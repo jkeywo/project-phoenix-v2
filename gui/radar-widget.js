@@ -167,6 +167,8 @@
           (self._canvas.width !== newW || self._canvas.height !== newH)) {
         self._canvas.width  = newW;
         self._canvas.height = newH;
+        // Resize clears the canvas; redraw immediately so there's no blank frame.
+        self._render();
       }
     }
 
@@ -202,6 +204,9 @@
    */
   RadarWidget.prototype.update = function (data) {
     this._data = data;
+    // Render immediately so the canvas never lags one rAF frame behind a state
+    // push — prevents the blank-frame flicker on console tab switch.
+    this._render();
   };
 
   /** Override effective range (e.g. from RadarDampening modifier). */

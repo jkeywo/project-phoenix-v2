@@ -444,7 +444,12 @@ export function buildNavigationConsoleState(state) {
                    : tags.includes('planet')  ? 'planet'
                    : tags.includes('station') ? 'station'
                    : 'ship';
-        return { name: e.name || null, kind };
+        return {
+          name: e.name || null,
+          kind,
+          world_x: entityX(e),
+          world_z: entityZ(e),
+        };
       },
     }
   );
@@ -466,6 +471,8 @@ export function buildNavigationConsoleState(state) {
     waypoint:                state.navigationWaypoint || null,
     ship_x:                  state.shipX || 0,
     ship_z:                  state.shipZ || 0,
+    ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
+    ship_speed:              state.forwardSpeed || 0,
     impulse_charge_progress: charge,
     cancel_visible:          charge > 0,
     on_screen:               onScreen,

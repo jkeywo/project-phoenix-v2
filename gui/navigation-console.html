@@ -2,440 +2,791 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
   <title>Project Phoenix — Navigation Console</title>
   <link rel="stylesheet" href="console.css">
   <style>
-    body { font-size: 16px; }
+    body { margin: 0; overflow: hidden; background: #000; touch-action: none; }
 
-    /* ── Layout ─────────────────────────────────────────────────── */
-    .panel-inner {
-      padding: 20px 48px 18px;
-      display: flex; flex-direction: column; gap: 10px;
+    /* ── Map canvas fills entire viewport ─────────────────────────── */
+    #map-canvas {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;
+      cursor: grab; touch-action: none;
+      display: block;
     }
+    #map-canvas.grabbing { cursor: grabbing; }
 
-    .panel-mid {
-      flex: 1; min-height: 0;
-      display: flex; flex-direction: row; gap: 24px;
-    }
-
-    .radar-col {
-      flex: 1 1 0; min-width: 0;
-      display: flex; flex-direction: column; gap: 10px;
-    }
-
-    .ctrl-col {
-      flex: 0 0 300px;
-      display: flex; flex-direction: column; gap: 14px;
-      justify-content: flex-start;
-    }
-
-    /* ── Hero ───────────────────────────────────────────────────── */
-    .hero h1       { font-size: 40px; letter-spacing: 0.28em; }
-    .hero h1 .sub  { font-size: 12px; margin-top: 2px; }
-    .hero .bar     { width: 6px; }
-    .hero          { gap: 16px; }
-
-    /* ── Radar ──────────────────────────────────────────────────── */
-    .radar-wrap {
-      flex: 1; min-height: 0;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .radar {
-      aspect-ratio: 1/1; height: 100%; width: auto;
-      max-height: 680px; max-width: 680px;
-      position: relative;
-    }
-    .radar canvas {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      z-index: 2; pointer-events: none;
-    }
-
-    /* ── Readout strip below radar ───────────────────────────────── */
-    .radar-footer {
-      flex-shrink: 0;
-      display: flex; align-items: center; gap: 16px;
-      padding: 6px 0;
-    }
-
-    /* ── Ctrl column ─────────────────────────────────────────────── */
-    .nav-label {
+    /* ── Corner HUD readouts ──────────────────────────────────────── */
+    .hud-corner {
+      position: fixed;
+      pointer-events: none;
       font-family: "JetBrains Mono", monospace;
-      font-size: 11px; letter-spacing: 0.3em;
+      font-size: 10px;
+      letter-spacing: .22em;
       color: var(--ink-faint);
-      padding-bottom: 6px;
-      border-bottom: 1px solid var(--line-faint);
+      line-height: 1.85;
     }
+    #hud-tl { top: 18px; left: 20px; }
+    #hud-tr { top: 18px; right: 20px; text-align: right; }
 
-    .impulse-readout {
-      font-family: "Chakra Petch", sans-serif;
-      font-size: 28px; letter-spacing: 0.12em;
-      color: var(--ink-dim);
-    }
-
-    .impulse-label {
-      font-family: "JetBrains Mono", monospace;
-      font-size: 10px; letter-spacing: 0.25em;
-      color: var(--ink-faint);
-    }
-
-    .charge-bar-wrap {
-      width: 100%; height: 8px;
-      background: var(--line-faint);
-      border-radius: 1px;
-      overflow: hidden;
-    }
-    .charge-bar {
-      height: 100%;
-      background: var(--reloading);
-      transition: width 0.3s linear;
-      width: 0%;
-    }
-
-    #cancel-btn { width: 100%; display: none; }
-    #cancel-btn.visible { display: block; }
-
-    #on-screen-btn { width: 100%; }
-
-    .waypoint-readout {
-      display: flex; flex-direction: column; gap: 4px;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 12px; letter-spacing: 0.08em;
-      color: var(--ink-dim);
-      border-top: 1px solid var(--line-faint);
-      padding-top: 10px;
-    }
-    .waypoint-readout .value {
-      font-family: "Chakra Petch", sans-serif;
-      font-size: 22px; letter-spacing: 0.12em;
-      color: var(--cyan);
-    }
-    #clear-waypoint-btn { width: 100%; }
-
-    /* ── Side rails ─────────────────────────────────────────────── */
-    .side-rail {
+    #hud-tl::before {
+      content: "";
       position: absolute;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.38em;
+      top: -7px; left: -9px;
+      width: 20px; height: 20px;
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
     }
-    .side-rail.top    { top: 15px;    left: 50%; transform: translateX(-50%); }
-    .side-rail.bottom { bottom: 13px; left: 50%; transform: translateX(-50%); }
+    #hud-tr::before {
+      content: "";
+      position: absolute;
+      top: -7px; right: -9px;
+      width: 20px; height: 20px;
+      border-top: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+    }
+    .hud-label {
+      color: var(--cyan);
+      font-size: 8px;
+      letter-spacing: .32em;
+      margin-bottom: 3px;
+      display: block;
+    }
+    .hud-val { color: var(--ink); }
+    .hud-val.ok   { color: var(--loaded); }
+    .hud-val.cyan { color: var(--cyan); }
 
-    /* ── Portrait (mobile) ──────────────────────────────────────── */
-    @media (max-aspect-ratio: 1/1) {
-      .panel-inner { padding: 12px 16px 10px; gap: 8px; }
-      .panel-mid { flex-direction: column; gap: 8px; }
-      .radar-col { flex: 0 0 auto; min-height: 50vw; }
-      .ctrl-col { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; gap: 10px; }
-      .hero h1 { font-size: 1.2rem; letter-spacing: 0.15em; }
-      .hero .bar { display: none; }
-      .hero .sub { display: none; }
-      .side-rail { display: none; }
-      .ctrl-col .nav-label { display: none; }
+    /* ── Entity overlay — portrait: bottom strip / landscape: right ─ */
+    #entity-overlay {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      padding: 14px 18px 20px;
+      background:
+        linear-gradient(0deg,
+          rgba(5,8,24,0.97) 0%,
+          rgba(5,8,24,0.82) 72%,
+          transparent 100%);
+      border-top: 1px solid var(--line-soft);
+      display: flex;
+      flex-direction: row;
+      align-items: flex-end;
+      gap: 14px;
+    }
+    #entity-overlay::before {
+      content: "";
+      position: absolute;
+      top: -1px; left: 0;
+      width: 24px; height: 14px;
+      border-top: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      pointer-events: none;
+    }
+    #entity-overlay::after {
+      content: "";
+      position: absolute;
+      top: -1px; right: 0;
+      width: 24px; height: 14px;
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+      pointer-events: none;
+    }
+
+    #entity-info { flex: 1 1 0; min-width: 0; }
+
+    .ent-name {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 18px; font-weight: 600;
+      color: var(--ink); letter-spacing: .06em; line-height: 1.2;
+    }
+    .ent-name.empty {
+      font-size: 11px; letter-spacing: .28em; color: var(--ink-faint);
+    }
+
+    .badges {
+      display: flex; gap: 5px; flex-wrap: wrap;
+      margin-top: 5px; align-items: center;
+    }
+    .badge {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 8px; letter-spacing: .18em;
+      padding: 2px 6px; border: 1px solid;
+    }
+    .badge.type     { color: var(--ink-dim); border-color: var(--line-faint); }
+
+    .pos-strip {
+      display: flex; gap: 12px; margin-top: 8px;
+      padding-top: 7px; border-top: 1px solid var(--line-faint);
+      align-items: baseline; flex-wrap: wrap;
+    }
+    .ps-item { display: flex; align-items: baseline; gap: 4px; }
+    .ps-k { font-family: "JetBrains Mono", monospace; font-size: 8px; letter-spacing: .2em; color: var(--ink-faint); }
+    .ps-v { font-family: "Chakra Petch", sans-serif; font-size: 20px; font-weight: 600; color: var(--ink); letter-spacing: .05em; }
+    .ps-u { font-family: "JetBrains Mono", monospace; font-size: 8px; color: var(--ink-faint); letter-spacing: .14em; }
+    .ps-sep { color: var(--line-soft); font-size: 10px; }
+
+    #ent-wp-row {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 8px; letter-spacing: .22em;
+      color: var(--ink-faint);
+      margin-top: 5px;
+    }
+    #ent-wp-val { color: var(--tactical); }
+
+    /* ── Action buttons ───────────────────────────────────────────── */
+    #action-btns {
+      display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+    }
+    #action-btns .btn {
+      --h: 46px;
+      font-size: 11px; letter-spacing: .2em;
+      padding: 0 12px 0 34px;
+      cursor: pointer;
+    }
+    #action-btns .btn .led { width: 10px; height: 10px; left: 11px; }
+
+    /* ── Waypoint toast ───────────────────────────────────────────── */
+    #wp-toast {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; letter-spacing: .3em;
+      color: var(--tactical);
+      background: rgba(5,8,24,0.92);
+      border: 1px solid var(--tactical);
+      box-shadow: 0 0 24px rgba(240,132,56,0.25);
+      padding: 10px 24px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .22s ease;
+    }
+    #wp-toast.show { opacity: 1; }
+
+    /* ── Landscape rearrangement ──────────────────────────────────── */
+    @media (orientation: landscape) {
+      #entity-overlay {
+        bottom: 0; top: 0;
+        left: auto; right: 0; width: 280px;
+        flex-direction: column;
+        align-items: stretch;
+        border-top: none;
+        border-left: 1px solid var(--line-soft);
+        padding: 22px 16px 22px;
+        background: linear-gradient(270deg,
+          rgba(5,8,24,0.97) 0%,
+          rgba(5,8,24,0.82) 72%,
+          transparent 100%);
+      }
+      #entity-overlay::before {
+        top: 0; left: -1px; right: auto;
+        bottom: 0; width: 14px; height: 24px;
+        border-top: 1px solid var(--line);
+        border-right: none;
+        border-left: none;
+        border-bottom: 1px solid var(--line);
+      }
+      #entity-overlay::after { display: none; }
+      #entity-info { flex: 1; }
+      .ent-name { font-size: 14px; }
+      .ps-v     { font-size: 17px; }
     }
   </style>
 </head>
-<body style="background:#000; margin:0; overflow:hidden;">
+<body>
 
-  <!-- Hidden data containers for Playwright smoke tests -->
-  <div id="nav-data"    aria-hidden="true"></div>
-  <div id="impulse-data" aria-hidden="true"></div>
+  <!-- hidden test data containers -->
+  <div id="nav-data"      aria-hidden="true"></div>
+  <div id="impulse-data"  aria-hidden="true"></div>
   <div id="waypoint-data" aria-hidden="true"></div>
 
-  <div class="frame landscape" data-screen-label="Navigation Console">
-    <div class="panel">
-      <div class="panel-inner">
+  <canvas id="map-canvas"></canvas>
 
-        <div class="side-rail top">PROJECT PHOENIX · NAVIGATION</div>
-        <div class="side-rail bottom" id="footer-ticker">NAVIGATION · SYSTEM CHART</div>
-
-        <!-- ── Hero header ──────────────────────────────────────── -->
-        <header class="hero">
-          <div class="bar"></div>
-          <h1>NAV <span class="sub">NAVIGATION · OFFICER</span></h1>
-          <div style="flex:1"></div>
-        </header>
-
-        <!-- ── Main split: radar (left) + controls (right) ──────── -->
-        <div class="panel-mid">
-
-          <!-- ── LEFT: System chart radar ─────────────────────────── -->
-          <section class="radar-col">
-            <div class="radar-wrap">
-              <div class="radar" id="radar-wrap">
-                <canvas id="nav-radar"></canvas>
-              </div>
-            </div>
-
-            <div class="radar-footer">
-              <div class="readout" style="flex:1; padding:6px 14px;">
-                <div class="v" id="blip-count">0</div>
-                <div class="k">CONTACTS</div>
-              </div>
-              <div class="readout" style="flex:1; padding:6px 14px;">
-                <div class="v" id="range-display">5000</div>
-                <div class="k">RANGE (u)</div>
-              </div>
-            </div>
-          </section>
-
-          <!-- ── RIGHT: Controls ──────────────────────────────────── -->
-          <section class="ctrl-col">
-            <div class="nav-label">PROPULSION</div>
-
-            <div>
-              <div class="impulse-label">IMPULSE STATUS</div>
-              <div class="impulse-readout" id="impulse-status">STANDBY</div>
-            </div>
-
-            <div>
-              <div class="charge-bar-wrap">
-                <div class="charge-bar" id="charge-bar"></div>
-              </div>
-            </div>
-
-            <button id="cancel-btn" class="btn danger" type="button">
-              <span class="btn-bg"></span>
-              <span class="label">CANCEL IMPULSE</span>
-            </button>
-
-            <div class="nav-label" style="margin-top:8px;">VIEWSCREEN</div>
-
-            <button id="on-screen-btn" class="btn" type="button">
-              <span class="btn-bg"></span>
-              <span class="label">ON SCREEN</span>
-            </button>
-
-            <div class="nav-label" style="margin-top:8px;">WAYPOINT</div>
-
-            <div class="waypoint-readout">
-              <span>ACTIVE TARGET</span>
-              <span class="value" id="waypoint-readout">NONE</span>
-            </div>
-
-            <button id="clear-waypoint-btn" class="btn danger" type="button">
-              <span class="btn-bg"></span>
-              <span class="label">CLEAR WAYPOINT</span>
-            </button>
-          </section>
-
-        </div>
-        <!-- /panel-mid -->
-
-        <footer class="console-footer footer-bar">
-          <span class="dot"></span>
-          <span id="footer-status">NAVIGATION ONLINE</span>
-          <span class="sep">·</span>
-          <span id="footer-impulse" style="color:var(--ink-faint);">STANDBY</span>
-          <span style="flex:1"></span>
-          <span id="footer-contacts" style="color:var(--ink-faint);">0 CONTACTS</span>
-        </footer>
-
-      </div>
-    </div>
+  <!-- ── Top-left HUD: own ship ─────────────────────────────────── -->
+  <div class="hud-corner" id="hud-tl">
+    <span class="hud-label">NAVIGATION · HELM</span>
+    <div>POS&nbsp;<span class="hud-val" id="hud-pos">0 / 0</span></div>
+    <div>HDG&nbsp;<span class="hud-val" id="hud-hdg">0°</span></div>
+    <div>SPD&nbsp;<span class="hud-val ok" id="hud-spd">0.0</span></div>
   </div>
 
-  <script src="radar-widget.js"></script>
+  <!-- ── Top-right HUD: map view ────────────────────────────────── -->
+  <div class="hud-corner" id="hud-tr">
+    <span class="hud-label">MAP VIEW</span>
+    <div>ZOOM&nbsp;<span class="hud-val cyan" id="hud-zoom">1.00×</span></div>
+  </div>
+
+  <!-- ── Entity overlay + action buttons ───────────────────────── -->
+  <div id="entity-overlay">
+
+    <div id="entity-info">
+      <div class="ent-name empty" id="ent-name">TAP MAP TO SELECT</div>
+      <div class="badges" id="ent-badges"></div>
+      <div class="pos-strip">
+        <div class="ps-item">
+          <span class="ps-k">BRG</span>
+          <span class="ps-v" id="ent-brg">—</span>
+          <span class="ps-u">°</span>
+        </div>
+        <span class="ps-sep">·</span>
+        <div class="ps-item">
+          <span class="ps-k">RNG</span>
+          <span class="ps-v" id="ent-rng">—</span>
+          <span class="ps-u">AU</span>
+        </div>
+      </div>
+      <div id="ent-wp-row">
+        WP&nbsp;<span id="ent-wp-val">NOT SET</span>
+      </div>
+    </div>
+
+    <div id="action-btns">
+      <button class="btn sensors" id="btn-on-screen" type="button">
+        <span class="btn-bg"></span>
+        <span class="led" id="on-screen-led"></span>
+        <span class="label">ON SCREEN</span>
+      </button>
+      <button class="btn tactical" id="btn-set-waypoint" type="button">
+        <span class="btn-bg"></span>
+        <span class="led amber"></span>
+        <span class="label">SET WAYPOINT</span>
+      </button>
+      <button class="btn danger" id="btn-clear-waypoint" type="button">
+        <span class="btn-bg"></span>
+        <span class="led fire"></span>
+        <span class="label">CLEAR WAYPOINT</span>
+      </button>
+    </div>
+
+  </div>
+
+  <div id="wp-toast">WAYPOINT SET</div>
+
   <script type="module">
     import { initConsole } from './console-core.js';
 
-    // ── State ─────────────────────────────────────────────────────────────
-    var _radarWidget = null;
-    var _state       = null;
+    const canvas = document.getElementById('map-canvas');
+    const ctx    = canvas.getContext('2d');
+    let W = 0, H = 0;
 
-    // ── Init console bridge ───────────────────────────────────────────────
-    var { sendAction } = initConsole({ name: 'Navigation', render: _apply });
+    /* ── Live state ─────────────────────────────────────────────── */
+    let _blips    = [];
+    let _shipX    = 0;
+    let _shipZ    = 0;
+    let _shipHdg  = 0;   // degrees
+    let _shipSpd  = 0;
+    let _range    = 5000;
+    let _waypoint = null;  // { x, z } world coords or null
+    let _onScreen = false;
+    let _initialized = false;
 
-    // ── Render ─────────────────────────────────────────────────────────────
-    function _apply(s) {
-      _state = s;
+    /* ── View state ─────────────────────────────────────────────── */
+    let panX = 0, panY = 0;   // world coords at screen center
+    let zoom = 0.06;           // px per world-unit
+    const ZOOM_MIN = 0.02, ZOOM_MAX = 2.0;
 
-      // Hidden data containers (Playwright)
-      var navData = document.getElementById('nav-data');
-      navData.dataset.blipCount       = String((s.blips || []).length);
-      navData.dataset.shipX           = String(s.ship_x || 0);
-      navData.dataset.shipZ           = String(s.ship_z || 0);
-      navData.dataset.onScreen        = String(!!s.on_screen);
+    const toSX = wx => W * 0.5 + (wx - panX) * zoom;
+    const toSY = wz => H * 0.5 + (wz - panY) * zoom;
+    const toWX = sx => panX + (sx - W * 0.5) / zoom;
+    const toWY = sy => panY + (sy - H * 0.5) / zoom;
 
-      var waypointData = document.getElementById('waypoint-data');
-      var waypoint = s.waypoint || null;
-      waypointData.dataset.active = String(!!waypoint);
-      waypointData.dataset.x = waypoint ? String(waypoint.x) : '';
-      waypointData.dataset.z = waypoint ? String(waypoint.z) : '';
+    /* ── Static star field ──────────────────────────────────────── */
+    const stars = Array.from({length: 280}, () => ({
+      x: Math.random(), y: Math.random(),
+      r: Math.random() < 0.12 ? 1.3 : 0.55,
+      a: 0.25 + Math.random() * 0.55,
+    }));
 
-      var impulseData = document.getElementById('impulse-data');
-      impulseData.dataset.charge      = String(s.impulse_charge_progress || 0);
-      impulseData.dataset.cancelVisible = String(!!s.cancel_visible);
+    /* ── Selection ──────────────────────────────────────────────── */
+    let selectedUuid = null;
+    let selectedBlip = null;
 
-      // Radar
-      _updateRadar(s);
+    /* ── Resize ─────────────────────────────────────────────────── */
+    function resize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      draw();
+    }
+    window.addEventListener('resize', resize);
 
-      // Impulse status
-      _updateImpulse(s);
-
-      // Footer
-      var blips = s.blips || [];
-      var footerContacts = document.getElementById('footer-contacts');
-      if (footerContacts) footerContacts.textContent = blips.length + ' CONTACT' + (blips.length === 1 ? '' : 'S');
-
-      var blipCount = document.getElementById('blip-count');
-      if (blipCount) blipCount.textContent = String(blips.length);
-
-      var rangeDisplay = document.getElementById('range-display');
-      if (rangeDisplay) rangeDisplay.textContent = String(Math.round(s.radar_range || 5000));
-
-      _updateWaypoint(s);
+    /* ═══════════════════════════════════════════════════════════════
+       DRAW
+    ═══════════════════════════════════════════════════════════════ */
+    function draw() {
+      if (!W || !H) return;
+      drawBackground();
+      drawStars();
+      drawGrid();
+      drawWaypointLine();
+      drawBlips();
+      drawOwnShip();
+      drawOffscreenIndicator();
+      updateHUD();
     }
 
-    function _updateRadar(s) {
-      var canvas = document.getElementById('nav-radar');
-      if (!canvas) return;
+    function drawBackground() {
+      const g = ctx.createRadialGradient(W*.48, H*.38, 0, W*.48, H*.38, Math.max(W,H)*.9);
+      g.addColorStop(0, '#07091e');
+      g.addColorStop(0.5, '#030610');
+      g.addColorStop(1, '#000000');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
 
-      // Init widget on first call
-      if (!_radarWidget) {
-        _radarWidget = new RadarWidget(canvas, {
-          consoleId: 'navigation',
-          onBlipTap: null,
-        });
+    function drawStars() {
+      ctx.save();
+      stars.forEach(s => {
+        const px = ((s.x + panX * 0.000012) % 1 + 1) % 1 * W;
+        const py = ((s.y + panY * 0.000012) % 1 + 1) % 1 * H;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#b8ceff';
+        ctx.beginPath();
+        ctx.arc(px, py, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    function drawGrid() {
+      const MAJOR = 500, MINOR = 100;
+      const visL = toWX(0), visR = toWX(W);
+      const visT = toWY(0), visB = toWY(H);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(40,58,120,0.22)';
+      ctx.lineWidth = 0.5;
+      for (let gx = Math.floor(visL/MINOR)*MINOR; gx < visR+MINOR; gx+=MINOR) {
+        ctx.beginPath(); ctx.moveTo(toSX(gx),0); ctx.lineTo(toSX(gx),H); ctx.stroke();
+      }
+      for (let gy = Math.floor(visT/MINOR)*MINOR; gy < visB+MINOR; gy+=MINOR) {
+        ctx.beginPath(); ctx.moveTo(0,toSY(gy)); ctx.lineTo(W,toSY(gy)); ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(70,95,165,0.30)';
+      ctx.lineWidth = 0.8;
+      for (let gx = Math.floor(visL/MAJOR)*MAJOR; gx < visR+MAJOR; gx+=MAJOR) {
+        ctx.beginPath(); ctx.moveTo(toSX(gx),0); ctx.lineTo(toSX(gx),H); ctx.stroke();
+      }
+      for (let gy = Math.floor(visT/MAJOR)*MAJOR; gy < visB+MAJOR; gy+=MAJOR) {
+        ctx.beginPath(); ctx.moveTo(0,toSY(gy)); ctx.lineTo(W,toSY(gy)); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawWaypointLine() {
+      if (!_waypoint) return;
+      const sx = toSX(_shipX), sy = toSY(_shipZ);
+      const wx = toSX(_waypoint.x), wy = toSY(_waypoint.z);
+      const d = 9;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(240,132,56,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(wx, wy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(240,132,56,0.18)';
+      ctx.strokeStyle = '#f08438';
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = '#f08438';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.moveTo(wx, wy-d); ctx.lineTo(wx+d, wy);
+      ctx.lineTo(wx, wy+d); ctx.lineTo(wx-d, wy);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0;
+      if (zoom > 0.04) {
+        ctx.font = '8px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#f08438';
+        ctx.textAlign = 'left';
+        ctx.fillText('WP', wx + d + 5, wy + 3);
+      }
+      ctx.restore();
+    }
+
+    const KIND_COL = {
+      star:    '#ffe8a0',
+      planet:  '#6cb6d0',
+      station: '#4ec870',
+      ship:    '#6cb6d0',
+    };
+    const KIND_LABEL = {
+      ship:'WARSHIP', station:'STARBASE', planet:'PLANET', star:'STAR', asteroid:'ASTEROID',
+    };
+
+    function blipWorld(b) {
+      if (b.world_x !== undefined && b.world_z !== undefined) {
+        return { x: b.world_x, z: b.world_z };
+      }
+      return { x: _shipX + b.radar_x * _range, z: _shipZ + b.radar_y * _range };
+    }
+
+    function drawBlips() {
+      _blips.forEach(b => {
+        if (b.kind === 'waypoint') return;
+        const { x: bx, z: bz } = blipWorld(b);
+        const px = toSX(bx), py = toSY(bz);
+        if (px < -60 || px > W+60 || py < -60 || py > H+60) return;
+
+        const col = KIND_COL[b.kind] || '#7a90c0';
+        const sel = b.uuid === selectedUuid;
+        const sz  = Math.max(0.7, Math.min(1.6, zoom * 60));
+        const r   = 6 * sz;
+
+        ctx.save();
+        ctx.translate(px, py);
+
+        if (sel) {
+          const bk = 15 * sz, bs = 6 * sz;
+          ctx.strokeStyle = '#f08438';
+          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = 0.9;
+          [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx2,sy2]) => {
+            ctx.beginPath();
+            ctx.moveTo(sx2*(bk-bs), sy2*bk);
+            ctx.lineTo(sx2*bk, sy2*bk);
+            ctx.lineTo(sx2*bk, sy2*(bk-bs));
+            ctx.stroke();
+          });
+          ctx.globalAlpha = 1;
+        }
+
+        ctx.shadowColor = col;
+        ctx.shadowBlur  = sel ? 16 : 7;
+
+        if (b.kind === 'ship') {
+          ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0,-r); ctx.lineTo(r*.6,0); ctx.lineTo(0,r*.8); ctx.lineTo(-r*.6,0);
+          ctx.closePath(); ctx.fill();
+        } else if (b.kind === 'station') {
+          ctx.fillStyle = col+'2a'; ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(0,-r*1.2); ctx.lineTo(r*1.2,0); ctx.lineTo(0,r*1.2); ctx.lineTo(-r*1.2,0);
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+          ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+          ctx.beginPath(); ctx.moveTo(-r*.7,0); ctx.lineTo(r*.7,0); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0,-r*.7); ctx.lineTo(0,r*.7); ctx.stroke();
+          ctx.globalAlpha = 1;
+        } else if (b.kind === 'planet') {
+          ctx.fillStyle = col+'30'; ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(0,0,r*1.3,0,Math.PI*2); ctx.fill(); ctx.stroke();
+        } else if (b.kind === 'star') {
+          ctx.fillStyle = '#ffe8a060'; ctx.strokeStyle = '#ffe8a0'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(0,0,r*1.6,0,Math.PI*2); ctx.fill(); ctx.stroke();
+          ctx.globalAlpha = 0.45;
+          for (let i = 0; i < 4; i++) {
+            const ang = i * Math.PI / 2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(ang)*r*1.8, Math.sin(ang)*r*1.8);
+            ctx.lineTo(Math.cos(ang)*r*2.8, Math.sin(ang)*r*2.8);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(-r*.7,-r*.7); ctx.lineTo(r*.7,r*.7);
+          ctx.moveTo(r*.7,-r*.7);  ctx.lineTo(-r*.7,r*.7);
+          ctx.stroke();
+        }
+
+        ctx.shadowBlur = 0;
+
+        if (zoom > 0.04 && b.name) {
+          ctx.font = Math.round(8*Math.min(sz,1.1)) + 'px "JetBrains Mono", monospace';
+          ctx.fillStyle   = sel ? '#f08438' : col;
+          ctx.shadowColor = 'transparent';
+          ctx.textAlign   = 'left';
+          ctx.fillText(b.name, r * 1.6 + 2, 3);
+        }
+        ctx.restore();
+      });
+    }
+
+    function drawOwnShip() {
+      const px = toSX(_shipX), py = toSY(_shipZ);
+      const sz  = Math.max(0.8, Math.min(1.8, zoom * 60));
+      const r   = 8 * sz;
+      const rad = (_shipHdg - 90) * Math.PI / 180;
+      const col = '#6cb6d0';
+
+      ctx.save();
+      ctx.translate(px, py);
+
+      ctx.strokeStyle = 'rgba(108,182,208,0.22)';
+      ctx.lineWidth   = 1;
+      ctx.beginPath(); ctx.arc(0,0,r*2.2,0,Math.PI*2); ctx.stroke();
+
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.65;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(rad)*r*1.7, Math.sin(rad)*r*1.7);
+      ctx.lineTo(Math.cos(rad)*r*2.8, Math.sin(rad)*r*2.8);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      ctx.rotate(rad + Math.PI/2);
+      ctx.shadowColor = col; ctx.shadowBlur = 14;
+      ctx.fillStyle   = col;
+      ctx.beginPath();
+      ctx.moveTo(0,-r);
+      ctx.lineTo(r*.65, r*.45);
+      ctx.lineTo(0, r*.05);
+      ctx.lineTo(-r*.65, r*.45);
+      ctx.closePath(); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+      if (zoom > 0.04) {
+        ctx.save();
+        ctx.font = '8px "JetBrains Mono", monospace';
+        ctx.fillStyle = col; ctx.textAlign = 'center';
+        ctx.fillText('OWN', px, py + r * 2.4 + 10);
+        ctx.restore();
+      }
+    }
+
+    function drawOffscreenIndicator() {
+      const px = toSX(_shipX), py = toSY(_shipZ);
+      if (px >= 10 && px <= W-10 && py >= 10 && py <= H-10) return;
+      const ang = Math.atan2(py - H*.5, px - W*.5);
+      const ar  = Math.min(W,H) * 0.43;
+      const ax  = W*.5 + Math.cos(ang)*ar;
+      const ay  = H*.5 + Math.sin(ang)*ar;
+      ctx.save();
+      ctx.translate(ax, ay); ctx.rotate(ang);
+      ctx.globalAlpha = 0.65;
+      ctx.fillStyle = '#6cb6d0';
+      ctx.beginPath();
+      ctx.moveTo(10,0); ctx.lineTo(-5,-5); ctx.lineTo(-5,5);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    function updateHUD() {
+      document.getElementById('hud-pos').textContent = Math.round(_shipX) + ' / ' + Math.round(_shipZ);
+      document.getElementById('hud-hdg').textContent = _shipHdg.toFixed(0) + '°';
+      document.getElementById('hud-spd').textContent = _shipSpd.toFixed(1);
+      document.getElementById('hud-zoom').textContent = zoom.toFixed(2) + '×';
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       PAN / ZOOM — Mouse
+    ═══════════════════════════════════════════════════════════════ */
+    let drag = null;
+
+    canvas.addEventListener('mousedown', e => {
+      drag = { sx: e.clientX, sy: e.clientY, px: panX, py: panY };
+      canvas.classList.add('grabbing');
+    });
+    window.addEventListener('mousemove', e => {
+      if (!drag) return;
+      panX = drag.px - (e.clientX - drag.sx) / zoom;
+      panY = drag.py - (e.clientY - drag.sy) / zoom;
+      draw();
+    });
+    window.addEventListener('mouseup', e => {
+      if (!drag) return;
+      const moved = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy);
+      if (moved < 5) handleTap(e.clientX, e.clientY);
+      drag = null;
+      canvas.classList.remove('grabbing');
+    });
+
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.13 : 0.885;
+      const mx = toWX(e.clientX), my = toWY(e.clientY);
+      zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom * factor));
+      panX = mx - (e.clientX - W*.5) / zoom;
+      panY = my - (e.clientY - H*.5) / zoom;
+      draw();
+    }, { passive: false });
+
+    /* ═══════════════════════════════════════════════════════════════
+       PAN / ZOOM — Touch
+    ═══════════════════════════════════════════════════════════════ */
+    let touchMap  = {};
+    let lastPinch = null;
+
+    canvas.addEventListener('touchstart', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches)
+        touchMap[t.identifier] = { ox: t.clientX, oy: t.clientY };
+      if (e.touches.length === 1)
+        drag = { sx: e.touches[0].clientX, sy: e.touches[0].clientY, px: panX, py: panY };
+      lastPinch = null;
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (e.touches.length >= 2) {
+        const t0 = e.touches[0], t1 = e.touches[1];
+        const dist = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
+        if (lastPinch) {
+          const factor = dist / lastPinch;
+          const mcx = (t0.clientX+t1.clientX)*.5, mcy = (t0.clientY+t1.clientY)*.5;
+          const mx = toWX(mcx), my = toWY(mcy);
+          zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom*factor));
+          panX = mx - (mcx - W*.5)/zoom;
+          panY = my - (mcy - H*.5)/zoom;
+          draw();
+        }
+        lastPinch = dist; drag = null;
+      } else if (e.touches.length === 1 && drag) {
+        panX = drag.px - (e.touches[0].clientX - drag.sx) / zoom;
+        panY = drag.py - (e.touches[0].clientY - drag.sy) / zoom;
+        draw();
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', e => {
+      e.preventDefault();
+      if (e.changedTouches.length === 1 && e.touches.length === 0) {
+        const t   = e.changedTouches[0];
+        const rec = touchMap[t.identifier];
+        if (rec && Math.hypot(t.clientX-rec.ox, t.clientY-rec.oy) < 9)
+          handleTap(t.clientX, t.clientY);
+      }
+      for (const t of e.changedTouches) delete touchMap[t.identifier];
+      drag = null; lastPinch = null;
+    }, { passive: false });
+
+    /* ═══════════════════════════════════════════════════════════════
+       ENTITY TAP SELECTION
+    ═══════════════════════════════════════════════════════════════ */
+    function handleTap(cx, cy) {
+      const wx2 = toWX(cx), wz2 = toWY(cy);
+      let best = null, bestD = Infinity;
+      _blips.forEach(b => {
+        if (b.kind === 'waypoint') return;
+        const { x: bx, z: bz } = blipWorld(b);
+        const d = Math.hypot(bx - wx2, bz - wz2);
+        const thresh = 55 / zoom;
+        if (d < thresh && d < bestD) { bestD = d; best = b; }
+      });
+      selectedUuid = best ? best.uuid : null;
+      selectedBlip = best || null;
+      updateEntityPanel(best);
+      draw();
+    }
+
+    function updateEntityPanel(b) {
+      const nameEl = document.getElementById('ent-name');
+      const bdgEl  = document.getElementById('ent-badges');
+      const brgEl  = document.getElementById('ent-brg');
+      const rngEl  = document.getElementById('ent-rng');
+
+      if (!b) {
+        nameEl.textContent = 'TAP MAP TO SELECT';
+        nameEl.className   = 'ent-name empty';
+        bdgEl.innerHTML    = '';
+        brgEl.textContent  = '—';
+        rngEl.textContent  = '—';
+        return;
       }
 
-      // Size canvas to wrapper
-      var wrap = document.getElementById('radar-wrap');
-      if (wrap) {
-        var sz = Math.min(wrap.clientWidth, wrap.clientHeight);
-        if (sz > 0 && (canvas.width !== sz || canvas.height !== sz)) {
-          canvas.width  = sz;
-          canvas.height = sz;
+      nameEl.textContent = b.name || b.kind.toUpperCase();
+      nameEl.className   = 'ent-name';
+
+      bdgEl.innerHTML = '<span class="badge type">' + (KIND_LABEL[b.kind] || b.kind.toUpperCase()) + '</span>';
+
+      const { x: bx, z: bz } = blipWorld(b);
+      const dx = bx - _shipX, dz = bz - _shipZ;
+      const brg = ((Math.atan2(dx, -dz) * 180 / Math.PI) + 360) % 360;
+      brgEl.textContent = brg.toFixed(1);
+      rngEl.textContent = Math.round(Math.hypot(dx, dz));
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       BUTTONS
+    ═══════════════════════════════════════════════════════════════ */
+    document.getElementById('btn-on-screen').addEventListener('click', () => {
+      sendAction('set_navigation_chart', {});
+    });
+
+    document.getElementById('btn-set-waypoint').addEventListener('click', () => {
+      if (!selectedBlip) return;
+      const { x: bx, z: bz } = blipWorld(selectedBlip);
+      sendAction('set_navigation_waypoint', { x: bx, z: bz });
+      const toast = document.getElementById('wp-toast');
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1900);
+    });
+
+    document.getElementById('btn-clear-waypoint').addEventListener('click', () => {
+      sendAction('clear_navigation_waypoint', {});
+    });
+
+    /* ═══════════════════════════════════════════════════════════════
+       STATE RENDER (called by initConsole on every push)
+    ═══════════════════════════════════════════════════════════════ */
+    function _renderConsole(s) {
+      _blips    = s.blips    || [];
+      _shipX    = s.ship_x   || 0;
+      _shipZ    = s.ship_z   || 0;
+      _shipHdg  = s.ship_heading || 0;
+      _shipSpd  = s.ship_speed   || 0;
+      _range    = s.radar_range  || 5000;
+      _waypoint = s.waypoint || null;
+      _onScreen = !!s.on_screen;
+
+      // Center on ship on first state push
+      if (!_initialized) {
+        panX = _shipX;
+        panY = _shipZ;
+        _initialized = true;
+      }
+
+      // ON SCREEN button LED
+      document.getElementById('on-screen-led').className = _onScreen ? 'led on' : 'led';
+
+      // Waypoint sub-label in entity info
+      const wpVal = document.getElementById('ent-wp-val');
+      if (_waypoint) {
+        wpVal.textContent = Math.round(_waypoint.x) + ' / ' + Math.round(_waypoint.z);
+      } else {
+        wpVal.textContent = 'NOT SET';
+      }
+
+      // Keep selected blip fresh; deselect if it disappeared
+      if (selectedUuid) {
+        const still = _blips.find(b => b.uuid === selectedUuid);
+        if (!still) {
+          selectedUuid = null;
+          selectedBlip = null;
+          updateEntityPanel(null);
+        } else {
+          selectedBlip = still;
+          updateEntityPanel(still);
         }
       }
 
-      _radarWidget.update({
-        mode:   'pre-projected',
-        blips:  s.blips || [],
-        range:  s.radar_range || 5000,
-        phaser_arcs:  [],
-        torpedo_arcs: [],
-      });
+      // ── Test data containers ─────────────────────────────────────
+      const navData = document.getElementById('nav-data');
+      navData.dataset.blipCount = String(_blips.length);
+      navData.dataset.shipX     = String(_shipX);
+      navData.dataset.shipZ     = String(_shipZ);
+      navData.dataset.onScreen  = String(_onScreen);
+
+      const waypointData = document.getElementById('waypoint-data');
+      waypointData.dataset.active = String(!!_waypoint);
+      waypointData.dataset.x      = _waypoint ? String(_waypoint.x) : '';
+      waypointData.dataset.z      = _waypoint ? String(_waypoint.z) : '';
+
+      const impulseData = document.getElementById('impulse-data');
+      impulseData.dataset.charge        = String(s.impulse_charge_progress || 0);
+      impulseData.dataset.cancelVisible = String(!!s.cancel_visible);
+
+      draw();
     }
 
-    function _updateImpulse(s) {
-      var charge = s.impulse_charge_progress || 0;
-      var label  = _impulseLabel(charge);
+    const { sendAction } = initConsole({ name: 'Navigation', render: _renderConsole });
 
-      var statusEl = document.getElementById('impulse-status');
-      if (statusEl) statusEl.textContent = label;
-
-      var barEl = document.getElementById('charge-bar');
-      if (barEl) barEl.style.width = Math.round(charge * 100) + '%';
-
-      var cancelBtn = document.getElementById('cancel-btn');
-      if (cancelBtn) {
-        if (s.cancel_visible) cancelBtn.classList.add('visible');
-        else                  cancelBtn.classList.remove('visible');
-      }
-
-      var footerImpulse = document.getElementById('footer-impulse');
-      if (footerImpulse) footerImpulse.textContent = label;
-    }
-
-    function _updateWaypoint(s) {
-      var waypoint = s.waypoint || null;
-      var readout = document.getElementById('waypoint-readout');
-      if (readout) {
-        readout.textContent = waypoint
-          ? 'X ' + _signedCoord(waypoint.x) + ' / Z ' + _signedCoord(waypoint.z)
-          : 'NONE';
-      }
-      var clearBtn = document.getElementById('clear-waypoint-btn');
-      if (clearBtn) {
-        clearBtn.classList.toggle('disabled', !waypoint);
-        clearBtn.disabled = !waypoint;
-      }
-    }
-
-    function _signedCoord(n) {
-      var v = Number(n) || 0;
-      return (v >= 0 ? '+' : '-') + Math.abs(v).toFixed(0).padStart(4, '0');
-    }
-
-    function _impulseLabel(charge) {
-      if (charge <= 0)    return 'STANDBY';
-      if (charge < 0.25)  return 'CHARGING…';
-      if (charge < 0.5)   return 'CHARGING… 25%';
-      if (charge < 0.75)  return 'CHARGING… 50%';
-      if (charge < 1.0)   return 'CHARGING… 75%';
-      return 'READY';
-    }
-
-    // ── Button actions ─────────────────────────────────────────────────────
-    document.getElementById('cancel-btn').addEventListener('click', function() {
-      sendAction('cancel_impulse');
-    });
-
-    document.getElementById('on-screen-btn').addEventListener('click', function() {
-      sendAction('set_navigation_chart');
-    });
-
-    document.getElementById('clear-waypoint-btn').addEventListener('click', function() {
-      sendAction('clear_navigation_waypoint');
-    });
-
-    document.getElementById('nav-radar').addEventListener('click', function(e) {
-      var s = _state;
-      if (!s) return;
-      var canvas = e.currentTarget;
-      var rect = canvas.getBoundingClientRect();
-      var size = Math.min(rect.width, rect.height);
-      if (size <= 0) return;
-      var cx = rect.left + rect.width / 2;
-      var cy = rect.top + rect.height / 2;
-      var radius = size / 2 - 8;
-      if (radius <= 0) return;
-      var nx = (e.clientX - cx) / radius;
-      var ny = (cy - e.clientY) / radius;
-      var dist = Math.hypot(nx, ny);
-      if (dist > 1) {
-        nx /= dist;
-        ny /= dist;
-      }
-      var range = s.radar_range || 5000;
-      sendAction('set_navigation_waypoint', {
-        x: (s.ship_x || 0) + nx * range,
-        z: (s.ship_z || 0) + ny * range,
-      });
-    });
-
-    // ── Resize: re-render radar when container changes ─────────────────────
-    (function() {
-      var resizeTimer = null;
-      window.addEventListener('resize', function() {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(function() {
-          if (_state) _updateRadar(_state);
-        }, 80);
-      });
-    })();
-
-    // ── Demo / initial state ───────────────────────────────────────────────
-    var _DEMO = {
-      blips: [
-        { uuid: 'sol',    radar_x:  0.00, radar_y:  0.00, scaled_radius: 0.012, kind: 'star',    name: 'Sol'        },
-        { uuid: 'earth',  radar_x:  0.06, radar_y: -0.03, scaled_radius: 0.006, kind: 'planet',  name: 'Earth'      },
-        { uuid: 'mars',   radar_x: -0.10, radar_y:  0.04, scaled_radius: 0.004, kind: 'planet',  name: 'Mars'       },
-        { uuid: 'ds9',    radar_x:  0.18, radar_y:  0.22, scaled_radius: 0.003, kind: 'station', name: 'Starbase 9' },
-        { uuid: 'outpost',radar_x: -0.30, radar_y: -0.18, scaled_radius: 0.003, kind: 'station', name: 'Outpost 7'  },
-      ],
-      ship_x:                  0,
-      ship_z:                  0,
-      impulse_charge_progress: 0.6,
-      cancel_visible:          true,
-      on_screen:               false,
-      radar_range:             5000,
-      waypoint:                { x: 1200, z: -800 },
-    };
-
-    _apply(_DEMO);
+    resize();
   </script>
 
 </body>

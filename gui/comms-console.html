@@ -636,30 +636,58 @@
     }
 
     function _syncChatFooter(footerRow, msg) {
-      footerRow.innerHTML = '';
+      // Update the ON SCREEN button in-place to avoid destroying it on every tick
+      // (which would reset :hover state and make the button flicker/unresponsive).
+      var existingBtn = footerRow.querySelector('.on-screen-btn');
       if (!msg.is_orphaned) {
-        var onScreenBtn = document.createElement('button');
-        onScreenBtn.type = 'button';
-        onScreenBtn.className = 'on-screen-btn';
-        onScreenBtn.id = 'on-screen-btn';
-        onScreenBtn.textContent = 'ON SCREEN';
-        onScreenBtn.addEventListener('click', function() {
-          if (typeof window._sendCommsAction === 'function') {
-            window._sendCommsAction('show_on_screen', { message_id: msg.id });
-          }
-        });
-        footerRow.appendChild(onScreenBtn);
+        if (!existingBtn) {
+          var onScreenBtn = document.createElement('button');
+          onScreenBtn.type = 'button';
+          onScreenBtn.className = 'on-screen-btn';
+          onScreenBtn.id = 'on-screen-btn';
+          onScreenBtn.textContent = 'ON SCREEN';
+          onScreenBtn.dataset.msgId = msg.id;
+          onScreenBtn.addEventListener('click', function() {
+            if (typeof window._sendCommsAction === 'function') {
+              window._sendCommsAction('show_on_screen', { message_id: msg.id });
+            }
+          });
+          footerRow.insertBefore(onScreenBtn, footerRow.firstChild);
+        } else if (existingBtn.dataset.msgId !== msg.id) {
+          // Selected message changed — rebind click without destroying the element.
+          existingBtn.dataset.msgId = msg.id;
+          var oldBtn = existingBtn;
+          var newBtn = oldBtn.cloneNode(true);
+          newBtn.addEventListener('click', function() {
+            if (typeof window._sendCommsAction === 'function') {
+              window._sendCommsAction('show_on_screen', { message_id: msg.id });
+            }
+          });
+          footerRow.replaceChild(newBtn, oldBtn);
+        }
+      } else if (existingBtn) {
+        existingBtn.remove();
       }
+
+      var existingNote = footerRow.querySelector('.out-of-range-note, .orphaned-note');
       if (msg.sender_in_range === false) {
-        var note = document.createElement('span');
-        note.className = 'out-of-range-note';
-        note.textContent = 'OUT OF RANGE';
-        footerRow.appendChild(note);
+        if (!existingNote || !existingNote.classList.contains('out-of-range-note')) {
+          if (existingNote) existingNote.remove();
+          var note = document.createElement('span');
+          note.className = 'out-of-range-note';
+          note.textContent = 'OUT OF RANGE';
+          footerRow.appendChild(note);
+        }
       } else if (msg.is_orphaned) {
-        var note2 = document.createElement('span');
-        note2.className = 'orphaned-note';
-        note2.textContent = 'TRANSMISSION ENDED';
-        footerRow.appendChild(note2);
+        if (!existingNote || !existingNote.classList.contains('orphaned-note')) {
+          if (existingNote) existingNote.remove();
+          var note2 = document.createElement('span');
+          note2.className = 'orphaned-note';
+          note2.textContent = 'TRANSMISSION ENDED';
+          footerRow.appendChild(note2);
+        }
+      } else if (existingNote) {
+        existingNote.remove();
       }
     }
 

@@ -94,9 +94,24 @@ impl SessionManager {
     pub fn reconnect(&mut self, token: &str) -> Option<&mut Player> {
         let idx = self.idx(token)?;
         self.players[idx].connected = true;
-        // Issue #130: reconnect treats the player as a fresh joiner — no preferential
-        // reassignment. Discard any saved consoles.
-        self.last_consoles.remove(token);
+        // Auto-reconnect restore (e.g. a browser refresh): give the player back
+        // the seat they held before disconnecting, but only if every one of
+        // those consoles is still free — i.e. no other *connected* player has
+        // claimed it while they were away. All-or-nothing so a partial restore
+        // never leaves them holding a fragment of a station that maps to no
+        // station row. If any console was taken, they fall back to no seat
+        // (lobby / spectator queue) and must re-select.
+        if let Some(prev) = self.last_consoles.remove(token) {
+            let all_free = prev.iter().all(|console| {
+                !self
+                    .players
+                    .iter()
+                    .any(|p| p.connected && p.token != token && p.consoles.contains(console))
+            });
+            if all_free {
+                self.players[idx].consoles = prev;
+            }
+        }
         Some(&mut self.players[idx])
     }
 
@@ -672,16 +687,38 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_does_not_restore_consoles() {
-        // Issue #130: reconnect treats player as fresh joiner — no console restore.
+    fn reconnect_restores_previous_consoles_when_free() {
+        // Auto-reconnect restore: a refresh should land the player back on the
+        // seat they held before disconnecting, when it is still free.
         let mut sm = SessionManager::new();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::Helm).unwrap();
         sm.disconnect("t1");
         sm.reconnect("t1");
         assert!(
+            sm.players()[0].consoles.contains(&Console::CaptainChair)
+                && sm.players()[0].consoles.contains(&Console::Helm),
+            "reconnect must restore the previously-held seat when free"
+        );
+    }
+
+    #[test]
+    fn reconnect_does_not_restore_consoles_taken_by_another_player() {
+        // If another connected player claimed any of the seat's consoles while
+        // the player was away, the restore is all-or-nothing → no restore.
+        let mut sm = SessionManager::new();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::Helm).unwrap();
+        sm.disconnect("t1");
+        // Bob grabs Helm while Alice is away.
+        sm.toggle_console("t2", Console::Helm).unwrap();
+        sm.reconnect("t1");
+        assert!(
             sm.players()[0].consoles.is_empty(),
-            "reconnect must not restore consoles"
+            "reconnect must not partially restore when a console was taken"
         );
     }
 }

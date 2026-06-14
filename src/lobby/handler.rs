@@ -94,7 +94,11 @@ pub fn process_message(
                 // Lobby-safe station advance on join: existing assigned players
                 // follow their `next` chain to the new player-count layout.
                 // The new joiner is NOT auto-assigned — they must SelectStation.
-                if !ship_stations.configs.is_empty()
+                // Gated to the Lobby phase: a fresh connection mid-game (a new
+                // spectator, or a reconnect whose seat could not be restored)
+                // must never reshuffle the live crew's consoles.
+                if phase == GamePhase::Lobby
+                    && !ship_stations.configs.is_empty()
                     && !is_reconnect
                     && !sessions.spectator_queue().contains(id_token)
                 {
@@ -1232,10 +1236,17 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_treated_as_fresh_joiner_no_console_restore() {
+    fn reconnect_restores_previous_station_when_free() {
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        // t1 disconnects (their station becomes free) then reconnects
+        // t1 held the Captain station. They disconnect (seat reserved, no
+        // cascade) then reconnect via Identify — the seat is still free.
+        let captain_consoles = sessions
+            .players()
+            .iter()
+            .find(|p| p.token == "t1")
+            .map(|p| p.consoles.clone())
+            .unwrap();
         sessions.disconnect("t1");
         let msg = ClientMessage::Identify {
             token: "t1".into(),
@@ -1250,15 +1261,16 @@ mod tests {
             &stations,
             &default_ship_config(),
         );
-        // Reconnect must NOT auto-assign the old station
-        assert!(
-            sessions
-                .players()
-                .iter()
-                .find(|p| p.token == "t1")
-                .map(|p| p.consoles.is_empty())
-                .unwrap_or(false),
-            "reconnecting player should not have consoles auto-restored"
+        // Reconnect restores the previously-held seat.
+        let restored = sessions
+            .players()
+            .iter()
+            .find(|p| p.token == "t1")
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        assert_eq!(
+            restored, captain_consoles,
+            "reconnecting player should have their previous seat restored when free"
         );
     }
 

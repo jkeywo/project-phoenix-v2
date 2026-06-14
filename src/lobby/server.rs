@@ -83,9 +83,14 @@ impl Plugin for LobbyPlugin {
             .add_message::<OutboundMessage>()
             .add_message::<PlayerDisconnected>()
             .add_systems(Startup, update_session_with_config)
+            // Order matters: `handle_disconnect` must run before `process_lobby`
+            // so that when a stale disconnect and the reconnect `Identify` land
+            // in the same frame (a browser refresh), the seat is vacated+saved
+            // first and then restored — not the reverse, which would leave the
+            // player marked disconnected with their seat cleared.
             .add_systems(
                 Update,
-                (process_lobby, handle_disconnect, update_game_state_cache),
+                (handle_disconnect, process_lobby, update_game_state_cache).chain(),
             );
     }
 }
@@ -249,12 +254,14 @@ pub fn process_lobby(
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
 ) {
-    // Only consume inbound messages during the Lobby phase.  In InProgress the
-    // simulation systems own the message queue; draining here would silently
-    // discard HelmInput and other sim messages before they can be processed.
-    if state.get() != &GamePhase::Lobby {
-        return;
-    }
+    // During the Lobby phase this system owns the inbound queue and handles
+    // every message type. Outside the lobby the simulation systems own it, so
+    // here we handle *only* the reconnect handshake (`Identify`) — a browser
+    // refresh mid-game must still receive its `Welcome` and have its seat
+    // restored. All other message types are left for the in-game systems.
+    // (Bevy `MessageReader`s have independent cursors, so reading here never
+    // hides messages from those systems.)
+    let in_lobby = state.get() == &GamePhase::Lobby;
     let default_stations = ShipStations::default();
     let stations = ship_stations
         .as_ref()
@@ -262,6 +269,9 @@ pub fn process_lobby(
         .unwrap_or(&default_stations);
     let world_data = world.as_ref().map(|w| &w.0);
     for ev in inbound.read() {
+        if !in_lobby && !matches!(ev.msg, ClientMessage::Identify { .. }) {
+            continue;
+        }
         let result = lobby_handler::process_message(
             &ev.token,
             &ev.msg,
@@ -280,14 +290,14 @@ fn handle_disconnect(
     mut sessions: ResMut<Sessions>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
-    ship_stations: Option<Res<ShipStations>>,
 ) {
     for ev in events.read() {
-        let result = if let Some(stations) = ship_stations.as_ref() {
-            lobby_handler::process_disconnect_with_stations(&ev.token, &mut sessions.0, stations)
-        } else {
-            lobby_handler::process_disconnect(&ev.token, &mut sessions.0)
-        };
+        // Reserve the seat: vacate the dropped player's consoles (saved for an
+        // auto-reconnect restore by `SessionManager::disconnect`) but do NOT run
+        // the leave-cascade that reshuffles the remaining crew. A browser
+        // refresh should not bump everyone else's stations; the seat sits empty
+        // until the same token reconnects (or another player claims it).
+        let result = lobby_handler::process_disconnect(&ev.token, &mut sessions.0);
         apply_result(result, &mut outbox, &mut next_state);
     }
 }

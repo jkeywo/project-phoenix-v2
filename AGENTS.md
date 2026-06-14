@@ -164,7 +164,7 @@ docs/             — Draft design notes (numbered).
 
 1. **Lobby:** Players scan QR → join via `client.html#<peerId>` → pick a station → captain presses "Engage" → `StartGame` → `InProgress`.
 2. **In-Progress:** Each console sends inputs; server simulation ticks at 10Hz (helm, weapons, repair, power, sensors, shields, navigation, comms). Server broadcasts `SimState` every 100ms with hull, power, flags, entity states. Region containment, asteroid streaming, NPC patrols, and world triggers all run server-side.
-3. **Disconnect/Reconnect:** Station becomes vacant immediately; `reassign_on_leave` cascades the next spectator in. Re-identify with same token → auto-reassign previous station if free, else back of spectator queue.
+3. **Disconnect/Reconnect:** The dropped player's consoles are vacated immediately, but the **seat is reserved** — the remaining crew is *not* reshuffled (no leave-cascade). The session token (in `localStorage`) is the identity; on browser refresh the client re-sends `Identify` and the server restores the previously-held station if every one of its consoles is still free (all-or-nothing), else the player lands back in the lobby / spectator queue. Reconnect is handled in every phase, so a refresh mid-game rejoins straight onto the same console.
 
 See `wiki/concepts/game-loop.md` and `wiki/entities/console.md` for per-console details.
 

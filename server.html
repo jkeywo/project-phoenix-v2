@@ -1056,9 +1056,15 @@
 
         conn.on('close', () => {
           const token = peerTokens.get(conn.peer);
-          if (!token) return;
-          wasmBindings.wasm_player_disconnected(token);
           peerTokens.delete(conn.peer);
+          if (!token) return;
+          // On a browser refresh the new page may have already reconnected
+          // (same token, new peer id) before this stale connection's close
+          // arrives. Only tear the token down if THIS conn is still the live
+          // one — otherwise we'd disconnect the freshly-restored session and
+          // delete the new routing entry.
+          if (tokenConns.get(token) !== conn) return;
+          wasmBindings.wasm_player_disconnected(token);
           tokenConns.delete(token);
         });
 

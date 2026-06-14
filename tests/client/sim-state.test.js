@@ -269,6 +269,20 @@ describe('apply entity lifecycle', () => {
     expect(s.frequencyHint).toBeNull();
   });
 
+  it('ObjectiveSummary stores mission objectives', () => {
+    const s = new ClientSimState();
+    const objectives = [{ id: 'obj-1', text: 'Find it', mandatory: true, status: 'Active', targets: ['Beacon'] }];
+    s.apply({ type: 'ObjectiveSummary', data: { objectives } });
+    expect(s.objectives).toEqual(objectives);
+  });
+
+  it('CommsState also refreshes mission objectives', () => {
+    const s = new ClientSimState();
+    const objectives = [{ id: 'obj-2', text: 'Hail it', mandatory: false, status: 'Active', targets: ['Station'] }];
+    s.apply({ type: 'CommsState', data: { messages: [], contacts: [], objectives } });
+    expect(s.objectives).toEqual(objectives);
+  });
+
   it('unrelated messages do not disturb the state', () => {
     const s = new ClientSimState();
     s.world.entities = [asteroid('a', 0, 0)];

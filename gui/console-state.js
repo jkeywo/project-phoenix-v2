@@ -41,6 +41,78 @@ export function entityRadius(e) {
   return (e.radius !== undefined && e.radius !== null) ? e.radius : 4;
 }
 
+function activeObjectiveTargetNames(objectives) {
+  const names = new Set();
+  for (const obj of (objectives || [])) {
+    if (!obj || obj.status && obj.status !== 'Active') continue;
+    for (const target of (obj.targets || [])) {
+      if (target != null && String(target).trim() !== '') names.add(String(target));
+    }
+  }
+  return names;
+}
+
+function entityMatchesObjectiveTarget(entity, targets) {
+  if (!entity || !targets || targets.size === 0) return false;
+  return [entity.name, entity.id, entity.uuid].some(v => v != null && targets.has(String(v)));
+}
+
+function withObjectiveTargets(entities, objectives) {
+  const targets = activeObjectiveTargetNames(objectives);
+  if (targets.size === 0) return entities || [];
+  return (entities || []).map(e => {
+    if (!entityMatchesObjectiveTarget(e, targets)) return e;
+    return { ...e, objective_target: true };
+  });
+}
+
+function hasAnyTag(entity, tags) {
+  const wanted = new Set((tags || []).map(t => String(t).toLowerCase()));
+  if (wanted.size === 0) return false;
+  const actual = (entity.tags || entity.entity_tags || []).map(t => String(t).toLowerCase());
+  return actual.some(t => wanted.has(t));
+}
+
+export function buildRadarRegions(entities, objectives = []) {
+  const objectiveEntities = withObjectiveTargets(entities, objectives);
+  return objectiveEntities
+    .filter(e => e && e.shape && hasAnyTag(e, ['region', 'asteroid_field', 'objective_marker']))
+    .map(e => {
+      const shape = String(e.shape).toLowerCase();
+      return {
+        uuid: e.uuid,
+        x: entityX(e),
+        z: entityZ(e),
+        shape,
+        radius: e.radius ?? null,
+        inner_radius: e.inner_radius ?? null,
+        outer_radius: e.radius ?? null,
+        half_extents: Array.isArray(e.half_extents)
+          ? [e.half_extents[0] || 0, e.half_extents[2] || e.half_extents[1] || 0]
+          : null,
+        yaw: e.yaw ?? null,
+        color: e.colour || e.color || (e.objective_target ? [0.83, 0.66, 0.13] : [0.6, 0.4, 1.0]),
+        name: e.name || null,
+        objective_target: !!e.objective_target,
+      };
+    });
+}
+
+function projectRadarRegions(regions, shipX, shipZ, range) {
+  const safeRange = Math.max(Number(range) || 0, 0.001);
+  return (regions || []).map(region => ({
+    ...region,
+    radar_x: (region.x - shipX) / safeRange,
+    radar_y: (region.z - shipZ) / safeRange,
+    scaled_radius: region.radius != null ? region.radius / safeRange : null,
+    scaled_inner_radius: region.inner_radius != null ? region.inner_radius / safeRange : null,
+    scaled_outer_radius: region.outer_radius != null ? region.outer_radius / safeRange : null,
+    scaled_half_extents: Array.isArray(region.half_extents)
+      ? [region.half_extents[0] / safeRange, region.half_extents[1] / safeRange]
+      : null,
+  }));
+}
+
 // ── Radar range constants (exported for tests) ──────────────────────────────
 
 export const WEAPONS_RADAR_RANGE = 300.0;
@@ -76,7 +148,7 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
   const selects = (opts.selects || []).map(t => String(t).toLowerCase());
   return (entities || []).map(a => {
     const tags = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
-    if (shows.length > 0 && !tags.some(t => shows.includes(t))) return null;
+    if (shows.length > 0 && !tags.some(t => shows.includes(t)) && !a.objective_target) return null;
 
     const ax = entityX(a), az = entityZ(a);
     const dx = ax - shipX, dz = az - shipZ;
@@ -98,6 +170,7 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
                  : tags.includes('star')    ? 'star'
                  : tags.includes('torpedo') || tags.includes('missile') ? 'torpedo'
                  : tags.includes('region')  ? 'region'
+                 : tags.includes('objective_marker') ? 'waypoint'
                  : 'asteroid';
     const targetTags = (a.target_tags || []).map(t => String(t).toLowerCase());
     const selectable = selects.length > 0 && targetTags.some(t => selects.includes(t));
@@ -329,12 +402,13 @@ export function buildShieldsConsoleState(state) {
  */
 export function buildSensorsConsoleState(state) {
   const range = state.sensorsRadarRange ?? SENSORS_RADAR_RANGE;
+  const entities = withObjectiveTargets(state.asteroids, state.objectives);
   const blips = buildBlips(
-    state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
+    entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range,
     {
       rotate: false,
-      shows: state.sensorsRadarShows || ['player', 'asteroid', 'ship', 'station', 'planet', 'star'],
+      shows: state.sensorsRadarShows || ['player', 'asteroid', 'ship', 'station', 'planet', 'star', 'region', 'objective_marker'],
       selects: state.sensorsRadarSelects || ['ship', 'station', 'planet'],
       extra: (a) => ({
         color:   null,
@@ -350,8 +424,8 @@ export function buildSensorsConsoleState(state) {
   let targetClass = null, targetHullPct = null, targetHeading = null, targetSpeed = null;
   let targetThreat = null, targetShieldFreq = null, targetShields = [];
 
-  if (state.sensorsTarget && state.asteroids) {
-    const tgt = state.asteroids.find(a => a.uuid === state.sensorsTarget);
+  if (state.sensorsTarget && entities) {
+    const tgt = entities.find(a => a.uuid === state.sensorsTarget);
     if (tgt) {
       const dx   = entityX(tgt) - (state.shipX || 0);
       const dz   = entityZ(tgt) - (state.shipZ || 0);
@@ -377,7 +451,12 @@ export function buildSensorsConsoleState(state) {
     scan_range:              range,
     complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
-    regions:                 state.regions || [],
+    regions:                 state.regions || projectRadarRegions(
+      buildRadarRegions(entities, state.objectives),
+      state.shipX || 0,
+      state.shipZ || 0,
+      range
+    ),
     blips,
     target_uuid:        state.sensorsTarget || null,
     target_name:        targetName,
@@ -425,24 +504,35 @@ const NAV_CHART_TAGS = new Set(['star', 'planet', 'station', 'player_ship', 'pla
  * @param {{ asteroids, shipX, shipZ, impulseChargeProgress, currentView }} state
  */
 export function buildNavigationConsoleState(state) {
+  const range = state.navChartRange ?? NAVIGATION_RADAR_RANGE;
+  const navShows = state.navChartShows || Array.from(NAV_CHART_TAGS);
+  const navShowsLower = navShows.map(s => String(s).toLowerCase());
+  const navSelects = (state.navChartSelects || ['ship', 'station', 'planet', 'star', 'region'])
+    .map(t => String(t).toLowerCase());
+  const entities = withObjectiveTargets(state.asteroids, state.objectives);
   // Filter to navigational entities only.
-  const navEntities = (state.asteroids || []).filter(e => {
+  const navEntities = entities.filter(e => {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
-    return tags.some(t => NAV_CHART_TAGS.has(t));
+    if (tags.includes('objective_marker') && !e.objective_target) return false;
+    return e.objective_target || tags.some(t => navShowsLower.includes(t));
   });
 
   const blips = buildBlips(
     navEntities,
     state.shipX || 0, state.shipZ || 0,
     0,                  // north-up: no ship-yaw rotation
-    NAVIGATION_RADAR_RANGE,
+    range,
     {
       rotate: false,    // world-axis frame
+      shows: navShows,
+      selects: navSelects,
       extra: (e) => {
         const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
         const kind = tags.includes('star')    ? 'star'
                    : tags.includes('planet')  ? 'planet'
                    : tags.includes('station') ? 'station'
+                   : tags.includes('region') || tags.includes('asteroid_field') ? 'region'
+                   : tags.includes('objective_marker') ? 'waypoint'
                    : 'ship';
         return {
           name: e.name || null,
@@ -451,7 +541,7 @@ export function buildNavigationConsoleState(state) {
           world_z: entityZ(e),
           stance:  e.stance  || 'neutral',
           faction: e.faction || null,
-          selectable: true,
+          selectable: navSelects.length === 0 || tags.some(t => navSelects.includes(t)),
         };
       },
     }
@@ -461,7 +551,7 @@ export function buildNavigationConsoleState(state) {
     state.shipX || 0,
     state.shipZ || 0,
     0,
-    NAVIGATION_RADAR_RANGE,
+    range,
     { rotate: false, edgeClamp: true }
   );
   if (waypoint) blips.push(waypoint);
@@ -479,7 +569,8 @@ export function buildNavigationConsoleState(state) {
     impulse_charge_progress: charge,
     cancel_visible:          charge > 0,
     on_screen:               onScreen,
-    radar_range:             NAVIGATION_RADAR_RANGE,
+    radar_range:             range,
+    regions:                 state.regions || buildRadarRegions(navEntities, state.objectives),
   });
 }
 

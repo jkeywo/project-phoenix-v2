@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   entityX, entityZ, entityRadius,
   buildBlips,
+  buildRadarRegions,
   buildWaypointBlip,
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
   NAVIGATION_RADAR_RANGE,
@@ -147,6 +148,50 @@ describe('buildBlips', () => {
     );
     expect(blips.find(b => b.uuid === 'ship-1').selectable).toBe(true);
     expect(blips.find(b => b.uuid === 'rock-1').selectable).toBe(false);
+  });
+
+  it('allows active objective targets through the show filter and marks them', () => {
+    const blips = buildBlips(
+      [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 25, z: 0, tags: ['objective_marker'] }],
+      0, 0, 0, 100,
+      { shows: ['ship'] }
+    );
+    expect(blips).toEqual([]);
+
+    const objectiveBlips = buildBlips(
+      [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 25, z: 0, tags: ['objective_marker'], objective_target: true }],
+      0, 0, 0, 100,
+      { shows: ['ship'] }
+    );
+    expect(objectiveBlips).toHaveLength(1);
+    expect(objectiveBlips[0].objective_target).toBe(true);
+    expect(objectiveBlips[0].kind).toBe('waypoint');
+  });
+});
+
+describe('buildRadarRegions', () => {
+  it('builds shape overlays and marks active objective regions by name', () => {
+    const regions = buildRadarRegions(
+      [{
+        uuid: 'nebula-1',
+        name: 'Kaleth Nebula',
+        x: 100,
+        z: -50,
+        tags: ['region'],
+        shape: 'sphere',
+        radius: 80,
+      }],
+      [{ id: 'obj', text: 'Survey', mandatory: true, status: 'Active', targets: ['Kaleth Nebula'] }]
+    );
+    expect(regions).toHaveLength(1);
+    expect(regions[0]).toMatchObject({
+      uuid: 'nebula-1',
+      x: 100,
+      z: -50,
+      shape: 'sphere',
+      radius: 80,
+      objective_target: true,
+    });
   });
 });
 
@@ -438,6 +483,19 @@ describe('buildSensorsConsoleState', () => {
     expect(blips.find(b => b.uuid === 'rock-1').selectable).toBe(false);
   });
 
+  it('rings active objective targets on the sensors radar even when tag-filtered out', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsRadarShows: ['ship'],
+      objectives: [{ id: 'obj-1', text: 'Reach patrol zone', mandatory: true, status: 'Active', targets: ['Patrol Zone'] }],
+      asteroids: [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 10, z: 0, tags: ['objective_marker'] }],
+    };
+    const blips = parse(buildSensorsConsoleState(state)).blips;
+    expect(blips).toHaveLength(1);
+    expect(blips[0].uuid).toBe('beacon-1');
+    expect(blips[0].objective_target).toBe(true);
+  });
+
   it('target_uuid and derived fields are null when no sensorsTarget', () => {
     const s = parse(buildSensorsConsoleState(EMPTY));
     expect(s.target_uuid).toBeNull();
@@ -650,5 +708,40 @@ describe('buildNavigationConsoleState', () => {
     expect(wp).toBeDefined();
     expect(wp.world_x).toBe(800);
     expect(wp.world_z).toBe(-400);
+  });
+
+  it('includes active objective marker beacons and hides inactive ones', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      navChartShows: ['station'],
+      objectives: [{ id: 'obj-1', text: 'Find zone', mandatory: true, status: 'Active', targets: ['Patrol Zone'] }],
+      asteroids: [
+        { uuid: 'beacon-1', name: 'Patrol Zone', x: 100, z: 0, tags: ['objective_marker'] },
+        { uuid: 'beacon-2', name: 'Quiet Zone', x: 200, z: 0, tags: ['objective_marker'] },
+      ],
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    expect(blips.map(b => b.uuid)).toEqual(['beacon-1']);
+    expect(blips[0].objective_target).toBe(true);
+    expect(blips[0].kind).toBe('waypoint');
+  });
+
+  it('emits region overlays for active objective regions', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      objectives: [{ id: 'obj-1', text: 'Survey nebula', mandatory: true, status: 'Active', targets: ['Kaleth Nebula'] }],
+      asteroids: [{
+        uuid: 'region-1',
+        name: 'Kaleth Nebula',
+        x: 100,
+        z: 100,
+        tags: ['region'],
+        shape: 'sphere',
+        radius: 50,
+      }],
+    };
+    const s = parse(buildNavigationConsoleState(state));
+    expect(s.regions).toHaveLength(1);
+    expect(s.regions[0].objective_target).toBe(true);
   });
 });

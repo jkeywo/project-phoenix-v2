@@ -308,15 +308,7 @@
     let _impulseCharge = 0;
     let _cancelVisible = false;
     let _selectedId  = null;
-
-    const REGIONS = [
-      {
-        name: 'NEUTRAL ZONE',
-        fill: 'rgba(240,132,56,0.055)',
-        stroke: 'rgba(240,132,56,0.28)',
-        pts: [{x:-800,y:-400},{x:200,y:-600},{x:300,y:-180},{x:-100,y:80},{x:-900,y:-80}]
-      },
-    ];
+    let _sendAction  = null;
 
     const stars = Array.from({length:320}, () => ({
       x: Math.random(), y: Math.random(),
@@ -328,7 +320,6 @@
       if (!W || !H) return;
       drawBackground();
       drawStars();
-      drawRegions();
       drawGrid();
       drawWaypointLine();
       drawEntities();
@@ -383,31 +374,6 @@
         ctx.beginPath(); ctx.moveTo(0,toSY(gy)); ctx.lineTo(W,toSY(gy)); ctx.stroke();
       }
       ctx.restore();
-    }
-
-    function drawRegions() {
-      REGIONS.forEach(r => {
-        ctx.save();
-        ctx.beginPath();
-        r.pts.forEach((p,i) => i===0
-          ? ctx.moveTo(toSX(p.x), toSY(p.y))
-          : ctx.lineTo(toSX(p.x), toSY(p.y)));
-        ctx.closePath();
-        ctx.fillStyle = r.fill;
-        ctx.fill();
-        ctx.strokeStyle = r.stroke;
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([9,7]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        const cx = r.pts.reduce((s,p)=>s+p.x,0)/r.pts.length;
-        const cy = r.pts.reduce((s,p)=>s+p.y,0)/r.pts.length;
-        ctx.font = '9px "JetBrains Mono", monospace';
-        ctx.fillStyle = r.stroke.replace(/[\d.]+\)$/, '0.55)');
-        ctx.textAlign = 'center';
-        ctx.fillText(r.name, toSX(cx), toSY(cy));
-        ctx.restore();
-      });
     }
 
     function drawWaypointLine() {
@@ -613,20 +579,7 @@
         }
       }
 
-      let reg = '—';
-      REGIONS.forEach(r => {
-        if (pointInPoly(_ownX, _ownY, r.pts)) reg = r.name;
-      });
-      document.getElementById('hud-region').textContent = reg;
-    }
-
-    function pointInPoly(x, y, pts) {
-      let inside = false;
-      for (let i=0,j=pts.length-1; i<pts.length; j=i++) {
-        const xi=pts[i].x, yi=pts[i].y, xj=pts[j].x, yj=pts[j].y;
-        if ((yi>y)!==(yj>y) && x<(xj-xi)*(y-yi)/(yj-yi)+xi) inside=!inside;
-      }
-      return inside;
+      document.getElementById('hud-region').textContent = '—';
     }
 
     function handleTap(cx, cy) {

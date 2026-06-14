@@ -2,8 +2,8 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, pure-iterator, shared]
-sources: [gui/console-state.js, gui/radar-widget.js, src/radar.rs, CONTEXT.md]
-updated: 2026-06-13
+sources: [gui/console-state.js, gui/radar-widget.js, gui/navigation-console.html, src/radar.rs, CONTEXT.md]
+updated: 2026-06-14
 ---
 
 # Radar Projection
@@ -39,6 +39,8 @@ Same input → same output → same visual semantics. This was an explicit deepe
 ## HTML console waypoint blips
 
 The HTML console path uses `gui/console-state.js::buildBlips()` and `buildWaypointBlip()` before passing pre-projected blips into `gui/radar-widget.js`. Navigation owns one shared custom waypoint via server `SimSnapshot.navigation_waypoint`; Helm projects it ship-relative and clamps it to radius `0.96` with `edge: true` when it is outside Helm radar range. The radar widget renders `kind: "waypoint"` as a cyan diamond/ring without a bitmap asset.
+
+`gui/navigation-console.html` draws only the live chart background, grid, server-derived blips, waypoint, and own-ship marker. It does not carry hardcoded sector polygons; scenario/region overlays should be data-driven rather than baked into the Navigation background.
 
 ## Future filters
 

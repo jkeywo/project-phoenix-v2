@@ -27,6 +27,16 @@ export const ACTION_MAP = Object.freeze({
     send('FireTorpedo', { tube: a.tube || 'fore', target_uuid: a.target_uuid || null });
   },
 
+  /** Begin loading a torpedo tube. */
+  load_tube: (a, send) => {
+    if (a.tube) send('LoadTube', { tube: a.tube });
+  },
+
+  /** Unload (or cancel loading of) a torpedo tube. */
+  unload_tube: (a, send) => {
+    if (a.tube) send('UnloadTube', { tube: a.tube });
+  },
+
   /** Lock the weapon / sensor target to a specific entity UUID. */
   set_target: (a, send) => {
     if (a.uuid) send('SetTarget', { uuid: a.uuid });

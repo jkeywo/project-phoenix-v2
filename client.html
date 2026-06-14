@@ -1064,7 +1064,7 @@
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    if ($('weapons-iframe')) $('weapons-iframe').addEventListener('load', () => { pushWeaponsConsoleState(); });
+    if ($('weapons-iframe')) $('weapons-iframe').addEventListener('load', () => { pushWeaponsConsoleState(); injectSwipeRelay($('weapons-iframe')); });
 
     function renderGame(s) {
       if (activeConsole === 'CaptainChair') {
@@ -1106,7 +1106,7 @@
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    if ($('captain-iframe')) $('captain-iframe').addEventListener('load', () => { pushCaptainConsoleState(); });
+    if ($('captain-iframe')) $('captain-iframe').addEventListener('load', () => { pushCaptainConsoleState(); injectSwipeRelay($('captain-iframe')); });
 
     // ── Helm console iframe bridge (issue #423) ──────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1122,7 +1122,7 @@
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState(); });
+    if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState(); injectSwipeRelay($('helm-iframe')); });
 
     // ── Repair console iframe bridge (issue #425) ────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1136,7 +1136,7 @@
       _pushIframe($('repair-iframe'), 'Repair', buildRepairConsoleState());
     }
 
-    if ($('repair-iframe')) $('repair-iframe').addEventListener('load', () => { pushRepairConsoleState(); });
+    if ($('repair-iframe')) $('repair-iframe').addEventListener('load', () => { pushRepairConsoleState(); injectSwipeRelay($('repair-iframe')); });
 
     // ── Power console iframe bridge (issue #425) ─────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1150,7 +1150,7 @@
       _pushIframe($('power-iframe'), 'Power', buildPowerConsoleState());
     }
 
-    if ($('power-iframe')) $('power-iframe').addEventListener('load', () => { pushPowerConsoleState(); });
+    if ($('power-iframe')) $('power-iframe').addEventListener('load', () => { pushPowerConsoleState(); injectSwipeRelay($('power-iframe')); });
 
     // ── Shields console iframe bridge (issue #423) ───────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1164,7 +1164,7 @@
       _pushIframe($('shields-iframe'), 'Shields', buildShieldsConsoleState());
     }
 
-    if ($('shields-iframe')) $('shields-iframe').addEventListener('load', () => { pushShieldsConsoleState(); });
+    if ($('shields-iframe')) $('shields-iframe').addEventListener('load', () => { pushShieldsConsoleState(); injectSwipeRelay($('shields-iframe')); });
 
     // ── Sensors console iframe bridge ─────────────────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1178,7 +1178,7 @@
       _pushIframe($('sensors-iframe'), 'Sensors', buildSensorsConsoleState());
     }
 
-    if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); });
+    if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); injectSwipeRelay($('sensors-iframe')); });
 
     // ── Comms console iframe bridge ────────────────────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1192,7 +1192,7 @@
       _pushIframe($('comms-iframe'), 'Comms', buildCommsConsoleState());
     }
 
-    if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); });
+    if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); injectSwipeRelay($('comms-iframe')); });
 
     // ── Navigation console iframe bridge (issue #458) ─────────────────────────
     // State builder extracted to gui/console-state.js.
@@ -1206,7 +1206,7 @@
       _pushIframe($('navigation-iframe'), 'Navigation', buildNavigationConsoleState());
     }
 
-    if ($('navigation-iframe')) $('navigation-iframe').addEventListener('load', () => { pushNavigationConsoleState(); });
+    if ($('navigation-iframe')) $('navigation-iframe').addEventListener('load', () => { pushNavigationConsoleState(); injectSwipeRelay($('navigation-iframe')); });
 
     // ── Console action postMessage bridge (issue #422) ────────────────────────
     // All iframe consoles send {type:'console_action', payload:json} via
@@ -1309,6 +1309,56 @@
         scheduleRender();
       }, { passive: true });
     })();
+
+    // ── Swipe relay for console iframes ──────────────────────────
+    // Console UIs run in iframes; touch events inside them don't reach the
+    // body-level listeners above. After each iframe loads we inject a tiny
+    // detector that posts SwipeConsole messages back to this window.
+    const SWIPE_RELAY_CODE = `(function(){
+      if(window.__swipeRelayInstalled)return;
+      window.__swipeRelayInstalled=true;
+      var sx,sy,st,sw=false,sc=false;
+      document.addEventListener('touchstart',function(e){
+        if(e.target.closest('button,[role="button"],input,select,textarea'))return;
+        var t=e.touches[0];
+        if(t.clientY>window.innerHeight*0.65)return;
+        sx=t.clientX;sy=t.clientY;st=performance.now();sw=true;sc=false;
+      },{passive:true});
+      document.addEventListener('touchmove',function(e){
+        if(!sw)return;
+        var dx=e.touches[0].clientX-sx,dy=e.touches[0].clientY-sy;
+        if(Math.abs(dx)>20&&Math.abs(dx)>Math.abs(dy)){sc=true;e.preventDefault();}
+      },{passive:false});
+      document.addEventListener('touchend',function(e){
+        if(!sw)return;sw=false;if(!sc)return;
+        var dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;
+        if(performance.now()-st>600||Math.abs(dx)<60||Math.abs(dy)>Math.abs(dx)*0.6)return;
+        window.parent.postMessage({type:'SwipeConsole',direction:dx<0?'left':'right'},'*');
+      },{passive:true});
+    })();`;
+
+    function injectSwipeRelay(iframeEl) {
+      try {
+        const doc = iframeEl && iframeEl.contentDocument;
+        if (!doc || iframeEl.contentWindow.__swipeRelayInstalled) return;
+        const s = doc.createElement('script');
+        s.textContent = SWIPE_RELAY_CODE;
+        (doc.head || doc.body || doc.documentElement).appendChild(s);
+      } catch (_) {}
+    }
+
+    // Handle SwipeConsole messages posted by the injected relay.
+    window.addEventListener('message', e => {
+      if (!e.data || e.data.type !== 'SwipeConsole') return;
+      const mine = myConsoles(state);
+      if (mine.length < 2 || state.phase !== 'InProgress') return;
+      const idx = Math.max(0, mine.indexOf(activeConsole));
+      const next = (e.data.direction === 'left')
+        ? (idx - 1 + mine.length) % mine.length
+        : (idx + 1) % mine.length;
+      setActiveConsole(mine[next]);
+      scheduleRender();
+    });
 
     // ── Incoming message handler ────────────────────────────────
 

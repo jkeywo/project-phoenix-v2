@@ -53,7 +53,7 @@ jobs:
       - name: Install Trunk
         uses: jetli/trunk-action@v0.5.1
         with:
-          version: latest
+          version: v0.21.14
 
       # Pre-install wasm-bindgen-cli at the exact version pinned in Cargo.lock.
       # Trunk normally fetches this binary from github.com/rustwasm/wasm-bindgen/releases

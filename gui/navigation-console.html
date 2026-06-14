@@ -707,11 +707,11 @@
     let drag = null;
 
     canvas.addEventListener('mousedown', e => {
-      drag = { sx: e.clientX, sy: e.clientY, px: panX, py: panY };
-      canvas.classList.add('grabbing');
+      drag = { sx: e.clientX, sy: e.clientY, px: panX, py: panY, picking: _pickingWaypoint };
+      if (!_pickingWaypoint) canvas.classList.add('grabbing');
     });
     window.addEventListener('mousemove', e => {
-      if (!drag) return;
+      if (!drag || drag.picking) return;  // don't pan while placing a waypoint
       panX = drag.px - (e.clientX - drag.sx) / zoom;
       panY = drag.py - (e.clientY - drag.sy) / zoom;
       draw();
@@ -719,7 +719,7 @@
     window.addEventListener('mouseup', e => {
       if (!drag) return;
       const moved = Math.hypot(e.clientX-drag.sx, e.clientY-drag.sy);
-      if (moved < 5) handleTap(e.clientX, e.clientY);
+      if (drag.picking || moved < 5) handleTap(e.clientX, e.clientY);
       drag = null;
       canvas.classList.remove('grabbing');
     });
@@ -742,7 +742,7 @@
       for (const t of e.changedTouches)
         touchMap[t.identifier] = { x: t.clientX, y: t.clientY, ox: t.clientX, oy: t.clientY };
       if (e.touches.length === 1)
-        drag = { sx: e.touches[0].clientX, sy: e.touches[0].clientY, px: panX, py: panY };
+        drag = { sx: e.touches[0].clientX, sy: e.touches[0].clientY, px: panX, py: panY, picking: _pickingWaypoint };
       lastPinch = null;
     }, { passive: false });
 
@@ -761,7 +761,7 @@
           draw();
         }
         lastPinch = dist; drag = null;
-      } else if (e.touches.length === 1 && drag) {
+      } else if (e.touches.length === 1 && drag && !drag.picking) {
         panX = drag.px - (e.touches[0].clientX - drag.sx) / zoom;
         panY = drag.py - (e.touches[0].clientY - drag.sy) / zoom;
         draw();
@@ -773,7 +773,7 @@
       if (e.changedTouches.length === 1 && e.touches.length === 0) {
         const t   = e.changedTouches[0];
         const rec = touchMap[t.identifier];
-        if (rec && Math.hypot(t.clientX-rec.ox, t.clientY-rec.oy) < 9)
+        if (_pickingWaypoint || (rec && Math.hypot(t.clientX-rec.ox, t.clientY-rec.oy) < 9))
           handleTap(t.clientX, t.clientY);
       }
       for (const t of e.changedTouches) delete touchMap[t.identifier];

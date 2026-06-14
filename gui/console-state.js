@@ -121,6 +121,61 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
   }).filter(Boolean);
 }
 
+/**
+ * Project the shared waypoint into a radar blip.
+ *
+ * @param {{ x:number, z:number }|null} waypoint
+ * @param {number} shipX
+ * @param {number} shipZ
+ * @param {number} shipYaw
+ * @param {number} range
+ * @param {object} [opts]
+ * @param {boolean} [opts.rotate=true]
+ * @param {boolean} [opts.edgeClamp=false]
+ * @returns {object|null}
+ */
+export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts = {}) {
+  if (!waypoint || !Number.isFinite(waypoint.x) || !Number.isFinite(waypoint.z)) return null;
+  const safeRange = Math.max(Number(range) || 0, 0.001);
+  const rotate = opts.rotate !== false;
+  const dx = waypoint.x - shipX;
+  const dz = waypoint.z - shipZ;
+  let radar_x, radar_y;
+  if (rotate) {
+    const cosY = Math.cos(shipYaw || 0);
+    const sinY = Math.sin(shipYaw || 0);
+    radar_x = (dx * cosY + dz * sinY) / safeRange;
+    radar_y = (dx * sinY - dz * cosY) / safeRange;
+  } else {
+    radar_x = dx / safeRange;
+    radar_y = dz / safeRange;
+  }
+
+  const normalizedDistance = Math.hypot(radar_x, radar_y);
+  const edge = opts.edgeClamp && normalizedDistance > 1;
+  if (edge) {
+    const scale = 0.96 / normalizedDistance;
+    radar_x *= scale;
+    radar_y *= scale;
+  }
+
+  return {
+    uuid: 'navigation-waypoint',
+    radar_x,
+    radar_y,
+    scaled_radius: 10 / safeRange,
+    kind: 'waypoint',
+    icon: 'waypoint',
+    color: [0.45, 0.95, 1.0],
+    name: 'WAYPOINT',
+    selectable: false,
+    objective_target: false,
+    edge,
+    world_x: waypoint.x,
+    world_z: waypoint.z,
+  };
+}
+
 // ── Console state builders ──────────────────────────────────────────────────
 
 /**
@@ -141,8 +196,12 @@ export function buildWeaponsConsoleState(state) {
         selects: state.tacticalRadarSelects || ['ship', 'station', 'asteroid'],
       }
     );
+  const targetUuid = state.weaponsTarget || null;
+  const targetBlip = targetUuid ? blips.find(b => b.uuid === targetUuid) : null;
+  const targetName = state.weaponsTargetName || (targetBlip && targetBlip.name) || null;
   return JSON.stringify({
-    target_uuid:   state.weaponsTarget      || null,
+    target_uuid:   targetUuid,
+    target_name:   targetName,
     banks:         state.weaponsBanks       || [],
     tubes:         state.weaponsTubes       || [],
     torpedo_count: state.weaponsTorpedoCount || 0,
@@ -185,6 +244,15 @@ export function buildHelmConsoleState(state) {
     state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range, { rotate: true }
   );
+  const waypoint = buildWaypointBlip(
+    state.navigationWaypoint || null,
+    state.shipX || 0,
+    state.shipZ || 0,
+    state.shipYaw || 0,
+    range,
+    { rotate: true, edgeClamp: true }
+  );
+  if (waypoint) blips.push(waypoint);
   return JSON.stringify({
     heading:                 (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
     speed:                   state.forwardSpeed          || 0,
@@ -194,6 +262,7 @@ export function buildHelmConsoleState(state) {
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'Radar',
     blips,
+    waypoint:                state.navigationWaypoint || null,
   });
 }
 
@@ -375,18 +444,35 @@ export function buildNavigationConsoleState(state) {
                    : tags.includes('planet')  ? 'planet'
                    : tags.includes('station') ? 'station'
                    : 'ship';
-        return { name: e.name || null, kind };
+        return {
+          name: e.name || null,
+          kind,
+          world_x: entityX(e),
+          world_z: entityZ(e),
+        };
       },
     }
   );
+  const waypoint = buildWaypointBlip(
+    state.navigationWaypoint || null,
+    state.shipX || 0,
+    state.shipZ || 0,
+    0,
+    NAVIGATION_RADAR_RANGE,
+    { rotate: false, edgeClamp: true }
+  );
+  if (waypoint) blips.push(waypoint);
 
   const charge = state.impulseChargeProgress || 0;
   const onScreen = state.currentView === 'NavigationChart';
 
   return JSON.stringify({
     blips,
+    waypoint:                state.navigationWaypoint || null,
     ship_x:                  state.shipX || 0,
     ship_z:                  state.shipZ || 0,
+    ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
+    ship_speed:              state.forwardSpeed || 0,
     impulse_charge_progress: charge,
     cancel_visible:          charge > 0,
     on_screen:               onScreen,

@@ -634,7 +634,7 @@
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
+      shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
       stations: [], maxPlayers: 0, complexity: {}, allFilled: false,
       // Weapons console iframe state (issue #422)
@@ -646,7 +646,9 @@
       // Shields console iframe state (issue #423)
       shieldFacings: [], shieldFocusedFacing: null,
       // Sensors console iframe state
-      sensorsTarget: null };
+      sensorsTarget: null,
+      // Shared Navigation waypoint from SimState
+      navigationWaypoint: null };
     let conn = null;
     // Station configs from server Welcome message (keyed by player count).
     let stationConfigs = {};
@@ -1053,7 +1055,7 @@
 
     function buildWeaponsConsoleState() {
       if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Tactical', state);
-      return JSON.stringify({ target_uuid: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto', blips: [], phaser_arcs: [], torpedo_arcs: [] });
+      return JSON.stringify({ target_uuid: null, target_name: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto', blips: [], phaser_arcs: [], torpedo_arcs: [] });
     }
 
     function pushWeaponsConsoleState() {
@@ -1299,8 +1301,8 @@
         if (mine.length < 2 || state.phase !== 'InProgress') return;
         const idx = Math.max(0, mine.indexOf(activeConsole));
         const next = (dx < 0)
-          ? (idx + 1) % mine.length
-          : (idx - 1 + mine.length) % mine.length;
+          ? (idx - 1 + mine.length) % mine.length
+          : (idx + 1) % mine.length;
         // setActiveConsole() is the single source of truth — also called by
         // the tab-bar onPress handler (issue #441) and the render() reconciler.
         setActiveConsole(mine[next]);
@@ -1349,6 +1351,7 @@
             state.sensorsRadarSelects  = window.simState.sensorsRadarSelects;
             state.phaserArcConfigs  = window.simState.phaserArcConfigs;
             state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
+            state.navigationWaypoint = window.simState.navigationWaypoint;
             // Push the pre-seeded repair teams so the Repair console renders its
             // rows immediately on (re)connect, before the first RepairState
             // broadcast (no-op unless Repair is the active console).
@@ -1445,6 +1448,9 @@
           state.shipYaw = snap.ship_yaw || 0;
           state.forwardSpeed = snap.forward_speed || 0;
           state.impulseChargeProgress = snap.impulse_charge_progress || 0;
+          state.navigationWaypoint = window.simState
+            ? window.simState.navigationWaypoint
+            : (snap.navigation_waypoint || null);
           if (vd) state.currentView = vd;
           // Red alert visual (issue #439): drives the phone bezel image swap.
           // `snap.red_alert` is a snake-cased serde field on SimSnapshot.
@@ -1477,6 +1483,7 @@
           pushWeaponsConsoleState();
           pushRepairConsoleState();
           pushSensorsConsoleState();
+          pushNavigationConsoleState();
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state (the weapons console is pushed above so
           // it doesn't need renderGame dispatch).
@@ -1512,6 +1519,7 @@
             state.weaponsLocked = true;
           } else {
             state.weaponsTarget = null;
+            state.weaponsTargetName = null;
             state.weaponsLocked = false;
             state.weaponsFireReady = false;
           }
@@ -1520,7 +1528,8 @@
         }
         case 'WeaponsUpdate': {
           // Save full bank/tube/torpedo/mode state for the iframe console.
-          const { target_uuid, banks, tubes, torpedo_count, phaser_mode, blips } = msg.data;
+          const { target_uuid, target_name, banks, tubes, torpedo_count, phaser_mode, blips } = msg.data;
+          const previousTarget = state.weaponsTarget;
           const bankList = Array.isArray(banks) ? banks : [];
           const fire_ready  = bankList.some(b => b.fire_ready);
           const on_cooldown = bankList.length > 0 && bankList.every(b => b.on_cooldown);
@@ -1535,8 +1544,12 @@
           state.weaponsBlips         = Array.isArray(blips) ? blips : state.weaponsBlips;
           if (target_uuid) {
             state.weaponsTarget = target_uuid;
+            state.weaponsTargetName = target_name || (previousTarget === target_uuid ? state.weaponsTargetName : null);
             state.weaponsLocked = true;
           } else {
+            state.weaponsTarget = null;
+            state.weaponsTargetName = null;
+            state.weaponsLocked = false;
             state.weaponsFireReady = false;
           }
           pushWeaponsConsoleState();
@@ -1592,6 +1605,7 @@
             : state.asteroids.filter(a => a.uuid !== uuid);
           if (state.weaponsTarget === uuid) {
             state.weaponsTarget = null;
+            state.weaponsTargetName = null;
             state.weaponsLocked = false;
             state.weaponsFireReady = false;
           }
@@ -1609,6 +1623,7 @@
             : state.asteroids.filter(a => a.uuid !== uuid);
           if (state.weaponsTarget === uuid) {
             state.weaponsTarget = null;
+            state.weaponsTargetName = null;
             state.weaponsLocked = false;
             state.weaponsFireReady = false;
           }

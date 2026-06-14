@@ -21,9 +21,18 @@ radius = 4.0
 icon = "ship"
 
 [mesh]
+model = "assets/models/dynasty_destroyer.glb"
 shape = "cuboid"
-size = [3.0, 1.0, 5.0]
+size = [4.0, 1.5, 6.0]
 colour = [0.2, 0.6, 0.9]
+
+[helm_console]
+max_speed = 25.0
+max_reverse_speed = 12.5
+acceleration = 8.333
+deceleration = 25.0
+max_yaw_rate = 0.196
+max_bank_deg = 15.0
 
 [comms]
 range = 800.0

@@ -94,6 +94,18 @@ export const ACTION_MAP = Object.freeze({
     send('SetView', { mode: { kind: 'NavigationChart' } });
   },
 
+  /** Set the shared custom navigation waypoint. */
+  set_navigation_waypoint: (a, send) => {
+    if (Number.isFinite(a.x) && Number.isFinite(a.z)) {
+      send('SetNavigationWaypoint', { x: a.x, z: a.z });
+    }
+  },
+
+  /** Clear the shared custom navigation waypoint. */
+  clear_navigation_waypoint: (a, send) => {
+    send('ClearNavigationWaypoint');
+  },
+
   /**
    * Select a science target.  Mutates local `state.sensorsTarget` so the
    * sensor display updates before the server acks the message.

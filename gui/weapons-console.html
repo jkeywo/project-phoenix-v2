@@ -451,66 +451,89 @@
                 min-width: 80px;
                 flex-shrink: 0;
               }
-              .tube-row .load-btn {
-                flex: 1;
+              .tube-buttons {
+                margin-left: auto;
+                display: flex;
+                gap: 8px;
+                flex-shrink: 0;
+              }
+              .tube-row .load-btn,
+              .tube-row .fire-btn {
+                --cham: 6px;
                 position: relative;
                 height: 36px;
-                border: 1px solid var(--ink-faint);
-                background: transparent;
-                color: var(--ink);
-                font-family: "JetBrains Mono", monospace;
+                width: 100px;
+                flex-shrink: 0;
+                border: none;
+                background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
+                clip-path: polygon(
+                  var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+                  100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+                  var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+                );
+                color: var(--ink-dim);
+                font-family: "Chakra Petch", sans-serif;
+                font-weight: 600;
                 font-size: 11px;
-                letter-spacing: 0.12em;
+                letter-spacing: 0.18em;
                 cursor: pointer;
                 overflow: hidden;
                 display: flex;
                 align-items: center;
                 justify-content: center;
+                user-select: none;
               }
-              .tube-row .load-btn:disabled {
+              .tube-row .load-btn::before,
+              .tube-row .fire-btn::before {
+                content: "";
+                position: absolute;
+                inset: 1.5px;
+                --cham: 4.5px;
+                background: linear-gradient(180deg, #1a2148 0%, #0e1432 50%, #070b22 100%);
+                clip-path: polygon(
+                  var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+                  100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+                  var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+                );
+              }
+              .tube-row .load-btn span,
+              .tube-row .fire-btn span {
+                position: relative;
+                z-index: 1;
+              }
+              .tube-row .load-btn:disabled,
+              .tube-row .fire-btn:disabled {
                 cursor: default;
-                opacity: 0.7;
+                opacity: 0.45;
               }
               .tube-row .load-btn .load-fill {
                 position: absolute;
                 inset: 0;
                 width: 0%;
-                background: rgba(0,200,120,0.18);
+                background: rgba(0,200,120,0.14);
                 transition: width 0.15s linear;
                 pointer-events: none;
+                z-index: 0;
               }
               .tube-row .load-btn.btn-unload .load-fill {
-                background: rgba(255,120,60,0.18);
+                background: rgba(255,120,60,0.14);
               }
-              .tube-row .load-btn .load-label {
-                position: relative;
-                z-index: 1;
-              }
-              .tube-row .fire-btn {
-                height: 36px;
-                width: 80px;
-                flex-shrink: 0;
-                border: 1px solid var(--ink-faint);
-                background: transparent;
-                color: var(--ink);
-                font-family: "JetBrains Mono", monospace;
-                font-size: 11px;
-                letter-spacing: 0.12em;
-                cursor: pointer;
-              }
+              .tube-row .load-btn.btn-load { color: var(--loaded); }
+              .tube-row .load-btn.btn-unload { color: var(--reloading); }
+              .tube-row .load-btn.btn-loading,
+              .tube-row .load-btn.btn-unloading { color: var(--ink-faint); }
               .tube-row .fire-btn.armed {
-                border-color: var(--tactical, #f04040);
-                color: var(--tactical, #f04040);
+                background: linear-gradient(180deg, #8c4818 0%, #5a2c10 50%, #2a1008 100%);
+                color: var(--tactical);
               }
-              .tube-row .fire-btn:disabled {
-                cursor: default;
-                opacity: 0.35;
+              .tube-row .fire-btn.armed::before {
+                background: linear-gradient(180deg, #2a1408 0%, #180c04 50%, #0c0602 100%);
               }
 
               @media (orientation: portrait) {
                 .tube-row .tube-name { min-width: 60px; font-size: 10px; }
-                .tube-row .load-btn { height: 30px; font-size: 10px; }
-                .tube-row .fire-btn { height: 30px; width: 60px; font-size: 10px; }
+                .tube-row .load-btn,
+                .tube-row .fire-btn { height: 30px; width: 80px; font-size: 10px; }
               }
             </style>
 
@@ -648,7 +671,7 @@
       var tubeList = document.getElementById('tube-list');
       tubeList.innerHTML = '';
       tubes.forEach(function(t) {
-        var state    = t.state || (t.loaded ? 'loaded' : 'loading');
+        var state    = t.state || (t.loaded ? 'loaded' : 'unloaded');
         var progress = typeof t.progress === 'number' ? t.progress : (t.loaded ? 1 : 0);
         var name     = t.id.replace(/_/g, ' ').toUpperCase();
 
@@ -663,7 +686,6 @@
         fill.style.width = (progress * 100).toFixed(1) + '%';
 
         var lbl = document.createElement('span');
-        lbl.className = 'load-label';
 
         if (state === 'loaded') {
           loadBtn.className = 'load-btn btn-unload';
@@ -693,9 +715,11 @@
         // Fire button
         var fireBtn = document.createElement('button');
         fireBtn.type = 'button';
-        fireBtn.textContent = 'FIRE';
-        fireBtn.disabled = !t.loaded;
-        fireBtn.className = t.loaded ? 'fire-btn armed' : 'fire-btn';
+        var fireLbl = document.createElement('span');
+        fireLbl.textContent = 'FIRE';
+        fireBtn.appendChild(fireLbl);
+        fireBtn.disabled = state !== 'loaded';
+        fireBtn.className = state === 'loaded' ? 'fire-btn armed' : 'fire-btn';
         fireBtn.addEventListener('click', (function(id) { return function() {
           var targetUuid = (_state && _state.target_uuid) ? _state.target_uuid : null;
           sendAction('fire_torpedo', { tube: id, target_uuid: targetUuid });
@@ -708,9 +732,13 @@
         nameEl.className = 'tube-name';
         nameEl.textContent = name;
 
+        var btns = document.createElement('div');
+        btns.className = 'tube-buttons';
+        btns.appendChild(loadBtn);
+        btns.appendChild(fireBtn);
+
         row.appendChild(nameEl);
-        row.appendChild(loadBtn);
-        row.appendChild(fireBtn);
+        row.appendChild(btns);
         tubeList.appendChild(row);
       });
 

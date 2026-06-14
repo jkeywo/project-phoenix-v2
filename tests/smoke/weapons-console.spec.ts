@@ -92,8 +92,17 @@ test('weapons console: FIRE buttons call __sendAction with correct envelopes', a
     (window as any).__sendAction = (json: string) => (window as any).__sent.push(json);
   });
 
+  // Render state so per-tube fire buttons are created.
+  await page.evaluate((s) => (window as any).__updateConsole('Tactical', JSON.stringify(s)), {
+    target_uuid: null,
+    banks: [{ id: 'fore', fire_ready: true, on_cooldown: false, cooldown_remaining: 0.0 }],
+    tubes: [{ id: 'fore', loaded: true, reload_secs: 0.0 }],
+    torpedo_count: 3,
+    phaser_mode: 'Auto',
+  });
+
   await page.locator('#fire-phaser').click();
-  await page.locator('#fire-torpedo').click();
+  await page.locator('#tube-list .tube-row:first-child .fire-btn').click();
 
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(2);
@@ -127,7 +136,7 @@ test('weapons console: short landscape keeps action buttons on screen', async ({
     phaser_mode: 'Auto',
   });
 
-  const buttons = ['#fire-torpedo', '#fire-phaser', '#phaser-mode-btn'];
+  const buttons = ['#tube-list .tube-row:first-child .fire-btn', '#fire-phaser', '#phaser-mode-btn'];
   for (const selector of buttons) {
     const box = await page.locator(selector).boundingBox();
     expect(box, `${selector} should have layout bounds`).not.toBeNull();

@@ -11,8 +11,9 @@ use uuid::Uuid;
 // ── AiState ───────────────────────────────────────────────────────────────────
 
 /// The set of states an AI controller can be in.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum AiState {
+    #[default]
     Idle,
     /// Navigate between a list of map-anchor waypoints in order.
     Patrolling {
@@ -50,12 +51,6 @@ pub enum AiState {
         /// Desired thrust fraction [0, 1].
         target_speed: f32,
     },
-}
-
-impl Default for AiState {
-    fn default() -> Self {
-        AiState::Idle
-    }
 }
 
 impl AiState {
@@ -645,7 +640,7 @@ fn should_fire_torpedo(world_view: &WorldView, target: &AiWorldEntity) -> bool {
             facings
                 .iter()
                 .find(|f| f.label == label)
-                .map(|f| shield_facing_depleted(f))
+                .map(shield_facing_depleted)
                 .unwrap_or(true) // quadrant not found → treat as down
         }
     }
@@ -854,17 +849,14 @@ fn evaluate_transitions(
         new_bb.state_entered_at = world_view.sim_time;
 
         let fires = match transition.condition.as_str() {
-            "on_attacked" => {
+            "on_attacked"
                 if world_view.attacker_this_tick.is_some()
-                    && controller.blackboard.on_attacked_armed
-                {
-                    new_bb.target = world_view.attacker_this_tick;
-                    new_bb.last_attacker = world_view.attacker_this_tick;
-                    new_bb.on_attacked_armed = false; // suppress until next non-on_attacked entry
-                    true
-                } else {
-                    false
-                }
+                    && controller.blackboard.on_attacked_armed =>
+            {
+                new_bb.target = world_view.attacker_this_tick;
+                new_bb.last_attacker = world_view.attacker_this_tick;
+                new_bb.on_attacked_armed = false; // suppress until next non-on_attacked entry
+                true
             }
             "enemy_in_range" => {
                 let radius = transition.radius.unwrap_or(100.0);
@@ -952,13 +944,9 @@ fn evaluate_transitions(
                     false
                 }
             }
-            "on_scenario_unloaded" => {
-                if world_view.scenario_unloaded {
-                    new_bb.on_attacked_armed = true;
-                    true
-                } else {
-                    false
-                }
+            "on_scenario_unloaded" if world_view.scenario_unloaded => {
+                new_bb.on_attacked_armed = true;
+                true
             }
             _ => false,
         };

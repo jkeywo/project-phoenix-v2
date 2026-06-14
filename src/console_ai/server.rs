@@ -299,10 +299,10 @@ fn run_tactical_ai(
     // (destroyed since the lock was set), skip this tick silently.
     let target_xz = asteroid_q
         .iter()
-        .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z)))
+        .find_map(|(u, t)| (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z)))
         .or_else(|| {
             npc_q.iter().find_map(|(u, t)| {
-                (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))
+                (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
             })
         });
     let Some((tx, tz)) = target_xz else {
@@ -847,12 +847,13 @@ mod tests {
         // Set a locked target
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
         // Add the target entity to the world at a position in ForePort arc
-        let mut world_res = app.world_mut().resource_mut::<WorldResource>();
-        world_res
-            .0
-            .entities
-            .push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
-        drop(world_res);
+        {
+            let mut world_res = app.world_mut().resource_mut::<WorldResource>();
+            world_res
+                .0
+                .entities
+                .push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
+        }
         // Also spawn the live ECS entity — run_tactical_ai uses live Transforms
         // (not the WorldResource snapshot) since the fix in e147fe2.
         app.world_mut().spawn((
@@ -917,12 +918,13 @@ mod tests {
             .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
-        let mut world_res = app.world_mut().resource_mut::<WorldResource>();
-        world_res
-            .0
-            .entities
-            .push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
-        drop(world_res);
+        {
+            let mut world_res = app.world_mut().resource_mut::<WorldResource>();
+            world_res
+                .0
+                .entities
+                .push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
+        }
 
         let (inbound, _) = tick(&mut app);
         let fired: Vec<_> = inbound

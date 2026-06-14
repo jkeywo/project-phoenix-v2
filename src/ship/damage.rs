@@ -122,8 +122,7 @@ impl ConsoleHull {
                 self.entries
                     .iter()
                     .enumerate()
-                    .filter(|(_, (_, cur, _))| *cur > 0.0)
-                    .last()
+                    .rfind(|(_, (_, cur, _))| *cur > 0.0)
                     .unwrap()
                     .0
             });

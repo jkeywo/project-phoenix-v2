@@ -3502,7 +3502,9 @@ mod tests {
             assert!(runtime.pending_follow_ups[0].placeholder_id.is_none());
         }
 
-        app.world_mut().resource_mut::<WorldContentRuntime>().pending_follow_ups[0]
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_follow_ups[0]
             .remaining_secs = -0.1;
         app.update();
 
@@ -7110,7 +7112,7 @@ size_max = 2.0
                         name: "rotated_scaled".to_string(),
                         anchor: None,
                         position: Some([1.0, 2.0, 3.0]),
-                        rotation: Some([0.0, 1.5708, 0.0]),
+                        rotation: Some([0.0, std::f32::consts::FRAC_PI_2, 0.0]),
                         scale: Some([2.0, 2.0, 2.0]),
                     }],
                     when: None,
@@ -7139,7 +7141,7 @@ size_max = 2.0
             .cloned()
             .expect("SpawnEntity must register name_to_uuid");
 
-        let expected_quat = Quat::from_euler(EulerRot::XYZ, 0.0, 1.5708, 0.0);
+        let expected_quat = Quat::from_euler(EulerRot::XYZ, 0.0, std::f32::consts::FRAC_PI_2, 0.0);
         let expected_scale = Vec3::new(2.0, 2.0, 2.0);
         let expected_translation = Vec3::new(1.0, 2.0, 3.0);
 

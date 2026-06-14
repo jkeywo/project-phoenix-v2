@@ -20,17 +20,13 @@ use crate::entity_config::GlobalConfig;
 /// When to spawn a `WorldEntity` declared in the world TOML.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum WorldEntitySpawnOn {
     /// Spawn immediately when the world is loaded (lobby phase).
+    #[default]
     Immediate,
     /// Spawn when the game starts (in-progress phase).
     GameStart,
-}
-
-impl Default for WorldEntitySpawnOn {
-    fn default() -> Self {
-        WorldEntitySpawnOn::Immediate
-    }
 }
 
 /// Positioning, rotation, and scale for a `WorldEntity`.
@@ -1637,7 +1633,7 @@ entity    = "raider_alpha"
             } => {
                 assert_eq!(id, "obj-raider-destroyed");
                 assert_eq!(text, "Pirate raider eliminated.");
-                assert_eq!(*mandatory, false);
+                assert!(!(*mandatory));
             }
             other => panic!("expected AddObjective, got {other:?}"),
         }
@@ -2534,7 +2530,10 @@ scale    = [2.0, 2.0, 2.0]
             .as_ref()
             .expect("transform present");
         assert_eq!(xf.position, Some([10.0, 0.0, 20.0]));
-        assert_eq!(xf.rotation, Some([0.0, 1.5707963, 0.0]));
+        let rotation = xf.rotation.expect("rotation present");
+        assert_eq!(rotation[0], 0.0);
+        assert!((rotation[1] - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(rotation[2], 0.0);
         assert_eq!(xf.scale, Some([2.0, 2.0, 2.0]));
     }
 
@@ -2715,7 +2714,10 @@ condition = "on_world_loaded"
                 assert_eq!(name, "raider_beta");
                 assert!(anchor.is_none());
                 assert_eq!(*position, Some([100.0, 0.0, -50.0]));
-                assert_eq!(*rotation, Some([0.0, 1.5707963, 0.0]));
+                let rotation = rotation.expect("rotation present");
+                assert_eq!(rotation[0], 0.0);
+                assert!((rotation[1] - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+                assert_eq!(rotation[2], 0.0);
                 assert_eq!(*scale, Some([2.0, 2.0, 2.0]));
             }
             other => panic!("expected SpawnEntity, got {other:?}"),

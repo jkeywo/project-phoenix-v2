@@ -517,17 +517,13 @@ fn handle_collisions(
         return;
     };
 
-    let contact = ctx
-        .contact_pairs_with(ship_entity)
-        .next()
-        .map(|pair| {
-            if pair.collider1() == Some(ship_entity) {
-                pair.collider2()
-            } else {
-                pair.collider1()
-            }
-        })
-        .flatten();
+    let contact = ctx.contact_pairs_with(ship_entity).next().and_then(|pair| {
+        if pair.collider1() == Some(ship_entity) {
+            pair.collider2()
+        } else {
+            pair.collider1()
+        }
+    });
 
     if contact.is_some() {
         let speed_at_impact = ship.forward_speed;
@@ -651,11 +647,11 @@ fn handle_set_shield_focus(
         if sessions.0.console_holder(Console::Shields) != Some(ev.token.as_str()) {
             continue;
         }
-        let idx = facing.and_then(|d| match d {
-            ViewDirection::Fore => Some(0),
-            ViewDirection::Port => Some(1),
-            ViewDirection::Aft => Some(2),
-            ViewDirection::Starboard => Some(3),
+        let idx = facing.map(|d| match d {
+            ViewDirection::Fore => 0,
+            ViewDirection::Port => 1,
+            ViewDirection::Aft => 2,
+            ViewDirection::Starboard => 3,
         });
         shields.0.set_focused_facing(idx);
 
@@ -1331,7 +1327,8 @@ fn spawn_game_start_entities(
                 } else {
                     crate::torpedo::TorpedoSystem::new(runtime_config)
                 };
-                commands.insert_resource(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
+                commands
+                    .insert_resource(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
             }
 
             if let Some(pc) = &config.power {
@@ -1397,11 +1394,13 @@ fn spawn_game_start_entities(
             commands.insert_resource(impulse_cfg.unwrap_or_default());
 
             // Bank config from [helm_console] TOML, or default
-            let bank_cfg = config.helm_console.as_ref().map(|hc| {
-                crate::ship_plugin::BankConfigResource {
-                    max_bank_deg: hc.max_bank_deg,
-                }
-            });
+            let bank_cfg =
+                config
+                    .helm_console
+                    .as_ref()
+                    .map(|hc| crate::ship_plugin::BankConfigResource {
+                        max_bank_deg: hc.max_bank_deg,
+                    });
             commands.insert_resource(bank_cfg.unwrap_or_default());
         }
     }
@@ -1511,7 +1510,15 @@ fn render_spawned_entities(
             let scene: Handle<bevy::scene::Scene> = match pending {
                 Some(p) => p.0.clone(),
                 None => {
-                    let path = format!("{}#Scene0", model_path);
+                    // `asset_server` resolves paths relative to the `assets/`
+                    // root, but the TOML `model` field carries an `assets/`
+                    // prefix (matching the `template_path` convention, which is
+                    // read via `std::fs` relative to the cwd). Strip it so the
+                    // GLB resolves correctly instead of looking for
+                    // `assets/assets/models/...` and silently failing to load —
+                    // which leaves the entity unrendered and invisible.
+                    let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
+                    let path = format!("{}#Scene0", rel);
                     let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
                     ec.insert(PendingSceneHandle(h.clone()));
                     h
@@ -3151,7 +3158,7 @@ mod tests {
         tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
         assert!(
-            team_is_idle(&teams, 0),
+            team_is_idle(teams, 0),
             "team 0 should remain idle after non-Repair dispatch"
         );
     }
@@ -3171,7 +3178,7 @@ mod tests {
         tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
         assert!(
-            team_is_travelling(&teams, 0),
+            team_is_travelling(teams, 0),
             "team 0 should be travelling after dispatch"
         );
     }
@@ -3213,7 +3220,7 @@ mod tests {
             &teams.0.slots()[0],
             crate::messages::TeamSlot::Returning { .. }
         ));
-        assert!(team_is_travelling(&teams, 1));
+        assert!(team_is_travelling(teams, 1));
     }
 
     #[test]
@@ -3601,7 +3608,7 @@ mod tests {
     /// With BEAM_DAMAGE_PER_SEC=5 and 30-HP asteroid:
     /// - Base: 6 seconds to destroy
     /// - 2Ã— modifier (bonus=1.0): 3 seconds to destroy
-    /// Test: after running ~4s of game time, the asteroid is destroyed with 2Ã— but not with 1Ã—.
+    ///   Test: after running ~4s of game time, the asteroid is destroyed with 2Ã— but not with 1Ã—.
     #[test]
     fn phaser_damage_modifier_doubles_kill_rate() {
         use crate::messages::{ModifierSlot, ModifierSource};

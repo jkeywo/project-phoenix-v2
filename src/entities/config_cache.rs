@@ -682,10 +682,11 @@ length = 0.0
         }
 
         fn queue_fetch(&mut self, path: String) {
-            if !self.cache.contains_key(&path) && !self.in_flight.contains(&path) {
-                if !self.pending.contains(&path) {
-                    self.pending.push_back(path);
-                }
+            if !self.cache.contains_key(&path)
+                && !self.in_flight.contains(&path)
+                && !self.pending.contains(&path)
+            {
+                self.pending.push_back(path);
             }
         }
 

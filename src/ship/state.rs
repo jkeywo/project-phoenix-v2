@@ -22,6 +22,12 @@ pub struct ShipState {
     pub phaser_frequency: f32,
 }
 
+impl Default for ShipState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShipState {
     pub fn new() -> Self {
         Self {

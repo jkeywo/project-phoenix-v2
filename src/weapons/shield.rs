@@ -411,8 +411,8 @@ pub fn attacker_bearing_relative(
     // Then normalise to (-π, π].
     let relative = world_bearing - ship_yaw;
     let tau = std::f32::consts::TAU;
-    let wrapped = ((relative + std::f32::consts::PI).rem_euclid(tau)) - std::f32::consts::PI;
-    wrapped
+
+    ((relative + std::f32::consts::PI).rem_euclid(tau)) - std::f32::consts::PI
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

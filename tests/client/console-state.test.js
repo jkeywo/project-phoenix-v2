@@ -597,6 +597,38 @@ describe('buildNavigationConsoleState', () => {
     expect(s.blips.find(b => b.kind === 'waypoint')).toBeDefined();
   });
 
+  it('blips include world_x and world_z for canvas rendering', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [
+        { uuid: 'st1', x: 500, z: -300, tags: ['station'] },
+        { uuid: 'pl1', x: -200, z: 400, tags: ['planet'] },
+      ],
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    expect(blips.length).toBe(2);
+    expect(blips[0].world_x).toBe(500);
+    expect(blips[0].world_z).toBe(-300);
+    expect(blips[1].world_x).toBe(-200);
+    expect(blips[1].world_z).toBe(400);
+  });
+
+  it('blips include world_x and world_z coordinates', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [
+        { uuid: 'st1', x: 500, z: 300, tags: ['station'], name: 'Starbase 1' },
+        { uuid: 'p1',  x: 200, z: 800, tags: ['planet'],  name: 'Alderaan'  },
+      ],
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    expect(blips.length).toBe(2);
+    expect(blips[0].world_x).toBe(500);
+    expect(blips[0].world_z).toBe(300);
+    expect(blips[1].world_x).toBe(200);
+    expect(blips[1].world_z).toBe(800);
+  });
+
   it('blips use world-axis (north-up) projection — no ship yaw rotation', () => {
     // Entity directly east (x+) of ship → radar_x positive, radar_y ≈ 0
     const state = {
@@ -606,5 +638,17 @@ describe('buildNavigationConsoleState', () => {
     const blip = parse(buildNavigationConsoleState(state)).blips[0];
     expect(blip.radar_x).toBeCloseTo(500 / NAVIGATION_RADAR_RANGE);
     expect(blip.radar_y).toBeCloseTo(0);
+  });
+
+  it('waypoint blip carries world_x/world_z for canvas rendering', () => {
+    const state = {
+      shipX: 100, shipZ: 200,
+      navigationWaypoint: { x: 800, z: -400 },
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const wp = blips.find(b => b.kind === 'waypoint');
+    expect(wp).toBeDefined();
+    expect(wp.world_x).toBe(800);
+    expect(wp.world_z).toBe(-400);
   });
 });

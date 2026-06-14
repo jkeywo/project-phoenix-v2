@@ -406,7 +406,7 @@ mod tests {
                 view_mode: ViewMode::default(),
                 ship_x: 12.5,
                 ship_z: -8.25,
-                ship_yaw: 1.5707,
+                ship_yaw: std::f32::consts::FRAC_PI_2,
                 forward_speed: 0.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],

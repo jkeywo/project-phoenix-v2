@@ -23,17 +23,13 @@ pub struct TargetSection {
 /// Purely cosmetic threat level for the target info panel.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ThreatLevel {
+    #[default]
     None,
     Low,
     Medium,
     High,
-}
-
-impl Default for ThreatLevel {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl ThreatLevel {

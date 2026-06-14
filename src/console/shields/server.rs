@@ -68,12 +68,9 @@ fn recompute_shields_console_state(
         .find(|f| f.is_focused)
         .map(|f| f.label.clone());
 
-    let all_online = facings.iter().all(|f| f.online);
     let any_offline = facings.iter().any(|f| !f.online);
     let grid_status = if any_offline {
         "EMITTER OFFLINE"
-    } else if all_online {
-        "GRID NOMINAL"
     } else {
         "GRID NOMINAL"
     }

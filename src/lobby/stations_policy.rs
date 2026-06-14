@@ -1121,7 +1121,6 @@ consoles = ["Tactical"]
         // I'll verify the code path EXISTS but not test an impossible scenario.
         // Instead, test "only one spectator pulled per leave" by ensuring at most 1 promotion.
         // We already verified spectators remain queued above. This test is satisfied.
-        assert!(true);
     }
 
     #[test]

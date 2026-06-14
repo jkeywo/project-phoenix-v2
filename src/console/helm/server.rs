@@ -16,7 +16,8 @@ impl Plugin for HelmPlugin {
             (
                 recompute_helm_console_state,
                 push_helm_console_state.after(recompute_helm_console_state),
-            ).in_set(crate::sim_sets::SimSet::Broadcast),
+            )
+                .in_set(crate::sim_sets::SimSet::Broadcast),
         );
     }
 }

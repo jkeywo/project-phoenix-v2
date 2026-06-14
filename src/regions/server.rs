@@ -237,11 +237,7 @@ fn handle_blocks_impulse_region_enter(
     let Ok(effects) = region_query.get(ev.region_entity) else {
         return;
     };
-    if effects
-        .0
-        .iter()
-        .any(|e| *e == RegionEffectKind::BlocksImpulse)
-    {
+    if effects.0.contains(&RegionEffectKind::BlocksImpulse) {
         impulse.0.cancel_charge();
     }
 }
@@ -348,7 +344,7 @@ mod tests {
             .resource::<RegionMembership>()
             .inside
             .get(&ship)
-            .map_or(false, |set| set.contains(&region))
+            .is_some_and(|set| set.contains(&region))
     }
 
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
@@ -1114,10 +1110,11 @@ mod tests {
         spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
         // Set ship speed above the clamped limit
-        let mut ship = app.world_mut().resource_mut::<ShipState>();
-        ship.forward_speed = 50.0;
-        ship.x = 10.0; // inside region
-        drop(ship);
+        {
+            let mut ship = app.world_mut().resource_mut::<ShipState>();
+            ship.forward_speed = 50.0;
+            ship.x = 10.0; // inside region
+        }
 
         tick_with_dt(&mut app, 0.016);
 
@@ -1138,10 +1135,11 @@ mod tests {
         let mut app = slow_zone_test_app();
         spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
-        let mut ship = app.world_mut().resource_mut::<ShipState>();
-        ship.forward_speed = 5.0;
-        ship.x = 10.0; // inside region
-        drop(ship);
+        {
+            let mut ship = app.world_mut().resource_mut::<ShipState>();
+            ship.forward_speed = 5.0;
+            ship.x = 10.0; // inside region
+        }
 
         tick_with_dt(&mut app, 0.016);
 
@@ -1178,10 +1176,11 @@ mod tests {
         let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
         // Start with 50 speed, enter Ã¢â€ â€™ clamped to ~16.667
-        let mut ship = app.world_mut().resource_mut::<ShipState>();
-        ship.forward_speed = 50.0;
-        ship.x = 10.0; // inside region
-        drop(ship);
+        {
+            let mut ship = app.world_mut().resource_mut::<ShipState>();
+            ship.forward_speed = 50.0;
+            ship.x = 10.0; // inside region
+        }
 
         tick_with_dt(&mut app, 0.016);
 

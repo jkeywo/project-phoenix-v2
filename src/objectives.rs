@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].id, "obj-1");
         assert_eq!(snapshots[0].text, "Destroy the convoy");
-        assert_eq!(snapshots[0].mandatory, true);
+        assert!(snapshots[0].mandatory);
         assert_eq!(snapshots[0].status, ObjectiveStatus::Active);
     }
 
@@ -211,10 +211,10 @@ mod tests {
 
         let snaps = mgr.sorted_snapshots();
         assert_eq!(snaps.len(), 4);
-        assert_eq!(snaps[0].mandatory, true);
-        assert_eq!(snaps[1].mandatory, true);
-        assert_eq!(snaps[2].mandatory, false);
-        assert_eq!(snaps[3].mandatory, false);
+        assert!(snaps[0].mandatory);
+        assert!(snaps[1].mandatory);
+        assert!(!snaps[2].mandatory);
+        assert!(!snaps[3].mandatory);
         assert_eq!(snaps[0].id, "man-1");
         assert_eq!(snaps[1].id, "man-2");
         assert_eq!(snaps[2].id, "opt-1");

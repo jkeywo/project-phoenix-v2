@@ -315,7 +315,7 @@ mod tests {
 
         let teams = app.world().resource::<ShipRepairTeams>();
         assert!(
-            team_is_idle(&teams, 0),
+            team_is_idle(teams, 0),
             "team 0 should remain idle after non-Repair dispatch"
         );
     }
@@ -338,7 +338,7 @@ mod tests {
 
         let teams = app.world().resource::<ShipRepairTeams>();
         assert!(
-            team_is_travelling(&teams, 0),
+            team_is_travelling(teams, 0),
             "team 0 should be travelling after dispatch"
         );
     }
@@ -386,7 +386,7 @@ mod tests {
             &teams.0.slots()[0],
             crate::messages::TeamSlot::Returning { .. }
         ));
-        assert!(team_is_travelling(&teams, 1));
+        assert!(team_is_travelling(teams, 1));
     }
 
     /// RepairState broadcast includes the team slot states.

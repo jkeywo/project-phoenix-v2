@@ -47,6 +47,12 @@ pub struct ShipPhysicsConfig {
     pub max_yaw_rate: f32,
 }
 
+impl Default for ShipPhysicsConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShipPhysicsConfig {
     pub fn new() -> Self {
         Self {

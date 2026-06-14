@@ -162,7 +162,7 @@ fn process_helm_inputs(
         }
     };
     let mut config = match ship_physics_config.as_deref() {
-        Some(cfg) => cfg.0.clone(),
+        Some(cfg) => cfg.0,
         None => ShipPhysicsConfig::new(),
     };
     config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
@@ -188,7 +188,11 @@ fn process_helm_inputs(
 
     // Visual banking: lerp roll toward target based on steering
     let max_bank_rad = bank_config.max_bank_deg.to_radians();
-    let target_roll = if impulse_active { 0.0 } else { -input.steering * max_bank_rad };
+    let target_roll = if impulse_active {
+        0.0
+    } else {
+        -input.steering * max_bank_rad
+    };
     let lerp_factor = (BANK_LERP_RATE * dt).min(1.0);
     ship.roll = ship.roll + (target_roll - ship.roll) * lerp_factor;
 }
@@ -224,10 +228,10 @@ pub fn handle_impulse_messages(
 
     for msg in reader.read() {
         match &msg.msg {
-            ClientMessage::StartImpulseCharge => {
-                if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) {
-                    impulse.0.start_charge();
-                }
+            ClientMessage::StartImpulseCharge
+                if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
+            {
+                impulse.0.start_charge();
             }
             ClientMessage::CancelImpulse => {
                 impulse.0.cancel_charge();
@@ -261,11 +265,7 @@ fn is_inside_blocks_impulse(
     };
     for &region_entity in inside {
         if let Ok(effects) = region_query.get(region_entity) {
-            if effects
-                .0
-                .iter()
-                .any(|e| *e == RegionEffectKind::BlocksImpulse)
-            {
+            if effects.0.contains(&RegionEffectKind::BlocksImpulse) {
                 return true;
             }
         }

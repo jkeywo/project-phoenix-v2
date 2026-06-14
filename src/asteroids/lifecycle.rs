@@ -132,7 +132,7 @@ pub fn check_destroyed_asteroids(
         ) {
             if let Some(row) = window.slots.get_mut(sz) {
                 if let Some(slot) = row.get_mut(sx) {
-                    if slot.as_ref().map_or(false, |d| d.uuid == uuid.0) {
+                    if slot.as_ref().is_some_and(|d| d.uuid == uuid.0) {
                         *slot = None;
                     }
                 }
@@ -200,7 +200,7 @@ pub fn update_asteroid_window(
             gx,
             gz,
             field_idx,
-            &grid,
+            grid,
             field.inner_radius,
             field.outer_radius,
             &field.asteroid_type_paths,
@@ -251,7 +251,7 @@ pub fn update_asteroid_window(
                     sx,
                     sz,
                     field_idx,
-                    &grid,
+                    grid,
                     field.inner_radius,
                     field.outer_radius,
                     &field.asteroid_type_paths,
@@ -267,7 +267,7 @@ pub fn update_asteroid_window(
                     sx,
                     sz,
                     field_idx,
-                    &grid,
+                    grid,
                     field.inner_radius,
                     field.outer_radius,
                     &field.cosmetic_type_paths,

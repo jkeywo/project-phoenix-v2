@@ -15,7 +15,7 @@ use crate::power_system::{PowerConfig, PowerSystem};
 pub struct ShipPowerSystem(pub PowerSystem);
 
 /// Wraps the power config for the ship's power system.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct PowerConfigResource(pub PowerConfig);
 
 /// Per-console power multiplier configuration: `[f32; 4]` indexed by level-1
@@ -36,12 +36,6 @@ impl Default for PowerMultiplierResource {
                 (Console::Sensors, defaults),
             ]),
         }
-    }
-}
-
-impl Default for PowerConfigResource {
-    fn default() -> Self {
-        Self(PowerConfig::default())
     }
 }
 
@@ -162,15 +156,15 @@ pub fn handle_power_messages(
 ) {
     for ev in reader.read() {
         match &ev.msg {
-            ClientMessage::IncreasePower { console } => {
-                if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
-                    power.0.increase(console.clone());
-                }
+            ClientMessage::IncreasePower { console }
+                if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) =>
+            {
+                power.0.increase(console.clone());
             }
-            ClientMessage::DecreasePower { console } => {
-                if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
-                    power.0.decrease(console.clone());
-                }
+            ClientMessage::DecreasePower { console }
+                if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) =>
+            {
+                power.0.decrease(console.clone());
             }
             _ => {}
         }

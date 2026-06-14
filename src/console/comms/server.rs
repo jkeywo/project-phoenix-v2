@@ -53,10 +53,8 @@ fn recompute_comms_console_state(
         for m in messages.iter_mut() {
             if let Some(flag) = rt.range_flags.get(&m.sender_uuid).copied() {
                 m.sender_in_range = flag;
-            } else if rt.range_active {
-                if uuid::Uuid::parse_str(&m.sender_uuid).is_ok() {
-                    m.sender_in_range = false;
-                }
+            } else if rt.range_active && uuid::Uuid::parse_str(&m.sender_uuid).is_ok() {
+                m.sender_in_range = false;
             }
         }
     }

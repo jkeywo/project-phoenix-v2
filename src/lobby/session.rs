@@ -23,6 +23,12 @@ pub struct SessionManager {
     spectator_queue: VecDeque<String>,
 }
 
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionManager {
     pub fn new() -> Self {
         Self {

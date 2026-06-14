@@ -570,10 +570,10 @@ fn draw_beam_vfx(
         // would render the beam to where the NPC spawned, not where it is now.
         let target_xz = asteroid_q
             .iter()
-            .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z)))
+            .find_map(|(u, t)| (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z)))
             .or_else(|| {
                 npc_q.iter().find_map(|(u, t)| {
-                    (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))
+                    (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
                 })
             });
 
@@ -636,11 +636,11 @@ fn draw_beam_vfx(
             npc_q
                 .iter()
                 .find_map(|(u, t)| {
-                    (u.0 == target_uuid_str).then(|| (t.translation.x, t.translation.z))
+                    (u.0 == target_uuid_str).then_some((t.translation.x, t.translation.z))
                 })
                 .or_else(|| {
                     asteroid_q.iter().find_map(|(u, t)| {
-                        (u.0 == target_uuid_str).then(|| (t.translation.x, t.translation.z))
+                        (u.0 == target_uuid_str).then_some((t.translation.x, t.translation.z))
                     })
                 })
         };
@@ -987,6 +987,33 @@ fn spawn_nebula_cloud_particles(
     }
 }
 
+// ── Warp-exit marker renderer ─────────────────────────────────────────────────
+
+/// Draws a vertical (XZ-plane) ring at the world position of each NPC entity
+/// that is currently in the `WarpingOut` AI state.
+///
+/// The ring glows cyan and pulses in opacity with the remaining time so crews
+/// can anticipate where the entity will disappear.
+fn draw_warp_exit_markers(query: Query<(&WarpOutMarker, &Transform)>, mut gizmos: Gizmos) {
+    for (marker, transform) in query.iter() {
+        let center = transform.translation;
+        // Pulse: brightest at full time remaining, dims as time runs out.
+        let pulse = (marker.remaining_secs * 2.0).sin().abs().max(0.2);
+        let color = Color::srgba(0.2, 0.9, 1.0, pulse * 0.8);
+
+        // Vertical ring: identity rotation → XY plane (normal = Z).
+        // Radius scales with target speed so faster entities show a larger ring.
+        let radius = (marker.target_speed * 0.4).clamp(5.0, 40.0);
+        gizmos.circle(Isometry3d::new(center, Quat::IDENTITY), radius, color);
+        // Second inner ring for visual depth.
+        gizmos.circle(
+            Isometry3d::new(center, Quat::IDENTITY),
+            radius * 0.6,
+            Color::srgba(0.5, 1.0, 1.0, pulse * 0.4),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1027,32 +1054,5 @@ mod tests {
         let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
         assert_eq!(to_spawn, vec!["c".to_string()]);
         assert_eq!(to_despawn, vec!["a".to_string()]);
-    }
-}
-
-// ── Warp-exit marker renderer ─────────────────────────────────────────────────
-
-/// Draws a vertical (XZ-plane) ring at the world position of each NPC entity
-/// that is currently in the `WarpingOut` AI state.
-///
-/// The ring glows cyan and pulses in opacity with the remaining time so crews
-/// can anticipate where the entity will disappear.
-fn draw_warp_exit_markers(query: Query<(&WarpOutMarker, &Transform)>, mut gizmos: Gizmos) {
-    for (marker, transform) in query.iter() {
-        let center = transform.translation;
-        // Pulse: brightest at full time remaining, dims as time runs out.
-        let pulse = (marker.remaining_secs * 2.0).sin().abs().max(0.2);
-        let color = Color::srgba(0.2, 0.9, 1.0, pulse * 0.8);
-
-        // Vertical ring: identity rotation → XY plane (normal = Z).
-        // Radius scales with target speed so faster entities show a larger ring.
-        let radius = (marker.target_speed * 0.4).clamp(5.0, 40.0);
-        gizmos.circle(Isometry3d::new(center, Quat::IDENTITY), radius, color);
-        // Second inner ring for visual depth.
-        gizmos.circle(
-            Isometry3d::new(center, Quat::IDENTITY),
-            radius * 0.6,
-            Color::srgba(0.5, 1.0, 1.0, pulse * 0.4),
-        );
     }
 }

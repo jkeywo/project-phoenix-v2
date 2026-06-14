@@ -1032,6 +1032,8 @@ impl EntityConfig {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
     use crate::entity_tags::EntityTag;
 
@@ -2151,7 +2153,7 @@ target_speed = 0.5
         );
         let hull = config.hull.as_ref().unwrap();
         assert!(
-            hull.captain_chair.map_or(false, |hp| hp > 0.0),
+            hull.captain_chair.is_some_and(|hp| hp > 0.0),
             "pirate_raider [hull] must have a positive captain_chair value"
         );
     }

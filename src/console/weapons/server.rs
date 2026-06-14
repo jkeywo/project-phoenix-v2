@@ -559,7 +559,7 @@ fn handle_fire_phaser_npc(
         // is in the Attacking state with a valid target (eliminates the 1-frame
         // event delay between tick_ai_controllers → InboundMessage → here).
         let should_fire = fire_orders.contains(&token)
-            || ctrl_opt.as_ref().map_or(false, |c| {
+            || ctrl_opt.as_ref().is_some_and(|c| {
                 matches!(
                     c.controller.current_state,
                     crate::ai::AiState::Attacking { .. }
@@ -844,8 +844,12 @@ fn handle_load_tube(
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
 ) {
     for ev in reader.read() {
-        let ClientMessage::LoadTube { tube } = &ev.msg else { continue };
-        if !tactical_authorized(&sessions, &ev.token) { continue }
+        let ClientMessage::LoadTube { tube } = &ev.msg else {
+            continue;
+        };
+        if !tactical_authorized(&sessions, &ev.token) {
+            continue;
+        }
         if let Some(t) = torpedo_sys.0.tube_mut(tube.as_str()) {
             t.start_load();
         }
@@ -858,8 +862,12 @@ fn handle_unload_tube(
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
 ) {
     for ev in reader.read() {
-        let ClientMessage::UnloadTube { tube } = &ev.msg else { continue };
-        if !tactical_authorized(&sessions, &ev.token) { continue }
+        let ClientMessage::UnloadTube { tube } = &ev.msg else {
+            continue;
+        };
+        if !tactical_authorized(&sessions, &ev.token) {
+            continue;
+        }
         if let Some(t) = torpedo_sys.0.tube_mut(tube.as_str()) {
             t.start_unload();
         }
@@ -1305,7 +1313,9 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                     .map(|t| {
                         let remaining = match &t.load_state {
                             crate::torpedo::TubeLoadState::Loading { remaining, .. }
-                            | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                            | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => {
+                                *remaining
+                            }
                             _ => 0.0,
                         };
                         TorpedoTubeState {
@@ -1579,7 +1589,7 @@ fn project_blip(
         .map(|s| s.to_string());
     let description = meta
         .and_then(|e| e.target_description.as_deref())
-        .or_else(|| name.as_deref())
+        .or(name.as_deref())
         .map(|s| s.to_string());
 
     Some(RadarBlip {

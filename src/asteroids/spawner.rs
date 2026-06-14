@@ -492,7 +492,7 @@ fn perlin2d_octaves(x: f32, y: f32, octaves: u32) -> f32 {
     let mut freq = 1.0;
     let mut max_amp = 0.0;
     for _ in 0..octaves {
-        result += source.get([x as f64 * freq as f64, y as f64 * freq as f64]) as f32 * amp;
+        result += source.get([x as f64 * freq, y as f64 * freq]) as f32 * amp;
         max_amp += amp;
         amp *= 0.5;
         freq *= 2.0;
@@ -1054,7 +1054,7 @@ mod tests {
         for spawn in &result.gameplay {
             let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
             assert!(
-                dist >= 100.0 && dist <= 200.0,
+                (100.0..=200.0).contains(&dist),
                 "Gameplay pos ({}, {}) dist={} outside torus [100,200]",
                 spawn.x,
                 spawn.z,
@@ -1064,7 +1064,7 @@ mod tests {
         for spawn in &result.cosmetic_upper {
             let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
             assert!(
-                dist >= 100.0 && dist <= 200.0,
+                (100.0..=200.0).contains(&dist),
                 "Cosmetic upper pos ({}, {}) dist={} outside torus [100,200]",
                 spawn.x,
                 spawn.z,
@@ -1074,7 +1074,7 @@ mod tests {
         for spawn in &result.cosmetic_lower {
             let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
             assert!(
-                dist >= 100.0 && dist <= 200.0,
+                (100.0..=200.0).contains(&dist),
                 "Cosmetic lower pos ({}, {}) dist={} outside torus [100,200]",
                 spawn.x,
                 spawn.z,

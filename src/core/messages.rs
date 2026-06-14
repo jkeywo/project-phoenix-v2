@@ -154,18 +154,14 @@ pub enum PhaserMode {
 }
 
 /// The state of a single repair team, broadcast as part of `RepairState`.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub enum TeamSlot {
+    #[default]
     Idle,
     /// Team is en route to the target console. `elapsed` counts up toward 5s.
-    Travelling {
-        console: Console,
-        elapsed: f32,
-    },
+    Travelling { console: Console, elapsed: f32 },
     /// Team is at the console performing repairs.
-    Repairing {
-        console: Console,
-    },
+    Repairing { console: Console },
     /// Team has finished and is returning to engineering.
     /// `remaining` counts down from 5s. `queued` holds the next console to
     /// dispatch to automatically on arrival (if any).
@@ -173,12 +169,6 @@ pub enum TeamSlot {
         remaining: f32,
         queued: Option<Console>,
     },
-}
-
-impl Default for TeamSlot {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -944,6 +934,7 @@ pub enum ClientMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     Welcome {
         state: GameState,

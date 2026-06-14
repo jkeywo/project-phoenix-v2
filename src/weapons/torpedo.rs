@@ -129,8 +129,13 @@ impl TubeLoadState {
         match self {
             TubeLoadState::Unloaded => 0.0,
             TubeLoadState::Loaded => 1.0,
-            TubeLoadState::Loading { remaining, total } | TubeLoadState::Unloading { remaining, total } => {
-                if *total <= 0.0 { 1.0 } else { 1.0 - remaining / total }
+            TubeLoadState::Loading { remaining, total }
+            | TubeLoadState::Unloading { remaining, total } => {
+                if *total <= 0.0 {
+                    1.0
+                } else {
+                    1.0 - remaining / total
+                }
             }
         }
     }
@@ -168,11 +173,25 @@ impl TorpedoTube {
         self.load_state = match self.load_state.clone() {
             TubeLoadState::Loading { remaining, total } => {
                 let r = (remaining - dt).max(0.0);
-                if r <= 0.0 { TubeLoadState::Loaded } else { TubeLoadState::Loading { remaining: r, total } }
+                if r <= 0.0 {
+                    TubeLoadState::Loaded
+                } else {
+                    TubeLoadState::Loading {
+                        remaining: r,
+                        total,
+                    }
+                }
             }
             TubeLoadState::Unloading { remaining, total } => {
                 let r = (remaining - dt).max(0.0);
-                if r <= 0.0 { TubeLoadState::Unloaded } else { TubeLoadState::Unloading { remaining: r, total } }
+                if r <= 0.0 {
+                    TubeLoadState::Unloaded
+                } else {
+                    TubeLoadState::Unloading {
+                        remaining: r,
+                        total,
+                    }
+                }
             }
             other => other,
         };
@@ -182,7 +201,10 @@ impl TorpedoTube {
     pub fn start_load(&mut self) {
         if self.load_state == TubeLoadState::Unloaded {
             let t = self.load_time;
-            self.load_state = TubeLoadState::Loading { remaining: t, total: t };
+            self.load_state = TubeLoadState::Loading {
+                remaining: t,
+                total: t,
+            };
         }
     }
 
@@ -191,7 +213,10 @@ impl TorpedoTube {
         match &self.load_state {
             TubeLoadState::Loaded => {
                 let t = self.load_time;
-                self.load_state = TubeLoadState::Unloading { remaining: t, total: t };
+                self.load_state = TubeLoadState::Unloading {
+                    remaining: t,
+                    total: t,
+                };
             }
             TubeLoadState::Loading { .. } => {
                 self.load_state = TubeLoadState::Unloaded;
@@ -202,7 +227,10 @@ impl TorpedoTube {
 
     /// Start a post-fire reload (goes from Loaded → Loading with the given time).
     pub fn start_reload(&mut self, load_time: f32) {
-        self.load_state = TubeLoadState::Loading { remaining: load_time, total: load_time };
+        self.load_state = TubeLoadState::Loading {
+            remaining: load_time,
+            total: load_time,
+        };
     }
 
     /// True if `bearing_rad` (radians from ship-forward, +right = positive)
@@ -436,10 +464,10 @@ impl TorpedoSystem {
                 let dz = tz - torpedo.z;
                 let dist_sq = dx * dx + dz * dz;
                 let threshold = det + radius;
-                if dist_sq <= threshold * threshold {
-                    if best.map(|(d, _)| dist_sq < d).unwrap_or(true) {
-                        best = Some((dist_sq, uuid));
-                    }
+                if dist_sq <= threshold * threshold
+                    && best.map(|(d, _)| dist_sq < d).unwrap_or(true)
+                {
+                    best = Some((dist_sq, uuid));
                 }
             }
             if let Some((_, uuid)) = best {
@@ -467,6 +495,8 @@ fn angle_diff(a: f32, b: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
     use crate::entities::config::TorpedoTubeConfig;
     use std::collections::HashMap;

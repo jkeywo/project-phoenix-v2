@@ -210,10 +210,15 @@
       .shield-stage .col.left { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
       .shield-stage .col.center { order: -1; }
       .diagram-wrap { max-width: 280px; }
-      .shield-stage .col.right { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .shield-stage .col.right { display: flex; flex-direction: column; gap: 4px; }
+      #quad-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
       .quad-card { min-width: 0; }
-      .qc-name { font-size: 14px; }
-      .qc-pct { font-size: 24px; }
+      .quad-card > .qc-body { padding: 6px 8px; gap: 3px; }
+      .qc-name { font-size: 12px; letter-spacing: 0.2em; }
+      .qc-pct { font-size: 20px; }
+      .qc-row1 .eta { font-size: 9px; }
+      .qc-row1 .unit { font-size: 9px; }
+      .qc-meta { font-size: 8px; }
       .hull-row .val { font-size: 16px; }
       .sec-lbl { font-size: 12px; }
       .footer-bar { font-size: 9px; gap: 8px; flex-wrap: wrap; }

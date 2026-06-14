@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 23 expected action keys', () => {
+  it('contains exactly the 25 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'clear_comms',
@@ -20,6 +20,7 @@ describe('ACTION_MAP', () => {
       'hail',
       'helm_input',
       'increase_power',
+      'load_tube',
       'respond_to_message',
       'select_comms_message',
       'set_navigation_chart',
@@ -33,6 +34,7 @@ describe('ACTION_MAP', () => {
       'show_on_screen',
       'start_impulse_charge',
       'toggle_red_alert',
+      'unload_tube',
     ]);
   });
 });
@@ -67,6 +69,34 @@ describe('fire_torpedo', () => {
     const send = mkSend();
     ACTION_MAP.fire_torpedo({ action: 'fire_torpedo' }, send);
     expect(send).toHaveBeenCalledWith('FireTorpedo', { tube: 'fore', target_uuid: null });
+  });
+});
+
+describe('load_tube', () => {
+  it('calls send LoadTube with tube', () => {
+    const send = mkSend();
+    ACTION_MAP.load_tube({ action: 'load_tube', tube: 'fore_port' }, send);
+    expect(send).toHaveBeenCalledWith('LoadTube', { tube: 'fore_port' });
+  });
+
+  it('does nothing when tube is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.load_tube({ action: 'load_tube' }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('unload_tube', () => {
+  it('calls send UnloadTube with tube', () => {
+    const send = mkSend();
+    ACTION_MAP.unload_tube({ action: 'unload_tube', tube: 'aft' }, send);
+    expect(send).toHaveBeenCalledWith('UnloadTube', { tube: 'aft' });
+  });
+
+  it('does nothing when tube is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.unload_tube({ action: 'unload_tube' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

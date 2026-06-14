@@ -44,7 +44,7 @@ The helm console renders an overhead radar showing nearby contacts from the HTML
 
 Navigation can set one shared custom waypoint. The server owns it as `SimSnapshot.navigation_waypoint`; the JS client mirrors it into `state.navigationWaypoint`; `buildHelmConsoleState()` appends a `kind: "waypoint"` blip. If the waypoint is outside Helm radar range, the blip is clamped to the radar edge and marked with `edge: true` so Helm still sees the bearing.
 
-`gui/helm-console.html` caches the last radar payload before calling `RadarWidget.update()`. This prevents impulse-only state pushes (`impulse_charge_progress` changing every tick while charging) from forcing redundant canvas redraws, which caused visible radar flicker on the HTML client.
+`gui/helm-console.html` caches the last radar payload before calling `RadarWidget.update()`, so impulse-only state pushes (`impulse_charge_progress` changing every tick while charging) don't push redundant data into the widget. For that caching to actually stop the canvas redrawing, `RadarWidget` is **render-on-demand**: its `requestAnimationFrame` loop only repaints when a dirty flag is set (by `update()`, resize, pan/zoom gestures, or an async icon load) instead of unconditionally every frame. Together these keep the helm radar still during impulse charge — the previous unconditional 60 fps repaint was the source of the visible flicker.
 
 ## Tuning constants
 

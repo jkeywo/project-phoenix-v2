@@ -171,6 +171,7 @@
       transition: opacity .22s ease;
     }
     #wp-toast.show { opacity: 1; }
+    #map-canvas.picking { cursor: crosshair; }
 
     #hidden-data {
       position: absolute;
@@ -642,6 +643,15 @@
 
     function handleTap(cx, cy) {
       const wx2 = toWX(cx), wy2 = toWY(cy);
+
+      if (_pickingWaypoint) {
+        _pickingWaypoint = false;
+        canvas.classList.remove('picking');
+        if (_sendAction) _sendAction('set_navigation_waypoint', { x: wx2, z: wy2 });
+        showToast('WAYPOINT SET');
+        return;
+      }
+
       let best = null, bestD = Infinity;
       _entities.forEach(e => {
         if (e.id === 'own') return;
@@ -687,6 +697,23 @@
       const brg  = ((Math.atan2(dx, -dz)*180/Math.PI)+360)%360;
       brgEl.textContent = brg.toFixed(1);
       rngEl.textContent = Math.round(dist);
+    }
+
+    let _pickingWaypoint = false;
+    let _wpToastTimer = null;
+
+    function showToast(msg, duration = 1900) {
+      const toast = document.getElementById('wp-toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      clearTimeout(_wpToastTimer);
+      _wpToastTimer = setTimeout(() => toast.classList.remove('show'), duration);
+    }
+
+    function updateWaypointButtons() {
+      const hasWp = !!_waypoint;
+      document.getElementById('btn-set-waypoint').style.display   = hasWp ? 'none' : '';
+      document.getElementById('btn-clear-waypoint').style.display = hasWp ? '' : 'none';
     }
 
     let drag = null;
@@ -821,6 +848,7 @@
         }
       }
 
+      updateWaypointButtons();
       updateHiddenData(s);
       draw();
     }
@@ -851,31 +879,24 @@
     });
 
     document.getElementById('btn-set-waypoint').addEventListener('click', () => {
-      if (!_selectedId || _selectedId === 'own') return;
-      const e = _entities.find(ent => ent.id === _selectedId);
-      if (!e) return;
-      if (_sendAction) {
-        _sendAction('set_navigation_waypoint', { x: e.x, z: e.y });
-      }
-      const toast = document.getElementById('wp-toast');
-      toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 1900);
+      _pickingWaypoint = true;
+      canvas.classList.add('picking');
+      showToast('TAP MAP TO PLACE WAYPOINT', 4000);
     });
 
     document.getElementById('btn-clear-waypoint').addEventListener('click', () => {
-      if (_sendAction) {
-        _sendAction('clear_navigation_waypoint');
-      }
+      if (_sendAction) _sendAction('clear_navigation_waypoint');
+      _waypoint = null;
       const wpVal = document.getElementById('ent-wp-val');
-      if (wpVal) {
-        wpVal.textContent = 'NOT SET';
-        wpVal.style.color = '';
-      }
+      if (wpVal) { wpVal.textContent = 'NOT SET'; wpVal.style.color = ''; }
+      updateWaypointButtons();
+      draw();
     });
 
     const _c = initConsole({ name: 'Navigation', render: _render });
     _sendAction = _c.sendAction;
 
+    updateWaypointButtons();
     resize();
   </script>
 

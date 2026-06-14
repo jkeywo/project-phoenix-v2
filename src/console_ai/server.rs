@@ -846,6 +846,12 @@ mod tests {
             .set(Console::Tactical, "Low".into());
         // Set a locked target
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
+        app.world_mut()
+            .resource_mut::<TorpedoSystemResource>()
+            .0
+            .tube_mut("fore_port")
+            .expect("default torpedo tube should exist")
+            .load_state = crate::torpedo::TubeLoadState::Loaded;
         // Add the target entity to the world at a position in ForePort arc
         {
             let mut world_res = app.world_mut().resource_mut::<WorldResource>();

@@ -19,6 +19,8 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 | `handle_set_phaser_mode` | Processes `SetPhaserMode { Auto \| Manual }` from Tactical holder |
 | `handle_set_phaser_frequency` | Processes `SetPhaserFrequency` from Tactical or Sensors (complexity-gated) |
 | `handle_fire_torpedo` | Processes `FireTorpedo { tube, target_uuid }`; launches if tube is loaded |
+| `handle_load_tube` | Processes `LoadTube { tube }`; manually starts loading a tube |
+| `handle_unload_tube` | Processes `UnloadTube { tube }`; manually unloads or cancels loading |
 | `tick_active_beam` | Advances the active phaser beam: damage accumulation, sever-on-range, natural end, cooldown start |
 | `tick_torpedo_system` | Advances all in-flight torpedoes; fires `TorpedoDestroyed` for expired ones |
 
@@ -261,6 +263,9 @@ fire_arc_deg = 90.0
   `validate_phaser_banks` enforcing `auto_arc_deg ∈ (0, fire_arc_deg]`
   and `fire_arc_deg ∈ (0, 360]`.
 - `TorpedoTubeConfig` lives at `src/entities/config.rs:289`.
+- Torpedo tubes start unloaded in both legacy and TOML-driven constructors
+  (`src/weapons/torpedo.rs`). Firing a loaded tube returns it to `unloaded`;
+  it does not auto-reload. Operators must send `LoadTube` to start loading.
 
 ### Wire shape
 
@@ -277,6 +282,8 @@ WeaponsUpdate {
 
 ClientMessage::FirePhaser { bank: String }
 ClientMessage::FireTorpedo { tube: String, target_uuid: String }
+ClientMessage::LoadTube { tube: String }
+ClientMessage::UnloadTube { tube: String }
 ```
 
 `ShipClientConfig` in `Welcome` ships the bank and tube layouts plus the

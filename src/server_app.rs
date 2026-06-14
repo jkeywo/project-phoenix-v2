@@ -1783,6 +1783,15 @@ mod tests {
         out
     }
 
+    fn load_tube_now(app: &mut App, tube: &str) {
+        app.world_mut()
+            .resource_mut::<TorpedoSystemResource>()
+            .0
+            .tube_mut(tube)
+            .expect("test tube should exist")
+            .load_state = crate::torpedo::TubeLoadState::Loaded;
+    }
+
     fn start_game(app: &mut App) {
         push(
             app,
@@ -3445,6 +3454,7 @@ mod tests {
     fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
+        load_tube_now(&mut app, "fore_port");
 
         push(
             &mut app,
@@ -3469,6 +3479,7 @@ mod tests {
     fn non_tactical_player_cannot_fire_torpedo() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
+        load_tube_now(&mut app, "fore_port");
 
         push(
             &mut app,
@@ -3492,6 +3503,7 @@ mod tests {
         // Note: The Lobby gate is now at the SimSet chain level.
         // In test configurations without SimSet, the system processes messages during Lobby.
         let mut app = test_app();
+        load_tube_now(&mut app, "aft");
         push(
             &mut app,
             "weapons",
@@ -3531,6 +3543,7 @@ mod tests {
     fn torpedo_launched_is_broadcast_to_all() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
+        load_tube_now(&mut app, "fore_starboard");
 
         push(
             &mut app,

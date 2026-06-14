@@ -2703,6 +2703,7 @@ fire_arc_deg = 90.0
         // Wiring proof: changing the in-flight torpedo's snapshot mid-flight
         // doesn't affect future launches (it's a per-torpedo copy).
         use crate::torpedo::{TorpedoConfig, TorpedoSystem};
+        use std::collections::HashMap;
         let mut cfg = TorpedoConfig::default();
         cfg.shield_pierce = 0.75;
         let tubes = vec![TorpedoTubeConfig {
@@ -2712,6 +2713,9 @@ fire_arc_deg = 90.0
             load_time: None,
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
+        sys.tube_mut("fore").unwrap().start_load();
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        sys.tick(sys.config.load_time, &targets);
         sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert!((sys.in_flight[0].shield_pierce - 0.75).abs() < 1e-6);
 

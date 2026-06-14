@@ -35,7 +35,7 @@ pub struct TorpedoConfig {
     pub turn_rate: f32,
     /// Seconds until an un-hit torpedo expires.
     pub lifespan: f32,
-    /// Default tube reload time in seconds.
+    /// Default tube load time in seconds.
     pub load_time: f32,
     /// Proximity-detonation radius in world units. A torpedo explodes when
     /// its centre comes within `detonation_radius + target_radius` of any
@@ -225,12 +225,9 @@ impl TorpedoTube {
         }
     }
 
-    /// Start a post-fire reload (goes from Loaded → Loading with the given time).
-    pub fn start_reload(&mut self, load_time: f32) {
-        self.load_state = TubeLoadState::Loading {
-            remaining: load_time,
-            total: load_time,
-        };
+    /// Mark this tube empty after firing. Loading is always a manual action.
+    pub fn mark_fired(&mut self) {
+        self.load_state = TubeLoadState::Unloaded;
     }
 
     /// True if `bearing_rad` (radians from ship-forward, +right = positive)
@@ -277,21 +274,21 @@ impl TorpedoSystem {
                 id: "fore_port".to_string(),
                 facing_deg: -30.0,
                 fire_arc_deg: 90.0,
-                load_state: TubeLoadState::Loaded,
+                load_state: TubeLoadState::Unloaded,
                 load_time,
             },
             TorpedoTube {
                 id: "fore_starboard".to_string(),
                 facing_deg: 30.0,
                 fire_arc_deg: 90.0,
-                load_state: TubeLoadState::Loaded,
+                load_state: TubeLoadState::Unloaded,
                 load_time,
             },
             TorpedoTube {
                 id: "aft".to_string(),
                 facing_deg: 180.0,
                 fire_arc_deg: 90.0,
-                load_state: TubeLoadState::Loaded,
+                load_state: TubeLoadState::Unloaded,
                 load_time,
             },
         ];
@@ -315,7 +312,7 @@ impl TorpedoSystem {
                 id: c.id.clone(),
                 facing_deg: c.facing_deg,
                 fire_arc_deg: c.fire_arc_deg,
-                load_state: TubeLoadState::Loaded,
+                load_state: TubeLoadState::Unloaded,
                 load_time: c.load_time.unwrap_or(global_load_time),
             })
             .collect();
@@ -356,8 +353,7 @@ impl TorpedoSystem {
         if !tube.is_loaded() {
             return LaunchResult::TubeNotLoaded;
         }
-        let tube_load_time = tube.load_time;
-        tube.start_reload(tube_load_time);
+        tube.mark_fired();
         self.torpedoes_remaining -= 1;
         let shield_pierce = self.config.shield_pierce;
         self.in_flight.push(Torpedo {
@@ -519,16 +515,41 @@ mod tests {
         TorpedoSystem::from_configs(&tubes, TorpedoConfig::default())
     }
 
+    fn load_tube(sys: &mut TorpedoSystem, id: &str) {
+        let load_time = sys.tube(id).unwrap().load_time;
+        sys.tube_mut(id).unwrap().start_load();
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        sys.tick(load_time, &targets);
+    }
+
+    fn loaded_system() -> TorpedoSystem {
+        let mut sys = default_system();
+        load_tube(&mut sys, "fore_port");
+        load_tube(&mut sys, "fore_starboard");
+        load_tube(&mut sys, "aft");
+        sys
+    }
+
+    #[test]
+    fn tubes_start_unloaded() {
+        let sys = default_system();
+        assert!(sys.tubes.iter().all(|tube| !tube.is_loaded()));
+        assert!(sys
+            .tubes
+            .iter()
+            .all(|tube| tube.load_state == TubeLoadState::Unloaded));
+    }
+
     #[test]
     fn launch_returns_launched_with_uuid() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(r, LaunchResult::Launched { uuid: "t1".into() });
     }
 
     #[test]
     fn launch_adds_torpedo_to_in_flight() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(sys.in_flight.len(), 1);
         assert_eq!(sys.in_flight[0].uuid, "t1");
@@ -536,23 +557,32 @@ mod tests {
 
     #[test]
     fn launch_decrements_torpedo_count() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(sys.torpedoes_remaining, 9);
     }
 
     #[test]
-    fn launch_starts_tube_reload() {
-        let mut sys = default_system();
+    fn launch_leaves_tube_unloaded_until_manual_load() {
+        let mut sys = loaded_system();
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
+        assert_eq!(
+            sys.tube("fore_port").unwrap().load_state,
+            TubeLoadState::Unloaded
+        );
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        sys.tick(sys.config.load_time, &targets);
+        assert_eq!(
+            sys.tube("fore_port").unwrap().load_state,
+            TubeLoadState::Unloaded
+        );
     }
 
     #[test]
     fn launch_from_unloaded_tube_returns_not_loaded() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        let r = sys.launch("fore_port", "t2".into(), 0.0, 0.0, 0.0, None, None);
+        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(r, LaunchResult::TubeNotLoaded);
     }
 
@@ -575,7 +605,7 @@ mod tests {
 
     #[test]
     fn can_launch_from_all_three_tubes_independently() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         let r1 = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let r2 = sys.launch("fore_starboard", "t2".into(), 0.0, 0.0, 0.0, None, None);
         let r3 = sys.launch("aft", "t3".into(), 0.0, 0.0, 0.0, None, None);
@@ -587,7 +617,7 @@ mod tests {
 
     #[test]
     fn torpedo_with_no_target_flies_straight() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let initial = sys.in_flight[0].heading;
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
@@ -597,7 +627,7 @@ mod tests {
 
     #[test]
     fn torpedo_moves_forward_in_straight_flight() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(1.0, &targets);
@@ -608,7 +638,7 @@ mod tests {
 
     #[test]
     fn torpedo_homes_toward_target() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         sys.launch(
             "fore_port",
             "t1".into(),
@@ -631,6 +661,7 @@ mod tests {
         config.turn_rate = PI / 4.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        load_tube(&mut sys, "fore_port");
         sys.launch(
             "fore_port",
             "t1".into(),
@@ -648,7 +679,7 @@ mod tests {
 
     #[test]
     fn torpedo_flies_straight_when_target_destroyed() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         sys.launch(
             "fore_port",
             "t1".into(),
@@ -670,7 +701,7 @@ mod tests {
         // (far right) and a new "target-b" (straight ahead). The torpedo must
         // keep homing toward "target-a", never re-routing to "target-b", and
         // its stored target_uuid must remain "target-a" throughout.
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         sys.launch(
             "fore_port",
             "t1".into(),
@@ -706,6 +737,7 @@ mod tests {
         config.lifespan = 5.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        load_tube(&mut sys, "fore_port");
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         let r = sys.tick(5.1, &targets);
@@ -719,6 +751,7 @@ mod tests {
         config.lifespan = 5.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        load_tube(&mut sys, "fore_port");
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         let r = sys.tick(4.9, &targets);
@@ -728,7 +761,7 @@ mod tests {
 
     #[test]
     fn collision_removes_torpedo_and_returns_damage() {
-        let mut sys = default_system();
+        let mut sys = loaded_system();
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let d = sys.handle_collision("t1");
         assert_eq!(d, Some(50));
@@ -743,12 +776,12 @@ mod tests {
     }
 
     #[test]
-    fn tube_reloads_after_load_time() {
+    fn tube_loads_after_manual_load_time() {
         let mut config = TorpedoConfig::default();
         config.load_time = 10.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.tube_mut("fore_port").unwrap().start_load();
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(10.0, &targets);
@@ -756,12 +789,12 @@ mod tests {
     }
 
     #[test]
-    fn tube_not_loaded_before_reload_time_expires() {
+    fn tube_not_loaded_before_manual_load_time_expires() {
         let mut config = TorpedoConfig::default();
         config.load_time = 10.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.tube_mut("fore_port").unwrap().start_load();
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(9.9, &targets);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
@@ -773,7 +806,9 @@ mod tests {
         let mut config = TorpedoConfig::default();
         config.detonation_radius = detonation_radius;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
-        TorpedoSystem::from_configs(&tubes, config)
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        load_tube(&mut sys, "fore_port");
+        sys
     }
 
     #[test]
@@ -840,8 +875,8 @@ mod tests {
     fn find_detonation_hits_handles_multiple_torpedoes_independently() {
         let mut sys = detonation_system(2.0);
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        // Move tube ready by skipping reload — instead launch via a fresh tube.
-        // Manually push a second torpedo to avoid tube cooldown.
+        // Manually push a second torpedo so the test can focus on detonation
+        // matching rather than tube load state.
         sys.in_flight.push(Torpedo {
             uuid: "t2".into(),
             x: 100.0,

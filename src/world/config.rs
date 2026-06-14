@@ -2205,6 +2205,38 @@ entity    = "raider"
         }
     }
 
+    #[test]
+    fn before_the_fire_research_handoff_and_dr_myst_share_thread() {
+        let root = parse_world(include_str!("../../assets/worlds/before_the_fire.toml"))
+            .expect("before_the_fire.toml must parse");
+        let handoff = root
+            .comms
+            .iter()
+            .find(|c| c.thread_id.as_deref() == Some("research-scholar"))
+            .expect("Research Outpost handoff comms must exist");
+        assert_eq!(handoff.from, "Research Outpost");
+        assert_eq!(handoff.node.speaker, None);
+        assert!(
+            handoff.node.body.contains("patching you through to Dr. Myst"),
+            "handoff should tell the crew Dr. Myst is being patched through"
+        );
+
+        let scholar = parse_world(include_str!("../../assets/worlds/btf_path_b.toml"))
+            .expect("btf_path_b.toml must parse");
+        let myst = scholar
+            .comms
+            .iter()
+            .find(|c| c.thread_id.as_deref() == Some("research-scholar"))
+            .expect("Dr. Myst follow-on comms must share the handoff thread");
+        assert_eq!(myst.from, "Research Outpost");
+        assert_eq!(myst.node.speaker.as_deref(), Some("Dr. Myst"));
+        assert_eq!(myst.node.delay_secs, Some(3.0));
+        assert!(
+            myst.node.responses.len() >= 2,
+            "Dr. Myst should have reply options after appearing"
+        );
+    }
+
     // -- entity_template_paths ---------------------------------------------
 
     #[test]

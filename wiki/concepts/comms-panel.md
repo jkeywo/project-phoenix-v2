@@ -44,6 +44,13 @@ inherit the same id. Auto-triggered messages (no hail) each get their own `threa
 (single-message threads). Old wire payloads without `thread_id` default to `""` and
 the client treats that as "own thread" (`effective_thread_id` falls back to `msg.id`).
 
+The pure-HTML phone console (`gui/comms-console.html`) also uses `thread_id` as
+the local selection key. Its inbox renders one row per thread, the chat panel
+renders every message in the selected thread, and response buttons target the
+latest unanswered message in that thread. This is what keeps the Before the Fire
+Research Outpost handoff and delayed Dr. Myst briefing in one conversation while
+still allowing the operator to reply to Dr. Myst.
+
 ### Multi-speaker channels
 
 Comms threads can contain multiple displayed speakers while staying anchored to

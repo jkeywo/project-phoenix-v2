@@ -849,3 +849,45 @@ describe('RadarWidget: _drawWorldSpaceRegions projection', () => {
     widget.destroy();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Render-on-demand (impulse-charge flicker fix)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('RadarWidget: render-on-demand', () => {
+  afterEach(teardownGlobals);
+
+  it('rAF loop does not repaint when nothing changed', () => {
+    const { widget } = makeWidget();
+    widget.update({ mode: 'pre-projected', blips: [] }); // clears the dirty flag
+    const spy = vi.spyOn(widget, '_render');
+    widget._loop(); // a frame with no intervening change
+    widget._loop();
+    expect(spy).not.toHaveBeenCalled();
+    widget.destroy();
+  });
+
+  it('rAF loop repaints after update() marks the canvas dirty', () => {
+    const { widget } = makeWidget();
+    widget.update({ mode: 'pre-projected', blips: [] });
+    widget._loop(); // drains any pending render
+    const spy = vi.spyOn(widget, '_render');
+    widget.update({ mode: 'pre-projected', blips: [{ uuid: 'a', radar_x: 0, radar_y: 0, kind: 'ship' }] });
+    expect(spy).toHaveBeenCalledTimes(1); // update() renders immediately
+    spy.mockClear();
+    widget._loop(); // dirty already cleared by the immediate render
+    expect(spy).not.toHaveBeenCalled();
+    widget.destroy();
+  });
+
+  it('pan/zoom gestures mark the canvas dirty for the next frame', () => {
+    const { widget } = makeWidget();
+    widget.update({ mode: 'pre-projected', blips: [] });
+    widget._loop();
+    const spy = vi.spyOn(widget, '_render');
+    widget.setZoom(2.0);
+    widget._loop();
+    expect(spy).toHaveBeenCalled();
+    widget.destroy();
+  });
+});

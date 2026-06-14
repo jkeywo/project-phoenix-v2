@@ -531,9 +531,11 @@
               }
 
               @media (orientation: portrait) {
-                .tube-row .tube-name { min-width: 60px; font-size: 10px; }
+                .tube-row { flex-direction: column; align-items: stretch; gap: 4px; }
+                .tube-row .tube-name { min-width: unset; font-size: 10px; }
+                .tube-buttons { margin-left: 0; }
                 .tube-row .load-btn,
-                .tube-row .fire-btn { height: 30px; width: 80px; font-size: 10px; }
+                .tube-row .fire-btn { height: 30px; font-size: 10px; flex: 1; }
               }
             </style>
 

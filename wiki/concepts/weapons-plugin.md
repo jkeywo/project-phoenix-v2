@@ -191,6 +191,13 @@ through `gui/console-core.js`, renders the four shield facings over
 by clicking or keyboard-activating the shield segment itself: clicking the
 currently focused segment clears focus by sending `facing: null`.
 
+As of 2026-06-14, the HTML panel uses the shield hex bitmap as an SVG
+pattern fill for the segment paths themselves, not just as the broad diagram
+backdrop. The surrounding panel/cards also reuse `assets/gui/panel-bg.png`,
+and the center marker uses the existing `assets/phone_border/compass-ring.png`
+and `needle.png` bitmaps so the console more closely matches the mockup's
+image-heavy treatment.
+
 ## Sources
 
 - `src/weapons_plugin.rs`

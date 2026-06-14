@@ -42,6 +42,12 @@ The HTML console path uses `gui/console-state.js::buildBlips()` and `buildWaypoi
 
 `gui/navigation-console.html` draws only the live chart background, grid, server-derived blips, waypoint, and own-ship marker. It does not carry hardcoded sector polygons; scenario/region overlays should be data-driven rather than baked into the Navigation background.
 
+## HTML objective markers
+
+`ObjectiveSummary` is shared mission state, so it is broadcast to all clients and mirrored into `gui/sim-state.js::ClientSimState.objectives`. The HTML radar builders mark active objective targets by matching each objective `targets` entry against entity `name`, `id`, or `uuid`.
+
+`gui/console-state.js::buildBlips()` lets active objective targets through even when their tag is normally hidden, which is how invisible `objective_marker` beacon entities appear only when referenced by an active objective. Point objectives render as normal blips with `objective_target: true`; shaped objective targets (`shape = "sphere" | "box" | "torus"`) also emit region overlays via `buildRadarRegions()`. Sensors draws those overlays in the shared pre-projected `RadarWidget`, while Navigation draws the same region payload on its custom full-screen map.
+
 ## Future filters
 
 PRD #66 mentions extending `radar.rs` for **range-based** and **type-based** filtering — Weapons console wants 60-unit targeting range; Science (Draft 3) wants only stars/planets, no asteroids. The current iterator can be wrapped in standard `.filter()` calls; explicit filter combinators may follow.

@@ -60,6 +60,25 @@
     .ctrl-col .fire-row          { margin-top: 12px; }
     .radar-col > .readout        { padding: 10px 22px; }
     .radar-col > .readout .v     { font-size: 28px; }
+    .torpedo-bay .inset-body {
+      display: grid;
+      grid-template-columns: minmax(112px, 0.8fr) minmax(0, 1.7fr);
+      align-items: start;
+      gap: 18px;
+      height: 100%;
+    }
+    .torpedo-summary {
+      min-width: 0;
+    }
+    .torpedo-summary .section-header {
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    #tube-list {
+      min-width: 0;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
 
     /* Narrow landscape compact breakpoint (phone landscape) */
     @media (orientation: landscape) and (max-width: 900px) {
@@ -87,6 +106,10 @@
       .radar-col > .readout { padding: 6px 14px; }
       .radar-col > .readout .v { font-size: 20px; }
       .section-header { font-size: 14px; }
+      .torpedo-bay .inset-body {
+        grid-template-columns: minmax(88px, 0.7fr) minmax(0, 1.8fr);
+        gap: 10px;
+      }
     }
 
     /* Short landscape phones: keep the whole console inside the iframe. */
@@ -167,6 +190,13 @@
       .ctrl-col .readout .u,
       .ctrl-col .readout .sub {
         font-size: 8px;
+      }
+      .torpedo-bay .inset-body {
+        grid-template-columns: minmax(72px, 0.58fr) minmax(0, 1.9fr);
+        gap: 7px;
+      }
+      #tube-list {
+        max-height: 100%;
       }
       .ctrl-col .tubes {
         gap: 4px;
@@ -337,6 +367,14 @@
       .ctrl-col .frequency .freq-bar { height: 1.25rem; }
 
       .ctrl-col .tubes { gap: 0.25rem; margin-top: 0.25rem; }
+      .torpedo-bay .inset-body {
+        display: block;
+        height: auto;
+      }
+      #tube-list {
+        overflow-y: visible;
+        padding-right: 0;
+      }
 
       .console-footer { font-size: 0.65rem; gap: 0.5rem; }
     }
@@ -417,18 +455,20 @@
           <section class="ctrl-col">
 
             <!-- TORPEDO BAY ──────────────────────────────── -->
-            <div class="inset" data-hideable="torpedo_tube_selector">
+            <div class="inset torpedo-bay" data-hideable="torpedo_tube_selector">
               <div class="inset-body">
-                <div class="section-header">
-                  <span>TORPEDO BAY</span>
-                  <span class="tag" id="tube-count-tag">— TUBES</span>
-                </div>
+                <div class="torpedo-summary">
+                  <div class="section-header">
+                    <span>TORPEDO BAY</span>
+                    <span class="tag" id="tube-count-tag">— TUBES</span>
+                  </div>
 
-                <div class="readout">
-                  <div class="k">MAG</div>
-                  <div class="v tactical" id="torpedo-count" data-count="0">0</div>
-                  <div class="u">RDS</div>
-                  <div class="spacer"></div>
+                  <div class="readout">
+                    <div class="k">MAG</div>
+                    <div class="v tactical" id="torpedo-count" data-count="0">0</div>
+                    <div class="u">RDS</div>
+                    <div class="spacer"></div>
+                  </div>
                 </div>
 
                 <!-- Per-tube rows (built dynamically) -->
@@ -441,8 +481,9 @@
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                margin-top: 10px;
+                margin-top: 0;
               }
+              .tube-row + .tube-row { margin-top: 10px; }
               .tube-row .tube-name {
                 font-family: "JetBrains Mono", monospace;
                 font-size: 12px;
@@ -530,10 +571,37 @@
                 background: linear-gradient(180deg, #2a1408 0%, #180c04 50%, #0c0602 100%);
               }
 
-              @media (orientation: portrait) {
-                .tube-row .tube-name { min-width: 60px; font-size: 10px; }
+              @media (orientation: landscape) and (max-height: 480px) {
+                .tube-row {
+                  gap: 5px;
+                }
+                .tube-row + .tube-row {
+                  margin-top: 5px;
+                }
+                .tube-row .tube-name {
+                  min-width: 56px;
+                  font-size: clamp(8px, 2.4vh, 9px);
+                  letter-spacing: 0.08em;
+                }
+                .tube-buttons {
+                  gap: 4px;
+                }
                 .tube-row .load-btn,
-                .tube-row .fire-btn { height: 30px; width: 80px; font-size: 10px; }
+                .tube-row .fire-btn {
+                  height: clamp(23px, 7dvh, 28px);
+                  width: clamp(56px, 18vw, 68px);
+                  font-size: clamp(8px, 2.4vh, 9px);
+                  letter-spacing: 0.1em;
+                }
+              }
+
+              @media (orientation: portrait) {
+                .tube-row { flex-direction: column; align-items: stretch; gap: 4px; margin-top: 10px; }
+                .tube-row:first-child { margin-top: 10px; }
+                .tube-row .tube-name { min-width: unset; font-size: 10px; }
+                .tube-buttons { margin-left: 0; }
+                .tube-row .load-btn,
+                .tube-row .fire-btn { height: 30px; font-size: 10px; flex: 1; }
               }
             </style>
 

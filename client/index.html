@@ -1226,6 +1226,12 @@
       if (action.action === 'set_sensors_target' && action.uuid) {
         state.sensorsTarget = action.uuid;
         send('SetScienceTarget', { uuid: action.uuid });
+      } else if (action.action === 'set_navigation_waypoint'
+          && Number.isFinite(action.x)
+          && Number.isFinite(action.z)) {
+        send('SetNavigationWaypoint', { x: action.x, z: action.z });
+      } else if (action.action === 'clear_navigation_waypoint') {
+        send('ClearNavigationWaypoint');
       }
     });
 

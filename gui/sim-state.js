@@ -102,6 +102,8 @@ export class ClientSimState {
     this.currentTargetName = null;
     /** Shared waypoint set by the Navigation console, or null when clear. */
     this.navigationWaypoint = null;
+    /** Latest mission objective snapshots. */
+    this.objectives = [];
     /** Radar range from server ship_config, populated on Welcome. */
     this.weaponsRadarRange = 300.0;
     this.helmRadarRange = 500.0;
@@ -110,6 +112,9 @@ export class ClientSimState {
     this.tacticalRadarSelects = ['ship', 'station', 'asteroid'];
     this.sensorsRadarShows = ['player', 'asteroid', 'ship', 'station', 'planet', 'star'];
     this.sensorsRadarSelects = ['ship', 'station', 'planet'];
+    this.navChartRange = 500.0;
+    this.navChartShows = ['region', 'asteroid_field', 'star', 'planet', 'station', 'player', 'objective_marker', 'ship'];
+    this.navChartSelects = ['ship', 'station', 'planet', 'star', 'region'];
     /** Fire-arc configs from server ship_config, populated on Welcome. */
     this.phaserArcConfigs = [];
     this.torpedoArcConfigs = [];
@@ -152,6 +157,9 @@ export class ClientSimState {
         this.tacticalRadarSelects = sc.tactical_radar_selects || this.tacticalRadarSelects;
         this.sensorsRadarShows    = sc.sensors_radar_shows    || this.sensorsRadarShows;
         this.sensorsRadarSelects  = sc.sensors_radar_selects  || this.sensorsRadarSelects;
+        this.navChartRange        = sc.nav_chart_range        ?? this.navChartRange;
+        this.navChartShows        = sc.nav_chart_shows        || this.navChartShows;
+        this.navChartSelects      = sc.nav_chart_selects      || this.navChartSelects;
         this.phaserArcConfigs  = sc.phaser_banks        ?? [];
         this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
         if (world) {
@@ -240,6 +248,12 @@ export class ClientSimState {
         break;
       case 'FrequencyHint':
         this.frequencyHint = d.frequency;
+        break;
+      case 'ObjectiveSummary':
+        this.objectives = d.objectives || [];
+        break;
+      case 'CommsState':
+        this.objectives = d.objectives || [];
         break;
       default:
         break;

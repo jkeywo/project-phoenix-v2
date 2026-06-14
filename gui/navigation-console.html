@@ -299,6 +299,7 @@
 
     let _state       = null;
     let _entities    = [];
+    let _regions     = [];
     let _ownX        = 0;
     let _ownY        = 0;
     let _ownHeading  = 0;
@@ -308,15 +309,7 @@
     let _impulseCharge = 0;
     let _cancelVisible = false;
     let _selectedId  = null;
-
-    const REGIONS = [
-      {
-        name: 'NEUTRAL ZONE',
-        fill: 'rgba(240,132,56,0.055)',
-        stroke: 'rgba(240,132,56,0.28)',
-        pts: [{x:-800,y:-400},{x:200,y:-600},{x:300,y:-180},{x:-100,y:80},{x:-900,y:-80}]
-      },
-    ];
+    let _sendAction  = null;
 
     const stars = Array.from({length:320}, () => ({
       x: Math.random(), y: Math.random(),
@@ -328,9 +321,9 @@
       if (!W || !H) return;
       drawBackground();
       drawStars();
-      drawRegions();
       drawGrid();
       drawWaypointLine();
+      drawRegions();
       drawEntities();
       drawOwnShip();
       drawOffscreenIndicator();
@@ -385,31 +378,6 @@
       ctx.restore();
     }
 
-    function drawRegions() {
-      REGIONS.forEach(r => {
-        ctx.save();
-        ctx.beginPath();
-        r.pts.forEach((p,i) => i===0
-          ? ctx.moveTo(toSX(p.x), toSY(p.y))
-          : ctx.lineTo(toSX(p.x), toSY(p.y)));
-        ctx.closePath();
-        ctx.fillStyle = r.fill;
-        ctx.fill();
-        ctx.strokeStyle = r.stroke;
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([9,7]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        const cx = r.pts.reduce((s,p)=>s+p.x,0)/r.pts.length;
-        const cy = r.pts.reduce((s,p)=>s+p.y,0)/r.pts.length;
-        ctx.font = '9px "JetBrains Mono", monospace';
-        ctx.fillStyle = r.stroke.replace(/[\d.]+\)$/, '0.55)');
-        ctx.textAlign = 'center';
-        ctx.fillText(r.name, toSX(cx), toSY(cy));
-        ctx.restore();
-      });
-    }
-
     function drawWaypointLine() {
       if (!_waypoint) return;
       ctx.save();
@@ -450,6 +418,59 @@
       neutral:  '#7a90c0',
     };
 
+    function regionColor(region, alpha) {
+      const c = region.color || [0.6, 0.4, 1.0];
+      const r = Math.round(c[0] * 255);
+      const g = Math.round(c[1] * 255);
+      const b = Math.round(c[2] * 255);
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+
+    function drawRegions() {
+      _regions.forEach(region => {
+        const px = toSX(region.x || 0);
+        const py = toSY(region.z || 0);
+        const stroke = region.objective_target ? '#d4a820' : regionColor(region, 0.95);
+        const fill = regionColor(region, 0.16);
+        ctx.save();
+        ctx.strokeStyle = stroke;
+        ctx.fillStyle = fill;
+        ctx.lineWidth = region.objective_target ? 2 : 1.4;
+        ctx.shadowColor = region.objective_target ? '#d4a820' : 'transparent';
+        ctx.shadowBlur = region.objective_target ? 12 : 0;
+
+        if (region.shape === 'box' && region.half_extents) {
+          const hw = Math.max(4, (region.half_extents[0] || 0) * zoom);
+          const hh = Math.max(4, (region.half_extents[1] || 0) * zoom);
+          ctx.fillRect(px - hw, py - hh, hw * 2, hh * 2);
+          ctx.strokeRect(px - hw, py - hh, hw * 2, hh * 2);
+        } else if (region.shape === 'torus') {
+          const outer = Math.max(4, (region.outer_radius || region.radius || 0) * zoom);
+          const inner = Math.max(0, (region.inner_radius || 0) * zoom);
+          const ringWidth = Math.max(1, outer - inner);
+          ctx.beginPath();
+          ctx.arc(px, py, (outer + inner) / 2, 0, Math.PI * 2);
+          ctx.lineWidth = ringWidth;
+          ctx.stroke();
+        } else {
+          const r = Math.max(4, (region.radius || 0) * zoom);
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        ctx.shadowBlur = 0;
+        if (zoom > 0.08 && region.name) {
+          ctx.font = '8px "JetBrains Mono", monospace';
+          ctx.fillStyle = stroke;
+          ctx.textAlign = 'left';
+          ctx.fillText(region.name, px + 8, py - 8);
+        }
+        ctx.restore();
+      });
+    }
+
     function drawEntities() {
       _entities.forEach(e => {
         if (e.id === 'own') return;
@@ -463,6 +484,17 @@
 
         ctx.save();
         ctx.translate(px, py);
+
+        if (e.objective_target) {
+          ctx.strokeStyle = '#d4a820';
+          ctx.lineWidth = 2;
+          ctx.shadowColor = '#d4a820';
+          ctx.shadowBlur = 12;
+          ctx.beginPath();
+          ctx.arc(0, 0, 16 * sz, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
 
         if (sel) {
           const bk = 15 * sz, bs = 6 * sz;
@@ -613,20 +645,7 @@
         }
       }
 
-      let reg = '—';
-      REGIONS.forEach(r => {
-        if (pointInPoly(_ownX, _ownY, r.pts)) reg = r.name;
-      });
-      document.getElementById('hud-region').textContent = reg;
-    }
-
-    function pointInPoly(x, y, pts) {
-      let inside = false;
-      for (let i=0,j=pts.length-1; i<pts.length; j=i++) {
-        const xi=pts[i].x, yi=pts[i].y, xj=pts[j].x, yj=pts[j].y;
-        if ((yi>y)!==(yj>y) && x<(xj-xi)*(y-yi)/(yj-yi)+xi) inside=!inside;
-      }
-      return inside;
+      document.getElementById('hud-region').textContent = '—';
     }
 
     function handleTap(cx, cy) {
@@ -789,6 +808,7 @@
       _onScreen   = !!s.on_screen;
       _impulseCharge = s.impulse_charge_progress || 0;
       _cancelVisible = !!s.cancel_visible;
+      _regions = s.regions || [];
 
       const waypointBlip = (s.blips || []).find(b => b.kind === 'waypoint');
       if (s.waypoint && s.waypoint.x !== undefined) {
@@ -810,6 +830,7 @@
           y: blip.world_z !== undefined ? blip.world_z : 0,
           stance: blip.stance || 'neutral',
           faction: blip.faction || null,
+          objective_target: !!blip.objective_target,
           colour: blip.colour || null,
           ship_class: blip.ship_class || null,
           hull_pct: blip.hull_pct !== undefined ? blip.hull_pct : null,

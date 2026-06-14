@@ -32,6 +32,7 @@
     ship:     '#ff8060',
     station:  '#ffe060',
     torpedo:  '#ff60ff',
+    region:   '#a070ff',
     unknown:  '#a8b0c0',
     battleship: '#e6330d',   // dark red — large enemy
     cruiser:    '#cc4d1a',   // orange-red — medium enemy
@@ -104,6 +105,13 @@
     this._rafId           = null;
     this._destroyed       = false;
     this._projectedBlips  = null;  // cache for world-space hit-testing
+
+    // Render-on-demand: the rAF loop only repaints when something actually
+    // changed (data push, resize, gesture, async icon load). A continuous
+    // 60 fps repaint would defeat the helm console's radar-payload caching and
+    // keep redrawing the canvas every frame while impulse charge updates the
+    // (DOM-only) progress overlay — the source of the impulse-charge flicker.
+    this._needsRender = true;
 
     // View state (zoom / pan) — Slice 5b (#449)
     this._zoom = 1.0;
@@ -188,8 +196,15 @@
 
   RadarWidget.prototype._loop = function () {
     if (this._destroyed) return;
-    this._render();
+    // Render-on-demand: only repaint when marked dirty. Skipping unchanged
+    // frames is what lets the helm radar stay still during impulse charge.
+    if (this._needsRender) this._render();
     this._rafId = requestAnimationFrame(this._rafLoop);
+  };
+
+  /** Mark the canvas dirty so the next rAF tick repaints it. */
+  RadarWidget.prototype._requestRender = function () {
+    this._needsRender = true;
   };
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -216,11 +231,13 @@
 
   RadarWidget.prototype.setZoom = function (factor) {
     this._zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, factor));
+    this._requestRender();
   };
 
   RadarWidget.prototype.setPan = function (x, z) {
     this._panX = x;
     this._panZ = z;
+    this._requestRender();
   };
 
   RadarWidget.prototype.getZoom = function () { return this._zoom; };
@@ -264,11 +281,14 @@
   // ── Rendering ─────────────────────────────────────────────────────────────
 
   RadarWidget.prototype._render = function () {
+    // Leave the dirty flag set if we can't actually paint yet (canvas missing
+    // or zero-sized), so the next rAF tick retries once it's ready.
     if (!this._canvas || !this._ctx) return;
     var ctx    = this._ctx;
     var canvas = this._canvas;
     var W = canvas.width, H = canvas.height;
     if (W === 0 || H === 0) return;
+    this._needsRender = false;
     var cx = W / 2, cy = H / 2;
     var R  = Math.min(W, H) / 2 - 8;
     var data = this._data;
@@ -317,6 +337,7 @@
     // ── Blips ──────────────────────────────────────────────────────────────
     if (data) {
       if (data.mode === 'pre-projected') {
+        this._drawPreProjectedRegions(ctx, cx, cy, R, data.regions || []);
         this._drawPreProjectedBlips(ctx, cx, cy, R, data);
       } else if (data.mode === 'world-space') {
         this._drawWorldSpaceBlips(ctx, cx, cy, R, data);
@@ -412,6 +433,38 @@
       // Target highlight ring (red, drawn on top)
       if (isTarget) {
         self._drawRing(ctx, bx, by, dotR + 7, 2, '#ff3344', true);
+      }
+    });
+  };
+
+  RadarWidget.prototype._drawPreProjectedRegions = function (ctx, cx, cy, R, regions) {
+    var self = this;
+    (regions || []).forEach(function (region) {
+      if (region.radar_x == null || region.radar_y == null) return;
+      var bx = cx + region.radar_x * R;
+      var by = cy - region.radar_y * R;
+      var c = region.color || [0.6, 0.4, 1.0];
+      var ri = Math.round(c[0] * 255);
+      var gi = Math.round(c[1] * 255);
+      var bi = Math.round(c[2] * 255);
+      var fillColor = 'rgba(' + ri + ',' + gi + ',' + bi + ',0.3)';
+      var strokeColor = region.objective_target ? '#d4a820' : 'rgb(' + ri + ',' + gi + ',' + bi + ')';
+      var scale = R;
+      switch (region.shape) {
+        case 'sphere':
+          self._drawRegionSphere(ctx, bx, by, region.scaled_radius || 0, scale, fillColor, strokeColor);
+          break;
+        case 'torus':
+          self._drawRegionTorus(ctx, bx, by,
+            region.scaled_outer_radius != null ? region.scaled_outer_radius : (region.scaled_radius || 0),
+            region.scaled_inner_radius || 0,
+            scale, strokeColor);
+          break;
+        case 'box': {
+          var he = region.scaled_half_extents || [0, 0];
+          self._drawRegionBox(ctx, bx, by, he[0] || 0, he[1] || 0, scale, fillColor, strokeColor);
+          break;
+        }
       }
     });
   };
@@ -805,6 +858,10 @@
     if (typeof Image === 'undefined') return;  // non-browser (test) environment
     Object.keys(ICON_STEMS).forEach(function (key) {
       var img = new Image();
+      // Repaint once each icon finishes loading so blips upgrade from the
+      // colored-circle fallback to the PNG icon (render-on-demand otherwise
+      // wouldn't repaint until the next data push).
+      img.onload = function () { self._requestRender(); };
       img.src = self._iconBasePath + ICON_STEMS[key] + '.png';
       self._icons[key] = img;
     });
@@ -923,6 +980,7 @@
       var wpc = this._dragStart.worldPerCss;
       this._panX = this._dragStart.panX - dx * wpc;
       this._panZ = this._dragStart.panZ + dy * wpc;  // canvas +Y is down = radar −Z = pan +Z
+      this._requestRender();
       if (this._onPanChange) this._onPanChange(this._panX, this._panZ);
     }
   };
@@ -939,6 +997,7 @@
     this._zoom = 1.0;
     this._panX = 0.0;
     this._panZ = 0.0;
+    this._requestRender();
     if (this._onZoomChange) this._onZoomChange(this._zoom);
     if (this._onPanChange)  this._onPanChange(this._panX, this._panZ);
   };

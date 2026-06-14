@@ -533,7 +533,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-bb2033066d30b1f2.js" crossorigin="anonymous" integrity="sha384-4jmdgTK0CKDe72WzCkqdcJ2aezd6Gk3pJNUsFjHGtiXB75rh0EWeyJ9KkYVyjqKd"><link rel="preload" href="./project-phoenix-bb2033066d30b1f2_bg.wasm" crossorigin="anonymous" integrity="sha384-1mbQfKADCUyoPFh9btydUqxAB1Iew++0tcPtTdgXOlnU1AzgzBHLD+izh7pZAYWZ" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-391b2bf0390979e2.js" crossorigin="anonymous" integrity="sha384-CWP1ULaRPcvS3dgT/MUHM8yiHZH6/ccR6KHbGue8u7A1pRFGEct2s59IK89Eoelq"><link rel="preload" href="./project-phoenix-391b2bf0390979e2_bg.wasm" crossorigin="anonymous" integrity="sha384-kwH0Un9pp6kPQp2avkwJyHBFZc3/AZ/+SnIvURLb3PC1wzKeuindmlXVvthyQNCl" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -686,8 +686,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-bb2033066d30b1f2.js';
-const wasm = await init({ module_or_path: './project-phoenix-bb2033066d30b1f2_bg.wasm' });
+import init, * as bindings from './project-phoenix-391b2bf0390979e2.js';
+const wasm = await init({ module_or_path: './project-phoenix-391b2bf0390979e2_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1067,9 +1067,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
         conn.on('close', () => {
           const token = peerTokens.get(conn.peer);
-          if (!token) return;
-          wasmBindings.wasm_player_disconnected(token);
           peerTokens.delete(conn.peer);
+          if (!token) return;
+          // On a browser refresh the new page may have already reconnected
+          // (same token, new peer id) before this stale connection's close
+          // arrives. Only tear the token down if THIS conn is still the live
+          // one — otherwise we'd disconnect the freshly-restored session and
+          // delete the new routing entry.
+          if (tokenConns.get(token) !== conn) return;
+          wasmBindings.wasm_player_disconnected(token);
           tokenConns.delete(token);
         });
 

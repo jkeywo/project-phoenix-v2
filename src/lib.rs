@@ -1,6 +1,7 @@
 // Structural lints we allow at the crate level because the
 // affected functions consume a fixed set of Bevy system parameters
 // common in game-development patterns.
+#![forbid(unsafe_code)]
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod ai;

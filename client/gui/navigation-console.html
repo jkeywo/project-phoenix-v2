@@ -8,7 +8,6 @@
   <style>
     body { margin: 0; overflow: hidden; background: #000; touch-action: none; }
 
-    /* ── Map canvas fills entire viewport ─────────────────────────── */
     #map-canvas {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
@@ -17,7 +16,6 @@
     }
     #map-canvas.grabbing { cursor: grabbing; }
 
-    /* ── Corner HUD readouts ──────────────────────────────────────── */
     .hud-corner {
       position: fixed;
       pointer-events: none;
@@ -54,10 +52,10 @@
       display: block;
     }
     .hud-val { color: var(--ink); }
-    .hud-val.ok   { color: var(--loaded); }
+    .hud-val.ok { color: var(--loaded); }
+    .hud-val.tac { color: var(--tactical); }
     .hud-val.cyan { color: var(--cyan); }
 
-    /* ── Entity overlay — portrait: bottom strip / landscape: right ─ */
     #entity-overlay {
       position: fixed;
       bottom: 0; left: 0; right: 0;
@@ -112,7 +110,10 @@
       font-size: 8px; letter-spacing: .18em;
       padding: 2px 6px; border: 1px solid;
     }
-    .badge.type     { color: var(--ink-dim); border-color: var(--line-faint); }
+    .badge.hostile  { color: var(--fire-bright); border-color: var(--fire-dim);   background: rgba(224,64,44,.09); }
+    .badge.friendly { color: var(--loaded);      border-color: var(--loaded-dim); background: rgba(78,200,112,.09); }
+    .badge.neutral  { color: var(--cyan);        border-color: var(--cyan-dim);   background: rgba(108,182,208,.09); }
+    .badge.type     { color: var(--ink-dim);     border-color: var(--line-faint); }
 
     .pos-strip {
       display: flex; gap: 12px; margin-top: 8px;
@@ -133,19 +134,27 @@
     }
     #ent-wp-val { color: var(--tactical); }
 
-    /* ── Action buttons ───────────────────────────────────────────── */
     #action-btns {
       display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
     }
     #action-btns .btn {
-      --h: 46px;
-      font-size: 11px; letter-spacing: .2em;
-      padding: 0 12px 0 34px;
+      --h: 50px;
+      font-size: 12px; letter-spacing: .2em;
+      padding: 0 14px 0 36px;
       cursor: pointer;
     }
+    #action-btns .btn:active > .btn-bg { opacity: .7; }
     #action-btns .btn .led { width: 10px; height: 10px; left: 11px; }
 
-    /* ── Waypoint toast ───────────────────────────────────────────── */
+    .btn.sensors            { color: var(--cyan); cursor: pointer; }
+    .btn.sensors > .btn-bg  { background: linear-gradient(180deg, #0b1d2b 0%, #060e16 100%); }
+    .btn.sensors            { background: linear-gradient(180deg, #4d9fbe 0%, #1a4858 55%, #091620 100%); }
+
+    #btn-clear-waypoint, #btn-set-waypoint {
+      color: var(--tactical);
+      cursor: pointer;
+    }
+
     #wp-toast {
       position: fixed;
       top: 50%; left: 50%;
@@ -162,17 +171,22 @@
       transition: opacity .22s ease;
     }
     #wp-toast.show { opacity: 1; }
+    #map-canvas.picking { cursor: crosshair; }
 
-    /* ── Landscape rearrangement ──────────────────────────────────── */
+    #hidden-data {
+      position: absolute;
+      left: -9999px; visibility: hidden;
+    }
+
     @media (orientation: landscape) {
       #entity-overlay {
         bottom: 0; top: 0;
-        left: auto; right: 0; width: 280px;
+        left: auto; right: 0; width: 300px;
         flex-direction: column;
         align-items: stretch;
         border-top: none;
         border-left: 1px solid var(--line-soft);
-        padding: 22px 16px 22px;
+        padding: 22px 18px 22px;
         background: linear-gradient(270deg,
           rgba(5,8,24,0.97) 0%,
           rgba(5,8,24,0.82) 72%,
@@ -188,37 +202,31 @@
       }
       #entity-overlay::after { display: none; }
       #entity-info { flex: 1; }
-      .ent-name { font-size: 14px; }
-      .ps-v     { font-size: 17px; }
+      #action-btns { flex-direction: column; }
+      .ent-name     { font-size: 15px; }
+      .ps-v         { font-size: 17px; }
     }
   </style>
 </head>
 <body>
 
-  <!-- hidden test data containers -->
-  <div id="nav-data"      aria-hidden="true"></div>
-  <div id="impulse-data"  aria-hidden="true"></div>
-  <div id="waypoint-data" aria-hidden="true"></div>
-
   <canvas id="map-canvas"></canvas>
 
-  <!-- ── Top-left HUD: own ship ─────────────────────────────────── -->
   <div class="hud-corner" id="hud-tl">
     <span class="hud-label">NAVIGATION · HELM</span>
     <div>POS&nbsp;<span class="hud-val" id="hud-pos">0 / 0</span></div>
     <div>HDG&nbsp;<span class="hud-val" id="hud-hdg">0°</span></div>
-    <div>SPD&nbsp;<span class="hud-val ok" id="hud-spd">0.0</span></div>
+    <div>SPD&nbsp;<span class="hud-val ok" id="hud-spd">0 kn</span></div>
+    <div>IMP&nbsp;<span class="hud-val" id="hud-imp">—</span></div>
   </div>
 
-  <!-- ── Top-right HUD: map view ────────────────────────────────── -->
   <div class="hud-corner" id="hud-tr">
     <span class="hud-label">MAP VIEW</span>
-    <div>ZOOM&nbsp;<span class="hud-val cyan" id="hud-zoom">1.00×</span></div>
+    <div>ZOOM&nbsp;<span class="hud-val cyan" id="hud-zoom">0.15×</span></div>
+    <div id="hud-region" class="hud-val tac">—</div>
   </div>
 
-  <!-- ── Entity overlay + action buttons ───────────────────────── -->
   <div id="entity-overlay">
-
     <div id="entity-info">
       <div class="ent-name empty" id="ent-name">TAP MAP TO SELECT</div>
       <div class="badges" id="ent-badges"></div>
@@ -239,11 +247,10 @@
         WP&nbsp;<span id="ent-wp-val">NOT SET</span>
       </div>
     </div>
-
     <div id="action-btns">
       <button class="btn sensors" id="btn-on-screen" type="button">
         <span class="btn-bg"></span>
-        <span class="led" id="on-screen-led"></span>
+        <span class="led cyan"></span>
         <span class="label">ON SCREEN</span>
       </button>
       <button class="btn tactical" id="btn-set-waypoint" type="button">
@@ -251,16 +258,21 @@
         <span class="led amber"></span>
         <span class="label">SET WAYPOINT</span>
       </button>
-      <button class="btn danger" id="btn-clear-waypoint" type="button">
+      <button class="btn tactical" id="btn-clear-waypoint" type="button">
         <span class="btn-bg"></span>
-        <span class="led fire"></span>
-        <span class="label">CLEAR WAYPOINT</span>
+        <span class="led amber"></span>
+        <span class="label">CLEAR WP</span>
       </button>
     </div>
-
   </div>
 
   <div id="wp-toast">WAYPOINT SET</div>
+
+  <div id="hidden-data">
+    <div id="nav-data"></div>
+    <div id="impulse-data"></div>
+    <div id="waypoint-data"></div>
+  </div>
 
   <script type="module">
     import { initConsole } from './console-core.js';
@@ -269,39 +281,6 @@
     const ctx    = canvas.getContext('2d');
     let W = 0, H = 0;
 
-    /* ── Live state ─────────────────────────────────────────────── */
-    let _blips    = [];
-    let _shipX    = 0;
-    let _shipZ    = 0;
-    let _shipHdg  = 0;   // degrees
-    let _shipSpd  = 0;
-    let _range    = 5000;
-    let _waypoint = null;  // { x, z } world coords or null
-    let _onScreen = false;
-    let _initialized = false;
-
-    /* ── View state ─────────────────────────────────────────────── */
-    let panX = 0, panY = 0;   // world coords at screen center
-    let zoom = 0.06;           // px per world-unit
-    const ZOOM_MIN = 0.02, ZOOM_MAX = 2.0;
-
-    const toSX = wx => W * 0.5 + (wx - panX) * zoom;
-    const toSY = wz => H * 0.5 + (wz - panY) * zoom;
-    const toWX = sx => panX + (sx - W * 0.5) / zoom;
-    const toWY = sy => panY + (sy - H * 0.5) / zoom;
-
-    /* ── Static star field ──────────────────────────────────────── */
-    const stars = Array.from({length: 280}, () => ({
-      x: Math.random(), y: Math.random(),
-      r: Math.random() < 0.12 ? 1.3 : 0.55,
-      a: 0.25 + Math.random() * 0.55,
-    }));
-
-    /* ── Selection ──────────────────────────────────────────────── */
-    let selectedUuid = null;
-    let selectedBlip = null;
-
-    /* ── Resize ─────────────────────────────────────────────────── */
     function resize() {
       W = canvas.width  = window.innerWidth;
       H = canvas.height = window.innerHeight;
@@ -309,26 +288,72 @@
     }
     window.addEventListener('resize', resize);
 
-    /* ═══════════════════════════════════════════════════════════════
-       DRAW
-    ═══════════════════════════════════════════════════════════════ */
+    let panX = 0, panY = 0;
+    let zoom = 0.15;
+    const ZOOM_MIN = 0.04, ZOOM_MAX = 2.5;
+
+    const toSX = wx => W * 0.5 + (wx - panX) * zoom;
+    const toSY = wy => H * 0.5 + (wy - panY) * zoom;
+    const toWX = sx => panX + (sx - W * 0.5) / zoom;
+    const toWY = sy => panY + (sy - H * 0.5) / zoom;
+
+    let _state       = null;
+    let _entities    = [];
+    let _ownX        = 0;
+    let _ownY        = 0;
+    let _ownHeading  = 0;
+    let _ownSpeed    = 0;
+    let _waypoint    = null;
+    let _onScreen    = false;
+    let _impulseCharge = 0;
+    let _cancelVisible = false;
+    let _selectedId  = null;
+
+    const REGIONS = [
+      {
+        name: 'NEUTRAL ZONE',
+        fill: 'rgba(240,132,56,0.055)',
+        stroke: 'rgba(240,132,56,0.28)',
+        pts: [{x:-800,y:-400},{x:200,y:-600},{x:300,y:-180},{x:-100,y:80},{x:-900,y:-80}]
+      },
+      {
+        name: 'FEDERATION SPACE',
+        fill: 'rgba(108,182,208,0.045)',
+        stroke: 'rgba(108,182,208,0.22)',
+        pts: [{x:-100,y:80},{x:300,y:-180},{x:900,y:0},{x:820,y:820},{x:0,y:920},{x:-200,y:580}]
+      },
+      {
+        name: 'KLINGON TERRITORY',
+        fill: 'rgba(224,64,44,0.045)',
+        stroke: 'rgba(224,64,44,0.22)',
+        pts: [{x:-800,y:-400},{x:-180,y:-720},{x:200,y:-600},{x:300,y:-180},{x:-100,y:80},{x:-900,y:-80}]
+      },
+    ];
+
+    const stars = Array.from({length:320}, () => ({
+      x: Math.random(), y: Math.random(),
+      r: Math.random() < 0.12 ? 1.3 : 0.55,
+      a: 0.25 + Math.random() * 0.55
+    }));
+
     function draw() {
       if (!W || !H) return;
       drawBackground();
       drawStars();
+      drawRegions();
       drawGrid();
       drawWaypointLine();
-      drawBlips();
+      drawEntities();
       drawOwnShip();
       drawOffscreenIndicator();
-      updateHUD();
+      updateHUDLabels();
     }
 
     function drawBackground() {
       const g = ctx.createRadialGradient(W*.48, H*.38, 0, W*.48, H*.38, Math.max(W,H)*.9);
       g.addColorStop(0, '#07091e');
       g.addColorStop(0.5, '#030610');
-      g.addColorStop(1, '#000000');
+      g.addColorStop(1,   '#000000');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
     }
@@ -336,8 +361,8 @@
     function drawStars() {
       ctx.save();
       stars.forEach(s => {
-        const px = ((s.x + panX * 0.000012) % 1 + 1) % 1 * W;
-        const py = ((s.y + panY * 0.000012) % 1 + 1) % 1 * H;
+        const px = ((s.x + panX * 0.00012) % 1 + 1) % 1 * W;
+        const py = ((s.y + panY * 0.00012) % 1 + 1) % 1 * H;
         ctx.globalAlpha = s.a;
         ctx.fillStyle = '#b8ceff';
         ctx.beginPath();
@@ -349,9 +374,9 @@
     }
 
     function drawGrid() {
-      const MAJOR = 500, MINOR = 100;
-      const visL = toWX(0), visR = toWX(W);
-      const visT = toWY(0), visB = toWY(H);
+      const MAJOR = 200, MINOR = 50;
+      const visL = toWX(0),   visR = toWX(W);
+      const visT = toWY(0),   visB = toWY(H);
       ctx.save();
       ctx.strokeStyle = 'rgba(40,58,120,0.22)';
       ctx.lineWidth = 0.5;
@@ -361,7 +386,7 @@
       for (let gy = Math.floor(visT/MINOR)*MINOR; gy < visB+MINOR; gy+=MINOR) {
         ctx.beginPath(); ctx.moveTo(0,toSY(gy)); ctx.lineTo(W,toSY(gy)); ctx.stroke();
       }
-      ctx.strokeStyle = 'rgba(70,95,165,0.30)';
+      ctx.strokeStyle = 'rgba(70,95,165,0.32)';
       ctx.lineWidth = 0.8;
       for (let gx = Math.floor(visL/MAJOR)*MAJOR; gx < visR+MAJOR; gx+=MAJOR) {
         ctx.beginPath(); ctx.moveTo(toSX(gx),0); ctx.lineTo(toSX(gx),H); ctx.stroke();
@@ -372,67 +397,80 @@
       ctx.restore();
     }
 
+    function drawRegions() {
+      REGIONS.forEach(r => {
+        ctx.save();
+        ctx.beginPath();
+        r.pts.forEach((p,i) => i===0
+          ? ctx.moveTo(toSX(p.x), toSY(p.y))
+          : ctx.lineTo(toSX(p.x), toSY(p.y)));
+        ctx.closePath();
+        ctx.fillStyle = r.fill;
+        ctx.fill();
+        ctx.strokeStyle = r.stroke;
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([9,7]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const cx = r.pts.reduce((s,p)=>s+p.x,0)/r.pts.length;
+        const cy = r.pts.reduce((s,p)=>s+p.y,0)/r.pts.length;
+        ctx.font = '9px "JetBrains Mono", monospace';
+        ctx.fillStyle = r.stroke.replace(/[\d.]+\)$/, '0.55)');
+        ctx.textAlign = 'center';
+        ctx.fillText(r.name, toSX(cx), toSY(cy));
+        ctx.restore();
+      });
+    }
+
     function drawWaypointLine() {
       if (!_waypoint) return;
-      const sx = toSX(_shipX), sy = toSY(_shipZ);
-      const wx = toSX(_waypoint.x), wy = toSY(_waypoint.z);
-      const d = 9;
       ctx.save();
       ctx.strokeStyle = 'rgba(240,132,56,0.55)';
       ctx.lineWidth = 1.5;
-      ctx.setLineDash([10, 8]);
+      ctx.setLineDash([10,8]);
       ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(wx, wy);
+      ctx.moveTo(toSX(_ownX), toSY(_ownY));
+      ctx.lineTo(toSX(_waypoint.x), toSY(_waypoint.z));
       ctx.stroke();
       ctx.setLineDash([]);
+      const px = toSX(_waypoint.x), py = toSY(_waypoint.z);
+      const d = 9;
       ctx.fillStyle = 'rgba(240,132,56,0.18)';
       ctx.strokeStyle = '#f08438';
       ctx.lineWidth = 1.5;
       ctx.shadowColor = '#f08438';
       ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.moveTo(wx, wy-d); ctx.lineTo(wx+d, wy);
-      ctx.lineTo(wx, wy+d); ctx.lineTo(wx-d, wy);
+      ctx.moveTo(px, py-d); ctx.lineTo(px+d, py);
+      ctx.lineTo(px, py+d); ctx.lineTo(px-d, py);
       ctx.closePath();
       ctx.fill(); ctx.stroke();
       ctx.shadowBlur = 0;
-      if (zoom > 0.04) {
+      if (zoom > 0.1) {
         ctx.font = '8px "JetBrains Mono", monospace';
         ctx.fillStyle = '#f08438';
         ctx.textAlign = 'left';
-        ctx.fillText('WP', wx + d + 5, wy + 3);
+        ctx.fillText('WP', px + d + 5, py + 3);
       }
       ctx.restore();
     }
 
-    const KIND_COL = {
-      star:    '#ffe8a0',
-      planet:  '#6cb6d0',
-      station: '#4ec870',
-      ship:    '#6cb6d0',
-    };
-    const KIND_LABEL = {
-      ship:'WARSHIP', station:'STARBASE', planet:'PLANET', star:'STAR', asteroid:'ASTEROID',
+    const ENT_COL = {
+      self:     '#6cb6d0',
+      hostile:  '#ff6040',
+      friendly: '#4ec870',
+      neutral:  '#7a90c0',
     };
 
-    function blipWorld(b) {
-      if (b.world_x !== undefined && b.world_z !== undefined) {
-        return { x: b.world_x, z: b.world_z };
-      }
-      return { x: _shipX + b.radar_x * _range, z: _shipZ + b.radar_y * _range };
-    }
+    function drawEntities() {
+      _entities.forEach(e => {
+        if (e.id === 'own') return;
+        const px = toSX(e.x), py = toSY(e.y);
+        if (px < -40 || px > W+40 || py < -40 || py > H+40) return;
 
-    function drawBlips() {
-      _blips.forEach(b => {
-        if (b.kind === 'waypoint') return;
-        const { x: bx, z: bz } = blipWorld(b);
-        const px = toSX(bx), py = toSY(bz);
-        if (px < -60 || px > W+60 || py < -60 || py > H+60) return;
-
-        const col = KIND_COL[b.kind] || '#7a90c0';
-        const sel = b.uuid === selectedUuid;
-        const sz  = Math.max(0.7, Math.min(1.6, zoom * 60));
+        const col = ENT_COL[e.stance] || ENT_COL.neutral;
+        const sel = e.id === _selectedId;
+        const sz  = Math.max(0.7, Math.min(1.6, zoom * 5));
         const r   = 6 * sz;
 
         ctx.save();
@@ -446,8 +484,8 @@
           [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx2,sy2]) => {
             ctx.beginPath();
             ctx.moveTo(sx2*(bk-bs), sy2*bk);
-            ctx.lineTo(sx2*bk, sy2*bk);
-            ctx.lineTo(sx2*bk, sy2*(bk-bs));
+            ctx.lineTo(sx2*bk,       sy2*bk);
+            ctx.lineTo(sx2*bk,       sy2*(bk-bs));
             ctx.stroke();
           });
           ctx.globalAlpha = 1;
@@ -456,13 +494,17 @@
         ctx.shadowColor = col;
         ctx.shadowBlur  = sel ? 16 : 7;
 
-        if (b.kind === 'ship') {
-          ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = 1;
+        if (e.kind === 'ship' || e.kind === 'waypoint') {
+          ctx.fillStyle   = e.kind === 'waypoint' ? '#f08438' : col;
+          ctx.strokeStyle = e.kind === 'waypoint' ? '#f08438' : col;
+          ctx.lineWidth   = 1;
           ctx.beginPath();
           ctx.moveTo(0,-r); ctx.lineTo(r*.6,0); ctx.lineTo(0,r*.8); ctx.lineTo(-r*.6,0);
           ctx.closePath(); ctx.fill();
-        } else if (b.kind === 'station') {
-          ctx.fillStyle = col+'2a'; ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        } else if (e.kind === 'station') {
+          ctx.fillStyle   = col + '2a';
+          ctx.strokeStyle = col;
+          ctx.lineWidth   = 1.5;
           ctx.beginPath();
           ctx.moveTo(0,-r*1.2); ctx.lineTo(r*1.2,0); ctx.lineTo(0,r*1.2); ctx.lineTo(-r*1.2,0);
           ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -470,22 +512,19 @@
           ctx.beginPath(); ctx.moveTo(-r*.7,0); ctx.lineTo(r*.7,0); ctx.stroke();
           ctx.beginPath(); ctx.moveTo(0,-r*.7); ctx.lineTo(0,r*.7); ctx.stroke();
           ctx.globalAlpha = 1;
-        } else if (b.kind === 'planet') {
-          ctx.fillStyle = col+'30'; ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        } else if (e.kind === 'planet') {
+          ctx.fillStyle   = col + '30';
+          ctx.strokeStyle = col;
+          ctx.lineWidth   = 1.5;
           ctx.beginPath(); ctx.arc(0,0,r*1.3,0,Math.PI*2); ctx.fill(); ctx.stroke();
-        } else if (b.kind === 'star') {
-          ctx.fillStyle = '#ffe8a060'; ctx.strokeStyle = '#ffe8a0'; ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.arc(0,0,r*1.6,0,Math.PI*2); ctx.fill(); ctx.stroke();
-          ctx.globalAlpha = 0.45;
-          for (let i = 0; i < 4; i++) {
-            const ang = i * Math.PI / 2;
-            ctx.beginPath();
-            ctx.moveTo(Math.cos(ang)*r*1.8, Math.sin(ang)*r*1.8);
-            ctx.lineTo(Math.cos(ang)*r*2.8, Math.sin(ang)*r*2.8);
-            ctx.stroke();
-          }
-          ctx.globalAlpha = 1;
-        } else {
+        } else if (e.kind === 'star') {
+          ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+          const s = r * 0.6;
+          ctx.beginPath();
+          ctx.moveTo(-s,-s); ctx.lineTo(s, s);
+          ctx.moveTo(s,-s);  ctx.lineTo(-s, s);
+          ctx.stroke();
+        } else if (e.kind === 'asteroid') {
           ctx.strokeStyle = col; ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.moveTo(-r*.7,-r*.7); ctx.lineTo(r*.7,r*.7);
@@ -495,22 +534,24 @@
 
         ctx.shadowBlur = 0;
 
-        if (zoom > 0.04 && b.name) {
+        if (zoom > 0.1) {
           ctx.font = Math.round(8*Math.min(sz,1.1)) + 'px "JetBrains Mono", monospace';
           ctx.fillStyle   = sel ? '#f08438' : col;
           ctx.shadowColor = 'transparent';
           ctx.textAlign   = 'left';
-          ctx.fillText(b.name, r * 1.6 + 2, 3);
+          ctx.fillText(e.name, r * 1.6 + 2, 3);
         }
+
         ctx.restore();
       });
     }
 
     function drawOwnShip() {
-      const px = toSX(_shipX), py = toSY(_shipZ);
-      const sz  = Math.max(0.8, Math.min(1.8, zoom * 60));
+      const px = toSX(_ownX), py = toSY(_ownY);
+      if (px < -60 || px > W+60 || py < -60 || py > H+60) return;
+      const sz  = Math.max(0.8, Math.min(1.8, zoom * 5));
       const r   = 8 * sz;
-      const rad = (_shipHdg - 90) * Math.PI / 180;
+      const rad = (_ownHeading - 90) * Math.PI / 180;
       const col = '#6cb6d0';
 
       ctx.save();
@@ -531,15 +572,16 @@
       ctx.shadowColor = col; ctx.shadowBlur = 14;
       ctx.fillStyle   = col;
       ctx.beginPath();
-      ctx.moveTo(0,-r);
-      ctx.lineTo(r*.65, r*.45);
-      ctx.lineTo(0, r*.05);
+      ctx.moveTo(0, -r);
+      ctx.lineTo(r*.65,  r*.45);
+      ctx.lineTo(0,      r*.05);
       ctx.lineTo(-r*.65, r*.45);
-      ctx.closePath(); ctx.fill();
+      ctx.closePath();
+      ctx.fill();
       ctx.shadowBlur = 0;
       ctx.restore();
 
-      if (zoom > 0.04) {
+      if (zoom > 0.09) {
         ctx.save();
         ctx.font = '8px "JetBrains Mono", monospace';
         ctx.fillStyle = col; ctx.textAlign = 'center';
@@ -549,7 +591,7 @@
     }
 
     function drawOffscreenIndicator() {
-      const px = toSX(_shipX), py = toSY(_shipZ);
+      const px = toSX(_ownX), py = toSY(_ownY);
       if (px >= 10 && px <= W-10 && py >= 10 && py <= H-10) return;
       const ang = Math.atan2(py - H*.5, px - W*.5);
       const ar  = Math.min(W,H) * 0.43;
@@ -566,16 +608,114 @@
       ctx.restore();
     }
 
-    function updateHUD() {
-      document.getElementById('hud-pos').textContent = Math.round(_shipX) + ' / ' + Math.round(_shipZ);
-      document.getElementById('hud-hdg').textContent = _shipHdg.toFixed(0) + '°';
-      document.getElementById('hud-spd').textContent = _shipSpd.toFixed(1);
+    function updateHUDLabels() {
+      document.getElementById('hud-pos').textContent  = Math.round(_ownX) + ' / ' + Math.round(_ownY);
       document.getElementById('hud-zoom').textContent = zoom.toFixed(2) + '×';
+      document.getElementById('hud-hdg').textContent  = _ownHeading.toFixed(0) + '°';
+      document.getElementById('hud-spd').textContent  = _ownSpeed.toFixed(1) + ' kn';
+
+      const impEl = document.getElementById('hud-imp');
+      if (impEl) {
+        if (_cancelVisible) {
+          impEl.textContent = Math.round(_impulseCharge * 100) + '%';
+          impEl.className = 'hud-val ok';
+        } else {
+          impEl.textContent = '—';
+          impEl.className = 'hud-val';
+        }
+      }
+
+      let reg = '—';
+      REGIONS.forEach(r => {
+        if (pointInPoly(_ownX, _ownY, r.pts)) reg = r.name;
+      });
+      document.getElementById('hud-region').textContent = reg;
     }
 
-    /* ═══════════════════════════════════════════════════════════════
-       PAN / ZOOM — Mouse
-    ═══════════════════════════════════════════════════════════════ */
+    function pointInPoly(x, y, pts) {
+      let inside = false;
+      for (let i=0,j=pts.length-1; i<pts.length; j=i++) {
+        const xi=pts[i].x, yi=pts[i].y, xj=pts[j].x, yj=pts[j].y;
+        if ((yi>y)!==(yj>y) && x<(xj-xi)*(y-yi)/(yj-yi)+xi) inside=!inside;
+      }
+      return inside;
+    }
+
+    function handleTap(cx, cy) {
+      const wx2 = toWX(cx), wy2 = toWY(cy);
+
+      if (_pickingWaypoint) {
+        _pickingWaypoint = false;
+        canvas.classList.remove('picking');
+        if (_sendAction) _sendAction('set_navigation_waypoint', { x: wx2, z: wy2 });
+        showToast('WAYPOINT SET');
+        return;
+      }
+
+      let best = null, bestD = Infinity;
+      _entities.forEach(e => {
+        if (e.id === 'own') return;
+        const d = Math.hypot(e.x-wx2, e.y-wy2);
+        const thresh = 55/zoom;
+        if (d < thresh && d < bestD) { bestD = d; best = e; }
+      });
+      _selectedId = best ? best.id : null;
+      updateEntityPanel(best);
+      draw();
+    }
+
+    function updateEntityPanel(e) {
+      const nameEl = document.getElementById('ent-name');
+      const bdgEl  = document.getElementById('ent-badges');
+      const brgEl  = document.getElementById('ent-brg');
+      const rngEl  = document.getElementById('ent-rng');
+
+      if (!e || e.id === 'own') {
+        nameEl.textContent = 'TAP MAP TO SELECT';
+        nameEl.className   = 'ent-name empty';
+        bdgEl.innerHTML    = '';
+        brgEl.textContent  = '—';
+        rngEl.textContent  = '—';
+        return;
+      }
+
+      nameEl.textContent = e.name;
+      nameEl.className   = 'ent-name';
+
+      const SC = { hostile:'hostile', friendly:'friendly', neutral:'neutral' };
+      const SL = { hostile:'HOSTILE', friendly:'ALLIED',   neutral:'NEUTRAL' };
+      const TL = { ship:'WARSHIP', station:'STARBASE', planet:'PLANET', asteroid:'ASTEROID', star:'STAR' };
+
+      let html = '<span class="badge '+(SC[e.stance]||'neutral')+'">'+(SL[e.stance]||'UNKNOWN')+'</span>';
+      html    += '<span class="badge type">'+(TL[e.kind]||e.kind.toUpperCase())+'</span>';
+      if (e.faction) html += '<span class="badge neutral">'+e.faction.toUpperCase()+'</span>';
+      bdgEl.innerHTML = html;
+
+      const dx = e.x - _ownX;
+      const dz = e.y - _ownY;
+      const dist = Math.hypot(dx, dz);
+      const brg  = ((Math.atan2(dx, -dz)*180/Math.PI)+360)%360;
+      brgEl.textContent = brg.toFixed(1);
+      rngEl.textContent = Math.round(dist);
+    }
+
+    let _pickingWaypoint = false;
+    let _wpToastTimer = null;
+
+    function showToast(msg, duration = 1900) {
+      const toast = document.getElementById('wp-toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      clearTimeout(_wpToastTimer);
+      _wpToastTimer = setTimeout(() => toast.classList.remove('show'), duration);
+    }
+
+    function updateWaypointButtons() {
+      const hasWp = !!_waypoint;
+      document.getElementById('btn-set-waypoint').style.display   = hasWp ? 'none' : '';
+      document.getElementById('btn-clear-waypoint').style.display = hasWp ? '' : 'none';
+    }
+
     let drag = null;
 
     canvas.addEventListener('mousedown', e => {
@@ -590,7 +730,7 @@
     });
     window.addEventListener('mouseup', e => {
       if (!drag) return;
-      const moved = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy);
+      const moved = Math.hypot(e.clientX-drag.sx, e.clientY-drag.sy);
       if (moved < 5) handleTap(e.clientX, e.clientY);
       drag = null;
       canvas.classList.remove('grabbing');
@@ -606,16 +746,13 @@
       draw();
     }, { passive: false });
 
-    /* ═══════════════════════════════════════════════════════════════
-       PAN / ZOOM — Touch
-    ═══════════════════════════════════════════════════════════════ */
-    let touchMap  = {};
-    let lastPinch = null;
+    let touchMap    = {};
+    let lastPinch   = null;
 
     canvas.addEventListener('touchstart', e => {
       e.preventDefault();
       for (const t of e.changedTouches)
-        touchMap[t.identifier] = { ox: t.clientX, oy: t.clientY };
+        touchMap[t.identifier] = { x: t.clientX, y: t.clientY, ox: t.clientX, oy: t.clientY };
       if (e.touches.length === 1)
         drag = { sx: e.touches[0].clientX, sy: e.touches[0].clientY, px: panX, py: panY };
       lastPinch = null;
@@ -655,137 +792,111 @@
       drag = null; lastPinch = null;
     }, { passive: false });
 
-    /* ═══════════════════════════════════════════════════════════════
-       ENTITY TAP SELECTION
-    ═══════════════════════════════════════════════════════════════ */
-    function handleTap(cx, cy) {
-      const wx2 = toWX(cx), wz2 = toWY(cy);
-      let best = null, bestD = Infinity;
-      _blips.forEach(b => {
-        if (b.kind === 'waypoint') return;
-        const { x: bx, z: bz } = blipWorld(b);
-        const d = Math.hypot(bx - wx2, bz - wz2);
-        const thresh = 55 / zoom;
-        if (d < thresh && d < bestD) { bestD = d; best = b; }
-      });
-      selectedUuid = best ? best.uuid : null;
-      selectedBlip = best || null;
-      updateEntityPanel(best);
-      draw();
-    }
+    function _render(s) {
+      _state    = s;
+      _ownX     = s.ship_x || 0;
+      _ownY     = s.ship_z || 0;
+      _ownHeading = s.ship_heading || 0;
+      _ownSpeed   = s.ship_speed || 0;
+      _onScreen   = !!s.on_screen;
+      _impulseCharge = s.impulse_charge_progress || 0;
+      _cancelVisible = !!s.cancel_visible;
 
-    function updateEntityPanel(b) {
-      const nameEl = document.getElementById('ent-name');
-      const bdgEl  = document.getElementById('ent-badges');
-      const brgEl  = document.getElementById('ent-brg');
-      const rngEl  = document.getElementById('ent-rng');
-
-      if (!b) {
-        nameEl.textContent = 'TAP MAP TO SELECT';
-        nameEl.className   = 'ent-name empty';
-        bdgEl.innerHTML    = '';
-        brgEl.textContent  = '—';
-        rngEl.textContent  = '—';
-        return;
-      }
-
-      nameEl.textContent = b.name || b.kind.toUpperCase();
-      nameEl.className   = 'ent-name';
-
-      bdgEl.innerHTML = '<span class="badge type">' + (KIND_LABEL[b.kind] || b.kind.toUpperCase()) + '</span>';
-
-      const { x: bx, z: bz } = blipWorld(b);
-      const dx = bx - _shipX, dz = bz - _shipZ;
-      const brg = ((Math.atan2(dx, -dz) * 180 / Math.PI) + 360) % 360;
-      brgEl.textContent = brg.toFixed(1);
-      rngEl.textContent = Math.round(Math.hypot(dx, dz));
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       BUTTONS
-    ═══════════════════════════════════════════════════════════════ */
-    document.getElementById('btn-on-screen').addEventListener('click', () => {
-      sendAction('set_navigation_chart', {});
-    });
-
-    document.getElementById('btn-set-waypoint').addEventListener('click', () => {
-      if (!selectedBlip) return;
-      const { x: bx, z: bz } = blipWorld(selectedBlip);
-      sendAction('set_navigation_waypoint', { x: bx, z: bz });
-      const toast = document.getElementById('wp-toast');
-      toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 1900);
-    });
-
-    document.getElementById('btn-clear-waypoint').addEventListener('click', () => {
-      sendAction('clear_navigation_waypoint', {});
-    });
-
-    /* ═══════════════════════════════════════════════════════════════
-       STATE RENDER (called by initConsole on every push)
-    ═══════════════════════════════════════════════════════════════ */
-    function _renderConsole(s) {
-      _blips    = s.blips    || [];
-      _shipX    = s.ship_x   || 0;
-      _shipZ    = s.ship_z   || 0;
-      _shipHdg  = s.ship_heading || 0;
-      _shipSpd  = s.ship_speed   || 0;
-      _range    = s.radar_range  || 5000;
-      _waypoint = s.waypoint || null;
-      _onScreen = !!s.on_screen;
-
-      // Center on ship on first state push
-      if (!_initialized) {
-        panX = _shipX;
-        panY = _shipZ;
-        _initialized = true;
-      }
-
-      // ON SCREEN button LED
-      document.getElementById('on-screen-led').className = _onScreen ? 'led on' : 'led';
-
-      // Waypoint sub-label in entity info
-      const wpVal = document.getElementById('ent-wp-val');
-      if (_waypoint) {
-        wpVal.textContent = Math.round(_waypoint.x) + ' / ' + Math.round(_waypoint.z);
+      const waypointBlip = (s.blips || []).find(b => b.kind === 'waypoint');
+      if (s.waypoint && s.waypoint.x !== undefined) {
+        _waypoint = s.waypoint;
       } else {
-        wpVal.textContent = 'NOT SET';
+        _waypoint = null;
       }
 
-      // Keep selected blip fresh; deselect if it disappeared
-      if (selectedUuid) {
-        const still = _blips.find(b => b.uuid === selectedUuid);
-        if (!still) {
-          selectedUuid = null;
-          selectedBlip = null;
-          updateEntityPanel(null);
+      const newEntities = [
+        { id:'own', name:'OWN SHIP', x: _ownX, y: _ownY, kind:'self', stance:'self' }
+      ];
+      (s.blips || []).forEach(blip => {
+        if (blip.kind === 'waypoint' && blip.uuid === 'navigation-waypoint') return;
+        newEntities.push({
+          id: blip.uuid,
+          name: blip.name || 'UNKNOWN',
+          kind: blip.kind || 'asteroid',
+          x: blip.world_x !== undefined ? blip.world_x : 0,
+          y: blip.world_z !== undefined ? blip.world_z : 0,
+          stance: blip.stance || 'neutral',
+          faction: blip.faction || null,
+          colour: blip.colour || null,
+          ship_class: blip.ship_class || null,
+          hull_pct: blip.hull_pct !== undefined ? blip.hull_pct : null,
+        });
+      });
+
+      const prevSelected = _entities.find(e => e.id === _selectedId);
+      const stillExists  = newEntities.find(e => e.id === _selectedId);
+      if (_selectedId && !stillExists) {
+        _selectedId = null;
+        updateEntityPanel(null);
+      }
+
+      _entities = newEntities;
+
+      const wpVal = document.getElementById('ent-wp-val');
+      if (wpVal) {
+        if (_waypoint) {
+          wpVal.textContent = 'SET (' + Math.round(_waypoint.x) + ', ' + Math.round(_waypoint.z) + ')';
+          wpVal.style.color = 'var(--tactical)';
         } else {
-          selectedBlip = still;
-          updateEntityPanel(still);
+          wpVal.textContent = 'NOT SET';
+          wpVal.style.color = '';
         }
       }
 
-      // ── Test data containers ─────────────────────────────────────
-      const navData = document.getElementById('nav-data');
-      navData.dataset.blipCount = String(_blips.length);
-      navData.dataset.shipX     = String(_shipX);
-      navData.dataset.shipZ     = String(_shipZ);
-      navData.dataset.onScreen  = String(_onScreen);
-
-      const waypointData = document.getElementById('waypoint-data');
-      waypointData.dataset.active = String(!!_waypoint);
-      waypointData.dataset.x      = _waypoint ? String(_waypoint.x) : '';
-      waypointData.dataset.z      = _waypoint ? String(_waypoint.z) : '';
-
-      const impulseData = document.getElementById('impulse-data');
-      impulseData.dataset.charge        = String(s.impulse_charge_progress || 0);
-      impulseData.dataset.cancelVisible = String(!!s.cancel_visible);
-
+      updateWaypointButtons();
+      updateHiddenData(s);
       draw();
     }
 
-    const { sendAction } = initConsole({ name: 'Navigation', render: _renderConsole });
+    function updateHiddenData(s) {
+      const navData = document.getElementById('nav-data');
+      if (navData) navData.textContent = JSON.stringify(s.blips || []);
 
+      const impData = document.getElementById('impulse-data');
+      if (impData) impData.textContent = JSON.stringify({
+        charge: _impulseCharge,
+        cancel_visible: _cancelVisible
+      });
+
+      const wpData = document.getElementById('waypoint-data');
+      if (wpData) wpData.textContent = JSON.stringify(s.waypoint || null);
+    }
+
+    document.getElementById('btn-on-screen').addEventListener('click', () => {
+      if (_sendAction) {
+        _sendAction('set_navigation_chart');
+      }
+      if (_selectedId && _selectedId !== 'own') {
+        const e = _entities.find(ent => ent.id === _selectedId);
+        if (e) { panX = e.x; panY = e.y; draw(); return; }
+      }
+      panX = _ownX; panY = _ownY; draw();
+    });
+
+    document.getElementById('btn-set-waypoint').addEventListener('click', () => {
+      _pickingWaypoint = true;
+      canvas.classList.add('picking');
+      showToast('TAP MAP TO PLACE WAYPOINT', 4000);
+    });
+
+    document.getElementById('btn-clear-waypoint').addEventListener('click', () => {
+      if (_sendAction) _sendAction('clear_navigation_waypoint');
+      _waypoint = null;
+      const wpVal = document.getElementById('ent-wp-val');
+      if (wpVal) { wpVal.textContent = 'NOT SET'; wpVal.style.color = ''; }
+      updateWaypointButtons();
+      draw();
+    });
+
+    const _c = initConsole({ name: 'Navigation', render: _render });
+    _sendAction = _c.sendAction;
+
+    updateWaypointButtons();
     resize();
   </script>
 

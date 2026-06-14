@@ -449,6 +449,9 @@ export function buildNavigationConsoleState(state) {
           kind,
           world_x: entityX(e),
           world_z: entityZ(e),
+          stance:  e.stance  || 'neutral',
+          faction: e.faction || null,
+          selectable: true,
         };
       },
     }

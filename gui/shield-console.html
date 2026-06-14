@@ -11,6 +11,10 @@
       padding: 24px 40px 22px;
       display: flex; flex-direction: column; gap: 10px;
       height: 100%;
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(80,110,170,0.12) 0%, transparent 58%),
+        linear-gradient(180deg, rgba(19,26,58,0.78) 0%, rgba(10,15,40,0.86) 45%, rgba(5,9,24,0.94) 100%),
+        url("../assets/gui/panel-bg.png") center / cover no-repeat;
     }
 
     /* ── Header ──────────────────────────────────────────────── */
@@ -74,17 +78,49 @@
     #threat-row { display: none; }
     #threat-row.active { display: flex; }
 
-    /* ── Center: shield diagram placeholder ──────────────────── */
+    /* ── Center: shield diagram ───────────────────────────────── */
     .diagram-wrap {
       position: relative; width: 100%; max-width: 520px; aspect-ratio: 1/1;
       display: flex; align-items: center; justify-content: center;
-      background:
-        radial-gradient(circle at 50% 50%, rgba(2, 10, 24, 0.18) 0%, rgba(2, 10, 24, 0.84) 68%, rgba(2, 10, 24, 0.98) 100%),
-        url("../assets/shield_console/shield-hex-bg.png") center / 118% 118% no-repeat;
+      filter: drop-shadow(0 0 22px rgba(108,182,208,0.14));
     }
-    .diagram-wrap svg { display: block; width: 100%; height: 100%; }
+    .diagram-wrap::before {
+      content: "";
+      position: absolute;
+      inset: 3%;
+      border-radius: 50%;
+      border: 1px solid rgba(108,182,208,0.14);
+      box-shadow:
+        0 0 28px rgba(108,182,208,0.10),
+        inset 0 0 28px rgba(108,182,208,0.06);
+      pointer-events: none;
+    }
+    .diagram-wrap svg { display: block; width: 100%; height: 100%; position: relative; z-index: 2; }
+    .ship-ring,
+    .ship-needle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      image-rendering: pixelated;
+      z-index: 3;
+    }
+    .ship-ring {
+      width: 68px;
+      height: 68px;
+      opacity: 0.9;
+      filter: drop-shadow(0 0 8px rgba(108,182,208,0.42));
+    }
+    .ship-needle {
+      width: 18px;
+      height: 42px;
+      opacity: 0.95;
+      filter: drop-shadow(0 0 8px rgba(240,132,56,0.55));
+    }
     .shield-segment {
       cursor: pointer;
+      mix-blend-mode: screen;
       transition: opacity 120ms ease, stroke-width 120ms ease, filter 120ms ease;
     }
     .shield-segment:hover,
@@ -120,7 +156,9 @@
       padding: 1.5px; flex-shrink: 0;
     }
     .quad-card > .qc-body {
-      --cham: 9px; background: linear-gradient(180deg, #0e1633 0%, #060b1f 100%);
+      --cham: 9px; background:
+        linear-gradient(180deg, rgba(14,22,51,0.86) 0%, rgba(6,11,31,0.94) 100%),
+        url("../assets/gui/panel-bg.png") center / cover no-repeat;
       clip-path: polygon(var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham), 100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%, var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham));
       width: 100%; height: 100%; padding: 10px 14px;
       display: flex; flex-direction: column; gap: 6px;
@@ -241,20 +279,82 @@
             <div class="corner-readout tr"><span class="k">HARMONIC</span><span class="v" id="harmonic-state">NUTATING</span></div>
             <div class="corner-readout bl"><span class="k">DEFLECTOR</span><span class="v" id="deflector-state">ONLINE</span></div>
             <div class="corner-readout br"><span class="k">MODULATION</span><span class="v" id="modulation-state">F-1.247</span></div>
+            <img class="ship-ring" src="../assets/phone_border/compass-ring.png" alt="" aria-hidden="true">
+            <img class="ship-needle" src="../assets/phone_border/needle.png" alt="" aria-hidden="true">
             <svg viewBox="0 0 200 200">
-              <!-- Outer circle (shield boundary) -->
-              <circle cx="100" cy="100" r="85" fill="none" stroke="var(--line-faint)" stroke-width="0.5" opacity="0.4"/>
-              <circle cx="100" cy="100" r="80" fill="none" stroke="var(--line-soft)" stroke-width="0.3" opacity="0.3"/>
-              <!-- Crosshair -->
-              <line x1="20" y1="100" x2="180" y2="100" stroke="var(--line-faint)" stroke-width="0.3" opacity="0.3"/>
-              <line x1="100" y1="20" x2="100" y2="180" stroke="var(--line-faint)" stroke-width="0.3" opacity="0.3"/>
-              <!-- Quadrant arcs -->
+              <defs>
+                <pattern id="shield-hex-fill" patternUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+                  <image href="../assets/shield_console/shield-hex-bg.png" x="0" y="0" width="200" height="200" preserveAspectRatio="xMidYMid slice"/>
+                </pattern>
+                <radialGradient id="chassisGrad" cx="50%" cy="42%" r="62%">
+                  <stop offset="0%"  stop-color="#0c1230"/>
+                  <stop offset="55%" stop-color="#070b22"/>
+                  <stop offset="100%" stop-color="#03050e"/>
+                </radialGradient>
+                <filter id="hubGlow" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="sRGB">
+                  <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+                  <feBlend in="SourceGraphic" in2="blur" mode="normal"/>
+                </filter>
+              </defs>
+
+              <!-- ── Back plate ──────────────────────────── -->
+              <!-- Dark bezel ring body (r=83 to r=91) via layered circles -->
+              <circle cx="100" cy="100" r="91" fill="#04060f"/>
+              <!-- Chassis interior fill -->
+              <circle cx="100" cy="100" r="83" fill="url(#chassisGrad)"/>
+
+              <!-- Range rings (25 / 50 / 75 pct of arc span INNER_R=34..MAX=78) -->
+              <circle cx="100" cy="100" r="45" fill="none" stroke="#1f2750" stroke-width="0.5" stroke-dasharray="1.5 4" opacity="0.85"/>
+              <circle cx="100" cy="100" r="56" fill="none" stroke="#1f2750" stroke-width="0.5" stroke-dasharray="1.5 4" opacity="0.85"/>
+              <circle cx="100" cy="100" r="67" fill="none" stroke="#1f2750" stroke-width="0.5" stroke-dasharray="1.5 4" opacity="0.85"/>
+
+              <!-- Ship silhouette (top-down, bow pointing up = Fore) -->
+              <g opacity="0.6">
+                <ellipse cx="100" cy="97" rx="9" ry="11" fill="#1a2148" stroke="#3a4674" stroke-width="0.5"/>
+                <rect x="98.5" y="105.5" width="3" height="5" rx="0.5" fill="#1a2148" stroke="#3a4674" stroke-width="0.4"/>
+                <line x1="94" y1="109.5" x2="99.5" y2="106" stroke="#3a4674" stroke-width="0.5"/>
+                <line x1="106" y1="109.5" x2="100.5" y2="106" stroke="#3a4674" stroke-width="0.5"/>
+                <ellipse cx="93" cy="112" rx="2" ry="4.5" fill="#1a2148" stroke="#3a4674" stroke-width="0.4"/>
+                <ellipse cx="107" cy="112" rx="2" ry="4.5" fill="#1a2148" stroke="#3a4674" stroke-width="0.4"/>
+              </g>
+
+              <!-- Hub -->
+              <circle cx="100" cy="100" r="14" fill="#050918" stroke="#3a4674" stroke-width="0.8"/>
+              <circle cx="100" cy="100" r="11" fill="none" stroke="#1f2750" stroke-width="0.5"/>
+              <!-- Hub glow dot (rendered below main dot so it blurs outward) -->
+              <circle cx="100" cy="100" r="3.5" fill="#6cb6d0" opacity="0.35" filter="url(#hubGlow)"/>
+              <circle cx="100" cy="100" r="2.2" fill="#6cb6d0"/>
+
+              <!-- Tick marks and bearing labels (JS-populated on load) -->
+              <g id="svg-ticks"></g>
+
+              <!-- ── Quadrant arcs (shield segments) ─────── -->
               <path id="arc-fore" class="shield-segment" data-facing="Fore" tabindex="0" role="button" aria-label="Focus fore shields" fill="var(--cyan)" stroke="var(--cyan)" stroke-width="1.6" opacity="0.38"/>
               <path id="arc-aft" class="shield-segment" data-facing="Aft" tabindex="0" role="button" aria-label="Focus aft shields" fill="var(--cyan)" stroke="var(--cyan)" stroke-width="1.6" opacity="0.38"/>
               <path id="arc-port" class="shield-segment" data-facing="Port" tabindex="0" role="button" aria-label="Focus port shields" fill="var(--cyan)" stroke="var(--cyan)" stroke-width="1.6" opacity="0.38"/>
               <path id="arc-stbd" class="shield-segment" data-facing="Starboard" tabindex="0" role="button" aria-label="Focus starboard shields" fill="var(--cyan)" stroke="var(--cyan)" stroke-width="1.6" opacity="0.38"/>
-              <!-- Ship icon in centre -->
-              <polygon points="100,15 107,45 107,55 100,60 93,55 93,45" fill="var(--cyan)" opacity="0.6" pointer-events="none"/>
+
+              <!-- ── Front frame (over arcs) ─────────────── -->
+              <!-- Inner chassis ring (soft cyan accent on arc inner boundary) -->
+              <circle cx="100" cy="100" r="83" fill="none" stroke="rgba(108,182,208,0.11)" stroke-width="0.9"/>
+              <!-- Bright chassis ring (bezel inner edge) -->
+              <circle cx="100" cy="100" r="86" fill="none" stroke="#5e6f96" stroke-width="1.0" opacity="0.8"/>
+              <!-- Outer bezel accent -->
+              <circle cx="100" cy="100" r="89.5" fill="none" stroke="#3a4674" stroke-width="1.4" opacity="0.9"/>
+              <!-- Outermost soft ring -->
+              <circle cx="100" cy="100" r="91.2" fill="none" stroke="#1f2750" stroke-width="0.5" opacity="0.5"/>
+
+              <!-- Spoke dividers at quadrant gap angles (45°/135°/225°/315° from top) -->
+              <!-- Each spoke runs from hub edge (r≈14) to chassis (r=83); sin/cos(PI/4)=0.707 -->
+              <!-- NE (45°):  hub=(110,90)  chassis=(159,41) -->
+              <line x1="110" y1="90"  x2="159" y2="41"  stroke="#3a4674" stroke-width="0.9" opacity="0.8"/>
+              <!-- SE (135°): hub=(110,110) chassis=(159,159) -->
+              <line x1="110" y1="110" x2="159" y2="159" stroke="#3a4674" stroke-width="0.9" opacity="0.8"/>
+              <!-- SW (225°): hub=(90,110)  chassis=(41,159) -->
+              <line x1="90"  y1="110" x2="41"  y2="159" stroke="#3a4674" stroke-width="0.9" opacity="0.8"/>
+              <!-- NW (315°): hub=(90,90)   chassis=(41,41) -->
+              <line x1="90"  y1="90"  x2="41"  y2="41"  stroke="#3a4674" stroke-width="0.9" opacity="0.8"/>
+
               <!-- Threat indicator (triangle on perimeter) -->
               <polygon id="threat-arrow" points="0,0 0,0 0,0" fill="var(--fire-bright)" opacity="0.8" display="none"/>
             </svg>
@@ -352,6 +452,40 @@
       ].join(' ');
     }
 
+    function _buildSvgTicks() {
+      var g = document.getElementById('svg-ticks');
+      if (!g) return;
+      var parts = [];
+      var CX = 100, CY = 100;
+      for (var deg = 0; deg < 360; deg += 5) {
+        var isCardinal = deg % 90 === 0;
+        var isMajor    = deg % 30 === 0;
+        var rOuter = 83;
+        var rInner = isCardinal ? 72 : (isMajor ? 75 : 78);
+        var sw     = isCardinal ? 1.3 : (isMajor ? 0.9 : 0.55);
+        var op     = isCardinal ? 0.9 : (isMajor ? 0.65 : 0.4);
+        var a = (deg - 90) * Math.PI / 180;
+        var x1 = (CX + rInner * Math.cos(a)).toFixed(2);
+        var y1 = (CY + rInner * Math.sin(a)).toFixed(2);
+        var x2 = (CX + rOuter * Math.cos(a)).toFixed(2);
+        var y2 = (CY + rOuter * Math.sin(a)).toFixed(2);
+        parts.push('<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="#3a4674" stroke-width="'+sw+'" opacity="'+op+'"/>');
+      }
+      // Bearing labels just inside the tick zone (r≈70 from center)
+      var labels = [
+        { deg: 0,   txt: '000', dx: 0,    dy: -70 },
+        { deg: 90,  txt: '090', dx:  70,  dy: 0   },
+        { deg: 180, txt: '180', dx: 0,    dy:  70  },
+        { deg: 270, txt: '270', dx: -70,  dy: 0   },
+      ];
+      labels.forEach(function(b) {
+        var x = CX + b.dx;
+        var y = CY + b.dy + 2;  // +2 for text baseline centering
+        parts.push('<text x="'+x+'" y="'+y+'" text-anchor="middle" dominant-baseline="middle" font-family="\'JetBrains Mono\',monospace" font-size="5.5" letter-spacing="1" fill="#5a6694" opacity="0.9">'+b.txt+'</text>');
+      });
+      g.innerHTML = parts.join('');
+    }
+
     function _rerender() {
       var s = _state;
       var hullPct = s.hull_integrity_pct;
@@ -435,7 +569,7 @@
         var isFocused = s.focused_facing === label;
         var color = isFocused ? 'var(--tactical)' : arcColor(tier(q && q.online ? pct : 0));
         arc.setAttribute('stroke', color);
-        arc.setAttribute('fill', color);
+        arc.setAttribute('fill', 'url(#shield-hex-fill)');
         arc.setAttribute('stroke-width', isFocused ? '2.5' : '1.6');
         arc.style.opacity = q && q.online ? (isFocused ? '0.72' : '0.42') : '0.16';
         arc.classList.toggle('focused', isFocused);
@@ -545,6 +679,7 @@
       });
     }
 
+    _buildSvgTicks();
     _initDemo();
   </script>
 </body>

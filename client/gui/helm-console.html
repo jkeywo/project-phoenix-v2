@@ -255,10 +255,12 @@
     }
     .impulse-bar-fill {
       height: 100%;
-      width: 0%;
+      width: 100%;
       background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
       box-shadow: 0 0 10px rgba(108, 182, 208, 0.4);
-      transition: width 0.1s ease;
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 0.1s ease;
     }
     .impulse-status {
       font-family: "JetBrains Mono", monospace;
@@ -553,11 +555,8 @@
       }
 
       var screenLed = document.getElementById('screen-led');
-      if (s.on_screen) {
-        screenLed.className = 'led on';
-      } else {
-        screenLed.className = 'led';
-      }
+      var screenLedTarget = s.on_screen ? 'led on' : 'led';
+      if (screenLed.className !== screenLedTarget) screenLed.className = screenLedTarget;
 
       var ip = s.impulse_charge_progress || 0;
       var impulseOverlay = document.getElementById('impulse-overlay');
@@ -568,18 +567,14 @@
 
       if (ip > 0) {
         impulseOverlay.classList.add('show');
-        impulseFill.style.width = (ip * 100) + '%';
-        if (ip >= 1.0) {
-          impulseStatus.textContent = 'ENGAGED';
-        } else {
-          impulseStatus.textContent = (ip * 100).toFixed(0) + '%';
-        }
-        impulseLed.className = 'led on';
-        impulseBtn.className = 'btn disabled';
+        impulseFill.style.transform = 'scaleX(' + ip + ')';
+        impulseStatus.textContent = ip >= 1.0 ? 'ENGAGED' : (ip * 100).toFixed(0) + '%';
+        if (impulseLed.className !== 'led on') impulseLed.className = 'led on';
+        if (impulseBtn.className !== 'btn disabled') impulseBtn.className = 'btn disabled';
       } else {
         impulseOverlay.classList.remove('show');
-        impulseLed.className = 'led';
-        impulseBtn.className = 'btn';
+        if (impulseLed.className !== 'led') impulseLed.className = 'led';
+        if (impulseBtn.className !== 'btn') impulseBtn.className = 'btn';
       }
 
       var footerMode = document.getElementById('footer-mode');

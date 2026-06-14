@@ -518,6 +518,7 @@
 
     var _state         = null;
     var _radarWidget   = null;
+    var _lastRadarJson  = '';
 
     function padHeading(d) {
       d = ((d % 360) + 360) % 360;
@@ -587,7 +588,16 @@
       }
 
       if (_radarWidget) {
-        _radarWidget.update({ mode: 'pre-projected', blips: s.blips || [], regions: s.regions || [] });
+        var radarPayload = {
+          mode: 'pre-projected',
+          blips: s.blips || [],
+          regions: s.regions || [],
+        };
+        var radarJson = JSON.stringify(radarPayload);
+        if (radarJson !== _lastRadarJson) {
+          _lastRadarJson = radarJson;
+          _radarWidget.update(radarPayload);
+        }
       }
     }
 

@@ -3,7 +3,7 @@ title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse]
 sources: [gui/helm-console.html, gui/console-state.js, gui/radar-widget.js, src/ship_plugin.rs, src/ship/physics.rs, src/ship/impulse.rs, src/modifiers/coordination.rs, PRD-022]
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 # Helm Console
@@ -43,6 +43,8 @@ If no one is at Helm, no `HelmInput` is read and the ship coasts/decelerates.
 The helm console renders an overhead radar showing nearby contacts from the HTML `RadarWidget`. `gui/console-state.js` projects contacts into the ship-relative frame for `gui/helm-console.html`.
 
 Navigation can set one shared custom waypoint. The server owns it as `SimSnapshot.navigation_waypoint`; the JS client mirrors it into `state.navigationWaypoint`; `buildHelmConsoleState()` appends a `kind: "waypoint"` blip. If the waypoint is outside Helm radar range, the blip is clamped to the radar edge and marked with `edge: true` so Helm still sees the bearing.
+
+`gui/helm-console.html` caches the last radar payload before calling `RadarWidget.update()`. This prevents impulse-only state pushes (`impulse_charge_progress` changing every tick while charging) from forcing redundant canvas redraws, which caused visible radar flicker on the HTML client.
 
 ## Tuning constants
 

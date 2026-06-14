@@ -1296,9 +1296,8 @@ pub struct CaptainConsoleState {
     /// Whether the ship is at red alert.
     pub red_alert: bool,
     /// Current camera direction as a plain string: `"Fore"`, `"Port"`,
-    /// `"Starboard"`, or `"Aft"`. Non-camera view modes (Radar, etc.) fall
-    /// back to `"Fore"`. Serialised directly so the HTML console JS can read
-    /// `s.view_direction` without parsing the tagged `ViewMode` enum shape.
+    /// `"Starboard"`, or `"Aft"`. Non-camera view modes (Radar, etc.) send an
+    /// empty string so the Captain panel can clear its direction highlight.
     pub view_direction: String,
     /// Mission objectives. Updated when `ObjectiveManager` is dirty.
     #[serde(default)]

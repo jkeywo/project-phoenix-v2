@@ -122,7 +122,7 @@ fn recompute_captain_console_state(
         ViewMode::Camera(ViewDirection::Port) => "Port",
         ViewMode::Camera(ViewDirection::Starboard) => "Starboard",
         ViewMode::Camera(ViewDirection::Aft) => "Aft",
-        _ => "Fore",
+        _ => "",
     }
     .to_string();
 
@@ -542,6 +542,17 @@ mod tests {
     }
 
     // ── Push tests (full pipeline) ────────────────────────────────────────────
+
+    #[test]
+    fn recompute_clears_direction_for_non_camera_view() {
+        let mut app = recompute_test_app();
+        app.world_mut().resource_mut::<ShipState>().view_mode = ViewMode::Radar;
+        app.update();
+
+        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
+        let comp = q.single(app.world()).unwrap();
+        assert_eq!(comp.0.view_direction, "");
+    }
 
     #[test]
     fn push_emits_one_message_with_expected_values() {

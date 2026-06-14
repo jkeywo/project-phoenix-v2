@@ -338,7 +338,8 @@
       });
 
       var dirEl = document.getElementById('dir');
-      dirEl.dataset.direction = s.view_direction || 'Fore';
+      var selectedDir = dirLabels.hasOwnProperty(s.view_direction) ? s.view_direction : '';
+      dirEl.dataset.direction = selectedDir;
 
       var alertEl = document.getElementById('alert');
       alertEl.dataset.redAlert = String(!!s.red_alert);
@@ -395,7 +396,7 @@
       }
 
       // ── Direction pad active state ──────────────────────────────────────
-      var dir = s.view_direction || 'Fore';
+      var dir = selectedDir;
       var btnIds = { Fore: 'dir-fore', Port: 'dir-port', Starboard: 'dir-stbd', Aft: 'dir-aft' };
       Object.keys(btnIds).forEach(function(k) {
         var el = document.getElementById(btnIds[k]);
@@ -406,7 +407,7 @@
 
       var viewStatusEl = document.getElementById('view-status');
       if (viewStatusEl) {
-        viewStatusEl.textContent = dirLabels[dir] || dir.toUpperCase();
+        viewStatusEl.textContent = dirLabels[dir] || 'ON SCREEN';
       }
 
       // ── Contacts count ──────────────────────────────────────────────────
@@ -431,7 +432,7 @@
       // ── Footer ticker ───────────────────────────────────────────────────
       var footerEl = document.getElementById('footer-ticker');
       if (footerEl) {
-        var dirLabel = dirLabels[dir] || 'FORE';
+        var dirLabel = dirLabels[dir] || 'ON SCREEN';
         footerEl.textContent = 'CAPTAIN · ' + dirLabel + ' · ' + (s.red_alert ? 'RED ALERT' : 'STANDARD');
       }
     }

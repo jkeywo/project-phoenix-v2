@@ -2,8 +2,8 @@
 title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
-sources: [src/shared/messages.rs, src/server/renderer.rs, PRD-036]
-updated: 2026-05-08
+sources: [src/core/messages.rs, src/server/renderer.rs, PRD-036]
+updated: 2026-06-14
 ---
 
 # View Modes
@@ -37,6 +37,10 @@ A top-centre text label on the viewscreen (`FORE` / `AFT` / `PORT` / `STARBOARD`
 ## Radar mode
 
 The viewscreen renders the asteroid field as a top-down map using [`radar_dots()`](./radar-projection.md). Useful as an alternative tactical view.
+
+## Captain panel synchronisation
+
+The Captain console state push reports `view_direction` only for camera modes. When another console takes the viewscreen (`Radar`, `SensorsRadar`, `SystemChart`, `NavigationChart`, or `Comms`), `CaptainConsoleState.view_direction` is an empty string; `gui/captain-console.html` treats that as no selected direction so the Fore/Port/Starboard/Aft buttons lose their active highlight.
 
 ## Captain authority
 

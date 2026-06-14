@@ -299,6 +299,7 @@
 
     let _state       = null;
     let _entities    = [];
+    let _regions     = [];
     let _ownX        = 0;
     let _ownY        = 0;
     let _ownHeading  = 0;
@@ -322,6 +323,7 @@
       drawStars();
       drawGrid();
       drawWaypointLine();
+      drawRegions();
       drawEntities();
       drawOwnShip();
       drawOffscreenIndicator();
@@ -416,6 +418,59 @@
       neutral:  '#7a90c0',
     };
 
+    function regionColor(region, alpha) {
+      const c = region.color || [0.6, 0.4, 1.0];
+      const r = Math.round(c[0] * 255);
+      const g = Math.round(c[1] * 255);
+      const b = Math.round(c[2] * 255);
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+
+    function drawRegions() {
+      _regions.forEach(region => {
+        const px = toSX(region.x || 0);
+        const py = toSY(region.z || 0);
+        const stroke = region.objective_target ? '#d4a820' : regionColor(region, 0.95);
+        const fill = regionColor(region, 0.16);
+        ctx.save();
+        ctx.strokeStyle = stroke;
+        ctx.fillStyle = fill;
+        ctx.lineWidth = region.objective_target ? 2 : 1.4;
+        ctx.shadowColor = region.objective_target ? '#d4a820' : 'transparent';
+        ctx.shadowBlur = region.objective_target ? 12 : 0;
+
+        if (region.shape === 'box' && region.half_extents) {
+          const hw = Math.max(4, (region.half_extents[0] || 0) * zoom);
+          const hh = Math.max(4, (region.half_extents[1] || 0) * zoom);
+          ctx.fillRect(px - hw, py - hh, hw * 2, hh * 2);
+          ctx.strokeRect(px - hw, py - hh, hw * 2, hh * 2);
+        } else if (region.shape === 'torus') {
+          const outer = Math.max(4, (region.outer_radius || region.radius || 0) * zoom);
+          const inner = Math.max(0, (region.inner_radius || 0) * zoom);
+          const ringWidth = Math.max(1, outer - inner);
+          ctx.beginPath();
+          ctx.arc(px, py, (outer + inner) / 2, 0, Math.PI * 2);
+          ctx.lineWidth = ringWidth;
+          ctx.stroke();
+        } else {
+          const r = Math.max(4, (region.radius || 0) * zoom);
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        ctx.shadowBlur = 0;
+        if (zoom > 0.08 && region.name) {
+          ctx.font = '8px "JetBrains Mono", monospace';
+          ctx.fillStyle = stroke;
+          ctx.textAlign = 'left';
+          ctx.fillText(region.name, px + 8, py - 8);
+        }
+        ctx.restore();
+      });
+    }
+
     function drawEntities() {
       _entities.forEach(e => {
         if (e.id === 'own') return;
@@ -429,6 +484,17 @@
 
         ctx.save();
         ctx.translate(px, py);
+
+        if (e.objective_target) {
+          ctx.strokeStyle = '#d4a820';
+          ctx.lineWidth = 2;
+          ctx.shadowColor = '#d4a820';
+          ctx.shadowBlur = 12;
+          ctx.beginPath();
+          ctx.arc(0, 0, 16 * sz, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
 
         if (sel) {
           const bk = 15 * sz, bs = 6 * sz;
@@ -742,6 +808,7 @@
       _onScreen   = !!s.on_screen;
       _impulseCharge = s.impulse_charge_progress || 0;
       _cancelVisible = !!s.cancel_visible;
+      _regions = s.regions || [];
 
       const waypointBlip = (s.blips || []).find(b => b.kind === 'waypoint');
       if (s.waypoint && s.waypoint.x !== undefined) {
@@ -763,6 +830,7 @@
           y: blip.world_z !== undefined ? blip.world_z : 0,
           stance: blip.stance || 'neutral',
           faction: blip.faction || null,
+          objective_target: !!blip.objective_target,
           colour: blip.colour || null,
           ship_class: blip.ship_class || null,
           hull_pct: blip.hull_pct !== undefined ? blip.hull_pct : null,

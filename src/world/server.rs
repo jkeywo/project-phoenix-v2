@@ -1694,9 +1694,8 @@ fn broadcast_comms_state(
     runtime.needs_broadcast = false;
 }
 
-/// Broadcast `ObjectiveSummary` to the Captain when objectives change.
+/// Broadcast `ObjectiveSummary` when objectives change.
 fn broadcast_objective_summary(
-    sessions: Res<Sessions>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut outbox: ResMut<SimOutbox>,
 ) {
@@ -1704,15 +1703,10 @@ fn broadcast_objective_summary(
         return;
     }
 
-    let Some(captain_token) = sessions.0.console_holder(Console::CaptainChair) else {
-        objectives.0.mark_clean();
-        return;
-    };
-
     let objectives_snap = objectives.0.sorted_snapshots();
 
     outbox.0.push((
-        Target::Token(captain_token.to_string()),
+        Target::All,
         ServerMessage::ObjectiveSummary {
             objectives: objectives_snap,
         },

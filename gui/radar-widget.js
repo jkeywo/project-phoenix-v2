@@ -32,6 +32,7 @@
     ship:     '#ff8060',
     station:  '#ffe060',
     torpedo:  '#ff60ff',
+    region:   '#a070ff',
     unknown:  '#a8b0c0',
     battleship: '#e6330d',   // dark red — large enemy
     cruiser:    '#cc4d1a',   // orange-red — medium enemy
@@ -336,6 +337,7 @@
     // ── Blips ──────────────────────────────────────────────────────────────
     if (data) {
       if (data.mode === 'pre-projected') {
+        this._drawPreProjectedRegions(ctx, cx, cy, R, data.regions || []);
         this._drawPreProjectedBlips(ctx, cx, cy, R, data);
       } else if (data.mode === 'world-space') {
         this._drawWorldSpaceBlips(ctx, cx, cy, R, data);
@@ -431,6 +433,38 @@
       // Target highlight ring (red, drawn on top)
       if (isTarget) {
         self._drawRing(ctx, bx, by, dotR + 7, 2, '#ff3344', true);
+      }
+    });
+  };
+
+  RadarWidget.prototype._drawPreProjectedRegions = function (ctx, cx, cy, R, regions) {
+    var self = this;
+    (regions || []).forEach(function (region) {
+      if (region.radar_x == null || region.radar_y == null) return;
+      var bx = cx + region.radar_x * R;
+      var by = cy - region.radar_y * R;
+      var c = region.color || [0.6, 0.4, 1.0];
+      var ri = Math.round(c[0] * 255);
+      var gi = Math.round(c[1] * 255);
+      var bi = Math.round(c[2] * 255);
+      var fillColor = 'rgba(' + ri + ',' + gi + ',' + bi + ',0.3)';
+      var strokeColor = region.objective_target ? '#d4a820' : 'rgb(' + ri + ',' + gi + ',' + bi + ')';
+      var scale = R;
+      switch (region.shape) {
+        case 'sphere':
+          self._drawRegionSphere(ctx, bx, by, region.scaled_radius || 0, scale, fillColor, strokeColor);
+          break;
+        case 'torus':
+          self._drawRegionTorus(ctx, bx, by,
+            region.scaled_outer_radius != null ? region.scaled_outer_radius : (region.scaled_radius || 0),
+            region.scaled_inner_radius || 0,
+            scale, strokeColor);
+          break;
+        case 'box': {
+          var he = region.scaled_half_extents || [0, 0];
+          self._drawRegionBox(ctx, bx, by, he[0] || 0, he[1] || 0, scale, fillColor, strokeColor);
+          break;
+        }
       }
     });
   };

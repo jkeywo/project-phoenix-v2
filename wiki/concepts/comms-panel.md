@@ -8,11 +8,19 @@ Client-side Comms console: two-panel inbox + chat room layout.
 
 ## Location
 
+- `gui/comms-console.html` — current pure-HTML phone Comms console iframe.
+- `gui/comms-state.js` — current pure-JS Comms state model used by `client.html`.
+
 - `src/console/comms/client.rs` — `CommsPanelPlugin` (Bevy, client feature)
 - `src/client_comms.rs` — `ClientCommsState` (pure, Bevy-free, unit-tested)
 - `src/console/comms/inbox.rs` — `CommsInbox` (pure server-side, no Bevy)
 
 ## Layout
+
+The current HTML iframe keeps a two-column inbox/chat layout in landscape. In
+portrait, selecting an inbox message adds `portrait-message` to the main panel so
+the message replaces the list; the Back button clears the local `_selectedId`,
+removes `portrait-message`, and re-renders the list with no selected row.
 
 ```
 ┌──────────────────┬───────────────────────────┐

@@ -574,7 +574,9 @@
       backBtn.className = 'back-btn';
       backBtn.textContent = '← BACK';
       backBtn.addEventListener('click', function() {
+        _selectedId = null;
         _setPortraitView(false);
+        if (_state) _render(_state);
       });
       hdr.appendChild(backBtn);
       var senderEl = document.createElement('span');

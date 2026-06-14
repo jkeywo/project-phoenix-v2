@@ -144,6 +144,19 @@ test('weapons console: short landscape keeps action buttons on screen', async ({
     expect(box!.y + box!.height, `${selector} bottom`).toBeLessThanOrEqual(390);
   }
 
+  const torpedoLayout = await page.locator('.torpedo-bay').evaluate((bay) => {
+    const summary = bay.querySelector('.torpedo-summary')!.getBoundingClientRect();
+    const tubes = bay.querySelector('#tube-list')!.getBoundingClientRect();
+    return {
+      summaryRight: summary.right,
+      summaryTop: summary.top,
+      tubesLeft: tubes.left,
+      tubesTop: tubes.top,
+    };
+  });
+  expect(torpedoLayout.tubesLeft, 'tube list should sit to the right of the torpedo summary').toBeGreaterThan(torpedoLayout.summaryRight);
+  expect(Math.abs(torpedoLayout.tubesTop - torpedoLayout.summaryTop), 'summary and tube list should share the same row').toBeLessThanOrEqual(2);
+
   const bodySizes = await page.locator('body').evaluate((body) => ({
     clientHeight: body.clientHeight,
     scrollHeight: body.scrollHeight,

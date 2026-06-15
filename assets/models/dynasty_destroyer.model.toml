@@ -1,21 +1,13 @@
-# Rig sidecar for dynasty_destroyer.glb (the reserved default "model" variant).
-#
-# Authored in post-base-rig (model-local, base-applied) space. The [base] rig
-# corrects the raw GLB into game space; it is applied INNER to the per-entity
-# [mesh] transform. Markers name mount points (beam emitters, exhaust, …).
-#
-# This is a minimal demo sidecar used by the pirate_raider marker-linkage test.
-
 [base]
-offset = [0.0, 0.0, 0.0]
-rotation = [0.0, 0.0, 0.0]
-scale = [1.0, 1.0, 1.0]
+offset = [ 0, -0.1, 0.3 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
 
 [extents]
-min = [-4.0, -1.2, -6.0]
-max = [4.0, 1.2, 6.0]
-size = [8.0, 2.4, 12.0]
+min = [ -0.9501487612724304, -0.5000000059604645, -0.649629545211792 ]
+max = [ 0.9499624371528625, 0.3212138652801514, 2.8565099482480263 ]
+size = [ 1.900111198425293, 0.8212138712406158, 3.506139493459818 ]
 
 [markers.fore_emitter]
-position = [0.0, 0.0, -6.0]
-direction = [0.0, 0.0, -1.0]
+position = [ 0, 0, -0.4440326898074707 ]
+direction = [ -0.01890820440480865, 0, 0.99982122392265 ]

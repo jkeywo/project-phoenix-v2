@@ -400,6 +400,8 @@
     var _radarWidget = null;
     var _complexity = 'full';
     var _CPXCYCLE   = ['full', 'std', 'low'];
+    var _demoMode   = true;
+    var _demoInterval = null;
 
     window.__updateConsole = function(name, stateJson) {
       var s;
@@ -407,6 +409,11 @@
       _apply(s);
     };
     function _apply(s) {
+      _demoMode = false;
+      if (_demoInterval) {
+        clearInterval(_demoInterval);
+        _demoInterval = null;
+      }
       if (!_state) { _state = {}; }
       if (s.scan_range != null)         _state.scan_range = s.scan_range;
       if (s.complexity)                 _state.complexity = s.complexity;
@@ -771,8 +778,8 @@
     _state = JSON.parse(JSON.stringify(_DEMO));
     _render(_state);
 
-    setInterval(function() {
-      if (!_state) return;
+    _demoInterval = setInterval(function() {
+      if (!_demoMode || !_state) return;
       var changed = false;
       _state.blips.forEach(function(b) {
         if (b.kind !== 'asteroid' && b.kind !== 'station') {
@@ -788,7 +795,7 @@
           mode:        'pre-projected',
           blips:       _state.blips,
           target_uuid: _state.target_uuid,
-          regions:     [],
+          regions:     _state.regions || [],
         });
       }
     }, 900);

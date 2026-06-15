@@ -558,6 +558,8 @@
       var screenLed = document.getElementById('screen-led');
       var screenLedTarget = s.on_screen ? 'led on' : 'led';
       if (screenLed.className !== screenLedTarget) screenLed.className = screenLedTarget;
+      var screenLabel = document.querySelector('#on-screen-btn .label');
+      if (screenLabel) screenLabel.textContent = s.on_screen ? 'CLEAR SCREEN' : 'ON SCREEN';
 
       var ip = s.impulse_charge_progress || 0;
       var impulseOverlay = document.getElementById('impulse-overlay');

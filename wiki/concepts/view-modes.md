@@ -3,12 +3,12 @@ title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
 sources: [src/core/messages.rs, src/server/renderer.rs, PRD-036]
-updated: 2026-06-14
+updated: 2026-06-15
 ---
 
 # View Modes
 
-What the **viewscreen** (server display) is showing. Captain-controlled.
+What the **viewscreen** (server display) is showing. Captain camera views are captain-controlled; Helm, Sensors, Navigation, and Comms can temporarily put their own overlay views on the screen.
 
 ## Wire shape
 
@@ -16,6 +16,9 @@ What the **viewscreen** (server display) is showing. Captain-controlled.
 pub enum ViewMode {
     Camera(ViewDirection),   // Fore | Aft | Port | Starboard
     Radar,                   // top-down asteroid map
+    SensorsRadar,
+    NavigationChart,
+    Comms,
 }
 ```
 
@@ -38,16 +41,28 @@ A top-centre text label on the viewscreen (`FORE` / `AFT` / `PORT` / `STARBOARD`
 
 The viewscreen renders the asteroid field as a top-down map using [`radar_dots()`](./radar-projection.md). Useful as an alternative tactical view.
 
+## Overlay toggle behaviour
+
+`ShipState` remembers the last camera direction requested by the captain. When Helm, Sensors, Navigation, or Comms requests an overlay view that is not currently active, the server switches to that overlay. When the same non-captain overlay is requested while it is already active, the server restores `Camera(last_captain_direction)`.
+
+Captain camera buttons are not toggles: pressing the currently-active captain camera direction leaves the view unchanged. Pressing a captain camera direction while an overlay is active updates the remembered captain direction and immediately restores the camera.
+
 ## Captain panel synchronisation
 
 The Captain console state push reports `view_direction` only for camera modes. When another console takes the viewscreen (`Radar`, `SensorsRadar`, `SystemChart`, `NavigationChart`, or `Comms`), `CaptainConsoleState.view_direction` is an empty string; `gui/captain-console.html` treats that as no selected direction so the Fore/Port/Starboard/Aft buttons lose their active highlight.
 
+HTML console panels derive their own `on_screen` flag from `SimSnapshot.view_mode`. The active non-captain console button shows `CLEAR SCREEN`; inactive buttons show `ON SCREEN`.
+
 ## Captain authority
 
-`SetView { mode }` is captain-only and InProgress-only. Server checks:
+`SetView { mode }` is authorized per view family and InProgress-only. Server checks:
 
 ```
-sender_token == captain_token()  &&  phase == InProgress
+Camera(_)       -> CaptainChair holder
+Radar           -> Helm holder
+SensorsRadar    -> Sensors holder
+NavigationChart -> Navigation holder
+Comms           -> Comms holder
 ```
 
 Ignored otherwise — silently, no error.

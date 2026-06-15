@@ -1507,7 +1507,7 @@
           state.navigationWaypoint = window.simState
             ? window.simState.navigationWaypoint
             : (snap.navigation_waypoint || null);
-          if (vd) state.currentView = vd;
+          state.currentView = vd || (vm && vm.kind) || state.currentView;
           // Red alert visual (issue #439): drives the phone bezel image swap.
           // `snap.red_alert` is a snake-cased serde field on SimSnapshot.
           const nextAlert = !!snap.red_alert;

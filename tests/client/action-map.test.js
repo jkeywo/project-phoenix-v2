@@ -140,6 +140,12 @@ describe('set_view', () => {
     ACTION_MAP.set_view({ action: 'set_view' }, send);
     expect(send).not.toHaveBeenCalled();
   });
+
+  it('sends non-camera view modes by kind', () => {
+    const send = mkSend();
+    ACTION_MAP.set_view({ action: 'set_view', direction: 'SensorsRadar' }, send);
+    expect(send).toHaveBeenCalledWith('SetView', { mode: { kind: 'SensorsRadar' } });
+  });
 });
 
 describe('toggle_red_alert', () => {

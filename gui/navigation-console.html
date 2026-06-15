@@ -858,6 +858,13 @@
       }
 
       updateWaypointButtons();
+      const onScreenBtn = document.getElementById('btn-on-screen');
+      if (onScreenBtn) {
+        const led = onScreenBtn.querySelector('.led');
+        const label = onScreenBtn.querySelector('.label');
+        if (led) led.className = 'led cyan' + (_onScreen ? ' on' : '');
+        if (label) label.textContent = _onScreen ? 'CLEAR SCREEN' : 'ON SCREEN';
+      }
       updateHiddenData(s);
       draw();
     }

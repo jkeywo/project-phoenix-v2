@@ -78,7 +78,7 @@ fn handle_set_view(
                 sessions.0.console_holder(required) == Some(ev.token.as_str())
             };
             if authorized {
-                ship.view_mode = mode;
+                ship.request_view_mode(mode);
             }
         }
     }
@@ -391,6 +391,73 @@ mod tests {
             "captain",
             ClientMessage::SetView {
                 mode: ViewMode::Camera(ViewDirection::Aft),
+            },
+        );
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Aft)
+        );
+    }
+
+    #[test]
+    fn active_non_captain_view_toggles_back_to_last_captain_camera() {
+        let mut app = test_app();
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::Identify {
+                token: "helm".into(),
+                name: "Hoshi".into(),
+            },
+        );
+        tick(&mut app);
+        push(&mut app, "captain", ClientMessage::StartGame);
+        tick(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::Camera(ViewDirection::Aft),
+            },
+        );
+        tick(&mut app);
+        app.world_mut()
+            .resource_mut::<Sessions>()
+            .0
+            .toggle_console("helm", Console::Helm)
+            .unwrap();
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::SetView {
+                mode: ViewMode::Radar,
+            },
+        );
+        tick(&mut app);
+        assert_eq!(app.world().resource::<ShipState>().view_mode, ViewMode::Radar);
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::SetView {
+                mode: ViewMode::Radar,
             },
         );
         tick(&mut app);

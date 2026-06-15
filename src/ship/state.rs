@@ -9,6 +9,7 @@ use bevy::prelude::Resource;
 pub struct ShipState {
     red_alert: bool,
     pub view_mode: ViewMode,
+    captain_view_direction: ViewDirection,
     /// Ship position (x, z)
     pub x: f32,
     pub z: f32,
@@ -33,6 +34,7 @@ impl ShipState {
         Self {
             red_alert: false,
             view_mode: ViewMode::Camera(ViewDirection::Fore),
+            captain_view_direction: ViewDirection::Fore,
             x: 0.0,
             z: 0.0,
             yaw: 0.0,
@@ -51,6 +53,37 @@ impl ShipState {
     /// alert texture swap and vignette pulse.
     pub fn red_alert(&self) -> bool {
         self.red_alert
+    }
+
+    pub fn request_view_mode(&mut self, mode: ViewMode) {
+        match mode {
+            ViewMode::Camera(direction) => {
+                self.captain_view_direction = direction.clone();
+                self.view_mode = ViewMode::Camera(direction);
+            }
+            other if self.view_mode == other => {
+                self.restore_captain_view();
+            }
+            other => {
+                self.view_mode = other;
+            }
+        }
+    }
+
+    pub fn show_view_mode(&mut self, mode: ViewMode) {
+        match mode {
+            ViewMode::Camera(direction) => {
+                self.captain_view_direction = direction.clone();
+                self.view_mode = ViewMode::Camera(direction);
+            }
+            other => {
+                self.view_mode = other;
+            }
+        }
+    }
+
+    pub fn restore_captain_view(&mut self) {
+        self.view_mode = ViewMode::Camera(self.captain_view_direction.clone());
     }
 
     pub fn snapshot(
@@ -167,6 +200,26 @@ mod tests {
         let mut s = ShipState::new();
         s.view_mode = ViewMode::Radar;
         assert_eq!(snap(&s, 100.0, (2, 2, 2)).view_mode, ViewMode::Radar);
+    }
+
+    #[test]
+    fn non_camera_request_toggles_back_to_last_captain_camera() {
+        let mut s = ShipState::new();
+        s.request_view_mode(ViewMode::Camera(ViewDirection::Aft));
+        s.request_view_mode(ViewMode::Radar);
+        assert_eq!(s.view_mode, ViewMode::Radar);
+        s.request_view_mode(ViewMode::Radar);
+        assert_eq!(s.view_mode, ViewMode::Camera(ViewDirection::Aft));
+    }
+
+    #[test]
+    fn captain_camera_request_updates_restore_target_even_from_overlay() {
+        let mut s = ShipState::new();
+        s.request_view_mode(ViewMode::Radar);
+        s.request_view_mode(ViewMode::Camera(ViewDirection::Port));
+        s.request_view_mode(ViewMode::NavigationChart);
+        s.request_view_mode(ViewMode::NavigationChart);
+        assert_eq!(s.view_mode, ViewMode::Camera(ViewDirection::Port));
     }
 
     #[test]

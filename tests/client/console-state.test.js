@@ -309,6 +309,10 @@ describe('buildCaptainConsoleState', () => {
     const s = parse(buildCaptainConsoleState({ objectives: ['obj-A'] }));
     expect(s.objectives).toEqual(['obj-A']);
   });
+
+  it('clears view_direction for non-camera views', () => {
+    expect(parse(buildCaptainConsoleState({ currentView: 'Radar' })).view_direction).toBe('');
+  });
 });
 
 describe('buildHelmConsoleState', () => {
@@ -458,6 +462,14 @@ describe('buildSensorsConsoleState', () => {
     expect(parse(buildSensorsConsoleState(EMPTY)).scan_range).toBe(SENSORS_RADAR_RANGE);
   });
 
+  it('on_screen is true when currentView is SensorsRadar', () => {
+    expect(parse(buildSensorsConsoleState({ currentView: 'SensorsRadar' })).on_screen).toBe(true);
+  });
+
+  it('on_screen is false for other views', () => {
+    expect(parse(buildSensorsConsoleState({ currentView: 'NavigationChart' })).on_screen).toBe(false);
+  });
+
   it('blips include color, name, stance, faction extra fields', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: 0,
@@ -470,17 +482,17 @@ describe('buildSensorsConsoleState', () => {
     expect(blips[0].color).toBeNull();
   });
 
-  it('marks sensor-visible ships selectable and asteroids untargetable by default', () => {
+  it('marks sensor-visible ships selectable and regions untargetable by default', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: 0,
       asteroids: [
         { uuid: 'ship-1', x: 10, z: 0, tags: ['ship'], target_tags: ['ship'] },
-        { uuid: 'rock-1', x: 20, z: 0, tags: ['asteroid'], target_tags: ['asteroid'] },
+        { uuid: 'region-1', x: 20, z: 0, tags: ['region'], target_tags: ['region'] },
       ],
     };
     const blips = parse(buildSensorsConsoleState(state)).blips;
     expect(blips.find(b => b.uuid === 'ship-1').selectable).toBe(true);
-    expect(blips.find(b => b.uuid === 'rock-1').selectable).toBe(false);
+    expect(blips.find(b => b.uuid === 'region-1').selectable).toBe(false);
   });
 
   it('rings active objective targets on the sensors radar even when tag-filtered out', () => {
@@ -558,6 +570,10 @@ describe('buildCommsConsoleState', () => {
   it('passes contacts through', () => {
     const contacts = [{ uuid: 'npc-1', name: 'Station Alpha', in_range: true }];
     expect(parse(buildCommsConsoleState({ commsContacts: contacts })).contacts).toEqual(contacts);
+  });
+
+  it('on_screen is true when currentView is Comms', () => {
+    expect(parse(buildCommsConsoleState({ currentView: 'Comms' })).on_screen).toBe(true);
   });
 });
 

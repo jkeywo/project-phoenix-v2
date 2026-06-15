@@ -458,6 +458,14 @@
       document.getElementById('btn-cancel-impulse').style.display =
         (s.impulse_charge_progress || 0) > 0 ? '' : 'none';
 
+      var onScreenBtn = document.getElementById('btn-on-screen');
+      if (onScreenBtn) {
+        var led = onScreenBtn.querySelector('.led');
+        var label = onScreenBtn.querySelector('.label');
+        if (led) led.className = 'led cyan' + (s.on_screen ? ' on' : '');
+        if (label) label.textContent = s.on_screen ? 'CLEAR SCREEN' : 'ON SCREEN';
+      }
+
       document.getElementById('cpx-badge').textContent =
         'CPX: ' + _complexity.toUpperCase() + ' ▾';
 

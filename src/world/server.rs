@@ -1485,8 +1485,18 @@ fn handle_show_on_screen(
 
         if let ClientMessage::ShowOnScreen { ref message_id } = ev.msg {
             if let Some(msg) = inbox.0.messages().into_iter().find(|m| &m.id == message_id) {
-                on_screen.0 = Some(msg.clone());
-                ship.view_mode = ViewMode::Comms;
+                let already_on_screen = matches!(ship.view_mode, ViewMode::Comms)
+                    && on_screen
+                        .0
+                        .as_ref()
+                        .is_some_and(|displayed| displayed.id == msg.id);
+                if already_on_screen {
+                    on_screen.0 = None;
+                    ship.restore_captain_view();
+                } else {
+                    on_screen.0 = Some(msg.clone());
+                    ship.show_view_mode(ViewMode::Comms);
+                }
             }
         }
     }

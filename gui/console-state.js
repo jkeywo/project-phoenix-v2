@@ -119,6 +119,8 @@ export const WEAPONS_RADAR_RANGE = 300.0;
 export const HELM_RADAR_RANGE    = 500.0;
 export const SENSORS_RADAR_RANGE = 500.0;
 
+const CAMERA_VIEWS = new Set(['Fore', 'Port', 'Starboard', 'Aft']);
+
 // ── Shared radar blip builder ───────────────────────────────────────────────
 
 /**
@@ -293,9 +295,10 @@ export function buildWeaponsConsoleState(state) {
  * @param {{ redAlert, currentView, objectives, hullPct, blips }} state
  */
 export function buildCaptainConsoleState(state) {
+  const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
   return JSON.stringify({
     red_alert:          state.redAlert    || false,
-    view_direction:     state.currentView || 'Fore',
+    view_direction:     viewDirection,
     view_mode:          'Camera',
     objectives:         state.objectives  || [],
     hull_integrity_pct: state.hullPct     || 100,
@@ -451,6 +454,7 @@ export function buildSensorsConsoleState(state) {
     scan_range:              range,
     complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
+    on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
     regions:                 state.regions || projectRadarRegions(
       buildRadarRegions(entities, state.objectives),
       state.shipX || 0,
@@ -483,6 +487,7 @@ export function buildCommsConsoleState(state) {
   return JSON.stringify({
     messages: state.commsMessages || [],
     contacts: state.commsContacts || [],
+    on_screen: state.currentView === 'Comms',
   });
 }
 

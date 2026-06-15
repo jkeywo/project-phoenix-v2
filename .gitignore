@@ -8,8 +8,8 @@ raw
 .obsidian
 .claude
 .codegraph
+.understand-anything
 .sandcastle
-.planning
 
 node_modules
 
@@ -33,3 +33,4 @@ tests/smoke/playwright-report
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+/.codegraph/daemon.pid

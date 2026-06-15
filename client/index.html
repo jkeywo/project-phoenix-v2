@@ -648,7 +648,8 @@
       // Sensors console iframe state
       sensorsTarget: null,
       // Shared Navigation waypoint from SimState
-      navigationWaypoint: null };
+      navigationWaypoint: null,
+      objectives: [] };
     let conn = null;
     // Station configs from server Welcome message (keyed by player count).
     let stationConfigs = {};
@@ -1538,7 +1539,6 @@
             state.repairTarget = repairTarget;
           }
           if (snap.console_hull) state.consoleHull = snap.console_hull;
-          pushWeaponsConsoleState();
           pushRepairConsoleState();
           pushSensorsConsoleState();
           pushNavigationConsoleState();
@@ -1738,6 +1738,8 @@
         case 'GameOver':
           state.phase = 'GameOver';
           break;
+        case 'ObjectiveSummary':
+          break; // fall through to scheduleRender
         default:
           return; // unknown — skip re-render
       }

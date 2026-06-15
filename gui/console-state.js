@@ -108,19 +108,28 @@ export function buildRadarRegions(entities, objectives = []) {
     .filter(Boolean);
 }
 
-function projectRadarRegions(regions, shipX, shipZ, range) {
+function projectRadarRegions(regions, shipX, shipZ, shipYaw, range, opts = {}) {
   const safeRange = Math.max(Number(range) || 0, 0.001);
-  return (regions || []).map(region => ({
-    ...region,
-    radar_x: (region.x - shipX) / safeRange,
-    radar_y: (region.z - shipZ) / safeRange,
-    scaled_radius: region.radius != null ? region.radius / safeRange : null,
-    scaled_inner_radius: region.inner_radius != null ? region.inner_radius / safeRange : null,
-    scaled_outer_radius: region.outer_radius != null ? region.outer_radius / safeRange : null,
-    scaled_half_extents: Array.isArray(region.half_extents)
-      ? [region.half_extents[0] / safeRange, region.half_extents[1] / safeRange]
-      : null,
-  }));
+  const rotate = opts.rotate !== false;
+  const cosY = rotate ? Math.cos(shipYaw || 0) : 0;
+  const sinY = rotate ? Math.sin(shipYaw || 0) : 0;
+  return (regions || []).map(region => {
+    const dx = region.x - shipX;
+    const dz = region.z - shipZ;
+    const radar_x = rotate ? (dx * cosY + dz * sinY) / safeRange : dx / safeRange;
+    const radar_y = rotate ? (dx * sinY - dz * cosY) / safeRange : dz / safeRange;
+    return {
+      ...region,
+      radar_x,
+      radar_y,
+      scaled_radius: region.radius != null ? region.radius / safeRange : null,
+      scaled_inner_radius: region.inner_radius != null ? region.inner_radius / safeRange : null,
+      scaled_outer_radius: region.outer_radius != null ? region.outer_radius / safeRange : null,
+      scaled_half_extents: Array.isArray(region.half_extents)
+        ? [region.half_extents[0] / safeRange, region.half_extents[1] / safeRange]
+        : null,
+    };
+  });
 }
 
 // ── Radar range constants (exported for tests) ──────────────────────────────
@@ -144,7 +153,7 @@ const CAMERA_VIEWS = new Set(['Fore', 'Port', 'Starboard', 'Aft']);
  * @param {object}   [opts]
  * @param {boolean}  [opts.rotate=true]
  *        true  → ship-local frame: rx = dx·cosY+dz·sinY, ry = dx·sinY−dz·cosY
- *                (weapons, helm)
+ *                (weapons, helm, sensors)
  *        false → world-axis frame: rx = dx, ry = dz
  *                (sensors — world-north-up, Z-down screen convention)
  * @param {function} [opts.extra]
@@ -425,7 +434,7 @@ export function buildSensorsConsoleState(state) {
     entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range,
     {
-      rotate: false,
+      rotate: true,
       shows: state.sensorsRadarShows || ['player', 'asteroid_field', 'ship', 'station', 'planet', 'star', 'region'],
       selects: state.sensorsRadarSelects || ['ship', 'station', 'planet'],
       extra: (a) => ({
@@ -474,7 +483,9 @@ export function buildSensorsConsoleState(state) {
       buildRadarRegions(entities, []),
       state.shipX || 0,
       state.shipZ || 0,
-      range
+      state.shipYaw || 0,
+      range,
+      { rotate: true }
     ),
     blips,
     target_uuid:        state.sensorsTarget || null,

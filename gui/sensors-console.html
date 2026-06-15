@@ -41,10 +41,12 @@
       flex: 1; min-height: 0;
       display: flex; align-items: center; justify-content: center;
     }
-    .radar-col .radar {
+    .radar-col .radar-surround-frame {
       aspect-ratio: 1/1; height: 100%; width: auto;
       max-height: 680px; max-width: 680px;
+      display: flex; align-items: center; justify-content: center;
     }
+    .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }
     .radar canvas {
       position: absolute; inset: 0;
       width: 100%; height: 100%;
@@ -224,7 +226,7 @@
       .side-rail { display: none; }
 
       .radar-col .radar-wrap { min-height: 0; }
-      .radar-col .radar      { width: 100%; height: auto; max-height: none; max-width: none; }
+      .radar-col .radar-surround-frame { width: 100%; height: auto; max-height: none; max-width: none; }
 
       .radar-col > .readout    { padding: .4rem .55rem; }
       .radar-col > .readout .v { font-size: 1.2rem; }
@@ -269,20 +271,22 @@
 
         <section class="radar-col">
           <div class="radar-wrap">
-            <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
+            <div class="radar-surround-frame">
               <img class="radar-surround" src="src_assets/helm_console/radar-surround.png" alt="">
-              <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
-              <div class="scan"></div>
-              <div class="crosshair-h"></div>
-              <div class="crosshair-v"></div>
-              <div class="range-label" id="rl-33"
-                   style="top:50%;left:8%;transform:translateY(-50%)">400</div>
-              <div class="range-label" id="rl-66"
-                   style="top:50%;left:21%;transform:translateY(-50%)">800</div>
-              <div class="range-label" id="rl-100"
-                   style="top:50%;left:34%;transform:translateY(-50%)">1200</div>
-              <canvas id="radar-canvas"></canvas>
-            </div>
+              <div class="radar" style="aspect-ratio:1/1;">
+                <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
+                <div class="scan"></div>
+                <div class="crosshair-h"></div>
+                <div class="crosshair-v"></div>
+                <div class="range-label" id="rl-33"
+                     style="top:50%;left:8%;transform:translateY(-50%)">400</div>
+                <div class="range-label" id="rl-66"
+                     style="top:50%;left:21%;transform:translateY(-50%)">800</div>
+                <div class="range-label" id="rl-100"
+                     style="top:50%;left:34%;transform:translateY(-50%)">1200</div>
+                <canvas id="radar-canvas"></canvas>
+              </div><!-- /.radar -->
+            </div><!-- /.radar-surround-frame -->
           </div>
 
           <div class="readout">
@@ -292,7 +296,7 @@
             <div class="spacer"></div>
             <div class="sub" id="contact-sub">
               8 CONTACTS<br>
-              <span style="color:var(--cyan)">WORLD FIXED</span>
+              <span style="color:var(--cyan)">SHIP RELATIVE</span>
             </div>
           </div>
         </section>
@@ -439,7 +443,7 @@
       var blips = s.blips || [];
       document.getElementById('contact-sub').innerHTML =
         blips.length + ' CONTACT' + (blips.length !== 1 ? 'S' : '') +
-        '<br><span style="color:var(--cyan)">WORLD FIXED</span>';
+        '<br><span style="color:var(--cyan)">SHIP RELATIVE</span>';
 
       if (_radarWidget) {
         _radarWidget.update({
@@ -619,8 +623,7 @@
       if (!canvas || typeof RadarWidget === 'undefined') return null;
       return new RadarWidget(canvas, {
         consoleId:    'sensors',
-        orientation:  'world_fixed',
-        iconBasePath: 'src_assets/radar_icons/Icon-',
+        orientation:  'ship_up',
         onBlipTap: function(uuid) {
           if (!_state) return;
           var blip = (_state.blips || []).find(function(b){ return b.uuid === uuid; });

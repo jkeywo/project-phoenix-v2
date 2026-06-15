@@ -574,7 +574,14 @@ html, body {
   letter-spacing: 0.18em;
 }
 
-/* radar-surround.png overlay — sits above the radar canvas, pointer-events off */
+/* radar-surround-frame — outer wrapper; surround.png fills it, inner .radar is 80% centered */
+.radar-surround-frame {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .radar-surround {
   position: absolute;
   inset: 0;

@@ -28,7 +28,8 @@
     .hero { gap: 18px; }
 
     .radar-col .radar-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-    .radar-col .radar { aspect-ratio: 1/1; width: auto; height: 100%; max-height: 720px; max-width: 720px; }
+    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: 100%; max-height: 720px; max-width: 720px; display: flex; align-items: center; justify-content: center; }
+    .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }
 
     .ctrl-col .stick-area { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
     .ctrl-col .btn-row { display: flex; gap: 12px; width: 100%; }
@@ -290,7 +291,7 @@
     .readout .v { font-size: 24px; }
     .radar-col > .readout { padding: 6px 14px; }
     .radar-col > .readout .v { font-size: 18px; }
-    .radar-col .radar { max-height: 50vh; max-width: 50vh; }
+    .radar-col .radar-surround-frame { max-height: 50vh; max-width: 50vh; }
     .helm-readout-overlay { font-size: 10px; }
     .helm-readout-overlay .v { font-size: 11px; }
     .readout-hdg { top: 8px; left: 12%; }
@@ -337,7 +338,7 @@
     .side-rail { display: none; }
 
     .radar-col .radar-wrap { min-height: 35vh; }
-    .radar-col .radar { max-height: none; max-width: none; }
+    .radar-col .radar-surround-frame { max-height: none; max-width: none; }
     .radar-col > .readout { padding: 0.4rem 0.6rem; }
     .radar-col > .readout .v { font-size: 1.25rem; }
 
@@ -394,8 +395,9 @@
 
           <section class="radar-col">
             <div class="radar-wrap">
-              <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
+              <div class="radar-surround-frame">
                 <img class="radar-surround" src="src_assets/helm_console/radar-surround.png" alt="">
+                <div class="radar" style="aspect-ratio:1/1;">
                 <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
                 <div class="scan"></div>
                 <div class="crosshair-h"></div>
@@ -426,7 +428,8 @@
                   <span class="k">LOCK</span>
                   <span class="id" id="lock-id">A-014</span>
                 </div>
-              </div>
+                </div><!-- /.radar -->
+              </div><!-- /.radar-surround-frame -->
             </div>
 
             <div class="readout">

@@ -103,7 +103,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install Node dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run editor tests
         run: npx vitest run

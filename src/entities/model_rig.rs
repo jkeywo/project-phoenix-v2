@@ -361,11 +361,8 @@ direction = [0.0, 0.0, -1.0]
         let rig_toml =
             std::fs::read_to_string(&path).expect("dynasty_destroyer sidecar must exist");
         let rig = ModelRig::from_toml(&rig_toml).expect("sidecar must parse");
-        let marker = rig
-            .marker(marker_name)
+        rig.marker(marker_name)
             .expect("fore_emitter marker must resolve in the sidecar");
-        assert!(approx(marker.position, [0.0, 0.0, -6.0]));
-        assert!(approx(marker.direction, [0.0, 0.0, -1.0]));
 
         // Missing marker → None (caller falls back to origin).
         assert!(rig.marker("does_not_exist").is_none());

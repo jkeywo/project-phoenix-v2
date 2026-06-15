@@ -106,7 +106,7 @@ describe('buildBlips', () => {
     });
   });
 
-  describe('rotate=false (world-axis frame, sensors)', () => {
+  describe('rotate=false (world-axis frame, navigation)', () => {
     it('radar_x = dx/range, radar_y = dz/range', () => {
       const range = 100;
       const blips = buildBlips([{ uuid: 'w', x: 30, z: 40, radius: 1, tags: [] }], 0, 0, 0, range, { rotate: false });
@@ -514,6 +514,37 @@ describe('buildSensorsConsoleState', () => {
     const blips = parse(buildSensorsConsoleState(state)).blips;
     expect(blips.find(b => b.uuid === 'ship-1').selectable).toBe(true);
     expect(blips.find(b => b.uuid === 'region-1').selectable).toBe(false);
+  });
+
+  it('projects blips in the same ship-local frame as helm and weapons', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: Math.PI / 2, sensorsRadarRange: 100,
+      asteroids: [{ uuid: 'ahead-after-turn', x: 100, z: 0, radius: 1, tags: ['ship'], target_tags: ['ship'] }],
+    };
+    const blip = parse(buildSensorsConsoleState(state)).blips[0];
+    expect(blip.radar_x).toBeCloseTo(0);
+    expect(blip.radar_y).toBeCloseTo(1);
+  });
+
+  it('projects asteroid-field overlays with the same ship-local frame as blips', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: Math.PI / 2, sensorsRadarRange: 100,
+      asteroids: [{
+        uuid: 'field-1',
+        x: 100,
+        z: 0,
+        tags: ['asteroid_field'],
+        radius: 40,
+        inner_radius: 20,
+      }],
+    };
+    const s = parse(buildSensorsConsoleState(state));
+    const blip = s.blips.find(b => b.uuid === 'field-1');
+    const region = s.regions.find(r => r.uuid === 'field-1');
+    expect(region.radar_x).toBeCloseTo(blip.radar_x);
+    expect(region.radar_y).toBeCloseTo(blip.radar_y);
+    expect(region.scaled_outer_radius).toBeCloseTo(0.4);
+    expect(region.scaled_inner_radius).toBeCloseTo(0.2);
   });
 
   it('excludes objective_marker entities from the sensors radar', () => {

@@ -52,6 +52,43 @@ test('sensors console: contact sub shows blip count', async ({ page }) => {
   await expect(page.locator('#contact-sub')).toContainText('2 CONTACTS');
 });
 
+test('sensors console: live region overlays survive the demo animation tick', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate(() => {
+    const widgetCtor = (window as any).RadarWidget;
+    const originalUpdate = widgetCtor.prototype.update;
+    (window as any).__radarRegionCounts = [];
+    widgetCtor.prototype.update = function(data: any) {
+      (window as any).__radarRegionCounts.push(data?.regions?.length ?? 0);
+      return originalUpdate.call(this, data);
+    };
+  });
+
+  const withRegion = {
+    ...NOMINAL_STATE,
+    regions: [{
+      uuid: 'field-1',
+      shape: 'torus',
+      radar_x: 0.1,
+      radar_y: -0.2,
+      scaled_outer_radius: 0.4,
+      scaled_inner_radius: 0.2,
+      color: [0.52, 0.32, 0.18],
+    }],
+  };
+
+  await page.evaluate(
+    (s) => (window as any).__updateConsole('Sensors', JSON.stringify(s)),
+    withRegion,
+  );
+  await page.waitForTimeout(1100);
+
+  const regionCounts = await page.evaluate(
+    () => (window as any).__radarRegionCounts,
+  );
+  expect(regionCounts).toEqual([1]);
+});
+
 test('sensors console: target panel shows NO TARGET when no target set', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 

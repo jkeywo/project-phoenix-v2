@@ -1,4 +1,4 @@
-import { isSupported, pickProjectRoot, getProjectRoot, readFile, writeFile, listDirectory, onRootChanged } from './project-root.js';
+import { isSupported, pickProjectRoot, getProjectRoot, readFile, writeFile, listDirectory, readBinaryFile, onRootChanged } from './project-root.js';
 import { ModeShell } from './mode-shell.js';
 import { stringifyWorldToml } from './world-toml.js';
 import { stringifyEntityToml } from './entity-toml.js';
@@ -10,6 +10,7 @@ import { confirmSaveIfCommented, resetCommentWarningOnRootChange } from './save-
 import { mountScenarioMode } from './scenario-mode.js';
 import { mountEntityMode } from './entity-mode-view.js';
 import { mountDefinitionsMode } from './definitions-mode-view.js';
+import { mountModelsMode } from './models-mode-view.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -35,6 +36,11 @@ const saveFlow = new SaveFlow(
     world: stringifyWorldToml,
     entity: stringifyEntityToml,
     definitions: stringifyDefinitionsPayload,
+    // Models Mode caches a ready-made TOML string (see models-mode-view.js);
+    // this passthrough lets a global Save All write it without crashing or
+    // mis-routing to the entity stringifier. Models' own Save buttons write
+    // directly via writeFile and do NOT depend on this path.
+    models: (tomlString) => tomlString,
   },
   writeFile,
   invalidationBus,
@@ -57,6 +63,7 @@ async function init() {
   }
 
   setupModeSwitcher();
+  setupUnsavedGuard();
   setupPickRoot();
   setupChangeRoot();
   setupGlobalUndoShortcuts();
@@ -96,6 +103,16 @@ async function init() {
     });
   }
 
+  const modelsHost = document.getElementById('models-mode-root');
+  if (modelsHost) {
+    mountModelsMode({
+      host: modelsHost,
+      modeShell,
+      saveFlow,
+      io: { readFile, writeFile, listDirectory, readBinaryFile, onRootChanged },
+    });
+  }
+
   // Make the persisted root handle available for FSA reads/writes.
   await getProjectRoot();
 }
@@ -108,6 +125,7 @@ const MODE_PANE_IDS = {
   World: 'world-mode-root',
   Entity: 'entity-mode-root',
   Definitions: 'definitions-mode-root',
+  Models: 'models-mode-root',
 };
 
 function setupModeSwitcher() {
@@ -125,6 +143,19 @@ function setupModeSwitcher() {
         pane.classList.toggle('hidden', m !== mode);
       }
     });
+  });
+}
+
+// Trigger the browser's native "unsaved changes" prompt on tab close /
+// reload whenever ANY mode (World/Entity/Definitions/Models) has a dirty
+// file tracked in modeShell. Per the platform contract, calling
+// preventDefault and setting returnValue is what shows the prompt.
+function setupUnsavedGuard() {
+  window.addEventListener('beforeunload', (e) => {
+    if (!modeShell.hasAnyDirty()) return;
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
   });
 }
 

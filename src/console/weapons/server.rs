@@ -1974,6 +1974,7 @@ mod tests {
                             auto_arc_deg: 240.0,
                             beam_range: 0.0,
                             shield_pierce: None,
+                            marker: None,
                         },
                         crate::entity_config::PhaserBankConfig {
                             id: "starboard".into(),
@@ -1982,6 +1983,7 @@ mod tests {
                             auto_arc_deg: 240.0,
                             beam_range: 0.0,
                             shield_pierce: None,
+                            marker: None,
                         },
                     ],
                 },

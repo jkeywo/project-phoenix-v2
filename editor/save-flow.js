@@ -67,6 +67,13 @@ export class SaveFlow {
       // pre-Slice-6 fixtures working unchanged.
       return this._stringifyFunctions.definitions || this._stringifyFunctions.entity;
     }
+    if (mode === 'Models') {
+      // Models Mode caches a ready-made TOML *string* via setContent, so its
+      // stringifier is a passthrough. Without one, a Save-All over a dirty
+      // Models file would mis-route to the entity stringifier. Falls back to
+      // a passthrough when not supplied so older fixtures can't crash.
+      return this._stringifyFunctions.models || ((s) => s);
+    }
     return this._stringifyFunctions.entity;
   }
 
@@ -115,7 +122,10 @@ export class SaveFlow {
       return { ok: false, errors: [e.message], warnings: [] };
     }
 
-    const validationResults = validateFile(path, parsedContent);
+    // Models mode caches a ready-made TOML *string* (not a parsed object),
+    // so validateFile would emit a junk "Root value must be an object"
+    // warning. Skip validation for Models; other modes are unchanged.
+    const validationResults = mode === 'Models' ? [] : validateFile(path, parsedContent);
     const warnings = validationResults.map((r) => r.message);
 
     if (this._commentConfirm && this._readFile) {

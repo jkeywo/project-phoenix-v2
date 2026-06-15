@@ -768,6 +768,62 @@ fn radar_icon_from_tags(tags: &[String]) -> String {
     }
 }
 
+fn upsert_world_entity(world: &mut WorldResource, snapshot: EntitySnapshot) {
+    if let Some(existing) = world.0.entities.iter_mut().find(|e| e.uuid == snapshot.uuid) {
+        *existing = snapshot;
+    } else {
+        world.0.entities.push(snapshot);
+    }
+}
+
+fn snapshot_from_entity_config(
+    uuid: String,
+    id: Option<String>,
+    config: &crate::entity_config::EntityConfig,
+    position: Vec3,
+) -> EntitySnapshot {
+    let mut snapshot = EntitySnapshot {
+        uuid,
+        id,
+        name: config.name.clone(),
+        position: Some([position.x, position.y, position.z]),
+        tags: config.tags.clone(),
+        ..EntitySnapshot::default()
+    };
+
+    if let Some(radar) = &config.radar_appearance {
+        if radar.colour.len() >= 3 {
+            snapshot.colour = Some([radar.colour[0], radar.colour[1], radar.colour[2]]);
+        }
+        if let Some(radius) = radar.radius {
+            snapshot.radius = Some(radius);
+        }
+        snapshot.radar_world_size = radar.world_size;
+        snapshot.radar_icon = Some(
+            radar
+                .icon
+                .clone()
+                .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags)),
+        );
+    } else {
+        snapshot.radar_icon = Some(radar_icon_from_tags(&snapshot.tags));
+    }
+
+    if let Some(collider) = &config.collider {
+        if snapshot.radius.is_none() {
+            snapshot.radius = Some(collider.radius);
+        }
+    }
+
+    if let Some(target) = &config.target {
+        snapshot.target_tags = target.tags.clone();
+        snapshot.threat_level = Some(target.threat_level.as_str().to_string());
+        snapshot.target_description = target.description.clone();
+    }
+
+    snapshot
+}
+
 /// For non-asteroid entities carrying `EntityUuid`:
 /// - New entities (present in ECS, absent from `reported`) emit `EntitySpawned`
 ///   and are added to `WorldResource.entities` so they appear on reconnect `Welcome`.
@@ -925,7 +981,7 @@ fn reconcile_runtime_entities(
                     snapshot.threat_level = Some(t.0.threat_level.as_str().to_string());
                     snapshot.target_description = t.0.description.clone();
                 }
-                world.0.entities.push(snapshot);
+                upsert_world_entity(&mut world, snapshot);
             }
         }
         registry.seeded = true;
@@ -1025,7 +1081,7 @@ fn reconcile_runtime_entities(
                     snapshot.threat_level = Some(t.0.threat_level.as_str().to_string());
                     snapshot.target_description = t.0.description.clone();
                 }
-                world.0.entities.push(snapshot.clone());
+                upsert_world_entity(&mut world, snapshot.clone());
                 outbox
                     .0
                     .push((Target::All, ServerMessage::EntitySpawned { snapshot }));
@@ -1062,7 +1118,7 @@ fn setup_world(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    _world: ResMut<WorldResource>,
+    mut world: ResMut<WorldResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
     let Some(world_config) = world_config else {
@@ -1121,8 +1177,12 @@ fn setup_world(
             &mut commands,
             &config,
             pos,
-            uuid,
+            uuid.clone(),
             entity_inst.id.clone(),
+        );
+        upsert_world_entity(
+            &mut world,
+            snapshot_from_entity_config(uuid, entity_inst.id.clone(), &config, pos),
         );
     }
 
@@ -1475,6 +1535,73 @@ struct RenderProcessed;
 #[derive(Component)]
 struct PendingSceneHandle(Handle<bevy::scene::Scene>);
 
+/// Read a model-rig sidecar TOML for `path`.
+///
+/// - **Native**: `std::fs::read_to_string` (returns `None` when absent).
+/// - **WASM**: checks the pending-sidecar queue populated by JS via
+///   `wasm_push_sidecar_toml`; fires a deferred JS fetch on first miss and
+///   returns `None` until the fetch resolves. An empty pushed string (404)
+///   resolves to `Some(String::new())`, which parses to an identity rig.
+fn load_sidecar_toml(path: &str) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::fs::read_to_string(path).ok()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::config_cache::pop_pending_sidecar_toml(path).or_else(|| {
+            crate::config_cache::request_sidecar_fetch(path.to_string());
+            None
+        })
+    }
+}
+
+/// Resolve a model's rig sidecar to a `ModelRig`.
+///
+/// Returns:
+/// - `Some(rig)` once the sidecar is resolved — either parsed, or an identity
+///   rig when the sidecar is genuinely absent (native: file missing; wasm: JS
+///   pushed an empty string for a 404) or fails to parse.
+/// - `None` while a wasm fetch is still in flight (caller retries next frame).
+///   On native this never returns `None` (the filesystem read is synchronous).
+fn resolve_sidecar_rig(
+    model_path: &str,
+    variant: Option<&str>,
+) -> Option<crate::model_rig::ModelRig> {
+    let path = crate::model_rig::sidecar_path(model_path, variant);
+    match load_sidecar_toml(&path) {
+        Some(toml_str) => {
+            if toml_str.trim().is_empty() {
+                // Absent (404 / empty) → identity rig so the model still renders.
+                Some(crate::model_rig::ModelRig::default())
+            } else {
+                match crate::model_rig::ModelRig::from_toml(&toml_str) {
+                    Ok(rig) => Some(rig),
+                    Err(e) => {
+                        // A present-but-malformed sidecar degrades to an identity
+                        // rig so the model still renders, but we surface the parse
+                        // error so an authoring typo isn't silently invisible.
+                        bevy::log::warn!("rig sidecar {path} failed to parse: {e}; using identity rig");
+                        Some(crate::model_rig::ModelRig::default())
+                    }
+                }
+            }
+        }
+        None => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                // Native: a missing file is "genuinely absent" → identity rig.
+                Some(crate::model_rig::ModelRig::default())
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                // WASM: fetch still in flight → retry next frame.
+                None
+            }
+        }
+    }
+}
+
 /// Add visual meshes and materials to spawned entities that have a `[mesh]`
 /// section but no `RenderProcessed` yet. When `cfg.model` is set, loads a GLB
 /// scene instead of creating a procedural shape — but defers insertion until
@@ -1530,9 +1657,38 @@ fn render_spawned_entities(
                     h
                 }
             };
+            // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
+            // The sidecar resolves to an identity rig when genuinely absent, so
+            // models without a sidecar still render (visually unchanged).
             if scenes.get(&scene).is_some() {
+                let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
+                    Some(rig) => rig,
+                    None => {
+                        // Sidecar fetch still in flight (wasm) — retry next frame.
+                        continue;
+                    }
+                };
+
                 ec.remove::<PendingSceneHandle>();
-                ec.insert(bevy::scene::SceneRoot(scene));
+
+                // Composition: entityTransform ∘ baseRig ∘ model. The base rig
+                // is applied INNER to the per-entity transform by spawning the
+                // GLB SceneRoot as a CHILD carrying `base_bevy_transform()`,
+                // while the per-entity Transform (spawn position + per-entity
+                // scale/rotation) stays on the parent below. Spawning the scene
+                // on a child (instead of the entity) also keeps the base rig's
+                // non-uniform scale from composing badly with the per-entity
+                // rotation on a single Transform.
+                let base_tf = rig.base_bevy_transform();
+                let scene_for_child = scene.clone();
+                ec.with_children(|parent| {
+                    parent.spawn((bevy::scene::SceneRoot(scene_for_child), base_tf));
+                });
+
+                // Attach the resolved marker map so downstream systems (weapons,
+                // exhaust, …) can resolve mount points by name.
+                ec.insert(crate::model_rig::ModelMarkers(rig.markers.clone()));
+
                 rendered = true;
             }
         } else {
@@ -1936,6 +2092,66 @@ mod tests {
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
+    }
+
+    #[test]
+    fn entity_config_radar_icon_flows_into_world_snapshot() {
+        let config = crate::entity_config::EntityConfig {
+            name: Some("Sun".into()),
+            tags: vec!["star".into(), "center".into()],
+            collider: Some(crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Ball,
+                radius: 50.0,
+                length: 0.0,
+            }),
+            radar_appearance: Some(crate::entity_config::RadarAppearanceConfig {
+                colour: vec![1.0, 0.85, 0.3],
+                radius: Some(50.0),
+                world_size: None,
+                icon: Some("star".into()),
+            }),
+            ..Default::default()
+        };
+
+        let snapshot = snapshot_from_entity_config(
+            "sun-uuid".into(),
+            None,
+            &config,
+            Vec3::new(0.0, 0.0, 0.0),
+        );
+
+        assert_eq!(snapshot.name.as_deref(), Some("Sun"));
+        assert_eq!(snapshot.tags, vec!["star", "center"]);
+        assert_eq!(snapshot.radius, Some(50.0));
+        assert_eq!(snapshot.colour, Some([1.0, 0.85, 0.3]));
+        assert_eq!(snapshot.radar_icon.as_deref(), Some("star"));
+    }
+
+    #[test]
+    fn world_entity_upsert_replaces_existing_snapshot_for_same_uuid() {
+        let mut world = WorldResource(WorldData::default());
+        upsert_world_entity(
+            &mut world,
+            EntitySnapshot {
+                uuid: "same".into(),
+                tags: vec!["asteroid".into()],
+                radar_icon: Some("asteroid".into()),
+                ..Default::default()
+            },
+        );
+        upsert_world_entity(
+            &mut world,
+            EntitySnapshot {
+                uuid: "same".into(),
+                tags: vec!["star".into()],
+                radar_icon: Some("star".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(world.0.entities.len(), 1);
+        assert_eq!(world.0.entities[0].tags, vec!["star"]);
+        assert_eq!(world.0.entities[0].radar_icon.as_deref(), Some("star"));
     }
 
     #[test]

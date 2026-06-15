@@ -1502,3 +1502,128 @@ form {
 }
 .validation-badge-error   { color: #ff5c5c; }
 .validation-badge-warning { color: #f0c674; }
+
+/* ── Models Mode (GLB rig editor) ─────────────────────────────────────── */
+
+.models-three-pane {
+  display: grid;
+  grid-template-columns: 220px 320px 1fr;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+}
+.models-pane {
+  background: #1e2126;
+  border: 1px solid #2f323a;
+  border-radius: 4px;
+  overflow: auto;
+  min-height: 0;
+}
+.models-pane-left   { padding: 6px; }
+.models-pane-center { padding: 8px; }
+.models-pane-right  { padding: 0; position: relative; display: flex; flex-direction: column; }
+
+.models-pane .placeholder {
+  color: #777; font-size: 12px; padding: 12px; font-style: italic;
+}
+
+.models-section-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: #aaa; margin: 10px 0 6px; font-weight: 600;
+}
+.models-section-title:first-child { margin-top: 0; }
+
+/* Model + variant lists */
+.models-file-list,
+.models-variant-list { display: flex; flex-direction: column; gap: 1px; }
+.models-file-row,
+.models-variant-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: 3px;
+  color: #ccc; font-size: 12px; cursor: pointer;
+}
+.models-file-row:hover,
+.models-variant-row:hover { background: #2a2d34; }
+.models-file-row-active,
+.models-variant-row-active { background: #3a4a66; color: #fff; }
+.models-variant-label {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dirty-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #d6a64a; flex-shrink: 0;
+}
+
+.models-new-variant,
+.models-add-marker {
+  display: flex; gap: 4px; margin-top: 8px;
+}
+.models-new-variant-input,
+.models-add-marker-input {
+  flex: 1; min-width: 0;
+  background: #1a1c20; border: 1px solid #333740; color: #ddd;
+  padding: 3px 6px; border-radius: 3px; font-size: 12px;
+}
+
+/* Buttons */
+.models-btn {
+  background: #2c2f36; border: 1px solid #3a3d44; color: #ccc;
+  padding: 3px 10px; border-radius: 3px; cursor: pointer; font-size: 12px;
+}
+.models-btn:hover { background: #3a3d44; }
+.models-btn-primary { background: #3a4a66; color: #fff; border-color: #45567a; }
+.models-btn-primary:hover { background: #45567a; }
+.models-btn-dirty { box-shadow: 0 0 0 1px #d6a64a inset; }
+
+/* Base transform form */
+.models-base-form { display: flex; flex-direction: column; gap: 6px; }
+.models-form-row { display: flex; align-items: center; gap: 4px; }
+.models-form-label { width: 96px; color: #aaa; font-size: 11px; flex-shrink: 0; }
+.models-form-input {
+  width: 0; flex: 1; min-width: 40px;
+  background: #1a1c20; border: 1px solid #333740; color: #ddd;
+  padding: 3px 4px; border-radius: 3px; font-size: 11px; font-family: monospace;
+}
+
+/* Gizmo mode toggle */
+.models-gizmo-toggle { display: flex; gap: 2px; margin-bottom: 6px; }
+.models-gizmo-btn {
+  background: #2a2d34; border: 1px solid #333740; color: #aaa;
+  padding: 3px 10px; cursor: pointer; font-size: 11px; border-radius: 3px;
+}
+.models-gizmo-btn.active { background: #3a4a66; color: #fff; }
+
+/* Marker list */
+.models-marker-list { display: flex; flex-direction: column; gap: 2px; }
+.models-marker-row {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px; border-radius: 3px; background: #23262c;
+}
+.models-marker-row-active { background: #3a4a66; }
+.models-marker-label {
+  flex: 1; color: #ddd; font-size: 12px; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.models-marker-btn {
+  background: #2c2f36; border: 1px solid #3a3d44; color: #bbb;
+  padding: 1px 6px; border-radius: 3px; cursor: pointer; font-size: 10px;
+}
+.models-marker-btn:hover { background: #3a3d44; }
+.models-marker-btn-delete:hover { background: #5a2d2d; color: #fff; }
+
+.models-save-row { margin-top: 12px; }
+
+/* Right pane: canvas + extents */
+.models-rig-canvas {
+  flex: 1; min-height: 240px; width: 100%;
+  background: #0c0d10; overflow: hidden;
+}
+.models-rig-canvas canvas { display: block; }
+.models-canvas-error { padding: 12px; color: #d66; font-size: 12px; font-family: monospace; }
+.models-extents-display {
+  flex-shrink: 0;
+  background: rgba(0,0,0,0.6); color: #ccc;
+  font-size: 11px; padding: 6px 8px; font-family: monospace;
+  border-top: 1px solid #2f323a;
+}
+.models-extents-row { line-height: 1.5; }

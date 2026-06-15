@@ -99,6 +99,17 @@ thread_local! {
     /// duplicate JS fetch calls.
     static WORLD_FETCH_REQUESTED: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
+
+    /// Queue of runtime-loaded model-rig sidecar TOML strings pushed by JS via
+    /// `wasm_push_sidecar_toml` in response to a sidecar fetch request. Keyed
+    /// by sidecar path. Kept separate from the world queue so the two fetch
+    /// flows never alias even though they share the same JS fetch callback.
+    static PENDING_SIDECAR_TOML: RefCell<HashMap<String, String>> =
+        RefCell::new(HashMap::new());
+
+    /// Set of sidecar paths already requested to avoid duplicate JS fetches.
+    static SIDECAR_FETCH_REQUESTED: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
 }
 
 // ── Public WASM API ──────────────────────────────────────────────────────────
@@ -373,6 +384,50 @@ pub fn request_world_fetch(path: String) {
     });
 }
 
+// ── Model-rig sidecar fetch bridge (mirrors the world-toml flow) ─────────────
+//
+// The sidecar fetch reuses the same JS fetch callback registered via
+// `set_world_fetch_callback` (server.html's callback simply `fetch(path)`s any
+// path, so a single callback serves both world TOMLs and rig sidecars). Only
+// the pending-queue + requested-set are sidecar-specific so the two flows stay
+// independent.
+
+/// Push a runtime-fetched sidecar TOML into the pending queue.
+///
+/// Called by JS after it has fetched a rig sidecar at a path that Rust
+/// requested via `request_sidecar_fetch`. An empty string signals "absent"
+/// (404) so the caller can proceed with an identity rig and stop re-requesting.
+#[cfg(target_arch = "wasm32")]
+pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
+    PENDING_SIDECAR_TOML.with(|m| {
+        m.borrow_mut().insert(path, toml_str);
+    });
+}
+
+/// Take the TOML for a previously-requested sidecar path, if available.
+///
+/// Returns `Some(toml)` (possibly an empty string meaning "absent") and removes
+/// the entry; returns `None` if the JS fetch has not yet delivered the TOML.
+#[cfg(target_arch = "wasm32")]
+pub fn pop_pending_sidecar_toml(path: &str) -> Option<String> {
+    PENDING_SIDECAR_TOML.with(|m| m.borrow_mut().remove(path))
+}
+
+/// Fire the JS fetch callback for a sidecar `path` if not already requested.
+#[cfg(target_arch = "wasm32")]
+pub fn request_sidecar_fetch(path: String) {
+    let already = SIDECAR_FETCH_REQUESTED.with(|s| s.borrow().contains(&path));
+    if already {
+        return;
+    }
+    SIDECAR_FETCH_REQUESTED.with(|s| s.borrow_mut().insert(path.clone()));
+    WORLD_FETCH_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&path));
+        }
+    });
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsValue> {
     match crate::faction::parse_faction_config(&toml_str) {
@@ -594,6 +649,15 @@ pub fn pop_pending_world_toml(_path: &str) -> Option<String> {
 }
 #[cfg(not(target_arch = "wasm32"))]
 pub fn request_world_fetch(_path: String) {}
+
+// Native no-ops for the sidecar-fetch helpers (native reads sidecars via
+// std::fs directly in `load_sidecar_toml`).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pop_pending_sidecar_toml(_path: &str) -> Option<String> {
+    None
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn request_sidecar_fetch(_path: String) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_load_faction(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {

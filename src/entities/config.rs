@@ -85,6 +85,12 @@ pub struct MeshConfig {
     /// When set, overrides the procedural shape rendering.
     #[serde(default)]
     pub model: Option<String>,
+    /// Optional rig-sidecar variant name. The model's rig sidecar is looked
+    /// up alongside the `.glb` as `<stem>.<variant>.toml`. When absent the
+    /// reserved default name `"model"` is used (i.e. `<stem>.model.toml`).
+    /// `Some("weathered")` selects `<stem>.weathered.toml`.
+    #[serde(default)]
+    pub variant: Option<String>,
     pub shape: MeshShape,
     /// RGB colour `[r, g, b]` in linear 0–1 range.
     pub colour: Vec<f32>,
@@ -310,6 +316,12 @@ pub struct PhaserBankConfig {
     /// apply time.
     #[serde(default)]
     pub shield_pierce: Option<f32>,
+    /// Optional rig-marker name linking this bank to a mount point in the
+    /// model's rig sidecar (`[markers.<name>]`). When resolvable, downstream
+    /// systems may use the marker's position/direction as the beam origin;
+    /// when absent or unresolved they fall back to the hull-offset default.
+    #[serde(default)]
+    pub marker: Option<String>,
 }
 
 /// Stable identifier for a torpedo tube, parsed verbatim from the TOML
@@ -333,6 +345,11 @@ pub struct TorpedoTubeConfig {
     /// global `[torpedoes] load_time` when absent.
     #[serde(default)]
     pub load_time: Option<f32>,
+    /// Optional rig-marker name linking this tube to a mount point in the
+    /// model's rig sidecar (`[markers.<name>]`). When absent or unresolved,
+    /// callers fall back to the ship-centre launch origin.
+    #[serde(default)]
+    pub marker: Option<String>,
 }
 
 /// Validate a `[[weapons_console.phaser_banks]]` list parsed from TOML.
@@ -2711,6 +2728,7 @@ fire_arc_deg = 90.0
             facing_deg: 0.0,
             fire_arc_deg: 90.0,
             load_time: None,
+            marker: None,
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
         sys.tube_mut("fore").unwrap().start_load();
@@ -2747,6 +2765,7 @@ beam_range = 40.0
                 auto_arc_deg: 120.0,
                 beam_range: 0.0,
                 shield_pierce: None,
+                marker: None,
             },
             PhaserBankConfig {
                 id: "starboard".into(),
@@ -2755,6 +2774,7 @@ beam_range = 40.0
                 auto_arc_deg: 120.0,
                 beam_range: 0.0,
                 shield_pierce: None,
+                marker: None,
             },
         ];
         assert!(validate_phaser_banks(&banks).is_ok());
@@ -2776,6 +2796,7 @@ beam_range = 40.0
                 auto_arc_deg: 90.0,
                 beam_range: 0.0,
                 shield_pierce: None,
+                marker: None,
             },
             PhaserBankConfig {
                 id: "port".into(),
@@ -2784,6 +2805,7 @@ beam_range = 40.0
                 auto_arc_deg: 90.0,
                 beam_range: 0.0,
                 shield_pierce: None,
+                marker: None,
             },
         ];
         let err = validate_phaser_banks(&banks).unwrap_err();
@@ -2800,6 +2822,7 @@ beam_range = 40.0
             auto_arc_deg: 180.0,
             beam_range: 0.0,
             shield_pierce: None,
+            marker: None,
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(
@@ -2817,6 +2840,7 @@ beam_range = 40.0
             auto_arc_deg: 90.0,
             beam_range: 0.0,
             shield_pierce: None,
+            marker: None,
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(
@@ -2831,6 +2855,7 @@ beam_range = 40.0
             auto_arc_deg: 0.0,
             beam_range: 0.0,
             shield_pierce: None,
+            marker: None,
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(err.contains("fire_arc_deg"), "zero arc rejected: {err}");
@@ -2889,12 +2914,14 @@ count = 10
                 facing_deg: -30.0,
                 fire_arc_deg: 90.0,
                 load_time: None,
+                marker: None,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
                 facing_deg: 180.0,
                 fire_arc_deg: 90.0,
                 load_time: None,
+                marker: None,
             },
         ];
         assert!(validate_torpedo_tubes(&tubes).is_ok());
@@ -2914,12 +2941,14 @@ count = 10
                 facing_deg: 180.0,
                 fire_arc_deg: 90.0,
                 load_time: None,
+                marker: None,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 90.0,
                 load_time: None,
+                marker: None,
             },
         ];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
@@ -2934,6 +2963,7 @@ count = 10
             facing_deg: 180.0,
             fire_arc_deg: 0.0,
             load_time: None,
+            marker: None,
         }];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
         assert!(err.contains("fire_arc_deg"));

@@ -489,6 +489,18 @@ pub fn wasm_push_world_toml(path: String, toml_str: String) {
     crate::config_cache::wasm_push_world_toml(path, toml_str);
 }
 
+/// Deliver a runtime-fetched model-rig sidecar TOML to the Rust side.
+///
+/// Called by JS after fetching a sidecar path that Rust requested via the
+/// `set_world_fetch_callback` callback (the same callback serves both world
+/// TOMLs and rig sidecars). Pass an empty string when the sidecar is absent
+/// (404) so the renderer proceeds with an identity base rig.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
+    crate::config_cache::wasm_push_sidecar_toml(path, toml_str);
+}
+
 // ── Bevy bridge systems ────────────────────────────────────────────────────
 
 /// Drains the inbound queue each frame and injects messages into Bevy.

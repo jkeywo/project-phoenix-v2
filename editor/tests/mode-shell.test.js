@@ -49,7 +49,7 @@ describe('mode-shell', () => {
   describe('getModes', () => {
     it('returns the list of registered modes', () => {
       const shell = new ModeShell();
-      expect(shell.getModes()).toEqual(['World', 'Entity', 'Definitions']);
+      expect(shell.getModes()).toEqual(['World', 'Entity', 'Definitions', 'Models']);
     });
   });
 

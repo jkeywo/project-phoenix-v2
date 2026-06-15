@@ -740,8 +740,7 @@
         // Load/unload button
         var loadBtn = document.createElement('button');
         loadBtn.type = 'button';
-        var isTransitioning = state === 'loading' || state === 'unloading';
-        loadBtn.disabled = isTransitioning;
+        loadBtn.disabled = state === 'unloading';
 
         var fill = document.createElement('span');
         fill.className = 'load-fill';
@@ -773,6 +772,11 @@
             btn.className = 'load-btn btn-unloading';
             fillEl.style.width = '0%';
             lblEl.textContent = 'UNLOADING ' + (typeof loadTime === 'number' ? loadTime.toFixed(1) : '…') + 's';
+            sendAction('unload_tube', { tube: id });
+          } else if (st === 'loading') {
+            btn.className = 'load-btn btn-unloading';
+            fillEl.style.width = '0%';
+            lblEl.textContent = 'CANCEL…';
             sendAction('unload_tube', { tube: id });
           } else {
             btn.className = 'load-btn btn-loading';

@@ -73,6 +73,23 @@ export async function writeFile(relativePath, content) {
 }
 
 /**
+ * Read a file relative to the project root as an ArrayBuffer. Same
+ * directory-traversal as `readFile`, but returns binary content — used by
+ * Models Mode to load .glb files into Three.js.
+ */
+export async function readBinaryFile(relativePath) {
+  const handle = await requireRoot();
+  const parts = normalizePath(relativePath);
+  let dir = handle;
+  for (let i = 0; i < parts.length - 1; i++) {
+    dir = await dir.getDirectoryHandle(parts[i]);
+  }
+  const fileHandle = await dir.getFileHandle(parts[parts.length - 1]);
+  const file = await fileHandle.getFile();
+  return await file.arrayBuffer();
+}
+
+/**
  * List entries in a directory relative to the project root.
  * Empty path means the root itself. Returns [{ name, kind }] where kind is
  * 'file' or 'directory'. Throws if no project root has been selected.

@@ -10,6 +10,7 @@
     "build": "npm run build:server && npm run build:client"
   },
   "devDependencies": {
+    "jsdom": "^29.1.1",
     "smol-toml": "^1.6.1",
     "vitest": "^4.1.6"
   }

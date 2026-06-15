@@ -284,6 +284,7 @@ mod tests {
             auto_arc_deg,
             beam_range: 0.0,
             shield_pierce: None,
+            marker: None,
         }
     }
 

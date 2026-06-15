@@ -9,7 +9,9 @@
   <script type="importmap">
   {
     "imports": {
-      "smol-toml": "https://esm.sh/smol-toml@1.6.1"
+      "smol-toml": "https://esm.sh/smol-toml@1.6.1",
+      "three": "https://esm.sh/three@0.160.0",
+      "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
     }
   }
   </script>
@@ -45,6 +47,7 @@
         <button class="v2-mode-tab active" data-mode="World">World</button>
         <button class="v2-mode-tab" data-mode="Entity">Entity</button>
         <button class="v2-mode-tab" data-mode="Definitions">Definitions</button>
+        <button class="v2-mode-tab" data-mode="Models">Models</button>
       </div>
       <div class="toolbar-group">
         <span id="v2-status"></span>
@@ -120,6 +123,11 @@
       <!-- Definitions Mode (Slice 6 will populate) -->
       <div id="definitions-mode-root" class="mode-pane hidden">
         <p class="placeholder">Definitions Mode — wired in a later slice.</p>
+      </div>
+
+      <!-- Models Mode (GLB rig editor) -->
+      <div id="models-mode-root" class="mode-pane hidden">
+        <p class="placeholder">Models Mode — loading…</p>
       </div>
     </div>
   </div>

@@ -318,7 +318,10 @@ export function mountScenarioMode({
   function updateUnsavedIndicator() {
     const indicator = document.getElementById('unsavedIndicator');
     if (!indicator) return;
-    indicator.textContent = layerManager.hasUnsavedChanges?.() ? '● Unsaved changes' : '';
+    // The indicator is shared across all modes. OR-in modeShell's cross-mode
+    // dirty state so a dirty Models sidecar (or any other mode) lights it too.
+    const dirty = !!layerManager.hasUnsavedChanges?.() || !!modeShell?.hasAnyDirty?.();
+    indicator.textContent = dirty ? '● Unsaved changes' : '';
   }
 
   // ── Toolbar ────────────────────────────────────────────────────────────

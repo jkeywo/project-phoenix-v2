@@ -1535,6 +1535,73 @@ struct RenderProcessed;
 #[derive(Component)]
 struct PendingSceneHandle(Handle<bevy::scene::Scene>);
 
+/// Read a model-rig sidecar TOML for `path`.
+///
+/// - **Native**: `std::fs::read_to_string` (returns `None` when absent).
+/// - **WASM**: checks the pending-sidecar queue populated by JS via
+///   `wasm_push_sidecar_toml`; fires a deferred JS fetch on first miss and
+///   returns `None` until the fetch resolves. An empty pushed string (404)
+///   resolves to `Some(String::new())`, which parses to an identity rig.
+fn load_sidecar_toml(path: &str) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::fs::read_to_string(path).ok()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::config_cache::pop_pending_sidecar_toml(path).or_else(|| {
+            crate::config_cache::request_sidecar_fetch(path.to_string());
+            None
+        })
+    }
+}
+
+/// Resolve a model's rig sidecar to a `ModelRig`.
+///
+/// Returns:
+/// - `Some(rig)` once the sidecar is resolved — either parsed, or an identity
+///   rig when the sidecar is genuinely absent (native: file missing; wasm: JS
+///   pushed an empty string for a 404) or fails to parse.
+/// - `None` while a wasm fetch is still in flight (caller retries next frame).
+///   On native this never returns `None` (the filesystem read is synchronous).
+fn resolve_sidecar_rig(
+    model_path: &str,
+    variant: Option<&str>,
+) -> Option<crate::model_rig::ModelRig> {
+    let path = crate::model_rig::sidecar_path(model_path, variant);
+    match load_sidecar_toml(&path) {
+        Some(toml_str) => {
+            if toml_str.trim().is_empty() {
+                // Absent (404 / empty) → identity rig so the model still renders.
+                Some(crate::model_rig::ModelRig::default())
+            } else {
+                match crate::model_rig::ModelRig::from_toml(&toml_str) {
+                    Ok(rig) => Some(rig),
+                    Err(e) => {
+                        // A present-but-malformed sidecar degrades to an identity
+                        // rig so the model still renders, but we surface the parse
+                        // error so an authoring typo isn't silently invisible.
+                        bevy::log::warn!("rig sidecar {path} failed to parse: {e}; using identity rig");
+                        Some(crate::model_rig::ModelRig::default())
+                    }
+                }
+            }
+        }
+        None => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                // Native: a missing file is "genuinely absent" → identity rig.
+                Some(crate::model_rig::ModelRig::default())
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                // WASM: fetch still in flight → retry next frame.
+                None
+            }
+        }
+    }
+}
+
 /// Add visual meshes and materials to spawned entities that have a `[mesh]`
 /// section but no `RenderProcessed` yet. When `cfg.model` is set, loads a GLB
 /// scene instead of creating a procedural shape — but defers insertion until
@@ -1590,9 +1657,38 @@ fn render_spawned_entities(
                     h
                 }
             };
+            // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
+            // The sidecar resolves to an identity rig when genuinely absent, so
+            // models without a sidecar still render (visually unchanged).
             if scenes.get(&scene).is_some() {
+                let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
+                    Some(rig) => rig,
+                    None => {
+                        // Sidecar fetch still in flight (wasm) — retry next frame.
+                        continue;
+                    }
+                };
+
                 ec.remove::<PendingSceneHandle>();
-                ec.insert(bevy::scene::SceneRoot(scene));
+
+                // Composition: entityTransform ∘ baseRig ∘ model. The base rig
+                // is applied INNER to the per-entity transform by spawning the
+                // GLB SceneRoot as a CHILD carrying `base_bevy_transform()`,
+                // while the per-entity Transform (spawn position + per-entity
+                // scale/rotation) stays on the parent below. Spawning the scene
+                // on a child (instead of the entity) also keeps the base rig's
+                // non-uniform scale from composing badly with the per-entity
+                // rotation on a single Transform.
+                let base_tf = rig.base_bevy_transform();
+                let scene_for_child = scene.clone();
+                ec.with_children(|parent| {
+                    parent.spawn((bevy::scene::SceneRoot(scene_for_child), base_tf));
+                });
+
+                // Attach the resolved marker map so downstream systems (weapons,
+                // exhaust, …) can resolve mount points by name.
+                ec.insert(crate::model_rig::ModelMarkers(rig.markers.clone()));
+
                 rendered = true;
             }
         } else {

@@ -41,6 +41,11 @@ id = "fore"
 facing_deg = 0.0
 fire_arc_deg = 180.0
 auto_arc_deg = 180.0
+# Links this bank to the fore_emitter mount point in the model's rig sidecar
+# (assets/models/dynasty_destroyer.model.toml). Downstream beam systems may use
+# the marker's position/direction as the beam origin; absent the marker they
+# fall back to the hull-offset default.
+marker = "fore_emitter"
 
 [radar_appearance]
 colour = [1.0, 0.2, 0.2]

@@ -503,6 +503,7 @@ mod tests {
             facing_deg,
             fire_arc_deg,
             load_time: None,
+            marker: None,
         }
     }
 

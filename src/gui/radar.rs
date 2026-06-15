@@ -816,7 +816,7 @@ pub fn bridge_sim_to_radar(
 
         let mut appearance = if is_region || is_field {
             let default_col = if is_field {
-                Color::srgb(0.25, 0.75, 0.55)
+                Color::srgb(0.52, 0.32, 0.18)
             } else {
                 Color::srgb(0.8, 0.4, 0.8)
             };

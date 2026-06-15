@@ -906,6 +906,9 @@ fn reconcile_runtime_entities(
                         snapshot.shape = Some("torus".to_string());
                         snapshot.radius = Some(field.0.outer_radius);
                         snapshot.inner_radius = Some(field.0.inner_radius);
+                        if snapshot.colour.is_none() {
+                            snapshot.colour = Some([0.52, 0.32, 0.18]);
+                        }
                     }
                 }
                 snapshot.radar_icon = Some(
@@ -1003,6 +1006,9 @@ fn reconcile_runtime_entities(
                         snapshot.shape = Some("torus".to_string());
                         snapshot.radius = Some(field.0.outer_radius);
                         snapshot.inner_radius = Some(field.0.inner_radius);
+                        if snapshot.colour.is_none() {
+                            snapshot.colour = Some([0.52, 0.32, 0.18]);
+                        }
                     }
                 }
                 snapshot.radar_icon = Some(

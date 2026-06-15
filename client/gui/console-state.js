@@ -155,7 +155,7 @@ const CAMERA_VIEWS = new Set(['Fore', 'Port', 'Starboard', 'Aft']);
  *        true  → ship-local frame: rx = dx·cosY+dz·sinY, ry = dx·sinY−dz·cosY
  *                (weapons, helm, sensors)
  *        false → world-axis frame: rx = dx, ry = dz
- *                (sensors — world-north-up, Z-down screen convention)
+ *                (navigation - world-north-up, Z-down screen convention)
  * @param {function} [opts.extra]
  *        Called as `extra(entity)` and merged into each blip object.
  *
@@ -185,14 +185,16 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
     const radius = (a.radar_world_size !== undefined && a.radar_world_size !== null)
       ? a.radar_world_size
       : entityRadius(a);
-    const kind   = tags.includes('ship')    ? 'ship'
+    const explicitKind = kindFromRadarIcon(a.radar_icon || a.radarIcon);
+    const kind   = explicitKind
+                 || (tags.includes('ship')    ? 'ship'
                  : tags.includes('station') ? 'station'
                  : tags.includes('planet')  ? 'planet'
                  : tags.includes('star')    ? 'star'
                  : tags.includes('torpedo') || tags.includes('missile') ? 'torpedo'
                  : tags.includes('region')  ? 'region'
                  : tags.includes('objective_marker') ? 'waypoint'
-                 : 'asteroid';
+                 : 'asteroid');
     const targetTags = (a.target_tags || []).map(t => String(t).toLowerCase());
     const selectable = selects.length > 0 && targetTags.some(t => selects.includes(t));
     const blip = {
@@ -213,6 +215,17 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
     if (opts.extra) Object.assign(blip, opts.extra(a));
     return blip;
   }).filter(Boolean);
+}
+
+function kindFromRadarIcon(icon) {
+  const value = icon === undefined || icon === null ? '' : String(icon).toLowerCase();
+  if (value === 'player_ship') return 'player';
+  if (value === 'missile') return 'torpedo';
+  if ([
+    'ship', 'player', 'asteroid', 'station', 'planet', 'star', 'torpedo',
+    'battleship', 'cruiser', 'destroyer',
+  ].includes(value)) return value;
+  return null;
 }
 
 /**
@@ -568,12 +581,14 @@ export function buildNavigationConsoleState(state) {
       selects: navSelects,
       extra: (e) => {
         const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
-        const kind = tags.includes('star')    ? 'star'
+        const explicitKind = kindFromRadarIcon(e.radar_icon || e.radarIcon);
+        const kind = explicitKind && explicitKind !== 'asteroid' ? explicitKind
+                   : tags.includes('star')    ? 'star'
                    : tags.includes('planet')  ? 'planet'
                    : tags.includes('station') ? 'station'
                    : tags.includes('region') || tags.includes('asteroid_field') ? 'region'
                    : tags.includes('objective_marker') ? 'waypoint'
-                   : 'ship';
+                   : explicitKind || 'ship';
         return {
           name: e.name || null,
           kind,

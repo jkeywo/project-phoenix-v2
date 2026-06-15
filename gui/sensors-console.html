@@ -270,11 +270,8 @@
         <section class="radar-col">
           <div class="radar-wrap">
             <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
+              <img class="radar-surround" src="src_assets/helm_console/radar-surround.png" alt="">
               <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
-              <div class="radar-bracket tl"><div class="nub"></div></div>
-              <div class="radar-bracket tr"><div class="nub"></div></div>
-              <div class="radar-bracket bl"><div class="nub"></div></div>
-              <div class="radar-bracket br"><div class="nub"></div></div>
               <div class="scan"></div>
               <div class="crosshair-h"></div>
               <div class="crosshair-v"></div>
@@ -457,6 +454,14 @@
 
       document.getElementById('btn-cancel-impulse').style.display =
         (s.impulse_charge_progress || 0) > 0 ? '' : 'none';
+
+      var onScreenBtn = document.getElementById('btn-on-screen');
+      if (onScreenBtn) {
+        var led = onScreenBtn.querySelector('.led');
+        var label = onScreenBtn.querySelector('.label');
+        if (led) led.className = 'led cyan' + (s.on_screen ? ' on' : '');
+        if (label) label.textContent = s.on_screen ? 'CLEAR SCREEN' : 'ON SCREEN';
+      }
 
       document.getElementById('cpx-badge').textContent =
         'CPX: ' + _complexity.toUpperCase() + ' ▾';

@@ -260,12 +260,16 @@
       box-shadow: 0 0 10px rgba(108, 182, 208, 0.4);
       transform: scaleX(0);
       transform-origin: left;
-      transition: transform 0.1s ease;
+      transition: none;
     }
     .impulse-status {
       font-family: "JetBrains Mono", monospace;
       font-size: 14px;
       color: var(--ink);
+    }
+    .radar.impulse-stabilized .scan {
+      animation: none;
+      opacity: 0.35;
     }
   /* ── Landscape: compact for phone screens ──────────────────── */
   @media (orientation: landscape) and (max-width: 900px) {
@@ -391,11 +395,8 @@
           <section class="radar-col">
             <div class="radar-wrap">
               <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
+                <img class="radar-surround" src="src_assets/helm_console/radar-surround.png" alt="">
                 <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
-                <div class="radar-bracket tl"><div class="nub"></div></div>
-                <div class="radar-bracket tr"><div class="nub"></div></div>
-                <div class="radar-bracket bl"><div class="nub"></div></div>
-                <div class="radar-bracket br"><div class="nub"></div></div>
                 <div class="scan"></div>
                 <div class="crosshair-h"></div>
                 <div class="crosshair-v"></div>
@@ -558,6 +559,8 @@
       var screenLed = document.getElementById('screen-led');
       var screenLedTarget = s.on_screen ? 'led on' : 'led';
       if (screenLed.className !== screenLedTarget) screenLed.className = screenLedTarget;
+      var screenLabel = document.querySelector('#on-screen-btn .label');
+      if (screenLabel) screenLabel.textContent = s.on_screen ? 'CLEAR SCREEN' : 'ON SCREEN';
 
       var ip = s.impulse_charge_progress || 0;
       var impulseOverlay = document.getElementById('impulse-overlay');
@@ -565,15 +568,19 @@
       var impulseStatus = document.getElementById('impulse-status');
       var impulseLed = document.getElementById('impulse-led');
       var impulseBtn = document.getElementById('impulse-btn');
+      var radarEl = document.querySelector('.radar');
+      var impulseCharging = ip > 0 && ip < 1.0;
 
       if (ip > 0) {
         impulseOverlay.classList.add('show');
+        if (radarEl) radarEl.classList.toggle('impulse-stabilized', impulseCharging);
         impulseFill.style.transform = 'scaleX(' + ip + ')';
         impulseStatus.textContent = ip >= 1.0 ? 'ENGAGED' : (ip * 100).toFixed(0) + '%';
         if (impulseLed.className !== 'led on') impulseLed.className = 'led on';
         if (impulseBtn.className !== 'btn disabled') impulseBtn.className = 'btn disabled';
       } else {
         impulseOverlay.classList.remove('show');
+        if (radarEl) radarEl.classList.remove('impulse-stabilized');
         if (impulseLed.className !== 'led') impulseLed.className = 'led';
         if (impulseBtn.className !== 'btn') impulseBtn.className = 'btn';
       }
@@ -594,7 +601,7 @@
           regions: s.regions || [],
         };
         var radarJson = JSON.stringify(radarPayload);
-        if (radarJson !== _lastRadarJson) {
+        if ((!impulseCharging || !_lastRadarJson) && radarJson !== _lastRadarJson) {
           _lastRadarJson = radarJson;
           _radarWidget.update(radarPayload);
         }

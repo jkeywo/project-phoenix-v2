@@ -384,6 +384,17 @@
       return null;
     }
 
+    function _isCommsOnScreen() {
+      return !!(_state && _state.on_screen);
+    }
+
+    function _styleOnScreenButton(btn) {
+      if (!btn) return;
+      btn.textContent = _isCommsOnScreen() ? 'CLEAR SCREEN' : 'ON SCREEN';
+      btn.style.borderColor = _isCommsOnScreen() ? 'var(--cyan)' : '';
+      btn.style.color = _isCommsOnScreen() ? 'var(--cyan)' : '';
+    }
+
     function _threadSummaries(messages, contacts) {
       var seen = [];
       (messages || []).forEach(function(m) {
@@ -760,8 +771,8 @@
           onScreenBtn.type = 'button';
           onScreenBtn.className = 'on-screen-btn';
           onScreenBtn.id = 'on-screen-btn';
-          onScreenBtn.textContent = 'ON SCREEN';
           onScreenBtn.dataset.msgId = msg.id;
+          _styleOnScreenButton(onScreenBtn);
           onScreenBtn.addEventListener('click', function() {
             if (typeof window._sendCommsAction === 'function') {
               window._sendCommsAction('show_on_screen', { message_id: msg.id });
@@ -778,7 +789,10 @@
               window._sendCommsAction('show_on_screen', { message_id: msg.id });
             }
           });
+          _styleOnScreenButton(newBtn);
           footerRow.replaceChild(newBtn, oldBtn);
+        } else {
+          _styleOnScreenButton(existingBtn);
         }
       } else if (existingBtn) {
         existingBtn.remove();
@@ -812,7 +826,7 @@
         onScreenBtn.type = 'button';
         onScreenBtn.className = 'on-screen-btn';
         onScreenBtn.id = 'on-screen-btn';
-        onScreenBtn.textContent = 'ON SCREEN';
+        _styleOnScreenButton(onScreenBtn);
         onScreenBtn.addEventListener('click', function() {
           if (typeof window._sendCommsAction === 'function') {
             window._sendCommsAction('show_on_screen', { message_id: msg.id });

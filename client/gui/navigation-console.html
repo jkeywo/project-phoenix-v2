@@ -858,6 +858,13 @@
       }
 
       updateWaypointButtons();
+      const onScreenBtn = document.getElementById('btn-on-screen');
+      if (onScreenBtn) {
+        const led = onScreenBtn.querySelector('.led');
+        const label = onScreenBtn.querySelector('.label');
+        if (led) led.className = 'led cyan' + (_onScreen ? ' on' : '');
+        if (label) label.textContent = _onScreen ? 'CLEAR SCREEN' : 'ON SCREEN';
+      }
       updateHiddenData(s);
       draw();
     }
@@ -888,9 +895,18 @@
     });
 
     document.getElementById('btn-set-waypoint').addEventListener('click', () => {
-      _pickingWaypoint = true;
-      canvas.classList.add('picking');
-      showToast('TAP MAP TO PLACE WAYPOINT', 4000);
+      const selected = _entities.find(e => e.id === _selectedId);
+      if (selected && selected.objective_target) {
+        // Set waypoint directly to the selected objective's position.
+        if (_sendAction) _sendAction('set_navigation_waypoint', { x: selected.x, z: selected.y });
+        _waypoint = { x: selected.x, z: selected.y };
+        updateWaypointButtons();
+        showToast('WAYPOINT SET');
+      } else {
+        _pickingWaypoint = true;
+        canvas.classList.add('picking');
+        showToast('TAP MAP TO PLACE WAYPOINT', 4000);
+      }
     });
 
     document.getElementById('btn-clear-waypoint').addEventListener('click', () => {

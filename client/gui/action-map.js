@@ -51,7 +51,12 @@ export const ACTION_MAP = Object.freeze({
   set_view: (a, send) => {
     // ClientMessage::SetView { mode: ViewMode::Camera(direction) }
     // serialises as {"type":"SetView","data":{"mode":{"kind":"Camera","data":"Fore"}}}
-    if (a.direction) send('SetView', { mode: { kind: 'Camera', data: a.direction } });
+    if (!a.direction) return;
+    if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction)) {
+      send('SetView', { mode: { kind: 'Camera', data: a.direction } });
+    } else {
+      send('SetView', { mode: { kind: a.direction } });
+    }
   },
 
   /** Toggle red alert status. */

@@ -110,7 +110,7 @@ export class ClientSimState {
     this.sensorsRadarRange = 500.0;
     this.tacticalRadarShows = ['player', 'ship', 'asteroid', 'station', 'missile', 'torpedo', 'region'];
     this.tacticalRadarSelects = ['ship', 'station', 'asteroid'];
-    this.sensorsRadarShows = ['player', 'asteroid', 'ship', 'station', 'planet', 'star'];
+    this.sensorsRadarShows = ['player', 'asteroid_field', 'ship', 'station', 'planet', 'star'];
     this.sensorsRadarSelects = ['ship', 'station', 'planet'];
     this.navChartRange = 500.0;
     this.navChartShows = ['region', 'asteroid_field', 'star', 'planet', 'station', 'player', 'objective_marker', 'ship'];

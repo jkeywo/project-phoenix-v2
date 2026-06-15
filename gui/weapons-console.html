@@ -416,12 +416,8 @@
             <div class="radar-wrap">
               <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
                 <!-- Background image (decorative) -->
+                <img class="radar-surround" src="src_assets/helm_console/radar-surround.png" alt="">
                 <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
-                <!-- Corner brackets -->
-                <div class="radar-bracket tl"><div class="nub"></div></div>
-                <div class="radar-bracket tr"><div class="nub"></div></div>
-                <div class="radar-bracket bl"><div class="nub"></div></div>
-                <div class="radar-bracket br"><div class="nub"></div></div>
                 <!-- Scan sweep animation -->
                 <div class="scan"></div>
                 <!-- Crosshairs -->
@@ -766,19 +762,27 @@
           lbl.textContent = 'LOADING ' + Math.round(progress * 100) + '%';
         } else {
           loadBtn.className = 'load-btn btn-unloading';
-          lbl.textContent = 'UNLOADING ' + Math.round(progress * 100) + '%';
+          var secsLeft = typeof t.reload_secs === 'number' ? t.reload_secs : 0;
+          lbl.textContent = 'UNLOADING ' + secsLeft.toFixed(1) + 's';
         }
 
         loadBtn.appendChild(fill);
         loadBtn.appendChild(lbl);
 
-        loadBtn.addEventListener('click', (function(id, st) { return function() {
-          if (st === 'loaded' || st === 'unloading') {
+        loadBtn.addEventListener('click', (function(id, st, btn, fillEl, lblEl, loadTime) { return function() {
+          btn.disabled = true;
+          if (st === 'loaded') {
+            btn.className = 'load-btn btn-unloading';
+            fillEl.style.width = '0%';
+            lblEl.textContent = 'UNLOADING ' + (typeof loadTime === 'number' ? loadTime.toFixed(1) : '…') + 's';
             sendAction('unload_tube', { tube: id });
           } else {
+            btn.className = 'load-btn btn-loading';
+            fillEl.style.width = '0%';
+            lblEl.textContent = 'LOADING 0%';
             sendAction('load_tube', { tube: id });
           }
-        }; })(t.id, state));
+        }; })(t.id, state, loadBtn, fill, lbl, t.load_time));
 
         // Fire button
         var fireBtn = document.createElement('button');

@@ -98,7 +98,7 @@ power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 
 [sensors_console.long_range_radar]
 range = 400.0
-shows = ["player", "asteroid", "ship", "station", "planet", "star"]
+shows = ["player", "asteroid_field", "ship", "station", "planet", "star"]
 selects = ["ship", "station", "planet"]
 
 [power]

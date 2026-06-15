@@ -34,7 +34,8 @@
 
     /* Radar — fills column, square aspect, capped at 720px */
     .radar-col .radar-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-    .radar-col .radar { aspect-ratio: 1/1; width: auto; height: 100%; max-height: 720px; max-width: 720px; }
+    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: 100%; max-height: 720px; max-width: 720px; display: flex; align-items: center; justify-content: center; }
+    .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }
 
     /* Compress inset bodies */
     .ctrl-col .inset             { flex: 1; min-height: 0; }
@@ -89,7 +90,7 @@
       .hero { gap: 10px; }
       .hero .sub { font-size: 11px; }
       .hero .complexity { display: none; }
-      .radar-col .radar { max-height: 50vh; max-width: 50vh; }
+      .radar-col .radar-surround-frame { max-height: 50vh; max-width: 50vh; }
       .side-rail { font-size: 9px; }
       .side-rail.top { top: 10px; }
       .side-rail.bottom { bottom: 10px; }
@@ -149,7 +150,7 @@
       .footer-bar {
         display: none;
       }
-      .radar-col .radar {
+      .radar-col .radar-surround-frame {
         max-height: calc(100dvh - 54px);
         max-width: calc(100dvh - 54px);
       }
@@ -414,22 +415,19 @@
           <!-- ── LEFT: Tactical radar ─────────────────────────────────── -->
           <section class="radar-col">
             <div class="radar-wrap">
-              <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
-                <!-- Background image (decorative) -->
+              <div class="radar-surround-frame">
                 <img class="radar-surround" src="src_assets/helm_console/radar-surround.png" alt="">
-                <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
-                <!-- Scan sweep animation -->
-                <div class="scan"></div>
-                <!-- Crosshairs -->
-                <div class="crosshair-h"></div>
-                <div class="crosshair-v"></div>
-                <!-- Range ring labels (updated by JS when range is known) -->
-                <div class="range-label" id="rl-33" style="top:50%; left:8%;  transform:translateY(-50%);">—</div>
-                <div class="range-label" id="rl-66" style="top:50%; left:20%; transform:translateY(-50%);">—</div>
-                <div class="range-label" id="rl-100" style="top:50%; left:33%; transform:translateY(-50%);">—</div>
-                <!-- Live canvas: drawRadar() renders blips + arcs here (z-index:2) -->
-                <canvas id="radar"></canvas>
-              </div>
+                <div class="radar" style="aspect-ratio:1/1;">
+                  <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
+                  <div class="scan"></div>
+                  <div class="crosshair-h"></div>
+                  <div class="crosshair-v"></div>
+                  <div class="range-label" id="rl-33" style="top:50%; left:8%;  transform:translateY(-50%);">—</div>
+                  <div class="range-label" id="rl-66" style="top:50%; left:20%; transform:translateY(-50%);">—</div>
+                  <div class="range-label" id="rl-100" style="top:50%; left:33%; transform:translateY(-50%);">—</div>
+                  <canvas id="radar"></canvas>
+                </div><!-- /.radar -->
+              </div><!-- /.radar-surround-frame -->
             </div>
 
             <!-- Target readout strip under radar (hidden by Tactical Low preset) -->

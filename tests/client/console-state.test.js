@@ -193,6 +193,27 @@ describe('buildRadarRegions', () => {
       objective_target: true,
     });
   });
+
+  it('builds asteroid field overlays from field radii when shape is omitted', () => {
+    const regions = buildRadarRegions([{
+      uuid: 'field-1',
+      name: 'Main Belt',
+      x: 0,
+      z: 0,
+      tags: ['asteroid_field'],
+      radius: 350,
+      inner_radius: 300,
+    }]);
+    expect(regions).toHaveLength(1);
+    expect(regions[0]).toMatchObject({
+      uuid: 'field-1',
+      shape: 'torus',
+      radius: 350,
+      inner_radius: 300,
+      outer_radius: 350,
+      color: [0.52, 0.32, 0.18],
+    });
+  });
 });
 
 describe('buildWaypointBlip', () => {
@@ -759,5 +780,42 @@ describe('buildNavigationConsoleState', () => {
     const s = parse(buildNavigationConsoleState(state));
     expect(s.regions).toHaveLength(1);
     expect(s.regions[0].objective_target).toBe(true);
+  });
+
+  it('emits asteroid field and nebula region overlays on the navigation screen', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [
+        {
+          uuid: 'field-1',
+          name: 'Main Belt',
+          x: 1200,
+          z: -200,
+          tags: ['field', 'asteroid_field'],
+          radius: 350,
+          inner_radius: 300,
+        },
+        {
+          uuid: 'nebula-1',
+          name: 'Kaleth Nebula',
+          x: 680,
+          z: -440,
+          tags: ['region', 'nebula'],
+          shape: 'sphere',
+          radius: 220,
+        },
+      ],
+    };
+    const s = parse(buildNavigationConsoleState(state));
+    expect(s.regions.map(r => r.uuid).sort()).toEqual(['field-1', 'nebula-1']);
+    expect(s.regions.find(r => r.uuid === 'field-1')).toMatchObject({
+      shape: 'torus',
+      inner_radius: 300,
+      outer_radius: 350,
+    });
+    expect(s.regions.find(r => r.uuid === 'nebula-1')).toMatchObject({
+      shape: 'sphere',
+      radius: 220,
+    });
   });
 });

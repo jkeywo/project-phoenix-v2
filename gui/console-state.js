@@ -512,13 +512,22 @@ export const NAVIGATION_RADAR_RANGE = 5000.0;
 
 // Tags that appear on strategic navigational entities shown in the nav chart.
 // Individual asteroid rocks and NPC ships are excluded.
-const NAV_CHART_TAGS = new Set(['star', 'planet', 'station', 'player_ship', 'player']);
+const NAV_CHART_TAGS = new Set([
+  'region',
+  'asteroid_field',
+  'star',
+  'planet',
+  'station',
+  'player_ship',
+  'player',
+  'objective_marker',
+]);
 
 /**
  * Navigation console state builder (issue #458).
  *
  * Produces a world-centred north-up radar snapshot filtered to strategic
- * navigational entities (stars, planets, stations, player ship).
+ * navigational entities (stars, planets, stations, regions, asteroid fields, player ship).
  * Individual asteroids and NPC ship blips are excluded.
  *
  * @param {{ asteroids, shipX, shipZ, impulseChargeProgress, currentView }} state

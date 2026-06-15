@@ -574,27 +574,14 @@ html, body {
   letter-spacing: 0.18em;
 }
 
-/* corner brackets around the radar that echo radar-surround.png */
-.radar-bracket {
+/* radar-surround.png overlay — sits above the radar canvas, pointer-events off */
+.radar-surround {
   position: absolute;
-  width: 3.5rem; height: 3.5rem;
-  border: 2px solid var(--line);
+  inset: 0;
+  width: 100%; height: 100%;
   pointer-events: none;
+  object-fit: fill;
 }
-.radar-bracket.tl { top: 0; left: 0; border-right: none; border-bottom: none; }
-.radar-bracket.tr { top: 0; right: 0; border-left: none; border-bottom: none; }
-.radar-bracket.bl { bottom: 0; left: 0; border-right: none; border-top: none; }
-.radar-bracket.br { bottom: 0; right: 0; border-left: none; border-top: none; }
-.radar-bracket .nub {
-  position: absolute;
-  background: linear-gradient(180deg, #2a3568, #0e1432);
-  border: 1px solid var(--line);
-  width: 4rem; height: 1.125rem;
-}
-.radar-bracket.tl .nub { top: 0.875rem; left: 0.875rem; }
-.radar-bracket.tr .nub { top: 0.875rem; right: 0.875rem; }
-.radar-bracket.bl .nub { bottom: 0.875rem; left: 0.875rem; }
-.radar-bracket.br .nub { bottom: 0.875rem; right: 0.875rem; }
 
 /* ── Title block / hero (orange bar) ─────────────────────────── */
 .hero {

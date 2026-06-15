@@ -17,6 +17,7 @@ radius = 20.0
 icon = "planet"
 
 [mesh]
+model = "assets/models/planet_paradise.glb"
 shape = "sphere"
 radius = 20.0
 colour = [0.0, 0.5, 1.0]

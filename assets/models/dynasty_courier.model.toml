@@ -1,0 +1,11 @@
+[base]
+offset = [ 0, -0.3, 0.2 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 1, 1, 1 ]
+
+[extents]
+min = [ -0.8, -0.35, -0.55 ]
+max = [ 0.8, 0.35, 1.8 ]
+size = [ 1.6, 0.7, 2.35 ]
+
+[markers]

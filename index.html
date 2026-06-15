@@ -533,7 +533,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-95c7218b0d473b93.js" crossorigin="anonymous" integrity="sha384-5L3kPYVVELm/z8W75baUIHLz48pghH/sQQVb/f3gHgwdZV80jIEuYrBx1Dm3Gaze"><link rel="preload" href="./project-phoenix-95c7218b0d473b93_bg.wasm" crossorigin="anonymous" integrity="sha384-BCvhC0fXW5hRJdI7cz/qD0Ez9N2KhYpy3F2qxjg54A8pAHJa/OFEmTmVm12ygm9a" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-1e98511a05d50e89.js" crossorigin="anonymous" integrity="sha384-a6ZsF4LZD4OT4vKk1DZeMG3th7sr/v/dWHfZInABajSrm/cPsksHc8YhEQ10w1yi"><link rel="preload" href="./project-phoenix-1e98511a05d50e89_bg.wasm" crossorigin="anonymous" integrity="sha384-aXKuEdWT9V9ixpyv1TslcScHHy7YPTtCcZwzuz35SPZ6cVpKuKQUtTu2NgLXtmOU" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -686,8 +686,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-95c7218b0d473b93.js';
-const wasm = await init({ module_or_path: './project-phoenix-95c7218b0d473b93_bg.wasm' });
+import init, * as bindings from './project-phoenix-1e98511a05d50e89.js';
+const wasm = await init({ module_or_path: './project-phoenix-1e98511a05d50e89_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1367,17 +1367,33 @@ function startServer() {
 
   set_message_callback(routeOutbound);
 
-  // Register the runtime world-fetch callback so load_world triggers can
-  // additively load a world TOML (e.g. patrol.toml) during gameplay.
+  // Register the runtime fetch callback. The same callback serves two flows:
+  //  - World TOMLs (e.g. patrol.toml) loaded additively by load_world triggers.
+  //  - Per-model rig sidecars under assets/models/*.toml, requested by the
+  //    renderer when spawning a GLB-backed entity.
+  // Sidecar paths (assets/models/<stem>.<variant>.toml) are routed to
+  // wasm_push_sidecar_toml; everything else is treated as a world TOML. An
+  // empty string on 404 tells Rust to stop re-requesting (renderer then falls
+  // back to an identity base rig).
   if (typeof wasmBindings.set_world_fetch_callback === 'function') {
+    const isSidecarPath = (p) =>
+      typeof wasmBindings.wasm_push_sidecar_toml === 'function' &&
+      /^assets\/models\/.+\.toml$/.test(p);
+    const pushToml = (path, toml) => {
+      if (isSidecarPath(path)) {
+        wasmBindings.wasm_push_sidecar_toml(path, toml);
+      } else {
+        wasmBindings.wasm_push_world_toml(path, toml);
+      }
+    };
     wasmBindings.set_world_fetch_callback(function(path) {
       fetch(path)
         .then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
-        .then(toml => { wasmBindings.wasm_push_world_toml(path, toml); })
+        .then(toml => { pushToml(path, toml); })
         .catch(err => {
-          console.error('[Phoenix] Failed to fetch world TOML at ' + path + ':', err);
+          console.error('[Phoenix] Failed to fetch TOML at ' + path + ':', err);
           // Push empty string so Rust stops re-requesting.
-          wasmBindings.wasm_push_world_toml(path, '');
+          pushToml(path, '');
         });
     });
   }

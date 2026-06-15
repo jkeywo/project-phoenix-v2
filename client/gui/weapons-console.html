@@ -767,6 +767,7 @@
         loadBtn.appendChild(lbl);
 
         loadBtn.addEventListener('click', (function(id, st, btn, fillEl, lblEl, loadTime) { return function() {
+          console.log('[tube-click] id=' + id + ' st=' + st + ' sendAction=' + typeof sendAction);
           btn.disabled = true;
           if (st === 'loaded') {
             btn.className = 'load-btn btn-unloading';

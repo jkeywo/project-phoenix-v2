@@ -1,8 +1,9 @@
 pub mod config;
 pub mod config_cache;
 pub mod entity_override;
-pub mod model_rig;
 pub mod loader;
+pub mod model_rig;
 pub mod spawner;
+pub mod star;
 pub mod tags;
 pub mod target;

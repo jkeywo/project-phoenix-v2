@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::entity_config::EntityConfig;
-use crate::entity_config::{AsteroidFieldConfig, LightConfig};
+use crate::entity_config::{AsteroidFieldConfig, LightConfig, StarConfig};
 use crate::region_effects::RegionEffectKind;
 use crate::region_shape::RegionShape;
 
@@ -44,6 +44,10 @@ pub struct AppearanceSection(pub crate::entity_config::AppearanceConfig);
 /// material from this data.
 #[derive(Component, Clone, Debug)]
 pub struct MeshSection(pub crate::entity_config::MeshConfig);
+
+/// Present when the EntityConfig has a [star] section.
+#[derive(Component, Clone, Debug)]
+pub struct StarSection(pub StarConfig);
 
 /// Present when the EntityConfig had a [shape] section (region entity).
 #[derive(Component, Clone, Debug)]
@@ -149,6 +153,11 @@ pub fn spawn_entity(
     // Mesh section
     if let Some(mesh) = &config.mesh {
         entity_commands.insert(MeshSection(mesh.clone()));
+    }
+
+    // Star section
+    if let Some(star) = &config.star {
+        entity_commands.insert(StarSection(star.clone()));
     }
 
     // Top-level name scalar
@@ -310,6 +319,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            star: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -349,6 +359,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            star: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -385,6 +396,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            star: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -426,6 +438,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            star: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -440,6 +453,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec![],
             collider: Some(ColliderConfig {
@@ -522,6 +536,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            star: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -540,6 +555,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["field".to_string()],
             asteroid_field: Some(AsteroidFieldConfig {
@@ -595,6 +611,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec![],
             appearance: Some(AppearanceConfig {
@@ -676,6 +693,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string(), "nebula".to_string()],
             shape: Some(RegionShape::Sphere { radius: 150.0 }),
@@ -732,6 +750,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius: 100.0 }),
@@ -778,6 +797,7 @@ mod tests {
         let faction_id = uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec![],
             faction: Some(faction_id),
@@ -848,6 +868,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
@@ -910,6 +931,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["npc".to_string()],
             hull: Some(crate::entity_config::HullConfig {
@@ -964,6 +986,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
@@ -1009,6 +1032,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {

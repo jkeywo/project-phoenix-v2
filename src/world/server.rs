@@ -574,6 +574,7 @@ fn setup_fallback_world(
         radar_appearance: None,
         target: None,
         mesh: None,
+        star: None,
         light: Vec::new(),
     };
     let ship_uuid = crate::entity_loader::assign_uuid();
@@ -6174,6 +6175,7 @@ condition = "on_world_loaded"
     fn spawn_region_with_uuid(app: &mut App, x: f32, z: f32, radius: f32, uuid: &str) -> Entity {
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
@@ -6439,6 +6441,7 @@ condition = "on_world_loaded"
         // ignores it because the only Ship is the player ship at origin.
         let npc_config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["npc".into()],
             shape: None,

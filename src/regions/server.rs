@@ -303,6 +303,7 @@ mod tests {
     fn spawn_region(app: &mut App, x: f32, z: f32, shape: RegionShape) -> Entity {
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(shape),
@@ -532,6 +533,7 @@ mod tests {
     fn spawn_blocks_impulse_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
@@ -579,6 +581,7 @@ mod tests {
     ) -> Entity {
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
@@ -871,6 +874,7 @@ mod tests {
     ) -> Entity {
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
@@ -1008,6 +1012,7 @@ mod tests {
         use crate::region_effects::RegionEffectsConfig as EffectsCfg;
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
@@ -1224,6 +1229,7 @@ mod tests {
     fn spawn_comms_jam_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
@@ -1261,6 +1267,7 @@ mod tests {
     fn spawn_sensor_blind_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),

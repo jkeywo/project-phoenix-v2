@@ -452,7 +452,10 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(app.world().resource::<ShipState>().view_mode, ViewMode::Radar);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Radar
+        );
         push(
             &mut app,
             "helm",

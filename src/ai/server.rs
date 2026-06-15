@@ -1302,6 +1302,7 @@ mod tests {
         // Build a minimal EntityConfig with a weapons_console section.
         let config = EntityConfig {
             name: None,
+            star: None,
             light: Vec::new(),
             faction: None,
             hull: None,

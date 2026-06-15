@@ -160,6 +160,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::science_plugin::SciencePlugin)
     .add_plugins(crate::navigation_plugin::NavigationPlugin)
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
+    .add_plugins(crate::entity_star::StarRenderPlugin)
     .add_message::<AsteroidDestroyedVfx>()
     .insert_resource(ShipState::new())
     .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
@@ -769,7 +770,12 @@ fn radar_icon_from_tags(tags: &[String]) -> String {
 }
 
 fn upsert_world_entity(world: &mut WorldResource, snapshot: EntitySnapshot) {
-    if let Some(existing) = world.0.entities.iter_mut().find(|e| e.uuid == snapshot.uuid) {
+    if let Some(existing) = world
+        .0
+        .entities
+        .iter_mut()
+        .find(|e| e.uuid == snapshot.uuid)
+    {
         *existing = snapshot;
     } else {
         world.0.entities.push(snapshot);
@@ -1581,7 +1587,9 @@ fn resolve_sidecar_rig(
                         // A present-but-malformed sidecar degrades to an identity
                         // rig so the model still renders, but we surface the parse
                         // error so an authoring typo isn't silently invisible.
-                        bevy::log::warn!("rig sidecar {path} failed to parse: {e}; using identity rig");
+                        bevy::log::warn!(
+                            "rig sidecar {path} failed to parse: {e}; using identity rig"
+                        );
                         Some(crate::model_rig::ModelRig::default())
                     }
                 }
@@ -1616,12 +1624,15 @@ fn render_spawned_entities(
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut star_surface_materials: ResMut<Assets<crate::entity_star::StarSurfaceMaterial>>,
+    mut star_halo_materials: ResMut<Assets<crate::entity_star::StarHaloMaterial>>,
     scenes: Res<Assets<bevy::scene::Scene>>,
     entities: Query<
         (
             Entity,
             &Transform,
-            &crate::entity_spawner::MeshSection,
+            Option<&crate::entity_spawner::MeshSection>,
+            Option<&crate::entity_spawner::StarSection>,
             Option<&crate::entity_spawner::Lights>,
             Option<&PendingSceneHandle>,
         ),
@@ -1630,119 +1641,152 @@ fn render_spawned_entities(
 ) {
     use crate::entity_config::MeshShape;
 
-    for (entity, transform, mesh_sec, lights_opt, pending) in entities.iter() {
-        let cfg = &mesh_sec.0;
+    for (entity, transform, mesh_sec, star_sec, lights_opt, pending) in entities.iter() {
+        let mesh_cfg_for_transform = mesh_sec.map(|mesh_sec| &mesh_sec.0);
         let mut ec = commands.entity(entity);
         let mut rendered = false;
 
-        if let Some(model_path) = &cfg.model {
-            // PATH A: GLB model — issue the load once and store the handle so the
-            // asset server keeps the asset alive. On subsequent frames the same
-            // strong handle is retrieved via `pending`, and we check readiness
-            // against that stable handle.
-            let scene: Handle<bevy::scene::Scene> = match pending {
-                Some(p) => p.0.clone(),
-                None => {
-                    // `asset_server` resolves paths relative to the `assets/`
-                    // root, but the TOML `model` field carries an `assets/`
-                    // prefix (matching the `template_path` convention, which is
-                    // read via `std::fs` relative to the cwd). Strip it so the
-                    // GLB resolves correctly instead of looking for
-                    // `assets/assets/models/...` and silently failing to load —
-                    // which leaves the entity unrendered and invisible.
-                    let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-                    let path = format!("{}#Scene0", rel);
-                    let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
-                    ec.insert(PendingSceneHandle(h.clone()));
-                    h
-                }
-            };
-            // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
-            // The sidecar resolves to an identity rig when genuinely absent, so
-            // models without a sidecar still render (visually unchanged).
-            if scenes.get(&scene).is_some() {
-                let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
-                    Some(rig) => rig,
+        if let Some(star_sec) = star_sec {
+            let cfg = &star_sec.0;
+            let surface_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
+                cfg.radius,
+                cfg.longitude_segments,
+                cfg.latitude_segments,
+            ));
+            let surface_mat =
+                star_surface_materials.add(crate::entity_star::surface_material_from_config(cfg));
+            ec.insert((Mesh3d(surface_mesh), MeshMaterial3d(surface_mat)));
+
+            let halo_radius = cfg.radius * cfg.halo_radius_multiplier.max(1.0);
+            let halo_mesh = meshes.add(crate::entity_star::halo_quad_mesh(halo_radius));
+            let halo_mat =
+                star_halo_materials.add(crate::entity_star::halo_material_from_config(cfg));
+            ec.with_children(|parent| {
+                parent.spawn((
+                    Mesh3d(halo_mesh),
+                    MeshMaterial3d(halo_mat),
+                    Transform::default(),
+                    crate::entity_star::StarHalo {
+                        radius: halo_radius,
+                    },
+                ));
+            });
+        } else if let Some(mesh_sec) = mesh_sec {
+            let cfg = &mesh_sec.0;
+
+            if let Some(model_path) = &cfg.model {
+                // PATH A: GLB model — issue the load once and store the handle so the
+                // asset server keeps the asset alive. On subsequent frames the same
+                // strong handle is retrieved via `pending`, and we check readiness
+                // against that stable handle.
+                let scene: Handle<bevy::scene::Scene> = match pending {
+                    Some(p) => p.0.clone(),
                     None => {
-                        // Sidecar fetch still in flight (wasm) — retry next frame.
-                        continue;
+                        // `asset_server` resolves paths relative to the `assets/`
+                        // root, but the TOML `model` field carries an `assets/`
+                        // prefix (matching the `template_path` convention, which is
+                        // read via `std::fs` relative to the cwd). Strip it so the
+                        // GLB resolves correctly instead of looking for
+                        // `assets/assets/models/...` and silently failing to load —
+                        // which leaves the entity unrendered and invisible.
+                        let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
+                        let path = format!("{}#Scene0", rel);
+                        let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
+                        ec.insert(PendingSceneHandle(h.clone()));
+                        h
                     }
                 };
+                // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
+                // The sidecar resolves to an identity rig when genuinely absent, so
+                // models without a sidecar still render (visually unchanged).
+                if scenes.get(&scene).is_some() {
+                    let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
+                        Some(rig) => rig,
+                        None => {
+                            // Sidecar fetch still in flight (wasm) — retry next frame.
+                            continue;
+                        }
+                    };
 
-                ec.remove::<PendingSceneHandle>();
+                    ec.remove::<PendingSceneHandle>();
 
-                // Composition: entityTransform ∘ baseRig ∘ model. The base rig
-                // is applied INNER to the per-entity transform by spawning the
-                // GLB SceneRoot as a CHILD carrying `base_bevy_transform()`,
-                // while the per-entity Transform (spawn position + per-entity
-                // scale/rotation) stays on the parent below. Spawning the scene
-                // on a child (instead of the entity) also keeps the base rig's
-                // non-uniform scale from composing badly with the per-entity
-                // rotation on a single Transform.
-                let base_tf = rig.base_bevy_transform();
-                let scene_for_child = scene.clone();
-                ec.with_children(|parent| {
-                    parent.spawn((bevy::scene::SceneRoot(scene_for_child), base_tf));
+                    // Composition: entityTransform ∘ baseRig ∘ model. The base rig
+                    // is applied INNER to the per-entity transform by spawning the
+                    // GLB SceneRoot as a CHILD carrying `base_bevy_transform()`,
+                    // while the per-entity Transform (spawn position + per-entity
+                    // scale/rotation) stays on the parent below. Spawning the scene
+                    // on a child (instead of the entity) also keeps the base rig's
+                    // non-uniform scale from composing badly with the per-entity
+                    // rotation on a single Transform.
+                    let base_tf = rig.base_bevy_transform();
+                    let scene_for_child = scene.clone();
+                    ec.with_children(|parent| {
+                        parent.spawn((bevy::scene::SceneRoot(scene_for_child), base_tf));
+                    });
+
+                    // Attach the resolved marker map so downstream systems (weapons,
+                    // exhaust, …) can resolve mount points by name.
+                    ec.insert(crate::model_rig::ModelMarkers(rig.markers.clone()));
+
+                    rendered = true;
+                }
+            } else {
+                // PATH B: Procedural primitive.
+                let color = if cfg.colour.len() >= 3 {
+                    Color::srgb(cfg.colour[0], cfg.colour[1], cfg.colour[2])
+                } else {
+                    Color::srgb(0.6, 0.6, 0.6)
+                };
+
+                let emissive_mul = cfg.emissive.unwrap_or(0.4);
+                let emissive = LinearRgba::from(color) * emissive_mul;
+
+                let mesh = match cfg.shape {
+                    MeshShape::Sphere => meshes.add(Sphere {
+                        radius: cfg.radius.max(0.1),
+                    }),
+                    MeshShape::Cuboid => {
+                        let [x, y, z] = cfg.size.unwrap_or([2.0, 1.0, 3.0]);
+                        meshes.add(Cuboid::new(x, y, z))
+                    }
+                    MeshShape::Torus => meshes.add(Torus {
+                        major_radius: cfg.radius.max(0.5),
+                        minor_radius: cfg.minor_radius.max(0.1),
+                    }),
+                };
+
+                let mat = materials.add(StandardMaterial {
+                    base_color: color,
+                    emissive,
+                    ..default()
                 });
 
-                // Attach the resolved marker map so downstream systems (weapons,
-                // exhaust, …) can resolve mount points by name.
-                ec.insert(crate::model_rig::ModelMarkers(rig.markers.clone()));
-
+                ec.insert((Mesh3d(mesh), MeshMaterial3d(mat)));
                 rendered = true;
             }
+
+            if !rendered {
+                // GLB not loaded yet — try again next frame.
+                continue;
+            }
+
+            // Apply scale/rotation to both paths — preserves spawn position.
+            if let Some(cfg) = mesh_cfg_for_transform
+                .filter(|cfg| cfg.scale != 1.0 || cfg.rotation != [0.0, 0.0, 0.0])
+            {
+                ec.insert(Transform {
+                    translation: transform.translation,
+                    rotation: bevy::math::Quat::from_euler(
+                        bevy::math::EulerRot::XYZ,
+                        cfg.rotation[0],
+                        cfg.rotation[1],
+                        cfg.rotation[2],
+                    ),
+                    scale: Vec3::splat(cfg.scale),
+                });
+            }
         } else {
-            // PATH B: Procedural primitive.
-            let color = if cfg.colour.len() >= 3 {
-                Color::srgb(cfg.colour[0], cfg.colour[1], cfg.colour[2])
-            } else {
-                Color::srgb(0.6, 0.6, 0.6)
-            };
-
-            let emissive_mul = cfg.emissive.unwrap_or(0.4);
-            let emissive = LinearRgba::from(color) * emissive_mul;
-
-            let mesh = match cfg.shape {
-                MeshShape::Sphere => meshes.add(Sphere {
-                    radius: cfg.radius.max(0.1),
-                }),
-                MeshShape::Cuboid => {
-                    let [x, y, z] = cfg.size.unwrap_or([2.0, 1.0, 3.0]);
-                    meshes.add(Cuboid::new(x, y, z))
-                }
-                MeshShape::Torus => meshes.add(Torus {
-                    major_radius: cfg.radius.max(0.5),
-                    minor_radius: cfg.minor_radius.max(0.1),
-                }),
-            };
-
-            let mat = materials.add(StandardMaterial {
-                base_color: color,
-                emissive,
-                ..default()
-            });
-
-            ec.insert((Mesh3d(mesh), MeshMaterial3d(mat)));
-            rendered = true;
-        }
-
-        if !rendered {
-            // GLB not loaded yet — try again next frame.
             continue;
-        }
-
-        // Apply scale/rotation to both paths — preserves spawn position.
-        if cfg.scale != 1.0 || cfg.rotation != [0.0, 0.0, 0.0] {
-            ec.insert(Transform {
-                translation: transform.translation,
-                rotation: bevy::math::Quat::from_euler(
-                    bevy::math::EulerRot::XYZ,
-                    cfg.rotation[0],
-                    cfg.rotation[1],
-                    cfg.rotation[2],
-                ),
-                scale: Vec3::splat(cfg.scale),
-            });
         }
 
         // Mark processed so we never visit this entity again.
@@ -2113,12 +2157,8 @@ mod tests {
             ..Default::default()
         };
 
-        let snapshot = snapshot_from_entity_config(
-            "sun-uuid".into(),
-            None,
-            &config,
-            Vec3::new(0.0, 0.0, 0.0),
-        );
+        let snapshot =
+            snapshot_from_entity_config("sun-uuid".into(), None, &config, Vec3::new(0.0, 0.0, 0.0));
 
         assert_eq!(snapshot.name.as_deref(), Some("Sun"));
         assert_eq!(snapshot.tags, vec!["star", "center"]);

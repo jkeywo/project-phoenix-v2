@@ -2217,7 +2217,10 @@ entity    = "raider"
         assert_eq!(handoff.from, "Research Outpost");
         assert_eq!(handoff.node.speaker, None);
         assert!(
-            handoff.node.body.contains("patching you through to Dr. Myst"),
+            handoff
+                .node
+                .body
+                .contains("patching you through to Dr. Myst"),
             "handoff should tell the crew Dr. Myst is being patched through"
         );
 

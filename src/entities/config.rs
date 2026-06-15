@@ -122,6 +122,77 @@ fn default_mesh_scale() -> f32 {
     1.0
 }
 
+fn default_star_radius() -> f32 {
+    40.0
+}
+
+fn default_star_longitude_segments() -> u32 {
+    64
+}
+
+fn default_star_latitude_segments() -> u32 {
+    32
+}
+
+fn default_star_surface_colour() -> [f32; 3] {
+    [1.0, 0.72, 0.12]
+}
+
+fn default_star_hot_colour() -> [f32; 3] {
+    [1.0, 0.96, 0.65]
+}
+
+fn default_star_cell_colour() -> [f32; 3] {
+    [0.95, 0.32, 0.04]
+}
+
+fn default_star_halo_colour() -> [f32; 3] {
+    [1.0, 0.78, 0.18]
+}
+
+fn default_star_halo_radius_multiplier() -> f32 {
+    2.4
+}
+
+fn default_star_animation_speed() -> f32 {
+    1.0
+}
+
+/// Animated procedural star/sun visual definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StarConfig {
+    pub radius: f32,
+    pub longitude_segments: u32,
+    pub latitude_segments: u32,
+    /// RGB colour `[r, g, b]` in linear 0-1 range.
+    pub surface_colour: [f32; 3],
+    /// RGB colour `[r, g, b]` in linear 0-1 range.
+    pub hot_colour: [f32; 3],
+    /// RGB colour `[r, g, b]` in linear 0-1 range.
+    pub cell_colour: [f32; 3],
+    /// RGB colour `[r, g, b]` in linear 0-1 range.
+    pub halo_colour: [f32; 3],
+    pub halo_radius_multiplier: f32,
+    pub animation_speed: f32,
+}
+
+impl Default for StarConfig {
+    fn default() -> Self {
+        Self {
+            radius: default_star_radius(),
+            longitude_segments: default_star_longitude_segments(),
+            latitude_segments: default_star_latitude_segments(),
+            surface_colour: default_star_surface_colour(),
+            hot_colour: default_star_hot_colour(),
+            cell_colour: default_star_cell_colour(),
+            halo_colour: default_star_halo_colour(),
+            halo_radius_multiplier: default_star_halo_radius_multiplier(),
+            animation_speed: default_star_animation_speed(),
+        }
+    }
+}
+
 /// Kind of a `[[light]]` entry: a point light or a directional light.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -944,6 +1015,9 @@ pub struct EntityConfig {
     /// 3-D mesh definition. When present the entity receives a visual on the viewscreen.
     #[serde(default)]
     pub mesh: Option<MeshConfig>,
+    /// Procedural animated star/sun visual.
+    #[serde(default)]
+    pub star: Option<StarConfig>,
     /// Renderer light sources attached to this entity.
     #[serde(default)]
     pub light: Vec<LightConfig>,
@@ -1916,18 +1990,70 @@ hull_integrity = 100
     // the build fails if a referenced template is missing or malformed.
 
     #[test]
-    fn star_sun_template_parses_with_mesh_and_lights() {
+    fn empty_star_section_uses_defaults() {
+        let config = EntityConfig::from_toml("[star]\n").expect("parse must succeed");
+        let star = config.star.as_ref().expect("must parse [star]");
+        assert!((star.radius - 40.0).abs() < 1e-6);
+        assert_eq!(star.longitude_segments, 64);
+        assert_eq!(star.latitude_segments, 32);
+        assert_eq!(star.surface_colour, [1.0, 0.72, 0.12]);
+        assert_eq!(star.hot_colour, [1.0, 0.96, 0.65]);
+        assert_eq!(star.cell_colour, [0.95, 0.32, 0.04]);
+        assert_eq!(star.halo_colour, [1.0, 0.78, 0.18]);
+        assert!((star.halo_radius_multiplier - 2.4).abs() < 1e-6);
+        assert!((star.animation_speed - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn star_section_overrides_defaults() {
+        let toml_str = r#"
+[star]
+radius = 75.0
+longitude_segments = 96
+latitude_segments = 48
+surface_colour = [0.9, 0.7, 0.2]
+hot_colour = [1.0, 1.0, 0.8]
+cell_colour = [0.8, 0.2, 0.1]
+halo_colour = [1.0, 0.6, 0.1]
+halo_radius_multiplier = 3.0
+animation_speed = 0.5
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let star = config.star.as_ref().expect("must parse [star]");
+        assert!((star.radius - 75.0).abs() < 1e-6);
+        assert_eq!(star.longitude_segments, 96);
+        assert_eq!(star.latitude_segments, 48);
+        assert_eq!(star.surface_colour, [0.9, 0.7, 0.2]);
+        assert_eq!(star.hot_colour, [1.0, 1.0, 0.8]);
+        assert_eq!(star.cell_colour, [0.8, 0.2, 0.1]);
+        assert_eq!(star.halo_colour, [1.0, 0.6, 0.1]);
+        assert!((star.halo_radius_multiplier - 3.0).abs() < 1e-6);
+        assert!((star.animation_speed - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn star_section_rejects_unknown_fields() {
+        let result = EntityConfig::from_toml(
+            r#"
+[star]
+radius = 40.0
+surfase_colour = [1.0, 0.7, 0.1]
+"#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn star_sun_template_parses_with_star_and_lights() {
         let toml_str = include_str!("../../assets/entities/star_sun.toml");
         let config = EntityConfig::from_toml(toml_str).expect("star_sun.toml must parse");
         assert_eq!(config.name.as_deref(), Some("Sun"));
-        let mesh = config
-            .mesh
+        let star = config
+            .star
             .as_ref()
-            .expect("star_sun.toml must have [mesh]");
-        assert!(
-            mesh.emissive.is_some(),
-            "star_sun.toml must set [mesh].emissive"
-        );
+            .expect("star_sun.toml must have [star]");
+        assert!((star.radius - 50.0).abs() < 1e-6);
+        assert!(config.mesh.is_none(), "star_sun.toml must not keep [mesh]");
         assert!(
             !config.light.is_empty(),
             "star_sun.toml must have at least one [[light]]"

@@ -44,6 +44,8 @@ The HTML console path uses `gui/console-state.js::buildBlips()` and `buildWaypoi
 
 `gui/console-state.js::buildRadarRegions()` is the HTML path for shaped map overlays. It emits `region`, `asteroid_field`, and objective-marker entities as sphere/box/torus payloads for Navigation and Sensors. Region entities normally carry `shape` from the server snapshot; asteroid-field entities may be normalised from `radius` + `inner_radius` into a torus/sphere overlay so fields remain visible on the Navigation map even when they are not point blips.
 
+`EntitySnapshot.radar_icon` is authoritative for HTML blip kind as well as bitmap icon selection. If a snapshot says `radar_icon = "star"`, `buildBlips()` and the Navigation chart both treat it as a star blip even when tags are missing or ambiguous; tag classification is only the fallback.
+
 ## HTML objective markers
 
 `ObjectiveSummary` is shared mission state, so it is broadcast to all clients and mirrored into `gui/sim-state.js::ClientSimState.objectives`. The HTML radar builders mark active objective targets by matching each objective `targets` entry against entity `name`, `id`, or `uuid`.

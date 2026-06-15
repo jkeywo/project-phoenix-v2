@@ -79,6 +79,15 @@ describe('buildBlips', () => {
     expect(blips[0].kind).toBe('asteroid');
   });
 
+  it('uses explicit radar_icon as the authoritative blip kind', () => {
+    const blips = buildBlips(
+      [{ uuid: 'sun', x: 1, z: 0, tags: ['unknown'], radar_icon: 'star' }],
+      0, 0, 0, 100
+    );
+    expect(blips[0].kind).toBe('star');
+    expect(blips[0].icon).toBe('star');
+  });
+
   it('supports entity_tags fallback', () => {
     const blips = buildBlips([{ uuid: 'q', x: 1, z: 0, entity_tags: ['ship'] }], 0, 0, 0, 100);
     expect(blips[0].kind).toBe('ship');
@@ -668,6 +677,19 @@ describe('buildNavigationConsoleState', () => {
     const blips = parse(buildNavigationConsoleState(state)).blips;
     expect(blips.length).toBe(2);
     expect(blips.map(b => b.kind).sort()).toEqual(['planet', 'star']);
+  });
+
+  it('draws a radar_icon star as a star on the navigation chart', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [
+        { uuid: 'sun', name: 'Sun', x: 0, z: 50, tags: ['unknown'], radar_icon: 'star', objective_target: true },
+      ],
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    expect(blips).toHaveLength(1);
+    expect(blips[0].kind).toBe('star');
+    expect(blips[0].icon).toBe('star');
   });
 
   it('excludes bare asteroid entities', () => {

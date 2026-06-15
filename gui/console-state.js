@@ -76,26 +76,36 @@ function hasAnyTag(entity, tags) {
 export function buildRadarRegions(entities, objectives = []) {
   const objectiveEntities = withObjectiveTargets(entities, objectives);
   return objectiveEntities
-    .filter(e => e && e.shape && hasAnyTag(e, ['region', 'asteroid_field', 'objective_marker']))
     .map(e => {
-      const shape = String(e.shape).toLowerCase();
+      if (!e || !hasAnyTag(e, ['region', 'asteroid_field', 'objective_marker'])) return null;
+      const isAsteroidField = hasAnyTag(e, ['asteroid_field']);
+      const shape = e.shape
+        ? String(e.shape).toLowerCase()
+        : (isAsteroidField ? ((e.inner_radius || 0) > 0 ? 'torus' : 'sphere') : null);
+      if (!shape) return null;
+      const radius = e.radius ?? e.outer_radius ?? null;
       return {
         uuid: e.uuid,
         x: entityX(e),
         z: entityZ(e),
         shape,
-        radius: e.radius ?? null,
+        radius,
         inner_radius: e.inner_radius ?? null,
-        outer_radius: e.radius ?? null,
+        outer_radius: e.outer_radius ?? radius,
         half_extents: Array.isArray(e.half_extents)
           ? [e.half_extents[0] || 0, e.half_extents[2] || e.half_extents[1] || 0]
           : null,
         yaw: e.yaw ?? null,
-        color: e.colour || e.color || (e.objective_target ? [0.83, 0.66, 0.13] : [0.6, 0.4, 1.0]),
+        color: e.colour || e.color || (
+          e.objective_target ? [0.83, 0.66, 0.13]
+          : isAsteroidField ? [0.52, 0.32, 0.18]
+          : [0.6, 0.4, 1.0]
+        ),
         name: e.name || null,
         objective_target: !!e.objective_target,
       };
-    });
+    })
+    .filter(Boolean);
 }
 
 function projectRadarRegions(regions, shipX, shipZ, range) {
@@ -316,8 +326,13 @@ export function buildCaptainConsoleState(state) {
  */
 export function buildHelmConsoleState(state) {
   const range = state.helmRadarRange ?? HELM_RADAR_RANGE;
+  // Exclude objective_marker entities — objectives only show on the nav chart.
+  const helmEntities = (state.asteroids || []).filter(e => {
+    const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
+    return !tags.includes('objective_marker');
+  });
   const blips = buildBlips(
-    state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
+    helmEntities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range, { rotate: true }
   );
   const waypoint = buildWaypointBlip(
@@ -405,13 +420,13 @@ export function buildShieldsConsoleState(state) {
  */
 export function buildSensorsConsoleState(state) {
   const range = state.sensorsRadarRange ?? SENSORS_RADAR_RANGE;
-  const entities = withObjectiveTargets(state.asteroids, state.objectives);
+  const entities = state.asteroids;
   const blips = buildBlips(
     entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range,
     {
       rotate: false,
-      shows: state.sensorsRadarShows || ['player', 'asteroid', 'ship', 'station', 'planet', 'star', 'region', 'objective_marker'],
+      shows: state.sensorsRadarShows || ['player', 'asteroid_field', 'ship', 'station', 'planet', 'star', 'region'],
       selects: state.sensorsRadarSelects || ['ship', 'station', 'planet'],
       extra: (a) => ({
         color:   null,
@@ -456,7 +471,7 @@ export function buildSensorsConsoleState(state) {
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
     regions:                 state.regions || projectRadarRegions(
-      buildRadarRegions(entities, state.objectives),
+      buildRadarRegions(entities, []),
       state.shipX || 0,
       state.shipZ || 0,
       range

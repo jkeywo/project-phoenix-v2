@@ -1377,6 +1377,8 @@
       if (window.simState)        window.simState.apply(msg);
       if (window.commsState)      window.commsState.apply(msg);
       if (window.complexityStore) window.complexityStore.apply(msg);
+      // Mirror objectives from simState (handles ObjectiveSummary / CommsState internally).
+      if (window.simState) state.objectives = window.simState.objectives || [];
       switch (msg.type) {
         case 'Welcome':
           if (window.lobbyState) {
@@ -1504,9 +1506,9 @@
           state.shipYaw = snap.ship_yaw || 0;
           state.forwardSpeed = snap.forward_speed || 0;
           state.impulseChargeProgress = snap.impulse_charge_progress || 0;
-          state.navigationWaypoint = window.simState
-            ? window.simState.navigationWaypoint
-            : (snap.navigation_waypoint || null);
+            state.navigationWaypoint = window.simState
+              ? window.simState.navigationWaypoint
+              : (snap.navigation_waypoint || null);
           state.currentView = vd || (vm && vm.kind) || state.currentView;
           // Red alert visual (issue #439): drives the phone bezel image swap.
           // `snap.red_alert` is a snake-cased serde field on SimSnapshot.

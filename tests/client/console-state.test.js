@@ -495,7 +495,7 @@ describe('buildSensorsConsoleState', () => {
     expect(blips.find(b => b.uuid === 'region-1').selectable).toBe(false);
   });
 
-  it('rings active objective targets on the sensors radar even when tag-filtered out', () => {
+  it('excludes objective_marker entities from the sensors radar', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: 0,
       sensorsRadarShows: ['ship'],
@@ -503,9 +503,9 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 10, z: 0, tags: ['objective_marker'] }],
     };
     const blips = parse(buildSensorsConsoleState(state)).blips;
-    expect(blips).toHaveLength(1);
-    expect(blips[0].uuid).toBe('beacon-1');
-    expect(blips[0].objective_target).toBe(true);
+    // Objective markers are intentionally excluded from the sensors radar —
+    // they only appear on the navigation console's system chart.
+    expect(blips).toHaveLength(0);
   });
 
   it('target_uuid and derived fields are null when no sensorsTarget', () => {

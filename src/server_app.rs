@@ -241,12 +241,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             poll_asset_preload,
         };
         app.add_plugins(crate::server::ServerViewscreenRadarPlugin)
-            .init_resource::<crate::server::asset_preload::AssetPreloadResource>()
-            .add_systems(
-                Update,
-                begin_asset_preload
-                    .run_if(resource_equals(crate::server::asset_preload::AssetPreloadResource::default())),
-            )
+            .add_systems(OnEnter(GamePhase::Lobby), begin_asset_preload)
             .add_systems(Update, poll_asset_preload)
             .add_systems(
                 Update,
@@ -1468,6 +1463,7 @@ fn spawn_game_start_entities(
                     .as_ref()
                     .map(|hc| crate::ship_plugin::BankConfigResource {
                         max_bank_deg: hc.max_bank_deg,
+                        bank_lerp_rate: hc.bank_lerp_rate,
                     });
             commands.insert_resource(bank_cfg.unwrap_or_default());
         }

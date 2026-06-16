@@ -798,14 +798,22 @@ struct NebulaCloudState {
 }
 
 /// Fog transition state — lerps intensity for a smooth fade-in/out.
+/// Stores the last active fog parameters so the fade-out can complete
+/// after the ship leaves the nebula region.
 #[derive(Resource)]
 struct NebulaFogState {
     intensity: f32,
+    color: [f32; 3],
+    density: f32,
 }
 
 impl Default for NebulaFogState {
     fn default() -> Self {
-        Self { intensity: 0.0 }
+        Self {
+            intensity: 0.0,
+            color: [0.0; 3],
+            density: 0.0,
+        }
     }
 }
 
@@ -835,22 +843,28 @@ fn nebula_fog_system(
     };
     let dt = time.delta_secs();
 
-    let mut active_fog: Option<([f32; 3], f32)> = None;
-    if let Some(inside) = membership.inside.get(&ship_entity) {
-        for &region in inside.iter() {
-            if let Ok(effects) = region_q.get(region) {
-                if let Some(e) = effects.0.iter().find_map(|e| {
-                    if let RegionEffectKind::NebulaFog { color, density } = e {
-                        Some((*color, *density))
-                    } else {
-                        None
-                    }
-                }) {
-                    active_fog = Some(e);
-                    break;
-                }
-            }
-        }
+    let active_fog: Option<([f32; 3], f32)> =
+        if let Some(inside) = membership.inside.get(&ship_entity) {
+            inside.iter().find_map(|&region| {
+                region_q.get(region).ok().and_then(|effects| {
+                    effects.0.iter().find_map(|e| {
+                        if let RegionEffectKind::NebulaFog { color, density } = e {
+                            Some((*color, *density))
+                        } else {
+                            None
+                        }
+                    })
+                })
+            })
+        } else {
+            None
+        };
+
+    // Update stored fog params when inside a nebula, so the fade-out
+    // still has valid values after leaving the region.
+    if let Some((color, density)) = active_fog {
+        state.color = color;
+        state.density = density;
     }
 
     let target = if active_fog.is_some() { 1.0 } else { 0.0 };
@@ -864,11 +878,10 @@ fn nebula_fog_system(
     if state.intensity <= 0.0 {
         commands.entity(cam_entity).remove::<DistanceFog>();
     } else {
-        let (color, density) = active_fog.unwrap();
         commands.entity(cam_entity).insert(DistanceFog {
-            color: Color::srgb(color[0], color[1], color[2]),
+            color: Color::srgb(state.color[0], state.color[1], state.color[2]),
             falloff: FogFalloff::Exponential {
-                density: density * state.intensity,
+                density: state.density * state.intensity,
             },
             ..default()
         });

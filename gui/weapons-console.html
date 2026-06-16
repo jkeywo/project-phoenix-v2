@@ -688,8 +688,78 @@
     var _state         = null;
     var _radarWidget   = null;
 
+    // Stable per-tube DOM refs, keyed by tube id. State pushes arrive at
+    // 10Hz; rebuilding the load/fire buttons from scratch on every push
+    // destroyed the button mid-click (mousedown on the old node, mouseup
+    // after it had already been replaced), so most clicks were silently
+    // dropped. Buttons are now created once and updated in place.
+    var _tubeRowEls = {};
+
     // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
     // Handled by initConsole({ render }) — see bottom of script.
+
+    // Build the (stable) DOM nodes for one torpedo tube row. Click handlers
+    // look up the tube's current state from `_state` at click time rather
+    // than capturing it, since these nodes now persist across many renders.
+    function _buildTubeRow(id) {
+      var loadBtn = document.createElement('button');
+      loadBtn.type = 'button';
+
+      var fill = document.createElement('span');
+      fill.className = 'load-fill';
+
+      var lbl = document.createElement('span');
+      loadBtn.appendChild(fill);
+      loadBtn.appendChild(lbl);
+
+      loadBtn.addEventListener('click', function() {
+        var t = (_state && _state.tubes || []).find(function(x) { return x.id === id; });
+        var st = t ? (t.state || (t.loaded ? 'loaded' : 'unloaded')) : 'unloaded';
+        loadBtn.disabled = true;
+        if (st === 'loaded') {
+          loadBtn.className = 'load-btn btn-unloading';
+          fill.style.width = '0%';
+          lbl.textContent = 'UNLOADING ' + (t && typeof t.load_time === 'number' ? t.load_time.toFixed(1) : '…') + 's';
+          sendAction('unload_tube', { tube: id });
+        } else if (st === 'loading') {
+          loadBtn.className = 'load-btn btn-unloading';
+          fill.style.width = '0%';
+          lbl.textContent = 'CANCEL…';
+          sendAction('unload_tube', { tube: id });
+        } else {
+          loadBtn.className = 'load-btn btn-loading';
+          fill.style.width = '0%';
+          lbl.textContent = 'LOADING 0%';
+          sendAction('load_tube', { tube: id });
+        }
+      });
+
+      var fireBtn = document.createElement('button');
+      fireBtn.type = 'button';
+      var fireLbl = document.createElement('span');
+      fireLbl.textContent = 'FIRE';
+      fireBtn.appendChild(fireLbl);
+      fireBtn.addEventListener('click', function() {
+        var targetUuid = (_state && _state.target_uuid) ? _state.target_uuid : null;
+        sendAction('fire_torpedo', { tube: id, target_uuid: targetUuid });
+      });
+
+      var row = document.createElement('div');
+      row.className = 'tube-row';
+
+      var nameEl = document.createElement('span');
+      nameEl.className = 'tube-name';
+
+      var btns = document.createElement('div');
+      btns.className = 'tube-buttons';
+      btns.appendChild(loadBtn);
+      btns.appendChild(fireBtn);
+
+      row.appendChild(nameEl);
+      row.appendChild(btns);
+
+      return { row: row, nameEl: nameEl, loadBtn: loadBtn, fill: fill, lbl: lbl, fireBtn: fireBtn };
+    }
 
     function _renderConsole(s) {
       _state = s;
@@ -731,90 +801,51 @@
       if (tubeCountTag) tubeCountTag.textContent = tubes.length + ' TUBE' + (tubes.length !== 1 ? 'S' : '');
 
       var tubeList = document.getElementById('tube-list');
-      tubeList.innerHTML = '';
+
+      // Drop rows for tubes that no longer exist (tube list is static in
+      // practice, but stay correct if it ever changes).
+      var seenIds = {};
+      tubes.forEach(function(t) { seenIds[t.id] = true; });
+      Object.keys(_tubeRowEls).forEach(function(id) {
+        if (!seenIds[id]) {
+          _tubeRowEls[id].row.remove();
+          delete _tubeRowEls[id];
+        }
+      });
+
       tubes.forEach(function(t) {
         var state    = t.state || (t.loaded ? 'loaded' : 'unloaded');
         var progress = typeof t.progress === 'number' ? t.progress : (t.loaded ? 1 : 0);
         var name     = t.id.replace(/_/g, ' ').toUpperCase();
 
-        // Load/unload button
-        var loadBtn = document.createElement('button');
-        loadBtn.type = 'button';
-        loadBtn.disabled = state === 'unloading';
-
-        var fill = document.createElement('span');
-        fill.className = 'load-fill';
-        fill.style.width = (progress * 100).toFixed(1) + '%';
-
-        var lbl = document.createElement('span');
-
-        if (state === 'loaded') {
-          loadBtn.className = 'load-btn btn-unload';
-          lbl.textContent = 'UNLOAD';
-        } else if (state === 'unloaded') {
-          loadBtn.className = 'load-btn btn-load';
-          lbl.textContent = 'LOAD';
-        } else if (state === 'loading') {
-          loadBtn.className = 'load-btn btn-loading';
-          lbl.textContent = 'LOADING ' + Math.round(progress * 100) + '%';
-        } else {
-          loadBtn.className = 'load-btn btn-unloading';
-          var secsLeft = typeof t.reload_secs === 'number' ? t.reload_secs : 0;
-          lbl.textContent = 'UNLOADING ' + secsLeft.toFixed(1) + 's';
+        var els = _tubeRowEls[t.id];
+        if (!els) {
+          els = _buildTubeRow(t.id);
+          _tubeRowEls[t.id] = els;
+          tubeList.appendChild(els.row);
         }
 
-        loadBtn.appendChild(fill);
-        loadBtn.appendChild(lbl);
+        els.nameEl.textContent = name;
+        els.fill.style.width = (progress * 100).toFixed(1) + '%';
+        els.loadBtn.disabled = state === 'unloading';
 
-        loadBtn.addEventListener('click', (function(id, st, btn, fillEl, lblEl, loadTime) { return function() {
-          console.log('[tube-click] id=' + id + ' st=' + st + ' sendAction=' + typeof sendAction);
-          btn.disabled = true;
-          if (st === 'loaded') {
-            btn.className = 'load-btn btn-unloading';
-            fillEl.style.width = '0%';
-            lblEl.textContent = 'UNLOADING ' + (typeof loadTime === 'number' ? loadTime.toFixed(1) : '…') + 's';
-            sendAction('unload_tube', { tube: id });
-          } else if (st === 'loading') {
-            btn.className = 'load-btn btn-unloading';
-            fillEl.style.width = '0%';
-            lblEl.textContent = 'CANCEL…';
-            sendAction('unload_tube', { tube: id });
-          } else {
-            btn.className = 'load-btn btn-loading';
-            fillEl.style.width = '0%';
-            lblEl.textContent = 'LOADING 0%';
-            sendAction('load_tube', { tube: id });
-          }
-        }; })(t.id, state, loadBtn, fill, lbl, t.load_time));
+        if (state === 'loaded') {
+          els.loadBtn.className = 'load-btn btn-unload';
+          els.lbl.textContent = 'UNLOAD';
+        } else if (state === 'unloaded') {
+          els.loadBtn.className = 'load-btn btn-load';
+          els.lbl.textContent = 'LOAD';
+        } else if (state === 'loading') {
+          els.loadBtn.className = 'load-btn btn-loading';
+          els.lbl.textContent = 'LOADING ' + Math.round(progress * 100) + '%';
+        } else {
+          els.loadBtn.className = 'load-btn btn-unloading';
+          var secsLeft = typeof t.reload_secs === 'number' ? t.reload_secs : 0;
+          els.lbl.textContent = 'UNLOADING ' + secsLeft.toFixed(1) + 's';
+        }
 
-        // Fire button
-        var fireBtn = document.createElement('button');
-        fireBtn.type = 'button';
-        var fireLbl = document.createElement('span');
-        fireLbl.textContent = 'FIRE';
-        fireBtn.appendChild(fireLbl);
-        fireBtn.disabled = state !== 'loaded';
-        fireBtn.className = state === 'loaded' ? 'fire-btn armed' : 'fire-btn';
-        fireBtn.addEventListener('click', (function(id) { return function() {
-          var targetUuid = (_state && _state.target_uuid) ? _state.target_uuid : null;
-          sendAction('fire_torpedo', { tube: id, target_uuid: targetUuid });
-        }; })(t.id));
-
-        var row = document.createElement('div');
-        row.className = 'tube-row';
-
-        var nameEl = document.createElement('span');
-        nameEl.className = 'tube-name';
-        nameEl.textContent = name;
-
-        var btns = document.createElement('div');
-        btns.className = 'tube-buttons';
-        btns.appendChild(loadBtn);
-        btns.appendChild(fireBtn);
-
-        row.appendChild(nameEl);
-        row.appendChild(btns);
-        tubeList.appendChild(row);
+        els.fireBtn.disabled = state !== 'loaded';
+        els.fireBtn.className = state === 'loaded' ? 'fire-btn armed' : 'fire-btn';
       });
 
       // ── Phaser state ─────────────────────────────────────────────────────

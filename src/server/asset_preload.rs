@@ -250,7 +250,7 @@ pub fn process_sub_world_toml(
 // ── Bevy Resource ─────────────────────────────────────────────────────────
 
 /// Tracks the progress of server-side asset pre-caching.
-#[derive(Resource, Default, PartialEq)]
+#[derive(Resource)]
 pub struct AssetPreloadResource {
     /// True once `begin_asset_preload` has run.
     pub started: bool,
@@ -338,26 +338,12 @@ pub fn begin_asset_preload(
 
     let config_cache = crate::config_cache::get_config_cache();
 
-    bevy::log::info!(
-        "asset_preload: config_cache has {} entries",
-        config_cache.len()
-    );
-
     // Initial discovery from base world
     let (mut manifest, pending_worlds) = discover_base_assets(&world_config, &config_cache);
-
-    bevy::log::info!(
-        "asset_preload: discovered {} GLBs, {} icons, {} sidecars, {} sub-worlds",
-        manifest.glb_models.len(),
-        manifest.radar_icons.len(),
-        manifest.sidecars.len(),
-        pending_worlds.len()
-    );
 
     // Start loading GLB models
     let mut glb_handles = Vec::new();
     for glb_path in &manifest.glb_models {
-        bevy::log::info!("asset_preload: queuing GLB load: {}", glb_path);
         let path = format!("{}#Scene0", glb_path);
         let handle: Handle<bevy::scene::Scene> = asset_server.load(&path);
         glb_handles.push((glb_path.clone(), handle));
@@ -366,7 +352,6 @@ pub fn begin_asset_preload(
     // Start loading radar icons
     let mut icon_handles = Vec::new();
     for icon_path in &manifest.radar_icons {
-        bevy::log::info!("asset_preload: queuing icon load: {}", icon_path);
         let handle: Handle<Image> = asset_server.load(icon_path);
         icon_handles.push((icon_path.clone(), handle));
     }

@@ -481,7 +481,7 @@ pub fn get_config_cache() -> ConfigCache {
 
 /// Queue a path for fetching and fire the callback.
 #[cfg(target_arch = "wasm32")]
-pub fn queue_and_fire(path: String) {
+fn queue_and_fire(path: String) {
     let mut should_fire = false;
 
     CONFIG_CACHE.with(|cache| {

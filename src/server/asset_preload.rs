@@ -545,8 +545,13 @@ pub fn poll_asset_preload(
         preload.complete = true;
         preload.ready_count = preload.total_count;
         bevy::log::info!(
-            "asset_preload: all {} assets ready",
-            preload.total_count
+            "asset_preload: all {} assets ready (glbs_ready={}, icons_ready={}, sidecars_done={}, sub_worlds_done={})",
+            preload.total_count, glbs_ready, icons_ready, sidecars_done, sub_worlds_done
+        );
+    } else {
+        bevy::log::debug!(
+            "asset_preload: waiting: glbs_ready={}, icons_ready={}, sidecars_done={} (pending={}), sub_worlds_done={} (pending={})",
+            glbs_ready, icons_ready, sidecars_done, preload.pending_sidecars.len(), sub_worlds_done, preload.pending_sub_worlds.len()
         );
     }
 }
@@ -581,8 +586,10 @@ pub fn auto_transition_from_loading(
     mut outbox: ResMut<LobbyOutbox>,
 ) {
     if !preload.complete {
+        bevy::log::debug!("auto_transition_from_loading: preload.complete=false, staying in Loading");
         return;
     }
+    bevy::log::info!("auto_transition_from_loading: preload.complete=true, transitioning to InProgress");
     next_state.set(GamePhase::InProgress);
     outbox.0.push((Target::All, ServerMessage::GameStarted));
 }

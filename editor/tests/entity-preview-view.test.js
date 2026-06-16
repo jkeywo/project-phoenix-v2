@@ -109,7 +109,7 @@ describe('renderEntityPreviewView', () => {
     const preview = computeEntityPreview({
       tags: ['ship'],
       collider: { shape: 'Capsule', radius: 3.0, length: 6.0 },
-      radar_appearance: { colour: [0.6, 0.8, 1.0], radius: 5.0 },
+      radar_appearance: { colour: [0.6, 0.8, 1.0], size: 5.0, icon: 'ship' },
     });
     const { Konva, created } = makeMockKonva();
     renderEntityPreviewView(host, preview, { Konva });
@@ -125,7 +125,7 @@ describe('renderEntityPreviewView', () => {
   it('renders station with diamond radar', () => {
     const preview = computeEntityPreview({
       tags: ['station'],
-      radar_appearance: { colour: [0.3, 0.8, 0.6], radius: 10.0 },
+      radar_appearance: { colour: [0.3, 0.8, 0.6], size: 10.0, icon: 'station' },
     });
     const { Konva, created } = makeMockKonva();
     renderEntityPreviewView(host, preview, { Konva });

@@ -4,7 +4,7 @@
  * Decouples appearance resolution from Konva/DOM so it is unit-testable.
  */
 
-import { tagShape } from './tag-shape-map.js';
+import { iconShape } from './tag-shape-map.js';
 
 /** Sentinel value returned as `shape` when no radar_appearance is present. */
 export const RADAR_SHAPE_FALLBACK = 'X';
@@ -19,23 +19,23 @@ export const RADAR_SHAPE_FALLBACK = 'X';
  *   radius: number,
  *   shape: string,
  *   hasFallback: boolean,
+ *   hasIcon: boolean,
  *   x: number,
  *   z: number,
  * }}
  */
 export function resolveEntityAppearance(entity, anchors = {}) {
-  const tags = entity.tags || [];
-  const shape = tagShape(tags);
-
   const radarApp = entity.radar_appearance;
   const hasFallback = !radarApp;
+  const hasIcon = !!radarApp?.icon;
+  const shape = iconShape(radarApp?.icon);
 
   const colour = radarApp
-    ? radarApp.colour
-    : [0.7, 0.7, 0.7]; // neutral grey for X fallback
+    ? (radarApp.colour ?? [0.7, 0.7, 0.7])
+    : [0.7, 0.7, 0.7]; // neutral grey for X fallback / unauthored colour
 
   const radius = radarApp
-    ? radarApp.radius
+    ? (radarApp.size ?? entity.collider?.radius ?? 8.0)
     : 8.0; // neutral fallback radius
 
   // Resolve position — entities carry positioning under nested `transform`.
@@ -56,7 +56,7 @@ export function resolveEntityAppearance(entity, anchors = {}) {
     }
   }
 
-  return { colour, radius, shape, hasFallback, x, z };
+  return { colour, radius, shape, hasFallback, hasIcon, x, z };
 }
 
 /**
@@ -83,7 +83,13 @@ export function colourToHex(colour) {
  * @param {boolean}  selected   - Whether entity is currently selected
  */
 export function drawEntityShape(group, Konva, appearance, selected = false) {
-  const { colour, radius, shape, hasFallback } = appearance;
+  const { colour, radius, shape, hasFallback, hasIcon } = appearance;
+
+  // A region-only entity (radar_appearance present but no icon) has no
+  // point marker on the live radar either — region geometry is drawn by
+  // the separate region overlay, not this glyph.
+  if (!hasFallback && !hasIcon) return;
+
   const hexColour = colourToHex(colour);
   const strokeColour = selected ? '#00ff00' : '#ffffff';
   const strokeWidth = selected ? 3 : 1.5;

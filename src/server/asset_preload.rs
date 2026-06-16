@@ -167,16 +167,11 @@ fn walk_entity(
 fn discover_world_assets(
     world: &WorldConfig,
     config_cache: &HashMap<String, EntityConfig>,
-    seen_worlds: &mut HashSet<String>,
     seen_entities: &mut HashSet<String>,
     manifest: &mut AssetManifest,
     extra_worlds_out: &mut Vec<String>,
     world_key: &str,
 ) {
-    if !seen_worlds.insert(world_key.to_string()) {
-        return;
-    }
-
     // Walk every [[entity]] in the world
     for entity_inst in &world.entities {
         walk_entity(&entity_inst.template_path, config_cache, seen_entities, manifest);
@@ -200,18 +195,9 @@ fn discover_world_assets(
     }
 
     // Track sub-world paths for the caller to fetch & recurse
-    for path in world_paths_from_triggers {
-        if !seen_worlds.contains(&path) && !extra_worlds_out.contains(&path) {
-            extra_worlds_out.push(path);
-        }
-    }
-
-    // Also handle extra_worlds field
-    for path in &world.extra_worlds {
-        if !seen_worlds.contains(path) && !extra_worlds_out.contains(path) {
-            extra_worlds_out.push(path.clone());
-        }
-    }
+    // (caller handles deduplication against seen_worlds)
+    extra_worlds_out.extend(world_paths_from_triggers);
+    extra_worlds_out.extend(world.extra_worlds.clone());
 }
 
 /// Build the initial `AssetManifest` from the base world + config cache.
@@ -221,7 +207,6 @@ pub fn discover_base_assets(
     world: &WorldConfig,
     config_cache: &HashMap<String, EntityConfig>,
 ) -> (AssetManifest, Vec<String>) {
-    let mut seen_worlds = HashSet::new();
     let mut seen_entities = HashSet::new();
     let mut manifest = AssetManifest::default();
     let mut pending_worlds = Vec::new();
@@ -229,7 +214,6 @@ pub fn discover_base_assets(
     discover_world_assets(
         world,
         config_cache,
-        &mut seen_worlds,
         &mut seen_entities,
         &mut manifest,
         &mut pending_worlds,
@@ -244,7 +228,6 @@ pub fn discover_base_assets(
 pub fn process_sub_world_toml(
     toml_str: &str,
     config_cache: &HashMap<String, EntityConfig>,
-    seen_worlds: &mut HashSet<String>,
     seen_entities: &mut HashSet<String>,
     manifest: &mut AssetManifest,
     path: &str,
@@ -255,7 +238,6 @@ pub fn process_sub_world_toml(
     discover_world_assets(
         &world,
         config_cache,
-        seen_worlds,
         seen_entities,
         manifest,
         &mut pending_worlds,
@@ -388,13 +370,11 @@ pub fn begin_asset_preload(
         {
             // On native we can read the file synchronously right now
             if let Ok(toml_str) = std::fs::read_to_string(world_path) {
-                let mut seen_worlds = HashSet::new();
                 let mut seen_entities = HashSet::new();
                 let mut manifest_mut = AssetManifest::default();
                 let _ = process_sub_world_toml(
                     &toml_str,
                     &config_cache,
-                    &mut seen_worlds,
                     &mut seen_entities,
                     &mut manifest_mut,
                     world_path,
@@ -487,22 +467,10 @@ pub fn poll_asset_preload(
                 let mut manifest = AssetManifest::default();
                 let cache = crate::config_cache::get_config_cache();
                 let cache_ref: &std::collections::HashMap<String, crate::entity_config::EntityConfig> = &*cache;
-                // SAFETY: We derive two &mut refs to separate fields (seen_worlds, seen_entities)
-                // from a single &mut preload. They are passed immediately to process_sub_world_toml
-                // and the function only accesses them through independent paths — there is no
-                // simultaneous aliasing of the same memory.
-                let (seen_worlds, seen_entities) = unsafe {
-                    let preload_ptr = core::ptr::addr_of_mut!(preload);
-                    (
-                        &mut (*preload_ptr).seen_worlds,
-                        &mut (*preload_ptr).seen_entities,
-                    )
-                };
                 match process_sub_world_toml(
                     &toml_str,
                     cache_ref,
-                    seen_worlds,
-                    seen_entities,
+                    &mut preload.seen_entities,
                     &mut manifest,
                     world_path,
                 ) {

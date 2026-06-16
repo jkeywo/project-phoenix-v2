@@ -1,6 +1,9 @@
 name = "Nebula"
 tags = ["region", "nebula"]
 
+[radar_appearance]
+region_colour = [0.6, 0.4, 1.0]
+
 [target]
 tags = ["region"]
 threat_level = "none"

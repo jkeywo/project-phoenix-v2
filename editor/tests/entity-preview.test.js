@@ -5,12 +5,12 @@ import { computeEntityPreview } from '../entity-preview.js';
 
 const shipWithRadar = {
   tags: ['ship', 'player'],
-  radar_appearance: { colour: [0.6, 0.8, 1.0], radius: 6.0 },
+  radar_appearance: { colour: [0.6, 0.8, 1.0], size: 6.0, icon: 'playerShip' },
 };
 
 const stationWithRadar = {
   tags: ['station', 'allied'],
-  radar_appearance: { colour: [0.3, 0.8, 0.6], radius: 18.0 },
+  radar_appearance: { colour: [0.3, 0.8, 0.6], size: 18.0, icon: 'station' },
 };
 
 const asteroidNoRadar = {

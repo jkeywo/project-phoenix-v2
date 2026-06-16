@@ -1,4 +1,4 @@
-import { tagShape } from './tag-shape-map.js';
+import { iconShape } from './tag-shape-map.js';
 import { RADAR_SHAPE_FALLBACK } from './canvas-world.js';
 
 const CONSOLE_SECTIONS = [
@@ -19,9 +19,9 @@ export function computeEntityPreview(entity, factionMap = new Map()) {
   const tags = Array.isArray(entity.tags) ? entity.tags : [];
   const radarApp = entity.radar_appearance;
 
-  const radarShape = radarApp ? tagShape(tags) : RADAR_SHAPE_FALLBACK;
+  const radarShape = radarApp ? iconShape(radarApp.icon) : RADAR_SHAPE_FALLBACK;
   const radarColour = radarApp?.colour ?? null;
-  const radarRadius = radarApp?.radius ?? null;
+  const radarRadius = radarApp?.size ?? null;
 
   const collider = entity.collider;
   const colliderShape = collider?.shape ?? null;

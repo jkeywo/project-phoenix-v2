@@ -1,34 +1,14 @@
 /**
- * tag-shape-map.js — Pure tag→RadarShape mapping.
+ * tag-shape-map.js — Pure icon→RadarShape mapping for the editor preview.
  *
- * Mirrors the runtime table in src/gui/radar.rs `tags_to_radar_layer` +
- * `layer_to_icon`. Each Rust `RadarLayer` maps to one editor `RadarShape`:
- *
- *   Rust layer  →  editor shape
- *   ──────────────────────────
- *   Ship        →  Triangle
- *   Asteroid    →  Dot
- *   Station     →  Diamond
- *   Missile     →  Dot       (rare in editor; torpedoes are runtime-only)
- *   Planet      →  Ring
- *   Star        →  Dot       (drawn as a filled circle, distinct from Ring)
- *
- * Precedence matches the runtime (first-match-wins, identical to
- * `tags_to_radar_layer` in src/gui/radar.rs):
- *
- *   has("region")                    → Dot (regions are not radar-relevant
- *                                           in-game; editor still draws them
- *                                           as a generic dot via fallback)
- *   has("ship") | has("pirate")      → Triangle
- *   has("asteroid") | "asteroid_field" → Dot
- *   has("station")                   → Diamond
- *   has("missile") | has("torpedo")  → Dot
- *   has("planet")                    → Ring
- *   has("star")                      → Dot
- *   (otherwise)                      → Dot
- *
- * When the Rust table changes, update this file AND the matching tests in
- * editor/tests/tag-shape-map.test.js.
+ * The editor draws a simplified vector glyph (Triangle/Diamond/Ring/Dot)
+ * instead of loading the real radar icon PNGs the live client uses. This
+ * module maps the entity's own authored `[radar_appearance].icon` string to
+ * a glyph — it is keyed by icon name, never by entity tags. An entity with
+ * no `[radar_appearance]` (or an icon string this map doesn't recognise)
+ * still gets a sensible glyph; the absence of *any* radar_appearance is a
+ * separate fallback handled upstream (see `RADAR_SHAPE_FALLBACK` in
+ * canvas-world.js), not by this function.
  */
 
 export const RADAR_SHAPE = Object.freeze({
@@ -39,31 +19,24 @@ export const RADAR_SHAPE = Object.freeze({
   Dot: 'Dot',
 });
 
+/** Icon-name substrings that map to a glyph other than the Dot default. */
+const SHIP_LIKE = ['ship', 'battleship', 'cruiser', 'destroyer'];
+const STATION_LIKE = ['station'];
+const PLANET_LIKE = ['planet'];
+
 /**
- * Return the RadarShape for a given tag array.
+ * Return the RadarShape glyph for a given icon name.
  *
- * Order of checks matches `tags_to_radar_layer` in src/gui/radar.rs.
- *
- * @param {string[]|null|undefined} tags
+ * @param {string|null|undefined} icon
  * @returns {'Triangle'|'Square'|'Diamond'|'Ring'|'Dot'}
  */
-export function tagShape(tags) {
-  if (!Array.isArray(tags)) return RADAR_SHAPE.Dot;
+export function iconShape(icon) {
+  if (!icon) return RADAR_SHAPE.Dot;
+  const value = String(icon).toLowerCase();
 
-  const has = (tag) => tags.includes(tag);
-
-  // Region is filtered out of the runtime radar entirely; in the editor we
-  // still need *some* shape so the entity is visible on the canvas, and Dot
-  // is the safest generic. Region rendering proper is handled by
-  // canvas-region.js, not by this mapping.
-  if (has('region')) return RADAR_SHAPE.Dot;
-
-  if (has('ship') || has('pirate')) return RADAR_SHAPE.Triangle;
-  if (has('asteroid') || has('asteroid_field')) return RADAR_SHAPE.Dot;
-  if (has('station')) return RADAR_SHAPE.Diamond;
-  if (has('missile') || has('torpedo')) return RADAR_SHAPE.Dot;
-  if (has('planet')) return RADAR_SHAPE.Ring;
-  if (has('star')) return RADAR_SHAPE.Dot;
+  if (SHIP_LIKE.some((s) => value.includes(s))) return RADAR_SHAPE.Triangle;
+  if (STATION_LIKE.some((s) => value.includes(s))) return RADAR_SHAPE.Diamond;
+  if (PLANET_LIKE.some((s) => value.includes(s))) return RADAR_SHAPE.Ring;
 
   return RADAR_SHAPE.Dot;
 }

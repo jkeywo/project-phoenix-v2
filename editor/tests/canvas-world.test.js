@@ -2,18 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { resolveEntityAppearance, RADAR_SHAPE_FALLBACK } from '../canvas-world.js';
 
 // Tests for the pure logic that drives canvas rendering of world-mode entities.
-// resolveEntityAppearance(entity) returns { colour, radius, shape, hasFallback }
+// resolveEntityAppearance(entity) returns { colour, radius, shape, hasFallback, hasIcon }
 //   - colour: [r, g, b] normalised 0-1 floats (from radar_appearance.colour)
-//   - radius: positive number (from radar_appearance.radius)
-//   - shape:  RadarShape string (from tag-shape-map)
-//   - hasFallback: true if radar_appearance was absent (render as X)
+//   - radius: positive number (from radar_appearance.size, falling back to collider radius)
+//   - shape:  RadarShape string (from tag-shape-map, keyed by radar_appearance.icon)
+//   - hasFallback: true if radar_appearance was absent entirely (render as X)
+//   - hasIcon: true if radar_appearance.icon was set (region-only entities have none)
 
 describe('resolveEntityAppearance', () => {
   describe('entities with [radar_appearance]', () => {
     it('pirate_raider returns red colour, radius 4, Triangle shape', () => {
       const entity = {
         tags: ['ship', 'npc', 'enemy'],
-        radar_appearance: { colour: [1.0, 0.2, 0.2], radius: 4.0 },
+        radar_appearance: { colour: [1.0, 0.2, 0.2], size: 4.0, icon: 'destroyer' },
       };
       const result = resolveEntityAppearance(entity);
       expect(result.colour).toEqual([1.0, 0.2, 0.2]);
@@ -25,7 +26,7 @@ describe('resolveEntityAppearance', () => {
     it('station_axiom returns green colour, radius 18, Diamond shape', () => {
       const entity = {
         tags: ['station', 'comms_contact', 'allied'],
-        radar_appearance: { colour: [0.3, 0.8, 0.6], radius: 18.0 },
+        radar_appearance: { colour: [0.3, 0.8, 0.6], size: 18.0, icon: 'station' },
       };
       const result = resolveEntityAppearance(entity);
       expect(result.colour).toEqual([0.3, 0.8, 0.6]);
@@ -37,7 +38,7 @@ describe('resolveEntityAppearance', () => {
     it('star_sun returns yellow colour, radius 50, Dot shape', () => {
       const entity = {
         tags: ['star', 'center'],
-        radar_appearance: { colour: [1.0, 0.85, 0.3], radius: 50.0 },
+        radar_appearance: { colour: [1.0, 0.85, 0.3], size: 50.0, icon: 'star' },
       };
       const result = resolveEntityAppearance(entity);
       expect(result.colour).toEqual([1.0, 0.85, 0.3]);
@@ -49,7 +50,7 @@ describe('resolveEntityAppearance', () => {
     it('planet_earth returns blue colour, radius 20, Ring shape', () => {
       const entity = {
         tags: ['planet', 'habitable'],
-        radar_appearance: { colour: [0.0, 0.6, 1.0], radius: 20.0 },
+        radar_appearance: { colour: [0.0, 0.6, 1.0], size: 20.0, icon: 'planet' },
       };
       const result = resolveEntityAppearance(entity);
       expect(result.colour).toEqual([0.0, 0.6, 1.0]);
@@ -61,7 +62,7 @@ describe('resolveEntityAppearance', () => {
     it('player_ship returns light-blue colour, radius 6, Triangle shape', () => {
       const entity = {
         tags: ['player', 'ship'],
-        radar_appearance: { colour: [0.6, 0.8, 1.0], radius: 6.0 },
+        radar_appearance: { colour: [0.6, 0.8, 1.0], size: 6.0, icon: 'playerShip' },
       };
       const result = resolveEntityAppearance(entity);
       expect(result.colour).toEqual([0.6, 0.8, 1.0]);
@@ -120,11 +121,13 @@ describe('resolveEntityAppearance', () => {
       expect(result.hasFallback).toBe(true);
     });
 
-    it('fallback entity with ship tag still gets Triangle shape', () => {
-      // A ship entity missing radar_appearance should still get Triangle
+    it('fallback entity gets Dot shape regardless of tags (shape is icon-driven, not tag-driven)', () => {
+      // No radar_appearance → no icon → Dot, even for a ship-tagged entity.
+      // drawEntityShape() draws the X marker for hasFallback regardless of
+      // this value; the X marker uses hasFallback, not shape.
       const entity = { tags: ['ship', 'npc'] };
       const result = resolveEntityAppearance(entity);
-      expect(result.shape).toBe('Triangle');
+      expect(result.shape).toBe('Dot');
       expect(result.hasFallback).toBe(true);
     });
 

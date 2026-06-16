@@ -31,8 +31,8 @@ describe('entity-toml', () => {
       expect(result.behaviour.initial_state).toBe('patrol');
     });
 
-    it('parses asteroid_large.toml', () => {
-      const text = readEntity('asteroid_large.toml');
+    it('parses asteroid_common_1_large.toml', () => {
+      const text = readEntity('asteroid_common_1_large.toml');
       const result = parseEntityToml(text);
       expect(result.tags).toContain('asteroid');
     });
@@ -80,9 +80,9 @@ describe('entity-toml', () => {
   describe('round-trip shipped entities', () => {
     const entityFiles = [
       'pirate_raider.toml',
-      'asteroid_large.toml',
-      'asteroid_small.toml',
-      'asteroid_cosmetic.toml',
+      'asteroid_common_1_large.toml',
+      'asteroid_common_1_small.toml',
+      'asteroid_common_1_cosmetic.toml',
       'player_ship.toml',
       'station_axiom.toml',
       'station_outpost.toml',

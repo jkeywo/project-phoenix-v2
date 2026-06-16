@@ -512,6 +512,7 @@ mod tests {
                 colour: [1.0, 0.95, 0.85],
                 intensity: 150000.0,
                 range: Some(5000.0),
+                face_player: false,
             }],
             tags: vec![],
             hull: None,

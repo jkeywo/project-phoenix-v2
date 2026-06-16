@@ -241,8 +241,17 @@ pub fn add_simulation_plugins(app: &mut App) {
             poll_asset_preload,
         };
         app.add_plugins(crate::server::ServerViewscreenRadarPlugin)
-            .add_systems(OnEnter(GamePhase::Lobby), begin_asset_preload)
-            .add_systems(Update, poll_asset_preload)
+            .init_resource::<crate::server::asset_preload::AssetPreloadResource>()
+            .add_systems(
+                Update,
+                begin_asset_preload
+                    .run_if(resource_equals(crate::server::asset_preload::AssetPreloadResource::default())),
+            )
+            .add_systems(
+                Update,
+                poll_asset_preload
+                    .run_if(in_state(GamePhase::Lobby).or(in_state(GamePhase::Loading))),
+            )
             .add_systems(
                 Update,
                 broadcast_loading_progress.run_if(in_state(GamePhase::Loading)),

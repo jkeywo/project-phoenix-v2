@@ -170,7 +170,7 @@ fn discover_world_assets(
     seen_entities: &mut HashSet<String>,
     manifest: &mut AssetManifest,
     extra_worlds_out: &mut Vec<String>,
-    world_key: &str,
+    _world_key: &str,
 ) {
     // Walk every [[entity]] in the world
     for entity_inst in &world.entities {

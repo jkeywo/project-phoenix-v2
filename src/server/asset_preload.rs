@@ -477,7 +477,8 @@ pub fn poll_asset_preload(
     let mut new_sub_worlds: Vec<String> = Vec::new();
     let mut still_pending_worlds: Vec<String> = Vec::new();
 
-    for world_path in &preload.pending_sub_worlds {
+    let pending_sub_worlds = preload.pending_sub_worlds.clone();
+    for world_path in &pending_sub_worlds {
         #[cfg(not(target_arch = "wasm32"))]
         {}
         #[cfg(target_arch = "wasm32")]

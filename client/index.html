@@ -150,6 +150,29 @@
        attribute selector (not `style.display = ''`) so the stylesheet's
        default state actually applies. */
     #phone-bezel[aria-hidden="true"] { display: none; }
+
+    /* ── Asset loading overlay (shown during Loading phase) ────────── */
+    #asset-loading {
+      display: none;
+      position: fixed; inset: 0; z-index: 200;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      color: #8af;
+      font-family: 'Chakra Petch', monospace;
+      font-size: 1rem;
+      text-align: center;
+      gap: 16px;
+    }
+    #asset-loading .spinner-ring {
+      width: 40px; height: 40px;
+      border: 3px solid #335;
+      border-top-color: #8af;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    #asset-loading .pct { font-size: 1.4rem; font-weight: 600; }
     .bezel-corner, .bezel-edge {
       position: absolute;
       pointer-events: none;
@@ -289,6 +312,7 @@
       transition: all .3s ease; }
     #ready-pill.go { background: #0a2830; color: var(--signal-cyan); border-color: var(--signal-cyan);
       animation: pill-pulse 1.5s ease-in-out infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes pill-pulse {
       0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.2); }
       50%       { box-shadow: 0 0 12px rgba(95,216,232,0.5); }
@@ -504,6 +528,13 @@
     <span id="conn-label"></span>
     <span id="conn-dot"></span>
     <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+  </div>
+
+  <!-- Asset loading overlay: shown during GamePhase::Loading while the
+       server pre-caches GLB models, radar icons, and rig sidecars. -->
+  <div id="asset-loading">
+    <div class="spinner-ring"></div>
+    <span>Preparing scenario&hellip; <span class="pct" id="asset-loading-pct">0</span>%</span>
   </div>
 
   <!-- Phone bezel frame (issue #439). Eight fixed-position pieces overlay
@@ -1494,7 +1525,18 @@
         }
         case 'GameStarted':
           state.phase = 'InProgress';
+          const loadingEl = document.getElementById('asset-loading');
+          if (loadingEl) loadingEl.style.display = 'none';
           break;
+        case 'LoadingProgress': {
+          const frac = msg.data?.fraction ?? 0;
+          const pct = Math.round(frac * 100);
+          const pctEl = document.getElementById('asset-loading-pct');
+          const assetEl = document.getElementById('asset-loading');
+          if (assetEl) assetEl.style.display = 'flex';
+          if (pctEl) pctEl.textContent = String(pct);
+          break;
+        }
         case 'SimState': {
           const snap = msg.data.snapshot;
           // SimSnapshot has view_mode: ViewMode (tagged enum), not view_direction.

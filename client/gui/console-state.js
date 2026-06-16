@@ -66,23 +66,18 @@ function withObjectiveTargets(entities, objectives) {
   });
 }
 
-function hasAnyTag(entity, tags) {
-  const wanted = new Set((tags || []).map(t => String(t).toLowerCase()));
-  if (wanted.size === 0) return false;
-  const actual = (entity.tags || entity.entity_tags || []).map(t => String(t).toLowerCase());
-  return actual.some(t => wanted.has(t));
-}
-
 export function buildRadarRegions(entities, objectives = []) {
   const objectiveEntities = withObjectiveTargets(entities, objectives);
   return objectiveEntities
     .map(e => {
-      if (!e || !hasAnyTag(e, ['region', 'asteroid_field', 'objective_marker'])) return null;
-      const isAsteroidField = hasAnyTag(e, ['asteroid_field']);
+      // An entity is a region on radar iff [radar_appearance].region_colour
+      // was authored for it. No tag-based detection, no colour fallback —
+      // shape geometry still comes from the entity's own [shape]/
+      // [asteroid_field] fields.
+      if (!e || !e.region_colour) return null;
       const shape = e.shape
         ? String(e.shape).toLowerCase()
-        : (isAsteroidField ? ((e.inner_radius || 0) > 0 ? 'torus' : 'sphere') : null);
-      if (!shape) return null;
+        : ((e.inner_radius || 0) > 0 ? 'torus' : 'sphere');
       const radius = e.radius ?? e.outer_radius ?? null;
       return {
         uuid: e.uuid,
@@ -96,11 +91,7 @@ export function buildRadarRegions(entities, objectives = []) {
           ? [e.half_extents[0] || 0, e.half_extents[2] || e.half_extents[1] || 0]
           : null,
         yaw: e.yaw ?? null,
-        color: e.colour || e.color || (
-          e.objective_target ? [0.83, 0.66, 0.13]
-          : isAsteroidField ? [0.52, 0.32, 0.18]
-          : [0.6, 0.4, 1.0]
-        ),
+        color: e.region_colour,
         name: e.name || null,
         objective_target: !!e.objective_target,
       };
@@ -168,6 +159,10 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
   const shows = (opts.shows || []).map(t => String(t).toLowerCase());
   const selects = (opts.selects || []).map(t => String(t).toLowerCase());
   return (entities || []).map(a => {
+    // No [radar_appearance].icon → this entity has no point blip (it may
+    // still render as a region via buildRadarRegions, or not at all).
+    if (!a || !a.radar_icon) return null;
+
     const tags = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
     if (shows.length > 0 && !tags.some(t => shows.includes(t)) && !a.objective_target) return null;
 
@@ -182,19 +177,9 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
       radar_x = dx / range;
       radar_y = dz / range;
     }
-    const radius = (a.radar_world_size !== undefined && a.radar_world_size !== null)
-      ? a.radar_world_size
+    const radius = (a.radar_size !== undefined && a.radar_size !== null)
+      ? a.radar_size
       : entityRadius(a);
-    const explicitKind = kindFromRadarIcon(a.radar_icon || a.radarIcon);
-    const kind   = explicitKind
-                 || (tags.includes('ship')    ? 'ship'
-                 : tags.includes('station') ? 'station'
-                 : tags.includes('planet')  ? 'planet'
-                 : tags.includes('star')    ? 'star'
-                 : tags.includes('torpedo') || tags.includes('missile') ? 'torpedo'
-                 : tags.includes('region')  ? 'region'
-                 : tags.includes('objective_marker') ? 'waypoint'
-                 : 'asteroid');
     const targetTags = (a.target_tags || []).map(t => String(t).toLowerCase());
     const selectable = selects.length > 0 && targetTags.some(t => selects.includes(t));
     const blip = {
@@ -202,9 +187,9 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
       radar_x,
       radar_y,
       scaled_radius: radius / range,
-      kind,
-      icon: a.radar_icon || kind,
-      color: a.colour || a.color || null,
+      kind: a.radar_icon,
+      icon: a.radar_icon,
+      color: a.colour || null,
       objective_target: !!a.objective_target,
       name: a.name || null,
       selectable,
@@ -215,17 +200,6 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
     if (opts.extra) Object.assign(blip, opts.extra(a));
     return blip;
   }).filter(Boolean);
-}
-
-function kindFromRadarIcon(icon) {
-  const value = icon === undefined || icon === null ? '' : String(icon).toLowerCase();
-  if (value === 'player_ship') return 'player';
-  if (value === 'missile') return 'torpedo';
-  if ([
-    'ship', 'player', 'asteroid', 'station', 'planet', 'star', 'torpedo',
-    'battleship', 'cruiser', 'destroyer',
-  ].includes(value)) return value;
-  return null;
 }
 
 /**
@@ -299,8 +273,8 @@ export function buildWeaponsConsoleState(state) {
       range,
       {
         rotate: true,
-        shows: state.tacticalRadarShows || ['player', 'ship', 'asteroid', 'station', 'missile', 'torpedo', 'region'],
-        selects: state.tacticalRadarSelects || ['ship', 'station', 'asteroid'],
+        shows: state.tacticalRadarShows,
+        selects: state.tacticalRadarSelects,
       }
     );
   const targetUuid = state.weaponsTarget || null;
@@ -448,8 +422,8 @@ export function buildSensorsConsoleState(state) {
     range,
     {
       rotate: true,
-      shows: state.sensorsRadarShows || ['player', 'asteroid_field', 'ship', 'station', 'planet', 'star', 'region'],
-      selects: state.sensorsRadarSelects || ['ship', 'station', 'planet'],
+      shows: state.sensorsRadarShows,
+      selects: state.sensorsRadarSelects,
       extra: (a) => ({
         color:   null,
         name:    a.name    || null,
@@ -534,34 +508,21 @@ export function buildCommsConsoleState(state) {
 
 export const NAVIGATION_RADAR_RANGE = 5000.0;
 
-// Tags that appear on strategic navigational entities shown in the nav chart.
-// Individual asteroid rocks and NPC ships are excluded.
-const NAV_CHART_TAGS = new Set([
-  'region',
-  'asteroid_field',
-  'star',
-  'planet',
-  'station',
-  'player_ship',
-  'player',
-  'objective_marker',
-]);
-
 /**
  * Navigation console state builder (issue #458).
  *
  * Produces a world-centred north-up radar snapshot filtered to strategic
- * navigational entities (stars, planets, stations, regions, asteroid fields, player ship).
- * Individual asteroids and NPC ship blips are excluded.
+ * navigational entities, per the ship_config-authored `nav_chart_shows`/
+ * `nav_chart_selects` lists. No JS-side default — an unauthored ship_config
+ * shows nothing on the nav chart until the TOML specifies these lists.
  *
  * @param {{ asteroids, shipX, shipZ, impulseChargeProgress, currentView }} state
  */
 export function buildNavigationConsoleState(state) {
   const range = state.navChartRange ?? NAVIGATION_RADAR_RANGE;
-  const navShows = state.navChartShows || Array.from(NAV_CHART_TAGS);
+  const navShows = state.navChartShows || [];
   const navShowsLower = navShows.map(s => String(s).toLowerCase());
-  const navSelects = (state.navChartSelects || ['ship', 'station', 'planet', 'star', 'region'])
-    .map(t => String(t).toLowerCase());
+  const navSelects = (state.navChartSelects || []).map(t => String(t).toLowerCase());
   const entities = withObjectiveTargets(state.asteroids, state.objectives);
   // Filter to navigational entities only.
   const navEntities = entities.filter(e => {
@@ -581,17 +542,14 @@ export function buildNavigationConsoleState(state) {
       selects: navSelects,
       extra: (e) => {
         const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
-        const explicitKind = kindFromRadarIcon(e.radar_icon || e.radarIcon);
-        const kind = explicitKind && explicitKind !== 'asteroid' ? explicitKind
-                   : tags.includes('star')    ? 'star'
-                   : tags.includes('planet')  ? 'planet'
-                   : tags.includes('station') ? 'station'
-                   : tags.includes('region') || tags.includes('asteroid_field') ? 'region'
-                   : tags.includes('objective_marker') ? 'waypoint'
-                   : explicitKind || 'ship';
+        // Objective-marker beacons (e.g. nav_beacon.toml) render as the
+        // synthetic waypoint marker rather than their authored icon — a
+        // UI affordance for "ring the active objective", not an icon
+        // resolution rule.
+        const kindOverride = tags.includes('objective_marker') ? { kind: 'waypoint' } : {};
         return {
           name: e.name || null,
-          kind,
+          ...kindOverride,
           world_x: entityX(e),
           world_z: entityZ(e),
           stance:  e.stance  || 'neutral',

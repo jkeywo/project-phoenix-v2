@@ -108,13 +108,16 @@ export class ClientSimState {
     this.weaponsRadarRange = 300.0;
     this.helmRadarRange = 500.0;
     this.sensorsRadarRange = 500.0;
-    this.tacticalRadarShows = ['player', 'ship', 'asteroid', 'station', 'missile', 'torpedo', 'region'];
-    this.tacticalRadarSelects = ['ship', 'station', 'asteroid'];
-    this.sensorsRadarShows = ['player', 'asteroid_field', 'ship', 'station', 'planet', 'star'];
-    this.sensorsRadarSelects = ['ship', 'station', 'planet'];
+    // Radar show/select tag lists are required from the server's ship_config
+    // (see Welcome handler below) — no JS-side default. A console whose
+    // ship_config omits these shows nothing until the TOML is authored.
+    this.tacticalRadarShows = [];
+    this.tacticalRadarSelects = [];
+    this.sensorsRadarShows = [];
+    this.sensorsRadarSelects = [];
     this.navChartRange = 500.0;
-    this.navChartShows = ['region', 'asteroid_field', 'star', 'planet', 'station', 'player', 'objective_marker', 'ship'];
-    this.navChartSelects = ['ship', 'station', 'planet', 'star', 'region'];
+    this.navChartShows = [];
+    this.navChartSelects = [];
     /** Fire-arc configs from server ship_config, populated on Welcome. */
     this.phaserArcConfigs = [];
     this.torpedoArcConfigs = [];
@@ -153,13 +156,13 @@ export class ClientSimState {
         this.weaponsRadarRange = sc.tactical_radar_range ?? 300.0;
         this.helmRadarRange    = sc.helm_radar_range    ?? 500.0;
         this.sensorsRadarRange = sc.sensors_radar_range ?? 500.0;
-        this.tacticalRadarShows   = sc.tactical_radar_shows   || this.tacticalRadarShows;
-        this.tacticalRadarSelects = sc.tactical_radar_selects || this.tacticalRadarSelects;
-        this.sensorsRadarShows    = sc.sensors_radar_shows    || this.sensorsRadarShows;
-        this.sensorsRadarSelects  = sc.sensors_radar_selects  || this.sensorsRadarSelects;
+        this.tacticalRadarShows   = sc.tactical_radar_shows   || [];
+        this.tacticalRadarSelects = sc.tactical_radar_selects || [];
+        this.sensorsRadarShows    = sc.sensors_radar_shows    || [];
+        this.sensorsRadarSelects  = sc.sensors_radar_selects  || [];
         this.navChartRange        = sc.nav_chart_range        ?? this.navChartRange;
-        this.navChartShows        = sc.nav_chart_shows        || this.navChartShows;
-        this.navChartSelects      = sc.nav_chart_selects      || this.navChartSelects;
+        this.navChartShows        = sc.nav_chart_shows        || [];
+        this.navChartSelects      = sc.nav_chart_selects      || [];
         this.phaserArcConfigs  = sc.phaser_banks        ?? [];
         this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
         if (world) {

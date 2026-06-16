@@ -1,5 +1,8 @@
 tags = ["region", "asteroid_belt"]
 
+[radar_appearance]
+region_colour = [0.6, 0.4, 1.0]
+
 [shape]
 type = "torus"
 inner_radius = 100.0

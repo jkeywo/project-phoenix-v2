@@ -1,5 +1,8 @@
 tags = ["field", "main", "asteroid_field"]
 
+[radar_appearance]
+region_colour = [0.52, 0.32, 0.18]
+
 [asteroid_field]
 inner_radius = 300.0
 outer_radius = 350.0

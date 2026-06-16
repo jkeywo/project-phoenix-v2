@@ -26,33 +26,28 @@
 
   // ── Constants ────────────────────────────────────────────────────────────
 
-  /** Blip fill colours by entity kind (pre-projected mode, no icon). */
-  var KIND_COLOR = {
-    asteroid: '#7ac0ff',
-    ship:     '#ff8060',
-    station:  '#ffe060',
-    torpedo:  '#ff60ff',
-    region:   '#a070ff',
-    unknown:  '#a8b0c0',
-    battleship: '#e6330d',   // dark red — large enemy
-    cruiser:    '#cc4d1a',   // orange-red — medium enemy
-    destroyer:  '#ff3333',   // bright red — small enemy
-    waypoint:   '#72f3ff',
-  };
+  /** Single neutral fallback colour for blips/regions with no authored
+   * colour and no loaded icon image. Not a per-kind chart — radar_appearance
+   * is the only source of blip colour. */
+  var FALLBACK_BLIP_COLOR = '#a8b0c0';
+  var FALLBACK_BLIP_COLOR_FLOATS = [0.66, 0.69, 0.75];
 
-  /** Icon name → PNG filename stem (e.g. "ship" → "Icon-Ship.png"). */
-  var ICON_STEMS = {
-    ship:       'Ship',
-    player:     'PlayerShip',
-    asteroid:   'Asteroid',
-    station:    'Station',
-    planet:     'Planet',
-    star:       'Star',
-    torpedo:    'Torpedo',
-    battleship: 'Battleship',
-    cruiser:    'Cruiser',
-    destroyer:  'Destroyer',
-  };
+  /** Convert a `[r, g, b]` float array (0..1) to a `rgb(...)` CSS string. */
+  function rgbCss(c) {
+    var ri = Math.round(c[0] * 255);
+    var gi = Math.round(c[1] * 255);
+    var bi = Math.round(c[2] * 255);
+    return 'rgb(' + ri + ',' + gi + ',' + bi + ')';
+  }
+
+  /** Convert a `[r, g, b]` float array (0..1) to a translucent `rgba(...)`
+   * CSS string for region fills. */
+  function rgbaCss(c, alpha) {
+    var ri = Math.round(c[0] * 255);
+    var gi = Math.round(c[1] * 255);
+    var bi = Math.round(c[2] * 255);
+    return 'rgba(' + ri + ',' + gi + ',' + bi + ',' + alpha + ')';
+  }
 
   var MIN_BLIP_PX        = 8;    // minimum blip diameter in canvas pixels
   var MIN_RANGE          = 10;   // minimum effective range for auto-scale
@@ -124,9 +119,11 @@
     this._dragStart     = null;  // {x, y, panX, panZ, worldPerCss} at drag-start
     this._didDrag       = false; // suppress click-based tap-to-lock after drag
 
-    // Icon images pre-loaded in Slice 2 (#446)
+    // Icon images, loaded lazily by name as blips reference them (no fixed
+    // whitelist/preload list — any icon string works as long as a matching
+    // PNG exists under iconBasePath).
     this._icons = {};
-    this._loadIcons();
+    this._getIconImage('player'); // own-ship marker — always needed
 
     // Enable pointer events so tap-to-lock works.
     // The console CSS may set pointer-events:none on .radar canvas; we override.
@@ -414,7 +411,7 @@
 
       // Blip: PNG icon or colored circle fallback
       var iconName = b.icon || b.kind;
-      var icon = self._icons[iconName];
+      var icon = self._getIconImage(iconName);
       var iconLoaded = icon && icon.complete && icon.naturalWidth > 0;
 
       if (b.kind === 'waypoint') {
@@ -422,11 +419,11 @@
       } else if (iconLoaded) {
         self._drawIconBlip(ctx, icon, bx, by, dotR, b.color);
       } else {
-        // Colored circle fallback
-        var color = KIND_COLOR[b.kind] || KIND_COLOR.unknown;
+        // Colored circle fallback — single neutral colour, or the blip's
+        // own authored colour when present.
         ctx.beginPath();
         ctx.arc(bx, by, dotR, 0, Math.PI * 2);
-        ctx.fillStyle = color;
+        ctx.fillStyle = b.color ? rgbCss(b.color) : FALLBACK_BLIP_COLOR;
         ctx.fill();
       }
 
@@ -443,12 +440,9 @@
       if (region.radar_x == null || region.radar_y == null) return;
       var bx = cx + region.radar_x * R;
       var by = cy - region.radar_y * R;
-      var c = region.color || [0.6, 0.4, 1.0];
-      var ri = Math.round(c[0] * 255);
-      var gi = Math.round(c[1] * 255);
-      var bi = Math.round(c[2] * 255);
-      var fillColor = 'rgba(' + ri + ',' + gi + ',' + bi + ',0.3)';
-      var strokeColor = region.objective_target ? '#d4a820' : 'rgb(' + ri + ',' + gi + ',' + bi + ')';
+      var c = region.color || FALLBACK_BLIP_COLOR_FLOATS;
+      var fillColor = rgbaCss(c, 0.3);
+      var strokeColor = region.objective_target ? '#d4a820' : rgbCss(c);
       var scale = R;
       switch (region.shape) {
         case 'sphere':
@@ -583,7 +577,7 @@
       }
 
       var iconName = p.icon || p.kind;
-      var icon     = self._icons[iconName];
+      var icon     = self._getIconImage(iconName);
       var iconLoaded = icon && icon.complete && icon.naturalWidth > 0;
 
       if (iconLoaded) {
@@ -591,7 +585,7 @@
       } else {
         ctx.beginPath();
         ctx.arc(bx, by, dotR, 0, Math.PI * 2);
-        ctx.fillStyle = KIND_COLOR[p.kind] || KIND_COLOR.unknown;
+        ctx.fillStyle = p.color ? rgbCss(p.color) : FALLBACK_BLIP_COLOR;
         ctx.fill();
       }
 
@@ -656,12 +650,9 @@
       var by = cy + sp.sy;
 
       // Build CSS colour strings from [r, g, b] float array
-      var c   = region.color || [0.6, 0.4, 1.0];
-      var ri  = Math.round(c[0] * 255);
-      var gi  = Math.round(c[1] * 255);
-      var bi  = Math.round(c[2] * 255);
-      var fillColor   = 'rgba(' + ri + ',' + gi + ',' + bi + ',0.3)';
-      var strokeColor = 'rgb('  + ri + ',' + gi + ',' + bi + ')';
+      var c   = region.color || FALLBACK_BLIP_COLOR_FLOATS;
+      var fillColor   = rgbaCss(c, 0.3);
+      var strokeColor = rgbCss(c);
 
       switch (region.shape) {
         case 'sphere':
@@ -846,25 +837,42 @@
     ctx.fill();
   };
 
-  // ── Icon loading (activated by Slice 2 / #446) ────────────────────────────
+  // ── Icon loading ─────────────────────────────────────────────────────────
 
   /**
-   * Pre-load all 7 blip icon PNGs in parallel.  Falls back gracefully when
-   * the Image constructor is unavailable (e.g. Node.js test environment) or
-   * when the PNG file does not exist (image.naturalWidth === 0 at render time).
+   * Title-case the first letter of an icon name to build its asset filename
+   * stem, e.g. "star" → "Star", "playerShip" → "PlayerShip". No
+   * whitelist — any icon string resolves by this convention.
    */
-  RadarWidget.prototype._loadIcons = function () {
+  function iconStemFromName(name) {
+    if (!name) return '';
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  /**
+   * Lazily load (and cache) the icon image for `name`, by naming convention
+   * (`iconBasePath + Capitalized(name) + '.png'`). The own-ship marker uses
+   * the fixed name `'player'`, mapped directly to `Icon-PlayerShip.png`
+   * since it's a synthetic UI element, not an entity icon.
+   *
+   * Falls back gracefully when the Image constructor is unavailable (e.g.
+   * Node.js test environment) or the PNG doesn't exist
+   * (image.naturalWidth === 0 at render time).
+   */
+  RadarWidget.prototype._getIconImage = function (name) {
+    if (!name) return null;
+    if (this._icons[name]) return this._icons[name];
+    if (typeof Image === 'undefined') return null; // non-browser (test) environment
     var self = this;
-    if (typeof Image === 'undefined') return;  // non-browser (test) environment
-    Object.keys(ICON_STEMS).forEach(function (key) {
-      var img = new Image();
-      // Repaint once each icon finishes loading so blips upgrade from the
-      // colored-circle fallback to the PNG icon (render-on-demand otherwise
-      // wouldn't repaint until the next data push).
-      img.onload = function () { self._requestRender(); };
-      img.src = self._iconBasePath + ICON_STEMS[key] + '.png';
-      self._icons[key] = img;
-    });
+    var stem = name === 'player' ? 'PlayerShip' : iconStemFromName(name);
+    var img = new Image();
+    // Repaint once the icon finishes loading so blips upgrade from the
+    // colored-circle fallback to the PNG icon (render-on-demand otherwise
+    // wouldn't repaint until the next data push).
+    img.onload = function () { self._requestRender(); };
+    img.src = self._iconBasePath + stem + '.png';
+    this._icons[name] = img;
+    return img;
   };
 
   // ── Hit testing ───────────────────────────────────────────────────────────

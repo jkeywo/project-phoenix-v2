@@ -533,7 +533,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-5fa18e35744203cb.js" crossorigin="anonymous" integrity="sha384-BWqgzg5OTs9BWvL7kzqAIaymDhw5o2lrUvCkk98a8C8ZrgkdtxNyl3PAYtF+uI7/"><link rel="preload" href="./project-phoenix-5fa18e35744203cb_bg.wasm" crossorigin="anonymous" integrity="sha384-QuNGIWtNXQXUM8m3zuRUUyqXKSU5FmcN9mnoourqBMVVU+igQprqpdmJT6ZmS6bn" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b3045cf1ec4dad79.js" crossorigin="anonymous" integrity="sha384-YSzQk+cA/U9NqagjA7RVtqQAOzMHBJ59N8YfTkdAqY3wUKeyILGqJk3SRrjW0lBk"><link rel="preload" href="./project-phoenix-b3045cf1ec4dad79_bg.wasm" crossorigin="anonymous" integrity="sha384-rAhob2C16okGxzzaa5TvQ0lo2KRQC+4VPL1bykTsOMSZgsUBwBnZC7z/WKS+NizX" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -660,6 +660,9 @@
     <a id="qr-link" target="_blank" style="cursor:pointer">
       <canvas id="qr"></canvas>
     </a>
+    <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
+      Preparing scenario&hellip; <span id="loading-progress-pct">0</span>%
+    </div>
   </div>
 
   <!-- Modifier debug overlay (F3) -->
@@ -686,8 +689,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-5fa18e35744203cb.js';
-const wasm = await init({ module_or_path: './project-phoenix-5fa18e35744203cb_bg.wasm' });
+import init, * as bindings from './project-phoenix-b3045cf1ec4dad79.js';
+const wasm = await init({ module_or_path: './project-phoenix-b3045cf1ec4dad79_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1152,6 +1155,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         if (parsed.type === 'GameStarted') {
           document.getElementById('overlay').style.display = 'none';
           startGameAudio();
+        }
+        if (parsed.type === 'LoadingProgress') {
+          const frac = parsed.data?.fraction ?? 0;
+          const pct = Math.round(frac * 100);
+          const el = document.getElementById('loading-progress-text');
+          const pctEl = document.getElementById('loading-progress-pct');
+          if (el) el.style.display = '';
+          if (pctEl) pctEl.textContent = String(pct);
         }
         if (parsed.type === 'SimState') {
           const snapshot = parsed.data?.snapshot;

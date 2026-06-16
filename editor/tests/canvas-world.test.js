@@ -123,8 +123,8 @@ describe('resolveEntityAppearance', () => {
 
     it('fallback entity gets Dot shape regardless of tags (shape is icon-driven, not tag-driven)', () => {
       // No radar_appearance → no icon → Dot, even for a ship-tagged entity.
-      // drawEntityShape() draws the X marker for hasFallback regardless of
-      // this value; the X marker uses hasFallback, not shape.
+      // drawEntityShape() draws a small dim dot for hasFallback entities
+      // regardless of this value; hasFallback is what controls the rendering.
       const entity = { tags: ['ship', 'npc'] };
       const result = resolveEntityAppearance(entity);
       expect(result.shape).toBe('Dot');

@@ -408,6 +408,19 @@ export class CanvasManager {
     });
 
     // Draw region area overlay FIRST (behind the entity marker)
+    if (spawn.asteroid_field) {
+      const af = spawn.asteroid_field;
+      const s = this.scale;
+      const ring = new Konva.Ring({
+        innerRadius: (af.inner_radius ?? 0) * s,
+        outerRadius: (af.outer_radius ?? 0) * s,
+        fill: '#85521e26',
+        stroke: '#85521e',
+        strokeWidth: 1 / s,
+      });
+      group.add(ring);
+    }
+
     if (spawn.shape) {
       // Build a region entity input for the pure renderer. The spawn group is
       // already positioned at (canvasPos.x, canvasPos.y), so we want the spec

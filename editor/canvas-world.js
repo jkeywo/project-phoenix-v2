@@ -75,7 +75,8 @@ export function colourToHex(colour) {
 
 /**
  * Draw a RadarShape on a Konva canvas context.
- * For `hasFallback` entities, draws an X in a neutral colour.
+ * For `hasFallback` entities (no radar_appearance), draws a small dim dot so the
+ * entity is visible in the editor even though it won't appear on the live radar.
  *
  * @param {object}   group      - Konva.Group to add shapes to (must support .add())
  * @param {object}   Konva      - Konva namespace (passed in to keep module testable)
@@ -95,20 +96,15 @@ export function drawEntityShape(group, Konva, appearance, selected = false) {
   const strokeWidth = selected ? 3 : 1.5;
 
   if (hasFallback) {
-    // X fallback: two crossed lines
-    const xSize = Math.max(6, Math.min(24, radius * 0.4));
-    const lineA = new Konva.Line({
-      points: [-xSize, -xSize, xSize, xSize],
-      stroke: '#aaaaaa',
-      strokeWidth: 2,
+    // No radar_appearance — draw a small dim dot so the entity is locatable
+    // in the editor. It won't appear on the live radar.
+    const dot = new Konva.Circle({
+      radius: 4,
+      fill: '#555566',
+      stroke: selected ? '#00ff00' : '#888899',
+      strokeWidth: 1,
     });
-    const lineB = new Konva.Line({
-      points: [xSize, -xSize, -xSize, xSize],
-      stroke: '#aaaaaa',
-      strokeWidth: 2,
-    });
-    group.add(lineA);
-    group.add(lineB);
+    group.add(dot);
     return;
   }
 

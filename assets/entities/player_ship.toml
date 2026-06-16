@@ -157,8 +157,8 @@ offline_duration = 10.0
 
 [radar_appearance]
 colour = [0.0, 1.0, 0.2]
-radius = 6.0
-icon = "player_ship"
+size = 6.0
+icon = "playerShip"
 
 [stations]
 min_players = 1

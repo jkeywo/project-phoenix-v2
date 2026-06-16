@@ -469,6 +469,18 @@ fn try_spawn_cell(
         .map(|c| c.tags.clone())
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| vec!["asteroid".into()]);
+    // Radar appearance comes straight from the rock's own TOML, exactly like
+    // collider/hull/tags above. Cosmetic variants have no [radar_appearance]
+    // section at all, so these stay None and the rock never appears on radar.
+    let radar_appearance = entity_config.and_then(|c| c.radar_appearance.as_ref());
+    let radar_icon = radar_appearance.and_then(|r| r.icon.clone());
+    let radar_colour = radar_appearance.and_then(|r| {
+        r.colour
+            .as_ref()
+            .filter(|c| c.len() >= 3)
+            .map(|c| [c[0], c[1], c[2]])
+    });
+    let radar_size = radar_appearance.and_then(|r| r.size);
 
     let uuid = uuid::Uuid::new_v4().to_string();
 
@@ -515,7 +527,9 @@ fn try_spawn_cell(
         position: Some([world_x, spawn.y, world_z]),
         tags: snapshot_tags,
         radius: Some(collider_radius),
-        radar_icon: Some("asteroid".into()),
+        radar_icon: radar_icon.clone(),
+        colour: radar_colour,
+        radar_size,
         ..EntitySnapshot::default()
     });
 
@@ -530,6 +544,9 @@ fn try_spawn_cell(
             max_hp: max_hp as i32,
             current_hp: max_hp as i32,
             radius: collider_radius,
+            radar_icon,
+            radar_colour,
+            radar_size,
         },
     ));
 }

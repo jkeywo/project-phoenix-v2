@@ -38,22 +38,6 @@ impl RadarFilter {
 
 // ── Appearance ────────────────────────────────────────────────────────────────
 
-/// Which icon to render for a radar blip. Each variant maps 1:1 to a
-/// PNG in `assets/radar_icons/`. `Missile` uses `Icon-Torpedo.png`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum RadarIcon {
-    Ship,
-    PlayerShip,
-    Asteroid,
-    Station,
-    Planet,
-    Star,
-    Torpedo,
-    Battleship,
-    Cruiser,
-    Destroyer,
-}
-
 /// How a region entity's shape is rendered on the 2D radar projection.
 /// Each variant maps to a different UI node layout.
 #[derive(Clone, Debug, PartialEq)]
@@ -84,15 +68,17 @@ pub enum RegionRadarShape {
 /// than as a point icon.
 #[derive(Component, Clone, Debug)]
 pub struct RadarAppearance {
-    pub icon: RadarIcon,
+    /// Point-blip icon name, taken verbatim from `EntitySnapshot.radar_icon`.
+    /// Free-form — resolved by naming convention to
+    /// `radar_icons/Icon-{Capitalized}.png`. `None` → no point icon drawn.
+    pub icon: Option<String>,
     pub world_size: f32,
     pub color: Color,
-    /// Region fill colour. `Some` → render as region shape;
-    /// `None` → render as a point icon.
+    /// Region fill colour. `Some` → also render as a region shape;
+    /// `None` → no region shape drawn.
     pub region_colour: Option<Color>,
     /// The region shape geometry. Meaningful only when
-    /// `region_colour` is `Some`. When `Some` and `region_colour`
-    /// is `Some`, the shape is rendered on the radar.
+    /// `region_colour` is `Some`.
     pub region_shape: Option<RegionRadarShape>,
     /// When `true` the entity is referenced by an active mission objective
     /// and should render a gold ring indicator on the radar.
@@ -101,10 +87,11 @@ pub struct RadarAppearance {
 
 impl RadarAppearance {
     /// The player-ship reference blip used at the centre of every radar.
-    /// Soft cyan-white, ship icon, 6.0-unit world size.
+    /// This is a synthetic UI element (not loaded from an entity TOML), so
+    /// its icon is a fixed literal rather than data-driven.
     pub fn player_ship() -> Self {
         Self {
-            icon: RadarIcon::PlayerShip,
+            icon: Some("playerShip".to_string()),
             world_size: 6.0,
             color: Color::srgb(0.95, 0.95, 1.0),
             region_colour: None,
@@ -114,7 +101,7 @@ impl RadarAppearance {
     }
 
     /// A point-entity blip (ship, station, planet, star, missile, asteroid).
-    pub fn point(icon: RadarIcon, world_size: f32, color: Color) -> Self {
+    pub fn point(icon: Option<String>, world_size: f32, color: Color) -> Self {
         Self {
             icon,
             world_size,
@@ -125,9 +112,12 @@ impl RadarAppearance {
         }
     }
 
-    /// A region-entity blip rendered as a filled/outlined shape.
+    /// A region-entity blip rendered as a filled/outlined shape. `icon` may
+    /// also be `Some` when the same entity has both a region fill and a
+    /// point icon (e.g. a future station-with-jamming-field); the icon is
+    /// drawn on top of the region.
     pub fn region(
-        icon: RadarIcon,
+        icon: Option<String>,
         world_size: f32,
         region_colour: Color,
         shape: Option<RegionRadarShape>,
@@ -143,12 +133,24 @@ impl RadarAppearance {
     }
 }
 
-/// Maps `RadarIcon` to the loaded `Handle<Image>` for the corresponding
-/// PNG. Populated once at startup by `client::phone_border::framing`
-/// when `PhoneAssets` is ready. Empty until populated; blips with a
-/// missing icon render as a coloured square (defensive fallback).
+/// Maps a radar icon name (verbatim from `[radar_appearance].icon`) to the
+/// loaded `Handle<Image>` for `radar_icons/Icon-{Capitalized}.png`. Populated
+/// lazily as new icon names are encountered — no fixed whitelist. Blips
+/// whose icon hasn't finished loading (or has no icon) render as a coloured
+/// square (defensive fallback).
 #[derive(Resource, Default)]
-pub struct RadarIconLookup(pub HashMap<RadarIcon, Handle<Image>>);
+pub struct RadarIconLookup(pub HashMap<String, Handle<Image>>);
+
+/// Title-case the first letter of an icon name to build its asset filename
+/// stem, e.g. `"star"` → `"Star"`, `"player_ship"` → `"Player_ship"`.
+pub fn icon_asset_path(icon_name: &str) -> String {
+    let mut chars = icon_name.chars();
+    let capitalized = match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    };
+    format!("radar_icons/Icon-{capitalized}.png")
+}
 
 // ── Orientation mode ──────────────────────────────────────────────────────────
 
@@ -437,36 +439,6 @@ pub struct RadarBlipFallbackIcon(pub Handle<Image>);
 
 fn setup_radar_blip_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(RadarBlipFallbackIcon(images.add(Image::default())));
-}
-
-// ── Icon mapping ──────────────────────────────────────────────────────────────
-
-/// Map a tag string to the `RadarIcon` used for its blip.
-///
-/// - `"ship"`, `"pirate"`, `"player"` → `Ship`
-/// - `"asteroid"`, `"asteroid_field"` → `Asteroid`
-/// - `"station"` → `Station`
-/// - `"missile"`, `"torpedo"` → `Torpedo`
-/// - `"planet"` → `Planet`
-/// - `"star"` → `Star`
-/// - `"battleship"` → `Battleship`
-/// - `"cruiser"` → `Cruiser`
-/// - `"destroyer"` → `Destroyer`
-/// - anything else → `Ship` (defensive fallback)
-pub fn icon_from_radar_icon_str(s: &str) -> RadarIcon {
-    match s {
-        "ship" | "pirate" => RadarIcon::Ship,
-        "player" | "player_ship" => RadarIcon::PlayerShip,
-        "asteroid" | "asteroid_field" => RadarIcon::Asteroid,
-        "station" => RadarIcon::Station,
-        "missile" | "torpedo" => RadarIcon::Torpedo,
-        "planet" => RadarIcon::Planet,
-        "star" => RadarIcon::Star,
-        "battleship" => RadarIcon::Battleship,
-        "cruiser" => RadarIcon::Cruiser,
-        "destroyer" => RadarIcon::Destroyer,
-        _ => RadarIcon::Ship,
-    }
 }
 
 /// Build a `RegionRadarShape` from an `EntitySnapshot` based on its
@@ -791,40 +763,38 @@ pub fn bridge_sim_to_radar(
         if !seen.insert(uuid.clone()) {
             continue;
         }
-        if snapshot.tags.is_empty() {
-            continue;
-        }
         // The player ship is already rendered as the RadarCenter blip with the
         // correct PlayerShip icon. Skip it from the world entity list to avoid
         // a duplicate red "ship" blip appearing at the same position.
         if snapshot.tags.iter().any(|t| t == "player") {
             continue;
         }
+        // No [radar_appearance] at all (neither icon nor region_colour) →
+        // this entity never appears on radar.
+        if snapshot.radar_icon.is_none() && snapshot.region_colour.is_none() {
+            continue;
+        }
 
         let entity_yaw = snapshot.yaw.unwrap_or(0.0);
-        let tag_colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
-        let icon_str = snapshot.radar_icon.as_deref().unwrap_or("ship");
-        let icon = icon_from_radar_icon_str(icon_str);
-        let is_region = snapshot.tags.iter().any(|t| t == "region");
-        let is_field = snapshot.tags.iter().any(|t| t == "asteroid_field");
+        let icon = snapshot.radar_icon.clone();
 
         let world_size = snapshot
-            .radar_world_size
+            .radar_size
             .or_else(|| Some(snapshot.radius_or_zero()))
             .filter(|s| *s > 0.0)
             .unwrap_or(4.0);
 
-        let mut appearance = if is_region || is_field {
-            let default_col = if is_field {
-                Color::srgb(0.52, 0.32, 0.18)
-            } else {
-                Color::srgb(0.8, 0.4, 0.8)
-            };
-            let region_colour = tag_colour.unwrap_or(default_col);
+        const DEFAULT_BLIP_COLOUR: Color = Color::srgb(0.95, 0.95, 1.0);
+
+        let mut appearance = if let Some(region_colour) = snapshot.region_colour {
+            let region_colour = Color::srgb(region_colour[0], region_colour[1], region_colour[2]);
             let region_shape = region_shape_from_snapshot(snapshot);
             RadarAppearance::region(icon, world_size, region_colour, region_shape)
         } else {
-            let color = tag_colour.unwrap_or(Color::srgb(0.95, 0.95, 1.0));
+            let color = snapshot
+                .colour
+                .map(|c| Color::srgb(c[0], c[1], c[2]))
+                .unwrap_or(DEFAULT_BLIP_COLOUR);
             RadarAppearance::point(icon, world_size, color)
         };
         appearance.objective_target = snapshot.objective_target;
@@ -942,7 +912,8 @@ fn sync_radar_blip_nodes(
         (&mut Node, &RadarLabelNode),
         (Without<RadarBlipNode>, Without<RadarRegionNode>),
     >,
-    icons: Res<RadarIconLookup>,
+    mut icons: ResMut<RadarIconLookup>,
+    asset_server: Res<AssetServer>,
     mut blip_materials: ResMut<Assets<RadarBlipMaterial>>,
     fallback: Option<Res<RadarBlipFallbackIcon>>,
 ) {
@@ -1102,6 +1073,9 @@ fn sync_radar_blip_nodes(
                 continue;
             }
 
+            // Region fill and point icon are independent — an entity with
+            // both renders the region shape first, then the icon on top
+            // (two distinct child nodes, both keyed by `src`).
             if let Some(region_colour) = appearance.region_colour {
                 // ── Region entity: render as shape ────────────────────────────
                 let shape = appearance
@@ -1137,15 +1111,22 @@ fn sync_radar_blip_nodes(
                             .insert(src, (name.unwrap_or_default(), label_left, label_top));
                     }
                 }
-            } else {
-                // ── Point entity: render as icon ─────────────────────────────
+            }
+            if appearance.icon.is_some() {
+                // ── Point icon: drawn on top of any region shape ─────────────
                 let icon_angle =
                     icon_rotation_angle(blip_pose.yaw, effective_yaw, &widget.orientation);
                 let size_px = world_size_to_px(appearance.world_size, range, radar_radius_px);
                 let half = size_px * 0.5;
                 let (left, top) =
                     blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
-                let icon_handle = icons.0.get(&appearance.icon).cloned();
+                let icon_handle = appearance.icon.as_ref().map(|name| {
+                    icons
+                        .0
+                        .entry(name.clone())
+                        .or_insert_with(|| asset_server.load(icon_asset_path(name)))
+                        .clone()
+                });
                 let size_frac = half / radar_radius_px;
                 let clip_circle = if widget.clip_mode == RadarClipMode::Circle {
                     1.0_f32
@@ -1873,29 +1854,23 @@ mod tests {
         ));
     }
 
-    // ── icon_from_radar_icon_str ──────────────────────────────────────────────
+    // ── icon_asset_path ────────────────────────────────────────────────────────
 
     #[test]
-    fn icon_from_str_known_tags() {
-        assert_eq!(icon_from_radar_icon_str("ship"), RadarIcon::Ship);
-        assert_eq!(icon_from_radar_icon_str("pirate"), RadarIcon::Ship);
-        assert_eq!(icon_from_radar_icon_str("player"), RadarIcon::PlayerShip);
-        assert_eq!(icon_from_radar_icon_str("asteroid"), RadarIcon::Asteroid);
+    fn icon_asset_path_capitalizes_first_letter_only() {
+        assert_eq!(icon_asset_path("star"), "radar_icons/Icon-Star.png");
+        assert_eq!(icon_asset_path("asteroid"), "radar_icons/Icon-Asteroid.png");
         assert_eq!(
-            icon_from_radar_icon_str("asteroid_field"),
-            RadarIcon::Asteroid
+            icon_asset_path("playerShip"),
+            "radar_icons/Icon-PlayerShip.png"
         );
-        assert_eq!(icon_from_radar_icon_str("station"), RadarIcon::Station);
-        assert_eq!(icon_from_radar_icon_str("missile"), RadarIcon::Torpedo);
-        assert_eq!(icon_from_radar_icon_str("torpedo"), RadarIcon::Torpedo);
-        assert_eq!(icon_from_radar_icon_str("planet"), RadarIcon::Planet);
-        assert_eq!(icon_from_radar_icon_str("star"), RadarIcon::Star);
     }
 
     #[test]
-    fn icon_from_str_unknown_falls_back_to_ship() {
-        assert_eq!(icon_from_radar_icon_str("wormhole"), RadarIcon::Ship);
-        assert_eq!(icon_from_radar_icon_str(""), RadarIcon::Ship);
+    fn icon_asset_path_is_free_form_no_whitelist() {
+        // Any icon name resolves by convention; there is no closed enum to
+        // reject unrecognised names.
+        assert_eq!(icon_asset_path("frigate"), "radar_icons/Icon-Frigate.png");
     }
 
     // ── helper constructors ───────────────────────────────────────────────────

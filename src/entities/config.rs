@@ -272,23 +272,33 @@ pub struct AppearanceConfig {
     pub size_max: f32,
 }
 
+/// Declares that an entity should appear on radar and how. There are no
+/// defaults derived from tags or entity type anywhere downstream — this
+/// table is the single source of truth. At least one of `icon` or
+/// `region_colour` must be set; an entity with neither (or with no
+/// `[radar_appearance]` table at all) never appears on radar.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RadarAppearanceConfig {
-    pub colour: Vec<f32>,
-    #[serde(default)]
-    pub radius: Option<f32>,
-    /// Authored world-space size override for radar rendering. When
-    /// `None`, the entity's physical `radius` is used. Lets authors fudge
-    /// radar visibility for tiny or oversized objects.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub world_size: Option<f32>,
-    /// Radar icon to use for this entity's blip. One of `"ship"`,
-    /// `"asteroid"`, `"station"`, `"planet"`, `"star"`, `"torpedo"`.
-    /// When absent the server falls back to deriving the icon from the
-    /// entity's tags.
+    /// Point-blip icon name. Free-form — resolved by naming convention to
+    /// `assets/radar_icons/Icon-{Capitalized}.png` on both clients. No
+    /// whitelist/enum; a missing PNG falls back to a coloured circle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Icon point colour (also the coloured-circle fallback when the icon
+    /// PNG is missing). `None` renders the fallback in a single neutral
+    /// constant colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<Vec<f32>>,
+    /// World-space radius for the icon blip only. When `None`, the entity's
+    /// physical collider radius is used. Does not affect region rendering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f32>,
+    /// Area-fill colour for region/field entities. Geometry comes from the
+    /// entity's existing `[shape]` or `[asteroid_field]` section; this only
+    /// controls whether the region is drawn on radar and in what colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region_colour: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1111,6 +1121,17 @@ impl EntityConfig {
             if !effects.is_empty() && config.shape.is_none() {
                 return Err(SerdeError::custom(
                     "region entity has effects but no [shape] section",
+                ));
+            }
+        }
+
+        // Validation: a [radar_appearance] table must declare at least one
+        // of icon/region_colour. An empty table is always an author mistake
+        // (omit the whole section to mean "don't show on radar").
+        if let Some(ref ra) = config.radar_appearance {
+            if ra.icon.is_none() && ra.region_colour.is_none() {
+                return Err(SerdeError::custom(
+                    "[radar_appearance] must set icon and/or region_colour",
                 ));
             }
         }
@@ -2862,7 +2883,7 @@ fire_arc_deg = 90.0
             marker: None,
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
-        sys.tube_mut("fore").unwrap().start_load();
+        assert!(sys.start_load("fore"));
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(sys.config.load_time, &targets);
         sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, None, None);

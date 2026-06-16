@@ -13,5 +13,5 @@ tags = ["objective_marker"]
 
 [radar_appearance]
 colour = [1.0, 0.85, 0.2]
-radius = 4.0
+size = 4.0
 icon   = "station"

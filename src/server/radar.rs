@@ -28,7 +28,7 @@ use std::collections::HashSet;
 use crate::gui::radar::GuiRadarPlugin;
 use crate::gui::{
     bridge_sim_to_radar, AutoScaleRadar, ConsoleRadar, GenericRadar, OrientationMode, RadarBlipMap,
-    RadarCenterPose, RadarClipMode, RadarFilter, RadarIcon, RadarIconLookup, WorldCentredRadar,
+    RadarCenterPose, RadarClipMode, RadarFilter, WorldCentredRadar,
 };
 use crate::lobby::WorldResource;
 use crate::messages::{GamePhase, ViewMode};
@@ -59,10 +59,7 @@ impl Plugin for ServerViewscreenRadarPlugin {
             app.add_plugins(GuiRadarPlugin);
         }
 
-        app.add_systems(
-            Startup,
-            (load_server_radar_icons, spawn_viewscreen_radar_widgets).chain(),
-        )
+        app.add_systems(Startup, spawn_viewscreen_radar_widgets)
         .add_systems(
             Update,
             (
@@ -125,57 +122,12 @@ fn spawn_radar_container(commands: &mut Commands, mode: RadarContainerMode, widg
     commands.entity(container).add_child(widget_entity);
 }
 
-// ── Startup system: radar icon assets ─────────────────────────────────────────
-
-/// Loads the six radar icon PNGs and populates the shared `RadarIconLookup`
-/// so the viewscreen renders icons instead of falling back to plain squares.
-fn load_server_radar_icons(asset_server: Res<AssetServer>, mut lookup: ResMut<RadarIconLookup>) {
-    if !lookup.0.is_empty() {
-        return;
-    }
-    lookup.0.insert(
-        RadarIcon::Ship,
-        asset_server.load("radar_icons/Icon-Ship.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::PlayerShip,
-        asset_server.load("radar_icons/Icon-PlayerShip.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::Asteroid,
-        asset_server.load("radar_icons/Icon-Asteroid.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::Station,
-        asset_server.load("radar_icons/Icon-Station.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::Planet,
-        asset_server.load("radar_icons/Icon-Planet.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::Star,
-        asset_server.load("radar_icons/Icon-Star.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::Torpedo,
-        asset_server.load("radar_icons/Icon-Torpedo.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::Battleship,
-        asset_server.load("radar_icons/Icon-Battleship.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::Cruiser,
-        asset_server.load("radar_icons/Icon-Cruiser.png"),
-    );
-    lookup.0.insert(
-        RadarIcon::Destroyer,
-        asset_server.load("radar_icons/Icon-Destroyer.png"),
-    );
-}
-
 // ── Startup system: radar widgets ─────────────────────────────────────────────
+//
+// Radar icon PNGs are no longer eagerly preloaded into a fixed whitelist —
+// `sync_radar_blip_nodes` (gui/radar.rs) loads each icon name lazily into
+// `RadarIconLookup` the first time it's seen, by naming convention
+// (`icon_asset_path`). No fixed icon set to maintain here.
 
 /// Description of one viewscreen radar widget that can be table-driven.
 struct ViewscreenRadarSpec {

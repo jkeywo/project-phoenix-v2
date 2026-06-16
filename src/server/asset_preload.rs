@@ -457,7 +457,7 @@ pub fn poll_asset_preload(
 
     // Poll sidecar delivery
     let mut still_pending = Vec::new();
-    for _path in &preload.pending_sidecars {
+    for path in &preload.pending_sidecars {
         #[cfg(not(target_arch = "wasm32"))]
         {}
         #[cfg(target_arch = "wasm32")]

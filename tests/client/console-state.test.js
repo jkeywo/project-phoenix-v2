@@ -39,10 +39,10 @@ describe('entityRadius', () => {
 
 // ── buildBlips ────────────────────────────────────────────────────────────────
 
-const NEAR = { uuid: 'a', x: 10, z: 0, radius: 2, tags: ['asteroid'] };
-const FAR  = { uuid: 'b', x: 1000, z: 1000, radius: 2, tags: ['asteroid'] };
-const SHIP = { uuid: 's', x: 5, z: 0, tags: ['ship'] };
-const STATION = { uuid: 'st', x: 0, z: 5, tags: ['station'] };
+const NEAR = { uuid: 'a', x: 10, z: 0, radius: 2, tags: ['asteroid'], radar_icon: 'asteroid' };
+const FAR  = { uuid: 'b', x: 1000, z: 1000, radius: 2, tags: ['asteroid'], radar_icon: 'asteroid' };
+const SHIP = { uuid: 's', x: 5, z: 0, tags: ['ship'], radar_icon: 'ship' };
+const STATION = { uuid: 'st', x: 0, z: 5, tags: ['station'], radar_icon: 'station' };
 
 describe('buildBlips', () => {
   it('returns empty array for no entities', () => {
@@ -75,7 +75,7 @@ describe('buildBlips', () => {
   });
 
   it('classifies entity with no recognised tag as asteroid', () => {
-    const blips = buildBlips([{ uuid: 'x', x: 1, z: 0, tags: ['unknown'] }], 0, 0, 0, 100);
+    const blips = buildBlips([{ uuid: 'x', x: 1, z: 0, tags: ['unknown'], radar_icon: 'asteroid' }], 0, 0, 0, 100);
     expect(blips[0].kind).toBe('asteroid');
   });
 
@@ -89,7 +89,7 @@ describe('buildBlips', () => {
   });
 
   it('supports entity_tags fallback', () => {
-    const blips = buildBlips([{ uuid: 'q', x: 1, z: 0, entity_tags: ['ship'] }], 0, 0, 0, 100);
+    const blips = buildBlips([{ uuid: 'q', x: 1, z: 0, entity_tags: ['ship'], radar_icon: 'ship' }], 0, 0, 0, 100);
     expect(blips[0].kind).toBe('ship');
   });
 
@@ -101,7 +101,7 @@ describe('buildBlips', () => {
   describe('rotate=true (ship-local frame, weapons/helm)', () => {
     it('at yaw=0 entity directly ahead (dz=-range) → radar_y ≈ 1', () => {
       const range = 100;
-      const blips = buildBlips([{ uuid: 'f', x: 0, z: -range, radius: 1, tags: [] }], 0, 0, 0, range, { rotate: true });
+      const blips = buildBlips([{ uuid: 'f', x: 0, z: -range, radius: 1, tags: [], radar_icon: 'asteroid' }], 0, 0, 0, range, { rotate: true });
       // dx=0, dz=-range → radar_x=(0·1+(-range)·0)/range=0, radar_y=(0·0-(-range)·1)/range=1
       expect(blips[0].radar_x).toBeCloseTo(0);
       expect(blips[0].radar_y).toBeCloseTo(1);
@@ -109,7 +109,7 @@ describe('buildBlips', () => {
 
     it('at yaw=0 entity to starboard (dx=+range) → radar_x ≈ 1', () => {
       const range = 100;
-      const blips = buildBlips([{ uuid: 'r', x: range, z: 0, radius: 1, tags: [] }], 0, 0, 0, range, { rotate: true });
+      const blips = buildBlips([{ uuid: 'r', x: range, z: 0, radius: 1, tags: [], radar_icon: 'asteroid' }], 0, 0, 0, range, { rotate: true });
       expect(blips[0].radar_x).toBeCloseTo(1);
       expect(blips[0].radar_y).toBeCloseTo(0);
     });
@@ -118,7 +118,7 @@ describe('buildBlips', () => {
   describe('rotate=false (world-axis frame, navigation)', () => {
     it('radar_x = dx/range, radar_y = dz/range', () => {
       const range = 100;
-      const blips = buildBlips([{ uuid: 'w', x: 30, z: 40, radius: 1, tags: [] }], 0, 0, 0, range, { rotate: false });
+      const blips = buildBlips([{ uuid: 'w', x: 30, z: 40, radius: 1, tags: [], radar_icon: 'asteroid' }], 0, 0, 0, range, { rotate: false });
       expect(blips[0].radar_x).toBeCloseTo(30 / 100);
       expect(blips[0].radar_y).toBeCloseTo(40 / 100);
     });
@@ -126,7 +126,7 @@ describe('buildBlips', () => {
 
   it('merges extra fields from opts.extra', () => {
     const blips = buildBlips(
-      [{ uuid: 'e', x: 1, z: 0, tags: [], name: 'Zeta', faction: 'pirate' }],
+      [{ uuid: 'e', x: 1, z: 0, tags: [], name: 'Zeta', faction: 'pirate', radar_icon: 'asteroid' }],
       0, 0, 0, 100,
       { extra: (a) => ({ name: a.name || null, faction: a.faction || null }) }
     );
@@ -137,8 +137,8 @@ describe('buildBlips', () => {
   it('filters visible blips by opts.shows', () => {
     const blips = buildBlips(
       [
-        { uuid: 'ship-1', x: 1, z: 0, tags: ['ship'] },
-        { uuid: 'planet-1', x: 2, z: 0, tags: ['planet'] },
+        { uuid: 'ship-1', x: 1, z: 0, tags: ['ship'], radar_icon: 'ship' },
+        { uuid: 'planet-1', x: 2, z: 0, tags: ['planet'], radar_icon: 'planet' },
       ],
       0, 0, 0, 100,
       { shows: ['ship'] }
@@ -149,8 +149,8 @@ describe('buildBlips', () => {
   it('marks blips selectable from target_tags and opts.selects', () => {
     const blips = buildBlips(
       [
-        { uuid: 'ship-1', x: 1, z: 0, tags: ['ship'], target_tags: ['ship'] },
-        { uuid: 'rock-1', x: 2, z: 0, tags: ['asteroid'], target_tags: ['asteroid'] },
+        { uuid: 'ship-1', x: 1, z: 0, tags: ['ship'], target_tags: ['ship'], radar_icon: 'ship' },
+        { uuid: 'rock-1', x: 2, z: 0, tags: ['asteroid'], target_tags: ['asteroid'], radar_icon: 'asteroid' },
       ],
       0, 0, 0, 100,
       { shows: ['ship', 'asteroid'], selects: ['ship'] }
@@ -161,14 +161,14 @@ describe('buildBlips', () => {
 
   it('allows active objective targets through the show filter and marks them', () => {
     const blips = buildBlips(
-      [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 25, z: 0, tags: ['objective_marker'] }],
+      [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 25, z: 0, tags: ['objective_marker'], radar_icon: 'waypoint' }],
       0, 0, 0, 100,
       { shows: ['ship'] }
     );
     expect(blips).toEqual([]);
 
     const objectiveBlips = buildBlips(
-      [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 25, z: 0, tags: ['objective_marker'], objective_target: true }],
+      [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 25, z: 0, tags: ['objective_marker'], objective_target: true, radar_icon: 'waypoint' }],
       0, 0, 0, 100,
       { shows: ['ship'] }
     );
@@ -189,6 +189,7 @@ describe('buildRadarRegions', () => {
         tags: ['region'],
         shape: 'sphere',
         radius: 80,
+        region_colour: [0.2, 0.4, 0.8],
       }],
       [{ id: 'obj', text: 'Survey', mandatory: true, status: 'Active', targets: ['Kaleth Nebula'] }]
     );
@@ -212,6 +213,7 @@ describe('buildRadarRegions', () => {
       tags: ['asteroid_field'],
       radius: 350,
       inner_radius: 300,
+      region_colour: [0.52, 0.32, 0.18],
     }]);
     expect(regions).toHaveLength(1);
     expect(regions[0]).toMatchObject({
@@ -294,8 +296,8 @@ describe('buildWeaponsConsoleState', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: 0,
       asteroids: [
-        { uuid: 'close', x: 1, z: 0, tags: ['asteroid'] },
-        { uuid: 'far', x: WEAPONS_RADAR_RANGE + 1, z: 0, tags: ['asteroid'] },
+        { uuid: 'close', x: 1, z: 0, tags: ['asteroid'], radar_icon: 'asteroid' },
+        { uuid: 'far', x: WEAPONS_RADAR_RANGE + 1, z: 0, tags: ['asteroid'], radar_icon: 'asteroid' },
       ],
     };
     const s = parse(buildWeaponsConsoleState(state));
@@ -503,7 +505,7 @@ describe('buildSensorsConsoleState', () => {
   it('blips include color, name, stance, faction extra fields', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: 0,
-      asteroids: [{ uuid: 'p', x: 10, z: 0, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate' }],
+      asteroids: [{ uuid: 'p', x: 10, z: 0, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate', radar_icon: 'ship' }],
     };
     const blips = parse(buildSensorsConsoleState(state)).blips;
     expect(blips[0].name).toBe('Raider');
@@ -515,9 +517,11 @@ describe('buildSensorsConsoleState', () => {
   it('marks sensor-visible ships selectable and regions untargetable by default', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsRadarShows: ['ship', 'region', 'asteroid_field'],
+      sensorsRadarSelects: ['ship'],
       asteroids: [
-        { uuid: 'ship-1', x: 10, z: 0, tags: ['ship'], target_tags: ['ship'] },
-        { uuid: 'region-1', x: 20, z: 0, tags: ['region'], target_tags: ['region'] },
+        { uuid: 'ship-1', x: 10, z: 0, tags: ['ship'], target_tags: ['ship'], radar_icon: 'ship' },
+        { uuid: 'region-1', x: 20, z: 0, tags: ['region'], target_tags: ['region'], radar_icon: 'region' },
       ],
     };
     const blips = parse(buildSensorsConsoleState(state)).blips;
@@ -528,7 +532,7 @@ describe('buildSensorsConsoleState', () => {
   it('projects blips in the same ship-local frame as helm and weapons', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: Math.PI / 2, sensorsRadarRange: 100,
-      asteroids: [{ uuid: 'ahead-after-turn', x: 100, z: 0, radius: 1, tags: ['ship'], target_tags: ['ship'] }],
+      asteroids: [{ uuid: 'ahead-after-turn', x: 100, z: 0, radius: 1, tags: ['ship'], target_tags: ['ship'], radar_icon: 'ship' }],
     };
     const blip = parse(buildSensorsConsoleState(state)).blips[0];
     expect(blip.radar_x).toBeCloseTo(0);
@@ -545,6 +549,8 @@ describe('buildSensorsConsoleState', () => {
         tags: ['asteroid_field'],
         radius: 40,
         inner_radius: 20,
+        radar_icon: 'field',
+        region_colour: [0.52, 0.32, 0.18],
       }],
     };
     const s = parse(buildSensorsConsoleState(state));
@@ -658,7 +664,8 @@ describe('buildNavigationConsoleState', () => {
   it('includes station entities', () => {
     const state = {
       shipX: 0, shipZ: 0,
-      asteroids: [{ uuid: 'st1', x: 100, z: 0, tags: ['station'], name: 'Starbase 1' }],
+      navChartShows: ['station'],
+      asteroids: [{ uuid: 'st1', x: 100, z: 0, tags: ['station'], name: 'Starbase 1', radar_icon: 'station' }],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
     expect(blips.length).toBe(1);
@@ -669,9 +676,10 @@ describe('buildNavigationConsoleState', () => {
   it('includes planet and star entities', () => {
     const state = {
       shipX: 0, shipZ: 0,
+      navChartShows: ['planet', 'star'],
       asteroids: [
-        { uuid: 'p1', x: 50, z: 0,  tags: ['planet'] },
-        { uuid: 's1', x: 0,  z: 50, tags: ['star']   },
+        { uuid: 'p1', x: 50, z: 0,  tags: ['planet'], radar_icon: 'planet' },
+        { uuid: 's1', x: 0,  z: 50, tags: ['star'],   radar_icon: 'star'   },
       ],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
@@ -711,7 +719,8 @@ describe('buildNavigationConsoleState', () => {
   it('includes player_ship entities', () => {
     const state = {
       shipX: 0, shipZ: 0,
-      asteroids: [{ uuid: 'ps1', x: 5, z: 0, tags: ['player_ship'] }],
+      navChartShows: ['player_ship'],
+      asteroids: [{ uuid: 'ps1', x: 5, z: 0, tags: ['player_ship'], radar_icon: 'ship' }],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
     expect(blips.length).toBe(1);
@@ -748,9 +757,10 @@ describe('buildNavigationConsoleState', () => {
   it('blips include world_x and world_z for canvas rendering', () => {
     const state = {
       shipX: 0, shipZ: 0,
+      navChartShows: ['station', 'planet'],
       asteroids: [
-        { uuid: 'st1', x: 500, z: -300, tags: ['station'] },
-        { uuid: 'pl1', x: -200, z: 400, tags: ['planet'] },
+        { uuid: 'st1', x: 500, z: -300, tags: ['station'], radar_icon: 'station' },
+        { uuid: 'pl1', x: -200, z: 400, tags: ['planet'], radar_icon: 'planet' },
       ],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
@@ -764,9 +774,10 @@ describe('buildNavigationConsoleState', () => {
   it('blips include world_x and world_z coordinates', () => {
     const state = {
       shipX: 0, shipZ: 0,
+      navChartShows: ['station', 'planet'],
       asteroids: [
-        { uuid: 'st1', x: 500, z: 300, tags: ['station'], name: 'Starbase 1' },
-        { uuid: 'p1',  x: 200, z: 800, tags: ['planet'],  name: 'Alderaan'  },
+        { uuid: 'st1', x: 500, z: 300, tags: ['station'], name: 'Starbase 1', radar_icon: 'station' },
+        { uuid: 'p1',  x: 200, z: 800, tags: ['planet'],  name: 'Alderaan',  radar_icon: 'planet'  },
       ],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
@@ -781,7 +792,8 @@ describe('buildNavigationConsoleState', () => {
     // Entity directly east (x+) of ship → radar_x positive, radar_y ≈ 0
     const state = {
       shipX: 0, shipZ: 0,
-      asteroids: [{ uuid: 'st', x: 500, z: 0, tags: ['station'] }],
+      navChartShows: ['station'],
+      asteroids: [{ uuid: 'st', x: 500, z: 0, tags: ['station'], radar_icon: 'station' }],
     };
     const blip = parse(buildNavigationConsoleState(state)).blips[0];
     expect(blip.radar_x).toBeCloseTo(500 / NAVIGATION_RADAR_RANGE);
@@ -806,8 +818,8 @@ describe('buildNavigationConsoleState', () => {
       navChartShows: ['station'],
       objectives: [{ id: 'obj-1', text: 'Find zone', mandatory: true, status: 'Active', targets: ['Patrol Zone'] }],
       asteroids: [
-        { uuid: 'beacon-1', name: 'Patrol Zone', x: 100, z: 0, tags: ['objective_marker'] },
-        { uuid: 'beacon-2', name: 'Quiet Zone', x: 200, z: 0, tags: ['objective_marker'] },
+        { uuid: 'beacon-1', name: 'Patrol Zone', x: 100, z: 0, tags: ['objective_marker'], radar_icon: 'waypoint' },
+        { uuid: 'beacon-2', name: 'Quiet Zone', x: 200, z: 0, tags: ['objective_marker'], radar_icon: 'waypoint' },
       ],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
@@ -828,6 +840,7 @@ describe('buildNavigationConsoleState', () => {
         tags: ['region'],
         shape: 'sphere',
         radius: 50,
+        region_colour: [0.3, 0.6, 0.9],
       }],
     };
     const s = parse(buildNavigationConsoleState(state));
@@ -838,6 +851,7 @@ describe('buildNavigationConsoleState', () => {
   it('emits asteroid field and nebula region overlays on the navigation screen', () => {
     const state = {
       shipX: 0, shipZ: 0,
+      navChartShows: ['asteroid_field', 'nebula'],
       asteroids: [
         {
           uuid: 'field-1',
@@ -847,6 +861,7 @@ describe('buildNavigationConsoleState', () => {
           tags: ['field', 'asteroid_field'],
           radius: 350,
           inner_radius: 300,
+          region_colour: [0.52, 0.32, 0.18],
         },
         {
           uuid: 'nebula-1',
@@ -856,6 +871,7 @@ describe('buildNavigationConsoleState', () => {
           tags: ['region', 'nebula'],
           shape: 'sphere',
           radius: 220,
+          region_colour: [0.2, 0.4, 0.8],
         },
       ],
     };

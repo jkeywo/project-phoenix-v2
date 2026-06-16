@@ -398,7 +398,7 @@
               <div class="radar-surround-frame">
                 <img class="radar-surround" src="src_assets/helm_console/radar-surround.png" alt="">
                 <div class="radar" style="aspect-ratio:1/1;">
-                <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
+                <img class="bg" id="radar-bg-img" src="src_assets/helm_console/radar-bg.png" alt="">
                 <div class="scan"></div>
                 <div class="crosshair-h"></div>
                 <div class="crosshair-v"></div>
@@ -545,6 +545,10 @@
       document.getElementById('pos-z').dataset.z     = String(s.z || 0);
 
       var hdg = s.heading || 0;
+      // Radar background is a world-fixed compass ring; rotate it opposite to
+      // heading so it stays true while the ship marker holds its forward-up position.
+      var radarBgImg = document.getElementById('radar-bg-img');
+      if (radarBgImg) radarBgImg.style.transform = 'rotate(' + (-hdg) + 'deg)';
       document.getElementById('hdg-val').textContent = padHeading(hdg);
       document.getElementById('heading-readout').textContent = Math.round(hdg) + '\u00B0';
       document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padStart(4, '0');

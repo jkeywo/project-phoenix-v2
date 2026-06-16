@@ -7,11 +7,20 @@ density = 0.005
 spawn_distance = 250.0
 despawn_distance = 300.0
 asteroid_type_paths = [
-    "assets/entities/asteroid_small.toml",
-    "assets/entities/asteroid_large.toml",
+    "assets/entities/asteroid_common_1_small.toml",
+    "assets/entities/asteroid_common_1_large.toml",
+    "assets/entities/asteroid_common_2_small.toml",
+    "assets/entities/asteroid_common_2_large.toml",
+    "assets/entities/asteroid_common_3_small.toml",
+    "assets/entities/asteroid_common_3_large.toml",
+    "assets/entities/asteroid_common_4_small.toml",
+    "assets/entities/asteroid_common_4_large.toml",
 ]
 cosmetic_type_paths = [
-    "assets/entities/asteroid_cosmetic.toml",
+    "assets/entities/asteroid_common_1_cosmetic.toml",
+    "assets/entities/asteroid_common_2_cosmetic.toml",
+    "assets/entities/asteroid_common_3_cosmetic.toml",
+    "assets/entities/asteroid_common_4_cosmetic.toml",
 ]
 tags = ["field", "main", "asteroid_field"]
 

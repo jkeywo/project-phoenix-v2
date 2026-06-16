@@ -49,16 +49,21 @@ impl Default for ImpulseConfigResource {
 #[derive(Resource, Clone)]
 pub struct BankConfigResource {
     pub max_bank_deg: f32,
+    pub bank_lerp_rate: f32,
 }
 
 impl Default for BankConfigResource {
     fn default() -> Self {
-        Self { max_bank_deg: 0.0 }
+        Self {
+            max_bank_deg: 0.0,
+            bank_lerp_rate: BANK_LERP_RATE,
+        }
     }
 }
 
 /// How quickly the ship's visual roll lerps toward the target bank angle.
-const BANK_LERP_RATE: f32 = 5.0;
+/// Used as the serde default for `HelmConsoleConfig::bank_lerp_rate`.
+pub const BANK_LERP_RATE: f32 = 5.0;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Plugin Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -193,7 +198,7 @@ fn process_helm_inputs(
     } else {
         -input.steering * max_bank_rad
     };
-    let lerp_factor = (BANK_LERP_RATE * dt).min(1.0);
+    let lerp_factor = (bank_config.bank_lerp_rate * dt).min(1.0);
     ship.roll = ship.roll + (target_roll - ship.roll) * lerp_factor;
 }
 

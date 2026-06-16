@@ -420,13 +420,6 @@ fn handle_fire_phaser(
     }
 }
 
-// ── NPC phaser constants ──────────────────────────────────────────────────────
-
-/// Default NPC beam duration in seconds.
-const NPC_BEAM_DURATION_SECS: f32 = 3.0;
-/// Default NPC beam damage per second.
-const NPC_BEAM_DAMAGE_PER_SEC: f32 = 5.0;
-
 /// Handles `FirePhaser` messages emitted by NPC AI controllers (tokens that
 /// start with `"ai:"`).  Uses the same range/arc guard (`is_fire_ready_with_range`)
 /// and the same `EntityConsoleHull::apply_damage` path as the player beam tick,
@@ -523,33 +516,34 @@ fn handle_fire_phaser_npc(
 
         let target_uuid: Option<uuid::Uuid> = ctrl_opt.and_then(|c| c.controller.blackboard.target);
 
+        use crate::entity_config::PhaserCombatConfig;
         let beam_range = weapons_section
             .map(|wc| {
                 if wc.0.beam_range > 0.0 {
                     wc.0.beam_range
                 } else {
-                    40.0
+                    PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 }
             })
-            .unwrap_or(40.0);
+            .unwrap_or(PhaserCombatConfig::DEFAULT_PHASER_RANGE);
         let damage_per_sec = weapons_section
             .map(|wc| {
                 if wc.0.beam_damage_per_sec > 0.0 {
                     wc.0.beam_damage_per_sec
                 } else {
-                    NPC_BEAM_DAMAGE_PER_SEC
+                    PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC
                 }
             })
-            .unwrap_or(NPC_BEAM_DAMAGE_PER_SEC);
+            .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC);
         let beam_duration = weapons_section
             .map(|wc| {
                 if wc.0.beam_duration_secs > 0.0 {
                     wc.0.beam_duration_secs
                 } else {
-                    NPC_BEAM_DURATION_SECS
+                    PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS
                 }
             })
-            .unwrap_or(NPC_BEAM_DURATION_SECS);
+            .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
 
         let npc_x = transform.translation.x;
         let npc_z = transform.translation.z;

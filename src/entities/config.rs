@@ -57,6 +57,30 @@ pub struct BehaviourConfig {
     /// Transition rules evaluated in declaration order.
     #[serde(default)]
     pub transition: Vec<crate::ai::TransitionConfig>,
+    /// Arrival radius in world units — closer than this counts as "reached waypoint".
+    /// Defaults to [`crate::ai::WAYPOINT_ARRIVAL_RADIUS`] when absent.
+    #[serde(default = "default_waypoint_arrival_radius")]
+    pub waypoint_arrival_radius: f32,
+    /// Extra clearance (world units) added on top of radii for collision avoidance.
+    /// Defaults to [`crate::ai::AVOIDANCE_BUFFER`] when absent.
+    #[serde(default = "default_avoidance_buffer")]
+    pub avoidance_buffer: f32,
+    /// Look-ahead horizon (seconds) for predictive collision avoidance.
+    /// Defaults to [`crate::ai::AVOIDANCE_LOOK_AHEAD_SECS`] when absent.
+    #[serde(default = "default_avoidance_look_ahead_secs")]
+    pub avoidance_look_ahead_secs: f32,
+}
+
+fn default_waypoint_arrival_radius() -> f32 {
+    crate::ai::WAYPOINT_ARRIVAL_RADIUS
+}
+
+fn default_avoidance_buffer() -> f32 {
+    crate::ai::AVOIDANCE_BUFFER
+}
+
+fn default_avoidance_look_ahead_secs() -> f32 {
+    crate::ai::AVOIDANCE_LOOK_AHEAD_SECS
 }
 
 /// Shape variant for the `[mesh]` section of an entity TOML.
@@ -340,6 +364,11 @@ pub struct HelmConsoleConfig {
     /// based on steering input percentage. 0 = no banking.
     #[serde(default)]
     pub max_bank_deg: f32,
+    /// How quickly the ship's visual roll lerps toward the target bank angle
+    /// (units: per-second lerp rate). Defaults to
+    /// [`crate::ship_plugin::BANK_LERP_RATE`] when absent.
+    #[serde(default = "default_bank_lerp_rate")]
+    pub bank_lerp_rate: f32,
 }
 
 impl HelmConsoleConfig {
@@ -348,6 +377,10 @@ impl HelmConsoleConfig {
     pub fn effective_radar_range(&self) -> f32 {
         self.radar.as_ref().map_or(0.0, |r| r.range)
     }
+}
+
+fn default_bank_lerp_rate() -> f32 {
+    crate::ship_plugin::BANK_LERP_RATE
 }
 
 fn default_impulse_charge_duration() -> f32 {

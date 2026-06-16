@@ -1012,6 +1012,9 @@ fn handle_respond_to_message(
                                 initial_state: state.clone(),
                                 state: behaviour.0.state.clone(),
                                 transition: behaviour.0.transition.clone(),
+                                waypoint_arrival_radius: behaviour.0.waypoint_arrival_radius,
+                                avoidance_buffer: behaviour.0.avoidance_buffer,
+                                avoidance_look_ahead_secs: behaviour.0.avoidance_look_ahead_secs,
                             },
                         );
                         ctrl.controller.current_state = new_ai_state;
@@ -1982,6 +1985,9 @@ fn handle_ai_events(
                                     initial_state: state.clone(),
                                     state: behaviour.0.state.clone(),
                                     transition: behaviour.0.transition.clone(),
+                                    waypoint_arrival_radius: behaviour.0.waypoint_arrival_radius,
+                                    avoidance_buffer: behaviour.0.avoidance_buffer,
+                                    avoidance_look_ahead_secs: behaviour.0.avoidance_look_ahead_secs,
                                 },
                             );
                             ctrl.controller.current_state = new_ai_state;

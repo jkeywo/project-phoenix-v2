@@ -36,13 +36,13 @@ pub const AI_RULE_AUTO_HINT: &str = "auto_hint";
 pub const AI_RULE_POWER_MOVEMENT: &str = "movement_rule";
 pub const AI_RULE_POWER_RED_ALERT: &str = "red_alert_rule";
 
-/// Default delay (seconds) before the frequency hint fires.
+// These constants are TOML-param fallbacks used by `ai_param_f32` when an
+// `[preset.ai]` rule block omits the corresponding key. The canonical values
+// live in the complexity TOML files (e.g. `assets/complexity/sensors.toml`);
+// these exist only as compile-time safety nets for future presets that forget
+// to specify a param. They must stay in sync with the shipped TOML values.
 const DEFAULT_AUTO_HINT_DELAY_SECS: f32 = 3.0;
-
-/// Default delay (seconds) before the auto-match fires.
 const DEFAULT_AUTO_MATCH_DELAY_SECS: f32 = 3.0;
-
-// Power AI tuning defaults (used when the TOML rule omits a param).
 const DEFAULT_THRUST_THRESHOLD: f32 = 0.7;
 const DEFAULT_ENGAGE_DELAY_SECS: f32 = 3.0;
 const DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT: f32 = 50.0;

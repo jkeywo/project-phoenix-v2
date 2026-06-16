@@ -264,6 +264,9 @@ fn attach_controllers_on_spawn(
         let mut controller = AiController::new([pos.x, pos.y, pos.z], time.elapsed_secs_f64());
         controller.current_state = initial_state;
         controller.current_state_name = initial_state_name;
+        controller.waypoint_arrival_radius = behaviour.0.waypoint_arrival_radius;
+        controller.avoidance_buffer = behaviour.0.avoidance_buffer;
+        controller.avoidance_look_ahead_secs = behaviour.0.avoidance_look_ahead_secs;
         registry.register_with_entity(&uuid.0, entity);
         let mut entity_cmd = commands.entity(entity);
         entity_cmd.insert(AiControllerComponent {
@@ -620,6 +623,9 @@ fn build_state_by_name_matches(
         initial_state: name.to_string(),
         state: behaviour.state.clone(),
         transition: vec![],
+        waypoint_arrival_radius: behaviour.waypoint_arrival_radius,
+        avoidance_buffer: behaviour.avoidance_buffer,
+        avoidance_look_ahead_secs: behaviour.avoidance_look_ahead_secs,
     });
     &built == new_state
 }

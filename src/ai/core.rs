@@ -121,6 +121,7 @@ pub struct TransitionConfig {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /// Arrival radius in world units — closer than this counts as "reached waypoint".
+/// Used as the serde default for `BehaviourConfig::waypoint_arrival_radius`.
 pub const WAYPOINT_ARRIVAL_RADIUS: f32 = 20.0;
 /// Angular deadband for `steer_toward`: within this angle, steering = 0.
 pub const PATROL_DEADBAND_RAD: f32 = 0.05;
@@ -128,9 +129,11 @@ pub const PATROL_DEADBAND_RAD: f32 = 0.05;
 pub const PATROL_FULL_STEER_RAD: f32 = PI / 4.0;
 /// Extra clearance (world units) added on top of the sum of radii for both
 /// target-approach offsetting and predictive collision avoidance.
-const AVOIDANCE_BUFFER: f32 = 5.0;
+/// Used as the serde default for `BehaviourConfig::avoidance_buffer`.
+pub const AVOIDANCE_BUFFER: f32 = 5.0;
 /// Look-ahead horizon (seconds) for predictive collision avoidance.
-const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
+/// Used as the serde default for `BehaviourConfig::avoidance_look_ahead_secs`.
+pub const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
 
 // ── AiInput ───────────────────────────────────────────────────────────────────
 
@@ -202,6 +205,10 @@ pub struct AiController {
     /// Used to match `TransitionConfig.from` entries.  Defaults to `"idle"`.
     pub current_state_name: String,
     pub blackboard: Blackboard,
+    /// Per-entity nav tuning, sourced from `[behaviour]` TOML fields.
+    pub waypoint_arrival_radius: f32,
+    pub avoidance_buffer: f32,
+    pub avoidance_look_ahead_secs: f32,
 }
 
 impl AiController {
@@ -216,6 +223,9 @@ impl AiController {
                 state_entered_at,
                 ..Default::default()
             },
+            waypoint_arrival_radius: WAYPOINT_ARRIVAL_RADIUS,
+            avoidance_buffer: AVOIDANCE_BUFFER,
+            avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
         }
     }
 }
@@ -397,11 +407,13 @@ fn avoidance_steering(
     self_radius: f32,
     excluded_uuid: Uuid,
     world_entities: &[AiWorldEntity],
+    avoidance_buffer: f32,
+    avoidance_look_ahead_secs: f32,
 ) -> f32 {
     let fwd_x = self_yaw.sin();
     let fwd_z = -self_yaw.cos();
-    let proj_self_x = self_pos[0] + fwd_x * self_speed * AVOIDANCE_LOOK_AHEAD_SECS;
-    let proj_self_z = self_pos[2] + fwd_z * self_speed * AVOIDANCE_LOOK_AHEAD_SECS;
+    let proj_self_x = self_pos[0] + fwd_x * self_speed * avoidance_look_ahead_secs;
+    let proj_self_z = self_pos[2] + fwd_z * self_speed * avoidance_look_ahead_secs;
 
     let mut total_avoidance: f32 = 0.0;
 
@@ -409,15 +421,15 @@ fn avoidance_steering(
         if entity.uuid == excluded_uuid {
             continue;
         }
-        let avoidance_radius = self_radius + entity.radius + AVOIDANCE_BUFFER;
+        let avoidance_radius = self_radius + entity.radius + avoidance_buffer;
 
         // Project the other entity forward using its yaw and forward_speed.
         let (ent_proj_x, ent_proj_z) = if let Some(ent_yaw) = entity.yaw {
             let ent_fwd_x = ent_yaw.sin();
             let ent_fwd_z = -ent_yaw.cos();
             (
-                entity.position[0] + ent_fwd_x * entity.forward_speed * AVOIDANCE_LOOK_AHEAD_SECS,
-                entity.position[2] + ent_fwd_z * entity.forward_speed * AVOIDANCE_LOOK_AHEAD_SECS,
+                entity.position[0] + ent_fwd_x * entity.forward_speed * avoidance_look_ahead_secs,
+                entity.position[2] + ent_fwd_z * entity.forward_speed * avoidance_look_ahead_secs,
             )
         } else {
             // Static entity — use current position.
@@ -543,7 +555,7 @@ fn tick_pursuing(
     }
 
     // Approach to the boundary of the target rather than its center.
-    let min_dist = world_view.self_radius + target_entity.radius + AVOIDANCE_BUFFER;
+    let min_dist = world_view.self_radius + target_entity.radius + controller.avoidance_buffer;
     let nav_point = offset_approach_target(pos, target_entity.position, min_dist);
     let ndx = nav_point[0] - pos[0];
     let ndz = nav_point[2] - pos[2];
@@ -566,6 +578,8 @@ fn tick_pursuing(
         world_view.self_radius,
         target_uuid,
         &world_view.entities,
+        controller.avoidance_buffer,
+        controller.avoidance_look_ahead_secs,
     );
     let steering = (base_steering + avoid).clamp(-1.0, 1.0);
 
@@ -685,7 +699,7 @@ fn tick_attacking(
 
     // Minimum approach distance accounts for physical radii so the AI never
     // tries to fly into the target's hull.
-    let min_dist = world_view.self_radius + target_entity.radius + AVOIDANCE_BUFFER;
+    let min_dist = world_view.self_radius + target_entity.radius + controller.avoidance_buffer;
     let effective_range = maintain_range.max(min_dist);
 
     // Steer toward target always.
@@ -711,6 +725,8 @@ fn tick_attacking(
             world_view.self_radius,
             target_uuid,
             &world_view.entities,
+            controller.avoidance_buffer,
+            controller.avoidance_look_ahead_secs,
         );
         let s = (base_s + avoid).clamp(-1.0, 1.0);
         // Thrust: 0 inside effective orbit range, target_speed outside; never reverses.
@@ -725,7 +741,7 @@ fn tick_attacking(
     let mut inputs = vec![AiInput::Helm { thrust, steering }];
 
     // Fire phasers when in beam range and ready.
-    let beam_range = world_view.entity_weapons_range.unwrap_or(40.0);
+    let beam_range = world_view.entity_weapons_range.unwrap_or(crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
     if dist <= beam_range && world_view.entity_phaser_ready {
         inputs.push(AiInput::SetTarget { uuid: target_uuid });
         inputs.push(AiInput::FirePhaser);
@@ -787,6 +803,8 @@ fn tick_fleeing(
         world_view.self_radius,
         controller.blackboard.last_attacker.unwrap_or(Uuid::nil()),
         &world_view.entities,
+        controller.avoidance_buffer,
+        controller.avoidance_look_ahead_secs,
     );
     let steering = (base_steering + avoid).clamp(-1.0, 1.0);
 
@@ -903,7 +921,7 @@ fn evaluate_transitions(
             }
             "in_weapons_range" => {
                 // Fires when the blackboard target is within the entity's weapons range.
-                let weapons_range = world_view.entity_weapons_range.unwrap_or(40.0);
+                let weapons_range = world_view.entity_weapons_range.unwrap_or(crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
                 if let Some(target_uuid) = controller.blackboard.target {
                     let pos = world_view.entity_pos;
                     let in_range = world_view.entities.iter().any(|e| {
@@ -1051,7 +1069,7 @@ fn tick_patrolling(
     let dist = (dx * dx + dz * dz).sqrt();
 
     // Check arrival
-    if dist < WAYPOINT_ARRIVAL_RADIUS {
+    if dist < controller.waypoint_arrival_radius {
         let next_idx = idx + 1;
         let (new_idx, still_patrolling) = if next_idx >= waypoints.len() {
             if loop_path {
@@ -1107,6 +1125,8 @@ fn tick_patrolling(
         world_view.self_radius,
         Uuid::nil(), // no target to exclude — all entities considered
         &world_view.entities,
+        controller.avoidance_buffer,
+        controller.avoidance_look_ahead_secs,
     );
     let steering = (base_steering + avoid).clamp(-1.0, 1.0);
 

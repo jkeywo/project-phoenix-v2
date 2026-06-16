@@ -1193,6 +1193,7 @@ async function preloadAndStart(scenarioPath) {
     // TOML, then fires callbacks for all referenced entity paths.
     window.wasm_load_world = wasmBindings.wasm_load_world;
     window.wasm_load_config = wasmBindings.wasm_load_config;
+    window.wasm_load_complexity = wasmBindings.wasm_load_complexity;
     window.wasm_is_preload_complete = wasmBindings.wasm_is_preload_complete;
 
     wasm_load_world(scenarioPath, worldToml);
@@ -1218,14 +1219,19 @@ function handleConfigRequest(path) {
   }
   fetchedPaths.add(path);
   
-  // Fetch the entity config
+  // Complexity TOML files are loaded through wasm_load_complexity, not
+  // wasm_load_config (they carry a [[preset]] array, not an [entity] schema).
+  const isComplexity = path.startsWith('assets/complexity/');
+  const loader = isComplexity ? wasm_load_complexity : wasm_load_config;
+
   fetch(path)
     .then(response => response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`)))
     .then(toml => {
       let complete = false;
       try {
-        // wasm_load_config returns true when the last pending config is loaded.
-        complete = wasm_load_config(path, toml) === true;
+        // wasm_load_config / wasm_load_complexity returns true when the last
+        // pending config is loaded.
+        complete = loader(path, toml) === true;
       } catch (e) {
         console.error(`Failed to parse config at ${path}:`, e);
         // Rust already cleaned up in_flight/pending in the Err path.
@@ -1236,11 +1242,11 @@ function handleConfigRequest(path) {
     })
     .catch(err => {
       console.error(`Failed to fetch config at ${path}:`, err);
-      // Fetch failed — call wasm_load_config with empty string so Rust can
+      // Fetch failed — call the loader with empty string so Rust can
       // remove this path from in_flight/pending and know whether preload is done.
       let complete = false;
       try {
-        complete = wasm_load_config(path, '') === true;
+        complete = loader(path, '') === true;
       } catch (_) {
         complete = wasm_is_preload_complete();
       }

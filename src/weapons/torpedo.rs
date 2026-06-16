@@ -333,6 +333,57 @@ impl TorpedoSystem {
         self.tubes.iter_mut().find(|t| t.id == id)
     }
 
+    /// Start loading a torpedo into the given tube.
+    ///
+    /// Consumes one torpedo from the shared pool. Returns `false` if the pool
+    /// is empty, the tube id is unknown, or the tube is not in the `Unloaded`
+    /// state.
+    pub fn start_load(&mut self, tube_id: &str) -> bool {
+        if self.torpedoes_remaining == 0 {
+            return false;
+        }
+        let idx = self.tubes.iter().position(|t| t.id == tube_id);
+        let Some(idx) = idx else {
+            return false;
+        };
+        if self.tubes[idx].load_state != TubeLoadState::Unloaded {
+            return false;
+        }
+        self.torpedoes_remaining -= 1;
+        self.tubes[idx].start_load();
+        true
+    }
+
+    /// Start unloading (or cancel a load in progress).
+    ///
+    /// If the tube is `Loaded`, begins the unloading timer — the torpedo is
+    /// returned to the magazine when the timer completes in [`tick`].
+    ///
+    /// If the tube is currently `Loading`, cancels immediately and returns the
+    /// torpedo to the magazine.
+    ///
+    /// Returns `false` if the tube id is unknown or the tube is already
+    /// `Unloaded` / `Unloading`.
+    pub fn start_unload(&mut self, tube_id: &str) -> bool {
+        let idx = self.tubes.iter().position(|t| t.id == tube_id);
+        let Some(idx) = idx else {
+            return false;
+        };
+        let tube = &self.tubes[idx];
+        let is_loaded = matches!(tube.load_state, TubeLoadState::Loaded);
+        let is_loading = matches!(tube.load_state, TubeLoadState::Loading { .. });
+        if is_loaded {
+            self.tubes[idx].start_unload();
+            true
+        } else if is_loading {
+            self.tubes[idx].start_unload();
+            self.torpedoes_remaining += 1;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn launch(
         &mut self,
         tube_id: &str,
@@ -343,9 +394,6 @@ impl TorpedoSystem {
         target_uuid: Option<String>,
         source_uuid: Option<String>,
     ) -> LaunchResult {
-        if self.torpedoes_remaining == 0 {
-            return LaunchResult::NoTorpedoes;
-        }
         let lifespan = self.config.lifespan;
         let Some(tube) = self.tube_mut(tube_id) else {
             return LaunchResult::UnknownTube;
@@ -354,7 +402,6 @@ impl TorpedoSystem {
             return LaunchResult::TubeNotLoaded;
         }
         tube.mark_fired();
-        self.torpedoes_remaining -= 1;
         let shield_pierce = self.config.shield_pierce;
         self.in_flight.push(Torpedo {
             uuid: uuid.clone(),
@@ -375,7 +422,11 @@ impl TorpedoSystem {
         target_positions: &std::collections::HashMap<String, (f32, f32)>,
     ) -> TorpedoTickResult {
         for t in &mut self.tubes {
+            let was_unloading = matches!(t.load_state, TubeLoadState::Unloading { .. });
             t.tick(dt);
+            if was_unloading && t.load_state == TubeLoadState::Unloaded {
+                self.torpedoes_remaining += 1;
+            }
         }
         let config = &self.config;
         let mut expired = Vec::new();
@@ -518,7 +569,7 @@ mod tests {
 
     fn load_tube(sys: &mut TorpedoSystem, id: &str) {
         let load_time = sys.tube(id).unwrap().load_time;
-        sys.tube_mut(id).unwrap().start_load();
+        assert!(sys.start_load(id));
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(load_time, &targets);
     }
@@ -557,10 +608,36 @@ mod tests {
     }
 
     #[test]
-    fn launch_decrements_torpedo_count() {
+    fn start_load_decrements_torpedo_count() {
+        let mut sys = default_system();
+        assert_eq!(sys.torpedoes_remaining, 10);
+        assert!(sys.start_load("fore_port"));
+        assert_eq!(sys.torpedoes_remaining, 9);
+    }
+
+    #[test]
+    fn start_load_fails_when_no_torpedoes() {
+        let mut config = TorpedoConfig::default();
+        config.count = 0;
+        let tubes = vec![cfg("fore_port", -30.0, 90.0)];
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        assert!(!sys.start_load("fore_port"));
+        assert_eq!(sys.torpedoes_remaining, 0);
+    }
+
+    #[test]
+    fn launch_does_not_change_torpedo_count() {
         let mut sys = loaded_system();
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        assert_eq!(sys.torpedoes_remaining, 9);
+        // Count was decremented at load time, not at launch
+        assert_eq!(sys.torpedoes_remaining, 7);
+    }
+
+    #[test]
+    fn start_load_fails_for_unknown_tube() {
+        let mut sys = default_system();
+        assert!(!sys.start_load("dorsal"));
+        assert_eq!(sys.torpedoes_remaining, 10);
     }
 
     #[test]
@@ -595,13 +672,46 @@ mod tests {
     }
 
     #[test]
-    fn launch_with_no_torpedoes_returns_no_torpedoes() {
-        let mut config = TorpedoConfig::default();
-        config.count = 0;
-        let tubes = vec![cfg("fore_port", -30.0, 90.0)];
-        let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        assert_eq!(r, LaunchResult::NoTorpedoes);
+    fn unload_cancelling_load_returns_torpedo_to_pool() {
+        let mut sys = default_system();
+        assert!(sys.start_load("fore_port"));
+        assert_eq!(sys.torpedoes_remaining, 9);
+        assert!(sys.start_unload("fore_port"));
+        assert_eq!(sys.torpedoes_remaining, 10);
+    }
+
+    #[test]
+    fn start_unload_loaded_tube_starts_timer_torpedo_returned_on_completion() {
+        let mut sys = default_system();
+        load_tube(&mut sys, "fore_port");
+        assert_eq!(sys.torpedoes_remaining, 9);
+        assert!(sys.start_unload("fore_port"));
+        assert_eq!(sys.torpedoes_remaining, 9); // not returned yet
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        sys.tick(sys.tube("fore_port").unwrap().load_time, &targets);
+        assert_eq!(sys.torpedoes_remaining, 10); // returned after timer
+    }
+
+    #[test]
+    fn start_unload_on_unloaded_tube_does_nothing() {
+        let mut sys = default_system();
+        assert!(!sys.start_unload("fore_port"));
+        assert_eq!(sys.torpedoes_remaining, 10);
+    }
+
+    #[test]
+    fn start_unload_on_unloading_tube_does_nothing() {
+        let mut sys = default_system();
+        load_tube(&mut sys, "fore_port");
+        assert!(sys.start_unload("fore_port"));
+        // Already unloading — second call does nothing
+        assert!(!sys.start_unload("fore_port"));
+    }
+
+    #[test]
+    fn start_unload_unknown_tube_returns_false() {
+        let mut sys = default_system();
+        assert!(!sys.start_unload("dorsal"));
     }
 
     #[test]
@@ -782,7 +892,7 @@ mod tests {
         config.load_time = 10.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.tube_mut("fore_port").unwrap().start_load();
+        assert!(sys.start_load("fore_port"));
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(10.0, &targets);
@@ -795,7 +905,7 @@ mod tests {
         config.load_time = 10.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.tube_mut("fore_port").unwrap().start_load();
+        assert!(sys.start_load("fore_port"));
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(9.9, &targets);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());

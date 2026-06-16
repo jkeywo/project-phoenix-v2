@@ -850,9 +850,7 @@ fn handle_load_tube(
         if !tactical_authorized(&sessions, &ev.token) {
             continue;
         }
-        if let Some(t) = torpedo_sys.0.tube_mut(tube.as_str()) {
-            t.start_load();
-        }
+        torpedo_sys.0.start_load(tube.as_str());
     }
 }
 
@@ -868,9 +866,7 @@ fn handle_unload_tube(
         if !tactical_authorized(&sessions, &ev.token) {
             continue;
         }
-        if let Some(t) = torpedo_sys.0.tube_mut(tube.as_str()) {
-            t.start_unload();
-        }
+        torpedo_sys.0.start_unload(tube.as_str());
     }
 }
 

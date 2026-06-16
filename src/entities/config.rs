@@ -2063,7 +2063,7 @@ surfase_colour = [1.0, 0.7, 0.1]
             !config.light.is_empty(),
             "star_sun.toml must have at least one [[light]]"
         );
-        assert_eq!(config.light[0].kind, LightKind::Point);
+        assert_eq!(config.light[0].kind, LightKind::Directional);
         let collider = config
             .collider
             .as_ref()
@@ -2099,8 +2099,8 @@ surfase_colour = [1.0, 0.7, 0.1]
             .grid
             .as_ref()
             .expect("must have [asteroid_field.grid]");
-        assert_eq!(field.asteroid_type_paths.len(), 2);
-        assert_eq!(field.cosmetic_type_paths.len(), 1);
+        assert_eq!(field.asteroid_type_paths.len(), 8);
+        assert_eq!(field.cosmetic_type_paths.len(), 4);
     }
 
     // ── Faction field tests ────────────────────────────────────────────────

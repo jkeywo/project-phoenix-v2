@@ -253,6 +253,7 @@ pub fn process_lobby(
     world: Option<Res<WorldResource>>,
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
+    preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
 ) {
     // During the Lobby phase this system owns the inbound queue and handles
     // every message type. Outside the lobby the simulation systems own it, so
@@ -261,15 +262,22 @@ pub fn process_lobby(
     // restored. All other message types are left for the in-game systems.
     // (Bevy `MessageReader`s have independent cursors, so reading here never
     // hides messages from those systems.)
-    let in_lobby = state.get() == &GamePhase::Lobby;
+    //
+    // During `Loading` the lobby system also handles inbound messages (reconnect,
+    // Identify, etc.) while the asset pre-cache runs.
+    let accepts_all = state.get() == &GamePhase::Lobby || state.get() == &GamePhase::Loading;
     let default_stations = ShipStations::default();
     let stations = ship_stations
         .as_ref()
         .map(|s| s.as_ref())
         .unwrap_or(&default_stations);
     let world_data = world.as_ref().map(|w| &w.0);
+    let preload_complete = preload
+        .as_ref()
+        .map(|r| r.complete)
+        .unwrap_or(true);
     for ev in inbound.read() {
-        if !in_lobby && !matches!(ev.msg, ClientMessage::Identify { .. }) {
+        if !accepts_all && !matches!(ev.msg, ClientMessage::Identify { .. }) {
             continue;
         }
         let result = lobby_handler::process_message(
@@ -280,6 +288,7 @@ pub fn process_lobby(
             world_data,
             stations,
             &ship_client_config.0,
+            preload_complete,
         );
         apply_result(result, &mut outbox, &mut next_state);
     }

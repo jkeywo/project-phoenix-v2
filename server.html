@@ -660,6 +660,9 @@
     <a id="qr-link" target="_blank" style="cursor:pointer">
       <canvas id="qr"></canvas>
     </a>
+    <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
+      Preparing scenario&hellip; <span id="loading-progress-pct">0</span>%
+    </div>
   </div>
 
   <!-- Modifier debug overlay (F3) -->
@@ -1141,6 +1144,14 @@
         if (parsed.type === 'GameStarted') {
           document.getElementById('overlay').style.display = 'none';
           startGameAudio();
+        }
+        if (parsed.type === 'LoadingProgress') {
+          const frac = parsed.data?.fraction ?? 0;
+          const pct = Math.round(frac * 100);
+          const el = document.getElementById('loading-progress-text');
+          const pctEl = document.getElementById('loading-progress-pct');
+          if (el) el.style.display = '';
+          if (pctEl) pctEl.textContent = String(pct);
         }
         if (parsed.type === 'SimState') {
           const snapshot = parsed.data?.snapshot;

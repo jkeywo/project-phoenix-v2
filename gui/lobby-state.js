@@ -44,7 +44,7 @@ export class LobbyState {
   }
 
   reset() {
-    /** GamePhase: 'Lobby' | 'InProgress' | 'GameOver' */
+    /** GamePhase: 'Lobby' | 'Loading' | 'InProgress' | 'GameOver' */
     this.phase = 'Lobby';
     /** Array of { token, name, consoles: [...], connected } */
     this.players = [];
@@ -156,6 +156,7 @@ export class LobbyState {
   /** True when the lobby panel should be visible. */
   showLobbyPanel(myToken) {
     if (this.phase === 'Lobby') return true;
+    if (this.phase === 'Loading') return true;
     if (this.phase === 'InProgress') return this.isSpectator(myToken);
     return false; // GameOver
   }
@@ -163,6 +164,11 @@ export class LobbyState {
   /** True when the "Game in progress" spectator banner should appear. */
   gameInProgressBanner(myToken) {
     return this.phase === 'InProgress' && this.isSpectator(myToken);
+  }
+
+  /** True during the asset pre-loading phase. */
+  isLoading() {
+    return this.phase === 'Loading';
   }
 
   /** Current complexity preset for a console, or null. */
@@ -270,4 +276,5 @@ export const lobbyState = new LobbyState();
 if (typeof window !== 'undefined') {
   window.lobbyState = lobbyState;
   window.reconcileActiveConsole = reconcileActiveConsole;
+  window.isLoadingPhase = () => lobbyState.isLoading();
 }

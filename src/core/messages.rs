@@ -335,6 +335,9 @@ pub struct CommsContact {
 pub enum GamePhase {
     #[default]
     Lobby,
+    /// Transient phase: asset pre-cache is running after captain pressed Engage.
+    /// Auto-transitions to `InProgress` when all rendering assets are ready.
+    Loading,
     InProgress,
     GameOver,
 }
@@ -603,20 +606,28 @@ pub struct EntitySnapshot {
     /// Seconds remaining until the entity completes warp-out (set while in `warping_out` state).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warp_out_remaining_secs: Option<f32>,
-    /// Optional per-entity world-space size override for radar blip
-    /// rendering. When `None`, clients fall back to `radius`. Authors
-    /// set this in the entity TOML's `[radar_appearance]` table to fudge
-    /// radar visibility independently of the entity's actual physical size.
+    /// Optional per-entity world-space size override for the radar icon
+    /// blip. When `None`, clients fall back to `radius`. Authors set this in
+    /// the entity TOML's `[radar_appearance]` table to fudge radar icon
+    /// size independently of the entity's actual physical size. Does not
+    /// affect region rendering.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub radar_world_size: Option<f32>,
+    pub radar_size: Option<f32>,
     /// Half-extents for Box-shaped region entities. `[x, y, z]` in world units.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub half_extents: Option<[f32; 3]>,
-    /// Radar icon name derived from entity tags by the server at snapshot-encode
-    /// time. One of `"ship"`, `"asteroid"`, `"station"`, `"planet"`, `"star"`,
-    /// `"torpedo"`. `None` defaults to `"ship"` on the client.
+    /// Point-blip icon name, taken verbatim from the entity TOML's
+    /// `[radar_appearance].icon`. Free-form string resolved by naming
+    /// convention on the client. `None` means this entity has no point
+    /// icon (it may still be a region via `region_colour`, or invisible to
+    /// radar entirely if both are absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radar_icon: Option<String>,
+    /// Area-fill colour for region/field entities, taken verbatim from
+    /// `[radar_appearance].region_colour`. `None` means this entity has no
+    /// region representation on radar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region_colour: Option<[f32; 3]>,
     /// Set to `true` when this entity is referenced by an active mission
     /// objective. The client radar renders a visual indicator for these entities.
     #[serde(default)]
@@ -675,65 +686,10 @@ impl EntitySnapshot {
             hull_fraction: None,
             inner_radius: None,
             warp_out_remaining_secs: None,
-            radar_world_size: None,
+            radar_size: None,
             half_extents: None,
             radar_icon: Some("asteroid".into()),
-            objective_target: false,
-            target_tags: Vec::new(),
-            threat_level: None,
-            target_description: None,
-        }
-    }
-
-    /// Convenience constructor for an asteroid field entity.
-    pub fn asteroid_field(
-        uuid: impl Into<String>,
-        x: f32,
-        z: f32,
-        inner_radius: f32,
-        outer_radius: f32,
-    ) -> Self {
-        Self {
-            uuid: uuid.into(),
-            id: None,
-            name: None,
-            position: Some([x, 0.0, z]),
-            tags: vec!["asteroid_field".into()],
-            shape: Some("torus".into()),
-            radius: Some(outer_radius),
-            colour: None,
-            yaw: None,
-            hull_fraction: None,
-            inner_radius: Some(inner_radius),
-            warp_out_remaining_secs: None,
-            radar_world_size: None,
-            half_extents: None,
-            radar_icon: Some("asteroid".into()),
-            objective_target: false,
-            target_tags: Vec::new(),
-            threat_level: None,
-            target_description: None,
-        }
-    }
-
-    /// Convenience constructor for a basic entity with position and tags (no extra aspects).
-    pub fn simple(uuid: impl Into<String>, x: f32, z: f32, tags: Vec<String>) -> Self {
-        Self {
-            uuid: uuid.into(),
-            id: None,
-            name: None,
-            position: Some([x, 0.0, z]),
-            tags,
-            shape: None,
-            radius: None,
-            colour: None,
-            yaw: None,
-            hull_fraction: None,
-            inner_radius: None,
-            warp_out_remaining_secs: None,
-            radar_world_size: None,
-            half_extents: None,
-            radar_icon: None,
+            region_colour: None,
             objective_target: false,
             target_tags: Vec::new(),
             threat_level: None,
@@ -932,6 +888,15 @@ pub enum ClientMessage {
     ClearNavigationWaypoint,
 }
 
+/// Progress of server-side asset pre-cache, broadcast during the `Loading`
+/// phase so clients can show a progress bar while GLB models and rig sidecars
+/// finish loading before the game starts.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct LoadingProgress {
+    /// 0.0 (nothing loaded) to 1.0 (all assets ready).
+    pub fraction: f32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 #[allow(clippy::large_enum_variant)]
@@ -957,6 +922,11 @@ pub enum ServerMessage {
         name: String,
     },
     GameStarted,
+    /// Broadcast during the `Loading` phase at ~2 Hz. Clients show a progress
+    /// bar until `GameStarted` arrives, which transitions the phase to `InProgress`.
+    LoadingProgress {
+        data: LoadingProgress,
+    },
     SimState {
         snapshot: SimSnapshot,
     },
@@ -1065,6 +1035,15 @@ pub enum ServerMessage {
         max_hp: i32,
         current_hp: i32,
         radius: f32,
+        /// From the rock's own TOML `[radar_appearance].icon`. `None` (e.g.
+        /// cosmetic asteroid variants with no `[radar_appearance]`) means
+        /// this rock never appears on radar.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radar_icon: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radar_colour: Option<[f32; 3]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radar_size: Option<f32>,
     },
     /// Sent at 10 Hz to the Power console holder only. Carries the current
     /// power allocation levels, battery charge fraction, and whether the

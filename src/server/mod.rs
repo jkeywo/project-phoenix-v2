@@ -1,3 +1,4 @@
+pub mod asset_preload;
 pub mod bridge;
 pub mod radar;
 pub mod renderer;

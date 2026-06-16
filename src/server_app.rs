@@ -235,7 +235,23 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(sim_outbox_broadcaster());
 
     #[cfg(feature = "server")]
-    app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
+    {
+        use crate::server::asset_preload::{
+            auto_transition_from_loading, begin_asset_preload, broadcast_loading_progress,
+            poll_asset_preload,
+        };
+        app.add_plugins(crate::server::ServerViewscreenRadarPlugin)
+            .add_systems(OnEnter(GamePhase::Lobby), begin_asset_preload)
+            .add_systems(Update, poll_asset_preload)
+            .add_systems(
+                Update,
+                broadcast_loading_progress.run_if(in_state(GamePhase::Loading)),
+            )
+            .add_systems(
+                Update,
+                auto_transition_from_loading.run_if(in_state(GamePhase::Loading)),
+            );
+    }
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.
@@ -750,31 +766,6 @@ fn broadcast_world_setup_on_start(
 }
 
 /// Reconciles the live ECS entities with the `TrackedEntities` registry each tick.
-///
-/// Derive the `radar_icon` string for a snapshot from the entity's tags.
-///
-/// This is the authoritative server-side mapping used when building snapshots
-/// in `reconcile_runtime_entities`. Clients read the resulting string directly
-/// from `EntitySnapshot.radar_icon` rather than re-deriving it from tags.
-fn radar_icon_from_tags(tags: &[String]) -> String {
-    let has = |t: &str| tags.iter().any(|s| s == t);
-    if has("player") || has("ship") || has("pirate") {
-        "ship".into()
-    } else if has("asteroid_field") || has("asteroid") {
-        "asteroid".into()
-    } else if has("station") {
-        "station".into()
-    } else if has("missile") || has("torpedo") {
-        "torpedo".into()
-    } else if has("planet") {
-        "planet".into()
-    } else if has("star") {
-        "star".into()
-    } else {
-        "ship".into() // defensive fallback
-    }
-}
-
 fn upsert_world_entity(world: &mut WorldResource, snapshot: EntitySnapshot) {
     if let Some(existing) = world
         .0
@@ -804,21 +795,19 @@ fn snapshot_from_entity_config(
     };
 
     if let Some(radar) = &config.radar_appearance {
-        if radar.colour.len() >= 3 {
-            snapshot.colour = Some([radar.colour[0], radar.colour[1], radar.colour[2]]);
+        if let Some(colour) = &radar.colour {
+            if colour.len() >= 3 {
+                snapshot.colour = Some([colour[0], colour[1], colour[2]]);
+            }
         }
-        if let Some(radius) = radar.radius {
-            snapshot.radius = Some(radius);
+        if let Some(region_colour) = &radar.region_colour {
+            if region_colour.len() >= 3 {
+                snapshot.region_colour =
+                    Some([region_colour[0], region_colour[1], region_colour[2]]);
+            }
         }
-        snapshot.radar_world_size = radar.world_size;
-        snapshot.radar_icon = Some(
-            radar
-                .icon
-                .clone()
-                .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags)),
-        );
-    } else {
-        snapshot.radar_icon = Some(radar_icon_from_tags(&snapshot.tags));
+        snapshot.radar_size = radar.size;
+        snapshot.radar_icon = radar.icon.clone();
     }
 
     if let Some(collider) = &config.collider {
@@ -960,30 +949,28 @@ fn reconcile_runtime_entities(
                         }
                     }
                 }
-                if let Some(ra) = radar_appearance {
-                    if ra.0.colour.len() >= 3 {
-                        snapshot.colour = Some([ra.0.colour[0], ra.0.colour[1], ra.0.colour[2]]);
-                    }
-                    if let Some(r) = ra.0.radius {
-                        snapshot.radius = Some(r);
-                    }
-                    snapshot.radar_world_size = ra.0.world_size;
-                }
                 if snapshot.shape.is_none() {
                     if let Some(field) = asteroid_field {
                         snapshot.shape = Some("torus".to_string());
                         snapshot.radius = Some(field.0.outer_radius);
                         snapshot.inner_radius = Some(field.0.inner_radius);
-                        if snapshot.colour.is_none() {
-                            snapshot.colour = Some([0.52, 0.32, 0.18]);
-                        }
                     }
                 }
-                snapshot.radar_icon = Some(
-                    radar_appearance
-                        .and_then(|r| r.0.icon.clone())
-                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags)),
-                );
+                if let Some(ra) = radar_appearance {
+                    if let Some(colour) = &ra.0.colour {
+                        if colour.len() >= 3 {
+                            snapshot.colour = Some([colour[0], colour[1], colour[2]]);
+                        }
+                    }
+                    if let Some(region_colour) = &ra.0.region_colour {
+                        if region_colour.len() >= 3 {
+                            snapshot.region_colour =
+                                Some([region_colour[0], region_colour[1], region_colour[2]]);
+                        }
+                    }
+                    snapshot.radar_size = ra.0.size;
+                    snapshot.radar_icon = ra.0.icon.clone();
+                }
                 if let Some(ref id) = snapshot.id {
                     snapshot.objective_target = active_objective_names.contains(id);
                 }
@@ -1060,30 +1047,28 @@ fn reconcile_runtime_entities(
                         }
                     }
                 }
-                if let Some(ra) = radar_appearance {
-                    if ra.0.colour.len() >= 3 {
-                        snapshot.colour = Some([ra.0.colour[0], ra.0.colour[1], ra.0.colour[2]]);
-                    }
-                    if let Some(r) = ra.0.radius {
-                        snapshot.radius = Some(r);
-                    }
-                    snapshot.radar_world_size = ra.0.world_size;
-                }
                 if snapshot.shape.is_none() {
                     if let Some(field) = asteroid_field {
                         snapshot.shape = Some("torus".to_string());
                         snapshot.radius = Some(field.0.outer_radius);
                         snapshot.inner_radius = Some(field.0.inner_radius);
-                        if snapshot.colour.is_none() {
-                            snapshot.colour = Some([0.52, 0.32, 0.18]);
-                        }
                     }
                 }
-                snapshot.radar_icon = Some(
-                    radar_appearance
-                        .and_then(|r| r.0.icon.clone())
-                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags)),
-                );
+                if let Some(ra) = radar_appearance {
+                    if let Some(colour) = &ra.0.colour {
+                        if colour.len() >= 3 {
+                            snapshot.colour = Some([colour[0], colour[1], colour[2]]);
+                        }
+                    }
+                    if let Some(region_colour) = &ra.0.region_colour {
+                        if region_colour.len() >= 3 {
+                            snapshot.region_colour =
+                                Some([region_colour[0], region_colour[1], region_colour[2]]);
+                        }
+                    }
+                    snapshot.radar_size = ra.0.size;
+                    snapshot.radar_icon = ra.0.icon.clone();
+                }
                 if let Some(ref id) = snapshot.id {
                     snapshot.objective_target = active_objective_names.contains(id);
                 }
@@ -2184,9 +2169,9 @@ mod tests {
                 length: 0.0,
             }),
             radar_appearance: Some(crate::entity_config::RadarAppearanceConfig {
-                colour: vec![1.0, 0.85, 0.3],
-                radius: Some(50.0),
-                world_size: None,
+                colour: Some(vec![1.0, 0.85, 0.3]),
+                size: None,
+                region_colour: None,
                 icon: Some("star".into()),
             }),
             ..Default::default()

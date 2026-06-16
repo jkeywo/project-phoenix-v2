@@ -49,6 +49,8 @@ pub fn process_message(
     world: Option<&WorldData>,
     ship_stations: &ShipStations,
     ship_config: &ShipClientConfig,
+    // When `false`, `StartGame` transitions to `Loading` instead of `InProgress`.
+    preload_complete: bool,
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut new_phase = None;
@@ -353,8 +355,12 @@ pub fn process_message(
                     all_stations_filled(ship_stations, check_count, &current_consoles)
                 };
                 if can_start {
-                    new_phase = Some(GamePhase::InProgress);
-                    outbound.push((Target::All, ServerMessage::GameStarted));
+                    if preload_complete || ship_stations.configs.is_empty() {
+                        new_phase = Some(GamePhase::InProgress);
+                        outbound.push((Target::All, ServerMessage::GameStarted));
+                    } else {
+                        new_phase = Some(GamePhase::Loading);
+                    }
                 }
             }
         }
@@ -644,6 +650,7 @@ mod tests {
             world,
             &default_stations(),
             &default_ship_config(),
+            true, // preload is always complete in tests (no Bevy app)
         )
     }
 
@@ -805,6 +812,7 @@ mod tests {
             world,
             &ship_stations(),
             &default_ship_config(),
+            true, // preload is always complete in tests (no Bevy app)
         )
     }
 
@@ -1200,6 +1208,7 @@ mod tests {
             None,
             &stations,
             &default_ship_config(),
+            true,
         );
         assert!(
             sessions.spectator_queue().contains(&"t7".to_string()),
@@ -1228,6 +1237,7 @@ mod tests {
             None,
             &stations,
             &default_ship_config(),
+            true,
         );
         assert!(
             sessions.spectator_queue().contains(&"t1".to_string()),
@@ -1260,6 +1270,7 @@ mod tests {
             None,
             &stations,
             &default_ship_config(),
+            true,
         );
         // Reconnect restores the previously-held seat.
         let restored = sessions
@@ -1440,6 +1451,7 @@ mod tests {
             None,
             &stations,
             &default_ship_config(),
+            true,
         );
         // t1 must have no consoles — no auto-assignment.
         let consoles = sessions
@@ -1489,6 +1501,7 @@ mod tests {
             None,
             &stations,
             &default_ship_config(),
+            true,
         );
 
         // t1 should be moved to Helm (next of Captain at 2P).
@@ -1590,6 +1603,7 @@ tags = ["player"]
             None,
             &stations,
             &default_ship_config(),
+            true,
         );
 
         // Session state: t1 must have no consoles (rollback).

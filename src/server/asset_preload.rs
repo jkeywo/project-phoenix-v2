@@ -487,11 +487,22 @@ pub fn poll_asset_preload(
                 let mut manifest = AssetManifest::default();
                 let cache = crate::config_cache::get_config_cache();
                 let cache_ref: &std::collections::HashMap<String, crate::entity_config::EntityConfig> = &*cache;
+                // SAFETY: We derive two &mut refs to separate fields (seen_worlds, seen_entities)
+                // from a single &mut preload. They are passed immediately to process_sub_world_toml
+                // and the function only accesses them through independent paths — there is no
+                // simultaneous aliasing of the same memory.
+                let (seen_worlds, seen_entities) = unsafe {
+                    let preload_ptr = core::ptr::addr_of_mut!(preload);
+                    (
+                        &mut (*preload_ptr).seen_worlds,
+                        &mut (*preload_ptr).seen_entities,
+                    )
+                };
                 match process_sub_world_toml(
                     &toml_str,
                     cache_ref,
-                    &mut preload.seen_worlds,
-                    &mut preload.seen_entities,
+                    seen_worlds,
+                    seen_entities,
                     &mut manifest,
                     world_path,
                 ) {

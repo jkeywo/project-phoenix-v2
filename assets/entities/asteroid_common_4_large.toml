@@ -1,0 +1,20 @@
+name = "Large Asteroid 4"
+tags = ["asteroid", "gameplay", "large"]
+
+[target]
+tags = ["asteroid"]
+threat_level = "none"
+
+[collider]
+shape = "Ball"
+radius = 4
+length = 0.0
+
+[hull]
+hull_integrity = 100
+
+[mesh]
+model = "assets/models/asteroid_common_4_large.glb"
+shape = "sphere"
+radius = 4
+colour = [0.6, 0.55, 0.45]

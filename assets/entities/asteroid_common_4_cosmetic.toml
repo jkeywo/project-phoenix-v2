@@ -1,0 +1,13 @@
+name = "Cosmetic Asteroid 4"
+tags = ["asteroid", "cosmetic"]
+
+[collider]
+shape = "Ball"
+radius = 1
+length = 0.0
+
+[mesh]
+model = "assets/models/asteroid_common_4_cosmetic.glb"
+shape = "sphere"
+radius = 1
+colour = [0.5, 0.45, 0.38]

@@ -215,6 +215,11 @@ pub struct LightConfig {
     /// Range in world units. Required for point lights; ignored for directional.
     #[serde(default)]
     pub range: Option<f32>,
+    /// If true, the light is spawned as a child entity and continuously
+    /// rotated to face the player's ship, regardless of how the parent
+    /// entity itself is oriented.
+    #[serde(default)]
+    pub face_player: bool,
 }
 
 /// One entry in the `[[hull.console_hull]]` TOML array.

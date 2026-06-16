@@ -47,6 +47,11 @@ pub struct Ship;
 #[derive(Component)]
 pub struct Asteroid;
 
+/// Marks a light entity that should continuously rotate to face the
+/// player's ship, regardless of how its parent entity is oriented.
+#[derive(Component)]
+pub struct FacePlayerLight;
+
 /// Stable UUID string identifying this asteroid entity (for targeting).
 #[derive(Component, Clone)]
 pub struct AsteroidUuid(pub String);
@@ -192,6 +197,7 @@ pub fn add_simulation_plugins(app: &mut App) {
         (spawn_game_start_entities, dump_tracked_entities).chain(),
     )
     .add_systems(Update, render_spawned_entities)
+    .add_systems(Update, face_player_lights.after(render_spawned_entities))
     .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
     .insert_resource(GameOverReason(None))
     .add_systems(
@@ -1792,12 +1798,15 @@ fn render_spawned_entities(
         // Mark processed so we never visit this entity again.
         ec.insert(RenderProcessed);
 
-        // Attach lights, if any.
+        // Attach lights, if any. A light that needs to face the player must
+        // be its own child entity so rotating it doesn't rotate the parent's
+        // visual mesh; otherwise a single light can live on the entity itself.
         if let Some(lights_comp) = lights_opt {
             let lights = &lights_comp.0;
-            match lights.len() {
-                0 => {}
-                1 => insert_light(&mut ec, &lights[0]),
+            let needs_children = lights.len() > 1 || lights.iter().any(|l| l.face_player);
+            match (lights.len(), needs_children) {
+                (0, _) => {}
+                (1, false) => insert_light(&mut ec, &lights[0]),
                 _ => {
                     ec.with_children(|parent| {
                         for light in lights {
@@ -1845,21 +1854,47 @@ fn spawn_child_light(
     let color = Color::srgb(light.colour[0], light.colour[1], light.colour[2]);
     match light.kind {
         LightKind::Point => {
-            parent.spawn(PointLight {
+            let mut child = parent.spawn(PointLight {
                 color,
                 intensity: light.intensity,
                 range: light.range.unwrap_or(50.0),
                 shadows_enabled: false,
                 ..default()
             });
+            if light.face_player {
+                child.insert(FacePlayerLight);
+            }
         }
         LightKind::Directional => {
-            parent.spawn(DirectionalLight {
+            let mut child = parent.spawn(DirectionalLight {
                 color,
                 illuminance: light.intensity,
                 shadows_enabled: false,
                 ..default()
             });
+            if light.face_player {
+                child.insert(FacePlayerLight);
+            }
+        }
+    }
+}
+
+/// Rotates every [`FacePlayerLight`] entity so it points toward the
+/// player's ship, independent of its parent entity's orientation.
+fn face_player_lights(
+    ship_query: Query<&GlobalTransform, With<Ship>>,
+    mut light_query: Query<(&GlobalTransform, &mut Transform), With<FacePlayerLight>>,
+) {
+    let Ok(ship_transform) = ship_query.single() else {
+        return;
+    };
+    let player_pos = ship_transform.translation();
+    for (global, mut transform) in &mut light_query {
+        let light_pos = global.translation();
+        if (player_pos - light_pos).length_squared() > f32::EPSILON {
+            transform.rotation = Transform::from_translation(light_pos)
+                .looking_at(player_pos, Vec3::Y)
+                .rotation;
         }
     }
 }

@@ -250,7 +250,7 @@ pub fn process_sub_world_toml(
 // ── Bevy Resource ─────────────────────────────────────────────────────────
 
 /// Tracks the progress of server-side asset pre-caching.
-#[derive(Resource)]
+#[derive(Resource, Default, PartialEq)]
 pub struct AssetPreloadResource {
     /// True once `begin_asset_preload` has run.
     pub started: bool,

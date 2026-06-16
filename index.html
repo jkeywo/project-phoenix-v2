@@ -533,7 +533,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-7ae4e93c2d38d5bc.js" crossorigin="anonymous" integrity="sha384-bUCHKeQGkd1a1V0xJEJbBIenwfvgBDRbMIjB2hS+TGdXf/EFQNesJHvmbE/Ox7gR"><link rel="preload" href="./project-phoenix-7ae4e93c2d38d5bc_bg.wasm" crossorigin="anonymous" integrity="sha384-B9kzkh1VasNb8Bd+r+3tFA2WRrWIIVsruccOoIOzwzn2qcptw2y7zL1jbhEyjcJE" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-5fa18e35744203cb.js" crossorigin="anonymous" integrity="sha384-BWqgzg5OTs9BWvL7kzqAIaymDhw5o2lrUvCkk98a8C8ZrgkdtxNyl3PAYtF+uI7/"><link rel="preload" href="./project-phoenix-5fa18e35744203cb_bg.wasm" crossorigin="anonymous" integrity="sha384-QuNGIWtNXQXUM8m3zuRUUyqXKSU5FmcN9mnoourqBMVVU+igQprqpdmJT6ZmS6bn" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -686,8 +686,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-7ae4e93c2d38d5bc.js';
-const wasm = await init({ module_or_path: './project-phoenix-7ae4e93c2d38d5bc_bg.wasm' });
+import init, * as bindings from './project-phoenix-5fa18e35744203cb.js';
+const wasm = await init({ module_or_path: './project-phoenix-5fa18e35744203cb_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1204,6 +1204,7 @@ async function preloadAndStart(scenarioPath) {
     // TOML, then fires callbacks for all referenced entity paths.
     window.wasm_load_world = wasmBindings.wasm_load_world;
     window.wasm_load_config = wasmBindings.wasm_load_config;
+    window.wasm_load_complexity = wasmBindings.wasm_load_complexity;
     window.wasm_is_preload_complete = wasmBindings.wasm_is_preload_complete;
 
     wasm_load_world(scenarioPath, worldToml);
@@ -1229,14 +1230,19 @@ function handleConfigRequest(path) {
   }
   fetchedPaths.add(path);
   
-  // Fetch the entity config
+  // Complexity TOML files are loaded through wasm_load_complexity, not
+  // wasm_load_config (they carry a [[preset]] array, not an [entity] schema).
+  const isComplexity = path.startsWith('assets/complexity/');
+  const loader = isComplexity ? wasm_load_complexity : wasm_load_config;
+
   fetch(path)
     .then(response => response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`)))
     .then(toml => {
       let complete = false;
       try {
-        // wasm_load_config returns true when the last pending config is loaded.
-        complete = wasm_load_config(path, toml) === true;
+        // wasm_load_config / wasm_load_complexity returns true when the last
+        // pending config is loaded.
+        complete = loader(path, toml) === true;
       } catch (e) {
         console.error(`Failed to parse config at ${path}:`, e);
         // Rust already cleaned up in_flight/pending in the Err path.
@@ -1247,11 +1253,11 @@ function handleConfigRequest(path) {
     })
     .catch(err => {
       console.error(`Failed to fetch config at ${path}:`, err);
-      // Fetch failed — call wasm_load_config with empty string so Rust can
+      // Fetch failed — call the loader with empty string so Rust can
       // remove this path from in_flight/pending and know whether preload is done.
       let complete = false;
       try {
-        complete = wasm_load_config(path, '') === true;
+        complete = loader(path, '') === true;
       } catch (_) {
         complete = wasm_is_preload_complete();
       }

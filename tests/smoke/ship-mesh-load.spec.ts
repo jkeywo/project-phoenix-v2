@@ -20,6 +20,15 @@ test('NPC ship GLB model loads (200) after game start', async ({ context }) => {
     route.fulfill({ contentType: 'text/plain', body: PATROL_TOML }),
   );
 
+  // Opt out of the default GLB stub (fixtures.ts) for the one model this test
+  // actually inspects. `route.continue()` sends the request straight to the
+  // network (the static `dist/` server), skipping all other matching handlers
+  // including the fixture-level GLB stub. Other GLBs (asteroids, etc.) keep
+  // the stub, which is fine — this test only asserts on dynasty_destroyer.glb.
+  await context.route('**/assets/models/dynasty_destroyer.glb', (route) =>
+    route.continue(),
+  );
+
   const serverPage = await context.newPage();
 
   // Record every .glb response and its status code.

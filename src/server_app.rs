@@ -250,7 +250,9 @@ pub fn add_simulation_plugins(app: &mut App) {
             )
             .add_systems(
                 Update,
-                auto_transition_from_loading.run_if(in_state(GamePhase::Loading)),
+                auto_transition_from_loading
+                    .run_if(in_state(GamePhase::Loading))
+                    .after(poll_asset_preload),
             );
     }
 }

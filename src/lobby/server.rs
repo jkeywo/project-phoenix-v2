@@ -272,7 +272,7 @@ pub fn process_lobby(
         .map(|s| s.as_ref())
         .unwrap_or(&default_stations);
     let world_data = world.as_ref().map(|w| &w.0);
-    let preload_complete = preload.map_or(true, |p| p.complete);
+    let preload_complete = preload.map_or(true, |p| !p.started || p.complete);
     for ev in inbound.read() {
         if !accepts_all && !matches!(ev.msg, ClientMessage::Identify { .. }) {
             continue;

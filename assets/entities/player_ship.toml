@@ -7,8 +7,6 @@ shape = "Capsule"
 radius = 1.5
 length = 4
 
-[hull]
-
 [[hull.console_hull]]
 console = "Helm"
 max_hp = 25
@@ -132,8 +130,8 @@ complexity_toml = "assets/complexity/navigation.toml"
 
 [navigation_console.system_chart]
 range = 800
-shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker", "ship" ]
-selects = [ "ship", "station", "planet", "star", "region" ]
+shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker" ]
+selects = [ "station", "planet", "star", "region" ]
 
 [comms]
 range = 1200

@@ -1,182 +1,178 @@
 name = "Player Ship"
-tags = ["player", "ship"]
+tags = [ "player", "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [collider]
 shape = "Capsule"
 radius = 1.5
-length = 4.0
+length = 4
 
 [hull]
-repair_team_count = 2
-
-[repair]
-travel_duration_secs = 5.0
-repair_rate_hp_per_sec = 0.5
 
 [[hull.console_hull]]
 console = "Helm"
-max_hp = 25.0
+max_hp = 25
 
 [[hull.console_hull]]
 console = "Tactical"
-max_hp = 25.0
+max_hp = 25
 
 [[hull.console_hull]]
 console = "Power"
-max_hp = 25.0
+max_hp = 25
 
 [[hull.console_hull]]
 console = "Shields"
-max_hp = 25.0
+max_hp = 25
+
+[repair]
+repair_team_count = 2
+travel_duration_secs = 5
+repair_rate_hp_per_sec = 0.5
 
 [weapons_console]
 complexity_toml = "assets/complexity/tactical.toml"
-power_multipliers = [-0.5, 0.0, 0.25, 0.5]
-beam_range = 100.0
-beam_damage_per_sec = 5.0
-beam_duration_secs = 6.0
-cooldown_secs = 6.0
-beam_color = [1.0, 0.4, 0.1, 1.0]
-torpedo_arc_color = [1.0, 0.55, 0.2, 0.15]
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
+torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
 
 [weapons_console.radar]
-range = 300.0
-shows = ["player", "ship", "asteroid", "station", "missile", "torpedo", "region"]
-selects = ["ship", "station", "asteroid"]
+range = 300
+shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
+selects = [ "ship", "station", "asteroid" ]
 
-# Fore phaser bank: forward-facing, 270° arc (blind spot is the rear 90°).
-# Auto-fire window covers the forward hemisphere only.
 [[weapons_console.phaser_banks]]
 id = "fore"
-facing_deg = 0.0
-fire_arc_deg = 270.0
-auto_arc_deg = 180.0
+facing_deg = 0
+fire_arc_deg = 270
+auto_arc_deg = 180
+beam_range = 100
+beam_damage_per_sec = 5
+beam_duration_secs = 6
+cooldown_secs = 6
+beam_color = [ 1, 0.4, 0.1, 1 ]
+marker = "phasers_fore"
 
-# Aft phaser bank: rear-facing, 270° arc (blind spot is the forward 90°).
-# Auto-fire window covers the rear hemisphere only.
 [[weapons_console.phaser_banks]]
 id = "aft"
-facing_deg = 180.0
-fire_arc_deg = 270.0
-auto_arc_deg = 180.0
+facing_deg = 180
+fire_arc_deg = 270
+auto_arc_deg = 180
+beam_range = 100
+beam_damage_per_sec = 5
+beam_duration_secs = 6
+cooldown_secs = 6
+beam_color = [ 1, 0.4, 0.1, 1 ]
+marker = "phasers_a"
 
 [torpedoes]
 count = 10
 damage_hull = 50
 damage_shields = 5
-speed = 30.0
-turn_rate_deg_per_sec = 45.0
-lifespan = 20.0
-load_time = 10.0
-detonation_radius = 5.0
+speed = 30
+turn_rate_deg_per_sec = 45
+lifespan = 20
+load_time = 10
+detonation_radius = 5
 
-# Forward tube A
 [[torpedoes.tubes]]
 id = "fore_port"
-facing_deg = 0.0
-fire_arc_deg = 90.0
-load_time = 3.0
+facing_deg = 0
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_port"
 
-# Forward tube B
 [[torpedoes.tubes]]
 id = "fore_starboard"
-facing_deg = 0.0
-fire_arc_deg = 90.0
-load_time = 3.0
+facing_deg = 0
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_starboard"
 
-# Aft tube: rear-facing torpedo launcher.
 [[torpedoes.tubes]]
 id = "aft"
-facing_deg = 180.0
-fire_arc_deg = 90.0
-load_time = 3.0
+facing_deg = 180
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_aft"
 
 [sensors_console]
 complexity_toml = "assets/complexity/sensors.toml"
-power_multipliers = [-0.5, 0.0, 0.25, 0.5]
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
 [sensors_console.long_range_radar]
-range = 400.0
-shows = ["player", "asteroid_field", "ship", "station", "planet", "star"]
-selects = ["ship", "station", "planet"]
+range = 400
+shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
+selects = [ "ship", "station", "planet" ]
 
 [power]
 complexity_toml = "assets/complexity/power.toml"
-capacity = 100.0
-rates = [6.0, 5.0, 4.0, 2.0, -2.0, -6.0]
-emergency_threshold = 25.0
+capacity = 100
+rates = [ 6, 5, 4, 2, -2, -6 ]
+emergency_threshold = 25
 
 [captain_console]
-
 [helm_console]
-max_speed = 25.0
-max_reverse_speed = 10.0
-acceleration = 10.0
-deceleration = 25.0
+max_speed = 25
+max_reverse_speed = 10
+acceleration = 10
+deceleration = 25
 max_yaw_rate = 0.5
-max_bank_deg = 10.0
-impulse_charge_duration = 3.0
-impulse_speed_multiplier = 10.0
-impulse_acceleration_multiplier = 5.0
+max_bank_deg = 10
+impulse_charge_duration = 3
+impulse_speed_multiplier = 10
+impulse_acceleration_multiplier = 5
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
 [helm_console.radar]
-range = 250.0
-shows = ["player", "asteroid", "asteroid_field", "ship", "station", "planet", "star"]
+range = 250
+shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
 
 [navigation_console]
 complexity_toml = "assets/complexity/navigation.toml"
 
 [navigation_console.system_chart]
-range = 800.0
-shows = ["region", "asteroid_field", "star", "planet", "station", "player", "objective_marker", "ship"]
-selects = ["ship", "station", "planet", "star", "region"]
+range = 800
+shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker", "ship" ]
+selects = [ "ship", "station", "planet", "star", "region" ]
 
-# Comms range — within this radius the player ship can hail / be hailed.
-# Scale matches helm radar / system chart so default-world entities are
-# generally reachable but distant contacts drop offline.
 [comms]
-range = 1200.0
+range = 1200
 
 [shields_console]
 complexity_toml = "assets/complexity/shields.toml"
 focus_bonus_max_hp = 50
-focus_bonus_regen = 5.0
+focus_bonus_regen = 5
 focus_penalty_max_hp = 25
 focus_penalty_regen = 2.5
-focus_decay_rate = 10.0
+focus_decay_rate = 10
 
 [shields_console.base]
-# UI assumes 4; other values will break the client Shields panel.
 num_facings = 4
 max_hp = 100
-regen_per_sec = 5.0
-offline_duration = 10.0
+regen_per_sec = 5
+offline_duration = 10
 
 [engineering_console]
-
 [radar_appearance]
-colour = [0.0, 1.0, 0.2]
-size = 6.0
+colour = [ 0, 1, 0.2 ]
+size = 6
 icon = "playerShip"
 
 [stations]
 min_players = 1
 max_players = 6
 
-# 1P: solo crew — captain handles everything including comms.
 [[stations.1]]
 name = "Captain"
 description = "Solo crew: pilot, fight, command, and hail contacts."
-consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power", "Sensors", "Shields", "Navigation", "Comms"]
+consoles = [ "CaptainChair", "Helm", "Tactical", "Repair", "Power", "Sensors", "Shields", "Navigation", "Comms" ]
 rank = "Cpt."
 next = "Helm"
 
-# 2P: command bridge + tactical ops.
 [[stations.2]]
 name = "Helm"
 description = "Pilot the ship, command the bridge, shields and manage comms."
-consoles = ["CaptainChair", "Helm", "Shields", "Comms"]
+consoles = [ "CaptainChair", "Helm", "Shields", "Comms" ]
 rank = "Cpt."
 next = "Helm"
 previous = "Captain"
@@ -184,15 +180,14 @@ previous = "Captain"
 [[stations.2]]
 name = "Tactical"
 description = "Weapons, damage control, power, and science operations."
-consoles = ["Tactical", "Repair", "Power", "Sensors", "Navigation"]
+consoles = [ "Tactical", "Repair", "Power", "Sensors", "Navigation" ]
 rank = "Ltn."
 next = "Tactical"
 
-# 3P: bridge, weapons, and engineering. Science ops split.
 [[stations.3]]
 name = "Helm"
 description = "Pilot the ship, command the bridge."
-consoles = ["CaptainChair", "Helm"]
+consoles = [ "CaptainChair", "Helm" ]
 rank = "Cpt."
 previous = "Helm"
 next = "Helm"
@@ -200,7 +195,7 @@ next = "Helm"
 [[stations.3]]
 name = "Tactical"
 description = "Manage weapons, sensors, shields, and navigation."
-consoles = ["Tactical", "Sensors", "Navigation"]
+consoles = [ "Tactical", "Sensors", "Navigation" ]
 rank = "Ltn."
 previous = "Tactical"
 next = "Tactical"
@@ -208,15 +203,14 @@ next = "Tactical"
 [[stations.3]]
 name = "Engineering"
 description = "Maintain and repair ship systems, manage power, shields, and manage comms."
-consoles = ["Repair", "Power", "Shields", "Comms"]
+consoles = [ "Repair", "Power", "Shields", "Comms" ]
 rank = "Ltn."
 next = "Engineering"
 
-# 4P: dedicated Science station.
 [[stations.4]]
 name = "Helm"
 description = "Pilot the ship and command the bridge."
-consoles = ["CaptainChair", "Helm"]
+consoles = [ "CaptainChair", "Helm" ]
 rank = "Cpt."
 previous = "Helm"
 next = "Helm"
@@ -224,7 +218,7 @@ next = "Helm"
 [[stations.4]]
 name = "Tactical"
 description = "Manage weapons systems."
-consoles = ["Tactical"]
+consoles = [ "Tactical" ]
 rank = "Ltn."
 previous = "Tactical"
 next = "Tactical"
@@ -232,7 +226,7 @@ next = "Tactical"
 [[stations.4]]
 name = "Engineering"
 description = "Maintain and repair ship systems, manage power."
-consoles = ["Repair", "Power"]
+consoles = [ "Repair", "Power" ]
 rank = "Ltn."
 previous = "Engineering"
 next = "Engineering"
@@ -240,22 +234,21 @@ next = "Engineering"
 [[stations.4]]
 name = "Science"
 description = "Hail stations, monitor sensors, shields, and navigation."
-consoles = ["Comms", "Sensors", "Shields", "Navigation"]
+consoles = [ "Comms", "Sensors", "Shields", "Navigation" ]
 rank = "Ens."
 next = "Science"
 
-# 5P: Captain breaks off from Helm.
 [[stations.5]]
 name = "Captain"
 description = "Command the bridge."
-consoles = ["CaptainChair"]
+consoles = [ "CaptainChair" ]
 rank = "Cpt."
 next = "Captain"
 
 [[stations.5]]
 name = "Helm"
 description = "Pilot the ship."
-consoles = ["Helm"]
+consoles = [ "Helm" ]
 rank = "Ltn."
 previous = "Helm"
 next = "Helm"
@@ -263,7 +256,7 @@ next = "Helm"
 [[stations.5]]
 name = "Tactical"
 description = "Manage weapons systems."
-consoles = ["Tactical"]
+consoles = [ "Tactical" ]
 rank = "Ltn."
 previous = "Tactical"
 next = "Tactical"
@@ -271,7 +264,7 @@ next = "Tactical"
 [[stations.5]]
 name = "Engineering"
 description = "Maintain and repair ship systems, manage power."
-consoles = ["Repair", "Power"]
+consoles = [ "Repair", "Power" ]
 rank = "Ltn."
 previous = "Engineering"
 next = "Engineering"
@@ -279,49 +272,48 @@ next = "Engineering"
 [[stations.5]]
 name = "Science"
 description = "Hail stations, monitor sensors, shields, and navigation."
-consoles = ["Comms", "Sensors", "Shields", "Navigation"]
+consoles = [ "Comms", "Sensors", "Shields", "Navigation" ]
 rank = "Ens."
 previous = "Science"
 next = "Sensors"
 
-# 6P: Science splits into dedicated Sensors and dedicated Shields/Navigation stations.
 [[stations.6]]
 name = "Captain"
 description = "Command the bridge."
-consoles = ["CaptainChair"]
+consoles = [ "CaptainChair" ]
 rank = "Cpt."
 previous = "Captain"
 
 [[stations.6]]
 name = "Helm"
 description = "Pilot the ship."
-consoles = ["Helm"]
+consoles = [ "Helm" ]
 rank = "Ltn."
 previous = "Helm"
 
 [[stations.6]]
 name = "Tactical"
 description = "Manage weapons systems."
-consoles = ["Tactical"]
+consoles = [ "Tactical" ]
 rank = "Ltn."
 previous = "Tactical"
 
 [[stations.6]]
 name = "Engineering"
 description = "Maintain and repair ship systems, manage power."
-consoles = ["Repair", "Power"]
+consoles = [ "Repair", "Power" ]
 rank = "Ltn."
 previous = "Engineering"
 
 [[stations.6]]
 name = "Comms"
 description = "Hail stations, navigate, and relay intelligence."
-consoles = ["Comms", "Navigation"]
+consoles = [ "Comms", "Navigation" ]
 rank = "Ens."
 
 [[stations.6]]
 name = "Sensors"
 description = "Monitor long-range sensors and shields."
-consoles = ["Sensors", "Shields"]
+consoles = [ "Sensors", "Shields" ]
 rank = "Ens."
 previous = "Science"

@@ -8,7 +8,7 @@ threat_level = "high"
 description = "Harrow Warhawk"
 
 [hull]
-captain_chair = 400.0
+hull_integrity = 400.0
 
 [collider]
 shape = "Capsule"

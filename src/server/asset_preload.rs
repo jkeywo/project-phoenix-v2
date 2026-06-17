@@ -279,6 +279,29 @@ pub struct AssetPreloadResource {
     progress_timer: Timer,
 }
 
+/// Safe default: preload not started (`started=false`), not complete
+/// (`complete=false`).  `init_resource` uses this so `poll_asset_preload`
+/// can always access the resource without panicking.
+impl Default for AssetPreloadResource {
+    fn default() -> Self {
+        Self {
+            started: false,
+            complete: false,
+            total_count: 0,
+            ready_count: 0,
+            glb_handles: Vec::new(),
+            icon_handles: Vec::new(),
+            pending_sidecars: Vec::new(),
+            initial_sidecar_count: 0,
+            pending_sub_worlds: Vec::new(),
+            initial_sub_world_count: 0,
+            seen_worlds: HashSet::new(),
+            seen_entities: HashSet::new(),
+            progress_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
+        }
+    }
+}
+
 impl AssetPreloadResource {
     fn new() -> Self {
         Self {
@@ -309,34 +332,46 @@ impl AssetPreloadResource {
 
 // ── Bevy Systems ──────────────────────────────────────────────────────────
 
-/// Run once on `OnEnter(Lobby)`: build the asset manifest and begin loading.
+/// Build the asset manifest and begin loading. Runs every Update frame
+/// (gated by internal guards) so it works with `init_state()` which does
+/// not fire `OnEnter` for the initial state.
 pub fn begin_asset_preload(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     world_config: Option<Res<WorldConfig>>,
+    preload: Option<Res<AssetPreloadResource>>,
 ) {
+    // Guard: only fire when not already started
+    if let Some(ref p) = preload {
+        if p.started || p.complete {
+            return;
+        }
+    }
+    // Guard: need WorldConfig to proceed (may not be ready on frame 1)
     let Some(world_config) = world_config else {
-        // No world config loaded (e.g. fallback world in native tests).
-        // Mark preload as complete immediately so the game starts normally.
-        commands.insert_resource(AssetPreloadResource {
-            started: true,
-            complete: true,
-            total_count: 0,
-            ready_count: 0,
-            glb_handles: Vec::new(),
-            icon_handles: Vec::new(),
-            pending_sidecars: Vec::new(),
-            initial_sidecar_count: 0,
-            pending_sub_worlds: Vec::new(),
-            initial_sub_world_count: 0,
-            seen_worlds: HashSet::new(),
-            seen_entities: HashSet::new(),
-            progress_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
-        });
+        bevy::log::info!("asset_preload: WorldConfig not ready yet, will retry next frame");
         return;
     };
 
     let config_cache = crate::config_cache::get_config_cache();
+    bevy::log::info!(
+        "asset_preload: config_cache has {} entries; starting asset discovery",
+        config_cache.len()
+    );
+
+    // Guard: if config cache is empty, entity configs haven't landed yet.
+    // On WASM the JS preload populates this cache before Bevy starts, so
+    // this guard is belt-and-suspenders. On native the cache is always
+    // empty (entity configs are read from disk at resolution time), so
+    // we proceed with whatever we have (= empty manifest = no-op preload).
+    #[cfg(not(target_arch = "wasm32"))]
+    let cache_is_empty = false;
+    #[cfg(target_arch = "wasm32")]
+    let cache_is_empty = config_cache.is_empty();
+    if cache_is_empty {
+        bevy::log::info!("asset_preload: config cache empty, retrying next frame");
+        return;
+    }
 
     // Initial discovery from base world
     let (mut manifest, pending_worlds) = discover_base_assets(&world_config, &config_cache);

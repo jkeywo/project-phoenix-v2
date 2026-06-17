@@ -769,6 +769,7 @@ fn sync_torpedo_entities(
                     Mesh3d(torpedo_mesh.clone()),
                     MeshMaterial3d(torpedo_mat.clone()),
                     Transform::from_xyz(t.x, 0.0, t.z),
+                    Visibility::default(),
                 ))
                 .id();
             entity_map.0.insert(uuid.clone(), entity);

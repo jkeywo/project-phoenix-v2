@@ -14,7 +14,8 @@ length = 0.0
 hull_integrity = 100
 
 [mesh]
-model = "assets/models/asteroid_common_1_large.glb"
+model = "assets/models/asteroid_common_1.glb"
+variant = "large"
 shape = "sphere"
 radius = 4
 colour = [0.6, 0.55, 0.45]

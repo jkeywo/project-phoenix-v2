@@ -253,7 +253,7 @@ pub fn process_lobby(
     world: Option<Res<WorldResource>>,
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
-    _preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
+    preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
 ) {
     // During the Lobby phase this system owns the inbound queue and handles
     // every message type. Outside the lobby the simulation systems own it, so
@@ -272,7 +272,7 @@ pub fn process_lobby(
         .map(|s| s.as_ref())
         .unwrap_or(&default_stations);
     let world_data = world.as_ref().map(|w| &w.0);
-    let preload_complete = true;
+    let preload_complete = preload.map_or(true, |p| p.complete);
     for ev in inbound.read() {
         if !accepts_all && !matches!(ev.msg, ClientMessage::Identify { .. }) {
             continue;

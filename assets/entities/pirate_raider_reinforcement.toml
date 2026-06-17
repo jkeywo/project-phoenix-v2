@@ -16,7 +16,7 @@ threat_level = "high"
 description = "Pirate Raider"
 
 [hull]
-captain_chair = 60.0
+hull_integrity = 60.0
 
 [collider]
 shape = "Capsule"
@@ -32,17 +32,17 @@ max_yaw_rate = 2.0
 max_bank_deg = 15.0
 
 [weapons_console]
-beam_range = 50.0
-beam_damage_per_sec = 6.0
-beam_duration_secs = 4.0
-cooldown_secs = 5.0
-beam_color = [1.0, 0.1, 0.1, 1.0]
 
 [[weapons_console.phaser_banks]]
 id = "fore"
 facing_deg = 0.0
 fire_arc_deg = 180.0
 auto_arc_deg = 180.0
+beam_range = 50.0
+beam_damage_per_sec = 6.0
+beam_duration_secs = 4.0
+cooldown_secs = 5.0
+beam_color = [1.0, 0.1, 0.1, 1.0]
 
 [radar_appearance]
 colour = [1.0, 0.2, 0.2]

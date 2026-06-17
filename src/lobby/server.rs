@@ -125,12 +125,10 @@ fn update_session_with_config(
         // Repair panel can derive its progress-bar durations without knowing
         // server-side constants. Absent block keeps defaults that match the
         // historical hardcoded constants.
-        if let Some(hc) = &ship_config.hull {
-            if hc.repair_team_count > 0 {
-                next.repair_team_count = hc.repair_team_count as u8;
-            }
-        }
         if let Some(rc) = &ship_config.repair {
+            if rc.repair_team_count > 0 {
+                next.repair_team_count = rc.repair_team_count as u8;
+            }
             next.repair_travel_secs = rc.travel_duration_secs;
             next.repair_rate_hp_per_sec = rc.repair_rate_hp_per_sec;
         }
@@ -147,12 +145,14 @@ fn update_session_with_config(
                     fire_arc_deg: b.fire_arc_deg,
                 })
                 .collect();
-            if wc.beam_color.len() == 4 {
+            let empty_color: Vec<f32> = vec![];
+            let beam_color_src = wc.phaser_banks.first().map(|b| &b.beam_color).unwrap_or(&empty_color);
+            if beam_color_src.len() == 4 {
                 next.phaser_beam_color = [
-                    wc.beam_color[0],
-                    wc.beam_color[1],
-                    wc.beam_color[2],
-                    wc.beam_color[3],
+                    beam_color_src[0],
+                    beam_color_src[1],
+                    beam_color_src[2],
+                    beam_color_src[3],
                 ];
             }
             if wc.torpedo_arc_color.len() == 4 {

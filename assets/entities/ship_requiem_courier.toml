@@ -8,7 +8,7 @@ threat_level = "low"
 description = "Requiem Courier"
 
 [hull]
-captain_chair = 40.0
+hull_integrity = 40.0
 
 [collider]
 shape = "Capsule"

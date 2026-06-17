@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+﻿use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::entity_config::EntityConfig;
@@ -239,11 +239,7 @@ pub fn spawn_entity(
                 .map(|e| (e.console.clone(), e.max_hp))
                 .collect();
             crate::damage::ConsoleHull::from_config(&entries)
-        } else if let Some(hp) = hull.captain_chair {
-            // Spec-required NPC ship path: `captain_chair = <n>` in TOML.
-            crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, hp)])
         } else if hull.hull_integrity > 0.0 {
-            // Legacy fallback: `hull_integrity = <n>` (stations, asteroids).
             crate::damage::ConsoleHull::from_config(&[(
                 crate::messages::Console::CaptainChair,
                 hull.hull_integrity,
@@ -865,7 +861,7 @@ mod tests {
     // Ã¢â€â‚¬Ã¢â€â‚¬ EntityConsoleHull component tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
-    fn spawn_entity_with_legacy_hull_integrity_attaches_captain_chair_slot() {
+    fn spawn_entity_with_hull_integrity_attaches_captain_chair_slot() {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
@@ -927,62 +923,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn npc_captain_chair_field_maps_to_captain_chair_console_slot() {
-        let mut app = test_app();
-        let config = EntityConfig {
-            name: None,
-            star: None,
-            light: Vec::new(),
-            tags: vec!["npc".to_string()],
-            hull: Some(crate::entity_config::HullConfig {
-                captain_chair: Some(60.0),
-                ..Default::default()
-            }),
-            collider: None,
-            appearance: None,
-            helm_console: None,
-            weapons_console: None,
-            engineering_console: None,
-            captain_console: None,
-            power: None,
-            sensors_console: None,
-            navigation_console: None,
-            shields_console: None,
-            torpedoes: None,
-            repair: None,
-            comms: None,
-            asteroid_field: None,
-            shape: None,
-            effects: None,
-            faction: None,
-            behaviour: None,
-            radar_appearance: None,
-            target: None,
-            mesh: None,
-        };
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
-        let world = app.world_mut();
-        let hull_comp = world
-            .get::<EntityConsoleHull>(spawned)
-            .expect("NPC with captain_chair should have EntityConsoleHull");
-        let entries = hull_comp.0.entries();
-        assert_eq!(entries.len(), 1, "NPC should have exactly one hull slot");
-        assert_eq!(
-            entries[0].0,
-            crate::messages::Console::CaptainChair,
-            "slot should be CaptainChair"
-        );
-        assert!((entries[0].2 - 60.0).abs() < 1e-6, "max_hp should be 60");
-        assert!(
-            (entries[0].1 - 60.0).abs() < 1e-6,
-            "current should start at 60"
-        );
-    }
 
     #[test]
-    fn legacy_hull_integrity_still_maps_to_captain_chair_slot() {
+    fn hull_integrity_maps_to_captain_chair_slot() {
         // Stations and asteroids still use hull_integrity in TOML Ã¢â‚¬â€ must keep working.
         let mut app = test_app();
         let config = EntityConfig {
@@ -1027,49 +970,4 @@ mod tests {
         assert_eq!(entries[0].0, crate::messages::Console::CaptainChair);
     }
 
-    #[test]
-    fn captain_chair_takes_precedence_over_hull_integrity() {
-        // If both are set, captain_chair wins.
-        let mut app = test_app();
-        let config = EntityConfig {
-            name: None,
-            star: None,
-            light: Vec::new(),
-            tags: vec![],
-            hull: Some(crate::entity_config::HullConfig {
-                captain_chair: Some(80.0),
-                hull_integrity: 999.0,
-                ..Default::default()
-            }),
-            collider: None,
-            appearance: None,
-            helm_console: None,
-            weapons_console: None,
-            engineering_console: None,
-            captain_console: None,
-            power: None,
-            sensors_console: None,
-            navigation_console: None,
-            shields_console: None,
-            torpedoes: None,
-            repair: None,
-            comms: None,
-            asteroid_field: None,
-            shape: None,
-            effects: None,
-            faction: None,
-            behaviour: None,
-            radar_appearance: None,
-            target: None,
-            mesh: None,
-        };
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
-        let world = app.world_mut();
-        let hull_comp = world.get::<EntityConsoleHull>(spawned).unwrap();
-        assert!(
-            (hull_comp.0.total_max() - 80.0).abs() < 1e-6,
-            "captain_chair should take precedence over hull_integrity"
-        );
-    }
 }

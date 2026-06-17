@@ -461,7 +461,7 @@ fn try_spawn_cell(
             if h.hull_integrity > 0.0 {
                 h.hull_integrity
             } else {
-                h.captain_chair.unwrap_or(30.0)
+                30.0
             }
         })
         .unwrap_or(30.0);

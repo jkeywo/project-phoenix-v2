@@ -259,19 +259,12 @@ pub struct ConsoleHullEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct HullConfig {
-    /// Legacy single-value hull integrity (kept for backward compat with station/asteroid configs).
+    /// HP for entities with a single hull slot (stations, asteroids, NPC ships).
     #[serde(default)]
     pub hull_integrity: f32,
-    /// HP for the single CaptainChair console slot (used by NPC ships).
-    /// Takes precedence over `hull_integrity` when present.
-    #[serde(default)]
-    pub captain_chair: Option<f32>,
-    /// Per-console hull entries. When present, replaces the single-value fields.
+    /// Per-console hull entries. When present, replaces `hull_integrity`.
     #[serde(default)]
     pub console_hull: Vec<ConsoleHullEntry>,
-    /// Number of repair teams available to this ship (default 0 = legacy).
-    #[serde(default)]
-    pub repair_team_count: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -418,8 +411,8 @@ pub type PhaserBankId = String;
 /// `auto_arc_deg` is the (narrower) auto-fire window, also centred on
 /// `facing_deg`. Must satisfy `0 < auto_arc_deg <= fire_arc_deg`.
 ///
-/// `beam_range` is in world units. When `0.0`, the renderer/server
-/// falls back to the parent `[weapons_console].beam_range`.
+/// `beam_range` is in world units. When `0.0`, falls back to
+/// `PhaserCombatConfig::DEFAULT_PHASER_RANGE`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhaserBankConfig {
@@ -429,10 +422,24 @@ pub struct PhaserBankConfig {
     pub auto_arc_deg: f32,
     #[serde(default)]
     pub beam_range: f32,
-    /// Per-bank override for the fraction of beam damage that bypasses
-    /// shields. When `None`, the parent `[weapons_console].shield_pierce`
-    /// (or its default of `0.0`) is used. Clamped to `[0.0, 1.0]` at
-    /// apply time.
+    /// Damage applied to the target per second of active beam.
+    /// When `0.0`, falls back to `PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC`.
+    #[serde(default)]
+    pub beam_damage_per_sec: f32,
+    /// Active beam duration in seconds. When `0.0`, falls back to
+    /// `PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS`.
+    #[serde(default)]
+    pub beam_duration_secs: f32,
+    /// Post-beam cooldown in seconds. When `0.0`, falls back to
+    /// `PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS`.
+    #[serde(default)]
+    pub cooldown_secs: f32,
+    /// RGBA beam colour as a 4-element float array `[r, g, b, a]` in 0.0–1.0.
+    /// When absent (empty vec), the renderer falls back to `beam_render::DEFAULT_BEAM_COLOR`.
+    #[serde(default)]
+    pub beam_color: Vec<f32>,
+    /// Fraction of beam damage that bypasses shields. When `None`, defaults to `0.0`.
+    /// Clamped to `[0.0, 1.0]` at apply time.
     #[serde(default)]
     pub shield_pierce: Option<f32>,
     /// Optional rig-marker name linking this bank to a mount point in the
@@ -529,18 +536,6 @@ pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String>
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WeaponsConsoleConfig {
-    #[serde(default)]
-    pub beam_range: f32,
-    #[serde(default)]
-    pub beam_damage_per_sec: f32,
-    #[serde(default)]
-    pub beam_duration_secs: f32,
-    #[serde(default)]
-    pub cooldown_secs: f32,
-    /// RGBA beam colour as a 4-element float array `[r, g, b, a]` in 0.0–1.0.
-    /// When absent (empty vec), the renderer falls back to `beam_render::DEFAULT_BEAM_COLOR`.
-    #[serde(default)]
-    pub beam_color: Vec<f32>,
     /// RGBA colour used by the client Tactical UI for torpedo fire-arc
     /// overlays. When absent, the `ShipClientConfig` default is used.
     #[serde(default)]
@@ -552,18 +547,9 @@ pub struct WeaponsConsoleConfig {
     pub complexity_toml: Option<String>,
     /// Per-bank phaser definitions parsed from
     /// `[[weapons_console.phaser_banks]]`. Each bank has its own facing,
-    /// fire arc, auto-fire arc, and range. Empty when the ship has no
-    /// explicit per-bank loadout.
+    /// fire arc, auto-fire arc, range, damage, duration, cooldown, and colour.
     #[serde(default)]
     pub phaser_banks: Vec<PhaserBankConfig>,
-    /// Fraction of phaser-beam damage that bypasses shields and applies
-    /// directly to the hull. Default `0.0` — all damage is mitigated by
-    /// the facing shield quadrant. Used as the global value for NPC
-    /// phasers (which do not have per-bank config) and as the fallback
-    /// for player banks whose `[[weapons_console.phaser_banks]].shield_pierce`
-    /// is unset.
-    #[serde(default)]
-    pub shield_pierce: f32,
     /// Radar configuration for the Tactical console radar widget, from
     /// `[weapons_console.radar]`.
     #[serde(default)]
@@ -729,43 +715,27 @@ impl ShieldsBaseConfig {
     }
 }
 
-/// Player-ship phaser combat tuning, derived from the existing flat fields
-/// on `[weapons_console]` (`beam_range`, `beam_damage_per_sec`,
-/// `beam_duration_secs`, `cooldown_secs`).
+/// Player-ship phaser combat tuning. All per-bank values (`beam_range`,
+/// `beam_damage_per_sec`, `beam_duration_secs`, `cooldown_secs`,
+/// `beam_color`, `shield_pierce`) live on each [`PhaserBankConfig`] entry.
 ///
 /// `PhaserCombatConfig` is the player-path source of truth, installed
-/// as a Bevy resource by `WeaponsPlugin` (defaults match the constants)
-/// and overridden in `spawn_game_start_entities` from the player ship's
-/// `[weapons_console]` block.
-///
-/// NOTE: Per-bank arc/facing fields are defined on
-/// [`PhaserBankConfig`] (parsed from `[[weapons_console.phaser_banks]]`).
-/// This flat config is being phased out in favour of the per-bank list;
-/// it currently remains the seed for shared timings until the weapons
-/// server is migrated to consume the per-bank list directly.
+/// as a Bevy resource by `WeaponsPlugin` and overridden in
+/// `spawn_game_start_entities` from the player ship's `[weapons_console]`
+/// block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhaserCombatConfig {
-    /// Effective player phaser range in world units. Used as the fallback
-    /// when an individual bank's `beam_range` is 0.0.
-    pub phaser_range: f32,
-    /// Active beam duration in seconds (how long a beam stays on a target).
-    pub beam_duration_secs: f32,
-    /// Post-beam cooldown in seconds. Shared by every bank.
-    pub beam_cooldown_secs: f32,
-    /// Damage applied to the target per second of active beam.
-    pub beam_damage_per_sec: f32,
-    /// Per-bank facing/arc/range list, parsed from
-    /// `[[weapons_console.phaser_banks]]` in TOML order. Empty if the ship
-    /// has no banks configured (e.g. NPC defaults). The Tactical UI also
-    /// receives a stripped subset of these via `PhaserBankClientConfig`.
+    /// Per-bank facing/arc/range/damage/duration/cooldown/colour list,
+    /// parsed from `[[weapons_console.phaser_banks]]` in TOML order. Empty
+    /// if the ship has no banks configured. The Tactical UI also receives a
+    /// stripped subset of these via `PhaserBankClientConfig`.
     pub banks: Vec<PhaserBankConfig>,
 }
 
 impl PhaserCombatConfig {
-    /// Canonical baseline phaser values, used when the ship TOML omits (or
-    /// zeroes) the corresponding `[weapons_console]` field. Other modules
-    /// needing the baseline (e.g. `weapons_plugin::BEAM_DAMAGE_PER_SEC`)
-    /// alias these rather than restating the numbers.
+    /// Canonical baseline phaser values used when a bank's field is `0.0`
+    /// (the "zero means absent" convention). Other modules needing the
+    /// baseline alias these constants rather than restating the numbers.
     pub const DEFAULT_PHASER_RANGE: f32 = 40.0;
     pub const DEFAULT_BEAM_DURATION_SECS: f32 = 6.0;
     pub const DEFAULT_BEAM_COOLDOWN_SECS: f32 = 6.0;
@@ -774,47 +744,22 @@ impl PhaserCombatConfig {
 
 impl Default for PhaserCombatConfig {
     fn default() -> Self {
-        Self {
-            phaser_range: Self::DEFAULT_PHASER_RANGE,
-            beam_duration_secs: Self::DEFAULT_BEAM_DURATION_SECS,
-            beam_cooldown_secs: Self::DEFAULT_BEAM_COOLDOWN_SECS,
-            beam_damage_per_sec: Self::DEFAULT_BEAM_DAMAGE_PER_SEC,
-            banks: Vec::new(),
-        }
+        Self { banks: Vec::new() }
     }
 }
 
 impl PhaserCombatConfig {
-    /// Build a `PhaserCombatConfig` from a parsed `[weapons_console]`
-    /// block, falling back to `PhaserCombatConfig::default()` for any
-    /// field whose TOML value is `<= 0.0` (the same "zero means absent"
-    /// convention used by the NPC phaser path at
-    /// `src/console/weapons/server.rs:330-337`).
+    /// Build a `PhaserCombatConfig` from a parsed `[weapons_console]` block.
+    /// All combat tuning is now per-bank; this method just clones the banks list.
     pub fn from_weapons_console(wc: &WeaponsConsoleConfig) -> Self {
-        let default = Self::default();
         Self {
-            phaser_range: if wc.beam_range > 0.0 {
-                wc.beam_range
-            } else {
-                default.phaser_range
-            },
-            beam_duration_secs: if wc.beam_duration_secs > 0.0 {
-                wc.beam_duration_secs
-            } else {
-                default.beam_duration_secs
-            },
-            beam_cooldown_secs: if wc.cooldown_secs > 0.0 {
-                wc.cooldown_secs
-            } else {
-                default.beam_cooldown_secs
-            },
-            beam_damage_per_sec: if wc.beam_damage_per_sec > 0.0 {
-                wc.beam_damage_per_sec
-            } else {
-                default.beam_damage_per_sec
-            },
             banks: wc.phaser_banks.clone(),
         }
+    }
+
+    /// Look up a bank by its id. Returns `None` if not found.
+    pub fn bank_by_id(&self, id: &str) -> Option<&PhaserBankConfig> {
+        self.banks.iter().find(|b| b.id == id)
     }
 }
 
@@ -833,6 +778,9 @@ impl PhaserCombatConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepairConfig {
+    /// Number of repair teams available to this ship (default 0 = legacy, treated as 2).
+    #[serde(default)]
+    pub repair_team_count: u32,
     /// Seconds a team spends travelling to a console (and the same again returning).
     #[serde(default = "default_repair_travel_duration_secs")]
     pub travel_duration_secs: f32,
@@ -851,6 +799,7 @@ fn default_repair_rate_hp_per_sec() -> f32 {
 impl Default for RepairConfig {
     fn default() -> Self {
         Self {
+            repair_team_count: 0,
             travel_duration_secs: default_repair_travel_duration_secs(),
             repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
         }
@@ -1217,10 +1166,6 @@ range = 50.0
 shows = ["asteroid"]
 
 [weapons_console]
-beam_range = 40.0
-beam_damage_per_sec = 5.0
-beam_duration_secs = 6.0
-cooldown_secs = 6.0
 
 [engineering_console]
 
@@ -1254,9 +1199,6 @@ cooldown_secs = 6.0
         assert_eq!(h.effective_radar_range(), 50.0);
 
         assert!(config.weapons_console.is_some());
-        let w = config.weapons_console.as_ref().unwrap();
-        assert_eq!(w.beam_range, 40.0);
-        assert_eq!(w.cooldown_secs, 6.0);
 
         assert!(config.engineering_console.is_some());
 
@@ -1395,27 +1337,38 @@ max_speed = 30.0
     fn weapons_console_beam_color_parses_rgba() {
         let toml_str = r##"
 [weapons_console]
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
 beam_color = [1.0, 0.5, 0.2, 0.9]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let w = config
             .weapons_console
             .expect("weapons_console must be Some");
-        assert_eq!(w.beam_color, vec![1.0, 0.5, 0.2, 0.9]);
+        assert_eq!(w.phaser_banks[0].beam_color, vec![1.0, 0.5, 0.2, 0.9]);
     }
 
     #[test]
     fn weapons_console_beam_color_defaults_to_empty_when_omitted() {
         let toml_str = r##"
 [weapons_console]
-beam_range = 40.0
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let w = config
             .weapons_console
             .expect("weapons_console must be Some");
         assert!(
-            w.beam_color.is_empty(),
+            w.phaser_banks[0].beam_color.is_empty(),
             "beam_color should default to empty vec when omitted"
         );
     }
@@ -1498,7 +1451,6 @@ max_speed = 50.0
         let toml_str = r##"
 [weapons_console]
 power_multipliers = [-0.3, 0.0, 0.15, 0.3]
-beam_range = 40.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let w = config
@@ -1525,7 +1477,6 @@ max_speed = 30.0
         let toml_str = r##"
 [weapons_console]
 complexity_toml = "assets/complexity/tactical.toml"
-beam_range = 40.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let w = config
@@ -1629,7 +1580,6 @@ complexity_toml = "assets/complexity/captain.toml"
     fn weapons_console_without_complexity_toml_defaults_to_none() {
         let toml_str = r##"
 [weapons_console]
-beam_range = 40.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let w = config
@@ -2355,8 +2305,8 @@ target_speed = 0.5
         );
         let hull = config.hull.as_ref().unwrap();
         assert!(
-            hull.captain_chair.is_some_and(|hp| hp > 0.0),
-            "pirate_raider [hull] must have a positive captain_chair value"
+            hull.hull_integrity > 0.0,
+            "pirate_raider [hull] must have a positive hull_integrity value"
         );
     }
 
@@ -2726,15 +2676,19 @@ max_hp = 250
 
     // ── PhaserCombatConfig (player phaser tuning) tests ───────────────────
     //
-    // PhaserCombatConfig is built from the existing flat fields on
-    // [weapons_console] (beam_range, beam_damage_per_sec, beam_duration_secs,
-    // cooldown_secs). No new TOML keys were introduced for this slice; the
-    // change is "the player path now honours them too".
+    // PhaserCombatConfig is built from the per-bank fields on
+    // [[weapons_console.phaser_banks]]. All combat tuning is per-bank.
 
     #[test]
-    fn phaser_combat_config_from_weapons_console_uses_supplied_values() {
+    fn phaser_combat_config_from_weapons_console_clones_banks() {
         let toml_str = r##"
 [weapons_console]
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
 beam_range = 99.0
 beam_damage_per_sec = 12.0
 beam_duration_secs = 4.0
@@ -2743,30 +2697,17 @@ cooldown_secs = 7.5
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let wc = config.weapons_console.expect("weapons_console");
         let combat = PhaserCombatConfig::from_weapons_console(&wc);
-        assert_eq!(combat.phaser_range, 99.0);
-        assert_eq!(combat.beam_damage_per_sec, 12.0);
-        assert_eq!(combat.beam_duration_secs, 4.0);
-        assert_eq!(combat.beam_cooldown_secs, 7.5);
+        assert_eq!(combat.banks.len(), 1);
+        assert_eq!(combat.banks[0].beam_range, 99.0);
+        assert_eq!(combat.banks[0].beam_damage_per_sec, 12.0);
+        assert_eq!(combat.banks[0].beam_duration_secs, 4.0);
+        assert_eq!(combat.banks[0].cooldown_secs, 7.5);
     }
 
     #[test]
-    fn phaser_combat_config_falls_back_to_defaults_for_zero_or_missing_fields() {
-        // Mirrors the "zero means absent" convention used by the NPC phaser
-        // path at console/weapons/server.rs:336-337.
-        let toml_str = r##"
-[weapons_console]
-beam_range = 50.0
-# beam_damage_per_sec omitted → 0.0 → fall back to default 5.0
-# beam_duration_secs omitted → 0.0 → fall back to default 6.0
-# cooldown_secs omitted → 0.0 → fall back to default 6.0
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let wc = config.weapons_console.expect("weapons_console");
-        let combat = PhaserCombatConfig::from_weapons_console(&wc);
-        assert_eq!(combat.phaser_range, 50.0, "supplied override applied");
-        assert_eq!(combat.beam_damage_per_sec, 5.0, "default for omitted field");
-        assert_eq!(combat.beam_duration_secs, 6.0, "default for omitted field");
-        assert_eq!(combat.beam_cooldown_secs, 6.0, "default for omitted field");
+    fn phaser_combat_config_default_has_empty_banks() {
+        let combat = PhaserCombatConfig::default();
+        assert!(combat.banks.is_empty());
     }
 
     // ── PhaserBankConfig / TorpedoTubeConfig schema tests (Phase A) ───────
@@ -2775,7 +2716,6 @@ beam_range = 50.0
     fn phaser_banks_array_parses_full_entries() {
         let toml_str = r##"
 [weapons_console]
-beam_range = 40.0
 
 [[weapons_console.phaser_banks]]
 id = "port"
@@ -2806,33 +2746,9 @@ auto_arc_deg = 120.0
     }
 
     #[test]
-    fn weapons_console_shield_pierce_defaults_to_zero() {
-        let toml_str = r##"
-[weapons_console]
-beam_range = 40.0
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let wc = config.weapons_console.expect("weapons_console");
-        assert_eq!(wc.shield_pierce, 0.0);
-    }
-
-    #[test]
-    fn weapons_console_shield_pierce_parses_when_present() {
-        let toml_str = r##"
-[weapons_console]
-beam_range = 40.0
-shield_pierce = 0.25
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let wc = config.weapons_console.expect("weapons_console");
-        assert!((wc.shield_pierce - 0.25).abs() < 1e-6);
-    }
-
-    #[test]
     fn phaser_bank_shield_pierce_defaults_to_none_when_absent() {
         let toml_str = r##"
 [weapons_console]
-beam_range = 40.0
 
 [[weapons_console.phaser_banks]]
 id = "port"
@@ -2849,7 +2765,6 @@ auto_arc_deg = 120.0
     fn phaser_bank_shield_pierce_parses_when_present() {
         let toml_str = r##"
 [weapons_console]
-beam_range = 40.0
 
 [[weapons_console.phaser_banks]]
 id = "port"

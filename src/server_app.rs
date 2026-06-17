@@ -1305,19 +1305,15 @@ fn spawn_game_start_entities(
                     ConsoleHull::from_config(&entries)
                 };
                 commands.insert_resource(ShipHullIntegrity(hull));
-                let team_count = if hc.repair_team_count > 0 {
-                    hc.repair_team_count as usize
-                } else {
-                    2
-                };
                 // [repair] block — overrides default RepairTimings if present.
                 // Absent block keeps the same defaults the hardcoded constants
                 // used to provide (5.0s travel, 0.5 HP/s repair rate).
-                let timings = config
-                    .repair
-                    .as_ref()
-                    .map(|rc| rc.to_runtime())
-                    .unwrap_or_default();
+                let repair = config.repair.as_ref();
+                let team_count = repair
+                    .map(|rc| rc.repair_team_count as usize)
+                    .filter(|&n| n > 0)
+                    .unwrap_or(2);
+                let timings = repair.map(|rc| rc.to_runtime()).unwrap_or_default();
                 commands.insert_resource(ShipRepairTeams(
                     crate::repair_teams::RepairTeams::new_with_timings(team_count, timings),
                 ));
@@ -1350,12 +1346,13 @@ fn spawn_game_start_entities(
             }
 
             if let Some(wc) = &config.weapons_console {
-                let beam_color = crate::beam_render::resolve_beam_color(&wc.beam_color);
-                let beam_range = if wc.beam_range > 0.0 {
-                    wc.beam_range
-                } else {
-                    40.0
-                };
+                let first_bank = wc.phaser_banks.first();
+                let beam_color = crate::beam_render::resolve_beam_color(
+                    first_bank.map(|b| &b.beam_color).unwrap_or(&vec![]),
+                );
+                let beam_range = first_bank
+                    .map(|b| if b.beam_range > 0.0 { b.beam_range } else { 40.0 })
+                    .unwrap_or(40.0);
                 commands.insert_resource(PhaserRenderConfig {
                     beam_color,
                     beam_range,

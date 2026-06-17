@@ -62,9 +62,8 @@ impl PhaserCooldown {
         self.per_bank.get(bank).copied().unwrap_or(0.0)
     }
 
-    pub fn start_bank(&mut self, bank: &str, config: &crate::entity_config::PhaserCombatConfig) {
-        self.per_bank
-            .insert(bank.to_string(), config.beam_cooldown_secs);
+    pub fn start_bank(&mut self, bank: &str, cooldown_secs: f32) {
+        self.per_bank.insert(bank.to_string(), cooldown_secs);
     }
 
     pub fn start_bank_with_cooldown(&mut self, bank: &str, secs: f32) {
@@ -355,9 +354,11 @@ fn handle_fire_phaser(
         let Some((tx, tz)) = live_entity_xz(target_uuid, &asteroid_q, &entity_q) else {
             continue;
         };
+        use crate::entity_config::PhaserCombatConfig;
+        let bank_cfg = combat_config.0.bank_by_id(bank);
         let bank_in_arc = if combat_config.0.banks.is_empty() {
             let effective_phaser_range =
-                combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
+                PhaserCombatConfig::DEFAULT_PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
             crate::radar::is_fire_ready_with_range(
                 tx,
                 tz,
@@ -367,16 +368,12 @@ fn handle_fire_phaser(
                 effective_phaser_range,
             )
         } else {
-            combat_config
-                .0
-                .banks
-                .iter()
-                .find(|b| b.id == *bank)
+            bank_cfg
                 .map(|bank_cfg| {
                     let bank_base_range = if bank_cfg.beam_range > 0.0 {
                         bank_cfg.beam_range
                     } else {
-                        combat_config.0.phaser_range
+                        PhaserCombatConfig::DEFAULT_PHASER_RANGE
                     };
                     let effective_bank_range =
                         bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
@@ -408,8 +405,11 @@ fn handle_fire_phaser(
             });
         }
 
+        let beam_duration_secs = bank_cfg
+            .map(|b| if b.beam_duration_secs > 0.0 { b.beam_duration_secs } else { PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS })
+            .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
         beam.target_uuid = Some(target_uuid.clone());
-        beam.remaining_secs = combat_config.0.beam_duration_secs;
+        beam.remaining_secs = beam_duration_secs;
         beam.damage_accumulator = 0.0;
         beam.bank = Some(bank.clone());
 
@@ -517,32 +517,18 @@ fn handle_fire_phaser_npc(
         let target_uuid: Option<uuid::Uuid> = ctrl_opt.and_then(|c| c.controller.blackboard.target);
 
         use crate::entity_config::PhaserCombatConfig;
-        let beam_range = weapons_section
-            .map(|wc| {
-                if wc.0.beam_range > 0.0 {
-                    wc.0.beam_range
-                } else {
-                    PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                }
-            })
+        let first_bank = weapons_section.and_then(|wc| wc.0.phaser_banks.first().cloned());
+        let beam_range = first_bank
+            .as_ref()
+            .map(|b| if b.beam_range > 0.0 { b.beam_range } else { PhaserCombatConfig::DEFAULT_PHASER_RANGE })
             .unwrap_or(PhaserCombatConfig::DEFAULT_PHASER_RANGE);
-        let damage_per_sec = weapons_section
-            .map(|wc| {
-                if wc.0.beam_damage_per_sec > 0.0 {
-                    wc.0.beam_damage_per_sec
-                } else {
-                    PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC
-                }
-            })
+        let damage_per_sec = first_bank
+            .as_ref()
+            .map(|b| if b.beam_damage_per_sec > 0.0 { b.beam_damage_per_sec } else { PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC })
             .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC);
-        let beam_duration = weapons_section
-            .map(|wc| {
-                if wc.0.beam_duration_secs > 0.0 {
-                    wc.0.beam_duration_secs
-                } else {
-                    PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS
-                }
-            })
+        let beam_duration = first_bank
+            .as_ref()
+            .map(|b| if b.beam_duration_secs > 0.0 { b.beam_duration_secs } else { PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS })
             .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
 
         let npc_x = transform.translation.x;
@@ -654,8 +640,10 @@ fn handle_fire_phaser_npc(
                             .iter()
                             .find(|(u, _, _)| u.to_string() == target_uuid_str)
                         {
-                            let shield_pierce =
-                                weapons_section.map(|wc| wc.0.shield_pierce).unwrap_or(0.0);
+                            let shield_pierce = first_bank
+                                .as_ref()
+                                .and_then(|b| b.shield_pierce)
+                                .unwrap_or(0.0);
                             let ship_yaw = ship_state.as_ref().map(|s| s.yaw).unwrap_or(0.0);
                             let bearing = crate::shield::attacker_bearing_relative(
                                 npc_x, npc_z, *tx, *tz, ship_yaw,
@@ -1103,23 +1091,28 @@ fn tick_active_beam(
     };
     let active_bank = beam.bank.clone().unwrap_or_default();
 
+    use crate::entity_config::PhaserCombatConfig;
+    let active_bank_cfg = combat_config.0.bank_by_id(&active_bank);
+    let active_bank_cooldown_secs_early = active_bank_cfg
+        .map(|b| if b.cooldown_secs > 0.0 { b.cooldown_secs } else { PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS })
+        .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS);
+
     // Use live ECS position for arc/range check — WorldResource snapshot is stale.
     let live_pos = live_entity_xz(&target_uuid, &asteroid_q, &entity_q);
     let Some((tx, tz)) = live_pos else {
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start_bank(&active_bank, &combat_config.0);
+        cooldown.start_bank(&active_bank, active_bank_cooldown_secs_early);
         commands.trigger(BeamEndedEvent {
             bank: active_bank.clone(),
             target_uuid,
         });
         return;
     };
-
     let bank_in_arc = if combat_config.0.banks.is_empty() {
         let effective_phaser_range =
-            combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
+            PhaserCombatConfig::DEFAULT_PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
         crate::radar::is_fire_ready_with_range(
             tx,
             tz,
@@ -1129,16 +1122,12 @@ fn tick_active_beam(
             effective_phaser_range,
         )
     } else {
-        combat_config
-            .0
-            .banks
-            .iter()
-            .find(|b| b.id == active_bank)
+        active_bank_cfg
             .map(|bank_cfg| {
                 let bank_base_range = if bank_cfg.beam_range > 0.0 {
                     bank_cfg.beam_range
                 } else {
-                    combat_config.0.phaser_range
+                    PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
                 let effective_bank_range =
                     bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
@@ -1155,11 +1144,12 @@ fn tick_active_beam(
             })
             .unwrap_or(false)
     };
+    let active_bank_cooldown_secs = active_bank_cooldown_secs_early;
     if !bank_in_arc {
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start_bank(&active_bank, &combat_config.0);
+        cooldown.start_bank(&active_bank, active_bank_cooldown_secs);
         commands.trigger(BeamEndedEvent {
             bank: active_bank.clone(),
             target_uuid,
@@ -1167,8 +1157,11 @@ fn tick_active_beam(
         return;
     }
 
+    let active_bank_damage_per_sec = active_bank_cfg
+        .map(|b| if b.beam_damage_per_sec > 0.0 { b.beam_damage_per_sec } else { PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC })
+        .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC);
     beam.damage_accumulator +=
-        combat_config.0.beam_damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
+        active_bank_damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
     let damage_to_apply = beam.damage_accumulator.floor() as i32;
     if damage_to_apply > 0 {
         beam.damage_accumulator -= damage_to_apply as f32;
@@ -1218,7 +1211,7 @@ fn tick_active_beam(
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            cooldown.start_bank(&active_bank, &combat_config.0);
+            cooldown.start_bank(&active_bank, active_bank_cooldown_secs);
             weapons_target.0 = None;
 
             outbox.0.push((
@@ -1250,7 +1243,7 @@ fn tick_active_beam(
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            cooldown.start_bank(&active_bank, &combat_config.0);
+            cooldown.start_bank(&active_bank, active_bank_cooldown_secs);
             weapons_target.0 = None;
 
             commands.trigger(BeamEndedEvent {
@@ -1266,7 +1259,7 @@ fn tick_active_beam(
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start_bank(&active_bank, &combat_config.0);
+        cooldown.start_bank(&active_bank, active_bank_cooldown_secs);
         commands.trigger(BeamEndedEvent {
             bank: active_bank.clone(),
             target_uuid,
@@ -1327,9 +1320,9 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 .resource::<crate::modifiers::ShipModifiers>()
                 .get(&ModifierSlot::RadarRange);
             let phaser_mode = world.resource::<CurrentPhaserMode>().0;
-            let (phaser_range, banks_config) = {
+            let banks_config = {
                 let cc = world.resource::<PhaserCombatConfigResource>();
-                (cc.0.phaser_range, cc.0.banks.clone())
+                cc.0.banks.clone()
             };
 
             // Query live ECS Transform for the target — WorldResource is a
@@ -1387,7 +1380,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             };
 
             let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
-                let effective_phaser_range = phaser_range * radar_range_mult;
+                let effective_phaser_range = crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
                 let fire_ready = match target_live_pos {
                     None => false,
                     Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
@@ -1416,7 +1409,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                                 let bank_base_range = if b.beam_range > 0.0 {
                                     b.beam_range
                                 } else {
-                                    phaser_range
+                                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                                 };
                                 let effective_bank_range = bank_base_range * radar_range_mult;
                                 let (rx, ry) = crate::weapons::phaser::ship_local(
@@ -1655,7 +1648,7 @@ fn recompute_weapons_console_state(
     });
 
     let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
-        let effective_phaser_range = combat_config.0.phaser_range * radar_range_mult;
+        let effective_phaser_range = crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
         let fire_ready = match target_live_pos {
             None => false,
             Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
@@ -1686,7 +1679,7 @@ fn recompute_weapons_console_state(
                         let bank_base_range = if b.beam_range > 0.0 {
                             b.beam_range
                         } else {
-                            combat_config.0.phaser_range
+                            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
                         let effective_bank_range = bank_base_range * radar_range_mult;
                         let (rx, ry) =
@@ -1952,10 +1945,6 @@ mod tests {
             // per-bank arc severance tests.
             .insert_resource(PhaserCombatConfigResource(
                 crate::entity_config::PhaserCombatConfig {
-                    phaser_range: 40.0,
-                    beam_duration_secs: 6.0,
-                    beam_cooldown_secs: 6.0,
-                    beam_damage_per_sec: 5.0,
                     banks: vec![
                         crate::entity_config::PhaserBankConfig {
                             id: "port".into(),
@@ -1963,6 +1952,10 @@ mod tests {
                             fire_arc_deg: 270.0,
                             auto_arc_deg: 240.0,
                             beam_range: 0.0,
+                            beam_damage_per_sec: 5.0,
+                            beam_duration_secs: 6.0,
+                            cooldown_secs: 6.0,
+                            beam_color: vec![],
                             shield_pierce: None,
                             marker: None,
                         },
@@ -1972,6 +1965,10 @@ mod tests {
                             fire_arc_deg: 270.0,
                             auto_arc_deg: 240.0,
                             beam_range: 0.0,
+                            beam_damage_per_sec: 5.0,
+                            beam_duration_secs: 6.0,
+                            cooldown_secs: 6.0,
+                            beam_color: vec![],
                             shield_pierce: None,
                             marker: None,
                         },
@@ -2784,9 +2781,8 @@ mod tests {
         // End-to-end TOML-driven wiring check: build the runtime
         // PhaserCombatConfig the same way `spawn_game_start_entities` does
         // (parse player_ship.toml → PhaserCombatConfig::from_weapons_console
-        // → PhaserCombatConfigResource) and assert the resulting cooldown is
-        // exactly what the TOML says. Changing `cooldown_secs = 6.0` to
-        // `99.0` in player_ship.toml would fail this assertion.
+        // → PhaserCombatConfigResource) and assert the resulting per-bank
+        // values are exactly what the TOML says.
         let toml_str = include_str!("../../../assets/entities/player_ship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
             .expect("player_ship.toml must parse");
@@ -2795,31 +2791,22 @@ mod tests {
             .expect("player_ship must declare [weapons_console]");
         let combat = crate::entity_config::PhaserCombatConfig::from_weapons_console(&wc);
 
-        // The four values that actually drive player phaser behaviour.
-        assert_eq!(
-            combat.beam_cooldown_secs, wc.cooldown_secs,
-            "beam_cooldown_secs must match TOML cooldown_secs"
-        );
-        assert_eq!(
-            combat.beam_duration_secs, wc.beam_duration_secs,
-            "beam_duration_secs must match TOML beam_duration_secs"
-        );
-        assert_eq!(
-            combat.beam_damage_per_sec, wc.beam_damage_per_sec,
-            "beam_damage_per_sec must match TOML beam_damage_per_sec"
-        );
-        assert_eq!(
-            combat.phaser_range, wc.beam_range,
-            "phaser_range must match TOML beam_range"
-        );
+        // player_ship.toml has two banks (fore, aft) with matching combat values.
+        assert_eq!(combat.banks.len(), 2, "must have fore and aft banks");
+        let fore = &combat.banks[0];
+        assert_eq!(fore.id, "fore");
+        assert_eq!(fore.cooldown_secs, 6.0, "cooldown_secs from TOML bank");
+        assert_eq!(fore.beam_duration_secs, 6.0, "beam_duration_secs from TOML bank");
+        assert_eq!(fore.beam_damage_per_sec, 5.0, "beam_damage_per_sec from TOML bank");
+        assert_eq!(fore.beam_range, 100.0, "beam_range from TOML bank");
 
         // And starting the cooldown produces exactly that value, so it flows
         // through to live `PhaserCooldown.bank_remaining_secs`.
         let mut cd = PhaserCooldown::default();
-        cd.start_bank("test", &combat);
+        cd.start_bank("test", fore.cooldown_secs);
         assert_eq!(
             cd.bank_remaining_secs("test"),
-            wc.cooldown_secs,
+            6.0,
             "PhaserCooldown::start_bank must use the TOML-sourced cooldown"
         );
     }
@@ -3769,17 +3756,23 @@ mod tests {
                 EntityUuid(npc_uuid_str.to_string()),
                 EntityPhaserState::default(),
                 WeaponsConsoleSection(crate::entity_config::WeaponsConsoleConfig {
-                    beam_range,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 3.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
                     torpedo_arc_color: vec![],
                     power_multipliers: None,
                     complexity_toml: None,
-                    phaser_banks: Vec::new(),
+                    phaser_banks: vec![crate::entity_config::PhaserBankConfig {
+                        id: "fore".into(),
+                        facing_deg: 0.0,
+                        fire_arc_deg: 360.0,
+                        auto_arc_deg: 360.0,
+                        beam_range,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 3.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: Some(0.0),
+                        marker: None,
+                    }],
                     radar: None,
-                    shield_pierce: 0.0,
                 }),
                 EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)])),
                 Transform::from_xyz(0.0, 0.0, 0.0),

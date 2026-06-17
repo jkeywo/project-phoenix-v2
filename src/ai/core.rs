@@ -1179,6 +1179,9 @@ mod tests {
             initial_state: "idle".into(),
             state: vec![],
             transition: vec![],
+            waypoint_arrival_radius: WAYPOINT_ARRIVAL_RADIUS,
+            avoidance_buffer: AVOIDANCE_BUFFER,
+            avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
         }
     }
 

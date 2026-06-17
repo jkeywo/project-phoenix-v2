@@ -8,7 +8,7 @@ threat_level = "medium"
 description = "Harrow Patrol"
 
 [hull]
-captain_chair = 120.0
+hull_integrity = 120.0
 
 [collider]
 shape = "Capsule"

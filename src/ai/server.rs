@@ -419,11 +419,8 @@ fn tick_ai_controllers(
         let (entity_phaser_ready, entity_weapons_range) = match weapons_section {
             Some(wc) => {
                 let ready = phaser_state.map(|ps| ps.is_ready()).unwrap_or(false);
-                let range = if wc.0.beam_range > 0.0 {
-                    Some(wc.0.beam_range)
-                } else {
-                    None
-                };
+                let range = wc.0.phaser_banks.first()
+                    .and_then(|b| if b.beam_range > 0.0 { Some(b.beam_range) } else { None });
                 (ready, range)
             }
             None => (false, None),
@@ -1153,17 +1150,23 @@ mod tests {
 
     fn make_weapons_console_config(beam_range: f32) -> crate::entity_config::WeaponsConsoleConfig {
         crate::entity_config::WeaponsConsoleConfig {
-            beam_range,
-            beam_damage_per_sec: 5.0,
-            beam_duration_secs: 3.0,
-            cooldown_secs: 3.0,
-            beam_color: vec![],
             torpedo_arc_color: vec![],
             power_multipliers: None,
             complexity_toml: None,
-            phaser_banks: Vec::new(),
+            phaser_banks: vec![crate::entity_config::PhaserBankConfig {
+                id: "fore".into(),
+                facing_deg: 0.0,
+                fire_arc_deg: 360.0,
+                auto_arc_deg: 360.0,
+                beam_range,
+                beam_damage_per_sec: 5.0,
+                beam_duration_secs: 3.0,
+                cooldown_secs: 3.0,
+                beam_color: vec![],
+                shield_pierce: Some(0.0),
+                marker: None,
+            }],
             radar: None,
-            shield_pierce: 0.0,
         }
     }
 
@@ -1351,7 +1354,7 @@ mod tests {
             "WeaponsConsoleSection must be attached when config has weapons_console"
         );
         assert!(
-            (wc.unwrap().0.beam_range - 80.0).abs() < 0.01,
+            wc.unwrap().0.phaser_banks.first().map(|b| (b.beam_range - 80.0).abs() < 0.01).unwrap_or(false),
             "beam_range must match config"
         );
     }

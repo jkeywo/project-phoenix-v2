@@ -613,6 +613,12 @@
     <span>Loading…</span>
   </div>
 
+  <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
+  <div id="asset-loading" style="display:none;position:fixed;inset:0;z-index:90;background:#000 url('assets/logo.png') center 40% / min(55vw,55vh) auto no-repeat;flex-direction:column;align-items:center;justify-content:center;color:#aae;font-family:monospace;font-size:0.9rem;gap:1rem;padding-bottom:15vh;">
+    <div class="spinner-ring"></div>
+    <span>Preparing scenario&hellip; <span id="asset-loading-pct">0</span>%</span>
+  </div>
+
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
 
@@ -1143,6 +1149,8 @@
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
           document.getElementById('overlay').style.display = 'none';
+          const al = document.getElementById('asset-loading');
+          if (al) al.style.display = 'none';
           startGameAudio();
         }
         if (parsed.type === 'LoadingProgress') {
@@ -1152,6 +1160,10 @@
           const pctEl = document.getElementById('loading-progress-pct');
           if (el) el.style.display = '';
           if (pctEl) pctEl.textContent = String(pct);
+          const al = document.getElementById('asset-loading');
+          const alPct = document.getElementById('asset-loading-pct');
+          if (al) al.style.display = 'flex';
+          if (alPct) alPct.textContent = String(pct);
         }
         if (parsed.type === 'SimState') {
           const snapshot = parsed.data?.snapshot;

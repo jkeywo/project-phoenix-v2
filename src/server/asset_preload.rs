@@ -703,6 +703,17 @@ pub fn broadcast_loading_progress(
     ));
 }
 
+/// Sends an immediate LoadingProgress(0%) on the first frame of Loading so
+/// clients always show the loading overlay even when assets complete quickly.
+pub fn broadcast_loading_start(mut outbox: ResMut<LobbyOutbox>) {
+    outbox.0.push((
+        Target::All,
+        ServerMessage::LoadingProgress {
+            data: LoadingProgress { fraction: 0.0 },
+        },
+    ));
+}
+
 /// Auto-transition from `Loading` → `InProgress` when preload completes.
 pub fn auto_transition_from_loading(
     preload: Res<AssetPreloadResource>,

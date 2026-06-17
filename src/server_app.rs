@@ -238,12 +238,13 @@ pub fn add_simulation_plugins(app: &mut App) {
     {
         use crate::server::asset_preload::{
             auto_transition_from_loading, begin_asset_preload, broadcast_loading_progress,
-            poll_asset_preload,
+            broadcast_loading_start, poll_asset_preload,
         };
         app.add_plugins(crate::server::ServerViewscreenRadarPlugin)
             .init_resource::<crate::server::asset_preload::AssetPreloadResource>()
             .add_systems(Update, begin_asset_preload)
             .add_systems(Update, poll_asset_preload)
+            .add_systems(OnEnter(GamePhase::Loading), broadcast_loading_start)
             .add_systems(
                 Update,
                 broadcast_loading_progress.run_if(in_state(GamePhase::Loading)),

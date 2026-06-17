@@ -114,21 +114,21 @@ describe('renderEntityComponentCard', () => {
     };
   }
 
-  it('renders a numeric input for hull.captain_chair that coerces to a number', () => {
-    const card = new ComponentCard('hull', { captain_chair: 60 }, COMPONENT_SCHEMA.hull);
+  it('renders a numeric input for hull.hull_integrity that coerces to a number', () => {
+    const card = new ComponentCard('hull', { hull_integrity: 60 }, COMPONENT_SCHEMA.hull);
     const { deps, edits } = makeDeps();
     renderEntityComponentCard(host, card, deps);
 
     const inputs = host.querySelectorAll('input').filter((i) => i.type === 'number');
-    const inp = inputs.find((i) => i.parentElement && i.parentElement.children[0]?.textContent === 'captain_chair');
+    const inp = inputs.find((i) => i.parentElement && i.parentElement.children[0]?.textContent === 'hull_integrity');
     expect(inp).toBeDefined();
     expect(inp.value).toBe('60');
 
     fireInput(inp, '99.5');
     expect(edits.length).toBe(1);
     expect(edits[0].section).toBe('hull');
-    expect(edits[0].data.captain_chair).toBe(99.5);
-    expect(typeof edits[0].data.captain_chair).toBe('number');
+    expect(edits[0].data.hull_integrity).toBe(99.5);
+    expect(typeof edits[0].data.hull_integrity).toBe('number');
   });
 
   it('renders a string input that coerces to a string', () => {
@@ -184,7 +184,7 @@ describe('renderEntityComponentCard', () => {
   });
 
   it('raw-toggle replaces body with a textarea containing the section TOML', () => {
-    const card = new ComponentCard('hull', { captain_chair: 60 }, COMPONENT_SCHEMA.hull);
+    const card = new ComponentCard('hull', { hull_integrity: 60 }, COMPONENT_SCHEMA.hull);
     card.toggleRaw();
     const { deps, edits } = makeDeps();
     renderEntityComponentCard(host, card, deps);
@@ -194,11 +194,10 @@ describe('renderEntityComponentCard', () => {
     expect(ta.value).toContain('hull');
     expect(ta.value).toContain('60');
 
-    // Edit it: change captain_chair to 80.
-    fireInput(ta, '[hull]\ncaptain_chair = 80\n');
+    fireInput(ta, '[hull]\nhull_integrity = 80\n');
     const last = edits[edits.length - 1];
     expect(last.section).toBe('hull');
-    expect(last.data.captain_chair).toBe(80);
+    expect(last.data.hull_integrity).toBe(80);
   });
 
   it('renders raw textarea when schema is null (null-schema fallback)', () => {
@@ -229,7 +228,7 @@ describe('renderEntityComponentCard', () => {
   it('complexity_toml field renders a <select> populated from getComplexityPaths', () => {
     const card = new ComponentCard(
       'weapons_console',
-      { complexity_toml: 'assets/complexity/tactical.toml', radar_range: 0, target_range: 0, fire_arc: 0, beam_range: 0, beam_damage_per_sec: 0, beam_duration_secs: 0, cooldown_secs: 0, beam_color: [] },
+      { complexity_toml: 'assets/complexity/tactical.toml' },
       COMPONENT_SCHEMA.weapons_console,
     );
     const { deps } = makeDeps();
@@ -242,7 +241,7 @@ describe('renderEntityComponentCard', () => {
   });
 
   it('header delete button calls onDelete', () => {
-    const card = new ComponentCard('hull', { captain_chair: 60 }, COMPONENT_SCHEMA.hull);
+    const card = new ComponentCard('hull', { hull_integrity: 60 }, COMPONENT_SCHEMA.hull);
     const { deps, edits } = makeDeps();
     renderEntityComponentCard(host, card, deps);
 
@@ -253,7 +252,7 @@ describe('renderEntityComponentCard', () => {
   });
 
   it('collapse toggle hides body', () => {
-    const card = new ComponentCard('hull', { captain_chair: 60 }, COMPONENT_SCHEMA.hull);
+    const card = new ComponentCard('hull', { hull_integrity: 60 }, COMPONENT_SCHEMA.hull);
     const { deps } = makeDeps();
     renderEntityComponentCard(host, card, deps);
 

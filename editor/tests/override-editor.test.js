@@ -137,10 +137,10 @@ describe('OverrideEditor — setOverride', () => {
   });
 
   it('successive calls accumulate overrides', () => {
-    ed.setOverride('hull.repair_team_count', 4);
+    ed.setOverride('repair.repair_team_count', 4);
     ed.setOverride('radar_appearance.radius', 10.0);
     const resolved = ed.getResolvedView();
-    expect(resolved.hull.repair_team_count).toBe(4);
+    expect(resolved.repair.repair_team_count).toBe(4);
     expect(resolved.radar_appearance.radius).toBe(10.0);
   });
 
@@ -175,15 +175,15 @@ describe('OverrideEditor — clearOverride', () => {
   });
 
   it('is a no-op when path was not overridden', () => {
-    expect(() => ed.clearOverride('hull.repair_team_count')).not.toThrow();
+    expect(() => ed.clearOverride('repair.repair_team_count')).not.toThrow();
     expect(ed.getOverridesSummary()).toEqual([]);
   });
 
   it('removing an override removes it from the summary', () => {
-    ed.setOverride('hull.repair_team_count', 5);
-    ed.clearOverride('hull.repair_team_count');
+    ed.setOverride('repair.repair_team_count', 5);
+    ed.clearOverride('repair.repair_team_count');
     const summary = ed.getOverridesSummary();
-    expect(summary.find((e) => e.path === 'hull.repair_team_count')).toBeUndefined();
+    expect(summary.find((e) => e.path === 'repair.repair_team_count')).toBeUndefined();
   });
 
   it('clears a subfield absent from template', () => {
@@ -321,21 +321,21 @@ describe('Integration: apply → clear → resolve → serialise', () => {
   it('full round-trip: set, clear one, serialise, re-parse, verify', () => {
     const ed = new OverrideEditor(PLAYER_SHIP);
 
-    ed.setOverride('hull.repair_team_count', 5);
+    ed.setOverride('repair.repair_team_count', 5);
     ed.setOverride('helm_console.max_speed', 80.0);
     ed.setOverride('radar_appearance.colour', [1.0, 0.0, 0.0]);
 
     // Clear one override
-    ed.clearOverride('hull.repair_team_count');
+    ed.clearOverride('repair.repair_team_count');
 
     // Summary should have 2 entries
     const summary = ed.getOverridesSummary();
     expect(summary).toHaveLength(2);
-    expect(summary.find((e) => e.path === 'hull.repair_team_count')).toBeUndefined();
+    expect(summary.find((e) => e.path === 'repair.repair_team_count')).toBeUndefined();
 
     // Resolved view: cleared field falls back to template
     const resolved = ed.getResolvedView();
-    expect(resolved.hull.repair_team_count).toBe(PLAYER_SHIP.hull.repair_team_count);
+    expect(resolved.repair.repair_team_count).toBe(PLAYER_SHIP.repair.repair_team_count);
     expect(resolved.helm_console.max_speed).toBe(80.0);
     expect(resolved.radar_appearance.colour).toEqual([1.0, 0.0, 0.0]);
 

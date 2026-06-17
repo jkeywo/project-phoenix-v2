@@ -14,10 +14,10 @@ function readEntity(name) {
 describe('entity-toml', () => {
   describe('parseEntityToml', () => {
     it('parses a basic entity TOML', () => {
-      const toml = 'tags = ["ship", "npc"]\n\n[hull]\ncaptain_chair = 100.0\n';
+      const toml = 'tags = ["ship", "npc"]\n\n[hull]\nhull_integrity = 100.0\n';
       const result = parseEntityToml(toml);
       expect(result.tags).toEqual(['ship', 'npc']);
-      expect(result.hull.captain_chair).toBe(100.0);
+      expect(result.hull.hull_integrity).toBe(100.0);
     });
 
     it('parses pirate_raider.toml', () => {
@@ -26,7 +26,7 @@ describe('entity-toml', () => {
       expect(result.tags).toContain('ship');
       expect(result.tags).toContain('npc');
       expect(result.faction).toBeTruthy();
-      expect(result.hull.captain_chair).toBe(60.0);
+      expect(result.hull.hull_integrity).toBe(60.0);
       expect(result.collider.shape).toBe('Capsule');
       expect(result.behaviour.initial_state).toBe('patrol');
     });
@@ -44,18 +44,18 @@ describe('entity-toml', () => {
 
   describe('stringifyEntityToml', () => {
     it('serializes a parsed entity back to string', () => {
-      const obj = { tags: ['ship'], hull: { captain_chair: 100.0 } };
+      const obj = { tags: ['ship'], hull: { hull_integrity: 100.0 } };
       const result = stringifyEntityToml(obj);
       expect(typeof result).toBe('string');
       expect(result).toContain('tags');
     });
 
     it('produces parseable TOML', () => {
-      const obj = { tags: ['test'], hull: { captain_chair: 50.0 } };
+      const obj = { tags: ['test'], hull: { hull_integrity: 50.0 } };
       const serialized = stringifyEntityToml(obj);
       const reparsed = parseEntityToml(serialized);
       expect(reparsed.tags).toEqual(['test']);
-      expect(reparsed.hull.captain_chair).toBe(50.0);
+      expect(reparsed.hull.hull_integrity).toBe(50.0);
     });
   });
 

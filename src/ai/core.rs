@@ -1518,11 +1518,7 @@ mod tests {
 
     #[test]
     fn build_initial_state_idle_name_returns_idle() {
-        let config = BehaviourConfig {
-            initial_state: "idle".into(),
-            state: vec![],
-            transition: vec![],
-        };
+        let config = empty_behaviour();
         assert_eq!(build_initial_state(&config), AiState::Idle);
     }
 
@@ -1540,6 +1536,9 @@ mod tests {
                 duration_secs: 0.0,
             }],
             transition: vec![],
+            waypoint_arrival_radius: WAYPOINT_ARRIVAL_RADIUS,
+            avoidance_buffer: AVOIDANCE_BUFFER,
+            avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
         };
         let state = build_initial_state(&config);
         assert_eq!(
@@ -1558,6 +1557,9 @@ mod tests {
             initial_state: "attack".into(),
             state: vec![],
             transition: vec![],
+            waypoint_arrival_radius: WAYPOINT_ARRIVAL_RADIUS,
+            avoidance_buffer: AVOIDANCE_BUFFER,
+            avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
         };
         assert_eq!(build_initial_state(&config), AiState::Idle);
     }

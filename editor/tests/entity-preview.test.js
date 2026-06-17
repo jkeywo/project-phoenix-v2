@@ -40,7 +40,7 @@ const entityWithAsteroidField = {
 const entityWithConsoles = {
   tags: ['ship', 'player'],
   helm_console: { max_speed: 50.0 },
-  weapons_console: { beam_range: 40.0 },
+  weapons_console: {},
   captain_console: {},
 };
 

@@ -89,7 +89,7 @@ describe('entity-toml extended', () => {
     });
 
     it('allows entity with neither shape nor effects', () => {
-      const obj = { tags: ['ship'], hull: { captain_chair: 100 } };
+      const obj = { tags: ['ship'], hull: { hull_integrity: 100 } };
       expect(validateEntitySections(obj).valid).toBe(true);
     });
 
@@ -491,9 +491,9 @@ describe('EntityModeShell', () => {
     });
 
     it('setSection updates the active section and rebuilds cards', () => {
-      shell.setSection('hull', { captain_chair: 999.0 });
+      shell.setSection('hull', { hull_integrity: 999.0 });
       const card = shell.getCard('hull');
-      expect(card.data.captain_chair).toBe(999.0);
+      expect(card.data.hull_integrity).toBe(999.0);
     });
 
     it('setSection with a brand-new section adds a card', () => {

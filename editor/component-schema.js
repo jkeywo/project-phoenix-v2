@@ -30,8 +30,12 @@ const PHASER_BANK_ENTRY_FIELDS = [
   { key: 'facing_deg', type: 'number' },
   { key: 'fire_arc_deg', type: 'number' },
   { key: 'auto_arc_deg', type: 'number' },
-  { key: 'beam_range', type: 'number', optional: true },
-  { key: 'shield_pierce', type: 'number', optional: true },
+  { key: 'beam_range', type: 'number', default: 0 },
+  { key: 'beam_damage_per_sec', type: 'number', default: 0 },
+  { key: 'beam_duration_secs', type: 'number', default: 0 },
+  { key: 'cooldown_secs', type: 'number', default: 0 },
+  { key: 'beam_color', type: 'array', items: 'number', default: [] },
+  { key: 'shield_pierce', type: 'number', default: 0 },
   { key: 'marker', type: 'string', optional: true },
 ];
 
@@ -74,8 +78,6 @@ export const COMPONENT_SCHEMA = {
     label: 'Hull',
     fields: [
       { key: 'hull_integrity', type: 'number', default: 0, optional: true },
-      { key: 'captain_chair', type: 'number', optional: true },
-      { key: 'repair_team_count', type: 'number', default: 0, optional: true },
       { key: 'console_hull', type: 'array', items: 'object', optional: true, default: [] },
     ],
   },
@@ -199,13 +201,7 @@ export const COMPONENT_SCHEMA = {
     section: 'weapons_console',
     label: 'Weapons Console',
     fields: [
-      { key: 'beam_range', type: 'number', default: 0 },
-      { key: 'beam_damage_per_sec', type: 'number', default: 0 },
-      { key: 'beam_duration_secs', type: 'number', default: 0 },
-      { key: 'cooldown_secs', type: 'number', default: 0 },
-      { key: 'beam_color', type: 'array', items: 'number', default: [] },
       { key: 'torpedo_arc_color', type: 'array', items: 'number', optional: true },
-      { key: 'shield_pierce', type: 'number', optional: true },
       { key: 'power_multipliers', type: 'array', items: 'number', optional: true },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
       {
@@ -331,6 +327,7 @@ export const COMPONENT_SCHEMA = {
     section: 'repair',
     label: 'Repair',
     fields: [
+      { key: 'repair_team_count', type: 'number', default: 0, optional: true },
       { key: 'travel_duration_secs', type: 'number', default: 5.0 },
       { key: 'repair_rate_hp_per_sec', type: 'number', default: 0.5 },
     ],

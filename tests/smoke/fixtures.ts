@@ -35,6 +35,13 @@ window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
 //   - an `[[comms]] on_hailed` block with a response carrying an
 //     `add_objective` action — required by `comms.spec.ts`.
 //
+// Position constraint: the player ship's `[comms] range = 1200` and the
+// station's `[comms] range = 800` (assets/entities/station_axiom.toml)
+// give an effective comms range of 800. The hail in `comms.spec.ts`
+// requires `in_range = true` on first CommsState, so the starbase must
+// sit at distance ≤ 800 from the player. Player spawns at the origin;
+// place the starbase well inside the gate at [500, 0, 0].
+//
 // Tests that need a different scenario (`tactical-fire-flow.spec.ts` with
 // its inline `MINIMAL_TEST_WORLD`, `patrol.spec.ts` and
 // `ship-mesh-load.spec.ts` with `patrol.toml`) keep routing their own
@@ -51,7 +58,7 @@ color      = [0.6, 0.55, 0.5]
 brightness = 300.0
 
 [anchors]
-starbase_alpha = [1000.0, 0.0, 0.0]
+starbase_alpha = [500.0, 0.0, 0.0]
 
 [[entity]]
 template_path = "assets/entities/player_ship.toml"

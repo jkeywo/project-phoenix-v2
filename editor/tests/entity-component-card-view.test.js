@@ -144,20 +144,19 @@ describe('renderEntityComponentCard', () => {
     expect(edits[0].data.name).toBe('New Name');
   });
 
-  it('renders a checkbox for boolean helm_console.radar_shows', () => {
+  it('renders a number input for helm_console.bank_lerp_rate', () => {
     const card = new ComponentCard(
       'helm_console',
-      { max_speed: 50, max_reverse_speed: 0, acceleration: 16, deceleration: 50, max_yaw_rate: 1.5, radar_range: 0, radar_shows: false, impulse_charge_duration: 3, impulse_speed_multiplier: 10 },
+      { max_speed: 50, max_reverse_speed: 0, acceleration: 16, deceleration: 50, max_yaw_rate: 1.5, impulse_charge_duration: 3, impulse_speed_multiplier: 10, bank_lerp_rate: 2.0 },
       COMPONENT_SCHEMA.helm_console,
     );
     const { deps, edits } = makeDeps();
     renderEntityComponentCard(host, card, deps);
-    const cb = host.querySelectorAll('input').find((i) => i.type === 'checkbox');
-    expect(cb).toBeDefined();
-    cb.checked = true;
-    cb.dispatchEvent({ type: 'change', target: cb });
-    const last = edits[edits.length - 1];
-    expect(last.data.radar_shows).toBe(true);
+    const inputs = host.querySelectorAll('input').filter((i) => i.type === 'number');
+    expect(inputs.length).toBeGreaterThan(0);
+    // bank_lerp_rate is a number field — verify at least one number input exists
+    const found = inputs.find((i) => i.value === '2');
+    expect(found).toBeDefined();
   });
 
   it('renders an array<number> textarea that coerces to numbers', () => {

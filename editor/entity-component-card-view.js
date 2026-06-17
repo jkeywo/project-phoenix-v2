@@ -404,6 +404,104 @@ function makeInputForField(field, value, deps, onChange) {
     return ta;
   }
 
+  // Sub-object → inline fields for each sub-field key.
+  if (field.type === 'subobject') {
+    const wrap = document.createElement('div');
+    wrap.className = 'entity-card-subobject';
+    const current = (value && typeof value === 'object') ? value : {};
+    for (const sub of (field.subfields ?? [])) {
+      const row = document.createElement('div');
+      row.className = 'entity-card-field entity-card-subfield';
+      const lbl = document.createElement('label');
+      lbl.textContent = sub.key;
+      row.appendChild(lbl);
+      const inp = makeInputForField(sub, current[sub.key], deps, (newVal) => {
+        const next = { ...current };
+        if (newVal === undefined || newVal === null || newVal === '') {
+          delete next[sub.key];
+        } else {
+          next[sub.key] = newVal;
+        }
+        onChange(Object.keys(next).length ? next : undefined);
+      });
+      row.appendChild(inp);
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
+  // Array-of-tables field → inline add/remove entry list.
+  if (field.type === 'array-of-tables') {
+    const wrap = document.createElement('div');
+    wrap.className = 'entity-card-aot-field';
+    const entries = Array.isArray(value) ? value : [];
+    const entryFields = field.entryFields ?? [];
+    const entryDefaults = field.entryDefaults ?? {};
+
+    const rebuild = (current) => {
+      wrap.innerHTML = '';
+      current.forEach((entry, idx) => {
+        const entryDiv = document.createElement('div');
+        entryDiv.className = 'entity-card-array-entry';
+
+        const hdr = document.createElement('div');
+        hdr.className = 'entity-card-array-entry-header';
+        const tag = document.createElement('span');
+        tag.textContent = `#${idx + 1}${entry.id ? ` — ${entry.id}` : ''}`;
+        hdr.appendChild(tag);
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'entity-card-btn entity-card-btn-delete';
+        rm.textContent = '✕';
+        rm.addEventListener('click', () => {
+          const next = current.slice();
+          next.splice(idx, 1);
+          onChange(next);
+          rebuild(next);
+        });
+        hdr.appendChild(rm);
+        entryDiv.appendChild(hdr);
+
+        for (const ef of entryFields) {
+          const row = document.createElement('div');
+          row.className = 'entity-card-field entity-card-subfield';
+          const lbl = document.createElement('label');
+          lbl.textContent = ef.key;
+          row.appendChild(lbl);
+          const inp = makeInputForField(ef, entry[ef.key], deps, (newVal) => {
+            const nextEntry = { ...entry };
+            if (newVal === undefined || newVal === null || newVal === '') {
+              delete nextEntry[ef.key];
+            } else {
+              nextEntry[ef.key] = newVal;
+            }
+            const next = current.slice();
+            next[idx] = nextEntry;
+            onChange(next);
+          });
+          row.appendChild(inp);
+          entryDiv.appendChild(row);
+        }
+        wrap.appendChild(entryDiv);
+      });
+
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'entity-card-btn entity-card-array-add';
+      addBtn.textContent = '+ entry';
+      addBtn.addEventListener('click', () => {
+        const next = current.slice();
+        next.push(structuredClone ? structuredClone(entryDefaults) : JSON.parse(JSON.stringify(entryDefaults)));
+        onChange(next);
+        rebuild(next);
+      });
+      wrap.appendChild(addBtn);
+    };
+
+    rebuild(entries);
+    return wrap;
+  }
+
   // String (default).
   const inp = document.createElement('input');
   inp.type = 'text';

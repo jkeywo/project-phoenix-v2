@@ -6,13 +6,43 @@
  * render structured component cards.
  *
  * Field descriptor shape:
- *   { key, type, default?, optional?, items?, dropdownSource? }
+ *   { key, type, default?, optional?, items?, dropdownSource?, subfields?, entryFields? }
  *
- *   type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'uuid-faction' | 'path-complexity'
+ *   type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'subobject' | 'array-of-tables'
  *   items: type of array elements (for type:'array')
  *   dropdownSource: 'factions' | 'complexity' (drives dropdown resolution)
  *   optional: true if the field may be omitted from TOML
+ *   subfields: field descriptors for type:'subobject' inline editing
+ *   entryFields: field descriptors for type:'array-of-tables' per-entry editing
+ *   entryDefaults: default object for new entries (for type:'array-of-tables')
  */
+
+/** Sub-field set reused for every RadarConfig sub-object. */
+const RADAR_SUBFIELDS = [
+  { key: 'range', type: 'number' },
+  { key: 'shows', type: 'array', items: 'string' },
+  { key: 'selects', type: 'array', items: 'string', optional: true },
+];
+
+/** Per-entry fields for [[weapons_console.phaser_banks]]. */
+const PHASER_BANK_ENTRY_FIELDS = [
+  { key: 'id', type: 'string' },
+  { key: 'facing_deg', type: 'number' },
+  { key: 'fire_arc_deg', type: 'number' },
+  { key: 'auto_arc_deg', type: 'number' },
+  { key: 'beam_range', type: 'number', optional: true },
+  { key: 'shield_pierce', type: 'number', optional: true },
+  { key: 'marker', type: 'string', optional: true },
+];
+
+/** Per-entry fields for [[torpedoes.tubes]]. */
+const TORPEDO_TUBE_ENTRY_FIELDS = [
+  { key: 'id', type: 'string' },
+  { key: 'facing_deg', type: 'number' },
+  { key: 'fire_arc_deg', type: 'number' },
+  { key: 'load_time', type: 'number', optional: true },
+  { key: 'marker', type: 'string', optional: true },
+];
 
 export const COMPONENT_SCHEMA = {
   tags: {
@@ -28,6 +58,14 @@ export const COMPONENT_SCHEMA = {
     label: 'Faction',
     fields: [
       { key: 'faction', type: 'uuid-faction', optional: true, dropdownSource: 'factions' },
+    ],
+  },
+
+  name: {
+    section: 'name',
+    label: 'Name',
+    fields: [
+      { key: 'name', type: 'string', default: '' },
     ],
   },
 
@@ -66,8 +104,69 @@ export const COMPONENT_SCHEMA = {
     section: 'radar_appearance',
     label: 'Radar Appearance',
     fields: [
+      { key: 'colour', type: 'array', items: 'number', optional: true },
+      { key: 'size', type: 'number', optional: true },
+      { key: 'icon', type: 'string', optional: true },
+      { key: 'region_colour', type: 'array', items: 'number', optional: true },
+    ],
+  },
+
+  mesh: {
+    section: 'mesh',
+    label: 'Mesh',
+    fields: [
+      { key: 'model', type: 'string', optional: true },
+      { key: 'variant', type: 'string', optional: true },
+      { key: 'shape', type: 'string', enum: ['sphere', 'cuboid', 'torus'] },
       { key: 'colour', type: 'array', items: 'number' },
+      { key: 'radius', type: 'number', optional: true, default: 0 },
+      { key: 'size', type: 'array', items: 'number', optional: true },
+      { key: 'minor_radius', type: 'number', optional: true, default: 0 },
+      { key: 'emissive', type: 'number', optional: true },
+      { key: 'scale', type: 'number', optional: true },
+      { key: 'rotation', type: 'array', items: 'number', optional: true },
+    ],
+  },
+
+  // Array-of-tables: maps to TOML `[[light]]` blocks (Vec<LightConfig>).
+  light: {
+    section: 'light',
+    label: 'Lights',
+    arrayOfTables: true,
+    fields: [
+      { key: 'kind', type: 'string', enum: ['point', 'directional'] },
+      { key: 'colour', type: 'array', items: 'number' },
+      { key: 'intensity', type: 'number' },
+      { key: 'range', type: 'number', optional: true },
+      { key: 'face_player', type: 'boolean', optional: true },
+    ],
+    entryFields: [
+      { key: 'kind', type: 'string', enum: ['point', 'directional'] },
+      { key: 'colour', type: 'array', items: 'number' },
+      { key: 'intensity', type: 'number' },
+      { key: 'range', type: 'number', optional: true },
+      { key: 'face_player', type: 'boolean', optional: true },
+    ],
+    entryDefaults: {
+      kind: 'point',
+      colour: [1.0, 1.0, 1.0],
+      intensity: 1000.0,
+    },
+  },
+
+  star: {
+    section: 'star',
+    label: 'Star',
+    fields: [
       { key: 'radius', type: 'number', optional: true },
+      { key: 'longitude_segments', type: 'number', optional: true },
+      { key: 'latitude_segments', type: 'number', optional: true },
+      { key: 'surface_colour', type: 'array', items: 'number', optional: true },
+      { key: 'hot_colour', type: 'array', items: 'number', optional: true },
+      { key: 'cell_colour', type: 'array', items: 'number', optional: true },
+      { key: 'halo_colour', type: 'array', items: 'number', optional: true },
+      { key: 'halo_radius_multiplier', type: 'number', optional: true },
+      { key: 'animation_speed', type: 'number', optional: true },
     ],
   },
 
@@ -80,12 +179,19 @@ export const COMPONENT_SCHEMA = {
       { key: 'acceleration', type: 'number', default: 0 },
       { key: 'deceleration', type: 'number', default: 0 },
       { key: 'max_yaw_rate', type: 'number', default: 0 },
-      { key: 'radar_range', type: 'number', default: 0 },
-      { key: 'radar_shows', type: 'boolean', default: false },
-      { key: 'power_multipliers', type: 'array', items: 'number', optional: true },
+      { key: 'max_bank_deg', type: 'number', default: 0, optional: true },
+      { key: 'bank_lerp_rate', type: 'number', optional: true },
       { key: 'impulse_charge_duration', type: 'number', default: 3.0 },
       { key: 'impulse_speed_multiplier', type: 'number', default: 10.0 },
+      { key: 'impulse_acceleration_multiplier', type: 'number', default: 5.0, optional: true },
+      { key: 'power_multipliers', type: 'array', items: 'number', optional: true },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
+      {
+        key: 'radar',
+        type: 'subobject',
+        optional: true,
+        subfields: RADAR_SUBFIELDS,
+      },
     ],
   },
 
@@ -93,16 +199,28 @@ export const COMPONENT_SCHEMA = {
     section: 'weapons_console',
     label: 'Weapons Console',
     fields: [
-      { key: 'radar_range', type: 'number', default: 0 },
-      { key: 'target_range', type: 'number', default: 0 },
-      { key: 'fire_arc', type: 'number', default: 0 },
       { key: 'beam_range', type: 'number', default: 0 },
       { key: 'beam_damage_per_sec', type: 'number', default: 0 },
       { key: 'beam_duration_secs', type: 'number', default: 0 },
       { key: 'cooldown_secs', type: 'number', default: 0 },
       { key: 'beam_color', type: 'array', items: 'number', default: [] },
+      { key: 'torpedo_arc_color', type: 'array', items: 'number', optional: true },
+      { key: 'shield_pierce', type: 'number', optional: true },
       { key: 'power_multipliers', type: 'array', items: 'number', optional: true },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
+      {
+        key: 'radar',
+        type: 'subobject',
+        optional: true,
+        subfields: RADAR_SUBFIELDS,
+      },
+      {
+        key: 'phaser_banks',
+        type: 'array-of-tables',
+        optional: true,
+        entryFields: PHASER_BANK_ENTRY_FIELDS,
+        entryDefaults: { id: '', facing_deg: 0.0, fire_arc_deg: 270.0, auto_arc_deg: 180.0 },
+      },
     ],
   },
 
@@ -110,10 +228,6 @@ export const COMPONENT_SCHEMA = {
     section: 'engineering_console',
     label: 'Engineering Console',
     fields: [
-      { key: 'repair_rate', type: 'number', default: 0 },
-      { key: 'repair_hp_per_cycle', type: 'number', default: 0 },
-      { key: 'repair_cooldown_secs', type: 'number', default: 0 },
-      { key: 'cooldown_secs', type: 'number', default: 0 },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
     ],
   },
@@ -133,6 +247,7 @@ export const COMPONENT_SCHEMA = {
       { key: 'capacity', type: 'number' },
       { key: 'rates', type: 'array', items: 'number' },
       { key: 'emergency_threshold', type: 'number' },
+      { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
     ],
   },
 
@@ -141,8 +256,27 @@ export const COMPONENT_SCHEMA = {
     label: 'Sensors Console',
     fields: [
       { key: 'power_multipliers', type: 'array', items: 'number', optional: true },
-      { key: 'long_range_radar', type: 'object', optional: true },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
+      {
+        key: 'long_range_radar',
+        type: 'subobject',
+        optional: true,
+        subfields: RADAR_SUBFIELDS,
+      },
+    ],
+  },
+
+  navigation_console: {
+    section: 'navigation_console',
+    label: 'Navigation Console',
+    fields: [
+      { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
+      {
+        key: 'system_chart',
+        type: 'subobject',
+        optional: true,
+        subfields: RADAR_SUBFIELDS,
+      },
     ],
   },
 
@@ -156,54 +290,68 @@ export const COMPONENT_SCHEMA = {
       { key: 'focus_penalty_regen', type: 'number', default: 2.5 },
       { key: 'focus_decay_rate', type: 'number', default: 10.0 },
       { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
+      {
+        key: 'base',
+        type: 'subobject',
+        optional: true,
+        subfields: [
+          { key: 'num_facings', type: 'number', optional: true },
+          { key: 'max_hp', type: 'number', optional: true },
+          { key: 'regen_per_sec', type: 'number', optional: true },
+          { key: 'offline_duration', type: 'number', optional: true },
+        ],
+      },
     ],
   },
 
-  name: {
-    section: 'name',
-    label: 'Name',
+  torpedoes: {
+    section: 'torpedoes',
+    label: 'Torpedoes',
     fields: [
-      { key: 'name', type: 'string', default: '' },
+      { key: 'count', type: 'number', default: 10 },
+      { key: 'damage_hull', type: 'number', default: 50 },
+      { key: 'damage_shields', type: 'number', default: 5 },
+      { key: 'speed', type: 'number', default: 30.0 },
+      { key: 'turn_rate_deg_per_sec', type: 'number', default: 45.0 },
+      { key: 'lifespan', type: 'number', default: 20.0 },
+      { key: 'load_time', type: 'number', default: 10.0 },
+      { key: 'detonation_radius', type: 'number', default: 5.0 },
+      { key: 'shield_pierce', type: 'number', optional: true },
+      {
+        key: 'tubes',
+        type: 'array-of-tables',
+        optional: true,
+        entryFields: TORPEDO_TUBE_ENTRY_FIELDS,
+        entryDefaults: { id: '', facing_deg: 0.0, fire_arc_deg: 90.0 },
+      },
     ],
   },
 
-  mesh: {
-    section: 'mesh',
-    label: 'Mesh',
+  repair: {
+    section: 'repair',
+    label: 'Repair',
     fields: [
-      { key: 'shape', type: 'string', enum: ['sphere', 'cuboid', 'torus'] },
-      { key: 'colour', type: 'array', items: 'number' },
-      { key: 'radius', type: 'number', optional: true, default: 0 },
-      { key: 'size', type: 'array', items: 'number', optional: true },
-      { key: 'minor_radius', type: 'number', optional: true, default: 0 },
-      { key: 'emissive', type: 'number', optional: true },
+      { key: 'travel_duration_secs', type: 'number', default: 5.0 },
+      { key: 'repair_rate_hp_per_sec', type: 'number', default: 0.5 },
     ],
   },
 
-  // Array-of-tables: maps to TOML `[[light]]` blocks (Vec<LightConfig>).
-  // Runtime card data is a bare array of entry objects, not a wrapping object.
-  // `entryFields` describes the schema for each entry.
-  light: {
-    section: 'light',
-    label: 'Lights',
-    arrayOfTables: true,
+  comms: {
+    section: 'comms',
+    label: 'Comms',
     fields: [
-      { key: 'kind', type: 'string', enum: ['point', 'directional'] },
-      { key: 'colour', type: 'array', items: 'number' },
-      { key: 'intensity', type: 'number' },
-      { key: 'range', type: 'number', optional: true },
+      { key: 'range', type: 'number' },
     ],
-    entryFields: [
-      { key: 'kind', type: 'string', enum: ['point', 'directional'] },
-      { key: 'colour', type: 'array', items: 'number' },
-      { key: 'intensity', type: 'number' },
-      { key: 'range', type: 'number', optional: true },
+  },
+
+  target: {
+    section: 'target',
+    label: 'Target',
+    fields: [
+      { key: 'tags', type: 'array', items: 'string', default: [] },
+      { key: 'threat_level', type: 'string', enum: ['none', 'low', 'medium', 'high'], optional: true },
+      { key: 'description', type: 'string', optional: true },
     ],
-    entryDefaults: {
-      kind: 'point',
-      colour: [1.0, 1.0, 1.0],
-      intensity: 1000.0,
-    },
   },
 
   asteroid_field: {
@@ -255,6 +403,9 @@ export const COMPONENT_SCHEMA = {
       { key: 'initial_state', type: 'string' },
       { key: 'state', type: 'array', items: 'object', default: [] },
       { key: 'transition', type: 'array', items: 'object', default: [] },
+      { key: 'waypoint_arrival_radius', type: 'number', optional: true },
+      { key: 'avoidance_buffer', type: 'number', optional: true },
+      { key: 'avoidance_look_ahead_secs', type: 'number', optional: true },
     ],
   },
 
@@ -281,6 +432,7 @@ export const ENTITY_CONFIG_SECTIONS = [
   'appearance',
   'mesh',
   'light',
+  'star',
   'radar_appearance',
   'helm_console',
   'weapons_console',
@@ -288,7 +440,12 @@ export const ENTITY_CONFIG_SECTIONS = [
   'captain_console',
   'power',
   'sensors_console',
+  'navigation_console',
   'shields_console',
+  'torpedoes',
+  'repair',
+  'comms',
+  'target',
   'asteroid_field',
   'shape',
   'effects',

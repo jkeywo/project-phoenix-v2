@@ -1439,6 +1439,13 @@
             state.tacticalRadarSelects = window.simState.tacticalRadarSelects;
             state.sensorsRadarShows    = window.simState.sensorsRadarShows;
             state.sensorsRadarSelects  = window.simState.sensorsRadarSelects;
+            // Navigation chart filter inputs — the Navigation builder has a
+            // two-stage filter (outer entity filter on `navChartShows`, then
+            // the inner `buildBlips` filter), so omitting these silently
+            // drops every non-objective entity from the nav chart.
+            state.navChartShows        = window.simState.navChartShows;
+            state.navChartSelects      = window.simState.navChartSelects;
+            state.navChartRange        = window.simState.navChartRange;
             state.phaserArcConfigs  = window.simState.phaserArcConfigs;
             state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
             state.navigationWaypoint = window.simState.navigationWaypoint;

@@ -2,8 +2,8 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, pure-iterator, shared]
-sources: [gui/console-state.js, gui/radar-widget.js, gui/navigation-console.html, src/radar.rs, CONTEXT.md]
-updated: 2026-06-14
+sources: [gui/console-state.js, gui/radar-widget.js, gui/navigation-console.html, gui/sim-state.js, client.html, src/radar.rs, CONTEXT.md]
+updated: 2026-06-17
 ---
 
 # Radar Projection
@@ -53,6 +53,17 @@ Entity TOML `[radar_appearance].icon` flows into `EntitySnapshot.radar_icon` whe
 `ObjectiveSummary` is shared mission state, so it is broadcast to all clients and mirrored into `gui/sim-state.js::ClientSimState.objectives`. The HTML radar builders mark active objective targets by matching each objective `targets` entry against entity `name`, `id`, or `uuid`.
 
 `gui/console-state.js::buildBlips()` lets active objective targets through even when their tag is normally hidden, which is how invisible `objective_marker` beacon entities appear only when referenced by an active objective. Point objectives render as normal blips with `objective_target: true`; shaped objective targets (`shape = "sphere" | "box" | "torus"`) also emit region overlays via `buildRadarRegions()`. Sensors draws those overlays in the shared pre-projected `RadarWidget`, while Navigation draws the same region payload on its custom full-screen map.
+
+## Navigation's two-stage filter (and the `client.html` mirror gotcha)
+
+`buildNavigationConsoleState` (`gui/console-state.js:521`) is the odd one out among the per-console builders: it runs **two** filters in series.
+
+1. **Outer filter** at `console-state.js:528-532` walks every entity and keeps it only if it is either an active objective target *or* one of its tags appears in `navChartShows`.
+2. **Inner filter** is the standard `buildBlips()` range/`shows` filter, applied to whatever the outer filter let through.
+
+This means an empty `navChartShows` is **not** a no-op for Navigation — it makes the outer filter drop every non-objective entity, leaving the chart blank. Tactical and Sensors only have the inner filter, where an empty `shows` falls through and shows everything.
+
+`navChartShows` / `navChartSelects` / `navChartRange` live on `ShipClientConfig` (`src/core/messages.rs:428-456`), sourced from `[navigation_console.system_chart]` in `assets/entities/player_ship.toml`. `gui/sim-state.js::apply('Welcome')` (lines 163-165) stores them on `window.simState`. **The inline `Welcome` handler in `client.html` must then mirror them onto the plain `state` object** passed into `buildNavigationConsoleState` — if any one of those three lines is missing, Navigation silently breaks. The bug-bait regression test in `tests/client/console-state.test.js` (`blips arrive when state is built via the client.html Welcome mirror path`) walks this exact path so the next field omission fails CI.
 
 ## Future filters
 

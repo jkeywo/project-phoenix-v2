@@ -16,6 +16,7 @@ import {
   buildCommsConsoleState,
   buildNavigationConsoleState,
 } from '../../gui/console-state.js';
+import { ClientSimState } from '../../gui/sim-state.js';
 
 // ── Entity helpers ────────────────────────────────────────────────────────────
 
@@ -886,5 +887,73 @@ describe('buildNavigationConsoleState', () => {
       shape: 'sphere',
       radius: 220,
     });
+  });
+
+  // ── Production-path regression: Welcome → client.html mirror → builder ───
+  //
+  // The Navigation builder has a two-stage filter (outer entity filter on
+  // `navChartShows`, then the inner `buildBlips` filter). If `client.html`'s
+  // Welcome-handler mirror block forgets to copy `navChartShows` /
+  // `navChartSelects` / `navChartRange` from `window.simState` onto the
+  // plain `state` object passed into the builder, the outer filter sees
+  // `navChartShows === undefined` and silently drops every non-objective
+  // entity — leaving the navigation chart blank.
+  //
+  // This test exercises that exact pipeline end-to-end (sans the iframe
+  // transport): it applies a real Welcome payload via `ClientSimState`,
+  // then mirrors only the keys `client.html` actually copies, and asserts
+  // that asteroids / stations / planets land in the blip list. Setting
+  // `state.navChartShows` directly (as every other test in this file does)
+  // would hide the very gap this test exists to catch.
+  it('blips arrive when state is built via the client.html Welcome mirror path', () => {
+    const sim = new ClientSimState();
+    const shipConfig = {
+      nav_chart_range: 800,
+      nav_chart_shows:   ['asteroid', 'station', 'planet', 'star'],
+      nav_chart_selects: ['station', 'planet'],
+    };
+    const world = {
+      entities: [
+        { uuid: 'st1', position: [500, 0, -300], tags: ['station'], name: 'Starbase 1', radar_icon: 'station' },
+        { uuid: 'pl1', position: [-200, 0, 400], tags: ['planet'],  name: 'Sol III',    radar_icon: 'planet'  },
+      ],
+      scenario_title: '',
+      scenario_description: '',
+    };
+    sim.apply({
+      type: 'Welcome',
+      data: {
+        state: { phase: 'InProgress', players: [], complexity: {}, world },
+        ship_stations: { configs: {}, min_players: 0, max_players: 0 },
+        ship_config: shipConfig,
+      },
+    });
+
+    // Mirror EXACTLY what client.html's Welcome handler copies onto `state`.
+    // Keep this in lock-step with the mirror block in client.html — if a new
+    // ShipClientConfig field is added there, mirror it here too.
+    const state = {
+      asteroids:           sim.world.entities,
+      repairTeams:         sim.repairTeams,
+      weaponsRadarRange:   sim.weaponsRadarRange,
+      helmRadarRange:      sim.helmRadarRange,
+      sensorsRadarRange:   sim.sensorsRadarRange,
+      tacticalRadarShows:  sim.tacticalRadarShows,
+      tacticalRadarSelects: sim.tacticalRadarSelects,
+      sensorsRadarShows:   sim.sensorsRadarShows,
+      sensorsRadarSelects: sim.sensorsRadarSelects,
+      navChartShows:       sim.navChartShows,
+      navChartSelects:     sim.navChartSelects,
+      navChartRange:       sim.navChartRange,
+      phaserArcConfigs:    sim.phaserArcConfigs,
+      torpedoArcConfigs:   sim.torpedoArcConfigs,
+      navigationWaypoint:  sim.navigationWaypoint,
+      shipX: 0, shipZ: 0,
+    };
+
+    const out = parse(buildNavigationConsoleState(state));
+    expect(out.blips.length).toBeGreaterThan(0);
+    expect(out.blips.map(b => b.uuid).sort()).toEqual(['pl1', 'st1']);
+    expect(out.radar_range).toBe(800);
   });
 });

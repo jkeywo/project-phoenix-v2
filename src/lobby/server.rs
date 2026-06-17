@@ -272,11 +272,21 @@ pub fn process_lobby(
         .map(|s| s.as_ref())
         .unwrap_or(&default_stations);
     let world_data = world.as_ref().map(|w| &w.0);
-    // Background preload runs but does not gate StartGame — the Loading phase
-    // transition has async completion bugs in CI (icon/sidecar fetch timing).
-    // Models pop in after game start rather than blocking it.
-    let _ = preload;
-    let preload_complete = true;
+    // Preload gate: only Engage when the asset pre-cache has finished.
+    // - If the resource is missing entirely (test app, native build that
+    //   hasn't run `begin_asset_preload`), treat as complete.
+    // - If the resource exists but `!started`, treat as complete too — the
+    //   preload system runs every `Update` and may not have observed the
+    //   lobby state yet on the first frame. This avoids a deadlock where
+    //   `process_lobby` would refuse Engage forever waiting for a system
+    //   that never runs.
+    // - Otherwise gate on `preload.complete`, which is set by
+    //   `poll_asset_preload` once all icons, sidecars, sub-worlds, and GLBs
+    //   reach a terminal LoadState (Loaded or Failed).
+    let preload_complete = preload
+        .as_ref()
+        .map(|p| !p.started || p.complete)
+        .unwrap_or(true);
     for ev in inbound.read() {
         if !accepts_all && !matches!(ev.msg, ClientMessage::Identify { .. }) {
             continue;

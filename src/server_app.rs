@@ -1540,6 +1540,12 @@ struct PendingSceneHandle(Handle<bevy::scene::Scene>);
 ///   `wasm_push_sidecar_toml`; fires a deferred JS fetch on first miss and
 ///   returns `None` until the fetch resolves. An empty pushed string (404)
 ///   resolves to `Some(String::new())`, which parses to an identity rig.
+///
+/// **Important**: this call is destructive — the entry is removed from the
+/// queue once read. The renderer is the sole intended consumer; callers that
+/// only need readiness (e.g. preload progress) must use
+/// [`crate::config_cache::is_pending_sidecar_delivered`] instead, or the
+/// renderer will lose the race and the model will never appear.
 fn load_sidecar_toml(path: &str) -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1547,7 +1553,7 @@ fn load_sidecar_toml(path: &str) -> Option<String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::config_cache::pop_pending_sidecar_toml(path).or_else(|| {
+        crate::config_cache::take_pending_sidecar_toml(path).or_else(|| {
             crate::config_cache::request_sidecar_fetch(path.to_string());
             None
         })
@@ -1684,10 +1690,29 @@ fn render_spawned_entities(
                         let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
                         let path = format!("{}#Scene0", rel);
                         let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
+                        // Diagnostic: distinguish prefetch hits (asset already in
+                        // path-cache, will arrive quickly) from cold loads (first
+                        // request for this path, network round-trip pending).
+                        bevy::log::info!(
+                            "render_spawned_entities: requesting scene {path} (load_state={:?})",
+                            asset_server.load_state(h.id())
+                        );
                         ec.insert(PendingSceneHandle(h.clone()));
                         h
                     }
                 };
+                // Hard-fail surface: a `LoadState::Failed` GLB will never appear in
+                // `Assets<Scene>`, so the `scenes.get(...).is_some()` check would
+                // spin forever. Mark such entities `RenderProcessed` so we stop
+                // retrying them every frame, and warn once per entity.
+                if matches!(asset_server.load_state(scene.id()), bevy::asset::LoadState::Failed(_)) {
+                    bevy::log::warn!(
+                        "render_spawned_entities: GLB failed to load for entity {entity:?}, path={model_path} — entity will exist without a mesh"
+                    );
+                    ec.remove::<PendingSceneHandle>();
+                    ec.insert(RenderProcessed);
+                    continue;
+                }
                 // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
                 // The sidecar resolves to an identity rig when genuinely absent, so
                 // models without a sidecar still render (visually unchanged).

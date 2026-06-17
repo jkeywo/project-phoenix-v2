@@ -65,6 +65,7 @@ Architecture, patterns, processes.
 - **[Broadcaster Seam](./concepts/broadcaster-seam.md)** — `SimBroadcaster` + `LobbyBroadcaster` registration API; Audience, Cadence, producer-registration recipe, full message catalogue with file:line references, `OutboundMessage` write contract, and cross-links to PRDs #117/#118/#120/#153/#154/#180/#187.
 - **[Modifier Coordination](./concepts/modifier-coordination.md)** — Single owner of `ShipModifiers`; complete catalogue of three modifier sources (power, regions, impulse) with translator recipe, read-interface guide, and per-UUID source identity.
 - **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.
+- **[Asset Preload](./concepts/asset-preload.md)** — Server-side discovery + pre-cache of GLBs, radar icons, model-rig sidecars, sub-world TOMLs. Sidecar inbox is a single-consumer queue (renderer takes; preload only peeks) — see the 2026-06-17 race-fix.
 - **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
 
 ## Sources

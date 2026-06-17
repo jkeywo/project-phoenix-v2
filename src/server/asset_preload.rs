@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use bevy::asset::LoadState;
 use bevy::prelude::*;
 
 use crate::core::messages::{GamePhase, LoadingProgress, ServerMessage};
@@ -269,6 +270,10 @@ pub struct AssetPreloadResource {
     glb_handles: Vec<(String, Handle<bevy::scene::Scene>)>,
     icon_handles: Vec<(String, Handle<Image>)>,
 
+    // Set of GLB paths for which we've already logged a Failed warning, so the
+    // warning fires exactly once per asset (poll runs every frame).
+    failed_glbs: HashSet<String>,
+
     // Sidecar tracking
     pending_sidecars: Vec<String>,
     /// All sidecar paths ever pushed to `pending_sidecars` — prevents duplicates
@@ -298,6 +303,7 @@ impl Default for AssetPreloadResource {
             ready_count: 0,
             glb_handles: Vec::new(),
             icon_handles: Vec::new(),
+            failed_glbs: HashSet::new(),
             pending_sidecars: Vec::new(),
             registered_sidecars: HashSet::new(),
             initial_sidecar_count: 0,
@@ -319,6 +325,7 @@ impl AssetPreloadResource {
             ready_count: 0,
             glb_handles: Vec::new(),
             icon_handles: Vec::new(),
+            failed_glbs: HashSet::new(),
             pending_sidecars: Vec::new(),
             registered_sidecars: HashSet::new(),
             initial_sidecar_count: 0,
@@ -401,8 +408,8 @@ pub fn begin_asset_preload(
     }
 
     // Request sidecar fetches (WASM) — on native these are read synchronously later
+    #[cfg(target_arch = "wasm32")]
     for sc_path in &manifest.sidecars {
-        #[cfg(target_arch = "wasm32")]
         crate::config_cache::request_sidecar_fetch(sc_path.clone());
     }
 
@@ -440,15 +447,15 @@ pub fn begin_asset_preload(
         }
     }
 
-    // GLBs are renderer-only — they don't affect game logic or collision.
-    // Counting them in total_count would stall the Loading gate in environments
-    // where large files take a long time to parse (e.g. headless CI WASM).
-    // GLB handles are still kept alive so the asset server loads them in the
-    // background and models pop in once ready.
-    let total_count = icon_handles.len() + manifest.sidecars.len();
+    // GLBs are now included in `total_count` (PRD: prefetch sidecar race fix).
+    // The poll loop tracks each GLB's `LoadState` and treats `Loaded` and
+    // `Failed` as terminal. A failed parse no longer deadlocks the gate; it
+    // just logs a warning and counts as "ready" so the rest of the world can
+    // proceed.
+    let total_count = glb_handles.len() + icon_handles.len() + manifest.sidecars.len();
 
     bevy::log::info!(
-        "asset_preload: discovered {} GLBs (background), {} icons, {} sidecars, {} sub-worlds (gating total {})",
+        "asset_preload: discovered {} GLBs, {} icons, {} sidecars, {} sub-worlds (gating total {})",
         glb_handles.len(),
         icon_handles.len(),
         manifest.sidecars.len(),
@@ -471,6 +478,7 @@ pub fn begin_asset_preload(
         ready_count: 0,
         glb_handles,
         icon_handles,
+        failed_glbs: HashSet::new(),
         pending_sidecars,
         registered_sidecars,
         initial_sidecar_count,
@@ -495,38 +503,46 @@ pub fn poll_asset_preload(
         return;
     }
 
-    // Poll sidecar delivery
+    // Poll sidecar delivery. Use a non-destructive check
+    // (`is_pending_sidecar_delivered`) so we don't drain the TOML out from
+    // under the renderer — `render_spawned_entities` is the sole consumer
+    // and reads the contents via `take_pending_sidecar_toml`. Calling the
+    // destructive `take_*` here would race the renderer and silently leave
+    // models unattached to their entities (the prefetch wins, then discards
+    // the TOML, so the renderer's later `take` returns `None` forever).
+    //
+    // On native this is a no-op observation (the inbox is always empty —
+    // native `load_sidecar_toml` reads from `std::fs` directly), but the
+    // call is cheap and keeps the code path identical across targets.
     let mut still_pending = Vec::new();
     for path in &preload.pending_sidecars {
-        #[cfg(not(target_arch = "wasm32"))]
-        {}
-        #[cfg(target_arch = "wasm32")]
-        {
-            match crate::config_cache::pop_pending_sidecar_toml(path) {
-                Some(_toml) => {}
-                None => still_pending.push(path.clone()),
-            }
+        if !crate::config_cache::is_pending_sidecar_delivered(path) {
+            still_pending.push(path.clone());
         }
     }
     preload.pending_sidecars = still_pending;
 
-    // Poll sub-world TOML delivery and process incrementally
-    let mut new_glbs: Vec<String> = Vec::new();
-    let mut new_icons: Vec<String> = Vec::new();
-    let mut new_sidecars: Vec<String> = Vec::new();
-    let mut new_sub_worlds: Vec<String> = Vec::new();
-    let mut still_pending_worlds: Vec<String> = Vec::new();
+    // Poll sub-world TOML delivery and process incrementally. On native,
+    // sub-worlds are read synchronously in `begin_asset_preload` so there
+    // is nothing to poll — gate the whole loop on WASM to avoid `mut`
+    // bindings that would never be mutated on native.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut new_glbs: Vec<String> = Vec::new();
+        let mut new_icons: Vec<String> = Vec::new();
+        let mut new_sidecars: Vec<String> = Vec::new();
+        let mut new_sub_worlds: Vec<String> = Vec::new();
+        let mut still_pending_worlds: Vec<String> = Vec::new();
 
-    let pending_sub_worlds = preload.pending_sub_worlds.clone();
-    for world_path in &pending_sub_worlds {
-        #[cfg(not(target_arch = "wasm32"))]
-        {}
-        #[cfg(target_arch = "wasm32")]
-        {
+        let pending_sub_worlds = preload.pending_sub_worlds.clone();
+        for world_path in &pending_sub_worlds {
             if let Some(toml_str) = crate::config_cache::pop_pending_world_toml(world_path) {
                 let mut manifest = AssetManifest::default();
                 let cache = crate::config_cache::get_config_cache();
-                let cache_ref: &std::collections::HashMap<String, crate::entity_config::EntityConfig> = &*cache;
+                let cache_ref: &std::collections::HashMap<
+                    String,
+                    crate::entity_config::EntityConfig,
+                > = &*cache;
                 match process_sub_world_toml(
                     &toml_str,
                     cache_ref,
@@ -541,51 +557,86 @@ pub fn poll_asset_preload(
                         new_sub_worlds.extend(more_worlds);
                     }
                     Err(e) => {
-                        bevy::log::warn!("asset_preload: failed to parse sub-world {world_path}: {e}");
+                        bevy::log::warn!(
+                            "asset_preload: failed to parse sub-world {world_path}: {e}"
+                        );
                     }
                 }
             } else {
                 still_pending_worlds.push(world_path.clone());
             }
         }
-    }
-    preload.pending_sub_worlds = still_pending_worlds;
+        preload.pending_sub_worlds = still_pending_worlds;
 
-    // Load newly discovered assets from sub-worlds
-    for glb_path in &new_glbs {
-        let path = format!("{}#Scene0", glb_path);
-        let handle: Handle<bevy::scene::Scene> = asset_server.load(&path);
-        preload.glb_handles.push((glb_path.clone(), handle));
-    }
-    for icon_path in &new_icons {
-        let handle: Handle<Image> = asset_server.load(icon_path);
-        preload.icon_handles.push((icon_path.clone(), handle));
-    }
-    for sc_path in &new_sidecars {
-        // Guard: only push sidecars that haven't been registered yet. The same
-        // GLB sidecar may be discovered again when a sub-world re-references a
-        // model already seen in the base world. Pushing a duplicate would leave
-        // a pending entry that can never be popped (JS delivers the TOML once).
-        if preload.registered_sidecars.insert(sc_path.clone()) {
-            #[cfg(target_arch = "wasm32")]
-            crate::config_cache::request_sidecar_fetch(sc_path.clone());
-            preload.pending_sidecars.push(sc_path.clone());
+        // Load newly discovered assets from sub-worlds
+        for glb_path in &new_glbs {
+            let path = format!("{}#Scene0", glb_path);
+            let handle: Handle<bevy::scene::Scene> = asset_server.load(&path);
+            preload.glb_handles.push((glb_path.clone(), handle));
         }
-    }
-    for w_path in &new_sub_worlds {
-        if !preload.pending_sub_worlds.contains(w_path) {
-            #[cfg(target_arch = "wasm32")]
-            crate::config_cache::request_world_fetch(w_path.clone());
-            preload.pending_sub_worlds.push(w_path.clone());
+        for icon_path in &new_icons {
+            let handle: Handle<Image> = asset_server.load(icon_path);
+            preload.icon_handles.push((icon_path.clone(), handle));
+        }
+        for sc_path in &new_sidecars {
+            // Guard: only push sidecars that haven't been registered yet. The same
+            // GLB sidecar may be discovered again when a sub-world re-references a
+            // model already seen in the base world. Pushing a duplicate would leave
+            // a pending entry that can never be popped (JS delivers the TOML once).
+            if preload.registered_sidecars.insert(sc_path.clone()) {
+                crate::config_cache::request_sidecar_fetch(sc_path.clone());
+                preload.pending_sidecars.push(sc_path.clone());
+            }
+        }
+        for w_path in &new_sub_worlds {
+            if !preload.pending_sub_worlds.contains(w_path) {
+                crate::config_cache::request_world_fetch(w_path.clone());
+                preload.pending_sub_worlds.push(w_path.clone());
+            }
         }
     }
 
-    // Recompute totals — GLBs are background-only and don't count toward the gate.
+    // ── GLB readiness ────────────────────────────────────────────────────
+    // For each GLB handle, query its LoadState. Treat `Loaded` and `Failed`
+    // as terminal. A `Failed` GLB logs a warn! once (so authoring errors
+    // surface) and counts as "ready" so it does not deadlock the gate; the
+    // entity will simply render without its model.
+    //
+    // Collect newly-failed paths into a local Vec first so the iterator's
+    // immutable borrow of `preload.glb_handles` doesn't conflict with the
+    // mutable `preload.failed_glbs.insert` we need for "warn once" tracking.
+    let mut glbs_loaded = 0usize;
+    let mut glbs_failed = 0usize;
+    let mut newly_failed: Vec<String> = Vec::new();
+    for (path, handle) in &preload.glb_handles {
+        match asset_server.load_state(handle.id()) {
+            LoadState::Loaded => glbs_loaded += 1,
+            LoadState::Failed(_) => {
+                if !preload.failed_glbs.contains(path) {
+                    newly_failed.push(path.clone());
+                }
+                glbs_failed += 1;
+            }
+            // NotLoaded / Loading — still in flight, don't count.
+            _ => {}
+        }
+    }
+    for path in newly_failed {
+        bevy::log::warn!(
+            "asset_preload: GLB failed to load: {path} — entities referencing this model will render without a mesh"
+        );
+        preload.failed_glbs.insert(path);
+    }
+    let glbs_terminal = glbs_loaded + glbs_failed;
+    let glbs_done = glbs_terminal == preload.glb_handles.len();
+
+    // Recompute totals: icons + sidecars + sub-worlds + GLBs.
     preload.total_count = preload.icon_handles.len()
-        + preload.pending_sidecars.len()
-        + preload.pending_sub_worlds.len();
+        + preload.initial_sidecar_count
+        + preload.initial_sub_world_count
+        + preload.glb_handles.len();
 
-    // Check completion: icons + sidecars + sub-worlds only. GLBs load in the background.
+    // Check completion: icons + sidecars + sub-worlds + GLBs.
     let sidecars_done = preload.pending_sidecars.is_empty();
     let sub_worlds_done = preload.pending_sub_worlds.is_empty();
     let icons_ready = preload
@@ -594,22 +645,37 @@ pub fn poll_asset_preload(
         .all(|(_, h)| images.get(h).is_some());
 
     // Recompute ready count for progress display.
-    let icon_ready = preload.icon_handles.iter().filter(|(_, h)| images.get(h).is_some()).count();
-    let sidecar_ready = preload.initial_sidecar_count.saturating_sub(preload.pending_sidecars.len());
-    let sub_world_ready = preload.initial_sub_world_count.saturating_sub(preload.pending_sub_worlds.len());
-    preload.ready_count = icon_ready + sidecar_ready + sub_world_ready;
+    let icon_ready = preload
+        .icon_handles
+        .iter()
+        .filter(|(_, h)| images.get(h).is_some())
+        .count();
+    let sidecar_ready = preload
+        .initial_sidecar_count
+        .saturating_sub(preload.pending_sidecars.len());
+    let sub_world_ready = preload
+        .initial_sub_world_count
+        .saturating_sub(preload.pending_sub_worlds.len());
+    preload.ready_count = icon_ready + sidecar_ready + sub_world_ready + glbs_terminal;
 
-    if icons_ready && sidecars_done && sub_worlds_done {
+    if icons_ready && sidecars_done && sub_worlds_done && glbs_done {
         preload.complete = true;
         preload.ready_count = preload.total_count;
         bevy::log::info!(
-            "asset_preload: gate assets ready (icons_ready={}, sidecars_done={}, sub_worlds_done={}); {} GLBs loading in background",
-            icons_ready, sidecars_done, sub_worlds_done, preload.glb_handles.len()
+            "asset_preload: all assets ready (icons={}, sidecars_done={}, sub_worlds_done={}, GLBs={}+{} failed)",
+            icons_ready, sidecars_done, sub_worlds_done, glbs_loaded, glbs_failed
         );
     } else {
         bevy::log::debug!(
-            "asset_preload: waiting: icons_ready={}, sidecars_done={} (pending={}), sub_worlds_done={} (pending={})",
-            icons_ready, sidecars_done, preload.pending_sidecars.len(), sub_worlds_done, preload.pending_sub_worlds.len()
+            "asset_preload: waiting: icons_ready={}, sidecars_done={} (pending={}), sub_worlds_done={} (pending={}), GLBs={}/{} ({} failed)",
+            icons_ready,
+            sidecars_done,
+            preload.pending_sidecars.len(),
+            sub_worlds_done,
+            preload.pending_sub_worlds.len(),
+            glbs_terminal,
+            preload.glb_handles.len(),
+            glbs_failed,
         );
     }
 }

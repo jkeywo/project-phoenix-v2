@@ -21,10 +21,18 @@ use {
     crate::entity_config::EntityConfig,
     bevy::prelude::*,
     js_sys::Function,
-    std::cell::RefCell,
-    std::collections::{HashMap, HashSet, VecDeque},
+    std::collections::VecDeque,
     wasm_bindgen::prelude::*,
 };
+
+// `RefCell` + `HashMap` are used by both the WASM thread-locals AND the
+// cross-target sidecar inbox below, so they live outside the cfg gate.
+// `HashSet` is only used inside the WASM block (the `tests` module imports
+// it locally).
+use std::cell::RefCell;
+use std::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
+use std::collections::HashSet;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::Resource;
@@ -100,16 +108,22 @@ thread_local! {
     static WORLD_FETCH_REQUESTED: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
 
+    /// Set of sidecar paths already requested to avoid duplicate JS fetches.
+    static SIDECAR_FETCH_REQUESTED: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
+}
+
+// The sidecar TOML inbox is a pure-Rust thread-local map: JS pushes here on
+// WASM, but on native we expose the same `take_*`/`is_*` API so unit tests
+// can simulate the prefetch ↔ renderer race without dragging in wasm-bindgen.
+// (The JS callback wiring — `request_sidecar_fetch` — remains WASM-only.)
+thread_local! {
     /// Queue of runtime-loaded model-rig sidecar TOML strings pushed by JS via
     /// `wasm_push_sidecar_toml` in response to a sidecar fetch request. Keyed
     /// by sidecar path. Kept separate from the world queue so the two fetch
     /// flows never alias even though they share the same JS fetch callback.
     static PENDING_SIDECAR_TOML: RefCell<HashMap<String, String>> =
         RefCell::new(HashMap::new());
-
-    /// Set of sidecar paths already requested to avoid duplicate JS fetches.
-    static SIDECAR_FETCH_REQUESTED: RefCell<HashSet<String>> =
-        RefCell::new(HashSet::new());
 }
 
 // ── Public WASM API ──────────────────────────────────────────────────────────
@@ -397,7 +411,9 @@ pub fn request_world_fetch(path: String) {
 /// Called by JS after it has fetched a rig sidecar at a path that Rust
 /// requested via `request_sidecar_fetch`. An empty string signals "absent"
 /// (404) so the caller can proceed with an identity rig and stop re-requesting.
-#[cfg(target_arch = "wasm32")]
+///
+/// Available on native too so unit tests can simulate JS delivery without
+/// dragging in wasm-bindgen.
 pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
     PENDING_SIDECAR_TOML.with(|m| {
         m.borrow_mut().insert(path, toml_str);
@@ -408,9 +424,25 @@ pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
 ///
 /// Returns `Some(toml)` (possibly an empty string meaning "absent") and removes
 /// the entry; returns `None` if the JS fetch has not yet delivered the TOML.
-#[cfg(target_arch = "wasm32")]
-pub fn pop_pending_sidecar_toml(path: &str) -> Option<String> {
+///
+/// **Single-consumer invariant.** This is destructive: once any caller takes
+/// the TOML, no other caller can read it. The renderer
+/// (`server_app::load_sidecar_toml`) is the sole intended consumer. Other
+/// callers that only need to know whether the fetch has completed should use
+/// [`is_pending_sidecar_delivered`] instead, otherwise the renderer's lookup
+/// will race the peeker and stall the model forever.
+pub fn take_pending_sidecar_toml(path: &str) -> Option<String> {
     PENDING_SIDECAR_TOML.with(|m| m.borrow_mut().remove(path))
+}
+
+/// Non-destructive check: has JS delivered the sidecar TOML for `path` yet?
+///
+/// Use this when you only need to know that the fetch has completed (e.g. the
+/// preload poller marking a sidecar as ready) and you do not need the TOML
+/// contents. Leaves the entry in `PENDING_SIDECAR_TOML` so the renderer can
+/// still consume it via [`take_pending_sidecar_toml`].
+pub fn is_pending_sidecar_delivered(path: &str) -> bool {
+    PENDING_SIDECAR_TOML.with(|m| m.borrow().contains_key(path))
 }
 
 /// Fire the JS fetch callback for a sidecar `path` if not already requested.
@@ -650,12 +682,9 @@ pub fn pop_pending_world_toml(_path: &str) -> Option<String> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn request_world_fetch(_path: String) {}
 
-// Native no-ops for the sidecar-fetch helpers (native reads sidecars via
-// std::fs directly in `load_sidecar_toml`).
-#[cfg(not(target_arch = "wasm32"))]
-pub fn pop_pending_sidecar_toml(_path: &str) -> Option<String> {
-    None
-}
+// Native no-op for the JS fetch trigger (native reads sidecars via std::fs
+// directly in `load_sidecar_toml`). The pure-Rust take/is/push functions
+// above are shared by both targets.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn request_sidecar_fetch(_path: String) {}
 
@@ -904,5 +933,85 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
             pending,
             vec!["asteroid_cosmetic.toml", "asteroid_small.toml"]
         );
+    }
+
+    // ── Sidecar inbox: peek vs take semantics ─────────────────────────────
+    //
+    // The renderer is the sole consumer of sidecar TOMLs. The preload
+    // poller must only PEEK at the inbox via `is_pending_sidecar_delivered`;
+    // calling the destructive `take_pending_sidecar_toml` from anywhere
+    // other than the renderer races and stalls the model forever (the bug
+    // these tests pin down).
+
+    /// Each test in this module mutates the process-wide
+    /// `PENDING_SIDECAR_TOML` thread-local. Tests must use unique paths so
+    /// they remain order-independent.
+    fn unique_sidecar_path(test_name: &str) -> String {
+        format!("assets/models/__test_{test_name}.model.toml")
+    }
+
+    #[test]
+    fn is_pending_sidecar_delivered_false_before_push() {
+        let path = unique_sidecar_path("not_pushed");
+        assert!(!super::is_pending_sidecar_delivered(&path));
+    }
+
+    #[test]
+    fn is_pending_sidecar_delivered_true_after_push() {
+        let path = unique_sidecar_path("pushed");
+        super::wasm_push_sidecar_toml(path.clone(), "anything".to_string());
+        assert!(super::is_pending_sidecar_delivered(&path));
+        // Cleanup so other tests do not see leftover entries.
+        let _ = super::take_pending_sidecar_toml(&path);
+    }
+
+    #[test]
+    fn is_pending_sidecar_delivered_is_non_destructive() {
+        // Regression test for the prefetch ↔ renderer race. The poll loop
+        // calls `is_pending_sidecar_delivered` to learn that the JS fetch
+        // resolved. If that call were destructive (like the old
+        // `pop_pending_sidecar_toml`), the renderer's later `take` would
+        // return `None` and the model would never attach to the entity.
+        let path = unique_sidecar_path("non_destructive");
+        super::wasm_push_sidecar_toml(path.clone(), "rig-toml-body".to_string());
+
+        // Simulate `poll_asset_preload` peeking.
+        assert!(super::is_pending_sidecar_delivered(&path));
+        // Peek again — should still be there.
+        assert!(super::is_pending_sidecar_delivered(&path));
+
+        // Simulate `render_spawned_entities` consuming the body.
+        assert_eq!(
+            super::take_pending_sidecar_toml(&path),
+            Some("rig-toml-body".to_string()),
+            "renderer must see the body that JS pushed even after the poller peeked"
+        );
+
+        // After take, the inbox is drained.
+        assert_eq!(super::take_pending_sidecar_toml(&path), None);
+        assert!(!super::is_pending_sidecar_delivered(&path));
+    }
+
+    #[test]
+    fn take_pending_sidecar_toml_is_destructive() {
+        let path = unique_sidecar_path("destructive");
+        super::wasm_push_sidecar_toml(path.clone(), "body".to_string());
+        assert_eq!(
+            super::take_pending_sidecar_toml(&path),
+            Some("body".to_string())
+        );
+        // Second take returns None — single-consumer invariant.
+        assert_eq!(super::take_pending_sidecar_toml(&path), None);
+    }
+
+    #[test]
+    fn empty_body_signals_absent_sidecar_and_is_delivered() {
+        // JS pushes an empty string on 404 so the renderer can fall back to
+        // an identity rig instead of re-requesting forever. The peek API
+        // must still report the empty body as "delivered".
+        let path = unique_sidecar_path("absent_404");
+        super::wasm_push_sidecar_toml(path.clone(), String::new());
+        assert!(super::is_pending_sidecar_delivered(&path));
+        assert_eq!(super::take_pending_sidecar_toml(&path), Some(String::new()));
     }
 }

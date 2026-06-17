@@ -519,7 +519,6 @@ pub fn poll_asset_preload(
         if !crate::config_cache::is_pending_sidecar_delivered(path) {
             still_pending.push(path.clone());
         }
-    }
     preload.pending_sidecars = still_pending;
 
     // Poll sub-world TOML delivery and process incrementally. On native,

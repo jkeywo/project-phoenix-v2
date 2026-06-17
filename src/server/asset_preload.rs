@@ -433,6 +433,15 @@ pub fn begin_asset_preload(
 
     let total_count = glb_handles.len() + icon_handles.len() + manifest.sidecars.len();
 
+    bevy::log::info!(
+        "asset_preload: discovered {} GLBs, {} icons, {} sidecars, {} sub-worlds (total {})",
+        glb_handles.len(),
+        icon_handles.len(),
+        manifest.sidecars.len(),
+        pending_worlds.len(),
+        total_count,
+    );
+
     // Track pending sidecars and sub-worlds for the poll loop
     let pending_sidecars = manifest.sidecars.clone();
     let initial_sidecar_count = pending_sidecars.len();

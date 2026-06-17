@@ -39,6 +39,20 @@ Live in `tests/smoke/`. Boot the **real** WASM server in a headless browser; moc
 
 The shim sets `window.__wasmReady` (and fires `wasm-ready`) only after **both** the fake peer opens **and** Trunk's `TrunkApplicationStarted` event fires, with a `setTimeout(0)` so `startPhoenix()` runs first. Tests `await page.waitForFunction('window.__wasmReady')` before sending anything.
 
+### Default scenario stub
+
+`fixtures.ts` installs a context-wide route that fulfils every `**/assets/worlds/default.toml` request with `MINIMAL_DEFAULT_WORLD` — an inline TOML with the player ship, "Starbase Alpha", and a single `[[comms]] on_hailed` block. The production `default.toml` references a planet (~36 MB GLB), an asteroid field (12 asteroid templates, ~150 MB of GLBs), a sun, and a nebula region; the [asset-preload](./asset-preload.md) gate waits for every GLB to reach a terminal `LoadState` before allowing `StartGame`, and headless Chromium can't realistically fetch + parse all of that within the 5 s `GameStarted` timeout used by most specs.
+
+The minimal world keeps only what the smoke suite actually inspects:
+
+- the player ship (no GLB — `player_ship.toml` is icon-only);
+- "Starbase Alpha" (one ~16 MB station GLB) — `comms.spec.ts` hails it and `world-bootstrap.spec.ts` asserts on its tag;
+- an `[[comms]] on_hailed` block with a response carrying an `add_objective` action — required by `comms.spec.ts`.
+
+Tests that need a different scenario (`tactical-fire-flow.spec.ts` with its inline `MINIMAL_TEST_WORLD`, `patrol.spec.ts` and `ship-mesh-load.spec.ts` with `patrol.toml`) keep routing their own world; Playwright matches the most-recently-added route first, so the per-test override wins.
+
+For tests that route a real production TOML but don't need its heavy entities, `fixtures.ts` exports `stripHeavyEntities(toml)` — a regex helper that removes any `[[entity]]` block whose `template_path` references the asteroid field, planet, sun, or nebula. `patrol.spec.ts` and `ship-mesh-load.spec.ts` use this on `patrol.toml` to drop the asteroid field while preserving the raider they actually inspect.
+
 ### What's covered
 
 | Spec | Issue | Verifies |

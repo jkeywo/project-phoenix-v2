@@ -18,6 +18,66 @@ const STUB_QRCODE = `'use strict';
 window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
 `;
 
+// Minimal default world used by every smoke test that doesn't route its own
+// scenario. The production `assets/worlds/default.toml` references a planet
+// (~36 MB GLB) and an asteroid field that pulls in 12 asteroid templates
+// (~150 MB of GLBs), plus a sun and a nebula region. The lobby preload gate
+// waits for every GLB to reach a terminal `LoadState` before allowing
+// `StartGame`, and headless Chromium can't realistically fetch + parse all
+// of that on a backgrounded server page within the 5 s `GameStarted`
+// timeout used by most specs.
+//
+// This minimal world keeps only what the smoke suite actually inspects:
+//
+//   - the player ship (no GLB — `player_ship.toml` is icon-only);
+//   - "Starbase Alpha" (one ~16 MB station GLB) — `comms.spec.ts` hails it
+//     and `world-bootstrap.spec.ts` asserts on its tag;
+//   - an `[[comms]] on_hailed` block with a response carrying an
+//     `add_objective` action — required by `comms.spec.ts`.
+//
+// Tests that need a different scenario (`tactical-fire-flow.spec.ts` with
+// its inline `MINIMAL_TEST_WORLD`, `patrol.spec.ts` and
+// `ship-mesh-load.spec.ts` with `patrol.toml`) keep routing their own
+// world; Playwright matches the most-recently-added route first, so the
+// per-test override wins over the fixture default below.
+export const MINIMAL_DEFAULT_WORLD = `
+[global]
+seed = 42
+title = "Smoke Test World"
+description = "Minimal world used by tests/smoke; see fixtures.ts."
+
+[ambient_light]
+color      = [0.6, 0.55, 0.5]
+brightness = 300.0
+
+[anchors]
+starbase_alpha = [1000.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+id            = "player-ship"
+transform     = { position = [0.0, 0.0, 0.0] }
+spawn_on      = "game_start"
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name          = "Starbase Alpha"
+transform     = { anchor = "starbase_alpha" }
+
+[[comms]]
+from    = "Starbase Alpha"
+trigger = "on_hailed"
+entity  = "Starbase Alpha"
+message = "USS Phoenix, this is Starbase Alpha. Please state your business."
+
+  [[comms.response]]
+  text = "We are on a survey mission."
+    [[comms.response.action]]
+    type = "add_objective"
+    id   = "obj-survey"
+    text = "Complete the survey in this sector."
+`;
+
 // Override the default context fixture to inject the PeerJS shim into every
 // page that the test creates.  No type parameter needed when overriding a
 // built-in fixture — TypeScript infers BrowserContext from the base signature.
@@ -35,6 +95,14 @@ export const test = base.extend({
     );
     await ctx.route('**/qrcode*.js', (route) =>
       route.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }),
+    );
+
+    // Default scenario: serve the minimal smoke-test world above instead of
+    // the production `assets/worlds/default.toml`. See MINIMAL_DEFAULT_WORLD
+    // for the full rationale. Tests that route their own scenario register
+    // their handler later, so it matches first (most-recently-added wins).
+    await ctx.route('**/assets/worlds/default.toml', (route) =>
+      route.fulfill({ contentType: 'text/plain', body: MINIMAL_DEFAULT_WORLD }),
     );
 
     await use(ctx);
@@ -166,6 +234,46 @@ function patchMaxPlayers(toml: string, maxPlayers: number): string {
   let patched = toml.replace(/^max_players\s*=\s*\d+/m, `max_players = ${maxPlayers}`);
   const pattern = new RegExp(`\r?\n\\[\\[stations\\.${maxPlayers + 1}\\]\\][\\s\\S]*$`);
   return patched.replace(pattern, '');
+}
+
+/**
+ * Strips heavy `[[entity]]` blocks from a world TOML so the lobby preload
+ * gate clears in CI. Specifically removes any block whose `template_path`
+ * references the asteroid field, planet, sun, or nebula region — large-GLB
+ * templates that aren't load-bearing for the smoke suite.
+ *
+ * The asteroid_field_main template alone pulls in 12 asteroid GLBs
+ * (~150 MB total); the gate waits for every GLB to reach a terminal
+ * `LoadState` before allowing `StartGame`, and the tests time out long
+ * before that happens.
+ *
+ * Use this in per-test routes that fulfil a real world file:
+ *
+ * ```ts
+ * await context.route('**\/assets/worlds/default.toml', (route) =>
+ *   route.fulfill({ contentType: 'text/plain', body: stripHeavyEntities(PATROL_TOML) }),
+ * );
+ * ```
+ *
+ * The regex is anchored to start-of-line (`m` flag) so `[[entity]]` text
+ * inside a `#` comment doesn't trigger the match, and the block body uses
+ * a tempered greedy `(?:(?!^\[\[)[\s\S])*?` so the match never crosses
+ * into a sibling `[[...]]` block — even if an intermediate non-heavy
+ * `[[entity]]` block sits between two heavy ones.
+ */
+export function stripHeavyEntities(toml: string): string {
+  const HEAVY_TEMPLATES = [
+    'asteroid_field_',
+    'planet_earth',
+    'star_sun',
+    'region_nebula',
+  ];
+  const heavyPattern = HEAVY_TEMPLATES.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const blockRegex = new RegExp(
+    String.raw`^\[\[entity\]\](?:(?!^\[\[)[\s\S])*?template_path\s*=\s*"[^"]*(?:${heavyPattern})[^"]*"(?:(?!^\[\[)[\s\S])*`,
+    'gm',
+  );
+  return toml.replace(blockRegex, '').replace(/\n{3,}/g, '\n\n');
 }
 
 // Boots a fresh server page, optionally patching the player_ship.toml fetch to

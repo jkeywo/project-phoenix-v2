@@ -6,7 +6,7 @@
 // `assets/models/dynasty_destroyer.glb` and return 200 — NOT the broken
 // `assets/assets/models/...` (404) that left entities unrendered.
 
-import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady, stripHeavyEntities } from './fixtures';
 import fs from 'fs';
 import path from 'path';
 
@@ -16,8 +16,11 @@ const PATROL_TOML = fs.readFileSync(
 );
 
 test('NPC ship GLB model loads (200) after game start', async ({ context }) => {
+  // Strip the asteroid_field block from patrol.toml so the lobby preload
+  // gate clears in CI. The raider (the entity this test inspects) is
+  // preserved.
   await context.route('**/assets/worlds/default.toml', (route) =>
-    route.fulfill({ contentType: 'text/plain', body: PATROL_TOML }),
+    route.fulfill({ contentType: 'text/plain', body: stripHeavyEntities(PATROL_TOML) }),
   );
 
   const serverPage = await context.newPage();

@@ -6,7 +6,7 @@
 // confirming that the pirate_raider.toml → patrol.toml → entity-spawn
 // pipeline is wired end-to-end.
 
-import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady, stripHeavyEntities } from './fixtures';
 import fs from 'fs';
 import path from 'path';
 
@@ -18,8 +18,11 @@ const PATROL_TOML = fs.readFileSync(
 
 test('patrol scenario: raider entity appears in WorldSetup after game start', async ({ context }) => {
   // Intercept the default world fetch and serve patrol.toml instead.
+  // `stripHeavyEntities` removes the asteroid_field block so the lobby
+  // preload gate clears in CI without waiting for ~150 MB of asteroid GLBs.
+  // The raider is preserved (smoke asserts on it below).
   await context.route('**/assets/worlds/default.toml', (route) =>
-    route.fulfill({ contentType: 'text/plain', body: PATROL_TOML }),
+    route.fulfill({ contentType: 'text/plain', body: stripHeavyEntities(PATROL_TOML) }),
   );
 
   const serverPage = await context.newPage();

@@ -189,7 +189,7 @@ export function createRigScene(host, deps = {}) {
     orientAnchor(THREE, anchor, dir);
 
     const dot = new THREE.Mesh(
-      new THREE.SphereGeometry(0.4, 16, 12),
+      new THREE.SphereGeometry(0.1, 16, 12),
       new THREE.MeshBasicMaterial({ color: MARKER_COLOR }),
     );
     anchor.add(dot);

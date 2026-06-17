@@ -1507,8 +1507,10 @@ form {
 
 .models-three-pane {
   display: grid;
-  grid-template-columns: 220px 320px 1fr;
+  grid-template-columns: 220px 1fr 320px;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
   height: 100%;
   min-height: 0;
 }
@@ -1519,9 +1521,9 @@ form {
   overflow: auto;
   min-height: 0;
 }
-.models-pane-left   { padding: 6px; }
-.models-pane-center { padding: 8px; }
-.models-pane-right  { padding: 0; position: relative; display: flex; flex-direction: column; }
+.models-pane-left     { padding: 6px; }
+.models-pane-controls { padding: 8px; overflow-y: auto; }
+.models-pane-viewport { padding: 0; position: relative; display: flex; flex-direction: column; }
 
 .models-pane .placeholder {
   color: #777; font-size: 12px; padding: 12px; font-style: italic;
@@ -1610,6 +1612,16 @@ form {
 }
 .models-marker-btn:hover { background: #3a3d44; }
 .models-marker-btn-delete:hover { background: #5a2d2d; color: #fff; }
+
+.models-marker-wrap { display: flex; flex-direction: column; }
+.models-marker-fields {
+  padding: 4px 6px 6px;
+  background: #1a1c20;
+  border: 1px solid #2f323a;
+  border-top: none;
+  border-radius: 0 0 3px 3px;
+  display: flex; flex-direction: column; gap: 4px;
+}
 
 .models-save-row { margin-top: 12px; }
 

@@ -79,13 +79,19 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
   host.appendChild(wrap);
 
   const leftPane = el('div', 'models-pane models-pane-left');
-  const centerPane = el('div', 'models-pane models-pane-center');
-  const rightPane = el('div', 'models-pane models-pane-right');
-  wrap.append(leftPane, centerPane, rightPane);
+  // Centre column = viewport (canvas); right column = transform + markers
+  const viewportPane = el('div', 'models-pane models-pane-viewport');
+  const controlPane = el('div', 'models-pane models-pane-controls');
+  wrap.append(leftPane, viewportPane, controlPane);
+
+  // Keep legacy variable names so existing code below compiles unchanged.
+  // renderCenter() writes the transform/marker controls into controlPane.
+  const centerPane = controlPane;
+  const rightPane = viewportPane; // unused after this point except extents
 
   const canvasHost = el('div', 'models-rig-canvas');
   const extentsDisplay = el('div', 'models-extents-display');
-  rightPane.append(canvasHost, extentsDisplay);
+  viewportPane.append(canvasHost, extentsDisplay);
 
   // ── Path helpers ──────────────────────────────────────────────────────
   const sidecarPath = (stem, variant) => `${MODELS_DIR}/${buildSidecarName(stem, variant)}`;
@@ -230,6 +236,8 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
   }
 
   function renderMarkerRow(name) {
+    const wrap = el('div', 'models-marker-wrap');
+
     const row = el('div', 'models-marker-row');
     if (name === selectedMarker) row.classList.add('models-marker-row-active');
 
@@ -251,7 +259,33 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
     delBtn.addEventListener('click', () => handleRemoveMarker(name));
     row.appendChild(delBtn);
 
-    return row;
+    wrap.appendChild(row);
+
+    // Numerical editors shown only for the selected marker.
+    if (name === selectedMarker) {
+      const m = rig.markers[name];
+      const fields = el('div', 'models-marker-fields');
+
+      fields.appendChild(vec3Row('Position', m.position, (v) => {
+        m.position = v;
+        rigUpdateMarker(rig, name, { position: v, direction: m.direction });
+        scene?.addMarker(name, { position: v, direction: m.direction });
+        scene?.select(name);
+        markCurrentDirty();
+      }, 0.01));
+
+      fields.appendChild(vec3Row('Direction', m.direction, (v) => {
+        m.direction = v;
+        rigUpdateMarker(rig, name, { position: m.position, direction: v });
+        scene?.addMarker(name, { position: m.position, direction: v });
+        scene?.select(name);
+        markCurrentDirty();
+      }, 0.01));
+
+      wrap.appendChild(fields);
+    }
+
+    return wrap;
   }
 
   function renderExtents() {
@@ -357,8 +391,9 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
   function onMarkerMoved(name, { position, direction }) {
     rigUpdateMarker(rig, name, { position, direction });
     markCurrentDirty();
-    // Avoid a full re-render mid-drag; just refresh the dirty markers.
+    // Refresh dirty indicator + numerical fields for the moved marker.
     renderLeft();
+    if (name === selectedMarker) renderCenter();
   }
 
   // ── Selection / loading ───────────────────────────────────────────────

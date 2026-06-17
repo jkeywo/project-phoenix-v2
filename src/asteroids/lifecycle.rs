@@ -501,6 +501,7 @@ fn try_spawn_cell(
         AsteroidShieldPierce(shield_pierce),
         asteroid_hull,
         Transform::from_xyz(world_x, spawn.y, world_z),
+        Visibility::default(),
         bevy_rapier3d::prelude::Collider::ball(collider_radius),
         bevy_rapier3d::prelude::RigidBody::Fixed,
     ));
@@ -608,6 +609,7 @@ fn spawn_cosmetic_entity(
 
     let mut entity_cmd = commands.spawn((
         Transform::from_xyz(spawn.x + anchor_offset[0], y, spawn.z + anchor_offset[2]),
+        Visibility::default(),
         bevy_rapier3d::prelude::Collider::ball(collider_radius),
         bevy_rapier3d::prelude::RigidBody::Fixed,
     ));

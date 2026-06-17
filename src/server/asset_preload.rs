@@ -431,10 +431,15 @@ pub fn begin_asset_preload(
         }
     }
 
-    let total_count = glb_handles.len() + icon_handles.len() + manifest.sidecars.len();
+    // GLBs are renderer-only — they don't affect game logic or collision.
+    // Counting them in total_count would stall the Loading gate in environments
+    // where large files take a long time to parse (e.g. headless CI WASM).
+    // GLB handles are still kept alive so the asset server loads them in the
+    // background and models pop in once ready.
+    let total_count = icon_handles.len() + manifest.sidecars.len();
 
     bevy::log::info!(
-        "asset_preload: discovered {} GLBs, {} icons, {} sidecars, {} sub-worlds (total {})",
+        "asset_preload: discovered {} GLBs (background), {} icons, {} sidecars, {} sub-worlds (gating total {})",
         glb_handles.len(),
         icon_handles.len(),
         manifest.sidecars.len(),
@@ -471,7 +476,7 @@ pub fn begin_asset_preload(
 /// Run every frame: poll asset readiness and update progress.
 pub fn poll_asset_preload(
     mut preload: ResMut<AssetPreloadResource>,
-    scenes: Res<Assets<bevy::scene::Scene>>,
+    _scenes: Res<Assets<bevy::scene::Scene>>,
     images: Res<Assets<Image>>,
     asset_server: Res<AssetServer>,
 ) {
@@ -558,44 +563,36 @@ pub fn poll_asset_preload(
         }
     }
 
-    // Recompute totals
-    preload.total_count = preload.glb_handles.len()
-        + preload.icon_handles.len()
+    // Recompute totals — GLBs are background-only and don't count toward the gate.
+    preload.total_count = preload.icon_handles.len()
         + preload.pending_sidecars.len()
         + preload.pending_sub_worlds.len();
 
-    // Check completion
+    // Check completion: icons + sidecars + sub-worlds only. GLBs load in the background.
     let sidecars_done = preload.pending_sidecars.is_empty();
     let sub_worlds_done = preload.pending_sub_worlds.is_empty();
-    let glbs_ready = preload
-        .glb_handles
-        .iter()
-        .all(|(_, h)| scenes.get(h).is_some());
     let icons_ready = preload
         .icon_handles
         .iter()
         .all(|(_, h)| images.get(h).is_some());
 
-    // Recompute ready count each tick for progress.
-    // GLBs and icons are counted when the asset server has them cached.
-    // Sidecars/sub-worlds are counted as resolved when no longer pending.
-    let glb_ready = preload.glb_handles.iter().filter(|(_, h)| scenes.get(h).is_some()).count();
+    // Recompute ready count for progress display.
     let icon_ready = preload.icon_handles.iter().filter(|(_, h)| images.get(h).is_some()).count();
     let sidecar_ready = preload.initial_sidecar_count.saturating_sub(preload.pending_sidecars.len());
     let sub_world_ready = preload.initial_sub_world_count.saturating_sub(preload.pending_sub_worlds.len());
-    preload.ready_count = glb_ready + icon_ready + sidecar_ready + sub_world_ready;
+    preload.ready_count = icon_ready + sidecar_ready + sub_world_ready;
 
-    if glbs_ready && icons_ready && sidecars_done && sub_worlds_done {
+    if icons_ready && sidecars_done && sub_worlds_done {
         preload.complete = true;
         preload.ready_count = preload.total_count;
         bevy::log::info!(
-            "asset_preload: all {} assets ready (glbs_ready={}, icons_ready={}, sidecars_done={}, sub_worlds_done={})",
-            preload.total_count, glbs_ready, icons_ready, sidecars_done, sub_worlds_done
+            "asset_preload: gate assets ready (icons_ready={}, sidecars_done={}, sub_worlds_done={}); {} GLBs loading in background",
+            icons_ready, sidecars_done, sub_worlds_done, preload.glb_handles.len()
         );
     } else {
         bevy::log::debug!(
-            "asset_preload: waiting: glbs_ready={}, icons_ready={}, sidecars_done={} (pending={}), sub_worlds_done={} (pending={})",
-            glbs_ready, icons_ready, sidecars_done, preload.pending_sidecars.len(), sub_worlds_done, preload.pending_sub_worlds.len()
+            "asset_preload: waiting: icons_ready={}, sidecars_done={} (pending={}), sub_worlds_done={} (pending={})",
+            icons_ready, sidecars_done, preload.pending_sidecars.len(), sub_worlds_done, preload.pending_sub_worlds.len()
         );
     }
 }

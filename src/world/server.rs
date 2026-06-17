@@ -4155,6 +4155,7 @@ mod tests {
                 },
             ],
             transition: vec![],
+            ..Default::default()
         };
 
         let entity = app

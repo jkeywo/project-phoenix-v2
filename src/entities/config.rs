@@ -45,7 +45,7 @@ impl StateConfig {
 
 /// Configuration for an AI behaviour controller attached to an entity.
 /// Re-exports the AI module's config type so callers only need `entity_config`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct BehaviourConfig {
     /// Name of the initial AI state (e.g. `"idle"`).
@@ -413,7 +413,7 @@ pub type PhaserBankId = String;
 ///
 /// `beam_range` is in world units. When `0.0`, falls back to
 /// `PhaserCombatConfig::DEFAULT_PHASER_RANGE`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PhaserBankConfig {
     pub id: PhaserBankId,
@@ -2520,6 +2520,7 @@ travel_duration_secs = 9.0
         let r = RepairConfig {
             travel_duration_secs: 3.0,
             repair_rate_hp_per_sec: 2.0,
+            ..Default::default()
         };
         let rt = r.to_runtime();
         assert_eq!(rt.travel_duration, 3.0);
@@ -2845,7 +2846,6 @@ fire_arc_deg = 90.0
     fn phaser_banks_defaults_to_empty_vec_when_absent() {
         let toml_str = r##"
 [weapons_console]
-beam_range = 40.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let wc = config.weapons_console.expect("weapons_console");
@@ -2866,6 +2866,7 @@ beam_range = 40.0
                 beam_range: 0.0,
                 shield_pierce: None,
                 marker: None,
+                ..Default::default()
             },
             PhaserBankConfig {
                 id: "starboard".into(),
@@ -2875,6 +2876,7 @@ beam_range = 40.0
                 beam_range: 0.0,
                 shield_pierce: None,
                 marker: None,
+                ..Default::default()
             },
         ];
         assert!(validate_phaser_banks(&banks).is_ok());
@@ -2897,6 +2899,7 @@ beam_range = 40.0
                 beam_range: 0.0,
                 shield_pierce: None,
                 marker: None,
+                ..Default::default()
             },
             PhaserBankConfig {
                 id: "port".into(),
@@ -2906,6 +2909,7 @@ beam_range = 40.0
                 beam_range: 0.0,
                 shield_pierce: None,
                 marker: None,
+                ..Default::default()
             },
         ];
         let err = validate_phaser_banks(&banks).unwrap_err();
@@ -2923,6 +2927,7 @@ beam_range = 40.0
             beam_range: 0.0,
             shield_pierce: None,
             marker: None,
+            ..Default::default()
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(
@@ -2941,6 +2946,7 @@ beam_range = 40.0
             beam_range: 0.0,
             shield_pierce: None,
             marker: None,
+            ..Default::default()
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(
@@ -2956,6 +2962,7 @@ beam_range = 40.0
             beam_range: 0.0,
             shield_pierce: None,
             marker: None,
+            ..Default::default()
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(err.contains("fire_arc_deg"), "zero arc rejected: {err}");

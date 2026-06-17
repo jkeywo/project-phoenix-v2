@@ -793,6 +793,7 @@ mod tests {
                     initial_state: "idle".to_string(),
                     state: vec![],
                     transition: vec![],
+                    ..Default::default()
                 }),
             ))
             .id();
@@ -841,6 +842,7 @@ mod tests {
                     initial_state: "idle".to_string(),
                     state: vec![],
                     transition: vec![],
+                    ..Default::default()
                 }),
             ))
             .id();
@@ -917,6 +919,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         }
     }
 
@@ -1049,6 +1052,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
 
         let entity = app
@@ -1116,6 +1120,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
 
         // Entity has no ScenarioUnloadedMarker
@@ -1195,6 +1200,7 @@ mod tests {
                     initial_state: "idle".into(),
                     state: vec![],
                     transition: vec![],
+                    ..Default::default()
                 }),
                 EntityConsoleHull(hull),
             ))
@@ -1250,6 +1256,7 @@ mod tests {
                     initial_state: "idle".into(),
                     state: vec![],
                     transition: vec![],
+                    ..Default::default()
                 }),
                 WeaponsConsoleSection(make_weapons_console_config(40.0)),
                 EntityPhaserState::default(), // cooldown 0 Ã¢â€ â€™ ready
@@ -1283,6 +1290,7 @@ mod tests {
                     initial_state: "idle".into(),
                     state: vec![],
                     transition: vec![],
+                    ..Default::default()
                 }),
                 WeaponsConsoleSection(make_weapons_console_config(40.0)),
                 EntityPhaserState {

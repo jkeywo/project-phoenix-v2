@@ -285,6 +285,7 @@ mod tests {
             beam_range: 0.0,
             shield_pierce: None,
             marker: None,
+            ..Default::default()
         }
     }
 

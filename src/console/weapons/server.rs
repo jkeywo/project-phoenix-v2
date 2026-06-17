@@ -3746,6 +3746,7 @@ mod tests {
                 duration_secs: 0.0,
             }],
             transition: vec![],
+            ..Default::default()
         };
 
         // Spawn NPC at origin, facing -Z (yaw = 0 → forward = -Z).

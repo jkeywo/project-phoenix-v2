@@ -1578,6 +1578,7 @@ mod tests {
                 duration_secs: 0.0,
             }],
             transition: vec![],
+            ..Default::default()
         };
         let state = build_initial_state(&config);
         assert_eq!(state, AiState::Pursuing { target_speed: 0.9 });
@@ -1714,6 +1715,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         }
     }
 
@@ -1842,6 +1844,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
 
         let registry = mutual_hostile_registry();
@@ -1904,6 +1907,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
         let registry = mutual_hostile_registry();
         let world = WorldView {
@@ -1968,6 +1972,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
         let registry = mutual_hostile_registry();
         // Friendly = same faction as self
@@ -2027,6 +2032,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
         let registry = mutual_hostile_registry();
         let world = WorldView {
@@ -2084,6 +2090,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         }
     }
 
@@ -2219,6 +2226,7 @@ mod tests {
                     seconds: None,
                 },
             ],
+            ..Default::default()
         };
         // Both conditions are true: enemy in range AND attacker present
         let world = WorldView {
@@ -2281,6 +2289,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
         let world = WorldView {
             attacker_this_tick: Some(attacker_id),
@@ -2337,6 +2346,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
         let world = WorldView {
             attacker_this_tick: Some(attacker_id),
@@ -2395,6 +2405,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
         let world = WorldView {
             attacker_this_tick: Some(attacker_id),
@@ -2444,6 +2455,7 @@ mod tests {
                 duration_secs: 0.0,
             }],
             transition: vec![],
+            ..Default::default()
         };
         let state = build_initial_state(&config);
         assert_eq!(
@@ -2823,6 +2835,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
         // entity_weapons_range=40, target at 20 — should be in range
         let world = WorldView {
@@ -2880,6 +2893,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         };
         // entity_weapons_range=40, target at 100 — out of range
         let world = WorldView {
@@ -3076,6 +3090,7 @@ mod tests {
                 threshold: Some(threshold),
                 seconds: None,
             }],
+            ..Default::default()
         }
     }
 
@@ -3175,6 +3190,7 @@ mod tests {
                 threshold: None,
                 seconds: Some(seconds),
             }],
+            ..Default::default()
         }
     }
 
@@ -3255,6 +3271,7 @@ mod tests {
                 threshold: None,
                 seconds: None,
             }],
+            ..Default::default()
         }
     }
 

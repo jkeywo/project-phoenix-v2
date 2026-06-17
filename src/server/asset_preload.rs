@@ -271,6 +271,9 @@ pub struct AssetPreloadResource {
 
     // Sidecar tracking
     pending_sidecars: Vec<String>,
+    /// All sidecar paths ever pushed to `pending_sidecars` — prevents duplicates
+    /// when sub-world processing re-discovers the same model.
+    registered_sidecars: HashSet<String>,
     initial_sidecar_count: usize,
 
     // Sub-world tracking (for incremental discovery)
@@ -296,6 +299,7 @@ impl Default for AssetPreloadResource {
             glb_handles: Vec::new(),
             icon_handles: Vec::new(),
             pending_sidecars: Vec::new(),
+            registered_sidecars: HashSet::new(),
             initial_sidecar_count: 0,
             pending_sub_worlds: Vec::new(),
             initial_sub_world_count: 0,
@@ -316,6 +320,7 @@ impl AssetPreloadResource {
             glb_handles: Vec::new(),
             icon_handles: Vec::new(),
             pending_sidecars: Vec::new(),
+            registered_sidecars: HashSet::new(),
             initial_sidecar_count: 0,
             pending_sub_worlds: Vec::new(),
             initial_sub_world_count: 0,
@@ -453,6 +458,7 @@ pub fn begin_asset_preload(
 
     // Track pending sidecars and sub-worlds for the poll loop
     let pending_sidecars = manifest.sidecars.clone();
+    let registered_sidecars: HashSet<String> = manifest.sidecars.iter().cloned().collect();
     let initial_sidecar_count = pending_sidecars.len();
     let initial_sub_world_count = pending_worlds.len();
     let mut seen_worlds = HashSet::new();
@@ -466,6 +472,7 @@ pub fn begin_asset_preload(
         glb_handles,
         icon_handles,
         pending_sidecars,
+        registered_sidecars,
         initial_sidecar_count,
         pending_sub_worlds: pending_worlds,
         initial_sub_world_count,
@@ -555,9 +562,15 @@ pub fn poll_asset_preload(
         preload.icon_handles.push((icon_path.clone(), handle));
     }
     for sc_path in &new_sidecars {
-        #[cfg(target_arch = "wasm32")]
-        crate::config_cache::request_sidecar_fetch(sc_path.clone());
-        preload.pending_sidecars.push(sc_path.clone());
+        // Guard: only push sidecars that haven't been registered yet. The same
+        // GLB sidecar may be discovered again when a sub-world re-references a
+        // model already seen in the base world. Pushing a duplicate would leave
+        // a pending entry that can never be popped (JS delivers the TOML once).
+        if preload.registered_sidecars.insert(sc_path.clone()) {
+            #[cfg(target_arch = "wasm32")]
+            crate::config_cache::request_sidecar_fetch(sc_path.clone());
+            preload.pending_sidecars.push(sc_path.clone());
+        }
     }
     for w_path in &new_sub_worlds {
         if !preload.pending_sub_worlds.contains(w_path) {

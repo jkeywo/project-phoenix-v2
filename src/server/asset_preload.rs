@@ -203,10 +203,14 @@ fn discover_world_assets(
 /// Build the initial `AssetManifest` from the base world + config cache.
 /// Returns a list of sub-world TOML paths that need to be fetched and
 /// recursively processed.
+/// Returns `(manifest, pending_world_paths, seen_entity_paths)`.
+/// The caller should store `seen_entity_paths` in `AssetPreloadResource` so
+/// that incremental sub-world processing shares the same dedup set and does
+/// not push duplicate sidecar paths into `pending_sidecars`.
 pub fn discover_base_assets(
     world: &WorldConfig,
     config_cache: &HashMap<String, EntityConfig>,
-) -> (AssetManifest, Vec<String>) {
+) -> (AssetManifest, Vec<String>, HashSet<String>) {
     let mut seen_entities = HashSet::new();
     let mut manifest = AssetManifest::default();
     let mut pending_worlds = Vec::new();
@@ -220,7 +224,7 @@ pub fn discover_base_assets(
         "(base)",
     );
 
-    (manifest, pending_worlds)
+    (manifest, pending_worlds, seen_entities)
 }
 
 /// Process a sub-world TOML string that was fetched from disk/network.
@@ -374,7 +378,7 @@ pub fn begin_asset_preload(
     }
 
     // Initial discovery from base world
-    let (mut manifest, pending_worlds) = discover_base_assets(&world_config, &config_cache);
+    let (mut manifest, pending_worlds, base_seen_entities) = discover_base_assets(&world_config, &config_cache);
 
     // Start loading GLB models
     let mut glb_handles = Vec::new();
@@ -405,7 +409,7 @@ pub fn begin_asset_preload(
         {
             // On native we can read the file synchronously right now
             if let Ok(toml_str) = std::fs::read_to_string(world_path) {
-                let mut seen_entities = HashSet::new();
+                let mut seen_entities = base_seen_entities.clone();
                 let mut manifest_mut = AssetManifest::default();
                 let _ = process_sub_world_toml(
                     &toml_str,
@@ -466,7 +470,7 @@ pub fn begin_asset_preload(
         pending_sub_worlds: pending_worlds,
         initial_sub_world_count,
         seen_worlds,
-        seen_entities: HashSet::new(),
+        seen_entities: base_seen_entities,
         progress_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
     };
 

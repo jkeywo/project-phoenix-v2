@@ -39,10 +39,6 @@ Live in `tests/smoke/`. Boot the **real** WASM server in a headless browser; moc
 
 The shim sets `window.__wasmReady` (and fires `wasm-ready`) only after **both** the fake peer opens **and** Trunk's `TrunkApplicationStarted` event fires, with a `setTimeout(0)` so `startPhoenix()` runs first. Tests `await page.waitForFunction('window.__wasmReady')` before sending anything.
 
-### Asset stubbing
-
-`fixtures.ts` installs a context-wide route that fulfils every `**/*.glb` request with an empty 200 body. The real `assets/models/*.glb` files total ~560 MB (single asteroid GLBs are ~38 MB) and parsing them in headless Chromium reliably blew the `GameStarted` timeout once the [asset-preload](./asset-preload.md) gate started waiting on GLB readiness. Bevy's glTF loader sees the missing header and surfaces `LoadState::Failed` — terminal, counts as "ready", the gate clears immediately. Tests that genuinely need the real bytes (today only `ship-mesh-load.spec.ts`) opt out per-URL with `route.continue()`, which skips all earlier matching handlers (including the fixture stub) and hits the static `dist/` server directly.
-
 ### What's covered
 
 | Spec | Issue | Verifies |

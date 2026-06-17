@@ -118,21 +118,6 @@ the gate (`asset_preload.rs:455-465`). This makes the captain's Engage
 properly wait until models are visible-ready, eliminating the "models pop
 in mid-game" UX issue.
 
-### Smoke-test interaction (`tests/smoke/fixtures.ts`)
-
-Including GLBs in the gate did, however, surface a separate CI issue: the
-real `assets/models/*.glb` files total ~560 MB (asteroid variants alone are
-~38 MB each), and fetching/parsing all of them in headless Chromium while
-the server page is rAF-throttled in the background routinely blew the 5 s
-`GameStarted` timeout in 11 smoke specs. The fix sits in the test layer,
-not in the gate: `fixtures.ts` installs a context-wide route that fulfils
-every `**/*.glb` request with an empty 200 body. Bevy's glTF loader fails
-to parse the missing header and surfaces `LoadState::Failed` — terminal,
-counts as ready, gate clears immediately. Tests that genuinely need the
-real bytes (`ship-mesh-load.spec.ts`) opt out per-URL with
-`route.continue()`, which sends the request straight to the static `dist/`
-server and skips all other matching handlers.
-
 ## Why the lobby gate was bypassed (and why it's safe to re-enable)
 
 `src/lobby/server.rs:275-296` used to hardcode `preload_complete = true`

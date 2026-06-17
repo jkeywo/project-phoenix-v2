@@ -18,23 +18,6 @@ const STUB_QRCODE = `'use strict';
 window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
 `;
 
-// Default GLB stub: an empty 200 response. Bevy's glTF loader fails to parse
-// the (missing) 12-byte header and surfaces `LoadState::Failed`, which
-// `poll_asset_preload` treats as terminal — the asset counts as "ready" so
-// the lobby preload gate clears immediately. The renderer logs one warn! per
-// failed asset and inserts `RenderProcessed` so the entity is not revisited.
-//
-// Why stub by default: the real `assets/models/*.glb` files total ~560 MB
-// (asteroid variants alone are ~38 MB each). Headless Chromium has to fetch,
-// decompress, and hand them to Bevy's WASM loader; on a backgrounded server
-// page (rAF throttled to ~1 fps) this routinely blows the 5 s `GameStarted`
-// timeout in spec files. Smoke tests assert on game-state messages
-// (SimState, GameStarted, WorldSetup, etc.) — they don't care whether a
-// mesh is visible. Tests that DO care (`ship-mesh-load.spec.ts`) override
-// this route per-test; Playwright matches the most-recently-added route
-// first, so the per-test override wins.
-const STUB_GLB_BODY = Buffer.alloc(0);
-
 // Override the default context fixture to inject the PeerJS shim into every
 // page that the test creates.  No type parameter needed when overriding a
 // built-in fixture — TypeScript infers BrowserContext from the base signature.
@@ -52,11 +35,6 @@ export const test = base.extend({
     );
     await ctx.route('**/qrcode*.js', (route) =>
       route.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }),
-    );
-
-    // Default GLB stub — see STUB_GLB_BODY comment above.
-    await ctx.route('**/*.glb', (route) =>
-      route.fulfill({ status: 200, contentType: 'model/gltf-binary', body: STUB_GLB_BODY }),
     );
 
     await use(ctx);

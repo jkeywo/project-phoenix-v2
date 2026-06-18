@@ -964,6 +964,28 @@ pub struct SensorsConsoleConfig {
     pub complexity_toml: Option<String>,
 }
 
+/// Single-facing NPC shield config (#471). Loaded from a top-level
+/// `[shields]` block on an entity TOML and translated to an
+/// `EntityShield` component at spawn time.
+///
+/// This is **independent** of `ShieldsBaseConfig` (which lives under
+/// `[shields_console.base]` and feeds the player ship's four-quadrant
+/// `ShieldSystem`). The NPC model is deliberately simpler:
+/// - one facing
+/// - `f32` HP (matches the rest of the NPC damage pipeline which is `f32`)
+/// - no `offline_duration`: once depleted, the shield is permanently
+///   broken for the rest of the engagement (regen will not restart).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntityShieldConfig {
+    /// Maximum shield HP. Required.
+    pub max_hp: f32,
+    /// HP regenerated per second while not broken and below `max_hp`.
+    /// Defaults to `0.0` (no regen) when omitted.
+    #[serde(default)]
+    pub regen_per_sec: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct EntityConfig {
@@ -984,6 +1006,15 @@ pub struct EntityConfig {
     pub navigation_console: Option<NavigationConsoleConfig>,
     /// Shields console focus config.
     pub shields_console: Option<ShieldsConsoleConfig>,
+    /// Single-facing NPC shield section (#471). When present the entity
+    /// gains an `EntityShield` component; incoming damage is routed through
+    /// `split_damage_for_pierce` then through the shield before falling
+    /// through to hull. Permanently breaks at 0 HP — no offline/regen
+    /// recovery once depleted. **This is the NPC-side shield model and is
+    /// orthogonal to the player ship's `shields_console` four-quadrant
+    /// system.**
+    #[serde(default)]
+    pub shields: Option<EntityShieldConfig>,
     /// Torpedo system config (player ship and any NPC ship with torpedoes).
     pub torpedoes: Option<TorpedoesConfig>,
     /// Repair team timings (travel duration, repair rate).

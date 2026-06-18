@@ -1,4 +1,4 @@
-﻿use bevy::prelude::*;
+use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::entity_config::EntityConfig;
@@ -6,7 +6,7 @@ use crate::entity_config::{AsteroidFieldConfig, LightConfig, StarConfig};
 use crate::region_effects::RegionEffectKind;
 use crate::region_shape::RegionShape;
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Marker Components Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// â”€â”€ Marker Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Every entity spawned by the generic spawner carries a UUID.
 #[derive(Component, Clone, Debug)]
@@ -40,7 +40,7 @@ pub struct ColliderSection(pub crate::entity_config::ColliderConfig);
 pub struct AppearanceSection(pub crate::entity_config::AppearanceConfig);
 
 /// Present when the EntityConfig has a [mesh] section.
-/// Drives all 3-D viewscreen rendering Ã¢â‚¬â€ the renderer creates a Bevy mesh and
+/// Drives all 3-D viewscreen rendering â€” the renderer creates a Bevy mesh and
 /// material from this data.
 #[derive(Component, Clone, Debug)]
 pub struct MeshSection(pub crate::entity_config::MeshConfig);
@@ -102,12 +102,88 @@ pub struct EntityTarget(pub crate::entity_target::TargetSection);
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Spawner Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+/// Single-facing NPC shield component (#471).
+///
+/// Attached when the entity TOML has a top-level `[shields]` block (see
+/// `EntityShieldConfig`). The damage pipeline routes incoming shots
+/// through `split_damage_for_pierce`: the absorbed portion lands here,
+/// pierced portion bypasses straight to hull. Regen ticks each frame
+/// while `!broken && current_hp < max_hp`.
+///
+/// **Permanent break semantics:** once `current_hp` reaches `0.0`, the
+/// shield is latched broken (`broken = true`) and never recovers - all
+/// subsequent damage skips the shield routing and goes straight to hull
+/// regardless of the attacker's `shield_pierce`. Regen is suppressed
+/// while broken.
+///
+/// Distinct from the player ship's four-quadrant `ShipShields` resource,
+/// which carries a multi-facing `ShieldSystem` with offline timers.
+#[derive(Component, Clone, Debug)]
+pub struct EntityShield {
+    pub current_hp: f32,
+    pub max_hp: f32,
+    pub regen_per_sec: f32,
+    pub broken: bool,
+}
+
+impl EntityShield {
+    /// Build a fresh shield from its config: full HP, not broken.
+    pub fn from_config(cfg: &crate::entity_config::EntityShieldConfig) -> Self {
+        Self {
+            current_hp: cfg.max_hp,
+            max_hp: cfg.max_hp,
+            regen_per_sec: cfg.regen_per_sec,
+            broken: false,
+        }
+    }
+
+    /// Apply `absorbed` damage to the shield, returning the leak that
+    /// overflows to hull. If the shield depletes during this hit, the
+    /// `broken` latch is set; subsequent calls return the full `absorbed`
+    /// amount as leak (the shield will not regen back).
+    pub fn apply_damage(&mut self, absorbed: f32) -> f32 {
+        if self.broken {
+            return absorbed;
+        }
+        if absorbed <= 0.0 {
+            return 0.0;
+        }
+        if absorbed >= self.current_hp {
+            let leak = absorbed - self.current_hp;
+            self.current_hp = 0.0;
+            self.broken = true;
+            leak
+        } else {
+            self.current_hp -= absorbed;
+            0.0
+        }
+    }
+
+    /// Advance regen for `dt` seconds. No-op while broken or already at max.
+    pub fn tick_regen(&mut self, dt: f32) {
+        if self.broken || self.current_hp >= self.max_hp {
+            return;
+        }
+        self.current_hp = (self.current_hp + self.regen_per_sec * dt).min(self.max_hp);
+    }
+
+    /// Fraction (0.0..=1.0) of current vs max HP. Returns 0.0 when broken
+    /// regardless of `current_hp` (broken shields read as zero on the wire).
+    pub fn fraction(&self) -> f32 {
+        if self.broken || self.max_hp <= 0.0 {
+            0.0
+        } else {
+            (self.current_hp / self.max_hp).clamp(0.0, 1.0)
+        }
+    }
+}
+
+// â”€â”€ Spawner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Spawn an entity from a resolved EntityConfig.
 ///
 /// Walks each optional section and inserts a component if present.
-/// No type dispatch Ã¢â‚¬â€ just checks Option::is_some for each field.
+/// No type dispatch â€” just checks Option::is_some for each field.
 ///
 /// Returns the spawned Entity. Callers must flush commands (e.g. via app.update())
 /// before querying components on the returned entity.
@@ -129,7 +205,7 @@ pub fn spawn_entity(
         entity_commands.insert(EntityId(human_id));
     }
 
-    // Collider section Ã¢â€ â€™ Rapier collider + rigid body
+    // Collider section â†’ Rapier collider + rigid body
     if let Some(collider) = &config.collider {
         let rapier_collider = match collider.shape {
             crate::entity_config::ColliderShape::Ball => Collider::ball(collider.radius),
@@ -165,7 +241,7 @@ pub fn spawn_entity(
         entity_commands.insert(EntityName(name.clone()));
     }
 
-    // Lights array Ã¢â‚¬â€ present when one or more [[light]] entries were declared.
+    // Lights array â€” present when one or more [[light]] entries were declared.
     if !config.light.is_empty() {
         entity_commands.insert(Lights(config.light.clone()));
     }
@@ -187,12 +263,12 @@ pub fn spawn_entity(
         }
     }
 
-    // Behaviour section Ã¢â‚¬â€ signals to ai_plugin to attach an AiController
+    // Behaviour section â€” signals to ai_plugin to attach an AiController
     if let Some(behaviour) = &config.behaviour {
         entity_commands.insert(BehaviourSection(behaviour.clone()));
     }
 
-    // Tags Ã¢â‚¬â€ mirror TOML tags onto the entity for snapshot builders.
+    // Tags â€” mirror TOML tags onto the entity for snapshot builders.
     if !config.tags.is_empty() {
         entity_commands.insert(EntityTagsSection(config.tags.clone()));
     }
@@ -207,27 +283,35 @@ pub fn spawn_entity(
         entity_commands.insert(EntityTarget(target.clone()));
     }
 
-    // Faction Ã¢â‚¬â€ attach a FactionComponent so the AI can read faction from ECS.
+    // Faction â€” attach a FactionComponent so the AI can read faction from ECS.
     if let Some(faction_uuid) = config.faction {
         entity_commands.insert(FactionComponent(faction_uuid));
     }
 
-    // WeaponsConsole Ã¢â‚¬â€ attach a WeaponsConsoleSection so the AI can read weapons config from ECS.
+    // WeaponsConsole â€” attach a WeaponsConsoleSection so the AI can read weapons config from ECS.
     if let Some(wc) = &config.weapons_console {
         entity_commands.insert(WeaponsConsoleSection(wc.clone()));
     }
 
-    // HelmConsole — attach a HelmConsoleSection so the AI tick can read movement params.
+    // HelmConsole - attach a HelmConsoleSection so the AI tick can read movement params.
     if let Some(hc) = &config.helm_console {
         entity_commands.insert(HelmConsoleSection(hc.clone()));
     }
 
-    // Comms range — attach CommsRange component when [comms] is present.
+    // Comms range - attach CommsRange component when [comms] is present.
     if let Some(comms) = &config.comms {
         entity_commands.insert(crate::comms::CommsRange(comms.range));
     }
 
-    // Hull Ã¢â‚¬â€ attach an EntityConsoleHull component if the config has hull data.
+    // Shields (#471) - single-facing NPC shield. Attach BEFORE the hull
+    // block: the hull block has an early-return for the empty-hull case,
+    // so anything after it could be skipped. Placing the shield insert
+    // here ensures `[shields]` is always honoured.
+    if let Some(shields_cfg) = &config.shields {
+        entity_commands.insert(EntityShield::from_config(shields_cfg));
+    }
+
+    // Hull â€” attach an EntityConsoleHull component if the config has hull data.
     // Per-console entries (console_hull) take precedence; if absent, the legacy
     // hull_integrity value is mapped to a single CaptainChair slot.
     if let Some(hull) = &config.hull {
@@ -245,7 +329,7 @@ pub fn spawn_entity(
                 hull.hull_integrity,
             )])
         } else {
-            // Empty hull section Ã¢â‚¬â€ skip.
+            // Empty hull section â€” skip.
             entity_commands.insert(EntityConsoleHull(crate::damage::ConsoleHull::from_config(
                 &[],
             )));
@@ -261,6 +345,124 @@ pub fn spawn_entity(
 mod tests {
     use super::*;
     use crate::entity_config::*;
+
+    // ── EntityShield unit tests (#471) ──────────────────────────────────────
+
+    #[test]
+    fn entity_shield_from_config_full_hp_not_broken() {
+        let cfg = EntityShieldConfig {
+            max_hp: 60.0,
+            regen_per_sec: 1.0,
+        };
+        let shield = EntityShield::from_config(&cfg);
+        assert_eq!(shield.current_hp, 60.0);
+        assert_eq!(shield.max_hp, 60.0);
+        assert_eq!(shield.regen_per_sec, 1.0);
+        assert!(!shield.broken);
+    }
+
+    #[test]
+    fn entity_shield_apply_damage_partial_returns_zero_leak() {
+        let mut shield = EntityShield {
+            current_hp: 60.0,
+            max_hp: 60.0,
+            regen_per_sec: 1.0,
+            broken: false,
+        };
+        let leak = shield.apply_damage(10.0);
+        assert_eq!(leak, 0.0);
+        assert_eq!(shield.current_hp, 50.0);
+        assert!(!shield.broken);
+    }
+
+    #[test]
+    fn entity_shield_apply_damage_overflow_breaks_and_returns_leak() {
+        let mut shield = EntityShield {
+            current_hp: 10.0,
+            max_hp: 60.0,
+            regen_per_sec: 1.0,
+            broken: false,
+        };
+        let leak = shield.apply_damage(15.0);
+        assert_eq!(leak, 5.0);
+        assert_eq!(shield.current_hp, 0.0);
+        assert!(shield.broken, "shield must latch broken once depleted");
+    }
+
+    #[test]
+    fn entity_shield_apply_damage_when_broken_returns_full_amount_as_leak() {
+        let mut shield = EntityShield {
+            current_hp: 0.0,
+            max_hp: 60.0,
+            regen_per_sec: 1.0,
+            broken: true,
+        };
+        let leak = shield.apply_damage(20.0);
+        assert_eq!(leak, 20.0, "broken shields pass damage through unchanged");
+        assert!(shield.broken);
+    }
+
+    #[test]
+    fn entity_shield_tick_regen_advances_below_max() {
+        let mut shield = EntityShield {
+            current_hp: 30.0,
+            max_hp: 60.0,
+            regen_per_sec: 5.0,
+            broken: false,
+        };
+        shield.tick_regen(1.0);
+        assert_eq!(shield.current_hp, 35.0);
+    }
+
+    #[test]
+    fn entity_shield_tick_regen_clamps_to_max() {
+        let mut shield = EntityShield {
+            current_hp: 58.0,
+            max_hp: 60.0,
+            regen_per_sec: 10.0,
+            broken: false,
+        };
+        shield.tick_regen(1.0);
+        assert_eq!(shield.current_hp, 60.0);
+    }
+
+    #[test]
+    fn entity_shield_tick_regen_noop_when_broken() {
+        let mut shield = EntityShield {
+            current_hp: 0.0,
+            max_hp: 60.0,
+            regen_per_sec: 5.0,
+            broken: true,
+        };
+        shield.tick_regen(10.0);
+        assert_eq!(
+            shield.current_hp, 0.0,
+            "broken shields must never regen back"
+        );
+        assert!(shield.broken);
+    }
+
+    #[test]
+    fn entity_shield_fraction_returns_zero_when_broken() {
+        let shield = EntityShield {
+            current_hp: 0.0,
+            max_hp: 60.0,
+            regen_per_sec: 0.0,
+            broken: true,
+        };
+        assert_eq!(shield.fraction(), 0.0);
+    }
+
+    #[test]
+    fn entity_shield_fraction_returns_ratio_when_intact() {
+        let shield = EntityShield {
+            current_hp: 30.0,
+            max_hp: 60.0,
+            regen_per_sec: 0.0,
+            broken: false,
+        };
+        assert_eq!(shield.fraction(), 0.5);
+    }
 
     /// Helper: build a minimal Bevy app for spawning tests.
     fn test_app() -> App {
@@ -304,6 +506,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: Some(crate::entity_config::CommsConfig { range: 8000.0 }),
@@ -344,6 +547,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -381,6 +585,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -423,6 +628,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -467,6 +673,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -522,6 +729,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -581,6 +789,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -626,6 +835,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -710,6 +920,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -763,6 +974,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -809,6 +1021,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -858,7 +1071,7 @@ mod tests {
         assert_eq!(transform.translation.z, -7.0);
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ EntityConsoleHull component tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // â”€â”€ EntityConsoleHull component tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn spawn_entity_with_hull_integrity_attaches_captain_chair_slot() {
@@ -882,6 +1095,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -923,10 +1137,64 @@ mod tests {
         );
     }
 
+    // ── EntityShield spawner attachment tests (#471) ────────────────────────
+
+    #[test]
+    fn spawn_entity_with_shields_block_attaches_entity_shield() {
+        let mut app = test_app();
+        let toml = r#"
+[hull]
+hull_integrity = 60.0
+
+[shields]
+max_hp = 30.0
+regen_per_sec = 1.5
+"#;
+        let config = EntityConfig::from_toml(toml).expect("toml must parse");
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+        let shield = app
+            .world()
+            .get::<EntityShield>(spawned)
+            .expect("entity with [shields] block must have EntityShield component");
+        assert_eq!(shield.max_hp, 30.0);
+        assert_eq!(shield.current_hp, 30.0);
+        assert_eq!(shield.regen_per_sec, 1.5);
+        assert!(!shield.broken);
+    }
+
+    #[test]
+    fn spawn_entity_without_shields_block_omits_entity_shield() {
+        let mut app = test_app();
+        let toml = r#"
+[hull]
+hull_integrity = 60.0
+"#;
+        let config = EntityConfig::from_toml(toml).expect("toml must parse");
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+        assert!(
+            app.world().get::<EntityShield>(spawned).is_none(),
+            "entity without [shields] block must not have EntityShield"
+        );
+    }
+
+    #[test]
+    fn entity_shield_config_parses_with_default_regen() {
+        let toml = r#"
+[shields]
+max_hp = 50.0
+"#;
+        let config = EntityConfig::from_toml(toml).expect("toml must parse");
+        let shields = config.shields.expect("shields block must be present");
+        assert_eq!(shields.max_hp, 50.0);
+        assert_eq!(shields.regen_per_sec, 0.0, "regen defaults to 0");
+    }
+
 
     #[test]
     fn hull_integrity_maps_to_captain_chair_slot() {
-        // Stations and asteroids still use hull_integrity in TOML Ã¢â‚¬â€ must keep working.
+        // Stations and asteroids still use hull_integrity in TOML â€” must keep working.
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
@@ -947,6 +1215,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,

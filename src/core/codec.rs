@@ -479,6 +479,7 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
+                    shield_fraction: None,
                     inner_radius: None,
                     warp_out_remaining_secs: None,
                     radar_size: None,
@@ -513,6 +514,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
+                        shield_fraction: None,
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_size: None,
@@ -535,6 +537,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
+                        shield_fraction: None,
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_size: None,
@@ -573,6 +576,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
+                        shield_fraction: None,
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_size: None,
@@ -1414,6 +1418,7 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
+                    shield_fraction: None,
                     inner_radius: None,
                     warp_out_remaining_secs: None,
                     radar_size: None,
@@ -1447,6 +1452,7 @@ mod tests {
                     colour: Some([0.2, 0.5, 0.8]),
                     yaw: Some(1.57),
                     hull_fraction: Some(0.85),
+                    shield_fraction: None,
                     inner_radius: Some(2.0),
                     warp_out_remaining_secs: None,
                     radar_size: None,
@@ -1480,6 +1486,7 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
+                    shield_fraction: None,
                     inner_radius: None,
                     warp_out_remaining_secs: Some(3.5),
                     radar_size: None,
@@ -1499,6 +1506,88 @@ mod tests {
     }
 
     #[test]
+    fn entity_snapshot_shield_fraction_round_trips() {
+        // (#471) shield_fraction: Some(0.0..=1.0) round-trips as a number,
+        // None is omitted from the wire via skip_serializing_if.
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![EntitySnapshot {
+                    uuid: "npc-1".into(),
+                    id: None,
+                    name: Some("Test Cruiser".into()),
+                    position: Some([5.0, 0.0, 10.0]),
+                    tags: vec!["ship".into()],
+                    shape: None,
+                    radius: None,
+                    colour: None,
+                    yaw: None,
+                    hull_fraction: Some(0.85),
+                    shield_fraction: Some(0.42),
+                    inner_radius: None,
+                    warp_out_remaining_secs: None,
+                    radar_size: None,
+                    region_colour: None,
+                    half_extents: None,
+                    radar_icon: None,
+                    objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
+                }],
+                ..Default::default()
+            },
+        };
+        // Verify wire format: shield_fraction must be present as a number.
+        let json = JsonCodec.encode_server(&msg).expect("encode");
+        assert!(
+            json.contains("\"shield_fraction\":0.42"),
+            "wire must contain shield_fraction=0.42, got: {json}"
+        );
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_snapshot_shield_fraction_none_is_omitted_from_wire() {
+        // (#471) When shield_fraction is None, the field should be entirely
+        // absent from the JSON wire format.
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![EntitySnapshot {
+                    uuid: "rock-1".into(),
+                    id: None,
+                    name: None,
+                    position: Some([0.0, 0.0, 0.0]),
+                    tags: vec!["asteroid".into()],
+                    shape: None,
+                    radius: Some(5.0),
+                    colour: None,
+                    yaw: None,
+                    hull_fraction: Some(1.0),
+                    shield_fraction: None,
+                    inner_radius: None,
+                    warp_out_remaining_secs: None,
+                    radar_size: None,
+                    region_colour: None,
+                    half_extents: None,
+                    radar_icon: None,
+                    objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
+                }],
+                ..Default::default()
+            },
+        };
+        let json = JsonCodec.encode_server(&msg).expect("encode");
+        assert!(
+            !json.contains("shield_fraction"),
+            "shield_fraction=None must be omitted from wire, got: {json}"
+        );
+        assert_server_roundtrip(&JsonCodec, msg);
+    }
+
+    #[test]
     fn entity_snapshot_radar_size_round_trips() {
         let msg = ServerMessage::WorldSetup {
             world: WorldData {
@@ -1513,6 +1602,7 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
+                    shield_fraction: None,
                     inner_radius: None,
                     warp_out_remaining_secs: None,
                     radar_size: Some(12.5),
@@ -1546,6 +1636,7 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
+                    shield_fraction: None,
                     inner_radius: None,
                     warp_out_remaining_secs: None,
                     radar_size: None,
@@ -1584,6 +1675,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
+                        shield_fraction: None,
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_size: None,
@@ -1606,6 +1698,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
+                        shield_fraction: None,
                         inner_radius: Some(10.0),
                         warp_out_remaining_secs: None,
                         radar_size: None,
@@ -1642,6 +1735,7 @@ mod tests {
                     position: Some([12.0, 0.0, -5.0]),
                     yaw: Some(0.5),
                     hull_fraction: Some(1.0),
+                    shield_fraction: None,
                     flags: vec![],
                     shields: None,
                     warp_out_remaining_secs: None,
@@ -1673,6 +1767,7 @@ mod tests {
                     position: None,
                     yaw: None,
                     hull_fraction: None,
+                    shield_fraction: None,
                     flags: vec![],
                     shields: None,
                     warp_out_remaining_secs: None,
@@ -1706,6 +1801,7 @@ mod tests {
                         position: Some([5.0, 0.0, -10.0]),
                         yaw: Some(0.0),
                         hull_fraction: Some(1.0),
+                        shield_fraction: None,
                         flags: vec![],
                         shields: None,
                         warp_out_remaining_secs: None,
@@ -1715,6 +1811,7 @@ mod tests {
                         position: Some([20.0, 0.0, -30.0]),
                         yaw: None,
                         hull_fraction: Some(0.5),
+                        shield_fraction: None,
                         flags: vec![crate::flag_kind::FlagKind::CommsJammed],
                         shields: None,
                         warp_out_remaining_secs: None,
@@ -1794,6 +1891,7 @@ mod tests {
                 colour: Some([0.2, 0.5, 0.8]),
                 yaw: Some(1.57),
                 hull_fraction: Some(0.85),
+                shield_fraction: None,
                 inner_radius: Some(2.0),
                 warp_out_remaining_secs: None,
                 radar_size: None,
@@ -1824,6 +1922,7 @@ mod tests {
                 colour: None,
                 yaw: None,
                 hull_fraction: None,
+                shield_fraction: None,
                 inner_radius: None,
                 warp_out_remaining_secs: None,
                 radar_size: None,
@@ -2203,6 +2302,7 @@ mod tests {
                     position: Some([50.0, 0.0, 0.0]),
                     yaw: Some(0.0),
                     hull_fraction: Some(0.75),
+                    shield_fraction: None,
                     flags: vec![],
                     shields: Some(vec![
                         ShieldFacingStatus {

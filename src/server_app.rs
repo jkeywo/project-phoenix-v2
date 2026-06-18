@@ -302,15 +302,17 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let mut q = world.query::<(
                 &AsteroidUuid,
                 Option<&crate::entity_spawner::EntityConsoleHull>,
+                Option<&crate::entity_spawner::EntityShield>,
             )>();
             q.iter(world)
-                .filter_map(|(uuid, hull_comp)| {
+                .filter_map(|(uuid, hull_comp, shield_comp)| {
                     let hull_fraction = hull_comp.map(|h| {
                         let max = h.0.total_max();
                         if max > 0.0 { h.0.total_current() / max } else { 1.0 }
                     });
+                    let shield_fraction = shield_comp.map(|s| s.fraction());
                     // Omit entry entirely when there is nothing to update.
-                    if hull_fraction.is_none() {
+                    if hull_fraction.is_none() && shield_fraction.is_none() {
                         return None;
                     }
                     Some(crate::messages::EntityStateSnapshot {
@@ -318,6 +320,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                         position: None,
                         yaw: None,
                         hull_fraction,
+                        shield_fraction,
                         flags: vec![],
                         shields: None,
                         warp_out_remaining_secs: None,
@@ -329,21 +332,23 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         // ── Non-asteroid entities (NPCs, stations): collect raw data first so
         // we can drop the ECS borrow before mutating the LastBroadcastEntityPositions
         // resource.
-        type NpcRaw = (String, bevy::math::Vec3, f32, Option<f32>);
+        type NpcRaw = (String, bevy::math::Vec3, f32, Option<f32>, Option<f32>);
         let npc_raw: Vec<NpcRaw> = {
             let mut q = world.query_filtered::<(
                 &Transform,
                 &EntityUuid,
                 Option<&crate::entity_spawner::EntityConsoleHull>,
+                Option<&crate::entity_spawner::EntityShield>,
             ), Without<Asteroid>>();
             q.iter(world)
-                .map(|(transform, uuid, hull_comp)| {
+                .map(|(transform, uuid, hull_comp, shield_comp)| {
                     let hull_fraction = hull_comp.map(|h| {
                         let max = h.0.total_max();
                         if max > 0.0 { h.0.total_current() / max } else { 1.0 }
                     });
+                    let shield_fraction = shield_comp.map(|s| s.fraction());
                     let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
-                    (uuid.0.clone(), transform.translation, yaw, hull_fraction)
+                    (uuid.0.clone(), transform.translation, yaw, hull_fraction, shield_fraction)
                 })
                 .collect()
         };
@@ -356,7 +361,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let mut last = world.resource_mut::<LastBroadcastEntityPositions>();
             npc_raw
                 .into_iter()
-                .map(|(uuid, pos, yaw, hull_fraction)| {
+                .map(|(uuid, pos, yaw, hull_fraction, shield_fraction)| {
                     let moved = match last.0.get(&uuid) {
                         Some(&(prev_pos, prev_yaw)) => {
                             (pos - prev_pos).length_squared() > POS_THRESHOLD_SQ
@@ -376,6 +381,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                         },
                         yaw: if moved { Some(yaw) } else { None },
                         hull_fraction,
+                        shield_fraction,
                         flags: vec![],
                         shields: None,
                         warp_out_remaining_secs: None,
@@ -931,6 +937,13 @@ fn snapshot_from_entity_config(
         snapshot.target_description = target.description.clone();
     }
 
+    // Initial shield fraction (#471). When the entity has a `[shields]`
+    // block, seed the snapshot at full HP. Per-tick updates flow through
+    // `EntityStateSnapshot.shield_fraction` from `sim_state_broadcaster`.
+    if config.shields.is_some() {
+        snapshot.shield_fraction = Some(1.0);
+    }
+
     snapshot
 }
 
@@ -960,6 +973,7 @@ fn reconcile_runtime_entities(
             Option<&AsteroidFieldSection>,
             Option<&crate::entity_spawner::EntityConsoleHull>,
             Option<&crate::entity_spawner::EntityTarget>,
+            Option<&crate::entity_spawner::EntityShield>,
         ),
         Without<Asteroid>,
     >,
@@ -981,7 +995,7 @@ fn reconcile_runtime_entities(
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _, _, _, _, _, _, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _, _, _, _, _, _, _, _)| (u.0.clone(), e))
         .collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
@@ -1013,6 +1027,7 @@ fn reconcile_runtime_entities(
                 asteroid_field,
                 hull_comp,
                 entity_target,
+                shield_comp,
             )) = query.get(*entity)
             {
                 let hull_fraction = hull_comp.map(|h| {
@@ -1023,11 +1038,13 @@ fn reconcile_runtime_entities(
                         1.0
                     }
                 });
+                let shield_fraction = shield_comp.map(|s| s.fraction());
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
                     name: name.as_ref().map(|n| n.0.clone()),
                     hull_fraction,
+                    shield_fraction,
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,
@@ -1111,6 +1128,7 @@ fn reconcile_runtime_entities(
                 asteroid_field,
                 hull_comp,
                 entity_target,
+                shield_comp,
             )) = query.get(*entity)
             {
                 let hull_fraction = hull_comp.map(|h| {
@@ -1121,11 +1139,13 @@ fn reconcile_runtime_entities(
                         1.0
                     }
                 });
+                let shield_fraction = shield_comp.map(|s| s.fraction());
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
                     name: name.as_ref().map(|n| n.0.clone()),
                     hull_fraction,
+                    shield_fraction,
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,

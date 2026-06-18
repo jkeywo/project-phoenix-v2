@@ -514,6 +514,7 @@ mod tests {
             captain_console: None,
             power: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,

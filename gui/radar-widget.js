@@ -100,6 +100,7 @@
     this._rafId           = null;
     this._destroyed       = false;
     this._projectedBlips  = null;  // cache for world-space hit-testing
+    this._offscreenCanvas = null;  // double-buffer canvas for atomic updates
 
     // Render-on-demand: the rAF loop only repaints when something actually
     // changed (data push, resize, gesture, async icon load). A continuous
@@ -273,6 +274,7 @@
     this._ctx             = null;
     this._icons           = {};
     this._projectedBlips  = null;
+    this._offscreenCanvas = null;
   };
 
   // ── Rendering ─────────────────────────────────────────────────────────────
@@ -281,70 +283,93 @@
     // Leave the dirty flag set if we can't actually paint yet (canvas missing
     // or zero-sized), so the next rAF tick retries once it's ready.
     if (!this._canvas || !this._ctx) return;
-    var ctx    = this._ctx;
     var canvas = this._canvas;
     var W = canvas.width, H = canvas.height;
     if (W === 0 || H === 0) return;
-    this._needsRender = false;
     var cx = W / 2, cy = H / 2;
     var R  = Math.min(W, H) / 2 - 8;
     var data = this._data;
 
+    // ── Double-buffer via offscreen canvas ─────────────────────────────────
+    // Render the full frame to an offscreen canvas first, then copy to the
+    // visible canvas atomically. This prevents the user ever seeing a
+    // partially-drawn frame (canvas cleared but blips not yet drawn), which is
+    // the source of the movement-induced flicker.
+    // Falls back to rendering directly on the visible canvas in environments
+    // where document.createElement is unavailable (e.g. Node.js tests).
+    var octx = this._ctx;
+    if (typeof document !== 'undefined') {
+      if (!this._offscreenCanvas || this._offscreenCanvas.width !== W || this._offscreenCanvas.height !== H) {
+        this._offscreenCanvas = document.createElement('canvas');
+        this._offscreenCanvas.width  = W;
+        this._offscreenCanvas.height = H;
+      }
+      octx = this._offscreenCanvas.getContext('2d');
+    }
+
     // Opaque fill prevents canvas clearRect flicker (issue #2)
-    ctx.fillStyle = '#07080c';
-    ctx.fillRect(0, 0, W, H);
+    octx.fillStyle = '#07080c';
+    octx.fillRect(0, 0, W, H);
 
     // ── Background disc ────────────────────────────────────────────────────
-    ctx.fillStyle = 'rgba(5,8,22,0.52)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, Math.PI * 2);
-    ctx.fill();
+    octx.fillStyle = 'rgba(5,8,22,0.52)';
+    octx.beginPath();
+    octx.arc(cx, cy, R, 0, Math.PI * 2);
+    octx.fill();
 
     // ── Range rings (33 / 66 / 100 %) ─────────────────────────────────────
-    ctx.strokeStyle = 'rgba(106,124,164,0.28)';
-    ctx.lineWidth   = 1;
+    octx.strokeStyle = 'rgba(106,124,164,0.28)';
+    octx.lineWidth   = 1;
     [0.33, 0.66, 1.0].forEach(function (f) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, R * f, 0, Math.PI * 2);
-      ctx.stroke();
+      octx.beginPath();
+      octx.arc(cx, cy, R * f, 0, Math.PI * 2);
+      octx.stroke();
     });
 
     // ── Fire-arc sectors (before clip so they span full radius) ───────────
     if (data) {
       if (data.mode === 'pre-projected') {
-        this._drawArcSectors(ctx, cx, cy, R,
+        this._drawArcSectors(octx, cx, cy, R,
           data.torpedo_arcs, 0.70,
           'rgba(60,160,240,0.08)', 'rgba(60,160,240,0.35)');
-        this._drawArcSectors(ctx, cx, cy, R,
+        this._drawArcSectors(octx, cx, cy, R,
           data.phaser_arcs, 0.90,
           'rgba(240,132,56,0.10)', 'rgba(240,132,56,0.40)');
       } else if (data.mode === 'world-space' && data.arcs) {
-        this._drawWorldSpaceArcs(ctx, cx, cy, R, data.arcs);
+        this._drawWorldSpaceArcs(octx, cx, cy, R, data.arcs);
       }
     }
 
     // ── Circle clip ────────────────────────────────────────────────────────
-    ctx.save();
+    octx.save();
     if (this._clipMode === 'circle') {
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.clip();
+      octx.beginPath();
+      octx.arc(cx, cy, R, 0, Math.PI * 2);
+      octx.clip();
     }
 
     // ── Blips ──────────────────────────────────────────────────────────────
     if (data) {
       if (data.mode === 'pre-projected') {
-        this._drawPreProjectedRegions(ctx, cx, cy, R, data.regions || []);
-        this._drawPreProjectedBlips(ctx, cx, cy, R, data);
+        this._drawPreProjectedRegions(octx, cx, cy, R, data.regions || []);
+        this._drawPreProjectedBlips(octx, cx, cy, R, data);
       } else if (data.mode === 'world-space') {
-        this._drawWorldSpaceBlips(ctx, cx, cy, R, data);
+        this._drawWorldSpaceBlips(octx, cx, cy, R, data);
       }
     }
 
-    ctx.restore();
+    octx.restore();
 
     // ── Own-ship marker (always on top, outside clip) ─────────────────────
-    this._drawOwnShip(ctx, cx, cy);
+    this._drawOwnShip(octx, cx, cy);
+
+    // ── Atomic copy to visible canvas ──────────────────────────────────────
+    if (this._offscreenCanvas) {
+      this._ctx.clearRect(0, 0, W, H);
+      this._ctx.drawImage(this._offscreenCanvas, 0, 0);
+    }
+
+    this._needsRender = false;
   };
 
   // ── Arc rendering ─────────────────────────────────────────────────────────

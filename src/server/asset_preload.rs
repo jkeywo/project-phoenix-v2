@@ -279,16 +279,21 @@ pub struct AssetPreloadResource {
     /// All sidecar paths ever pushed to `pending_sidecars` — prevents duplicates
     /// when sub-world processing re-discovers the same model.
     registered_sidecars: HashSet<String>,
-    initial_sidecar_count: usize,
 
     // Sub-world tracking (for incremental discovery)
     pending_sub_worlds: Vec<String>,
-    initial_sub_world_count: usize,
+    /// Tracks all worlds ever processed (including "(base)"). Length minus one
+    /// gives the total sub-world count used in progress fraction computation.
     seen_worlds: HashSet<String>,
     seen_entities: HashSet<String>,
 
     // Timer for throttling progress broadcasts
     progress_timer: Timer,
+    /// True once `broadcast_loading_progress` has sent at least one update.
+    /// Used to send the current fraction immediately on first entry, rather
+    /// than waiting for the 0.1s timer to fire (which may never fire if
+    /// `poll_asset_preload` sets `complete=true` before the timer elapses).
+    progress_sent: bool,
 }
 
 /// Safe default: preload not started (`started=false`), not complete
@@ -306,36 +311,16 @@ impl Default for AssetPreloadResource {
             failed_glbs: HashSet::new(),
             pending_sidecars: Vec::new(),
             registered_sidecars: HashSet::new(),
-            initial_sidecar_count: 0,
             pending_sub_worlds: Vec::new(),
-            initial_sub_world_count: 0,
             seen_worlds: HashSet::new(),
             seen_entities: HashSet::new(),
             progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+            progress_sent: false,
         }
     }
 }
 
 impl AssetPreloadResource {
-    fn new() -> Self {
-        Self {
-            started: false,
-            complete: false,
-            total_count: 0,
-            ready_count: 0,
-            glb_handles: Vec::new(),
-            icon_handles: Vec::new(),
-            failed_glbs: HashSet::new(),
-            pending_sidecars: Vec::new(),
-            registered_sidecars: HashSet::new(),
-            initial_sidecar_count: 0,
-            pending_sub_worlds: Vec::new(),
-            initial_sub_world_count: 0,
-            seen_worlds: HashSet::new(),
-            seen_entities: HashSet::new(),
-            progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
-        }
-    }
 
     /// Progress fraction 0.0–1.0.
     pub fn fraction(&self) -> f32 {
@@ -413,6 +398,9 @@ pub fn begin_asset_preload(
         crate::config_cache::request_sidecar_fetch(sc_path.clone());
     }
 
+    let mut seen_worlds = HashSet::new();
+    seen_worlds.insert("(base)".to_string());
+
     // Request sub-world TOML fetches
     for world_path in &pending_worlds {
         #[cfg(target_arch = "wasm32")]
@@ -443,6 +431,7 @@ pub fn begin_asset_preload(
                 manifest.glb_models.extend(manifest_mut.glb_models);
                 manifest.radar_icons.extend(manifest_mut.radar_icons);
                 manifest.sidecars.extend(manifest_mut.sidecars);
+                seen_worlds.insert(world_path.clone());
             }
         }
     }
@@ -466,10 +455,6 @@ pub fn begin_asset_preload(
     // Track pending sidecars and sub-worlds for the poll loop
     let pending_sidecars = manifest.sidecars.clone();
     let registered_sidecars: HashSet<String> = manifest.sidecars.iter().cloned().collect();
-    let initial_sidecar_count = pending_sidecars.len();
-    let initial_sub_world_count = pending_worlds.len();
-    let mut seen_worlds = HashSet::new();
-    seen_worlds.insert("(base)".to_string());
 
     let resource = AssetPreloadResource {
         started: true,
@@ -483,12 +468,11 @@ pub fn begin_asset_preload(
         failed_glbs: HashSet::new(),
         pending_sidecars,
         registered_sidecars,
-        initial_sidecar_count,
         pending_sub_worlds: pending_worlds,
-        initial_sub_world_count,
         seen_worlds,
         seen_entities: base_seen_entities,
         progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+        progress_sent: false,
     };
 
     commands.insert_resource(resource);
@@ -567,6 +551,7 @@ pub fn poll_asset_preload(
                         new_icons.extend(manifest.radar_icons);
                         new_sidecars.extend(manifest.sidecars);
                         new_sub_worlds.extend(more_worlds);
+                        preload.seen_worlds.insert(world_path.clone());
                     }
                     Err(e) => {
                         bevy::log::warn!(
@@ -644,9 +629,17 @@ pub fn poll_asset_preload(
     let glbs_terminal = glbs_loaded + glbs_failed;
     let glbs_done = glbs_terminal == preload.glb_handles.len();
 
+    // Use dynamic totals so sidecars/sub-worlds discovered from sub-worlds
+    // are included: `registered_sidecars` only grows, and `seen_worlds`
+    // tracks every world ever processed (minus the synthetic "(base)" entry).
+    let total_sidecars = preload.registered_sidecars.len();
+    let total_sub_worlds = preload
+        .seen_worlds
+        .len()
+        .saturating_sub(1); // subtract "(base)"
     preload.total_count = preload.icon_handles.len()
-        + preload.initial_sidecar_count
-        + preload.initial_sub_world_count
+        + total_sidecars
+        + total_sub_worlds
         + preload.glb_handles.len();
 
     let sidecars_done = preload.pending_sidecars.is_empty();
@@ -661,12 +654,8 @@ pub fn poll_asset_preload(
         .iter()
         .filter(|(_, h)| images.get(h).is_some())
         .count();
-    let sidecar_ready = preload
-        .initial_sidecar_count
-        .saturating_sub(preload.pending_sidecars.len());
-    let sub_world_ready = preload
-        .initial_sub_world_count
-        .saturating_sub(preload.pending_sub_worlds.len());
+    let sidecar_ready = total_sidecars.saturating_sub(preload.pending_sidecars.len());
+    let sub_world_ready = total_sub_worlds.saturating_sub(preload.pending_sub_worlds.len());
     preload.ready_count = icon_ready + sidecar_ready + sub_world_ready + glbs_terminal;
 
     if icons_ready && sidecars_done && sub_worlds_done && glbs_done {
@@ -692,6 +681,11 @@ pub fn poll_asset_preload(
 }
 
 /// Broadcast `LoadingProgress` at ~2 Hz during the `Loading` phase.
+///
+/// Sends the current fraction immediately on first entry (before the timer
+/// fires) so the user sees progress even when assets complete before the
+/// 0.1 s throttle interval elapses. Subsequent sends are throttled by the
+/// repeating timer.
 pub fn broadcast_loading_progress(
     mut preload: ResMut<AssetPreloadResource>,
     mut outbox: ResMut<LobbyOutbox>,
@@ -701,9 +695,16 @@ pub fn broadcast_loading_progress(
         return;
     }
     preload.progress_timer.tick(time.delta());
-    if !preload.progress_timer.just_finished() {
+
+    // Send on first entry regardless of timer state, then let the timer
+    // throttle subsequent updates to ~2 Hz.  Without this gate the very
+    // first `LoadingProgress` (after the initial 0 %) would be delayed by
+    // 0.1 s, and if `poll_asset_preload` sets complete=true before the
+    // timer fires, the user would never see anything but 0 %.
+    if !preload.progress_timer.just_finished() && preload.progress_sent {
         return;
     }
+    preload.progress_sent = true;
 
     let fraction = preload.fraction();
     outbox.0.push((

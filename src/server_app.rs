@@ -3,7 +3,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::damage::ConsoleHull;
-use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
+use crate::lobby::{InboundMessage, LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
     ViewDirection,
@@ -31,7 +31,7 @@ use std::collections::HashMap;
 // â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 pub use crate::weapons_plugin::{
     weapons_update_broadcaster, ActiveBeam, AsteroidDestroyedVfx, CurrentPhaserMode,
-    PhaserCooldown, PhaserRenderConfig, TorpedoSystemResource, WeaponsTarget,
+    LastWeaponsUpdate, PhaserCooldown, PhaserRenderConfig, TorpedoSystemResource, WeaponsTarget,
 };
 
 pub use crate::repair_plugin::{repair_state_broadcaster, ShipRepairTeams};
@@ -110,6 +110,24 @@ struct CollisionCooldown {
 #[derive(Resource, Default)]
 pub struct SimOutbox(pub Vec<(Target, ServerMessage)>);
 
+/// Last-broadcast positions for non-asteroid entities (NPCs, stations).
+/// Keyed by UUID string; value is (translation, yaw). Used by the
+/// sim_state_broadcaster to skip sending position/yaw when unchanged.
+#[derive(Resource, Default)]
+pub struct LastBroadcastEntityPositions(
+    pub std::collections::HashMap<String, (bevy::math::Vec3, f32)>,
+);
+
+/// Last-broadcast per-console hull state. When the hull changes, a
+/// `ConsoleHullUpdate` event message is emitted and this cache is updated.
+#[derive(Resource, Default)]
+pub struct LastBroadcastHull(pub Vec<crate::messages::ConsoleHullStatus>);
+
+/// Last-broadcast shield facings. Used to suppress the per-tick `ShieldStatus`
+/// broadcast to all players when nothing has changed.
+#[derive(Resource, Default)]
+pub struct LastBroadcastShields(pub Vec<crate::messages::ShieldFacingStatus>);
+
 /// Tracks non-asteroid entities that have been reported to clients via
 /// `EntitySpawned` / `EntityDespawned`.  Seeded from `WorldResource` on
 /// the first `InProgress` frame so initial world entities are not re-reported.
@@ -184,6 +202,9 @@ pub fn add_simulation_plugins(app: &mut App) {
     .init_resource::<CollisionCooldown>()
     .init_resource::<TrackedEntities>()
     .init_resource::<SimOutbox>()
+    .init_resource::<LastBroadcastEntityPositions>()
+    .init_resource::<LastBroadcastHull>()
+    .init_resource::<LastBroadcastShields>()
     .insert_resource(SimBroadcastTimer(Timer::from_seconds(
         0.1,
         TimerMode::Repeating,
@@ -194,7 +215,12 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         OnEnter(GamePhase::InProgress),
-        (spawn_game_start_entities, dump_tracked_entities).chain(),
+        (
+            reset_broadcast_caches_on_start,
+            spawn_game_start_entities,
+            dump_tracked_entities,
+        )
+            .chain(),
     )
     .add_systems(Update, render_spawned_entities)
     .add_systems(Update, face_player_lights.after(render_spawned_entities))
@@ -206,6 +232,12 @@ pub fn add_simulation_plugins(app: &mut App) {
             .chain()
             .after(crate::lobby::process_lobby)
             .before(crate::sim_sets::SimSet::Input),
+    )
+    .add_systems(
+        Update,
+        refresh_caches_on_midgame_reconnect
+            .after(crate::lobby::process_lobby)
+            .before(crate::sim_sets::SimSet::Broadcast),
     )
     .add_systems(
         Update,
@@ -264,84 +296,103 @@ pub fn add_simulation_plugins(app: &mut App) {
 /// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
 pub fn sim_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
-        // Build per-tick entity state from live ECS first (before any resource
-        // borrows, so world.query() can get the exclusive access it needs).
-        let entity_states: Vec<crate::messages::EntityStateSnapshot> = {
-            // Asteroids carry AsteroidUuid.
-            let mut asteroid_query = world.query::<(
-                &Transform,
+        // ── Asteroids: position/yaw never changes — omit from per-tick payload.
+        // The client already has asteroid positions from WorldSetup/AsteroidSpawned.
+        let asteroid_states: Vec<crate::messages::EntityStateSnapshot> = {
+            let mut q = world.query::<(
                 &AsteroidUuid,
                 Option<&crate::entity_spawner::EntityConsoleHull>,
             )>();
-            let asteroid_states: Vec<_> = asteroid_query
-                .iter(world)
-                .map(|(transform, uuid, hull_comp)| {
+            q.iter(world)
+                .filter_map(|(uuid, hull_comp)| {
                     let hull_fraction = hull_comp.map(|h| {
                         let max = h.0.total_max();
-                        if max > 0.0 {
-                            h.0.total_current() / max
-                        } else {
-                            1.0
-                        }
+                        if max > 0.0 { h.0.total_current() / max } else { 1.0 }
                     });
-                    crate::messages::EntityStateSnapshot {
+                    // Omit entry entirely when there is nothing to update.
+                    if hull_fraction.is_none() {
+                        return None;
+                    }
+                    Some(crate::messages::EntityStateSnapshot {
                         uuid: uuid.0.clone(),
-                        position: Some([
-                            transform.translation.x,
-                            transform.translation.y,
-                            transform.translation.z,
-                        ]),
-                        yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                        position: None,
+                        yaw: None,
                         hull_fraction,
                         flags: vec![],
                         shields: None,
                         warp_out_remaining_secs: None,
-                    }
+                    })
                 })
-                .collect();
+                .collect()
+        };
 
-            // Non-asteroid entities (NPCs, stations) carry EntityUuid.
-            let mut npc_query = world.query_filtered::<(
+        // ── Non-asteroid entities (NPCs, stations): collect raw data first so
+        // we can drop the ECS borrow before mutating the LastBroadcastEntityPositions
+        // resource.
+        type NpcRaw = (String, bevy::math::Vec3, f32, Option<f32>);
+        let npc_raw: Vec<NpcRaw> = {
+            let mut q = world.query_filtered::<(
                 &Transform,
                 &EntityUuid,
                 Option<&crate::entity_spawner::EntityConsoleHull>,
             ), Without<Asteroid>>();
-            let npc_states: Vec<_> = npc_query
-                .iter(world)
+            q.iter(world)
                 .map(|(transform, uuid, hull_comp)| {
                     let hull_fraction = hull_comp.map(|h| {
                         let max = h.0.total_max();
-                        if max > 0.0 {
-                            h.0.total_current() / max
-                        } else {
-                            1.0
-                        }
+                        if max > 0.0 { h.0.total_current() / max } else { 1.0 }
                     });
+                    let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
+                    (uuid.0.clone(), transform.translation, yaw, hull_fraction)
+                })
+                .collect()
+        };
+
+        // Compare against last-broadcast positions; only include position/yaw
+        // when the entity actually moved (delta > ~1 cm).
+        const POS_THRESHOLD_SQ: f32 = 0.0001; // 0.01 world-unit radius
+        const YAW_THRESHOLD: f32 = 0.001;     // ~0.057 degrees
+        let npc_states: Vec<crate::messages::EntityStateSnapshot> = {
+            let mut last = world.resource_mut::<LastBroadcastEntityPositions>();
+            npc_raw
+                .into_iter()
+                .map(|(uuid, pos, yaw, hull_fraction)| {
+                    let moved = match last.0.get(&uuid) {
+                        Some(&(prev_pos, prev_yaw)) => {
+                            (pos - prev_pos).length_squared() > POS_THRESHOLD_SQ
+                                || (yaw - prev_yaw).abs() > YAW_THRESHOLD
+                        }
+                        None => true,
+                    };
+                    if moved {
+                        last.0.insert(uuid.clone(), (pos, yaw));
+                    }
                     crate::messages::EntityStateSnapshot {
-                        uuid: uuid.0.clone(),
-                        position: Some([
-                            transform.translation.x,
-                            transform.translation.y,
-                            transform.translation.z,
-                        ]),
-                        yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                        uuid,
+                        position: if moved {
+                            Some([pos.x, pos.y, pos.z])
+                        } else {
+                            None
+                        },
+                        yaw: if moved { Some(yaw) } else { None },
                         hull_fraction,
                         flags: vec![],
                         shields: None,
                         warp_out_remaining_secs: None,
                     }
                 })
-                .collect();
-
-            asteroid_states.into_iter().chain(npc_states).collect()
+                .collect()
         };
 
-        // Extract all resource data (borrows are confined to this block).
+        let entity_states: Vec<_> = asteroid_states
+            .into_iter()
+            .chain(npc_states)
+            .collect();
+
+        // ── Extract ship state and hull (borrows confined to this block).
         let (
-            console_hull,
             power_levels,
             flags,
-            helm_range_mult,
             charge_progress,
             engine_thrust,
             ship_x,
@@ -351,6 +402,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             ship_red_alert,
             ship_view_mode,
             navigation_waypoint,
+            current_hull,
         ) = {
             let ship = world.resource::<ShipState>();
             let hull = world.resource::<ShipHullIntegrity>();
@@ -366,8 +418,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
                 .unwrap_or((2, 2, 2));
             let flags = modifiers.flags();
-            let helm_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-            let console_hull: Vec<crate::messages::ConsoleHullStatus> = hull
+            let current_hull: Vec<crate::messages::ConsoleHullStatus> = hull
                 .0
                 .entries()
                 .iter()
@@ -383,10 +434,8 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 last_helm.map(|h| h.thrust.abs()).unwrap_or(0.0)
             };
             (
-                console_hull,
                 power_levels,
                 flags,
-                helm_range_mult,
                 impulse.0.charge_progress,
                 engine_thrust,
                 ship.x,
@@ -396,25 +445,23 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 ship.red_alert(),
                 ship.view_mode.clone(),
                 navigation_waypoint,
+                current_hull,
             )
         };
 
-        let radar_state = {
-            // All four ranges come from the ship TOML via ShipClientConfig
-            // (populated by lobby/server.rs); the Default fallback only
-            // applies before the lobby has loaded the player ship config.
-            let default_cfg = crate::messages::ShipClientConfig::default();
-            let cfg = world
-                .get_resource::<crate::lobby::server::ShipClientConfigResource>()
-                .map(|r| &r.0)
-                .unwrap_or(&default_cfg);
-            crate::messages::RadarStateSnapshot {
-                helm_range: cfg.helm_radar_range * helm_range_mult,
-                tactical_range: cfg.tactical_radar_range * helm_range_mult,
-                science_long_range: cfg.sensors_radar_range * helm_range_mult,
-                science_system_map: cfg.nav_chart_range,
+        // ── Emit ConsoleHullUpdate only when hull HP changed.
+        {
+            let last = world.resource::<LastBroadcastHull>();
+            let hull_changed = last.0 != current_hull;
+            if hull_changed {
+                let entries = current_hull.clone();
+                world.resource_mut::<LastBroadcastHull>().0 = current_hull;
+                world
+                    .resource_mut::<SimOutbox>()
+                    .0
+                    .push((Target::All, ServerMessage::ConsoleHullUpdate { entries }));
             }
-        };
+        }
 
         let snapshot = crate::messages::SimSnapshot {
             red_alert: ship_red_alert,
@@ -423,11 +470,10 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             ship_z,
             ship_yaw,
             forward_speed: ship_forward_speed,
-            console_hull,
+            console_hull: vec![],
             power_levels,
             flags,
             entity_states,
-            radar_state,
             impulse_charge_progress: charge_progress,
             engine_thrust,
             navigation_waypoint,
@@ -664,6 +710,7 @@ fn handle_set_shield_focus(
     mut shields: ResMut<ShipShields>,
     sessions: Res<Sessions>,
     mut outbox: ResMut<SimOutbox>,
+    mut last: ResMut<LastBroadcastShields>,
 ) {
     for ev in reader.read() {
         let facing = match &ev.msg {
@@ -685,7 +732,7 @@ fn handle_set_shield_focus(
         // Immediately broadcast the updated shield status so the client UI
         // sees the new max_hp / is_focused values without waiting for the
         // 10 Hz tick.
-        let facings = shields
+        let facings: Vec<ShieldFacingStatus> = shields
             .0
             .snapshot()
             .into_iter()
@@ -698,23 +745,28 @@ fn handle_set_shield_focus(
                 is_focused: s.is_focused,
             })
             .collect();
+        last.0 = facings.clone();
         outbox
             .0
             .push((Target::All, ServerMessage::ShieldStatus { facings }));
     }
 }
 
-/// Broadcast `ShieldStatus` to all players at 10 Hz.
+/// Broadcast `ShieldStatus` at 10 Hz.
+/// Sends to all players only when shield state changed; always sends to the
+/// Shields console holder so their panel stays smooth during regeneration.
 fn broadcast_shield_status(
     time: Res<Time>,
     mut timer: ResMut<SimBroadcastTimer>,
     shields: Res<ShipShields>,
     mut outbox: ResMut<SimOutbox>,
+    sessions: Res<Sessions>,
+    mut last: ResMut<LastBroadcastShields>,
 ) {
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
-    let facings = shields
+    let facings: Vec<ShieldFacingStatus> = shields
         .0
         .snapshot()
         .into_iter()
@@ -727,9 +779,21 @@ fn broadcast_shield_status(
             is_focused: s.is_focused,
         })
         .collect();
-    outbox
-        .0
-        .push((Target::All, ServerMessage::ShieldStatus { facings }));
+
+    if facings != last.0 {
+        // State changed — broadcast to everyone.
+        last.0 = facings.clone();
+        outbox
+            .0
+            .push((Target::All, ServerMessage::ShieldStatus { facings }));
+    } else if let Some(token) = sessions.0.console_holder(Console::Shields) {
+        // Nothing changed but the Shields holder still gets a periodic refresh
+        // so regenerating HP stays smooth on their panel.
+        outbox.0.push((
+            Target::Token(token.to_string()),
+            ServerMessage::ShieldStatus { facings },
+        ));
+    }
 }
 
 /// Tracks whether the initial WorldSetup broadcast has fired, so it only
@@ -747,6 +811,47 @@ fn on_game_over_enter(mut game_over_reason: ResMut<GameOverReason>, mut outbox: 
     outbox
         .0
         .push((Target::All, ServerMessage::GameOver { reason }));
+}
+
+/// Reset all change-detection caches when entering InProgress so the first
+/// broadcast tick always sends a full state to all players. Also covers the
+/// multi-game restart case where stale cache from a previous game would
+/// otherwise suppress initial updates.
+fn reset_broadcast_caches_on_start(
+    mut hull: ResMut<LastBroadcastHull>,
+    mut shields: ResMut<LastBroadcastShields>,
+    mut positions: ResMut<LastBroadcastEntityPositions>,
+    mut weapons: ResMut<LastWeaponsUpdate>,
+) {
+    *hull = LastBroadcastHull::default();
+    *shields = LastBroadcastShields::default();
+    *positions = LastBroadcastEntityPositions::default();
+    *weapons = LastWeaponsUpdate::default();
+}
+
+/// When a player reconnects mid-game (Identify during InProgress), `process_lobby`
+/// queues a Welcome into LobbyOutbox. Detect this and clear hull/shields/weapons
+/// caches so the next 10 Hz tick sends a full state update to all players
+/// (including the reconnecting player).
+fn refresh_caches_on_midgame_reconnect(
+    lobby_outbox: Res<LobbyOutbox>,
+    state: Res<State<GamePhase>>,
+    mut hull: ResMut<LastBroadcastHull>,
+    mut shields: ResMut<LastBroadcastShields>,
+    mut weapons: ResMut<LastWeaponsUpdate>,
+) {
+    if *state.get() != GamePhase::InProgress {
+        return;
+    }
+    let has_welcome = lobby_outbox
+        .0
+        .iter()
+        .any(|(_, msg)| matches!(msg, ServerMessage::Welcome { .. }));
+    if has_welcome {
+        *hull = LastBroadcastHull::default();
+        *shields = LastBroadcastShields::default();
+        *weapons = LastWeaponsUpdate::default();
+    }
 }
 
 /// Emit a single `WorldSetup` broadcast when the game enters `InProgress`.
@@ -1945,7 +2050,18 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(LobbyPlugin)
+        app.configure_sets(
+            Update,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
+        .add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             // Advance time by 200 ms per tick so Hz-based SimBroadcaster timers
             // (period = 100 ms) always fire within a single update call.
@@ -1972,6 +2088,9 @@ mod tests {
             .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
             .insert_resource(test_complexity_rules())
             .init_resource::<SimOutbox>()
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<LastBroadcastHull>()
+            .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
             .add_message::<crate::ai_plugin::AiEntityDestroyed>()
             .add_plugins(crate::captain_plugin::CaptainPlugin)
@@ -1981,6 +2100,10 @@ mod tests {
             .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
             .add_plugins(crate::science_plugin::SciencePlugin)
             .add_plugins(crate::comms_plugin::CommsConsolePlugin)
+            .add_systems(
+                OnEnter(GamePhase::InProgress),
+                reset_broadcast_caches_on_start,
+            )
             .add_systems(
                 Update,
                 (
@@ -1992,6 +2115,7 @@ mod tests {
                         .after(crate::lobby::process_lobby)
                         .before(broadcast_world_setup_on_start),
                     broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
+                    refresh_caches_on_midgame_reconnect.after(crate::lobby::process_lobby),
                 ),
             )
             .add_systems(
@@ -2677,18 +2801,24 @@ mod tests {
     }
 
     #[test]
-    fn hull_integrity_starts_at_100_and_appears_in_sim_snapshot() {
+    fn hull_integrity_starts_at_100_and_appears_in_console_hull_update() {
         let mut app = test_app();
         start_game(&mut app);
+        // The first InProgress tick (inside start_game) already emitted and consumed
+        // the initial ConsoleHullUpdate. Reset the cache to force re-emission.
+        app.world_mut()
+            .resource_mut::<LastBroadcastHull>()
+            .0
+            .clear();
         let out = tick(&mut app);
-        let snap = out
+        let entries = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                ServerMessage::ConsoleHullUpdate { entries } => Some(entries.clone()),
                 _ => None,
             })
-            .expect("expected a SimState broadcast");
-        let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
+            .expect("expected a ConsoleHullUpdate broadcast");
+        let total: f32 = entries.iter().map(|c| c.current).sum();
         assert!((total - 100.0).abs() < 1e-6);
     }
 
@@ -2696,6 +2826,8 @@ mod tests {
     fn direct_damage_reduces_hull_integrity_in_broadcast() {
         let mut app = test_app();
         start_game(&mut app);
+        // Consume the initial ConsoleHullUpdate so LastBroadcastHull is seeded.
+        let _ = tick(&mut app);
 
         // Directly apply damage to the resource (simulates collision at ~half speed).
         {
@@ -2707,14 +2839,14 @@ mod tests {
         }
 
         let out = tick(&mut app);
-        let snap = out
+        let entries = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                ServerMessage::ConsoleHullUpdate { entries } => Some(entries.clone()),
                 _ => None,
             })
-            .expect("expected a SimState broadcast");
-        let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
+            .expect("expected a ConsoleHullUpdate after damage");
+        let total: f32 = entries.iter().map(|c| c.current).sum();
         assert!((total - 90.0).abs() < 1e-6);
     }
 
@@ -2914,9 +3046,7 @@ mod tests {
                 uuid: "target-uuid".into(),
             },
         );
-        // Lock the target
-        let _ = tick(&mut app);
-        // Now run another tick to get a WeaponsUpdate
+        // Target changes → WeaponsUpdate fires this tick.
         let out = tick(&mut app);
 
         let update = out
@@ -2935,11 +3065,11 @@ mod tests {
         );
     }
 
-    /// Target locked but beyond 40-unit phaser range (within 60u lock range) â†' fire_ready = false.
+    /// Target locked but beyond 40-unit phaser range (within 60u lock range) → fire_ready = false.
     #[test]
     fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
         let mut app = test_app();
-        // Ship at origin, yaw=0. Asteroid at (0, -50): directly ahead, 50 units â€" within lock range
+        // Ship at origin, yaw=0. Asteroid at (0, -50): directly ahead, 50 units — within lock range
         // (60u) but outside phaser range (40u).
         setup_weapons_world(&mut app, 0.0, -50.0);
         start_game_with_weapons(&mut app);
@@ -2951,7 +3081,7 @@ mod tests {
                 uuid: "target-uuid".into(),
             },
         );
-        let _ = tick(&mut app);
+        // Target changes → WeaponsUpdate fires this tick.
         let out = tick(&mut app);
 
         let update = out
@@ -4235,14 +4365,14 @@ mod tests {
                 .apply_damage(scaled_damage, &mut rng);
         }
         let out = tick(&mut app);
-        let snap = out
+        let entries = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                ServerMessage::ConsoleHullUpdate { entries } => Some(entries.clone()),
                 _ => None,
             })
-            .expect("expected SimState");
-        let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
+            .expect("expected ConsoleHullUpdate");
+        let total: f32 = entries.iter().map(|c| c.current).sum();
         assert!(
             near(total, 97.0),
             "hull should be 100 - 3 = 97 with halved collision damage"

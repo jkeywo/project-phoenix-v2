@@ -7,7 +7,7 @@ use crate::entity_spawner::EntityConsoleHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     ClientMessage, Console, GamePhase, ModifierSlot, PhaserBank, PhaserBankClientConfig,
-    PhaserBankState, RadarBlip, RadarRegion, ServerMessage, TorpedoTubeClientConfig,
+    PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage, TorpedoTubeClientConfig,
     TorpedoTubeState, WeaponsConsoleState,
 };
 use crate::ship_state::ShipState;
@@ -27,6 +27,18 @@ pub const BEAM_DAMAGE_PER_SEC: f32 =
     crate::entity_config::PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC;
 
 // ── Resources ─────────────────────────────────────────────────────────────
+
+/// Cache of the last `WeaponsUpdate` sent to the Tactical holder.
+/// The broadcaster compares against this to skip identical ticks.
+#[derive(Resource, Default, Clone, PartialEq)]
+pub struct LastWeaponsUpdate {
+    pub target_uuid: Option<String>,
+    pub target_name: Option<String>,
+    pub banks: Vec<PhaserBankState>,
+    pub tubes: Vec<TorpedoTubeState>,
+    pub torpedo_count: u32,
+    pub phaser_mode: PhaserMode,
+}
 
 /// The currently locked target UUID on the Weapons console. `None` means no
 /// lock is active.
@@ -191,6 +203,7 @@ pub struct WeaponsPlugin;
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeaponsTarget>()
+            .init_resource::<LastWeaponsUpdate>()
             .init_resource::<ActiveBeam>()
             .init_resource::<PhaserCooldown>()
             .init_resource::<CurrentPhaserMode>()
@@ -1439,6 +1452,22 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                     .collect()
             };
 
+            let current = LastWeaponsUpdate {
+                target_uuid: target_uuid.clone(),
+                target_name: target_name.clone(),
+                banks: banks.clone(),
+                tubes: tubes.clone(),
+                torpedo_count,
+                phaser_mode,
+            };
+            {
+                let last = world.resource::<LastWeaponsUpdate>();
+                if *last == current {
+                    return vec![];
+                }
+            }
+            *world.resource_mut::<LastWeaponsUpdate>() = current;
+
             vec![ServerMessage::WeaponsUpdate {
                 target_uuid,
                 target_name,
@@ -1909,7 +1938,18 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(LobbyPlugin)
+        app.configure_sets(
+            Update,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
+        .add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
@@ -2229,7 +2269,7 @@ mod tests {
                 uuid: "target-uuid".into(),
             },
         );
-        let _ = tick(&mut app);
+        // Target changes → WeaponsUpdate fires this tick.
         let out = tick(&mut app);
 
         let update = out
@@ -2261,7 +2301,7 @@ mod tests {
                 uuid: "target-uuid".into(),
             },
         );
-        let _ = tick(&mut app);
+        // Target changes → WeaponsUpdate fires this tick.
         let out = tick(&mut app);
 
         let update = out

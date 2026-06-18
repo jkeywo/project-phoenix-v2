@@ -131,9 +131,11 @@ export class ClientSimState {
     if (!msg || !msg.type) return;
     const d = msg.data || {};
     switch (msg.type) {
+      case 'ConsoleHullUpdate':
+        this.consoleHull = d.entries || [];
+        break;
       case 'SimState': {
         const snap = d.snapshot || {};
-        this.consoleHull = snap.console_hull || [];
         this.navigationWaypoint = snap.navigation_waypoint || null;
         // Update live positions/hull of known entities IN PLACE — never append.
         for (const st of (snap.entity_states || [])) {

@@ -122,6 +122,63 @@ test('sensors console: target panel renders target name when target set', async 
   await expect(page.locator('#tgt-kind-tag')).toHaveText('SHIP');
 });
 
+// (#473) Single-facing NPC shield bar
+test('sensors console: renders single shield bar when target_shield_fraction set', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  const withShield = {
+    ...NOMINAL_STATE,
+    target_uuid: 'ksv-nemesis',
+    target_name: 'KSV NEMESIS',
+    target_kind: 'ship',
+    target_shield_fraction: 0.5,
+    target_shields: [],
+  };
+  await page.evaluate(
+    (s) => (window as any).__updateConsole('Sensors', JSON.stringify(s)),
+    withShield,
+  );
+  // The shields card has exactly ONE .s-facing row (single-bar mode).
+  await expect(page.locator('#shield-facings .s-facing')).toHaveCount(1);
+  await expect(page.locator('#shield-facings .s-facing .lbl')).toHaveText('SHLD');
+  await expect(page.locator('#shield-facings .s-facing .pct')).toHaveText('50%');
+  await expect(page.locator('#shields-tag')).toHaveText('ONLINE');
+});
+
+test('sensors console: renders SHIELD DOWN when target_shield_fraction is zero', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  const broken = {
+    ...NOMINAL_STATE,
+    target_uuid: 'ksv-nemesis',
+    target_name: 'KSV NEMESIS',
+    target_kind: 'ship',
+    target_shield_fraction: 0,
+    target_shields: [],
+  };
+  await page.evaluate(
+    (s) => (window as any).__updateConsole('Sensors', JSON.stringify(s)),
+    broken,
+  );
+  await expect(page.locator('#shield-facings .s-facing .pct')).toHaveText('DOWN');
+  await expect(page.locator('#shields-tag')).toHaveText('SHIELD DOWN');
+});
+
+test('sensors console: renders NO SHIELD DATA when target has no shield_fraction', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  const noShield = {
+    ...NOMINAL_STATE,
+    target_uuid: 'ast-001',
+    target_name: 'ASTEROID',
+    target_kind: 'asteroid',
+    target_shields: [],
+    // target_shield_fraction omitted
+  };
+  await page.evaluate(
+    (s) => (window as any).__updateConsole('Sensors', JSON.stringify(s)),
+    noShield,
+  );
+  await expect(page.locator('#shield-facings')).toContainText('NO SHIELD DATA');
+});
+
 test('sensors console: cancel impulse button hidden when charge=0', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 

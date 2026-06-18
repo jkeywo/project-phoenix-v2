@@ -584,8 +584,8 @@ mod tests {
     fn active_impulse_autopilots_with_boosted_acceleration() {
         let mut app = test_app();
         // 5x boost: base accel = 25/3 ≈ 8.33; boosted = ~41.67 per second.
-        // Timer fires every 100ms, so the very first tick advances physics by
-        // dt = 0.1s → expected forward_speed ≈ 4.17.
+        // Timer fires at 30 Hz (dt ≈ 1/30 s), so the first tick gives
+        // forward_speed ≈ 41.67/30 ≈ 1.39.
         app.insert_resource(ImpulseConfigResource {
             charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
             speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
@@ -613,11 +613,10 @@ mod tests {
         tick(&mut app);
 
         let ship = app.world().resource::<ShipState>();
-        // With a 5x boost and dt=0.1s, expect roughly +4.17 forward.
-        // Without the boost we'd expect ~+0.83; require >=3.0 to clearly
-        // distinguish the boosted path.
+        // With 5x boost, expect ≈1.39; without boost ≈0.28. Require >=1.0 to
+        // clearly distinguish the boosted path.
         assert!(
-            ship.forward_speed >= 3.0,
+            ship.forward_speed >= 1.0,
             "active impulse should autopilot with boosted accel; got forward_speed={}",
             ship.forward_speed
         );
@@ -654,7 +653,7 @@ mod tests {
         tick(&mut app);
 
         let ship = app.world().resource::<ShipState>();
-        // Base accel ≈ 8.33, dt = 0.1 → expected ≈ 0.83. Cap at 2.0 to
+        // Base accel ≈ 8.33, dt = 1/30 → expected ≈ 0.28. Cap at 2.0 to
         // catch any accidental boost.
         assert!(
             ship.forward_speed < 2.0,
@@ -687,10 +686,10 @@ mod tests {
         tick(&mut app);
 
         let ship = app.world().resource::<ShipState>();
-        // Const is 5.0 → expect ≈ +4.17/tick. Without the fallback,
+        // Const is 5.0 → expect ≈ 1.39/tick (dt=1/30). Without the fallback,
         // forward_speed would be ~0 (0× accel during impulse).
         assert!(
-            ship.forward_speed >= 3.0,
+            ship.forward_speed >= 1.0,
             "zero acceleration_multiplier must fall back to const; \
              got forward_speed={}",
             ship.forward_speed

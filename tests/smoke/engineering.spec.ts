@@ -40,11 +40,11 @@ async function startGameWithEngineering(context: BrowserContext) {
   return { captain, engineer };
 }
 
-test('Engineering player receives console_hull in SimState after game start', async ({ context }) => {
+test('Engineering player receives ConsoleHullUpdate after game start', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
-  const simState = await engineer.waitForMessage('SimState', 2_000) as any;
-  const hull = simState.data.snapshot.console_hull;
+  const msg = await engineer.waitForMessage('ConsoleHullUpdate', 2_000) as any;
+  const hull = msg.data.entries;
 
   expect(Array.isArray(hull)).toBe(true);
   expect(hull.length).toBeGreaterThanOrEqual(1);
@@ -60,11 +60,11 @@ test('Engineering player receives console_hull in SimState after game start', as
   await engineer.close();
 });
 
-test('total hull starts at 100 in first SimState', async ({ context }) => {
+test('total hull starts at 100 in first ConsoleHullUpdate', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
-  const simState = await engineer.waitForMessage('SimState', 2_000) as any;
-  const hull = simState.data.snapshot.console_hull;
+  const msg = await engineer.waitForMessage('ConsoleHullUpdate', 2_000) as any;
+  const hull = msg.data.entries;
   const total = hull.reduce((sum: number, e: any) => sum + e.current, 0);
 
   expect(total).toBe(100);

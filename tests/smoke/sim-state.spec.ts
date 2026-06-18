@@ -70,13 +70,8 @@ test('SimState is broadcast to all clients within 2 s of game start', async ({ c
     expect(typeof snap.ship_yaw).toBe('number');
     expect(typeof snap.red_alert).toBe('boolean');
     expect(snap.view_mode).toBeDefined();
-    // Issues #160: unified entity_states and radar_state
+    // Issues #160: unified entity_states; radar_state moved to Welcome ship_config
     expect(Array.isArray(snap.entity_states)).toBe(true);
-    expect(snap.radar_state).toBeDefined();
-    expect(typeof snap.radar_state.helm_range).toBe('number');
-    expect(typeof snap.radar_state.tactical_range).toBe('number');
-    expect(typeof snap.radar_state.science_long_range).toBe('number');
-    expect(typeof snap.radar_state.science_system_map).toBe('number');
   }
 
   await captain.close();

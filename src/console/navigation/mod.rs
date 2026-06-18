@@ -51,7 +51,10 @@ mod tests {
     use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::ServerMessage;
-    use crate::server_app::{sim_state_broadcaster, ShipHullIntegrity, ShipImpulse};
+    use crate::server_app::{
+        sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull,
+        LastBroadcastShields, ShipHullIntegrity, ShipImpulse,
+    };
     use crate::ship_state::ShipState;
 
     #[derive(Resource, Default)]
@@ -72,6 +75,7 @@ mod tests {
             ))
             .add_plugins(NavigationPlugin)
             .add_plugins(sim_state_broadcaster())
+            .init_resource::<crate::simulation::SimOutbox>()
             .init_resource::<Outbox>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
@@ -80,6 +84,9 @@ mod tests {
             )])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(crate::modifiers::ShipModifiers::new())
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<LastBroadcastHull>()
+            .init_resource::<LastBroadcastShields>()
             .add_systems(PostUpdate, collect);
         app
     }

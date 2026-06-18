@@ -551,11 +551,8 @@ pub struct SimSnapshot {
     /// Per-tick entity state snapshots (position, yaw, hull, flags).
     #[serde(default)]
     pub entity_states: Vec<EntityStateSnapshot>,
-    /// Current radar configuration ranges.
-    #[serde(default)]
-    pub radar_state: RadarStateSnapshot,
-    /// Per-console hull integrity. Empty when the ship has no per-console hull config.
-    #[serde(default)]
+    /// Per-console hull integrity. Omitted when empty (sent via ConsoleHullUpdate events instead).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub console_hull: Vec<ConsoleHullStatus>,
     /// Shared custom waypoint set by the Navigation console.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1116,6 +1113,11 @@ pub enum ServerMessage {
     /// Carries a human-readable reason string displayed on the game-over screen.
     GameOver {
         reason: String,
+    },
+    /// Sent once at game start and whenever per-console hull HP changes.
+    /// Replaces the `console_hull` field that was previously embedded in every `SimState`.
+    ConsoleHullUpdate {
+        entries: Vec<ConsoleHullStatus>,
     },
     /// Broadcast when the ship takes damage (from collision or damage zone).
     /// `shield` = HP absorbed by shields, `hull` = HP that reached the hull.

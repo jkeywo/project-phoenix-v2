@@ -253,7 +253,10 @@ mod tests {
     use crate::messages::{ModifierSlot, ServerMessage, *};
     use crate::modifiers::ShipModifiers;
     use crate::shield::ShieldSystem;
-    use crate::simulation::{ShipHullIntegrity, ShipImpulse, ShipShields, SimOutbox};
+    use crate::simulation::{
+    LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
+    ShipImpulse, ShipShields, SimOutbox,
+};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -283,6 +286,9 @@ mod tests {
             .insert_resource(ShipModifiers::new())
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<LastBroadcastHull>()
+            .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
             .add_plugins(PowerPlugin)
             .add_systems(

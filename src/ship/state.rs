@@ -1,8 +1,5 @@
 use crate::flag_kind::FlagKind;
-use crate::messages::{
-    ConsoleHullStatus, EntityStateSnapshot, RadarStateSnapshot, SimSnapshot, ViewDirection,
-    ViewMode,
-};
+use crate::messages::{EntityStateSnapshot, SimSnapshot, ViewDirection, ViewMode};
 use bevy::prelude::Resource;
 
 #[derive(Resource)]
@@ -91,9 +88,7 @@ impl ShipState {
         power_levels: (u8, u8, u8),
         flags: Vec<FlagKind>,
         entity_states: Vec<EntityStateSnapshot>,
-        radar_state: RadarStateSnapshot,
         impulse_charge_progress: f32,
-        console_hull: Vec<ConsoleHullStatus>,
     ) -> SimSnapshot {
         SimSnapshot {
             red_alert: self.red_alert,
@@ -105,10 +100,9 @@ impl ShipState {
             power_levels,
             flags,
             entity_states,
-            radar_state,
             impulse_charge_progress,
             engine_thrust: 0.0,
-            console_hull,
+            console_hull: vec![],
             navigation_waypoint: None,
         }
     }
@@ -134,22 +128,8 @@ mod tests {
         assert!(!s.red_alert);
     }
 
-    fn empty_entity_states() -> Vec<EntityStateSnapshot> {
-        vec![]
-    }
-    fn default_radar() -> RadarStateSnapshot {
-        RadarStateSnapshot::default()
-    }
-
     fn snap(s: &ShipState, _hull: f32, levels: (u8, u8, u8)) -> SimSnapshot {
-        s.snapshot(
-            levels,
-            vec![],
-            empty_entity_states(),
-            default_radar(),
-            0.0,
-            vec![],
-        )
+        s.snapshot(levels, vec![], vec![], 0.0)
     }
 
     #[test]
@@ -182,14 +162,7 @@ mod tests {
         s.x = 3.0;
         s.z = -7.5;
         s.yaw = 1.25;
-        let snap = s.snapshot(
-            (2, 2, 2),
-            vec![],
-            empty_entity_states(),
-            default_radar(),
-            0.0,
-            vec![],
-        );
+        let snap = s.snapshot((2, 2, 2), vec![], vec![], 0.0);
         assert_eq!(snap.ship_x, 3.0);
         assert_eq!(snap.ship_z, -7.5);
         assert_eq!(snap.ship_yaw, 1.25);
@@ -231,14 +204,7 @@ mod tests {
     #[test]
     fn snapshot_includes_impulse_charge_progress() {
         let s = ShipState::new();
-        let snap = s.snapshot(
-            (2, 2, 2),
-            vec![],
-            empty_entity_states(),
-            default_radar(),
-            0.5,
-            vec![],
-        );
+        let snap = s.snapshot((2, 2, 2), vec![], vec![], 0.5);
         assert!((snap.impulse_charge_progress - 0.5).abs() < 1e-6);
     }
 

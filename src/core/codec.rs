@@ -339,7 +339,6 @@ mod tests {
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -363,7 +362,6 @@ mod tests {
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -387,7 +385,6 @@ mod tests {
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -411,7 +408,6 @@ mod tests {
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -435,7 +431,6 @@ mod tests {
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -459,7 +454,6 @@ mod tests {
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -1368,7 +1362,6 @@ mod tests {
                 power_levels: (4, 2, 1),
                 flags: vec![],
                 entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -1392,7 +1385,6 @@ mod tests {
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -1654,7 +1646,6 @@ mod tests {
                     shields: None,
                     warp_out_remaining_secs: None,
                 }],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -1686,7 +1677,6 @@ mod tests {
                     shields: None,
                     warp_out_remaining_secs: None,
                 }],
-                radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -1697,34 +1687,6 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
-    #[test]
-    fn radar_state_snapshot_custom_values_round_trips() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                radar_state: RadarStateSnapshot {
-                    helm_range: 40.0,
-                    tactical_range: 55.0,
-                    science_long_range: 180.0,
-                    science_system_map: 600.0,
-                },
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
 
     #[test]
     fn sim_snapshot_with_multiple_entity_states_round_trips() {
@@ -1758,12 +1720,6 @@ mod tests {
                         warp_out_remaining_secs: None,
                     },
                 ],
-                radar_state: RadarStateSnapshot {
-                    helm_range: 50.0,
-                    tactical_range: 60.0,
-                    science_long_range: 200.0,
-                    science_system_map: 500.0,
-                },
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
@@ -2284,7 +2240,6 @@ mod tests {
                     ]),
                     warp_out_remaining_secs: None,
                 }],
-                radar_state: crate::messages::RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],

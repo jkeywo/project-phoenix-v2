@@ -240,4 +240,28 @@ name = "Pirate"
             "Pirates must consider Federation as enemies"
         );
     }
+
+    #[test]
+    fn federation_and_harrow_are_mutually_hostile() {
+        // (#472) Federation now lists Harrow as an enemy so the player
+        // ship's auto-fire engages Harrow patrols, cruisers, and
+        // battleships in the combat-test scenario (#475).
+        let fed_toml = include_str!("../../assets/factions/federation.toml");
+        let harrow_toml = include_str!("../../assets/factions/harrow.toml");
+        let fed = parse_faction_config(fed_toml).unwrap();
+        let harrow = parse_faction_config(harrow_toml).unwrap();
+
+        let mut reg = FactionRegistry::new();
+        reg.insert(fed.clone());
+        reg.insert(harrow.clone());
+
+        assert!(
+            is_enemy(Some(fed.uuid), Some(harrow.uuid), &reg),
+            "Federation must consider Harrow as enemies (#472)"
+        );
+        assert!(
+            is_enemy(Some(harrow.uuid), Some(fed.uuid), &reg),
+            "Harrow must consider Federation as enemies"
+        );
+    }
 }

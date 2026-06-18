@@ -118,10 +118,13 @@ condition = "on_attacked"
 to = "pursue"
 
 # Patrolling or idle: enemy comes into detection range → pursue.
+# (#475) Radius extended to 5000 so destroyers detect the player from
+# anywhere on the map in the combat-test scenario, where they spawn
+# 600-1000u away and need to engage immediately.
 [[behaviour.transition]]
 from = ["patrol", "idle"]
 condition = "enemy_in_range"
-radius = 250.0
+radius = 5000.0
 to = "pursue"
 
 # Pursuing: enemy enters weapons range → attack.

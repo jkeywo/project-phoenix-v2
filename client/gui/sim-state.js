@@ -137,12 +137,13 @@ export class ClientSimState {
       case 'SimState': {
         const snap = d.snapshot || {};
         this.navigationWaypoint = snap.navigation_waypoint || null;
-        // Update live positions/hull of known entities IN PLACE — never append.
+        // Update live positions/hull/shield of known entities IN PLACE — never append.
         for (const st of (snap.entity_states || [])) {
           const entity = this.world.entities.find(e => e.uuid === st.uuid);
           if (!entity) continue;
           if (st.position != null) entity.position = st.position;
           if (st.hull_fraction != null) entity.hull_fraction = st.hull_fraction;
+          if (st.shield_fraction != null) entity.shield_fraction = st.shield_fraction;
         }
         break;
       }

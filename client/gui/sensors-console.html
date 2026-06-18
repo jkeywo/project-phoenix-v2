@@ -434,6 +434,9 @@
       if (s.target_threat)              _state.target_threat = s.target_threat;
       if (s.target_shield_freq !== undefined) _state.target_shield_freq = s.target_shield_freq;
       if (s.target_shields)             _state.target_shields = s.target_shields;
+      // Single-facing NPC shield bar (#473). Use `in s` (not `!== undefined`)
+      // so explicit nulls clear the previous value.
+      if ('target_shield_fraction' in s) _state.target_shield_fraction = s.target_shield_fraction;
       _render(_state);
     }
 
@@ -537,8 +540,17 @@
       rangeEl.textContent = s.target_range   != null
         ? Math.round(s.target_range) : '\u2014';
 
+      // Single-facing NPC shield (#473) takes precedence over the
+      // four-quadrant `target_shields` array. Order:
+      //   1. `target_shield_fraction != null`  → single-bar mode (NPC)
+      //   2. `target_shields.length > 0`       → four-quadrant mode (legacy)
+      //   3. otherwise                         → "NO SHIELD DATA"
+      var shieldFraction = s.target_shield_fraction;
       var shields = s.target_shields || [];
-      if (shields.length > 0) {
+      if (shieldFraction !== undefined && shieldFraction !== null) {
+        shieldsCard.classList.remove('panel-dim');
+        _renderSingleShield(shieldFraction);
+      } else if (shields.length > 0) {
         shieldsCard.classList.remove('panel-dim');
         _renderShields(shields, s.target_shield_freq);
       } else {
@@ -551,6 +563,27 @@
 
       scanCard.classList.remove('panel-dim');
       _renderScanData(s);
+    }
+
+    /// Render a single-facing NPC shield (#473): one horizontal bar,
+    /// labelled "DOWN" in the value cell + "SHIELD DOWN" in the tag when
+    /// the shield is broken (fraction = 0); "<pct>%" otherwise. Hides the
+    /// player-only frequency-chip section.
+    function _renderSingleShield(fraction) {
+      var pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
+      var broken = pct === 0;
+      var cls = broken ? 'off' : pct > 60 ? 'ok' : pct > 25 ? 'warn' : 'crit';
+      var label = broken ? 'DOWN' : pct + '%';
+      document.getElementById('shields-tag').textContent = broken ? 'SHIELD DOWN' : 'ONLINE';
+      var html =
+        '<div class="s-facing">' +
+        '<span class="lbl">SHLD</span>' +
+        '<div class="bar-w"><div class="bar-f ' + cls + '" style="width:' + pct + '%"></div></div>' +
+        '<span class="pct">' + label + '</span>' +
+        '</div>';
+      document.getElementById('shield-facings').innerHTML = html;
+      // NPCs do not carry a shield frequency.
+      document.getElementById('freq-section').style.display = 'none';
     }
 
     function _renderShields(shields, shieldFreq) {

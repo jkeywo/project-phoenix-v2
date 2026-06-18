@@ -437,6 +437,7 @@ export function buildSensorsConsoleState(state) {
   let targetName = null, targetKind = null, targetStance = null, targetFaction = null;
   let targetClass = null, targetHullPct = null, targetHeading = null, targetSpeed = null;
   let targetThreat = null, targetShieldFreq = null, targetShields = [];
+  let targetShieldFraction = null;
 
   if (state.sensorsTarget && entities) {
     const tgt = entities.find(a => a.uuid === state.sensorsTarget);
@@ -458,6 +459,12 @@ export function buildSensorsConsoleState(state) {
       targetThreat    = tgt.threat    || (targetStance === 'hostile' ? 'high' : 'low');
       targetShieldFreq = tgt.shield_freq || null;
       targetShields    = tgt.shields     || [];
+      // Single-facing NPC shield fraction (#473). `null` for shieldless
+      // entities (no [shields] block on the TOML); `0..=1` for shielded
+      // NPCs; `0` for broken shields.
+      targetShieldFraction = tgt.shield_fraction !== undefined && tgt.shield_fraction !== null
+        ? tgt.shield_fraction
+        : null;
     }
   }
 
@@ -489,6 +496,7 @@ export function buildSensorsConsoleState(state) {
     target_threat:      targetThreat,
     target_shield_freq: targetShieldFreq,
     target_shields:     targetShields,
+    target_shield_fraction: targetShieldFraction,
   });
 }
 

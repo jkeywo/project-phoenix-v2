@@ -1966,7 +1966,7 @@ fn handle_ai_events(
                         state,
                         target,
                     } => {
-                        // Resolve spawn name ? UUID
+                        // Resolve spawn name → UUID
                         let target_uuid = match name_to_uuid.get(entity) {
                             Some(u) => u.clone(),
                             None => {

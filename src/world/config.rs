@@ -2257,6 +2257,58 @@ entity    = "raider"
     }
 
     #[test]
+    fn parse_world_combat_test_toml_parses_and_carries_8_waves() {
+        // (#475) The combat-test scenario must parse and contain:
+        //   - 8 on_timer wave-spawn triggers
+        //   - 1 on_all_destroyed victory trigger
+        //   - 1 on_destroyed starbase defeat trigger
+        //   - 1 on_world_loaded objective trigger
+        //   - 9 comms templates (1 intro + 8 wave announcements)
+        let toml = include_str!("../../assets/worlds/combat_test.toml");
+        let cfg = parse_world(toml).expect("combat_test.toml must parse");
+
+        // Count timer triggers (waves).
+        let timer_count = cfg
+            .triggers
+            .iter()
+            .filter(|t| matches!(t.condition, TriggerCondition::OnTimer { .. }))
+            .count();
+        assert_eq!(timer_count, 8, "combat_test must have 8 wave-spawn timers");
+
+        // OnAllDestroyed victory trigger present with all 8 wave names.
+        let victory = cfg
+            .triggers
+            .iter()
+            .find(|t| matches!(t.condition, TriggerCondition::OnAllDestroyed { .. }))
+            .expect("combat_test must have an on_all_destroyed victory trigger");
+        if let TriggerCondition::OnAllDestroyed { entity_names } = &victory.condition {
+            assert_eq!(
+                entity_names.len(),
+                8,
+                "victory trigger must reference all 8 waves"
+            );
+        }
+
+        // Starbase-destroyed defeat trigger.
+        let defeat = cfg.triggers.iter().any(|t| {
+            matches!(
+                &t.condition,
+                TriggerCondition::OnDestroyed { entity_name } if entity_name == "Starbase Alpha"
+            )
+        });
+        assert!(defeat, "must have on_destroyed Starbase Alpha defeat trigger");
+
+        // Comms: 1 on_world_loaded urgent intro + 8 on_world_loaded delayed wave
+        // announcements = 9 total. (See file comment: on_timer not supported on
+        // [[comms]] blocks, so we use on_world_loaded + delay_secs.)
+        assert_eq!(cfg.comms.len(), 9, "combat_test must have 9 comms templates");
+
+        // Eight delayed wave-announce comms, plus one intro with no delay.
+        let delayed_count = cfg.comms.iter().filter(|c| c.node.delay_secs.is_some()).count();
+        assert_eq!(delayed_count, 8, "8 delayed wave-announce comms expected");
+    }
+
+    #[test]
     fn parse_world_before_the_fire_scenario_files_parse_with_expected_urgent_flags() {
         // Each entry: (file contents, expected number of urgent [[comms]] blocks).
         let cases: &[(&str, &str, usize)] = &[

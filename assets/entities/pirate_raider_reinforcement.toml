@@ -109,12 +109,14 @@ condition = "on_attacked"
 to = "pursue"
 
 # Patrolling or idle: enemy comes into detection range → pursue.
-# Radius expanded to 400 (vs 250 in base destroyer) so the reinforcement
-# detects the player immediately from its spawn position (~370 units away).
+# (#475) Radius extended to 5000 so destroyers detect the player from
+# anywhere on the map. The 400 radius in the original reinforcement
+# variant is no longer needed — even the base destroyer now detects at
+# 5000u.
 [[behaviour.transition]]
 from = ["patrol", "idle"]
 condition = "enemy_in_range"
-radius = 400.0
+radius = 5000.0
 to = "pursue"
 
 # Pursuing: enemy enters weapons range → attack.

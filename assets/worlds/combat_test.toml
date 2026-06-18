@@ -1,0 +1,305 @@
+# Combat Test Scenario (#475)
+#
+# An 8-wave defence scenario that exercises the full combat stack:
+#   - on_all_destroyed trigger condition (#470)
+#   - NPC shields backend + Sensors panel rendering (#471, #473)
+#   - Rebalanced Harrow fleet + Axiom Station (#474)
+#   - Federation-Harrow mutual hostility (#472)
+#
+# Layout: concentric rings centred on the star at the origin.
+#   - Star at [0, 0, 0]
+#   - Inner asteroid field: r=200..300
+#   - Clear zone: r=300..800 — where the planet, starbase, and player live
+#   - Outer asteroid field: r=800..1000
+#   - Spawn anchors beyond the outer belt, biased toward the +X hemisphere
+#     so enemies fly through the outer belt to reach the starbase.
+#
+# Starbase Alpha sits at [500, 0, 100] — within the clear zone. Player ship
+# spawns at [400, 0, 200] (~140u from the starbase) ready to defend.
+#
+# Wave timeline (locked from the design interview):
+#   t=0   destroyer    enemy_n_outer
+#   t=45  destroyer    enemy_se
+#   t=60  destroyer    enemy_e
+#   t=120 cruiser      enemy_ne
+#   t=210 destroyer    enemy_ese
+#   t=240 cruiser      enemy_ene
+#   t=270 destroyer    enemy_s_outer
+#   t=300 battleship   enemy_e_far
+#
+# Targeting model:
+#   Harrow ships spawn in their default `initial_state` (patrol/idle).
+#   Each ship's `enemy_in_range` transition (radius 5000) detects the
+#   player on the first tick and switches to `pursuing` with the player
+#   as the target. The starbase, being factionless, is not auto-targeted —
+#   enemies pursue and engage the player ship directly. If the player
+#   moves to draw fire away from the starbase, the destroyer/cruiser/
+#   battleship combat at the player's position will incidentally
+#   threaten the starbase if it's in their weapons cone.
+#
+#   `set_ai_state` in the same trigger as `spawn_entity` was attempted
+#   but found unworkable: Bevy `Commands` defer the spawn until the
+#   next ECS sync, so the AI controller doesn't exist when `set_ai_state`
+#   would run. The `enemy_in_range` approach is robust and uses only
+#   existing engine mechanisms.
+#
+# Victory: all 8 waves destroyed → game_over "VICTORY".
+# Defeat:  Starbase Alpha destroyed → game_over "DEFEAT".
+#          Player ship destroyed → handled by the built-in apply_hull_damage
+#          path which sets GamePhase::GameOver directly with reason
+#          "All consoles destroyed" — no scenario trigger needed.
+
+[global]
+seed = 475
+title = "Combat Test: Defend Starbase Alpha"
+description = "Eight waves of Harrow attackers. Hold the line."
+
+[ambient_light]
+color      = [0.6, 0.55, 0.5]
+brightness = 300.0
+
+# ── Anchors ───────────────────────────────────────────────────────────────────
+#
+# Starbase at [500, 0, 100]. Spawn anchors are absolute world coords (the
+# `spawn_entity` action's `anchor` field resolves against this `[anchors]`
+# block). All spawn anchors lie outside the outer asteroid belt (r >= 1000
+# from world origin) on the outward-facing +X hemisphere of the starbase.
+[anchors]
+# Verification: distance from world origin to each anchor, computed as
+# sqrt(x^2 + z^2). All should be >= 1000.
+enemy_e        = [1200.0, 0.0, 100.0]    # 1204
+enemy_ne       = [1000.0, 0.0, -400.0]   # 1077
+enemy_se       = [1000.0, 0.0, 600.0]    # 1166
+enemy_n_outer  = [900.0, 0.0, -600.0]    # 1081
+enemy_s_outer  = [900.0, 0.0, 800.0]     # 1204
+enemy_ene      = [1100.0, 0.0, -150.0]   # 1110
+enemy_ese      = [1100.0, 0.0, 350.0]    # 1154
+enemy_e_far    = [1400.0, 0.0, 100.0]    # 1404
+
+# ── Static map entities ───────────────────────────────────────────────────────
+
+# Star at world origin. Inner asteroid field rings the star at r=200..300.
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+
+# Planet in the inter-field gap.
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "earth"
+name = "earth"
+transform = { position = [550.0, 0.0, 0.0] }
+
+# Inner asteroid belt.
+[[entity]]
+template_path = "assets/entities/asteroid_field_main.toml"
+id = "inner-belt"
+transform = { position = [0.0, 0.0, 0.0] }
+
+# Outer asteroid belt. Same template — provides cover and forces enemies
+# to fly through asteroids to reach the starbase.
+[[entity]]
+template_path = "assets/entities/asteroid_field_main.toml"
+id = "outer-belt"
+transform = { position = [0.0, 0.0, 0.0] }
+
+# Player ship spawn-on-game-start in the clear zone, ~140u from the starbase.
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+id = "player-ship"
+transform = { position = [400.0, 0.0, 200.0] }
+spawn_on = "game_start"
+
+# Defended object. Named "Starbase Alpha" so on_destroyed can reference it.
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "Starbase Alpha"
+transform = { position = [500.0, 0.0, 100.0] }
+
+# ── Wave spawn triggers ──────────────────────────────────────────────────────
+
+# Wave 1: destroyer at t=0
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/pirate_raider.toml"
+  name          = "wave_1"
+  anchor        = "enemy_n_outer"
+
+# Wave 2: destroyer at t=45
+[[trigger]]
+condition = "on_timer"
+after_secs = 45.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/pirate_raider.toml"
+  name          = "wave_2"
+  anchor        = "enemy_se"
+
+# Wave 3: destroyer at t=60
+[[trigger]]
+condition = "on_timer"
+after_secs = 60.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/pirate_raider.toml"
+  name          = "wave_3"
+  anchor        = "enemy_e"
+
+# Wave 4: cruiser at t=120
+[[trigger]]
+condition = "on_timer"
+after_secs = 120.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/ship_harrow_patrol.toml"
+  name          = "wave_4"
+  anchor        = "enemy_ne"
+
+# Wave 5: destroyer at t=210
+[[trigger]]
+condition = "on_timer"
+after_secs = 210.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/pirate_raider.toml"
+  name          = "wave_5"
+  anchor        = "enemy_ese"
+
+# Wave 6: cruiser at t=240
+[[trigger]]
+condition = "on_timer"
+after_secs = 240.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/ship_harrow_patrol.toml"
+  name          = "wave_6"
+  anchor        = "enemy_ene"
+
+# Wave 7: destroyer at t=270
+[[trigger]]
+condition = "on_timer"
+after_secs = 270.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/pirate_raider.toml"
+  name          = "wave_7"
+  anchor        = "enemy_s_outer"
+
+# Wave 8 (final): battleship at t=300
+[[trigger]]
+condition = "on_timer"
+after_secs = 300.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/ship_harrow_warhawk.toml"
+  name          = "wave_8"
+  anchor        = "enemy_e_far"
+
+# ── Endings ──────────────────────────────────────────────────────────────────
+
+# Victory: all 8 named waves destroyed. (#470)
+[[trigger]]
+condition = "on_all_destroyed"
+entities  = ["wave_1", "wave_2", "wave_3", "wave_4", "wave_5", "wave_6", "wave_7", "wave_8"]
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+
+# Defeat: Starbase Alpha destroyed.
+[[trigger]]
+condition = "on_destroyed"
+entity    = "Starbase Alpha"
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "DEFEAT: Starbase Alpha lost. The Harrow strike fleet has secured the system."
+
+# ── Objectives ───────────────────────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-defend"
+  text      = "Defend Starbase Alpha against the incoming Harrow fleet."
+  mandatory = true
+  targets   = ["Starbase Alpha"]
+
+# ── Comms ────────────────────────────────────────────────────────────────────
+#
+# Federation Command opens with an urgent flash brief, then announces
+# each wave as it spawns. The wave announcements all fire `on_world_loaded`
+# but each has a `delay_secs` matching its wave's `on_timer` spawn time —
+# the comms template runtime queues delayed messages and injects them
+# when their timer expires. Using `on_world_loaded + delay_secs` avoids
+# needing `on_timer` support on the `[[comms]]` block.
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+urgent  = true
+message = "USS Phoenix, intelligence reports a Harrow strike fleet inbound on Starbase Alpha. Eight contacts, mixed class. Hold the line. Command out."
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+delay_secs = 0.5
+message = "Contact, bearing north-northwest: Harrow destroyer closing on Starbase Alpha."
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+delay_secs = 45.0
+message = "Second contact, bearing southeast: Harrow destroyer inbound."
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+delay_secs = 60.0
+message = "Third destroyer detected, due east. They are coordinating."
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+delay_secs = 120.0
+urgent  = true
+message = "Heavy contact, bearing northeast: Harrow cruiser. Repeat — cruiser inbound. All hands brace."
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+delay_secs = 210.0
+message = "New destroyer, bearing east-southeast. They keep coming."
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+delay_secs = 240.0
+urgent  = true
+message = "Second cruiser, east-northeast. Phoenix, prioritise the cruiser — Starbase Alpha is taking sustained fire."
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+delay_secs = 270.0
+message = "Destroyer, south. Final wave inbound shortly."
+
+[[comms]]
+from    = "Federation Command"
+trigger = "on_world_loaded"
+delay_secs = 300.0
+urgent  = true
+message = "FLASH: Harrow battleship inbound from due east. This is the last of them. Take it down."

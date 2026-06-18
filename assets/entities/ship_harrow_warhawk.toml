@@ -131,7 +131,7 @@ to = "pursuing"
 [[behaviour.transition]]
 from = ["idle", "patrolling"]
 condition = "enemy_in_range"
-radius = 500.0
+radius = 5000.0
 to = "pursuing"
 
 [[behaviour.transition]]

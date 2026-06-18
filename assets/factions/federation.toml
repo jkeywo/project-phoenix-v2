@@ -1,3 +1,6 @@
 uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 name = "Federation"
-enemies = ["bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"]
+enemies = [
+    "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb", # Pirate
+    "cccccccc-3333-4333-8333-cccccccccccc", # Harrow (#472)
+]

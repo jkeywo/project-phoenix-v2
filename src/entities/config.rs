@@ -2312,17 +2312,20 @@ target_speed = 0.5
     // ── pirate_raider.toml compile-time template tests ─────────────────────
 
     #[test]
-    fn pirate_raider_template_parses_with_pirate_faction() {
+    fn pirate_raider_template_parses_with_harrow_faction() {
+        // (#472) `pirate_raider.toml` was re-factioned from Pirate to Harrow
+        // so the player ship's auto-fire (Federation faction) engages it.
+        // Filename kept as `pirate_raider.toml` to avoid cascading rename
+        // across world TOMLs that reference it.
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
-        // Must have pirate faction UUID
         let faction = config
             .faction
             .expect("pirate_raider must declare a faction");
         assert_eq!(
             faction.to_string(),
-            "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
-            "pirate_raider faction must be Pirate"
+            "cccccccc-3333-4333-8333-cccccccccccc",
+            "pirate_raider faction must be Harrow (#472)"
         );
     }
 

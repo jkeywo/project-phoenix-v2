@@ -473,7 +473,9 @@ pub fn begin_asset_preload(
 
     let resource = AssetPreloadResource {
         started: true,
-        complete: total_count == 0,
+        // Don't mark complete if sub-worlds are pending — they may add more
+        // GLBs/icons/sidecars once their TOMLs arrive.
+        complete: total_count == 0 && pending_worlds.is_empty(),
         total_count,
         ready_count: 0,
         glb_handles,
@@ -499,7 +501,17 @@ pub fn poll_asset_preload(
     images: Res<Assets<Image>>,
     asset_server: Res<AssetServer>,
 ) {
-    if !preload.started || preload.complete {
+    if !preload.started {
+        return;
+    }
+    // Keep polling even after complete=true during the Lobby phase: sub-world
+    // GLBs need continued tracking and any newly-discovered assets need
+    // asset_server.load calls so they're cached before the game starts.
+    // Only skip when there is genuinely nothing left to discover or wait for.
+    if preload.complete
+        && preload.pending_sub_worlds.is_empty()
+        && preload.pending_sidecars.is_empty()
+    {
         return;
     }
 
@@ -627,16 +639,16 @@ pub fn poll_asset_preload(
         );
         preload.failed_glbs.insert(path);
     }
+    // GLBs load from the Lobby so the viewscreen has models ready at game start.
+    // Treat Failed as terminal so a bad asset doesn't deadlock the gate.
     let glbs_terminal = glbs_loaded + glbs_failed;
     let glbs_done = glbs_terminal == preload.glb_handles.len();
 
-    // Recompute totals: icons + sidecars + sub-worlds + GLBs.
     preload.total_count = preload.icon_handles.len()
         + preload.initial_sidecar_count
         + preload.initial_sub_world_count
         + preload.glb_handles.len();
 
-    // Check completion: icons + sidecars + sub-worlds + GLBs.
     let sidecars_done = preload.pending_sidecars.is_empty();
     let sub_worlds_done = preload.pending_sub_worlds.is_empty();
     let icons_ready = preload
@@ -644,7 +656,6 @@ pub fn poll_asset_preload(
         .iter()
         .all(|(_, h)| images.get(h).is_some());
 
-    // Recompute ready count for progress display.
     let icon_ready = preload
         .icon_handles
         .iter()
@@ -662,12 +673,12 @@ pub fn poll_asset_preload(
         preload.complete = true;
         preload.ready_count = preload.total_count;
         bevy::log::info!(
-            "asset_preload: all assets ready (icons={}, sidecars_done={}, sub_worlds_done={}, GLBs={}+{} failed)",
-            icons_ready, sidecars_done, sub_worlds_done, glbs_loaded, glbs_failed
+            "asset_preload: all assets ready — icons={}, sidecars={}, sub_worlds={}, GLBs={}+{} failed",
+            icons_ready, sidecars_done, sub_worlds_done, glbs_loaded, glbs_failed,
         );
     } else {
         bevy::log::debug!(
-            "asset_preload: waiting: icons_ready={}, sidecars_done={} (pending={}), sub_worlds_done={} (pending={}), GLBs={}/{} ({} failed)",
+            "asset_preload: waiting — icons={}, sidecars={} (pending {}), sub_worlds={} (pending {}), GLBs {}/{} ({} failed)",
             icons_ready,
             sidecars_done,
             preload.pending_sidecars.len(),

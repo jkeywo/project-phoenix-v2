@@ -420,19 +420,18 @@ pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
     });
 }
 
-/// Take the TOML for a previously-requested sidecar path, if available.
+/// Get the TOML for a previously-requested sidecar path, if available.
 ///
-/// Returns `Some(toml)` (possibly an empty string meaning "absent") and removes
-/// the entry; returns `None` if the JS fetch has not yet delivered the TOML.
+/// Returns `Some(toml)` (possibly an empty string meaning "absent") and leaves
+/// the entry in the cache; returns `None` if the JS fetch has not yet
+/// delivered the TOML.
 ///
-/// **Single-consumer invariant.** This is destructive: once any caller takes
-/// the TOML, no other caller can read it. The renderer
-/// (`server_app::load_sidecar_toml`) is the sole intended consumer. Other
-/// callers that only need to know whether the fetch has completed should use
-/// [`is_pending_sidecar_delivered`] instead, otherwise the renderer's lookup
-/// will race the peeker and stall the model forever.
+/// The sidecar cache is persistent: once a path is fetched it remains
+/// available so that multiple entities sharing the same sidecar (e.g. many
+/// asteroid rocks of the same type) can all read it without the first
+/// consumer destroying it for the rest.
 pub fn take_pending_sidecar_toml(path: &str) -> Option<String> {
-    PENDING_SIDECAR_TOML.with(|m| m.borrow_mut().remove(path))
+    PENDING_SIDECAR_TOML.with(|m| m.borrow().get(path).cloned())
 }
 
 /// Non-destructive check: has JS delivered the sidecar TOML for `path` yet?
@@ -935,13 +934,13 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         );
     }
 
-    // ── Sidecar inbox: peek vs take semantics ─────────────────────────────
+    // ── Sidecar cache: persistent read semantics ─────────────────────────
     //
-    // The renderer is the sole consumer of sidecar TOMLs. The preload
-    // poller must only PEEK at the inbox via `is_pending_sidecar_delivered`;
-    // calling the destructive `take_pending_sidecar_toml` from anywhere
-    // other than the renderer races and stalls the model forever (the bug
-    // these tests pin down).
+    // The sidecar cache is persistent: once a TOML is pushed it stays so
+    // that many entities sharing the same sidecar path (e.g. multiple rocks
+    // of the same asteroid type) can all read it. `take_pending_sidecar_toml`
+    // is non-destructive (returns a clone); `is_pending_sidecar_delivered`
+    // checks presence. The preload poller uses the latter to track progress.
 
     /// Each test in this module mutates the process-wide
     /// `PENDING_SIDECAR_TOML` thread-local. Tests must use unique paths so
@@ -961,47 +960,43 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         let path = unique_sidecar_path("pushed");
         super::wasm_push_sidecar_toml(path.clone(), "anything".to_string());
         assert!(super::is_pending_sidecar_delivered(&path));
-        // Cleanup so other tests do not see leftover entries.
-        let _ = super::take_pending_sidecar_toml(&path);
+    }
+
+    #[test]
+    fn take_is_non_destructive_multiple_readers() {
+        // Regression: many asteroid entities share the same sidecar path.
+        // The first entity to call take_pending_sidecar_toml must not destroy
+        // the entry — subsequent entities for the same sidecar must also get it.
+        let path = unique_sidecar_path("multi_reader");
+        super::wasm_push_sidecar_toml(path.clone(), "rig-toml-body".to_string());
+
+        // First reader (entity 1).
+        assert_eq!(
+            super::take_pending_sidecar_toml(&path),
+            Some("rig-toml-body".to_string()),
+        );
+        // Second reader (entity 2) must still see it.
+        assert_eq!(
+            super::take_pending_sidecar_toml(&path),
+            Some("rig-toml-body".to_string()),
+            "second entity for the same sidecar path must not get None"
+        );
+        // is_pending_sidecar_delivered also still true.
+        assert!(super::is_pending_sidecar_delivered(&path));
     }
 
     #[test]
     fn is_pending_sidecar_delivered_is_non_destructive() {
-        // Regression test for the prefetch ↔ renderer race. The poll loop
-        // calls `is_pending_sidecar_delivered` to learn that the JS fetch
-        // resolved. If that call were destructive (like the old
-        // `pop_pending_sidecar_toml`), the renderer's later `take` would
-        // return `None` and the model would never attach to the entity.
         let path = unique_sidecar_path("non_destructive");
         super::wasm_push_sidecar_toml(path.clone(), "rig-toml-body".to_string());
-
-        // Simulate `poll_asset_preload` peeking.
         assert!(super::is_pending_sidecar_delivered(&path));
-        // Peek again — should still be there.
         assert!(super::is_pending_sidecar_delivered(&path));
-
-        // Simulate `render_spawned_entities` consuming the body.
         assert_eq!(
             super::take_pending_sidecar_toml(&path),
             Some("rig-toml-body".to_string()),
-            "renderer must see the body that JS pushed even after the poller peeked"
         );
-
-        // After take, the inbox is drained.
-        assert_eq!(super::take_pending_sidecar_toml(&path), None);
-        assert!(!super::is_pending_sidecar_delivered(&path));
-    }
-
-    #[test]
-    fn take_pending_sidecar_toml_is_destructive() {
-        let path = unique_sidecar_path("destructive");
-        super::wasm_push_sidecar_toml(path.clone(), "body".to_string());
-        assert_eq!(
-            super::take_pending_sidecar_toml(&path),
-            Some("body".to_string())
-        );
-        // Second take returns None — single-consumer invariant.
-        assert_eq!(super::take_pending_sidecar_toml(&path), None);
+        // Cache entry persists after take.
+        assert!(super::is_pending_sidecar_delivered(&path));
     }
 
     #[test]

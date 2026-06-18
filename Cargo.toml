@@ -38,3 +38,10 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 [target.wasm32-unknown-unknown.dependencies]
 js-sys = "0.3"
 web-sys = { version = "0.3.97", features = ["Window", "Navigator", "console"] }
+# Routes Rust panics through console.error with a real message + location.
+# Without this, a panic anywhere in the Bevy app (e.g. inside a system) traps
+# the wasm instance and every subsequent JS→WASM call surfaces as a bare
+# "RuntimeError: memory access out of bounds" — usually pointing at whatever
+# entry point fired next (typically `wasm_receive_message`), which makes the
+# real panic site invisible.
+console_error_panic_hook = "0.1"

@@ -3,7 +3,7 @@ title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, events, routing]
 sources: [src/server/bridge.rs, src/server/lobby.rs, src/server/simulation.rs, AGENTS.md]
-updated: 2026-05-08
+updated: 2026-06-18
 ---
 
 # Message Flow
@@ -76,6 +76,12 @@ See [Game Loop](./game-loop.md).
 ## Why the codec seam matters here
 
 `bridge.rs` is the *only* call site of `JsonCodec::decode` / `encode` outside tests. This means the wire format is one module change away from being binary. See [Codec Seam](./codec-seam.md).
+
+## Diagnosing WASM panics
+
+`wasm_init` calls `console_error_panic_hook::set_once()` before `App::new()`. Without this, any Rust panic anywhere in the Bevy app traps the wasm instance and every *subsequent* JS→WASM call surfaces as `RuntimeError: memory access out of bounds`, almost always pointing at `wasm_receive_message` (the next entry point fired by PeerJS). The hook routes the real panic message + Rust source location to `console.error` so the actual fault is visible.
+
+If a "memory access out of bounds" trace ever points at `wasm_receive_message` again, look earlier in the console for the *real* panic — and check that the hook is still installed in `src/server/bridge.rs::wasm_init`.
 
 ## Related
 

@@ -144,6 +144,14 @@ pub fn wasm_validate_stations(toml_str: &str) -> Result<JsValue, JsValue> {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_init() {
+    // Route Rust panics through console.error with a useful message + location.
+    // Without this, a panic in any Bevy system traps the wasm instance and
+    // every subsequent JS→WASM call surfaces as a bare "RuntimeError: memory
+    // access out of bounds" pointing at whatever entry point fired next
+    // (typically `wasm_receive_message` since the host page receives PeerJS
+    // messages continuously). `set_once` is idempotent.
+    console_error_panic_hook::set_once();
+
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
         primary_window: Some(bevy::window::Window {

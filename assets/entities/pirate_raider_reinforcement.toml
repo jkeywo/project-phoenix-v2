@@ -1,22 +1,29 @@
-# Pirate Raider Reinforcement
+# Harrow Destroyer Reinforcement (formerly Pirate Raider Reinforcement)
 #
 # Variant of pirate_raider.toml used when reinforcements arrive via a
-# LoadWorld trigger.  Identical to the base raider except the
+# LoadWorld trigger. Identical to the base destroyer except the
 # `enemy_in_range` detection radius is expanded to 400 units so the
-# raider immediately detects and pursues the player from its spawn
+# destroyer immediately detects and pursues the player from its spawn
 # position (~370 units from player start in the default scenario).
+#
+# (#474) Re-balanced alongside pirate_raider.toml: hull 30 + shield 15
+# at 0.5/s regen, phaser pierce 0.1, no flee — fight to the death.
 
-name = "Pirate Raider"
+name = "Harrow Destroyer"
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
 [target]
 tags = ["ship"]
 threat_level = "high"
-description = "Pirate Raider"
+description = "Harrow Destroyer"
 
 [hull]
-hull_integrity = 60.0
+hull_integrity = 30.0
+
+[shields]
+max_hp = 15.0
+regen_per_sec = 0.5
 
 [collider]
 shape = "Capsule"
@@ -38,10 +45,11 @@ id = "fore"
 facing_deg = 0.0
 fire_arc_deg = 180.0
 auto_arc_deg = 180.0
-beam_range = 50.0
+beam_range = 75.0
 beam_damage_per_sec = 6.0
 beam_duration_secs = 4.0
-cooldown_secs = 5.0
+cooldown_secs = 4.0
+shield_pierce = 0.1
 beam_color = [1.0, 0.1, 0.1, 1.0]
 
 [radar_appearance]
@@ -83,13 +91,8 @@ target_speed = 0.9
 [[behaviour.state]]
 name = "attack"
 kind = "attacking"
-maintain_range = 35.0
+maintain_range = 50.0
 target_speed = 0.8
-
-[[behaviour.state]]
-name = "flee"
-kind = "fleeing"
-target_speed = 1.0
 
 [[behaviour.state]]
 name = "warp_out"
@@ -106,7 +109,7 @@ condition = "on_attacked"
 to = "pursue"
 
 # Patrolling or idle: enemy comes into detection range → pursue.
-# Radius expanded to 400 (vs 200 in base raider) so the reinforcement
+# Radius expanded to 400 (vs 250 in base destroyer) so the reinforcement
 # detects the player immediately from its spawn position (~370 units away).
 [[behaviour.transition]]
 from = ["patrol", "idle"]
@@ -126,22 +129,8 @@ from = "attack"
 condition = "target_destroyed"
 to = "patrol"
 
-# Attacking: hull drops below 30 % → flee.
-[[behaviour.transition]]
-from = ["attack", "pursue"]
-condition = "hull_below"
-threshold = 0.3
-to = "flee"
-
-# Fleeing: after 10 s of fleeing, warp out.
-[[behaviour.transition]]
-from = "flee"
-condition = "on_timer"
-seconds = 10.0
-to = "warp_out"
-
 # Any active state: scenario unloaded → warp out gracefully.
 [[behaviour.transition]]
-from = ["patrol", "idle", "pursue", "attack", "flee"]
+from = ["patrol", "idle", "pursue", "attack"]
 condition = "on_scenario_unloaded"
 to = "warp_out"

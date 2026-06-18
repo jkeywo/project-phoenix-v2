@@ -24,7 +24,7 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
 
   // Boot a single client and take the captain station so we can start the game.
   const captain = await createTestClient(context, hostId, { name: 'Cap' });
-  await captain.send('SelectStation', { station: 'CaptainChair' });
+  await captain.send('SelectStation', { station: 'Captain' });
   await captain.page.waitForFunction(
     (t) => (window as any).__messages?.some(
       (m: any) => m.type === 'StationAssigned' && m.data.token === t,

@@ -3,7 +3,7 @@ title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
 sources: [src/world/server.rs, src/world/config.rs, src/world/content.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, assets/worlds/default.toml, assets/worlds/patrol.toml]
-updated: 2026-05-22
+updated: 2026-06-18
 ---
 
 # WorldPlugin
@@ -49,11 +49,29 @@ A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/render
 
 ## Update systems
 
-- `handle_hail` — Comms officer hails a contact; matching comms templates fire and inject messages
-- `handle_respond_to_message` — player picks a response, may emit follow-up dialogue, runs response actions
-- `handle_clear_comms` — drops orphaned and read messages
-- `broadcast_comms_state` / `broadcast_objective_summary` — push deltas on change
-- `handle_ai_events` — `WorldEvent` (attacked, destroyed, hailed, timer) drives trigger evaluation and the matching trigger actions
+- `handle_hail` �?" Comms officer hails a contact; matching comms templates fire and inject messages
+- `handle_respond_to_message` �?" player picks a response, may emit follow-up dialogue, runs response actions
+- `handle_clear_comms` �?" drops orphaned and read messages
+- `broadcast_comms_state` / `broadcast_objective_summary` �?" push deltas on change
+- `handle_ai_events` �?" `WorldEvent` (attacked, destroyed, hailed, timer) drives trigger evaluation and the matching trigger actions
+
+## Trigger conditions
+
+Triggers in `[[trigger]]` blocks are matched against `WorldEvent`s by `evaluate_single_trigger` / `evaluate_triggers_with_flags` in `src/world/content.rs`. All conditions are single-shot (set `TriggerState.fired = true` once dispatched). The full list:
+
+| `condition = ` | Required fields | Fires on |
+|---|---|---|
+| `on_destroyed` | `entity = "<name>"` | `WorldEvent::Destroyed { uuid }` whose `uuid` resolves to the named entity. |
+| `on_all_destroyed` | `entities = ["<name>", ...]` | The tick the **last** named entity is destroyed. Stateful: tracks observed `Destroyed` events in `TriggerState.seen_destroyed`. Names that are never registered in `name_to_uuid` cause the trigger to never fire (#470). |
+| `on_attacked` | `entity = "<name>"` | `WorldEvent::Attacked` for the named entity. |
+| `on_timer` | `after_secs = <f32>` | `WorldEvent::TimerElapsed` once `elapsed_secs >= after_secs`. |
+| `on_hailed` | `entity = "<name>"` | `WorldEvent::Hailed` for the named entity. |
+| `on_flag_set` / `on_flag_cleared` | `name = "<flag>"` | False→true / true→false transitions of a world flag (with `parent:` walks for sub-world layers). |
+| `on_world_loaded` | (none) | Once at world load (or sub-world load). |
+| `on_entered_region` / `on_exited_region` | `entity = "<region>"` | Player ship enters / exits the named region. |
+
+`OnAllDestroyed` is the only condition with non-trivial runtime state (`seen_destroyed: HashSet<String>` on `TriggerState`). `condition_matches` is stateless and read-only; the stateful `OnAllDestroyed` path is fast-pathed in `trigger_fires_for_events` before delegating. The mutation of `seen_destroyed` happens **before** the `when` predicate is evaluated, so a trigger with `on_all_destroyed` + `when = "flag(armed)"` will accumulate destruction events while the flag is unset and fire on the first tick where both conditions hold.
+
 
 ## Resources
 

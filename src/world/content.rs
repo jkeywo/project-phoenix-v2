@@ -15,7 +15,7 @@
 // PRD #342: the legacy multi-world layering machinery was deleted in slice 5.
 // One world is loaded per session; runtime state is flat.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Re-export pure config types so legacy import paths continue to resolve.
 pub use crate::world::config::{
@@ -79,6 +79,12 @@ pub struct TriggerState {
     /// to the parent `WorldLayerMap` entry so `UnloadWorld` cascades.
     #[doc(hidden)]
     pub origin_layer: Option<String>,
+    /// Set of entity names whose `WorldEvent::Destroyed` we have already
+    /// observed. Only populated for `OnAllDestroyed` triggers; ignored by
+    /// every other condition. The matcher fires when this set contains
+    /// every name in the condition's `entity_names`. (#470)
+    #[doc(hidden)]
+    pub seen_destroyed: HashSet<String>,
 }
 
 /// Runtime state for one comms template — tracks whether it has already fired.
@@ -163,6 +169,7 @@ pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String
         TriggerCondition::OnTimer { .. }
         | TriggerCondition::OnFlagSet { .. }
         | TriggerCondition::OnFlagCleared { .. }
+        | TriggerCondition::OnAllDestroyed { .. }
         | TriggerCondition::OnWorldLoaded => None,
     }
 }
@@ -212,9 +219,13 @@ pub fn evaluate_triggers_with_flags(
         // past-root and never match — matches the previous behaviour
         // before fix 1.
         let layer_chain: [Option<String>; 1] = [state.origin_layer.clone()];
-        let fires = events.iter().any(|event| {
-            condition_matches(&state.trigger.condition, event, name_to_uuid, &layer_chain)
-        });
+        let fires = trigger_fires_for_events(
+            &state.trigger.condition,
+            events,
+            name_to_uuid,
+            &layer_chain,
+            &mut state.seen_destroyed,
+        );
         if !fires {
             continue;
         }
@@ -259,9 +270,13 @@ pub fn evaluate_single_trigger(
     if state.fired {
         return None;
     }
-    let fires = events
-        .iter()
-        .any(|event| condition_matches(&state.trigger.condition, event, name_to_uuid, layer_chain));
+    let fires = trigger_fires_for_events(
+        &state.trigger.condition,
+        events,
+        name_to_uuid,
+        layer_chain,
+        &mut state.seen_destroyed,
+    );
     if !fires {
         return None;
     }
@@ -337,10 +352,53 @@ pub fn evaluate_comms_templates(
     results
 }
 
+/// Decide whether a single trigger fires for the given batch of events.
+///
+/// Most conditions delegate to the stateless `condition_matches` once per
+/// event. `OnAllDestroyed` is stateful: this function updates
+/// `seen_destroyed` from any `WorldEvent::Destroyed` whose UUID resolves
+/// to one of the named entities, then fires when the set covers every
+/// name. Names whose UUID is never registered in `name_to_uuid` can never
+/// reach `seen_destroyed`, so the trigger never fires for unspawned
+/// entities (matches `OnDestroyed`'s "unknown entity → never matches"
+/// semantics).
+fn trigger_fires_for_events(
+    condition: &TriggerCondition,
+    events: &[WorldEvent],
+    name_to_uuid: &HashMap<String, String>,
+    layer_chain: &[Option<String>],
+    seen_destroyed: &mut HashSet<String>,
+) -> bool {
+    if let TriggerCondition::OnAllDestroyed { entity_names } = condition {
+        for event in events {
+            if let WorldEvent::Destroyed { uuid } = event {
+                for name in entity_names {
+                    if seen_destroyed.contains(name) {
+                        continue;
+                    }
+                    if let Some(mapped) = name_to_uuid.get(name) {
+                        if mapped == uuid {
+                            seen_destroyed.insert(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+        return entity_names.iter().all(|n| seen_destroyed.contains(n));
+    }
+    events
+        .iter()
+        .any(|event| condition_matches(condition, event, name_to_uuid, layer_chain))
+}
+
 /// Returns true if `condition` matches `event`, using `name_to_uuid` to
 /// resolve entity names to runtime UUIDs and `layer_chain` to resolve
 /// `parent:` prefixes on `OnFlagSet` / `OnFlagCleared` condition names
 /// (innermost layer first; `None` = base world).
+///
+/// Stateless and read-only — does not handle `OnAllDestroyed` (which is
+/// stateful). `OnAllDestroyed` is fast-pathed in `trigger_fires_for_events`
+/// before this matcher runs and never reaches the match block.
 fn condition_matches(
     condition: &TriggerCondition,
     event: &WorldEvent,
@@ -419,6 +477,7 @@ pub fn trigger_states_from_world(world: &crate::world::config::WorldConfig) -> V
             trigger: t.clone(),
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         })
         .collect()
 }
@@ -471,6 +530,7 @@ mod tests {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -489,6 +549,7 @@ mod tests {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -507,6 +568,7 @@ mod tests {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -519,6 +581,214 @@ mod tests {
         assert!(fired2.is_empty());
     }
 
+    // ── OnAllDestroyed ─────────────────────────────────────────────────────
+
+    fn all_destroyed_trigger(names: &[&str], action: TriggerAction) -> Trigger {
+        Trigger {
+            condition: TriggerCondition::OnAllDestroyed {
+                entity_names: names.iter().map(|s| s.to_string()).collect(),
+            },
+            actions: vec![action],
+            when: None,
+        }
+    }
+
+    #[test]
+    fn on_all_destroyed_fires_only_after_last_named_entity_dies() {
+        let mut states = vec![TriggerState {
+            trigger: all_destroyed_trigger(&["a", "b"], add_obj("obj-cleared")),
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("a".into(), "uuid-a".into());
+        name_to_uuid.insert("b".into(), "uuid-b".into());
+
+        // First destruction: only `a` dies — must NOT fire.
+        let events1 = vec![WorldEvent::Destroyed {
+            uuid: "uuid-a".into(),
+        }];
+        let fired1 = evaluate_triggers(&mut states, &events1, &name_to_uuid);
+        assert!(
+            fired1.is_empty(),
+            "OnAllDestroyed must not fire while any named entity still alive"
+        );
+        assert!(!states[0].fired);
+        assert!(states[0].seen_destroyed.contains("a"));
+
+        // Second destruction: `b` dies — now must fire.
+        let events2 = vec![WorldEvent::Destroyed {
+            uuid: "uuid-b".into(),
+        }];
+        let fired2 = evaluate_triggers(&mut states, &events2, &name_to_uuid);
+        assert_eq!(fired2.len(), 1);
+        assert!(states[0].fired);
+    }
+
+    #[test]
+    fn on_all_destroyed_is_single_shot() {
+        let mut states = vec![TriggerState {
+            trigger: all_destroyed_trigger(&["a"], add_obj("obj-cleared")),
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("a".into(), "uuid-a".into());
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-a".into(),
+        }];
+        let fired1 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired1.len(), 1);
+        assert!(
+            fired2.is_empty(),
+            "OnAllDestroyed must not re-fire after firing once"
+        );
+    }
+
+    #[test]
+    fn on_all_destroyed_never_fires_for_unspawned_entity() {
+        // entity_names = ["a", "b"] but only "a" is registered in name_to_uuid.
+        // Even if some `WorldEvent::Destroyed` event matches "a"'s uuid,
+        // "b" can never enter `seen_destroyed` so the trigger never fires.
+        let mut states = vec![TriggerState {
+            trigger: all_destroyed_trigger(&["a", "b"], add_obj("obj-x")),
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("a".into(), "uuid-a".into());
+        // "b" never registered.
+        let events = vec![
+            WorldEvent::Destroyed {
+                uuid: "uuid-a".into(),
+            },
+            WorldEvent::Destroyed {
+                uuid: "uuid-b".into(),
+            },
+        ];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert!(
+            fired.is_empty(),
+            "OnAllDestroyed must not fire when a named entity was never registered"
+        );
+        assert!(states[0].seen_destroyed.contains("a"));
+        assert!(!states[0].seen_destroyed.contains("b"));
+    }
+
+    #[test]
+    fn on_all_destroyed_fires_when_all_named_entities_die_in_one_batch() {
+        let mut states = vec![TriggerState {
+            trigger: all_destroyed_trigger(&["a", "b", "c"], add_obj("obj-cleared")),
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("a".into(), "uuid-a".into());
+        name_to_uuid.insert("b".into(), "uuid-b".into());
+        name_to_uuid.insert("c".into(), "uuid-c".into());
+
+        let events = vec![
+            WorldEvent::Destroyed {
+                uuid: "uuid-a".into(),
+            },
+            WorldEvent::Destroyed {
+                uuid: "uuid-b".into(),
+            },
+            WorldEvent::Destroyed {
+                uuid: "uuid-c".into(),
+            },
+        ];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+        assert!(states[0].fired);
+    }
+
+    #[test]
+    fn on_all_destroyed_ignores_destruction_events_for_other_entities() {
+        let mut states = vec![TriggerState {
+            trigger: all_destroyed_trigger(&["a"], add_obj("obj-x")),
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("a".into(), "uuid-a".into());
+        name_to_uuid.insert("other".into(), "uuid-other".into());
+
+        // Some other entity dies — must not register against this trigger.
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-other".into(),
+        }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert!(fired.is_empty());
+        assert!(!states[0].seen_destroyed.contains("a"));
+        assert!(states[0].seen_destroyed.is_empty());
+    }
+
+    #[test]
+    fn on_all_destroyed_when_predicate_gates_firing_but_seen_set_persists() {
+        // Pins the design decision: `seen_destroyed` accumulates BEFORE the
+        // `when` predicate is evaluated. The trigger fires as soon as both
+        // (a) every named entity has been destroyed AND
+        // (b) the `when` predicate evaluates true,
+        // even if those become true on different ticks.
+        use crate::world::flags::{parse_predicate, FlagStore};
+
+        let predicate = parse_predicate("flag(armed)").expect("parse");
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnAllDestroyed {
+                    entity_names: vec!["a".into(), "b".into()],
+                },
+                actions: vec![add_obj("obj-cleared")],
+                when: Some(predicate),
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("a".into(), "uuid-a".into());
+        name_to_uuid.insert("b".into(), "uuid-b".into());
+
+        // Tick 1: both entities die, but `armed` flag is unset → must NOT fire.
+        let events = vec![
+            WorldEvent::Destroyed {
+                uuid: "uuid-a".into(),
+            },
+            WorldEvent::Destroyed {
+                uuid: "uuid-b".into(),
+            },
+        ];
+        let flag_store_unset = FlagStore::default();
+        let chain_unset: [&FlagStore; 1] = [&flag_store_unset];
+        let fired_tick1 =
+            evaluate_triggers_with_flags(&mut states, &events, &name_to_uuid, &chain_unset);
+        assert!(
+            fired_tick1.is_empty(),
+            "must not fire while `when` predicate is false"
+        );
+        assert!(!states[0].fired);
+        // But the seen_destroyed set must still have grown.
+        assert!(states[0].seen_destroyed.contains("a"));
+        assert!(states[0].seen_destroyed.contains("b"));
+
+        // Tick 2: no new events, but the flag is now set → must fire from
+        // the persisted `seen_destroyed` set.
+        let mut flag_store_set = FlagStore::default();
+        flag_store_set.set_flag("armed");
+        let chain_set: [&FlagStore; 1] = [&flag_store_set];
+        let fired_tick2 =
+            evaluate_triggers_with_flags(&mut states, &[], &name_to_uuid, &chain_set);
+        assert_eq!(fired_tick2.len(), 1);
+        assert!(states[0].fired);
+    }
+
     #[test]
     fn on_timer_fires_when_elapsed_exceeds_threshold() {
         let mut states = vec![TriggerState {
@@ -529,6 +799,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let name_to_uuid = HashMap::new();
         let before = vec![WorldEvent::TimerElapsed { elapsed_secs: 10.0 }];
@@ -551,6 +822,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -574,6 +846,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("starbase".into(), "uuid-sb".into());
@@ -591,11 +864,13 @@ mod tests {
                 trigger: dest_trigger("raider", add_obj("obj-r")),
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             },
             TriggerState {
                 trigger: dest_trigger("station", add_obj("obj-s")),
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             },
         ];
         let mut name_to_uuid = HashMap::new();
@@ -616,6 +891,7 @@ mod tests {
             trigger: dest_trigger("ghost", add_obj("obj-ghost")),
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::Destroyed {
@@ -803,6 +1079,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::WorldLoaded];
@@ -821,6 +1098,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![
@@ -846,6 +1124,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::WorldLoaded];
@@ -869,6 +1148,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -892,6 +1172,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -915,6 +1196,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -937,6 +1219,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -959,6 +1242,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
         let name_to_uuid = HashMap::new(); // empty — name does not resolve
         let events = vec![WorldEvent::EnteredRegion {
@@ -985,6 +1269,7 @@ mod tests {
             },
             fired: false,
             origin_layer: Some("child.toml".into()),
+            seen_destroyed: HashSet::new(),
         };
         let layer_chain = vec![Some("child.toml".into()), None];
         let events = vec![WorldEvent::FlagSet {
@@ -1013,6 +1298,7 @@ mod tests {
             },
             fired: false,
             origin_layer: Some("child.toml".into()),
+            seen_destroyed: HashSet::new(),
         };
         let layer_chain = vec![Some("child.toml".into()), None];
         // Event originated in a DIFFERENT layer (the base / None layer).
@@ -1042,6 +1328,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         };
         let layer_chain = vec![None];
         let events = vec![WorldEvent::FlagSet {

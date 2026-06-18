@@ -597,6 +597,13 @@ pub struct EntitySnapshot {
     pub yaw: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hull_fraction: Option<f32>,
+    /// Single-facing NPC shield fraction (#471). `Some(current/max)` for
+    /// entities with an `EntityShield` component, `None` otherwise. A
+    /// broken shield reads as `Some(0.0)` (the `EntityShield::fraction`
+    /// helper clamps broken to zero so the bar visibly empties without
+    /// a separate "broken" wire field).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_fraction: Option<f32>,
     /// Inner radius for ring-shaped entities (e.g. asteroid fields).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inner_radius: Option<f32>,
@@ -681,6 +688,7 @@ impl EntitySnapshot {
             colour: None,
             yaw: None,
             hull_fraction: None,
+            shield_fraction: None,
             inner_radius: None,
             warp_out_remaining_secs: None,
             radar_size: None,
@@ -706,6 +714,12 @@ pub struct EntityStateSnapshot {
     pub yaw: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hull_fraction: Option<f32>,
+    /// Single-facing NPC shield fraction (#471). Present for entities with
+    /// an `EntityShield` component; mirrors `EntitySnapshot.shield_fraction`
+    /// for live-tick updates so the Sensors panel can re-render the shield
+    /// bar each frame without re-receiving the full snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_fraction: Option<f32>,
     #[serde(default)]
     pub flags: Vec<FlagKind>,
     /// Four-quadrant shield state, present only for ship-like entities.

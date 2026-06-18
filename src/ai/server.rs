@@ -1338,6 +1338,7 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,

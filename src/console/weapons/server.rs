@@ -235,6 +235,7 @@ impl Plugin for WeaponsPlugin {
                 (
                     tick_active_beam.in_set(crate::sim_sets::SimSet::Physics),
                     tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
+                    tick_npc_shield_regen.in_set(crate::sim_sets::SimSet::Physics),
                 ),
             )
             .add_systems(
@@ -459,6 +460,7 @@ fn handle_fire_phaser_npc(
             &crate::entity_spawner::EntityUuid,
             &Transform,
             &mut EntityConsoleHull,
+            Option<&mut crate::entity_spawner::EntityShield>,
         ),
         Without<AiControllerComponent>,
     >,
@@ -493,7 +495,7 @@ fn handle_fire_phaser_npc(
     // Include both EntityConsoleHull entities (NPCs/asteroids) and the player ship.
     let mut target_positions: Vec<(uuid::Uuid, f32, f32)> = hull_query
         .iter()
-        .filter_map(|(_, uid, t, _)| {
+        .filter_map(|(_, uid, t, _, _)| {
             uuid::Uuid::parse_str(&uid.0)
                 .ok()
                 .map(|u| (u, t.translation.x, t.translation.z))
@@ -642,6 +644,15 @@ fn handle_fire_phaser_npc(
                 // Check if the beam target is the player ship.
                 let is_player = player_ship_q.iter().any(|(u, _)| u.0 == target_uuid_str);
 
+                // `shield_pierce` snapshot from the firing bank — used by
+                // both the player-target and NPC-target damage paths to
+                // route shield-eligible damage through any shield system
+                // (player ship's `ShipShields` / NPC's `EntityShield`).
+                let shield_pierce = first_bank
+                    .as_ref()
+                    .and_then(|b| b.shield_pierce)
+                    .unwrap_or(0.0);
+
                 if is_player {
                     // Player ship damage path: route through shields → hull resource → broadcast.
                     // Only apply when at least 1 whole unit has accumulated.
@@ -653,10 +664,6 @@ fn handle_fire_phaser_npc(
                             .iter()
                             .find(|(u, _, _)| u.to_string() == target_uuid_str)
                         {
-                            let shield_pierce = first_bank
-                                .as_ref()
-                                .and_then(|b| b.shield_pierce)
-                                .unwrap_or(0.0);
                             let ship_yaw = ship_state.as_ref().map(|s| s.yaw).unwrap_or(0.0);
                             let bearing = crate::shield::attacker_bearing_relative(
                                 npc_x, npc_z, *tx, *tz, ship_yaw,
@@ -741,14 +748,35 @@ fn handle_fire_phaser_npc(
                     // NPC/asteroid target: existing EntityConsoleHull component path.
                     let mut target_destroyed = false;
                     if damage >= 1.0 {
-                        for (tgt_entity, tgt_uid, _tgt_transform, mut tgt_hull) in
+                        for (tgt_entity, tgt_uid, _tgt_transform, mut tgt_hull, mut tgt_shield) in
                             hull_query.iter_mut()
                         {
                             if tgt_uid.0 != target_uuid_str {
                                 continue;
                             }
                             let mut rng = rand::rng();
-                            tgt_hull.0.apply_damage(damage, &mut rng);
+                            // Route through any `EntityShield` component using
+                            // the bank's `shield_pierce` snapshot. Asteroids
+                            // / shieldless stations skip this and hit hull
+                            // directly. (#471)
+                            let damage_to_hull = if let Some(ref mut shield) = tgt_shield {
+                                if shield.broken {
+                                    damage
+                                } else {
+                                    let (pierced, absorbed) =
+                                        crate::damage::split_damage_for_pierce(
+                                            damage,
+                                            shield_pierce,
+                                        );
+                                    let leak = shield.apply_damage(absorbed);
+                                    pierced + leak
+                                }
+                            } else {
+                                damage
+                            };
+                            if damage_to_hull > 0.0 {
+                                tgt_hull.0.apply_damage(damage_to_hull, &mut rng);
+                            }
                             if tgt_hull.0.is_destroyed() {
                                 target_destroyed = true;
                                 commands.entity(tgt_entity).despawn();
@@ -928,6 +956,7 @@ fn tick_torpedo_system(
         Option<&AsteroidUuid>,
         Option<&crate::entity_spawner::EntityUuid>,
         &mut EntityConsoleHull,
+        Option<&mut crate::entity_spawner::EntityShield>,
     )>,
     mut commands: Commands,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
@@ -999,7 +1028,10 @@ fn tick_torpedo_system(
     };
     let hits = torpedo_sys.0.find_detonation_hits(&targets);
     for (torpedo_uuid, target_uuid) in hits {
-        let Some(damage) = torpedo_sys.0.handle_collision(&torpedo_uuid) else {
+        // `handle_collision_full` returns the structured detonation
+        // (`damage_hull` always pierces; `damage_shields` is the
+        // shield-eligible portion to be split via `shield_pierce`).
+        let Some(detonation) = torpedo_sys.0.handle_collision_full(&torpedo_uuid) else {
             continue;
         };
         outbox.0.push((
@@ -1012,7 +1044,9 @@ fn tick_torpedo_system(
         let mut hit_x = 0.0_f32;
         let mut hit_z = 0.0_f32;
 
-        for (entity, asteroid_uuid, entity_uuid, mut hull_comp) in hull_query.iter_mut() {
+        for (entity, asteroid_uuid, entity_uuid, mut hull_comp, mut shield_comp) in
+            hull_query.iter_mut()
+        {
             let uuid_matches = asteroid_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str())
                 || entity_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str());
             if !uuid_matches {
@@ -1020,7 +1054,33 @@ fn tick_torpedo_system(
             }
             let is_asteroid = asteroid_uuid.is_some();
             let mut rng = rand::rng();
-            hull_comp.0.apply_damage(damage as f32, &mut rng);
+
+            // Route shield-eligible damage through any `EntityShield`
+            // component, with overflow leaking to hull. Hull damage
+            // (always-pierces) goes straight to hull. Asteroids carry no
+            // shield so the shielded path is a no-op for them. (#471)
+            let mut hull_damage = detonation.damage_hull as f32;
+            let shield_eligible = detonation.damage_shields as f32;
+            if shield_eligible > 0.0 {
+                if let Some(ref mut shield) = shield_comp {
+                    if shield.broken {
+                        hull_damage += shield_eligible;
+                    } else {
+                        let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
+                            shield_eligible,
+                            detonation.shield_pierce,
+                        );
+                        let leak = shield.apply_damage(absorbed);
+                        hull_damage += pierced + leak;
+                    }
+                } else {
+                    hull_damage += shield_eligible;
+                }
+            }
+            if hull_damage > 0.0 {
+                hull_comp.0.apply_damage(hull_damage, &mut rng);
+            }
+
             if hull_comp.0.is_destroyed() {
                 commands.entity(entity).despawn();
                 if is_asteroid {
@@ -1071,6 +1131,25 @@ fn tick_torpedo_system(
     }
 }
 
+/// Tick NPC shield regen each frame (#471).
+///
+/// For every entity carrying an `EntityShield` that is not broken and is
+/// below `max_hp`, advance `current_hp` by `regen_per_sec * dt`, clamped
+/// to `max_hp`. Broken shields do not regen — once down they stay down
+/// for the rest of the engagement (no offline timer / recovery model).
+fn tick_npc_shield_regen(
+    time: Res<Time>,
+    mut shields: Query<&mut crate::entity_spawner::EntityShield>,
+) {
+    let dt = time.delta_secs();
+    if dt <= 0.0 {
+        return;
+    }
+    for mut shield in shields.iter_mut() {
+        shield.tick_regen(dt);
+    }
+}
+
 /// Active beam tick handler for weapons plugin integration tests
 /// to reference when building their test app.
 fn tick_active_beam(
@@ -1084,6 +1163,7 @@ fn tick_active_beam(
         Option<&AsteroidUuid>,
         Option<&crate::entity_spawner::EntityUuid>,
         &mut EntityConsoleHull,
+        Option<&mut crate::entity_spawner::EntityShield>,
     )>,
     mut commands: Commands,
     modifiers: Res<crate::modifiers::ShipModifiers>,
@@ -1182,7 +1262,20 @@ fn tick_active_beam(
         let mut asteroid_destroyed = false;
         let mut npc_destroyed = false;
 
-        for (entity, asteroid_uuid, entity_uuid, mut hull_comp) in hull_query.iter_mut() {
+        // Per-bank `shield_pierce` snapshot for routing damage through any
+        // `EntityShield` component on the target. NPCs/stations with a
+        // shield split incoming damage via `split_damage_for_pierce`:
+        // the pierced fraction lands on hull directly, the absorbed
+        // fraction hits the shield (with overflow leaking to hull).
+        // Asteroids carry no `EntityShield` so the routing is a no-op
+        // for them. (#471)
+        let bank_pierce = active_bank_cfg
+            .and_then(|b| b.shield_pierce)
+            .unwrap_or(0.0);
+
+        for (entity, asteroid_uuid, entity_uuid, mut hull_comp, mut shield_comp) in
+            hull_query.iter_mut()
+        {
             // Match by whichever UUID component is present
             let uuid_matches = asteroid_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str())
                 || entity_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str());
@@ -1192,7 +1285,27 @@ fn tick_active_beam(
 
             let is_asteroid = asteroid_uuid.is_some();
             let mut rng = rand::rng();
-            hull_comp.0.apply_damage(damage_to_apply as f32, &mut rng);
+
+            // Route through shield if present and not broken; otherwise
+            // hit hull directly.
+            let damage_to_hull: f32 = if let Some(ref mut shield) = shield_comp {
+                if shield.broken {
+                    damage_to_apply as f32
+                } else {
+                    let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
+                        damage_to_apply as f32,
+                        bank_pierce,
+                    );
+                    let leak = shield.apply_damage(absorbed);
+                    pierced + leak
+                }
+            } else {
+                damage_to_apply as f32
+            };
+
+            if damage_to_hull > 0.0 {
+                hull_comp.0.apply_damage(damage_to_hull, &mut rng);
+            }
 
             // Tag the NPC with AttackerThisTick so its AI's `on_attacked`
             // transition fires. Skipped if there's no player-ship entity
@@ -3364,6 +3477,250 @@ mod tests {
             .world()
             .resource::<PhaserCooldown>()
             .is_bank_active("port"));
+    }
+
+    // ── NPC shields integration (#471) ────────────────────────────────────
+
+    /// Spawn a shielded NPC: same as `spawn_npc_entity` but also attaches an
+    /// `EntityShield` so the damage routing path is exercised end-to-end.
+    fn spawn_shielded_npc_entity(
+        app: &mut App,
+        npc_x: f32,
+        npc_z: f32,
+        hull_max: f32,
+        shield_max: f32,
+        regen_per_sec: f32,
+    ) -> bevy::ecs::entity::Entity {
+        app.world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("npc-1".into()),
+                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                    crate::messages::Console::CaptainChair,
+                    hull_max,
+                )])),
+                crate::entity_spawner::EntityShield {
+                    current_hp: shield_max,
+                    max_hp: shield_max,
+                    regen_per_sec,
+                    broken: false,
+                },
+                Transform::from_xyz(npc_x, 0.0, npc_z),
+            ))
+            .id()
+    }
+
+    #[test]
+    fn phaser_beam_damages_shielded_npc_routes_through_shield_first() {
+        let mut app = test_app();
+        setup_npc_world(&mut app, 0.0, -20.0);
+        start_game_with_weapons(&mut app);
+
+        let npc_entity = spawn_shielded_npc_entity(&mut app, 0.0, -20.0, 30.0, 20.0, 0.0);
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
+        tick(&mut app);
+
+        // Apply 5 units of damage. With pierce=0 (default in test config),
+        // the entire amount lands on the shield, hull is unchanged.
+        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 5.0;
+        app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
+        tick(&mut app);
+
+        let shield = app
+            .world()
+            .get::<crate::entity_spawner::EntityShield>(npc_entity)
+            .expect("NPC must still have shield component");
+        assert!(
+            shield.current_hp < 20.0,
+            "shield must absorb damage, got {}",
+            shield.current_hp
+        );
+        assert!(!shield.broken, "shield must still be intact");
+
+        let hull_hp = app
+            .world()
+            .get::<EntityConsoleHull>(npc_entity)
+            .expect("hull must still exist")
+            .0
+            .total_current();
+        assert_eq!(hull_hp, 30.0, "hull must be untouched while shield holds");
+    }
+
+    #[test]
+    fn phaser_beam_breaks_shield_then_leaks_to_hull() {
+        let mut app = test_app();
+        setup_npc_world(&mut app, 0.0, -20.0);
+        start_game_with_weapons(&mut app);
+
+        let npc_entity = spawn_shielded_npc_entity(&mut app, 0.0, -20.0, 30.0, 10.0, 0.0);
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
+        tick(&mut app);
+
+        // Apply 15 units of damage. With shield=10, shield depletes
+        // and 5 units leak to hull.
+        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 15.0;
+        app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
+        tick(&mut app);
+
+        let shield = app
+            .world()
+            .get::<crate::entity_spawner::EntityShield>(npc_entity)
+            .expect("shield component must persist after break");
+        assert_eq!(shield.current_hp, 0.0);
+        assert!(shield.broken, "shield must latch broken once depleted");
+
+        let hull_hp = app
+            .world()
+            .get::<EntityConsoleHull>(npc_entity)
+            .expect("hull must exist")
+            .0
+            .total_current();
+        assert!(
+            hull_hp < 30.0 && hull_hp > 20.0,
+            "hull must take only the leak (~5 units), got {hull_hp}"
+        );
+    }
+
+    #[test]
+    fn phaser_beam_post_break_skips_shield_routing_entirely() {
+        let mut app = test_app();
+        setup_npc_world(&mut app, 0.0, -20.0);
+        start_game_with_weapons(&mut app);
+
+        // Spawn with already-broken shield.
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("npc-1".into()),
+                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                    crate::messages::Console::CaptainChair,
+                    30.0,
+                )])),
+                crate::entity_spawner::EntityShield {
+                    current_hp: 0.0,
+                    max_hp: 20.0,
+                    regen_per_sec: 0.0,
+                    broken: true,
+                },
+                Transform::from_xyz(0.0, 0.0, -20.0),
+            ))
+            .id();
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
+        tick(&mut app);
+
+        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 5.0;
+        app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
+        tick(&mut app);
+
+        let hull_hp = app
+            .world()
+            .get::<EntityConsoleHull>(npc_entity)
+            .expect("hull must exist")
+            .0
+            .total_current();
+        // Hull must take damage (broken shield does not absorb).
+        // We don't pin the exact amount because the beam tick may
+        // accumulate additional damage during the same frame; we just
+        // verify the broken shield path didn't absorb any of it.
+        assert!(
+            hull_hp < 30.0,
+            "broken shield must let damage through to hull, got {hull_hp}"
+        );
+        let shield = app
+            .world()
+            .get::<crate::entity_spawner::EntityShield>(npc_entity)
+            .expect("shield component must persist");
+        assert_eq!(
+            shield.current_hp, 0.0,
+            "broken shield current_hp must remain 0, got {}",
+            shield.current_hp
+        );
+        assert!(shield.broken, "shield must remain broken");
+    }
+
+    #[test]
+    fn shield_regen_advances_npc_shield_below_max() {
+        let mut app = test_app();
+        setup_npc_world(&mut app, 0.0, -20.0);
+        start_game_with_weapons(&mut app);
+
+        let npc_entity = spawn_shielded_npc_entity(&mut app, 0.0, -20.0, 30.0, 20.0, 5.0);
+
+        // Damage the shield to 10 HP.
+        if let Some(mut shield) = app
+            .world_mut()
+            .get_mut::<crate::entity_spawner::EntityShield>(npc_entity)
+        {
+            shield.current_hp = 10.0;
+        }
+
+        // Advance time. The Bevy `Time` resource advances on each `app.update()`
+        // call; we tick a few frames and expect regen to push hp upward.
+        for _ in 0..3 {
+            tick(&mut app);
+        }
+
+        let shield = app
+            .world()
+            .get::<crate::entity_spawner::EntityShield>(npc_entity)
+            .expect("shield must persist");
+        // We don't assert exact values (frame timing varies in tests) but we
+        // verify regen is making forward progress and not stuck at 10.
+        assert!(
+            shield.current_hp > 10.0,
+            "shield must regen between ticks, got {}",
+            shield.current_hp
+        );
+        assert!(
+            shield.current_hp <= 20.0,
+            "shield must clamp to max_hp, got {}",
+            shield.current_hp
+        );
+        assert!(!shield.broken);
     }
 
     // ── Cycle 3: AiEntityDestroyed message written on NPC destruction ─────

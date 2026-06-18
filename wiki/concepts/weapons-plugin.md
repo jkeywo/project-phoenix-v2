@@ -69,6 +69,30 @@ The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `Weapo
 
 Produces `ServerMessage::WeaponsUpdate` sent to the Tactical console holder at 10 Hz.
 
+## NPC shields (#471)
+
+Single-facing shield component for NPCs and stations. Distinct from the player ship's four-quadrant `ShipShields` resource: NPCs carry an `EntityShield` ECS component (`src/entities/spawner.rs`) populated from a top-level `[shields]` block on the entity TOML:
+
+```toml
+[shields]
+max_hp        = 60.0
+regen_per_sec = 1.0
+```
+
+Damage routing — three paths in `src/console/weapons/server.rs` route NPC-bound damage through the shield:
+
+| Path | System | Pierce source |
+|---|---|---|
+| Player phaser → NPC | `tick_active_beam` | Active bank's `shield_pierce` (Option<f32>) |
+| Player torpedo → NPC | `tick_torpedo_system` | `TorpedoDetonation.shield_pierce` (snapshot at launch) |
+| NPC phaser → NPC/station | `handle_fire_phaser_npc` (else-branch) | NPC's bank `shield_pierce` |
+
+Each path applies `split_damage_for_pierce(damage, pierce)`: the `pierced` portion lands on hull directly, `absorbed` hits the shield, and any overflow leaks back to hull. Damage with no shield component falls through to the legacy hull-direct path unchanged (zero regression for asteroids and shieldless stations).
+
+**Permanent break semantics** — once `current_hp` reaches `0.0`, the shield latches `broken = true` and never recovers. All subsequent damage skips the shield routing entirely and goes straight to hull regardless of the attacker's `shield_pierce`. There is no offline timer / recovery model (unlike the player ship). `tick_npc_shield_regen` (Physics set) advances `current_hp` by `regen_per_sec * dt` only while `!broken && current_hp < max_hp`.
+
+**Wire format** — `EntitySnapshot.shield_fraction: Option<f32>` and `EntityStateSnapshot.shield_fraction: Option<f32>` carry the live shield ratio (`Some(current/max)` for shielded entities, broken shields read as `Some(0.0)`, shieldless entities omit the field). Used by the Sensors panel target-info row (#473).
+
 ## Tests
 
 Tests live in `src/weapons_plugin.rs` under `#[cfg(test)] mod tests`.

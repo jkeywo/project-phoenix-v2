@@ -563,6 +563,7 @@ fn setup_fallback_world(
         sensors_console: None,
         navigation_console: None,
         shields_console: None,
+        shields: None,
         torpedoes: None,
         repair: None,
         comms: None,
@@ -3608,6 +3609,7 @@ mod tests {
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         }];
 
         // Emit the AiEntityDestroyed message.
@@ -3626,6 +3628,77 @@ mod tests {
                 .iter()
                 .any(|o| o.id == "obj-001"),
             "AddObjective action must have fired"
+        );
+    }
+
+    #[test]
+    fn on_all_destroyed_trigger_fires_after_all_named_entities_die_across_ticks() {
+        // End-to-end Bevy runtime check: an `OnAllDestroyed` trigger over two
+        // named entities must accumulate `seen_destroyed` across separate
+        // `app.update()` calls and fire its action only when the last entity
+        // dies. Mirrors `on_entity_destroyed_trigger_fires_add_objective_action`
+        // but uses two separate destruction ticks. (#470)
+        let mut app = ai_trigger_test_app();
+
+        let uuid_a = "wave-a-uuid";
+        let uuid_b = "wave-b-uuid";
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime
+            .name_to_uuid
+            .insert("wave_a".to_string(), uuid_a.to_string());
+        runtime
+            .name_to_uuid
+            .insert("wave_b".to_string(), uuid_b.to_string());
+        runtime.trigger_states = vec![TriggerState {
+            trigger: crate::world::content::Trigger {
+                condition: TriggerCondition::OnAllDestroyed {
+                    entity_names: vec!["wave_a".to_string(), "wave_b".to_string()],
+                },
+                actions: vec![TriggerAction::AddObjective {
+                    id: "obj-victory".to_string(),
+                    text: "All waves cleared".to_string(),
+                    mandatory: false,
+                    targets: vec![],
+                }],
+                when: None,
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+
+        // Tick 1: only wave_a dies. Trigger must NOT fire yet.
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: uuid_a.to_string(),
+            });
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            !objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-victory"),
+            "AddObjective must not fire after only first wave dies"
+        );
+
+        // Tick 2: wave_b dies. Trigger must NOW fire.
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: uuid_b.to_string(),
+            });
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-victory"),
+            "AddObjective must fire after the last named entity dies"
         );
     }
 
@@ -3658,6 +3731,7 @@ mod tests {
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
         // First firing: flag unset â†’ no objective.
@@ -3717,6 +3791,7 @@ mod tests {
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3731,6 +3806,7 @@ mod tests {
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
             ];
         }
@@ -3780,6 +3856,7 @@ mod tests {
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3794,6 +3871,7 @@ mod tests {
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
             ];
         }
@@ -3839,6 +3917,7 @@ mod tests {
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3855,6 +3934,7 @@ mod tests {
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
             ];
         }
@@ -3922,6 +4002,7 @@ mod tests {
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
+                seen_destroyed: HashSet::new(),
             }];
         }
         app.world_mut()
@@ -3979,6 +4060,7 @@ mod tests {
                     },
                     fired: false,
                     origin_layer: Some(layer_path.clone()),
+                    seen_destroyed: HashSet::new(),
                 },
                 // Base-world watcher: on_flag_set armed.
                 TriggerState {
@@ -3996,6 +4078,7 @@ mod tests {
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
             ];
         }
@@ -4052,6 +4135,7 @@ mod tests {
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
         app.world_mut()
@@ -4099,6 +4183,7 @@ mod tests {
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -4199,6 +4284,7 @@ mod tests {
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -4953,6 +5039,7 @@ transition = []
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -4997,6 +5084,7 @@ transition = []
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -5936,6 +6024,7 @@ entity = "layer_npc"
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
@@ -6198,6 +6287,7 @@ condition = "on_world_loaded"
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -6246,6 +6336,7 @@ condition = "on_world_loaded"
             },
             fired: false,
             origin_layer: None,
+            seen_destroyed: HashSet::new(),
         });
     }
 
@@ -6464,6 +6555,7 @@ condition = "on_world_loaded"
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
+            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -6525,6 +6617,7 @@ condition = "on_world_loaded"
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             });
         }
 
@@ -6615,6 +6708,7 @@ size_max = 2.0
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -6690,6 +6784,7 @@ size_max = 2.0
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -6773,6 +6868,7 @@ size_max = 2.0
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -6868,6 +6964,7 @@ size_max = 2.0
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -6884,6 +6981,7 @@ size_max = 2.0
                     },
                     fired: false,
                     origin_layer: None,
+                    seen_destroyed: HashSet::new(),
                 },
             ];
         }
@@ -6950,6 +7048,7 @@ size_max = 2.0
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
         app.world_mut()
@@ -7003,6 +7102,7 @@ size_max = 2.0
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -7076,6 +7176,7 @@ size_max = 2.0
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
 
@@ -7133,6 +7234,7 @@ size_max = 2.0
                 },
                 fired: false,
                 origin_layer: None,
+                seen_destroyed: HashSet::new(),
             }];
         }
 

@@ -151,6 +151,10 @@ struct RawTriggerEntry {
     condition: String,
     #[serde(default)]
     entity: Option<String>,
+    /// Required by `on_all_destroyed`; ignored by every other condition.
+    /// (#470)
+    #[serde(default)]
+    entities: Option<Vec<String>>,
     #[serde(default)]
     after_secs: Option<f32>,
     #[serde(default)]
@@ -303,6 +307,14 @@ pub struct RawWorld {
 pub enum TriggerCondition {
     /// Fires when the named entity (by name, resolved to UUID at runtime) is destroyed.
     OnDestroyed { entity_name: String },
+    /// Fires when **all** of the named entities have been destroyed at
+    /// least once during the world's lifetime. Tracks observed
+    /// destruction events across ticks via `TriggerState.seen_destroyed`;
+    /// fires single-shot on the tick the last named entity is destroyed.
+    /// Names that are never spawned (never enter `name_to_uuid`) cause
+    /// the trigger to never fire — matches the "unknown entity → never
+    /// matches" semantics of `OnDestroyed`. (#470)
+    OnAllDestroyed { entity_names: Vec<String> },
     /// Fires when the named entity is attacked.
     OnAttacked { entity_name: String },
     /// Fires once when `elapsed_secs` crosses `after_secs`.
@@ -756,6 +768,7 @@ fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<Comms
 fn parse_trigger_condition_from_string(
     name: &str,
     entity: Option<String>,
+    entities: Option<Vec<String>>,
     after_secs: Option<f32>,
     flag_name: Option<String>,
     ctx: &str,
@@ -765,6 +778,17 @@ fn parse_trigger_condition_from_string(
             entity_name: entity
                 .ok_or_else(|| format!("{ctx} 'on_destroyed' requires an 'entity' field"))?,
         }),
+        "on_all_destroyed" => {
+            let entity_names = entities.ok_or_else(|| {
+                format!("{ctx} 'on_all_destroyed' requires an 'entities' field")
+            })?;
+            if entity_names.is_empty() {
+                return Err(format!(
+                    "{ctx} 'on_all_destroyed' requires a non-empty 'entities' list"
+                ));
+            }
+            Ok(TriggerCondition::OnAllDestroyed { entity_names })
+        }
         "on_attacked" => Ok(TriggerCondition::OnAttacked {
             entity_name: entity
                 .ok_or_else(|| format!("{ctx} 'on_attacked' requires an 'entity' field"))?,
@@ -874,6 +898,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         let condition = parse_trigger_condition_from_string(
             &raw_trigger.condition,
             raw_trigger.entity,
+            raw_trigger.entities,
             raw_trigger.after_secs,
             raw_trigger.name,
             "Trigger",
@@ -899,6 +924,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         let trigger = parse_trigger_condition_from_string(
             &raw_comms.trigger,
             raw_comms.entity,
+            None,
             None,
             None,
             "Comms block",
@@ -1637,6 +1663,71 @@ entity    = "raider_alpha"
             }
             other => panic!("expected AddObjective, got {other:?}"),
         }
+    }
+
+    // ── on_all_destroyed parser ────────────────────────────────────────────
+
+    #[test]
+    fn parse_world_reads_on_all_destroyed_trigger_with_entities_list() {
+        let toml = r#"
+[[trigger]]
+condition = "on_all_destroyed"
+entities  = ["wave_1_a", "wave_1_b", "wave_2_a"]
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "Victory."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.triggers.len(), 1);
+        match &cfg.triggers[0].condition {
+            TriggerCondition::OnAllDestroyed { entity_names } => {
+                assert_eq!(
+                    entity_names,
+                    &vec![
+                        "wave_1_a".to_string(),
+                        "wave_1_b".to_string(),
+                        "wave_2_a".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected OnAllDestroyed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_rejects_on_all_destroyed_without_entities_field() {
+        let toml = r#"
+[[trigger]]
+condition = "on_all_destroyed"
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "Victory."
+"#;
+        let err = parse_world(toml).expect_err("missing entities must error");
+        assert!(
+            err.contains("on_all_destroyed") && err.contains("entities"),
+            "error must mention condition + entities field: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_rejects_on_all_destroyed_with_empty_entities_list() {
+        let toml = r#"
+[[trigger]]
+condition = "on_all_destroyed"
+entities  = []
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "Victory."
+"#;
+        let err = parse_world(toml).expect_err("empty entities list must error");
+        assert!(
+            err.contains("on_all_destroyed") && err.contains("non-empty"),
+            "error must mention non-empty requirement: {err}"
+        );
     }
 
     #[test]

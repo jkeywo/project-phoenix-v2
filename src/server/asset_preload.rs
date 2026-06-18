@@ -311,7 +311,7 @@ impl Default for AssetPreloadResource {
             initial_sub_world_count: 0,
             seen_worlds: HashSet::new(),
             seen_entities: HashSet::new(),
-            progress_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
+            progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
         }
     }
 }
@@ -333,7 +333,7 @@ impl AssetPreloadResource {
             initial_sub_world_count: 0,
             seen_worlds: HashSet::new(),
             seen_entities: HashSet::new(),
-            progress_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
+            progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
         }
     }
 
@@ -486,7 +486,7 @@ pub fn begin_asset_preload(
         initial_sub_world_count,
         seen_worlds,
         seen_entities: base_seen_entities,
-        progress_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
+        progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
     };
 
     commands.insert_resource(resource);
@@ -726,6 +726,14 @@ pub fn auto_transition_from_loading(
     }
     bevy::log::info!("auto_transition_from_loading: preload.complete=true, transitioning to InProgress");
     next_state.set(GamePhase::InProgress);
+    // Send 100% before GameStarted so clients always see the final value,
+    // even when assets completed before the 0.1s timer fired.
+    outbox.0.push((
+        Target::All,
+        ServerMessage::LoadingProgress {
+            data: LoadingProgress { fraction: 1.0 },
+        },
+    ));
     outbox.0.push((Target::All, ServerMessage::GameStarted));
 }
 

@@ -53,7 +53,6 @@ describe('apply WorldSetup / SimState', () => {
     s.world.entities = [asteroid('a', 0, 0), asteroid('b', 5, 5)];
     const ref = s.world.entities; // must stay the same array
     s.apply({ type: 'SimState', data: { snapshot: {
-      console_hull: [{ console: 'Helm', current: 50, max_hp: 100 }],
       entity_states: [
         { uuid: 'a', position: [1, 0, 2], hull_fraction: 0.5 },
         { uuid: 'unknown', position: [9, 9, 9] }, // must NOT be appended
@@ -63,7 +62,13 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.world.entities).toHaveLength(2);
     expect(s.world.entities[0].position).toEqual([1, 0, 2]);
     expect(s.world.entities[0].hull_fraction).toBe(0.5);
-    expect(s.consoleHull).toEqual([{ console: 'Helm', current: 50, max_hp: 100 }]);
+  });
+
+  it('ConsoleHullUpdate replaces consoleHull', () => {
+    const s = new ClientSimState();
+    const entries = [{ console: 'Helm', current: 50, max_hp: 100 }];
+    s.apply({ type: 'ConsoleHullUpdate', data: { entries } });
+    expect(s.consoleHull).toEqual(entries);
   });
 
   it('SimState leaves position untouched when the snapshot omits it', () => {

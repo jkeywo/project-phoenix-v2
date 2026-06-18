@@ -72,7 +72,7 @@ pub struct ShipPlugin;
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(HelmInputTimer(Timer::from_seconds(
-            0.1,
+            1.0 / 30.0,
             TimerMode::Repeating,
         )))
         .init_resource::<LastHelmInput>()

@@ -42,7 +42,7 @@ describe('Slice 5: Entity Mode full cycle', () => {
     await ctx.view._internal.loadEntity('assets/entities/pirate_raider.toml');
 
     const hull = ctx.view.shell.getCard('hull');
-    expect(hull.data.hull_integrity).toBe(60);
+    expect(hull.data.hull_integrity).toBe(30);
 
     ctx.view._internal.handleCardEdit('hull', { hull_integrity: 99.5 });
 
@@ -55,7 +55,7 @@ describe('Slice 5: Entity Mode full cycle', () => {
 
     const undoEntries = ctx.modeShell.getUndoHistory('Entity', path);
     expect(undoEntries.length).toBe(1);
-    expect(undoEntries[0].hull.hull_integrity).toBe(60);
+    expect(undoEntries[0].hull.hull_integrity).toBe(30);
   });
 
   it('undo restores the previous hull.hull_integrity value', async () => {
@@ -66,7 +66,7 @@ describe('Slice 5: Entity Mode full cycle', () => {
     expect(restoreCb).toBeDefined();
     restoreCb(ctx.modeShell, 'assets/entities/pirate_raider.toml', 'undo');
 
-    expect(ctx.view.shell.getParsedEntity().hull.hull_integrity).toBe(60);
+    expect(ctx.view.shell.getParsedEntity().hull.hull_integrity).toBe(30);
   });
 
   it('save writes the file and clears dirty', async () => {

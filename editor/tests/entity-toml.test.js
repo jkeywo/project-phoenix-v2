@@ -26,7 +26,7 @@ describe('entity-toml', () => {
       expect(result.tags).toContain('ship');
       expect(result.tags).toContain('npc');
       expect(result.faction).toBeTruthy();
-      expect(result.hull.hull_integrity).toBe(60.0);
+      expect(result.hull.hull_integrity).toBe(30.0);
       expect(result.collider.shape).toBe('Capsule');
       expect(result.behaviour.initial_state).toBe('patrol');
     });

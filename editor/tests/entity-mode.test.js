@@ -368,7 +368,8 @@ describe('EntityModeShell', () => {
       expect(factionCard).not.toBeNull();
       // The top-level faction field in TOML is a plain string UUID, not an object.
       // The card's data holds the string value directly.
-      expect(factionCard.data).toBe('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb');
+      // (#472) pirate_raider.toml was re-factioned from Pirate to Harrow.
+      expect(factionCard.data).toBe('cccccccc-3333-4333-8333-cccccccccccc');
     });
 
     it('faction card getFactionFields returns field with UUID value', () => {

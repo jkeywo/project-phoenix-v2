@@ -82,6 +82,36 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.world.entities[0].hull_fraction).toBe(0.25);
   });
 
+  // ── shield_fraction merge (#473) ─────────────────────────────────────────
+
+  it('SimState merges shield_fraction into the live entity in place', () => {
+    const s = new ClientSimState();
+    s.world.entities = [asteroid('a', 0, 0)];
+    s.apply({ type: 'SimState', data: { snapshot: {
+      entity_states: [{ uuid: 'a', shield_fraction: 0.7 }],
+    } } });
+    expect(s.world.entities[0].shield_fraction).toBe(0.7);
+  });
+
+  it('SimState leaves shield_fraction untouched when the snapshot omits it', () => {
+    const s = new ClientSimState();
+    s.world.entities = [{ ...asteroid('a', 0, 0), shield_fraction: 0.5 }];
+    s.apply({ type: 'SimState', data: { snapshot: {
+      entity_states: [{ uuid: 'a', position: [1, 0, 2] }],
+    } } });
+    expect(s.world.entities[0].position).toEqual([1, 0, 2]);
+    expect(s.world.entities[0].shield_fraction).toBe(0.5);
+  });
+
+  it('SimState shield_fraction = 0 (broken shield) merges correctly', () => {
+    const s = new ClientSimState();
+    s.world.entities = [{ ...asteroid('a', 0, 0), shield_fraction: 0.5 }];
+    s.apply({ type: 'SimState', data: { snapshot: {
+      entity_states: [{ uuid: 'a', shield_fraction: 0 }],
+    } } });
+    expect(s.world.entities[0].shield_fraction).toBe(0);
+  });
+
   it('SimState mirrors the shared navigation waypoint', () => {
     const s = new ClientSimState();
     s.apply({ type: 'SimState', data: { snapshot: {

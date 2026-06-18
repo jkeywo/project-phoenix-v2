@@ -615,6 +615,49 @@ describe('buildSensorsConsoleState', () => {
     };
     expect(parse(buildSensorsConsoleState(state)).target_threat).toBe('high');
   });
+
+  // ── target_shield_fraction (#473) ────────────────────────────────────────
+
+  it('target_shield_fraction is null when target has no shield_fraction field', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'] }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
+  });
+
+  it('target_shield_fraction is null when target has shield_fraction = null', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_fraction: null }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
+  });
+
+  it('target_shield_fraction passes through when target has a shield', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_fraction: 0.42 }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBe(0.42);
+  });
+
+  it('target_shield_fraction is 0 for broken shield', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_fraction: 0 }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBe(0);
+  });
+
+  it('target_shield_fraction is null when sensorsTarget is unset', () => {
+    const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
+    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
+  });
 });
 
 describe('buildCommsConsoleState', () => {

@@ -1,14 +1,27 @@
-name = "Harrow Patrol"
+# Harrow Cruiser (Ironveil class)
+#
+# Medium-weight cruiser. Two phaser banks (port + starboard), shielded,
+# fights to the death. (#474) Rebalanced for the combat-test scenario
+# (#475) — gained weapons (previously had a `[behaviour]` block declaring
+# `attacking` state but no `[weapons_console]`, so could not fire),
+# gained `on_attacked → pursue` transition (mirrors the destroyer),
+# gained a `[shields]` block, removed flee/warp_out from combat.
+
+name = "Harrow Cruiser"
 tags = ["ship", "npc", "comms_contact"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
 [target]
 tags = ["ship"]
 threat_level = "medium"
-description = "Harrow Patrol"
+description = "Harrow Cruiser"
 
 [hull]
 hull_integrity = 120.0
+
+[shields]
+max_hp = 60.0
+regen_per_sec = 1.0
 
 [collider]
 shape = "Capsule"
@@ -34,8 +47,48 @@ deceleration = 25.0
 max_yaw_rate = 0.196
 max_bank_deg = 10.0
 
+[weapons_console]
+
+# Port bank: facing -90° (left side), wide auto-arc so the cruiser can
+# fire one bank or the other depending on relative bearing without
+# perfect alignment.
+[[weapons_console.phaser_banks]]
+id = "port"
+facing_deg = -90.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
+beam_range = 100.0
+beam_damage_per_sec = 8.0
+beam_duration_secs = 5.0
+cooldown_secs = 4.0
+shield_pierce = 0.1
+beam_color = [1.0, 0.2, 0.05, 1.0]
+
+# Starboard bank: facing +90° (right side).
+[[weapons_console.phaser_banks]]
+id = "starboard"
+facing_deg = 90.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
+beam_range = 100.0
+beam_damage_per_sec = 8.0
+beam_duration_secs = 5.0
+cooldown_secs = 4.0
+shield_pierce = 0.1
+beam_color = [1.0, 0.2, 0.05, 1.0]
+
+[comms]
+range = 600.0
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+
 [behaviour]
 initial_state = "patrolling"
+
+[[behaviour.state]]
+name = "idle"
+kind = "idle"
+target_speed = 0.0
 
 [[behaviour.state]]
 name = "patrolling"
@@ -52,23 +105,29 @@ target_speed = 0.9
 [[behaviour.state]]
 name = "attacking"
 kind = "attacking"
-maintain_range = 80.0
+maintain_range = 90.0
 target_speed = 0.7
 
 [[behaviour.state]]
-name = "fleeing"
-kind = "fleeing"
-target_speed = 1.0
-
-[[behaviour.state]]
-name = "warping_out"
+name = "warp_out"
 kind = "warping_out"
 duration_secs = 6.0
+target_speed = 1.0
+
+# ── Transitions ───────────────────────────────────────────────────────────────
+
+# (#474) on_attacked → pursue. Mirrors the destroyer pattern; lets the
+# AI core re-target the attacker (`new_bb.target = attacker_this_tick`
+# in `src/ai/core.rs::evaluate_transitions`).
+[[behaviour.transition]]
+from = ["patrolling", "idle", "pursuing", "attacking"]
+condition = "on_attacked"
+to = "pursuing"
 
 [[behaviour.transition]]
-from = "patrolling"
+from = ["patrolling", "idle"]
 condition = "enemy_in_range"
-radius = 250.0
+radius = 350.0
 to = "pursuing"
 
 [[behaviour.transition]]
@@ -76,14 +135,14 @@ from = "pursuing"
 condition = "in_weapons_range"
 to = "attacking"
 
-[[behaviour.transition]]
-from = "attacking"
-condition = "hull_below"
-threshold = 0.3
-to = "fleeing"
+# (#474) No flee/warp_out from combat — fight to the death.
 
 [[behaviour.transition]]
-from = "fleeing"
-condition = "hull_below"
-threshold = 0.15
-to = "warping_out"
+from = "attacking"
+condition = "target_destroyed"
+to = "patrolling"
+
+[[behaviour.transition]]
+from = ["patrolling", "idle", "pursuing", "attacking"]
+condition = "on_scenario_unloaded"
+to = "warp_out"

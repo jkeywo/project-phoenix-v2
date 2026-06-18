@@ -1982,7 +1982,8 @@ radius = 100.0
         let toml_str = include_str!("../../assets/entities/station_axiom.toml");
         let config = EntityConfig::from_toml(toml_str).expect("station_axiom.toml must parse");
         let hull = config.hull.as_ref().expect("must have [hull]");
-        assert!((hull.hull_integrity - 200.0).abs() < 1e-6);
+        // (#474) Buffed from 200 to 800 for the combat-test scenario.
+        assert!((hull.hull_integrity - 800.0).abs() < 1e-6);
     }
 
     #[test]
@@ -2359,7 +2360,98 @@ target_speed = 0.5
     }
 
     #[test]
-    fn pirate_raider_template_has_behaviour_with_all_six_states() {
+    fn pirate_raider_template_has_shields_block() {
+        // (#474) Harrow Destroyer has a single-facing shield (#471).
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        let shields = config
+            .shields
+            .as_ref()
+            .expect("pirate_raider must have a [shields] block");
+        assert!((shields.max_hp - 15.0).abs() < 1e-6);
+        assert!((shields.regen_per_sec - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pirate_raider_template_phaser_has_shield_pierce() {
+        // (#474) Harrow weapons all have 0.1 pierce.
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        let wc = config.weapons_console.as_ref().unwrap();
+        let bank = wc.phaser_banks.first().expect("must have a phaser bank");
+        assert_eq!(bank.shield_pierce, Some(0.1));
+    }
+
+    #[test]
+    fn ship_harrow_patrol_template_has_two_phaser_banks_and_shields() {
+        // (#474) Cruiser gained weapons + shields.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_patrol.toml");
+        let config = EntityConfig::from_toml(toml_str)
+            .expect("ship_harrow_patrol.toml must parse");
+        let wc = config
+            .weapons_console
+            .as_ref()
+            .expect("cruiser must have [weapons_console] (#474)");
+        assert_eq!(
+            wc.phaser_banks.len(),
+            2,
+            "cruiser must have port + starboard banks"
+        );
+        let shields = config
+            .shields
+            .as_ref()
+            .expect("cruiser must have [shields] (#474)");
+        assert!((shields.max_hp - 60.0).abs() < 1e-6);
+        assert!((shields.regen_per_sec - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ship_harrow_warhawk_template_has_full_behaviour_and_weapons() {
+        // (#474) Battleship gained a full behaviour tree + weapons +
+        // shields. Previously was a stub.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_warhawk.toml");
+        let config = EntityConfig::from_toml(toml_str)
+            .expect("ship_harrow_warhawk.toml must parse");
+        let wc = config
+            .weapons_console
+            .as_ref()
+            .expect("battleship must have [weapons_console] (#474)");
+        assert_eq!(wc.phaser_banks.len(), 2, "battleship must have 2 banks");
+        let bank = &wc.phaser_banks[0];
+        assert!((bank.beam_damage_per_sec - 12.0).abs() < 1e-6);
+        assert!((bank.beam_range - 150.0).abs() < 1e-6);
+        let shields = config
+            .shields
+            .as_ref()
+            .expect("battleship must have [shields] (#474)");
+        assert!((shields.max_hp - 120.0).abs() < 1e-6);
+        let behaviour = config.behaviour.as_ref().expect("must have [behaviour]");
+        let kinds: Vec<&str> = behaviour.state.iter().map(|s| s.kind.as_str()).collect();
+        for required in &["idle", "patrolling", "pursuing", "attacking"] {
+            assert!(
+                kinds.contains(required),
+                "battleship must have '{required}' state (#474 full behaviour tree)"
+            );
+        }
+    }
+
+    #[test]
+    fn station_axiom_template_has_explicit_ball_collider() {
+        // (#474) Explicit collider for robust hit detection.
+        let toml_str = include_str!("../../assets/entities/station_axiom.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("station_axiom.toml must parse");
+        let collider = config
+            .collider
+            .as_ref()
+            .expect("station_axiom must have explicit [collider] (#474)");
+        assert!((collider.radius - 18.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pirate_raider_template_has_behaviour_states() {
+        // (#474) Rebalanced to fight to the death — removed `fleeing`
+        // state. `warping_out` retained only for clean scenario teardown
+        // (`on_scenario_unloaded`).
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         let behaviour = config
@@ -2378,15 +2470,21 @@ target_speed = 0.5
             state_kinds.contains(&"attacking"),
             "must have attacking state"
         );
-        assert!(state_kinds.contains(&"fleeing"), "must have fleeing state");
+        assert!(
+            !state_kinds.contains(&"fleeing"),
+            "fleeing state was removed in #474 — destroyers fight to the death"
+        );
         assert!(
             state_kinds.contains(&"warping_out"),
-            "must have warping_out state"
+            "warping_out retained for clean on_scenario_unloaded teardown"
         );
     }
 
     #[test]
     fn pirate_raider_template_transitions_include_enemy_in_range_and_on_attacked() {
+        // (#474) Rebalanced — removed `hull_below` (flee threshold) and
+        // `on_timer` (flee→warp_out delay) transitions. The destroyer
+        // now fights to the death.
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         let behaviour = config.behaviour.expect("behaviour must be Some");
@@ -2408,12 +2506,8 @@ target_speed = 0.5
             "must have in_weapons_range transition"
         );
         assert!(
-            conditions.contains(&"hull_below"),
-            "must have hull_below transition"
-        );
-        assert!(
-            conditions.contains(&"on_timer"),
-            "must have on_timer transition"
+            !conditions.contains(&"hull_below"),
+            "hull_below (flee threshold) was removed in #474"
         );
         assert!(
             conditions.contains(&"on_scenario_unloaded"),

@@ -1,14 +1,27 @@
-name = "Harrow Warhawk"
-tags = ["ship", "npc"]
+# Harrow Battleship (Warhawk class)
+#
+# Heavy capital ship. Two long-range phaser banks (port + starboard),
+# heavy shielding, slow but devastating. (#474) Rebalanced for the
+# combat-test scenario (#475) — gained a full behaviour tree (previously
+# only had `initial_state = "idle"` and a stub `attacking` state with
+# no transitions, so the ship spawned and sat there), gained weapons
+# (no `[weapons_console]` block before), gained shields, slowed down.
+
+name = "Harrow Battleship"
+tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
 [target]
 tags = ["ship"]
 threat_level = "high"
-description = "Harrow Warhawk"
+description = "Harrow Battleship"
 
 [hull]
-hull_integrity = 400.0
+hull_integrity = 280.0
+
+[shields]
+max_hp = 120.0
+regen_per_sec = 1.5
 
 [collider]
 shape = "Capsule"
@@ -26,19 +39,114 @@ shape = "cuboid"
 size = [10.0, 3.0, 16.0]
 colour = [0.9, 0.2, 0.05]
 
+# Slower than the cruiser; the battleship is a deliberate threat the
+# player must engage, not a kiteable nuisance.
 [helm_console]
-max_speed = 25.0
-max_reverse_speed = 12.5
-acceleration = 8.333
-deceleration = 25.0
-max_yaw_rate = 0.196
+max_speed = 18.0
+max_reverse_speed = 9.0
+acceleration = 6.0
+deceleration = 18.0
+max_yaw_rate = 0.12
 max_bank_deg = 5.0
+
+[weapons_console]
+
+# Port heavy bank.
+[[weapons_console.phaser_banks]]
+id = "port"
+facing_deg = -90.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
+beam_range = 150.0
+beam_damage_per_sec = 12.0
+beam_duration_secs = 8.0
+cooldown_secs = 4.0
+shield_pierce = 0.1
+beam_color = [1.0, 0.15, 0.05, 1.0]
+
+# Starboard heavy bank.
+[[weapons_console.phaser_banks]]
+id = "starboard"
+facing_deg = 90.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
+beam_range = 150.0
+beam_damage_per_sec = 12.0
+beam_duration_secs = 8.0
+cooldown_secs = 4.0
+shield_pierce = 0.1
+beam_color = [1.0, 0.15, 0.05, 1.0]
+
+[comms]
+range = 800.0
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# (#474) Full behaviour tree (was stub). Initial state `idle` because
+# the combat-test scenario explicitly sets the AI state via
+# `set_ai_state` immediately after `spawn_entity` so the battleship
+# starts pursuing the starbase. Patrol waypoints listed so the AI
+# doesn't crash if a different scenario spawns the warhawk without an
+# explicit state.
 
 [behaviour]
 initial_state = "idle"
+
+[[behaviour.state]]
+name = "idle"
+kind = "idle"
+target_speed = 0.0
+
+[[behaviour.state]]
+name = "patrolling"
+kind = "patrolling"
+waypoints = ["warhawk_patrol_a", "warhawk_patrol_b"]
+loop_path = true
+target_speed = 0.5
+
+[[behaviour.state]]
+name = "pursuing"
+kind = "pursuing"
+target_speed = 0.9
 
 [[behaviour.state]]
 name = "attacking"
 kind = "attacking"
 maintain_range = 120.0
 target_speed = 0.8
+
+[[behaviour.state]]
+name = "warp_out"
+kind = "warping_out"
+duration_secs = 6.0
+target_speed = 1.0
+
+# ── Transitions ───────────────────────────────────────────────────────────────
+
+[[behaviour.transition]]
+from = ["idle", "patrolling", "pursuing", "attacking"]
+condition = "on_attacked"
+to = "pursuing"
+
+[[behaviour.transition]]
+from = ["idle", "patrolling"]
+condition = "enemy_in_range"
+radius = 500.0
+to = "pursuing"
+
+[[behaviour.transition]]
+from = "pursuing"
+condition = "in_weapons_range"
+to = "attacking"
+
+[[behaviour.transition]]
+from = "attacking"
+condition = "target_destroyed"
+to = "patrolling"
+
+# (#474) No flee — fights to the death.
+
+[[behaviour.transition]]
+from = ["idle", "patrolling", "pursuing", "attacking"]
+condition = "on_scenario_unloaded"
+to = "warp_out"

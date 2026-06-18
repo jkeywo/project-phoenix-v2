@@ -195,10 +195,22 @@ fn discover_world_assets(
         walk_entity(&path, config_cache, seen_entities, manifest);
     }
 
-    // Track sub-world paths for the caller to fetch & recurse
-    // (caller handles deduplication against seen_worlds)
-    extra_worlds_out.extend(world_paths_from_triggers);
-    extra_worlds_out.extend(world.extra_worlds.clone());
+    // Track sub-world paths for the caller to fetch & recurse.
+    // Deduplicate here: two triggers can reference the same load_world path
+    // (e.g. on_hailed + on_entered_region both loading the same branch world).
+    // A duplicate in pending_sub_worlds causes pop_pending_world_toml to consume
+    // the TOML on the first pop, leaving the second copy waiting forever since
+    // request_world_fetch won't re-fire (already in WORLD_FETCH_REQUESTED).
+    for path in world_paths_from_triggers {
+        if !extra_worlds_out.contains(&path) {
+            extra_worlds_out.push(path);
+        }
+    }
+    for path in &world.extra_worlds {
+        if !extra_worlds_out.contains(path) {
+            extra_worlds_out.push(path.clone());
+        }
+    }
 }
 
 /// Build the initial `AssetManifest` from the base world + config cache.
@@ -809,5 +821,61 @@ mod tests {
         assert!(manifest.glb_models.is_empty());
         assert!(manifest.sidecars.is_empty());
         assert!(manifest.radar_icons.is_empty());
+    }
+
+    /// Regression: two triggers referencing the same load_world path (e.g.
+    /// on_hailed + on_entered_region both loading btf_path_a.toml) must not
+    /// produce duplicate entries in the pending_sub_worlds list.
+    /// A duplicate causes pop_pending_world_toml to consume the TOML on the
+    /// first pop; the second copy then waits forever (request_world_fetch
+    /// deduplicates), blocking preload completion.
+    #[test]
+    fn discover_base_assets_deduplicates_load_world_paths() {
+        use crate::world::config::parse_world;
+
+        let toml = r#"
+[global]
+seed = 1
+title = "Test"
+
+[[trigger]]
+condition = "on_hailed"
+entity = "Station"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/branch_a.toml"
+
+[[trigger]]
+condition = "on_entered_region"
+entity = "Station Dock"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/branch_a.toml"
+
+[[trigger]]
+condition = "on_hailed"
+entity = "Outpost"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/branch_b.toml"
+"#;
+
+        let world = parse_world(toml).expect("parse must succeed");
+        let config_cache = HashMap::new();
+        let (_manifest, pending_worlds, _) = discover_base_assets(&world, &config_cache);
+
+        // branch_a.toml must appear exactly once despite two triggers referencing it
+        let branch_a_count = pending_worlds
+            .iter()
+            .filter(|p| p.as_str() == "assets/worlds/branch_a.toml")
+            .count();
+        assert_eq!(
+            branch_a_count, 1,
+            "duplicate load_world path causes permanent preload hang; got {branch_a_count} copies"
+        );
+        assert_eq!(pending_worlds.len(), 2, "expected branch_a + branch_b only");
     }
 }

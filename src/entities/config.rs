@@ -2444,7 +2444,8 @@ target_speed = 0.5
             .collider
             .as_ref()
             .expect("station_axiom must have explicit [collider] (#474)");
-        assert!((collider.radius - 18.0).abs() < 1e-6);
+        assert_eq!(collider.shape, ColliderShape::Ball);
+        assert!((collider.radius - 12.0).abs() < 1e-6);
     }
 
     #[test]

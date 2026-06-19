@@ -121,6 +121,11 @@ pub struct FiredCommsTemplate {
     pub thread_id: Option<String>,
     /// When true, the injected `CommsMessage` should be flagged as urgent.
     pub urgent: bool,
+    /// Optional chained follow-up node that should be scheduled at inject
+    /// time. The server queues this onto `pending_follow_ups` so the
+    /// chained message arrives on its own `delay_secs` timer with no
+    /// player response click required (one-way "Stand by..." broadcasts).
+    pub root_follow_up: Option<CommsDialogueNode>,
 }
 
 /// Runtime state for one active dialogue conversation.
@@ -346,6 +351,7 @@ pub fn evaluate_comms_templates(
                 node: state.template.node.clone(),
                 thread_id: state.template.thread_id.clone(),
                 urgent: state.template.urgent,
+                root_follow_up: state.template.root_follow_up.clone(),
             });
         }
     }
@@ -929,6 +935,7 @@ mod tests {
             },
             thread_id: None,
             urgent: false,
+            root_follow_up: None,
         });
         let states = comms_template_states_from_world(&world);
         assert_eq!(states.len(), 1);
@@ -953,6 +960,7 @@ mod tests {
                 },
                 thread_id: None,
                 urgent: false,
+                root_follow_up: None,
             },
             fired: false,
         }];
@@ -983,6 +991,7 @@ mod tests {
                 },
                 thread_id: None,
                 urgent: false,
+                root_follow_up: None,
             },
             fired: false,
         }];
@@ -1014,6 +1023,7 @@ mod tests {
                 },
                 thread_id: None,
                 urgent: false,
+                root_follow_up: None,
             },
             fired: false,
         }];

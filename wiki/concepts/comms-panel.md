@@ -51,6 +51,58 @@ latest unanswered message in that thread. This is what keeps the Before the Fire
 Research Outpost handoff and delayed Dr. Myst briefing in one conversation while
 still allowing the operator to reply to Dr. Myst.
 
+### Auto-chained root follow-up (`[comms.follow_up]`)
+
+A root `[[comms]]` block can declare a sibling `[comms.follow_up]` that fires
+automatically after the root message is injected — no player response click
+required. Used for one-way broadcasts that promise more dialogue
+("Stand by — patching you through..."). The chained node:
+
+- inherits the parent's `thread_id` (same conversation),
+- supports its own `speaker` override (see "Multi-speaker channels" below),
+- supports its own `delay_secs` (silent during the wait — no `...` placeholder
+  for root chains),
+- supports its own nested `[[comms.follow_up.response]]` tree (so the chained
+  message can become a branching dialogue),
+- inherits the parent template's `urgent` flag.
+
+`[comms.follow_up]` is **mutually exclusive** with `[[comms.response]]` on the
+root node: the parser hard-errors when both are present so authors pick one
+shape per node — branching dialogue (responses) OR a chained monologue
+(follow_up).
+
+Worked example — Before the Fire Research Outpost (`assets/worlds/before_the_fire.toml`):
+
+```toml
+[[comms]]
+thread_id = "research-scholar"
+from      = "Research Outpost"
+trigger   = "on_hailed"
+entity    = "Research Outpost"
+urgent    = true
+message   = "...Stand by — patching you through to Dr. Myst now."
+
+  [comms.follow_up]
+  speaker    = "Dr. Myst"
+  delay_secs = 3.0
+  message    = "Ardent, this is Dr. Myst..."
+
+    [[comms.follow_up.response]]
+    text = "What happens if it fires?"
+
+      [comms.follow_up.response.follow_up]
+      speaker    = "Dr. Myst"
+      delay_secs = 2.0
+      message    = "If it fires at full charge..."
+```
+
+Implementation: scheduled in `handle_hail` (`src/world/server.rs:719`) and
+`handle_ai_events` (`src/world/server.rs:1786`) by pushing a
+`PendingFollowUp` onto `runtime.pending_follow_ups` whose `placeholder_id =
+None`. The existing `tick_pending_follow_ups` system drains the queue when
+the timer expires and injects the chained `CommsMessage` sharing the parent
+`thread_id`. See `wiki/log.md` for the entry that landed this.
+
 ### Multi-speaker channels
 
 Comms threads can contain multiple displayed speakers while staying anchored to
@@ -190,6 +242,7 @@ cargo test comms
 - `src/client_comms.rs`
 - `src/console/comms/inbox.rs`
 - `src/core/messages.rs`
-- `src/world/config.rs` (`speaker` parsing, legacy follow-up `from` alias)
-- `src/world/server.rs` (thread_id generation in handle_hail, handle_respond_to_message, auto-triggered comms)
-- `src/world/content.rs` (ActiveDialogue.thread_id)
+- `src/world/config.rs` (`speaker` parsing, legacy follow-up `from` alias, root-level `[comms.follow_up]` parsing + mutual-exclusion validation)
+- `src/world/server.rs` (thread_id generation in handle_hail, handle_respond_to_message, auto-triggered comms; root_follow_up scheduling at inject time)
+- `src/world/content.rs` (ActiveDialogue.thread_id; `FiredCommsTemplate.root_follow_up`)
+- `assets/worlds/before_the_fire.toml` (Research Outpost handoff → Dr. Myst chain via `[comms.follow_up]`)

@@ -778,15 +778,15 @@ fn handle_hail(
                 .find(|c| c.uuid == *target_uuid)
                 .map(|c| c.name.clone())
                 .unwrap_or_else(|| target_uuid.clone());
-            let sender_name = f.node.speaker.clone().unwrap_or(channel_name);
+            let sender_name = f.node.speaker.clone().unwrap_or(channel_name.clone());
 
             let delay = f.node.delay_secs.unwrap_or(0.0);
             if delay > 0.0 {
                 runtime.pending_follow_ups.push(PendingFollowUp {
                     node: f.node.clone(),
-                    sender_uuid,
-                    sender_name,
-                    thread_id,
+                    sender_uuid: sender_uuid.clone(),
+                    sender_name: sender_name.clone(),
+                    thread_id: thread_id.clone(),
                     remaining_secs: delay,
                     placeholder_id: None,
                     urgent: f.urgent,
@@ -798,7 +798,7 @@ fn handle_hail(
                 let msg = CommsMessage {
                     id: msg_id.clone(),
                     sender_uuid: sender_uuid.clone(),
-                    sender_name,
+                    sender_name: sender_name.clone(),
                     subject: f.node.body.chars().take(40).collect(),
                     body: f.node.body.clone(),
                     responses,
@@ -814,9 +814,32 @@ fn handle_hail(
                     msg_id,
                     ActiveDialogue {
                         current_node: f.node.clone(),
-                        thread_id,
+                        thread_id: thread_id.clone(),
                     },
                 );
+            }
+
+            // Schedule the chained root follow_up, if any. Always queued
+            // onto `pending_follow_ups`: zero-or-missing `delay_secs` means
+            // the chained message arrives on the very next tick. The
+            // chained node inherits the parent's thread_id so both
+            // messages render in the same conversation; its own
+            // `speaker` overrides the display name (channel identity
+            // stays put). No `...` placeholder — root chains stay silent
+            // during the wait, mirroring the existing delayed-root
+            // behaviour.
+            if let Some(ref fu) = f.root_follow_up {
+                let fu_sender_name = fu.speaker.clone().unwrap_or(sender_name.clone());
+                let fu_delay = fu.delay_secs.unwrap_or(0.0).max(0.0);
+                runtime.pending_follow_ups.push(PendingFollowUp {
+                    node: fu.clone(),
+                    sender_uuid: sender_uuid.clone(),
+                    sender_name: fu_sender_name,
+                    thread_id: thread_id.clone(),
+                    remaining_secs: fu_delay,
+                    placeholder_id: None,
+                    urgent: f.urgent,
+                });
             }
         }
     }
@@ -1813,9 +1836,9 @@ fn handle_ai_events(
         if delay > 0.0 {
             runtime.pending_follow_ups.push(PendingFollowUp {
                 node: fc.node.clone(),
-                sender_uuid,
-                sender_name,
-                thread_id,
+                sender_uuid: sender_uuid.clone(),
+                sender_name: sender_name.clone(),
+                thread_id: thread_id.clone(),
                 remaining_secs: delay,
                 placeholder_id: None,
                 urgent: fc.urgent,
@@ -1826,7 +1849,7 @@ fn handle_ai_events(
             let msg = crate::messages::CommsMessage {
                 id: msg_id.clone(),
                 sender_uuid: sender_uuid.clone(),
-                sender_name,
+                sender_name: sender_name.clone(),
                 subject: fc.node.body.chars().take(40).collect(),
                 body: fc.node.body.clone(),
                 responses,
@@ -1842,9 +1865,25 @@ fn handle_ai_events(
                 msg_id,
                 ActiveDialogue {
                     current_node: fc.node.clone(),
-                    thread_id,
+                    thread_id: thread_id.clone(),
                 },
             );
+        }
+
+        // Schedule the chained root follow_up, if any. See the
+        // matching block in `handle_hail` for the rationale.
+        if let Some(ref fu) = fc.root_follow_up {
+            let fu_sender_name = fu.speaker.clone().unwrap_or(sender_name.clone());
+            let fu_delay = fu.delay_secs.unwrap_or(0.0).max(0.0);
+            runtime.pending_follow_ups.push(PendingFollowUp {
+                node: fu.clone(),
+                sender_uuid: sender_uuid.clone(),
+                sender_name: fu_sender_name,
+                thread_id: thread_id.clone(),
+                remaining_secs: fu_delay,
+                placeholder_id: None,
+                urgent: fc.urgent,
+            });
         }
     }
 
@@ -3039,6 +3078,7 @@ mod tests {
                 },
                 thread_id: None,
                 urgent: false,
+                root_follow_up: None,
             },
             fired: false,
         });
@@ -3499,6 +3539,7 @@ mod tests {
                     },
                     thread_id: Some("research-scholar".to_string()),
                     urgent: true,
+                    root_follow_up: None,
                 },
                 fired: false,
             }];
@@ -3532,6 +3573,260 @@ mod tests {
         assert!(messages[0].is_urgent);
     }
 
+    // -- Root-level [comms.follow_up] (auto-chained monologues) ─────────────
+
+    /// `handle_hail` injects the root template AND queues a `PendingFollowUp`
+    /// for the chained `root_follow_up` node. Once the queued timer expires,
+    /// the chained message is injected into the inbox sharing the parent's
+    /// `thread_id` and the chained `speaker` overrides the display name.
+    #[test]
+    fn root_follow_up_fires_on_hail_after_timer_expires() {
+        let station_uuid = "station-uuid-rfu-001";
+        let mut app = comms_test_app();
+        app.add_systems(Update, tick_pending_follow_ups);
+        setup_game_with_root_follow_up(&mut app, station_uuid);
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
+        let _ = tick(&mut app);
+
+        // After the hail, the root message is in the inbox and the chained
+        // follow-up sits silently in `pending_follow_ups` (no `...`
+        // placeholder for root chains).
+        {
+            let messages = app.world().resource::<CommsInboxRes>().0.messages();
+            assert_eq!(messages.len(), 1, "only the root message visible during wait");
+            assert_eq!(messages[0].body, "Stand by — patching you through.");
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert_eq!(
+                runtime.pending_follow_ups.len(),
+                1,
+                "chained follow-up must be queued"
+            );
+            assert!(
+                runtime.pending_follow_ups[0].placeholder_id.is_none(),
+                "root chains must stay silent (no placeholder)"
+            );
+        }
+
+        // Force the timer to expire and tick again.
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_follow_ups[0]
+            .remaining_secs = -0.1;
+        let _ = tick(&mut app);
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 2, "chained message arrives after timer");
+        let parent = &messages[0];
+        let chained = &messages[1];
+        // Both share the same thread.
+        assert_eq!(chained.thread_id, parent.thread_id);
+        assert!(!chained.thread_id.is_empty());
+        // The chained `speaker` overrode the display name; sender_uuid stays
+        // the channel identity.
+        assert_eq!(chained.sender_name, "Dr. Myst");
+        assert_eq!(chained.sender_uuid, station_uuid);
+        assert_eq!(chained.body, "Captain. Dr. Myst speaking.");
+    }
+
+    /// When the root template carries an explicit `thread_id`, the chained
+    /// follow-up message inherits the same id (so the inbox shows them as
+    /// one conversation).
+    #[test]
+    fn root_follow_up_inherits_explicit_thread_id() {
+        let station_uuid = "station-uuid-rfu-002";
+        let mut app = comms_test_app();
+        app.add_systems(Update, tick_pending_follow_ups);
+        setup_game_with_root_follow_up(&mut app, station_uuid);
+
+        // Stamp the template with an explicit thread_id.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.comms_template_states[0].template.thread_id =
+                Some("research-scholar".to_string());
+        }
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
+        let _ = tick(&mut app);
+        // Trip the timer.
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_follow_ups[0]
+            .remaining_secs = -0.1;
+        let _ = tick(&mut app);
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].thread_id, "research-scholar");
+        assert_eq!(messages[1].thread_id, "research-scholar");
+    }
+
+    /// A chained `root_follow_up` with `delay_secs = None` is queued with
+    /// `remaining_secs = 0.0`. The next `tick_pending_follow_ups` pass that
+    /// runs (decrementing by any non-negative `dt`) finds it ready and
+    /// injects it. This mirrors how `response.follow_up` with no delay
+    /// reaches the inbox on the next tick after `RespondToMessage`.
+    #[test]
+    fn root_follow_up_with_zero_delay_fires_on_next_tick() {
+        let station_uuid = "station-uuid-rfu-003";
+        let mut app = comms_test_app();
+        app.add_systems(Update, tick_pending_follow_ups);
+        setup_game_with_root_follow_up(&mut app, station_uuid);
+
+        // Drop the delay on the chained node.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            if let Some(ref mut fu) = runtime.comms_template_states[0].template.root_follow_up {
+                fu.delay_secs = None;
+            }
+        }
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
+        // First tick: handle_hail injects the root and queues the chained
+        // node with remaining_secs = 0.0. Whether `tick_pending_follow_ups`
+        // fires on this same tick depends on Bevy's parallel scheduling,
+        // so we don't assert on it here.
+        let _ = tick(&mut app);
+        // Second tick: regardless of within-tick ordering, the queued
+        // follow-up's timer (0.0) is now <= 0.0 and the chained message
+        // has been injected.
+        let _ = tick(&mut app);
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(
+            messages.len(),
+            2,
+            "zero-delay chained message must fire on the next tick"
+        );
+        assert_eq!(messages[1].body, "Captain. Dr. Myst speaking.");
+        // The pending queue must be drained.
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(runtime.pending_follow_ups.is_empty());
+    }
+
+    /// `handle_ai_events` (auto-fire path: `on_world_loaded`,
+    /// `on_attacked`, `on_destroyed`, `on_flag_set`) also schedules the
+    /// chained `root_follow_up`. Verified by emitting `WorldLoaded` on a
+    /// template with a chained node.
+    #[test]
+    fn root_follow_up_fires_for_auto_triggered_template() {
+        use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState};
+
+        let mut app = ai_trigger_test_app();
+        app.add_systems(Update, tick_pending_follow_ups);
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert(
+                "Research Outpost".to_string(),
+                "research-outpost-uuid".to_string(),
+            );
+            runtime.comms_template_states = vec![CommsTemplateState {
+                template: CommsTemplate {
+                    from: "Research Outpost".to_string(),
+                    trigger: TriggerCondition::OnWorldLoaded,
+                    node: CommsDialogueNode {
+                        body: "Stand by.".to_string(),
+                        responses: vec![],
+                        speaker: None,
+                        delay_secs: None,
+                    },
+                    thread_id: Some("research-scholar".to_string()),
+                    urgent: false,
+                    root_follow_up: Some(CommsDialogueNode {
+                        body: "Captain. Dr. Myst speaking.".to_string(),
+                        responses: vec![],
+                        speaker: Some("Dr. Myst".to_string()),
+                        delay_secs: Some(2.0),
+                    }),
+                },
+                fired: false,
+            }];
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+        }
+
+        app.update();
+
+        // Root injected; chained follow-up queued.
+        {
+            let messages = app.world().resource::<CommsInboxRes>().0.messages();
+            assert_eq!(messages.len(), 1);
+            assert_eq!(messages[0].body, "Stand by.");
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert_eq!(runtime.pending_follow_ups.len(), 1);
+        }
+
+        // Trip the timer and tick.
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_follow_ups[0]
+            .remaining_secs = -0.1;
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 2);
+        let chained = &messages[1];
+        assert_eq!(chained.sender_name, "Dr. Myst");
+        assert_eq!(chained.body, "Captain. Dr. Myst speaking.");
+        assert_eq!(chained.thread_id, "research-scholar");
+    }
+
+    /// Like `setup_game_with_comms_and_followup`, but installs a template
+    /// whose root has zero `[[response]]` entries and a top-level
+    /// `root_follow_up` chain (the new authoring shape). The chained node
+    /// uses `speaker = "Dr. Myst"` to verify display-speaker override.
+    fn setup_game_with_root_follow_up(app: &mut App, station_uuid: &str) {
+        setup_game_with_comms(app, station_uuid);
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime.comms_template_states.clear();
+        runtime
+            .comms_template_states
+            .push(crate::world::content::CommsTemplateState {
+                template: crate::world::content::CommsTemplate {
+                    from: "starbase_alpha".into(),
+                    trigger: TriggerCondition::OnHailed {
+                        entity_name: "starbase_alpha".into(),
+                    },
+                    node: CommsDialogueNode {
+                        body: "Stand by — patching you through.".into(),
+                        responses: vec![], // no [[response]] — chained monologue
+                        speaker: None,
+                        delay_secs: None,
+                    },
+                    thread_id: None,
+                    urgent: false,
+                    root_follow_up: Some(CommsDialogueNode {
+                        body: "Captain. Dr. Myst speaking.".into(),
+                        responses: vec![],
+                        speaker: Some("Dr. Myst".into()),
+                        delay_secs: Some(2.0),
+                    }),
+                },
+                fired: false,
+            });
+    }
+
     fn setup_game_with_comms_and_followup(app: &mut App, station_uuid: &str) {
         setup_game_with_comms(app, station_uuid);
         // Replace the single template with one that has a follow-up node.
@@ -3562,6 +3857,7 @@ mod tests {
                     },
                     thread_id: None,
                     urgent: false,
+                    root_follow_up: None,
                 },
                 fired: false,
             });
@@ -4347,6 +4643,7 @@ mod tests {
                     },
                     thread_id: None,
                     urgent: false,
+                    root_follow_up: None,
                 },
                 fired: false,
             }];
@@ -4406,6 +4703,7 @@ mod tests {
                     },
                     thread_id: None,
                     urgent: false,
+                    root_follow_up: None,
                 },
                 fired: false,
             }];
@@ -7396,6 +7694,7 @@ size_max = 2.0
                     },
                     thread_id: None,
                     urgent: false,
+                    root_follow_up: None,
                 },
                 fired: false,
             });
@@ -7784,6 +8083,7 @@ size_max = 2.0
                     },
                     thread_id: None,
                     urgent: false,
+                    root_follow_up: None,
                 },
                 fired: false,
             });

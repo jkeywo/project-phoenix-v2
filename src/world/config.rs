@@ -277,6 +277,14 @@ struct RawCommsEntry {
     delay_secs: Option<f32>,
     #[serde(default)]
     urgent: bool,
+    /// Optional chained follow-up message that fires automatically after the
+    /// root node is injected. Authoring shape for one-way broadcasts that
+    /// promise more dialogue ("Stand by — patching you through...") without
+    /// any player response click. Mutually exclusive with `[[response]]`:
+    /// when both are present, the parser drops `follow_up` and emits a
+    /// warning so the responses path keeps working.
+    #[serde(default)]
+    follow_up: Option<RawCommsFollowUp>,
 }
 
 /// Raw single-pass deserialization of a world TOML.
@@ -492,6 +500,13 @@ pub struct CommsTemplate {
     /// and an amber tint while any unread urgent message from this sender
     /// remains. Defaults to false.
     pub urgent: bool,
+    /// Optional chained follow-up node that auto-fires after the root
+    /// message is injected. Used for one-way broadcasts that promise
+    /// further dialogue ("Stand by...") — the chained message arrives on
+    /// its own `delay_secs` timer with no response click required.
+    /// Mutually exclusive with `node.responses`: when the author supplies
+    /// both, the parser drops this field and warns.
+    pub root_follow_up: Option<CommsDialogueNode>,
 }
 
 // -- Parser helpers -----------------------------------------------------------
@@ -741,18 +756,22 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
     Ok(actions)
 }
 
+fn parse_comms_follow_up(raw_fu: &RawCommsFollowUp) -> Result<CommsDialogueNode, String> {
+    let fu_responses = parse_comms_responses(&raw_fu.responses)?;
+    Ok(CommsDialogueNode {
+        body: raw_fu.message.clone(),
+        responses: fu_responses,
+        speaker: raw_fu.speaker.clone().or_else(|| raw_fu.from.clone()),
+        delay_secs: raw_fu.delay_secs,
+    })
+}
+
 fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<CommsResponse>, String> {
     let mut responses = Vec::new();
     for raw_resp in raw_responses {
         let actions = parse_raw_actions(&raw_resp.actions)?;
         let follow_up = if let Some(ref raw_fu) = raw_resp.follow_up {
-            let fu_responses = parse_comms_responses(&raw_fu.responses)?;
-            Some(CommsDialogueNode {
-                body: raw_fu.message.clone(),
-                responses: fu_responses,
-                speaker: raw_fu.speaker.clone().or_else(|| raw_fu.from.clone()),
-                delay_secs: raw_fu.delay_secs,
-            })
+            Some(parse_comms_follow_up(raw_fu)?)
         } else {
             None
         };
@@ -930,6 +949,20 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             "Comms block",
         )?;
         let responses = parse_comms_responses(&raw_comms.responses)?;
+        let root_follow_up = if let Some(ref raw_fu) = raw_comms.follow_up {
+            if !responses.is_empty() {
+                return Err(format!(
+                    "Comms template from '{}' has both [[response]] and \
+                     a top-level [comms.follow_up]; these are mutually \
+                     exclusive — use response.follow_up for branching dialogue \
+                     or remove the responses to chain a monologue",
+                    raw_comms.from
+                ));
+            }
+            Some(parse_comms_follow_up(raw_fu)?)
+        } else {
+            None
+        };
         let node = CommsDialogueNode {
             body: raw_comms.message,
             responses,
@@ -942,6 +975,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             node,
             thread_id: raw_comms.thread_id,
             urgent: raw_comms.urgent,
+            root_follow_up,
         });
     }
 
@@ -1917,6 +1951,112 @@ message = "Stand by."
         assert_eq!(follow_up.speaker.as_deref(), Some("Dr. Myst"));
     }
 
+    // -- Root-level [comms.follow_up] (auto-chained monologues) ─────────────
+
+    #[test]
+    fn parse_world_reads_root_follow_up_with_speaker_and_delay() {
+        let toml = r#"
+[[comms]]
+from    = "Research Outpost"
+trigger = "on_hailed"
+entity  = "Research Outpost"
+message = "Stand by — patching you through to Dr. Myst now."
+
+  [comms.follow_up]
+  speaker    = "Dr. Myst"
+  delay_secs = 2.0
+  message    = "Captain. Dr. Myst speaking."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let tmpl = &cfg.comms[0];
+        assert!(
+            tmpl.node.responses.is_empty(),
+            "root has no responses when chained"
+        );
+        let fu = tmpl
+            .root_follow_up
+            .as_ref()
+            .expect("root_follow_up must parse");
+        assert_eq!(fu.speaker.as_deref(), Some("Dr. Myst"));
+        assert_eq!(fu.delay_secs, Some(2.0));
+        assert_eq!(fu.body, "Captain. Dr. Myst speaking.");
+        assert!(
+            fu.responses.is_empty(),
+            "no nested responses configured here"
+        );
+    }
+
+    #[test]
+    fn parse_world_root_follow_up_supports_nested_responses() {
+        let toml = r#"
+[[comms]]
+from    = "Research Outpost"
+trigger = "on_hailed"
+entity  = "Research Outpost"
+message = "Stand by."
+
+  [comms.follow_up]
+  message = "Captain. Dr. Myst speaking."
+
+    [[comms.follow_up.response]]
+    text = "What did you find?"
+
+    [[comms.follow_up.response]]
+    text = "Stand by, doctor."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let fu = cfg.comms[0]
+            .root_follow_up
+            .as_ref()
+            .expect("root_follow_up must parse");
+        assert_eq!(fu.responses.len(), 2);
+        assert_eq!(fu.responses[0].text, "What did you find?");
+        assert_eq!(fu.responses[1].text, "Stand by, doctor.");
+    }
+
+    #[test]
+    fn parse_world_root_follow_up_with_responses_is_rejected() {
+        // Mutual exclusion: a root node with both [[response]] and a
+        // top-level [comms.follow_up] is a hard parse error.
+        let toml = r#"
+[[comms]]
+from    = "Research Outpost"
+trigger = "on_hailed"
+entity  = "Research Outpost"
+message = "Stand by."
+
+  [[comms.response]]
+  text = "Acknowledge."
+
+  [comms.follow_up]
+  message = "Captain. Dr. Myst speaking."
+"#;
+        let err = parse_world(toml)
+            .expect_err("must reject mixed responses + root follow_up");
+        assert!(
+            err.contains("Research Outpost"),
+            "error must name the offending sender: {err}"
+        );
+        assert!(
+            err.contains("mutually exclusive") || err.contains("[comms.follow_up]"),
+            "error must explain the conflict: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_root_follow_up_absent_keeps_root_follow_up_none() {
+        // Existing world files (no [comms.follow_up]) still produce
+        // root_follow_up = None — back-compat smoke test.
+        let toml = r#"
+[[comms]]
+from    = "Starcorp Command"
+trigger = "on_world_loaded"
+message = "Investigate the situation."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert!(cfg.comms[0].root_follow_up.is_none());
+    }
+
     #[test]
     fn parse_world_unknown_trigger_condition_errors() {
         let toml = r#"
@@ -2315,7 +2455,7 @@ entity    = "raider"
             (
                 "before_the_fire",
                 include_str!("../../assets/worlds/before_the_fire.toml"),
-                1,
+                2,
             ),
             (
                 "btf_path_a",
@@ -2325,7 +2465,7 @@ entity    = "raider"
             (
                 "btf_path_b",
                 include_str!("../../assets/worlds/btf_path_b.toml"),
-                1,
+                0,
             ),
             (
                 "btf_path_c",
@@ -2349,7 +2489,12 @@ entity    = "raider"
     }
 
     #[test]
-    fn before_the_fire_research_handoff_and_dr_myst_share_thread() {
+    fn before_the_fire_research_handoff_chains_dr_myst_via_root_follow_up() {
+        // The Research Outpost handoff lives in `before_the_fire.toml` as a
+        // single `[[comms]]` block whose top-level `[comms.follow_up]`
+        // chains Dr. Myst's briefing on the same `research-scholar` thread.
+        // No cross-world content for Dr. Myst — the chained follow-up
+        // delivers the briefing 3 seconds after hail.
         let root = parse_world(include_str!("../../assets/worlds/before_the_fire.toml"))
             .expect("before_the_fire.toml must parse");
         let handoff = root
@@ -2366,19 +2511,23 @@ entity    = "raider"
                 .contains("patching you through to Dr. Myst"),
             "handoff should tell the crew Dr. Myst is being patched through"
         );
-
-        let scholar = parse_world(include_str!("../../assets/worlds/btf_path_b.toml"))
-            .expect("btf_path_b.toml must parse");
-        let myst = scholar
-            .comms
-            .iter()
-            .find(|c| c.thread_id.as_deref() == Some("research-scholar"))
-            .expect("Dr. Myst follow-on comms must share the handoff thread");
-        assert_eq!(myst.from, "Research Outpost");
-        assert_eq!(myst.node.speaker.as_deref(), Some("Dr. Myst"));
-        assert_eq!(myst.node.delay_secs, Some(3.0));
         assert!(
-            myst.node.responses.len() >= 2,
+            handoff.urgent,
+            "the Research Outpost handoff thread is urgent (Dr. Myst's briefing carries critical intel)"
+        );
+        assert!(
+            handoff.node.responses.is_empty(),
+            "handoff has no inline responses — the chain is the auto-follow_up"
+        );
+
+        let myst = handoff
+            .root_follow_up
+            .as_ref()
+            .expect("Dr. Myst chained follow-up must be present");
+        assert_eq!(myst.speaker.as_deref(), Some("Dr. Myst"));
+        assert_eq!(myst.delay_secs, Some(3.0));
+        assert!(
+            myst.responses.len() >= 2,
             "Dr. Myst should have reply options after appearing"
         );
     }

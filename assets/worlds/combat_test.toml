@@ -241,11 +241,10 @@ condition = "on_world_loaded"
 # ── Comms ────────────────────────────────────────────────────────────────────
 #
 # Federation Command opens with an urgent flash brief, then announces
-# each wave as it spawns. The wave announcements all fire `on_world_loaded`
-# but each has a `delay_secs` matching its wave's `on_timer` spawn time —
-# the comms template runtime queues delayed messages and injects them
-# when their timer expires. Using `on_world_loaded + delay_secs` avoids
-# needing `on_timer` support on the `[[comms]]` block.
+# each wave as it spawns. The wave announcements use `trigger = "on_timer"`
+# with `after_secs` matching each wave's spawn time. The previous
+# `delay_secs` shortcut was removed when follow-up triggers were added;
+# any time-delayed comms now uses `on_timer` directly.
 
 [[comms]]
 from    = "Federation Command"
@@ -255,51 +254,51 @@ message = "USS Phoenix, intelligence reports a Harrow strike fleet inbound on St
 
 [[comms]]
 from    = "Federation Command"
-trigger = "on_world_loaded"
-delay_secs = 0.5
+trigger = "on_timer"
+after_secs = 0.5
 message = "Contact, bearing north-northwest: Harrow destroyer closing on Starbase Alpha."
 
 [[comms]]
 from    = "Federation Command"
-trigger = "on_world_loaded"
-delay_secs = 45.0
+trigger = "on_timer"
+after_secs = 45.0
 message = "Second contact, bearing southeast: Harrow destroyer inbound."
 
 [[comms]]
 from    = "Federation Command"
-trigger = "on_world_loaded"
-delay_secs = 60.0
+trigger = "on_timer"
+after_secs = 60.0
 message = "Third destroyer detected, due east. They are coordinating."
 
 [[comms]]
 from    = "Federation Command"
-trigger = "on_world_loaded"
-delay_secs = 120.0
+trigger = "on_timer"
+after_secs = 120.0
 urgent  = true
 message = "Heavy contact, bearing northeast: Harrow cruiser. Repeat — cruiser inbound. All hands brace."
 
 [[comms]]
 from    = "Federation Command"
-trigger = "on_world_loaded"
-delay_secs = 210.0
+trigger = "on_timer"
+after_secs = 210.0
 message = "New destroyer, bearing east-southeast. They keep coming."
 
 [[comms]]
 from    = "Federation Command"
-trigger = "on_world_loaded"
-delay_secs = 240.0
+trigger = "on_timer"
+after_secs = 240.0
 urgent  = true
 message = "Second cruiser, east-northeast. Phoenix, prioritise the cruiser — Starbase Alpha is taking sustained fire."
 
 [[comms]]
 from    = "Federation Command"
-trigger = "on_world_loaded"
-delay_secs = 270.0
+trigger = "on_timer"
+after_secs = 270.0
 message = "Destroyer, south. Final wave inbound shortly."
 
 [[comms]]
 from    = "Federation Command"
-trigger = "on_world_loaded"
-delay_secs = 300.0
+trigger = "on_timer"
+after_secs = 300.0
 urgent  = true
 message = "FLASH: Harrow battleship inbound from due east. This is the last of them. Take it down."

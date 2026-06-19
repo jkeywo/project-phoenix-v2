@@ -165,10 +165,12 @@ A comms template — a top-level message and a tree of player response choices.
 |---|---|---|---|
 | `from` | string | **required** | Channel/source identity used for hailing, range, contact lookup, and synthetic broadcasts. Usually a named `[[entity]]` `name`; synthetic names such as `"Starcorp Command"` are allowed for broadcasts with no physical contact. |
 | `speaker` | string | none | Optional display speaker for this root message. Use when the voice on the channel is a specific character distinct from the hailed contact, e.g. `speaker = "Dr. Myst"` on a message sent via `from = "Research Outpost"`. |
-| `trigger` | `"on_hailed"` \| `"on_destroyed"` \| `"on_attacked"` | **required** | When to deliver this message. |
-| `entity` | string | depends | The named `[[entity]]` whose event triggers delivery (typically the same as `from`). |
+| `trigger` | trigger condition | **required** | When to deliver this message. Any `TriggerCondition` works: `on_hailed`, `on_destroyed`, `on_attacked`, `on_all_destroyed`, `on_world_loaded`, `on_timer`, `on_flag_set`, `on_flag_cleared`, `on_entered_region`, `on_exited_region`. Use `on_timer` + `after_secs` for time-delayed broadcasts (the migration target for the old `delay_secs` shortcut, now removed). |
+| `entity` | string | depends | The named `[[entity]]` whose event triggers delivery (typically the same as `from`). Required by entity-scoped triggers (`on_hailed`, `on_destroyed`, etc.). |
+| `entities` | array of strings | none | Required by `on_all_destroyed`. |
+| `after_secs` | number | none | Required by `on_timer`. World-relative seconds. |
+| `name` | string | none | Flag name. Required by `on_flag_set` / `on_flag_cleared`. |
 | `message` | string | **required** | The root message body. |
-| `delay_secs` | number | `0.0` | Optional delay before the root message is delivered. Root delays are silent: no `...` placeholder or speaker reveal appears until the timer expires. |
 | `[[comms.response]]` | array | `[]` | Player response options. |
 
 #### `[[comms.response]]`
@@ -177,7 +179,42 @@ A comms template — a top-level message and a tree of player response choices.
 |---|---|---|---|
 | `text` | string | **required** | Display text on the response button. |
 | `[[comms.response.action]]` | array | `[]` | Same shape as `[[trigger.action]]`. |
-| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, speaker?, delay_secs?, response... }` block presented after this choice. Follow-ups may set `speaker`; legacy `from` is accepted as a display-speaker alias, but new content should use `speaker`. If `delay_secs` is set, the thread shows a `...` placeholder while waiting. |
+| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, speaker?, trigger?, response... }` block presented after this choice. Follow-ups may set `speaker`; legacy `from` is accepted as a display-speaker alias, but new content should use `speaker`. If `trigger` is set, the thread shows a `...` placeholder while waiting for the trigger to fire (or fires immediately on the next tick if the trigger condition is already true — see "Triggered follow-ups" below). |
+
+#### Triggered follow-ups
+
+A `[comms.response.follow_up]` (or a chained `[comms.follow_up]`) can optionally carry a `trigger` field that delays delivery until a world condition is met. Supported trigger conditions mirror the `[[trigger]]` block; the most common shapes are:
+
+| Trigger | Fields | Notes |
+|---|---|---|
+| `on_timer` | `after_secs` | Queue-relative — counts from the moment the follow-up is queued (the response is picked, or the parent message is injected), NOT from world load. Replaces the legacy `delay_secs` shortcut. |
+| `on_entered_region` | `entity` | The named region entity. Fires when the player ship enters the region, OR immediately on the next tick if the ship is already inside. |
+| `on_exited_region` | `entity` | Fires when the ship leaves the region, OR immediately if it is already outside. |
+| `on_flag_set` | `name` | Fires when the named world flag transitions to set, OR immediately if it is already set. |
+| `on_flag_cleared` | `name` | Fires when the named world flag transitions to cleared, OR immediately if it is already cleared. |
+| `on_destroyed` | `entity` | Fires when the named entity is destroyed, OR immediately if its UUID is no longer in the live ECS set. |
+| `on_all_destroyed` | `entities` | Fires when every named entity is destroyed. |
+| `on_attacked` | `entity` | Event-only: fires when a fresh `Attacked` event is observed for the entity. Does not have an "already attacked" state to short-circuit on. |
+| `on_hailed` | `entity` | Event-only: fires when a fresh `Hailed` event is observed. |
+| `on_world_loaded` | (none) | Fires immediately (the world is, by construction, loaded). |
+
+Worked example — Axiom Station acknowledges arrival when the player ship enters its dock region (`assets/worlds/before_the_fire.toml`):
+
+```toml
+[[comms]]
+from    = "Axiom Station"
+trigger = "on_world_loaded"
+entity  = "Axiom Station"
+message = "This is Axiom Station — we have a situation. Please respond."
+
+  [[comms.response]]
+  text = "Understood, Axiom Station. We are proceeding to your location."
+
+    [comms.response.follow_up]
+    trigger = "on_entered_region"
+    entity  = "Axiom Station Dock"
+    message = "Ardent, we have you on the dock approach. Welcome to Axiom."
+```
 
 `from` is the radio endpoint; `speaker` is the voice currently talking on that endpoint. This lets one chat thread stay anchored to a station while multiple characters speak inside it:
 

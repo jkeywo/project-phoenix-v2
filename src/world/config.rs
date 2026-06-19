@@ -238,10 +238,32 @@ struct RawCommsFollowUp {
     /// `speaker`; kept so existing authored worlds continue to parse.
     #[serde(default)]
     from: Option<String>,
-    /// Optional delay in seconds before this follow-up message is injected.
-    /// A `...` placeholder is shown in the chat during the wait.
+    /// Optional trigger condition that gates this follow-up. When absent,
+    /// the follow-up fires immediately. When present, the follow-up sits in
+    /// the pending queue with a `...` placeholder until the trigger
+    /// condition is met (or fires immediately on the next tick if the
+    /// condition is already true — e.g. `on_entered_region` when the ship
+    /// is already inside, `on_flag_set` when the flag is already set,
+    /// `on_world_loaded` always).
     #[serde(default)]
-    delay_secs: Option<f32>,
+    trigger: Option<String>,
+    /// Entity reference for triggers that require one
+    /// (`on_destroyed`, `on_attacked`, `on_hailed`, `on_entered_region`,
+    /// `on_exited_region`).
+    #[serde(default)]
+    entity: Option<String>,
+    /// Entity list for `on_all_destroyed`.
+    #[serde(default)]
+    entities: Option<Vec<String>>,
+    /// Elapsed-seconds threshold for `on_timer`. For follow-ups the timer
+    /// is measured from the moment the follow-up is queued (i.e. the
+    /// response is picked or the parent message is injected), not from
+    /// world load.
+    #[serde(default)]
+    after_secs: Option<f32>,
+    /// Flag name for `on_flag_set` / `on_flag_cleared`.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,16 +287,21 @@ struct RawCommsEntry {
     speaker: Option<String>,
     #[serde(default)]
     entity: Option<String>,
+    /// Entity list for `on_all_destroyed` root triggers.
+    #[serde(default)]
+    entities: Option<Vec<String>>,
+    /// Elapsed-seconds threshold for `on_timer` root triggers.
+    #[serde(default)]
+    after_secs: Option<f32>,
+    /// Flag name for `on_flag_set` / `on_flag_cleared` root triggers.
+    #[serde(default)]
+    name: Option<String>,
     #[serde(default, rename = "response")]
     responses: Vec<RawCommsResponse>,
     /// When set, all messages from this template (and their follow-ups) share
     /// this thread_id. When absent, a unique UUID is generated per fire.
     #[serde(default)]
     thread_id: Option<String>,
-    /// Optional delay in seconds before this template's message is injected
-    /// after the trigger fires. Root/template delays stay silent during the wait.
-    #[serde(default)]
-    delay_secs: Option<f32>,
     #[serde(default)]
     urgent: bool,
     /// Optional chained follow-up message that fires automatically after the
@@ -477,9 +504,22 @@ pub struct CommsDialogueNode {
     /// Display-speaker override for this node. When `Some`, it overrides the
     /// channel/contact name used for the delivered `CommsMessage`.
     pub speaker: Option<String>,
-    /// Delay in seconds before this node is injected after being triggered.
-    /// `None` / `0.0` means immediate injection.
-    pub delay_secs: Option<f32>,
+    /// Optional trigger condition that gates injection of this node into
+    /// the inbox.
+    ///
+    /// `None` — fire immediately on the next tick after being queued
+    /// (the default; mirrors a "no delay, no condition" follow-up).
+    ///
+    /// `Some(condition)` — sit in the pending queue with a `...`
+    /// placeholder until the condition is met. The condition is evaluated
+    /// against world events observed after the follow-up is queued, plus
+    /// "already-true" state-based shortcuts (e.g. ship currently inside a
+    /// region for `OnEnteredRegion`, flag already set for `OnFlagSet`).
+    /// For `OnTimer` the elapsed-seconds clock is queue-relative, not
+    /// world-relative — so a follow-up with `after_secs = 3.0` fires
+    /// three seconds after the player picks the response (or the parent
+    /// message is injected, for chained roots).
+    pub trigger: Option<TriggerCondition>,
 }
 
 /// A comms template: a root dialogue node associated with a trigger condition.
@@ -502,8 +542,10 @@ pub struct CommsTemplate {
     pub urgent: bool,
     /// Optional chained follow-up node that auto-fires after the root
     /// message is injected. Used for one-way broadcasts that promise
-    /// further dialogue ("Stand by...") — the chained message arrives on
-    /// its own `delay_secs` timer with no response click required.
+    /// further dialogue ("Stand by...") — the chained message arrives
+    /// either on the next tick or when its own `trigger` fires (with
+    /// "fire immediately if already true" semantics), with no response
+    /// click required.
     /// Mutually exclusive with `node.responses`: when the author supplies
     /// both, the parser drops this field and warns.
     pub root_follow_up: Option<CommsDialogueNode>,
@@ -758,11 +800,22 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
 
 fn parse_comms_follow_up(raw_fu: &RawCommsFollowUp) -> Result<CommsDialogueNode, String> {
     let fu_responses = parse_comms_responses(&raw_fu.responses)?;
+    let trigger = match &raw_fu.trigger {
+        Some(name) => Some(parse_trigger_condition_from_string(
+            name,
+            raw_fu.entity.clone(),
+            raw_fu.entities.clone(),
+            raw_fu.after_secs,
+            raw_fu.name.clone(),
+            "Comms follow-up",
+        )?),
+        None => None,
+    };
     Ok(CommsDialogueNode {
         body: raw_fu.message.clone(),
         responses: fu_responses,
         speaker: raw_fu.speaker.clone().or_else(|| raw_fu.from.clone()),
-        delay_secs: raw_fu.delay_secs,
+        trigger,
     })
 }
 
@@ -943,9 +996,9 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         let trigger = parse_trigger_condition_from_string(
             &raw_comms.trigger,
             raw_comms.entity,
-            None,
-            None,
-            None,
+            raw_comms.entities,
+            raw_comms.after_secs,
+            raw_comms.name,
             "Comms block",
         )?;
         let responses = parse_comms_responses(&raw_comms.responses)?;
@@ -967,7 +1020,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             body: raw_comms.message,
             responses,
             speaker: raw_comms.speaker,
-            delay_secs: raw_comms.delay_secs,
+            trigger: None,
         };
         comms.push(CommsTemplate {
             from: raw_comms.from,
@@ -1954,7 +2007,7 @@ message = "Stand by."
     // -- Root-level [comms.follow_up] (auto-chained monologues) ─────────────
 
     #[test]
-    fn parse_world_reads_root_follow_up_with_speaker_and_delay() {
+    fn parse_world_reads_root_follow_up_with_speaker_and_timer_trigger() {
         let toml = r#"
 [[comms]]
 from    = "Research Outpost"
@@ -1964,7 +2017,8 @@ message = "Stand by — patching you through to Dr. Myst now."
 
   [comms.follow_up]
   speaker    = "Dr. Myst"
-  delay_secs = 2.0
+  trigger    = "on_timer"
+  after_secs = 2.0
   message    = "Captain. Dr. Myst speaking."
 "#;
         let cfg = parse_world(toml).expect("must parse");
@@ -1978,7 +2032,7 @@ message = "Stand by — patching you through to Dr. Myst now."
             .as_ref()
             .expect("root_follow_up must parse");
         assert_eq!(fu.speaker.as_deref(), Some("Dr. Myst"));
-        assert_eq!(fu.delay_secs, Some(2.0));
+        assert_eq!(fu.trigger, Some(TriggerCondition::OnTimer { after_secs: 2.0 }));
         assert_eq!(fu.body, "Captain. Dr. Myst speaking.");
         assert!(
             fu.responses.is_empty(),
@@ -2055,6 +2109,168 @@ message = "Investigate the situation."
 "#;
         let cfg = parse_world(toml).expect("must parse");
         assert!(cfg.comms[0].root_follow_up.is_none());
+    }
+
+    // -- Follow-up triggers (response.follow_up.trigger) -------------------
+
+    #[test]
+    fn parse_world_reads_response_follow_up_with_on_entered_region_trigger() {
+        // The motivating use case: a response that promises the player will
+        // hear more on arrival. The follow-up's `trigger` field gates the
+        // injection until the named region is entered (or fires immediately
+        // if the ship is already inside).
+        let toml = r#"
+[[comms]]
+from    = "Axiom Station"
+trigger = "on_hailed"
+entity  = "Axiom Station"
+message = "Identify yourself."
+
+  [[comms.response]]
+  text = "We are proceeding to your location."
+
+    [comms.response.follow_up]
+    trigger = "on_entered_region"
+    entity  = "Axiom Station Dock"
+    message = "Welcome aboard, Ardent."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let fu = cfg.comms[0].node.responses[0]
+            .follow_up
+            .as_ref()
+            .expect("follow-up must parse");
+        assert_eq!(
+            fu.trigger,
+            Some(TriggerCondition::OnEnteredRegion {
+                entity_name: "Axiom Station Dock".into()
+            }),
+        );
+        assert_eq!(fu.body, "Welcome aboard, Ardent.");
+    }
+
+    #[test]
+    fn parse_world_reads_response_follow_up_with_on_flag_set_trigger() {
+        let toml = r#"
+[[comms]]
+from    = "Command"
+trigger = "on_hailed"
+entity  = "Command"
+message = "Stand by."
+
+  [[comms.response]]
+  text = "Standing by."
+
+    [comms.response.follow_up]
+    trigger = "on_flag_set"
+    name    = "alert_phase_two"
+    message = "Phase two engaged."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let fu = cfg.comms[0].node.responses[0]
+            .follow_up
+            .as_ref()
+            .expect("follow-up must parse");
+        assert_eq!(
+            fu.trigger,
+            Some(TriggerCondition::OnFlagSet {
+                name: "alert_phase_two".into()
+            }),
+        );
+    }
+
+    #[test]
+    fn parse_world_reads_response_follow_up_with_on_timer_trigger() {
+        // Replaces the legacy `delay_secs = N` shape.
+        let toml = r#"
+[[comms]]
+from    = "Command"
+trigger = "on_hailed"
+entity  = "Command"
+message = "Stand by."
+
+  [[comms.response]]
+  text = "Standing by."
+
+    [comms.response.follow_up]
+    trigger    = "on_timer"
+    after_secs = 5.0
+    message    = "Five seconds later..."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let fu = cfg.comms[0].node.responses[0]
+            .follow_up
+            .as_ref()
+            .expect("follow-up must parse");
+        assert_eq!(
+            fu.trigger,
+            Some(TriggerCondition::OnTimer { after_secs: 5.0 }),
+        );
+    }
+
+    #[test]
+    fn parse_world_follow_up_without_trigger_keeps_trigger_none() {
+        // A follow-up with no `trigger` field still parses; the resulting
+        // node has `trigger = None` (fires immediately on the next tick).
+        let toml = r#"
+[[comms]]
+from    = "Command"
+trigger = "on_hailed"
+entity  = "Command"
+message = "Identify yourself."
+
+  [[comms.response]]
+  text = "Phoenix here."
+
+    [comms.response.follow_up]
+    message = "Acknowledged."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let fu = cfg.comms[0].node.responses[0]
+            .follow_up
+            .as_ref()
+            .expect("follow-up must parse");
+        assert_eq!(fu.trigger, None);
+    }
+
+    #[test]
+    fn parse_world_follow_up_with_on_entered_region_missing_entity_errors() {
+        let toml = r#"
+[[comms]]
+from    = "Command"
+trigger = "on_hailed"
+entity  = "Command"
+message = "Identify yourself."
+
+  [[comms.response]]
+  text = "Phoenix here."
+
+    [comms.response.follow_up]
+    trigger = "on_entered_region"
+    message = "Welcome."
+"#;
+        let err = parse_world(toml).expect_err("missing entity must error");
+        assert!(
+            err.contains("on_entered_region") && err.contains("entity"),
+            "error must mention the missing entity field: {err}",
+        );
+    }
+
+    #[test]
+    fn parse_world_root_comms_with_on_timer_trigger() {
+        // [[comms]] blocks support `on_timer` as the template-level trigger
+        // (the migration target for the legacy root-level `delay_secs`).
+        let toml = r#"
+[[comms]]
+from    = "Command"
+trigger    = "on_timer"
+after_secs = 45.0
+message    = "Second wave inbound."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(
+            cfg.comms[0].trigger,
+            TriggerCondition::OnTimer { after_secs: 45.0 },
+        );
     }
 
     #[test]
@@ -2438,14 +2654,18 @@ entity    = "raider"
         });
         assert!(defeat, "must have on_destroyed Starbase Alpha defeat trigger");
 
-        // Comms: 1 on_world_loaded urgent intro + 8 on_world_loaded delayed wave
-        // announcements = 9 total. (See file comment: on_timer not supported on
-        // [[comms]] blocks, so we use on_world_loaded + delay_secs.)
+        // Comms: 1 on_world_loaded urgent intro + 8 on_timer wave
+        // announcements = 9 total.
         assert_eq!(cfg.comms.len(), 9, "combat_test must have 9 comms templates");
 
-        // Eight delayed wave-announce comms, plus one intro with no delay.
-        let delayed_count = cfg.comms.iter().filter(|c| c.node.delay_secs.is_some()).count();
-        assert_eq!(delayed_count, 8, "8 delayed wave-announce comms expected");
+        // Eight wave-announce comms use `on_timer` triggers; the urgent
+        // intro fires on `on_world_loaded`.
+        let timer_count = cfg
+            .comms
+            .iter()
+            .filter(|c| matches!(c.trigger, TriggerCondition::OnTimer { .. }))
+            .count();
+        assert_eq!(timer_count, 8, "8 on_timer wave-announce comms expected");
     }
 
     #[test]
@@ -2525,7 +2745,7 @@ entity    = "raider"
             .as_ref()
             .expect("Dr. Myst chained follow-up must be present");
         assert_eq!(myst.speaker.as_deref(), Some("Dr. Myst"));
-        assert_eq!(myst.delay_secs, Some(3.0));
+        assert_eq!(myst.trigger, Some(TriggerCondition::OnTimer { after_secs: 3.0 }));
         assert!(
             myst.responses.len() >= 2,
             "Dr. Myst should have reply options after appearing"

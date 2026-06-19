@@ -140,6 +140,15 @@ cannot continue without them. Please respond."""
   [[comms.response]]
   text = "Understood, Axiom Station. We are proceeding to your location."
 
+    # Follow-up gated on entering the docking region â€” fires immediately if
+    # the ship is already inside. Lets Axiom Station acknowledge the rendezvous
+    # at the moment the player physically arrives, even though the same
+    # boundary crossing also loads the Diplomat branch (`btf_path_a.toml`).
+    [comms.response.follow_up]
+    trigger = "on_entered_region"
+    entity  = "Axiom Station Dock"
+    message = "Ardent, we have you on the dock approach. Welcome to Axiom. Administrator Chen is preparing the full briefing now â€” stand by."
+
   [[comms.response]]
   text = "Axiom Station, do you know where the Harrow patrol is operating?"
     [comms.response.follow_up]
@@ -162,7 +171,8 @@ message = "A.E.V. Ardent, this is the Research Outpost. We read you. Stand by â€
   # `urgent = true` from the parent template.
   [comms.follow_up]
   speaker    = "Dr. Myst"
-  delay_secs = 3.0
+  trigger    = "on_timer"
+  after_secs = 3.0
   message    = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying to reach someone for hours. I'm detecting an intermittent stellar resonance signature from the deep outer system â€” beyond the Kaleth Nebula. The frequency profile matches a theoretical class of weapon I've encountered in Imperium research archives. Whatever is out there is charging."
 
     [[comms.follow_up.response]]
@@ -170,7 +180,8 @@ message = "A.E.V. Ardent, this is the Research Outpost. We read you. Stand by â€
 
       [comms.follow_up.response.follow_up]
       speaker    = "Dr. Myst"
-      delay_secs = 2.0
+      trigger    = "on_timer"
+      after_secs = 2.0
       message    = "If it fires at full charge it will create a persistent quantum interference zone across this system. It's not a targeted weapon â€” it's a geography weapon. Navigation through this system will be effectively impossible for decades. The charge cycle is approximately twenty minutes. I don't know how far along they are. The signature is already strong."
 
         [[comms.follow_up.response.follow_up.response]]
@@ -187,7 +198,8 @@ message = "A.E.V. Ardent, this is the Research Outpost. We read you. Stand by â€
 
       [comms.follow_up.response.follow_up]
       speaker    = "Dr. Myst"
-      delay_secs = 2.0
+      trigger    = "on_timer"
+      after_secs = 2.0
       message    = "Yes â€” there's a sub-harmonic embedded in the resonance signature I cannot explain. It doesn't match any known Harrow or Imperium technology. It may be nothing. Or it may be something this system has been doing for longer than the Harrow have been pointing weapons at it. I've flagged it in my logs."
 
         [[comms.follow_up.response.follow_up.response]]

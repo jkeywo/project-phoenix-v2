@@ -60,8 +60,8 @@ required. Used for one-way broadcasts that promise more dialogue
 
 - inherits the parent's `thread_id` (same conversation),
 - supports its own `speaker` override (see "Multi-speaker channels" below),
-- supports its own `delay_secs` (silent during the wait — no `...` placeholder
-  for root chains),
+- supports its own `trigger` (e.g. `on_timer` with `after_secs` for a delayed
+  reveal — silent during the wait, no `...` placeholder for root chains),
 - supports its own nested `[[comms.follow_up.response]]` tree (so the chained
   message can become a branching dialogue),
 - inherits the parent template's `urgent` flag.
@@ -84,7 +84,8 @@ message   = "...Stand by — patching you through to Dr. Myst now."
 
   [comms.follow_up]
   speaker    = "Dr. Myst"
-  delay_secs = 3.0
+  trigger    = "on_timer"
+  after_secs = 3.0
   message    = "Ardent, this is Dr. Myst..."
 
     [[comms.follow_up.response]]
@@ -92,16 +93,18 @@ message   = "...Stand by — patching you through to Dr. Myst now."
 
       [comms.follow_up.response.follow_up]
       speaker    = "Dr. Myst"
-      delay_secs = 2.0
+      trigger    = "on_timer"
+      after_secs = 2.0
       message    = "If it fires at full charge..."
 ```
 
 Implementation: scheduled in `handle_hail` (`src/world/server.rs:719`) and
 `handle_ai_events` (`src/world/server.rs:1786`) by pushing a
 `PendingFollowUp` onto `runtime.pending_follow_ups` whose `placeholder_id =
-None`. The existing `tick_pending_follow_ups` system drains the queue when
-the timer expires and injects the chained `CommsMessage` sharing the parent
-`thread_id`. See `wiki/log.md` for the entry that landed this.
+None`. The `tick_pending_follow_ups` system evaluates each pending
+follow-up's `trigger` each tick against current world state (region
+membership, flag store, live entity UUIDs) plus this tick's pending events;
+ready follow-ups are injected and replace any `...` placeholder.
 
 ### Multi-speaker channels
 
@@ -118,13 +121,59 @@ Example: Before the Fire keeps `from = "Research Outpost"` and
 Outpost channel, while the chat transcript shows Dr. Myst as the speaker for
 the relevant messages.
 
+### Triggered follow-ups (proximity, flags, events)
+
+Any `[comms.response.follow_up]` (or chained `[comms.follow_up]`) can carry an
+optional `trigger` field that gates injection until a world condition is met.
+All `TriggerCondition` variants are supported, mirroring the `[[trigger]]`
+block:
+
+- **Time-based** — `on_timer` + `after_secs` (queue-relative; counts from when
+  the follow-up is queued, not from world load). Replaces the legacy
+  `delay_secs` shortcut, which was removed.
+- **State-based** — `on_entered_region`, `on_exited_region`, `on_flag_set`,
+  `on_flag_cleared`, `on_destroyed`, `on_all_destroyed`, `on_world_loaded`.
+  These fire on the next tick if the condition is **already true** at queue
+  time (e.g. the ship is currently inside the named region, the flag is
+  already set, the entity is already destroyed). This means a player who
+  picks "we are proceeding to your location" while already at the dock
+  receives the follow-up immediately rather than having to leave and
+  re-enter the region.
+- **Event-only** — `on_attacked`, `on_hailed`. These require a fresh event in
+  `pending_world_events` and have no "already-happened" short-circuit.
+
+Response follow-ups show a `...` placeholder in the chat while the trigger is
+pending; chained root follow-ups stay silent. The placeholder is removed and
+replaced with the real message when the trigger fires.
+
+Worked example — Axiom Station acknowledges arrival when the player ship
+enters its dock region (`assets/worlds/before_the_fire.toml`):
+
+```toml
+[[comms.response]]
+text = "Understood, Axiom Station. We are proceeding to your location."
+
+  [comms.response.follow_up]
+  trigger = "on_entered_region"
+  entity  = "Axiom Station Dock"
+  message = "Ardent, we have you on the dock approach. Welcome to Axiom..."
+```
+
+Implementation: the pure evaluator `follow_up_trigger_holds` in
+`src/world/server.rs` returns true when the condition is met (or
+already-true at queue time). `tick_pending_follow_ups` runs in
+`SimSet::Physics` (ordered `.before(handle_ai_events)` so it observes
+`pending_world_events` before they are drained) and snapshots region
+membership + live UUIDs + flag store for the evaluator.
+
 ### Delayed messages
 
-`delay_secs` works on both root `[[comms]]` messages and
-`[comms.response.follow_up]` nodes. Root/template delays are silent until the
-timer expires, so a delayed character introduction does not appear as an
-immediate `...` row. Response follow-ups still show a `...` placeholder inside
-the active thread while the reply is pending.
+Use `trigger = "on_timer"` + `after_secs` on any follow-up for time-based
+delays. The clock is **queue-relative** for follow-ups (counts from when the
+follow-up is queued — i.e. when the response is picked or the parent message
+is injected), and **world-relative** for root `[[comms]]` blocks (counts from
+world load, matching the existing `on_timer` trigger semantics for top-level
+triggers).
 
 ### Inbox list — one row per thread
 

@@ -18,12 +18,20 @@
  *     ] }
  *   }
  *
- * Notes on `on_timer` (audit risk #7): `RawCommsEntry` in
- * `src/world/config.rs` does NOT include an `after_secs` field, and the
- * parser passes `None` for after_secs when parsing comms templates. So
- * `on_timer` is NOT supported at the comms-template level. The adapter
- * does NOT model `after_secs` for comms; the view layer restricts the
- * trigger `<select>` to the three supported variants.
+ * Notes on `on_timer` and other extended triggers: the parser in
+ * `src/world/config.rs` accepts the full TriggerCondition set on
+ * `[[comms]]` blocks (including `on_timer` with `after_secs`,
+ * `on_all_destroyed`, `on_world_loaded`, `on_flag_set`/`cleared`,
+ * `on_entered_region`/`on_exited_region`). The editor view currently
+ * restricts the trigger `<select>` to the three most common variants
+ * (`on_hailed`, `on_attacked`, `on_destroyed`) — extend
+ * `comms-view.js` if richer trigger authoring is needed.
+ *
+ * Note on follow-up `trigger`: each `[comms.response.follow_up]` (and
+ * each chained `[comms.follow_up]`) can carry an optional `trigger`
+ * field that gates injection until a world condition is met. The
+ * adapter passes it through verbatim as part of the follow-up node;
+ * the view layer does not yet expose it for editing.
  *
  * Round-trip contract: `editorCommsToWorld(worldCommsToEditor(x)) ≈ x`
  * for any well-formed live comms array.

@@ -123,8 +123,10 @@ pub struct FiredCommsTemplate {
     pub urgent: bool,
     /// Optional chained follow-up node that should be scheduled at inject
     /// time. The server queues this onto `pending_follow_ups` so the
-    /// chained message arrives on its own `delay_secs` timer with no
-    /// player response click required (one-way "Stand by..." broadcasts).
+    /// chained message arrives without any player response click required
+    /// (one-way "Stand by..." broadcasts). If the chained node carries a
+    /// `trigger`, the follow-up waits for that trigger to fire; otherwise
+    /// it fires on the next tick.
     pub root_follow_up: Option<CommsDialogueNode>,
 }
 
@@ -138,11 +140,24 @@ pub struct ActiveDialogue {
     pub thread_id: String,
 }
 
-/// A delayed comms message that is waiting for its `delay_secs` timer to expire
-/// before being injected into the inbox.
+/// A comms message that has been queued and is waiting to be injected into
+/// the inbox.
+///
+/// A follow-up sits in the queue until its trigger condition is met. If the
+/// follow-up has no trigger, it fires on the next tick. If the follow-up
+/// has a trigger, it fires when:
+///   - the trigger condition is observed in a `WorldEvent` after queueing, OR
+///   - the trigger condition is "already-true" at evaluation time (e.g.
+///     the ship is currently inside the named region for `OnEnteredRegion`;
+///     the flag is already set for `OnFlagSet`; the world has already
+///     loaded for `OnWorldLoaded`), OR
+///   - for `OnTimer`, the `elapsed_secs` field reaches `after_secs`. The
+///     `elapsed_secs` clock is queue-relative, NOT world-relative, so a
+///     3-second response follow-up fires three seconds after the player
+///     picks the response.
 #[derive(Clone, Debug)]
 pub struct PendingFollowUp {
-    /// The dialogue node to inject once the delay expires.
+    /// The dialogue node to inject once the trigger condition is met.
     pub node: CommsDialogueNode,
     /// UUID of the entity sending this message.
     pub sender_uuid: String,
@@ -151,10 +166,11 @@ pub struct PendingFollowUp {
     pub sender_name: String,
     /// Shared thread identifier for this conversation.
     pub thread_id: String,
-    /// Remaining seconds before injection.
-    pub remaining_secs: f32,
+    /// Seconds elapsed since this follow-up was queued. Used for
+    /// `OnTimer` trigger evaluation (queue-relative, not world-relative).
+    pub elapsed_secs: f32,
     /// The id of the `...` placeholder message currently shown in the inbox,
-    /// if the delay is an in-thread response follow-up. Root/template delays
+    /// if the follow-up is an in-thread response follow-up. Chained roots
     /// stay silent until the real message is ready.
     pub placeholder_id: Option<String>,
     /// Whether the real message should be flagged as urgent.
@@ -931,7 +947,7 @@ mod tests {
                 body: "hello".into(),
                 responses: vec![],
                 speaker: None,
-                delay_secs: None,
+                trigger: None,
             },
             thread_id: None,
             urgent: false,
@@ -956,7 +972,7 @@ mod tests {
                     body: "MAYDAY".into(),
                     responses: vec![],
                     speaker: None,
-                    delay_secs: None,
+                    trigger: None,
                 },
                 thread_id: None,
                 urgent: false,
@@ -987,7 +1003,7 @@ mod tests {
                     body: "MAYDAY".into(),
                     responses: vec![],
                     speaker: None,
-                    delay_secs: None,
+                    trigger: None,
                 },
                 thread_id: None,
                 urgent: false,
@@ -1019,7 +1035,7 @@ mod tests {
                     body: "MAYDAY".into(),
                     responses: vec![],
                     speaker: None,
-                    delay_secs: None,
+                    trigger: None,
                 },
                 thread_id: None,
                 urgent: false,

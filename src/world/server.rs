@@ -13,7 +13,8 @@ use crate::ship_state::ShipState;
 use crate::simulation::SimOutbox;
 use crate::world::content::{
     comms_template_states_from_world, evaluate_comms_templates, trigger_states_from_world,
-    ActiveDialogue, CommsTemplateState, PendingFollowUp, TriggerAction, TriggerState, WorldEvent,
+    ActiveDialogue, CommsTemplateState, PendingFollowUp, TriggerAction, TriggerCondition,
+    TriggerState, WorldEvent,
 };
 
 // -- Resources --------------------------------------------------------------
@@ -69,9 +70,9 @@ pub struct WorldContentRuntime {
     /// without duplicating the dispatch logic that lives inside
     /// `handle_ai_events`.
     pub pending_world_events: Vec<WorldEvent>,
-    /// Delayed comms messages awaiting their `delay_secs` timer before injection.
-    /// Response follow-ups may hold a `...` placeholder that is replaced with
-    /// the real message when ready; root/template delays stay silent.
+    /// Comms follow-ups awaiting their trigger condition before injection.
+    /// Response follow-ups carry a `placeholder_id` so the inbox shows a
+    /// `...` row while the trigger is pending; chained roots stay silent.
     pub pending_follow_ups: Vec<PendingFollowUp>,
 }
 
@@ -226,7 +227,9 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 Update,
-                tick_pending_follow_ups.in_set(crate::sim_sets::SimSet::Physics),
+                tick_pending_follow_ups
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .before(handle_ai_events),
             )
             .add_systems(
                 Update,
@@ -780,63 +783,55 @@ fn handle_hail(
                 .unwrap_or_else(|| target_uuid.clone());
             let sender_name = f.node.speaker.clone().unwrap_or(channel_name.clone());
 
-            let delay = f.node.delay_secs.unwrap_or(0.0);
-            if delay > 0.0 {
-                runtime.pending_follow_ups.push(PendingFollowUp {
-                    node: f.node.clone(),
-                    sender_uuid: sender_uuid.clone(),
-                    sender_name: sender_name.clone(),
+            // The root message always injects immediately when its
+            // template fires. Per-node triggers are an authoring concept
+            // for follow-ups, not roots — the template-level `trigger`
+            // already controls when the root arrives.
+            let msg_id = uuid::Uuid::new_v4().to_string();
+            let responses: Vec<String> =
+                f.node.responses.iter().map(|r| r.text.clone()).collect();
+            let msg = CommsMessage {
+                id: msg_id.clone(),
+                sender_uuid: sender_uuid.clone(),
+                sender_name: sender_name.clone(),
+                subject: f.node.body.chars().take(40).collect(),
+                body: f.node.body.clone(),
+                responses,
+                selected_response: None,
+                is_read: false,
+                is_orphaned: false,
+                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                thread_id: thread_id.clone(),
+                is_urgent: f.urgent,
+            };
+            inbox.0.inject(msg);
+            runtime.active_dialogues.insert(
+                msg_id,
+                ActiveDialogue {
+                    current_node: f.node.clone(),
                     thread_id: thread_id.clone(),
-                    remaining_secs: delay,
-                    placeholder_id: None,
-                    urgent: f.urgent,
-                });
-            } else {
-                let msg_id = uuid::Uuid::new_v4().to_string();
-                let responses: Vec<String> =
-                    f.node.responses.iter().map(|r| r.text.clone()).collect();
-                let msg = CommsMessage {
-                    id: msg_id.clone(),
-                    sender_uuid: sender_uuid.clone(),
-                    sender_name: sender_name.clone(),
-                    subject: f.node.body.chars().take(40).collect(),
-                    body: f.node.body.clone(),
-                    responses,
-                    selected_response: None,
-                    is_read: false,
-                    is_orphaned: false,
-                    sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
-                    thread_id: thread_id.clone(),
-                    is_urgent: f.urgent,
-                };
-                inbox.0.inject(msg);
-                runtime.active_dialogues.insert(
-                    msg_id,
-                    ActiveDialogue {
-                        current_node: f.node.clone(),
-                        thread_id: thread_id.clone(),
-                    },
-                );
-            }
+                },
+            );
 
             // Schedule the chained root follow_up, if any. Always queued
-            // onto `pending_follow_ups`: zero-or-missing `delay_secs` means
-            // the chained message arrives on the very next tick. The
-            // chained node inherits the parent's thread_id so both
-            // messages render in the same conversation; its own
-            // `speaker` overrides the display name (channel identity
-            // stays put). No `...` placeholder — root chains stay silent
-            // during the wait, mirroring the existing delayed-root
-            // behaviour.
+            // onto `pending_follow_ups`: a triggerless follow-up fires on
+            // the very next tick, while one with a `trigger` waits until
+            // its condition is observed (or fires immediately on the next
+            // tick if the condition is already true — see
+            // `tick_pending_follow_ups`). The chained node inherits the
+            // parent's thread_id so both messages render in the same
+            // conversation; its own `speaker` overrides the display name
+            // (channel identity stays put). No `...` placeholder — root
+            // chains stay silent during the wait, mirroring the existing
+            // delayed-root behaviour.
             if let Some(ref fu) = f.root_follow_up {
                 let fu_sender_name = fu.speaker.clone().unwrap_or(sender_name.clone());
-                let fu_delay = fu.delay_secs.unwrap_or(0.0).max(0.0);
                 runtime.pending_follow_ups.push(PendingFollowUp {
                     node: fu.clone(),
                     sender_uuid: sender_uuid.clone(),
                     sender_name: fu_sender_name,
                     thread_id: thread_id.clone(),
-                    remaining_secs: fu_delay,
+                    elapsed_secs: 0.0,
                     placeholder_id: None,
                     urgent: f.urgent,
                 });
@@ -845,32 +840,82 @@ fn handle_hail(
     }
 }
 
-/// Tick delayed comms messages: decrement their timers each frame and, when
-/// the timer reaches zero, remove any `...` placeholder and inject the real
-/// message.
+/// Tick pending comms follow-ups: advance queue-relative timers, evaluate
+/// trigger conditions against current world state plus this tick's pending
+/// events, and inject any follow-ups whose conditions are now met.
+///
+/// Ordering: scheduled `.before(handle_ai_events)` so this system observes
+/// `pending_world_events` BEFORE `handle_ai_events` drains them. This lets
+/// follow-ups react to events on the same tick they fire.
+///
+/// "Fire immediately if already true" semantics applies to state-based
+/// triggers: `OnEnteredRegion` fires if the ship is currently inside the
+/// region; `OnFlagSet` fires if the flag is currently set; `OnDestroyed`
+/// fires if the named entity is no longer in the ECS; `OnWorldLoaded`
+/// always fires. Event-only triggers (`OnAttacked`, `OnHailed`) require
+/// the matching event to be observed in `pending_world_events`.
 fn tick_pending_follow_ups(
     time: Res<bevy::time::Time>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
+    region_membership: Option<Res<crate::regions::server::RegionMembership>>,
+    ship_query: Query<Entity, With<crate::simulation::Ship>>,
+    entity_uuid_q: Query<&EntityUuid>,
 ) {
     if runtime.pending_follow_ups.is_empty() {
         return;
     }
 
     let dt = time.delta_secs();
-    let mut ready: Vec<PendingFollowUp> = Vec::new();
 
-    for pfu in &mut runtime.pending_follow_ups {
-        pfu.remaining_secs -= dt;
-        if pfu.remaining_secs <= 0.0 {
-            ready.push(pfu.clone());
+    // Snapshot events + flags + name lookup before we touch the queue, so
+    // every pending follow-up evaluated this tick sees the same world.
+    let events_snapshot: Vec<WorldEvent> = runtime.pending_world_events.clone();
+    let name_to_uuid_snapshot = runtime.name_to_uuid.clone();
+    let flags_snapshot = runtime.flags.clone();
+
+    // Build the set of region UUIDs the player ship is currently inside.
+    let inside_region_uuids: HashSet<String> = if let (Some(membership), Ok(ship_entity)) =
+        (region_membership.as_ref(), ship_query.single())
+    {
+        membership
+            .inside
+            .get(&ship_entity)
+            .map(|set| {
+                set.iter()
+                    .filter_map(|e| membership.region_uuids.get(e).cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        HashSet::new()
+    };
+
+    // Build the set of all live entity UUIDs (for OnDestroyed checks).
+    let live_uuids: HashSet<String> = entity_uuid_q.iter().map(|u| u.0.clone()).collect();
+
+    let mut ready: Vec<PendingFollowUp> = Vec::new();
+    let mut keep: Vec<PendingFollowUp> =
+        Vec::with_capacity(runtime.pending_follow_ups.len());
+
+    for mut pfu in runtime.pending_follow_ups.drain(..) {
+        pfu.elapsed_secs += dt;
+        let fires = follow_up_trigger_holds(
+            pfu.node.trigger.as_ref(),
+            pfu.elapsed_secs,
+            &events_snapshot,
+            &name_to_uuid_snapshot,
+            &flags_snapshot,
+            &inside_region_uuids,
+            &live_uuids,
+        );
+        if fires {
+            ready.push(pfu);
+        } else {
+            keep.push(pfu);
         }
     }
-
-    // Remove the expired entries from the queue.
-    runtime
-        .pending_follow_ups
-        .retain(|p| p.remaining_secs > 0.0);
+    runtime.pending_follow_ups = keep;
 
     for pfu in ready {
         if let Some(placeholder_id) = &pfu.placeholder_id {
@@ -903,6 +948,104 @@ fn tick_pending_follow_ups(
             },
         );
     }
+}
+
+/// Pure evaluator: returns true when a follow-up trigger condition is met
+/// for the given snapshot of world state and observed events.
+///
+/// State-based conditions check current world state and fire immediately
+/// when "already true" — `OnEnteredRegion` fires while the ship is inside
+/// the region, `OnFlagSet` fires while the flag holds a non-zero counter,
+/// `OnDestroyed` fires once the named entity's UUID is absent from the
+/// live ECS set, `OnWorldLoaded` always fires (the world is, by
+/// construction, loaded once a follow-up is queued).
+///
+/// Event-based conditions (`OnAttacked`, `OnHailed`) require a matching
+/// `WorldEvent` in `events`. `OnTimer` is queue-relative: it compares
+/// `elapsed_secs` against the configured `after_secs`.
+///
+/// A `None` trigger means "fire immediately" — the follow-up arrives on
+/// the next tick after being queued.
+pub(crate) fn follow_up_trigger_holds(
+    trigger: Option<&TriggerCondition>,
+    elapsed_secs: f32,
+    events: &[WorldEvent],
+    name_to_uuid: &HashMap<String, String>,
+    flags: &crate::world::flags::FlagStore,
+    inside_region_uuids: &HashSet<String>,
+    live_uuids: &HashSet<String>,
+) -> bool {
+    let Some(condition) = trigger else {
+        return true;
+    };
+    match condition {
+        TriggerCondition::OnTimer { after_secs } => elapsed_secs >= *after_secs,
+        TriggerCondition::OnWorldLoaded => true,
+        TriggerCondition::OnEnteredRegion { entity_name } => name_to_uuid
+            .get(entity_name)
+            .map(|u| inside_region_uuids.contains(u))
+            .unwrap_or(false),
+        TriggerCondition::OnExitedRegion { entity_name } => name_to_uuid
+            .get(entity_name)
+            .map(|u| !inside_region_uuids.contains(u))
+            .unwrap_or(false),
+        TriggerCondition::OnFlagSet { name } => {
+            // Follow-ups don't currently participate in sub-world layer
+            // chains; strip any `parent:` prefix to keep the predicate
+            // resolving against the base store. (Matches the comms-template
+            // evaluator, which passes a base-only chain.)
+            let key = strip_parent_prefix(name);
+            flags.flag(key)
+        }
+        TriggerCondition::OnFlagCleared { name } => {
+            let key = strip_parent_prefix(name);
+            !flags.flag(key)
+        }
+        TriggerCondition::OnDestroyed { entity_name } => {
+            // "Already destroyed" — the entity was registered in
+            // `name_to_uuid` but its UUID is no longer in the live ECS set.
+            // Also fires on a fresh `Destroyed` event observed this tick.
+            name_to_uuid
+                .get(entity_name)
+                .map(|u| {
+                    !live_uuids.contains(u)
+                        || events.iter().any(|e| {
+                            matches!(e, WorldEvent::Destroyed { uuid } if uuid == u)
+                        })
+                })
+                .unwrap_or(false)
+        }
+        TriggerCondition::OnAllDestroyed { entity_names } => entity_names.iter().all(|name| {
+            name_to_uuid
+                .get(name)
+                .map(|u| !live_uuids.contains(u))
+                .unwrap_or(false)
+        }),
+        TriggerCondition::OnAttacked { entity_name } => name_to_uuid
+            .get(entity_name)
+            .map(|u| {
+                events
+                    .iter()
+                    .any(|e| matches!(e, WorldEvent::Attacked { uuid, .. } if uuid == u))
+            })
+            .unwrap_or(false),
+        TriggerCondition::OnHailed { entity_name } => name_to_uuid
+            .get(entity_name)
+            .map(|u| {
+                events.iter().any(|e| {
+                    matches!(e, WorldEvent::Hailed { target_uuid } if target_uuid == u)
+                })
+            })
+            .unwrap_or(false),
+    }
+}
+
+fn strip_parent_prefix(name: &str) -> &str {
+    let mut rest = name;
+    while let Some(s) = rest.strip_prefix("parent:") {
+        rest = s;
+    }
+    rest
 }
 
 /// Handle `RespondToMessage { message_id, response_index }` from Comms holders.
@@ -1421,10 +1564,12 @@ fn handle_respond_to_message(
                 .clone()
                 .unwrap_or_else(|| inbox.0.sender_name_for(message_id).unwrap_or_default());
 
-            let delay = follow_up.delay_secs.unwrap_or(0.0);
-            if delay > 0.0 {
-                // Show a `...` placeholder immediately and queue the real
-                // message to be injected once the timer expires.
+            if follow_up.trigger.is_some() {
+                // Triggered follow-up: show a `...` placeholder immediately
+                // and queue the real message to be injected once the
+                // trigger condition is met (or fires on the next tick if
+                // the condition is already true — see
+                // `tick_pending_follow_ups`).
                 let placeholder_id = uuid::Uuid::new_v4().to_string();
                 let placeholder = CommsMessage {
                     id: placeholder_id.clone(),
@@ -1446,12 +1591,12 @@ fn handle_respond_to_message(
                     sender_uuid,
                     sender_name,
                     thread_id,
-                    remaining_secs: delay,
+                    elapsed_secs: 0.0,
                     placeholder_id: Some(placeholder_id),
                     urgent: false, // follow-up urgency is not a TOML-level concept
                 });
             } else {
-                // Inject immediately (no delay).
+                // No trigger — inject immediately (same tick).
                 let new_msg_id = uuid::Uuid::new_v4().to_string();
                 let new_responses: Vec<String> =
                     follow_up.responses.iter().map(|r| r.text.clone()).collect();
@@ -1832,55 +1977,43 @@ fn handle_ai_events(
             .cloned()
             .unwrap_or_else(|| fc.from.clone());
 
-        let delay = fc.node.delay_secs.unwrap_or(0.0);
-        if delay > 0.0 {
-            runtime.pending_follow_ups.push(PendingFollowUp {
-                node: fc.node.clone(),
-                sender_uuid: sender_uuid.clone(),
-                sender_name: sender_name.clone(),
+        // Root templates inject immediately when their template-level
+        // `trigger` fires. Per-node triggers are reserved for follow-ups.
+        let msg_id = uuid::Uuid::new_v4().to_string();
+        let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
+        let msg = crate::messages::CommsMessage {
+            id: msg_id.clone(),
+            sender_uuid: sender_uuid.clone(),
+            sender_name: sender_name.clone(),
+            subject: fc.node.body.chars().take(40).collect(),
+            body: fc.node.body.clone(),
+            responses,
+            selected_response: None,
+            is_read: false,
+            is_orphaned: false,
+            sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+            thread_id: thread_id.clone(),
+            is_urgent: fc.urgent,
+        };
+        inbox.0.inject(msg);
+        runtime.active_dialogues.insert(
+            msg_id,
+            ActiveDialogue {
+                current_node: fc.node.clone(),
                 thread_id: thread_id.clone(),
-                remaining_secs: delay,
-                placeholder_id: None,
-                urgent: fc.urgent,
-            });
-        } else {
-            let msg_id = uuid::Uuid::new_v4().to_string();
-            let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
-            let msg = crate::messages::CommsMessage {
-                id: msg_id.clone(),
-                sender_uuid: sender_uuid.clone(),
-                sender_name: sender_name.clone(),
-                subject: fc.node.body.chars().take(40).collect(),
-                body: fc.node.body.clone(),
-                responses,
-                selected_response: None,
-                is_read: false,
-                is_orphaned: false,
-                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
-                thread_id: thread_id.clone(),
-                is_urgent: fc.urgent,
-            };
-            inbox.0.inject(msg);
-            runtime.active_dialogues.insert(
-                msg_id,
-                ActiveDialogue {
-                    current_node: fc.node.clone(),
-                    thread_id: thread_id.clone(),
-                },
-            );
-        }
+            },
+        );
 
         // Schedule the chained root follow_up, if any. See the
         // matching block in `handle_hail` for the rationale.
         if let Some(ref fu) = fc.root_follow_up {
             let fu_sender_name = fu.speaker.clone().unwrap_or(sender_name.clone());
-            let fu_delay = fu.delay_secs.unwrap_or(0.0).max(0.0);
             runtime.pending_follow_ups.push(PendingFollowUp {
                 node: fu.clone(),
                 sender_uuid: sender_uuid.clone(),
                 sender_name: fu_sender_name,
                 thread_id: thread_id.clone(),
-                remaining_secs: fu_delay,
+                elapsed_secs: 0.0,
                 placeholder_id: None,
                 urgent: fc.urgent,
             });
@@ -3074,7 +3207,7 @@ mod tests {
                         follow_up: None,
                     }],
                     speaker: None,
-                    delay_secs: None,
+                    trigger: None,
                 },
                 thread_id: None,
                 urgent: false,
@@ -3461,7 +3594,7 @@ mod tests {
     }
 
     #[test]
-    fn delayed_follow_up_replacement_preserves_display_speaker() {
+    fn triggerless_follow_up_replacement_preserves_display_speaker() {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .init_resource::<WorldContentRuntime>()
@@ -3494,12 +3627,12 @@ mod tests {
                     body: "Welcome, Phoenix.".into(),
                     responses: vec![],
                     speaker: Some("Dockmaster Kade".into()),
-                    delay_secs: Some(1.0),
+                    trigger: None,
                 },
                 sender_uuid: "station-uuid-delayed".into(),
                 sender_name: "Dockmaster Kade".into(),
                 thread_id: "thread-delayed".into(),
-                remaining_secs: -1.0,
+                elapsed_secs: 0.0,
                 placeholder_id: Some("placeholder-001".into()),
                 urgent: false,
             });
@@ -3515,7 +3648,7 @@ mod tests {
     }
 
     #[test]
-    fn delayed_root_comms_template_waits_silently_until_timer_expires() {
+    fn root_comms_template_with_on_timer_trigger_waits_silently() {
         use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState};
 
         let mut app = ai_trigger_test_app();
@@ -3530,12 +3663,12 @@ mod tests {
             runtime.comms_template_states = vec![CommsTemplateState {
                 template: CommsTemplate {
                     from: "Research Outpost".to_string(),
-                    trigger: TriggerCondition::OnWorldLoaded,
+                    trigger: TriggerCondition::OnTimer { after_secs: 3.0 },
                     node: CommsDialogueNode {
                         body: "Ardent, this is Dr. Myst.".to_string(),
                         responses: vec![],
                         speaker: Some("Dr. Myst".to_string()),
-                        delay_secs: Some(3.0),
+                        trigger: None,
                     },
                     thread_id: Some("research-scholar".to_string()),
                     urgent: true,
@@ -3543,7 +3676,11 @@ mod tests {
                 },
                 fired: false,
             }];
-            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+            // Simulate that the world has been alive for less than the
+            // template's `after_secs` — no TimerElapsed event yet.
+            runtime
+                .pending_world_events
+                .push(WorldEvent::TimerElapsed { elapsed_secs: 1.0 });
         }
 
         app.update();
@@ -3552,17 +3689,22 @@ mod tests {
             let messages = app.world().resource::<CommsInboxRes>().0.messages();
             assert!(
                 messages.is_empty(),
-                "delayed root comms must not reveal a placeholder immediately"
+                "on_timer root comms must stay silent until the timer fires"
             );
             let runtime = app.world().resource::<WorldContentRuntime>();
-            assert_eq!(runtime.pending_follow_ups.len(), 1);
-            assert!(runtime.pending_follow_ups[0].placeholder_id.is_none());
+            assert!(
+                runtime.pending_follow_ups.is_empty(),
+                "root templates do not queue onto pending_follow_ups"
+            );
         }
 
-        app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .pending_follow_ups[0]
-            .remaining_secs = -0.1;
+        // Push a TimerElapsed event past the threshold; template fires now.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .pending_world_events
+                .push(WorldEvent::TimerElapsed { elapsed_secs: 3.5 });
+        }
         app.update();
 
         let messages = app.world().resource::<CommsInboxRes>().0.messages();
@@ -3576,9 +3718,10 @@ mod tests {
     // -- Root-level [comms.follow_up] (auto-chained monologues) ─────────────
 
     /// `handle_hail` injects the root template AND queues a `PendingFollowUp`
-    /// for the chained `root_follow_up` node. Once the queued timer expires,
-    /// the chained message is injected into the inbox sharing the parent's
-    /// `thread_id` and the chained `speaker` overrides the display name.
+    /// for the chained `root_follow_up` node. Once the queued trigger fires
+    /// (here: `on_timer` reaches `after_secs`), the chained message is
+    /// injected into the inbox sharing the parent's `thread_id` and the
+    /// chained `speaker` overrides the display name.
     #[test]
     fn root_follow_up_fires_on_hail_after_timer_expires() {
         let station_uuid = "station-uuid-rfu-001";
@@ -3615,11 +3758,12 @@ mod tests {
             );
         }
 
-        // Force the timer to expire and tick again.
+        // Force the queue-relative timer past the `after_secs` threshold
+        // and tick again.
         app.world_mut()
             .resource_mut::<WorldContentRuntime>()
             .pending_follow_ups[0]
-            .remaining_secs = -0.1;
+            .elapsed_secs = 5.0;
         let _ = tick(&mut app);
 
         let messages = app.world().resource::<CommsInboxRes>().0.messages();
@@ -3662,11 +3806,11 @@ mod tests {
             },
         );
         let _ = tick(&mut app);
-        // Trip the timer.
+        // Trip the queue-relative timer.
         app.world_mut()
             .resource_mut::<WorldContentRuntime>()
             .pending_follow_ups[0]
-            .remaining_secs = -0.1;
+            .elapsed_secs = 5.0;
         let _ = tick(&mut app);
 
         let messages = app.world().resource::<CommsInboxRes>().0.messages();
@@ -3675,23 +3819,24 @@ mod tests {
         assert_eq!(messages[1].thread_id, "research-scholar");
     }
 
-    /// A chained `root_follow_up` with `delay_secs = None` is queued with
-    /// `remaining_secs = 0.0`. The next `tick_pending_follow_ups` pass that
-    /// runs (decrementing by any non-negative `dt`) finds it ready and
-    /// injects it. This mirrors how `response.follow_up` with no delay
+    /// A chained `root_follow_up` with `trigger = None` is queued with
+    /// `elapsed_secs = 0.0`. The next `tick_pending_follow_ups` pass that
+    /// runs finds it ready (triggerless follow-ups are always ready) and
+    /// injects it. This mirrors how `response.follow_up` with no trigger
     /// reaches the inbox on the next tick after `RespondToMessage`.
     #[test]
-    fn root_follow_up_with_zero_delay_fires_on_next_tick() {
+    fn root_follow_up_with_no_trigger_fires_on_next_tick() {
         let station_uuid = "station-uuid-rfu-003";
         let mut app = comms_test_app();
         app.add_systems(Update, tick_pending_follow_ups);
         setup_game_with_root_follow_up(&mut app, station_uuid);
 
-        // Drop the delay on the chained node.
+        // Drop the trigger on the chained node — now it's triggerless and
+        // should fire on the very next tick.
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             if let Some(ref mut fu) = runtime.comms_template_states[0].template.root_follow_up {
-                fu.delay_secs = None;
+                fu.trigger = None;
             }
         }
         let _ = tick(&mut app);
@@ -3704,12 +3849,12 @@ mod tests {
             },
         );
         // First tick: handle_hail injects the root and queues the chained
-        // node with remaining_secs = 0.0. Whether `tick_pending_follow_ups`
-        // fires on this same tick depends on Bevy's parallel scheduling,
-        // so we don't assert on it here.
+        // node with `trigger = None` and `elapsed_secs = 0`. Whether
+        // `tick_pending_follow_ups` fires on this same tick depends on
+        // Bevy's parallel scheduling, so we don't assert on it here.
         let _ = tick(&mut app);
         // Second tick: regardless of within-tick ordering, the queued
-        // follow-up's timer (0.0) is now <= 0.0 and the chained message
+        // triggerless follow-up is now ready and the chained message
         // has been injected.
         let _ = tick(&mut app);
 
@@ -3717,7 +3862,7 @@ mod tests {
         assert_eq!(
             messages.len(),
             2,
-            "zero-delay chained message must fire on the next tick"
+            "triggerless chained message must fire on the next tick"
         );
         assert_eq!(messages[1].body, "Captain. Dr. Myst speaking.");
         // The pending queue must be drained.
@@ -3750,7 +3895,7 @@ mod tests {
                         body: "Stand by.".to_string(),
                         responses: vec![],
                         speaker: None,
-                        delay_secs: None,
+                        trigger: None,
                     },
                     thread_id: Some("research-scholar".to_string()),
                     urgent: false,
@@ -3758,7 +3903,7 @@ mod tests {
                         body: "Captain. Dr. Myst speaking.".to_string(),
                         responses: vec![],
                         speaker: Some("Dr. Myst".to_string()),
-                        delay_secs: Some(2.0),
+                        trigger: Some(TriggerCondition::OnTimer { after_secs: 2.0 }),
                     }),
                 },
                 fired: false,
@@ -3777,11 +3922,11 @@ mod tests {
             assert_eq!(runtime.pending_follow_ups.len(), 1);
         }
 
-        // Trip the timer and tick.
+        // Trip the queue-relative timer and tick.
         app.world_mut()
             .resource_mut::<WorldContentRuntime>()
             .pending_follow_ups[0]
-            .remaining_secs = -0.1;
+            .elapsed_secs = 5.0;
         app.update();
 
         let messages = app.world().resource::<CommsInboxRes>().0.messages();
@@ -3795,7 +3940,8 @@ mod tests {
     /// Like `setup_game_with_comms_and_followup`, but installs a template
     /// whose root has zero `[[response]]` entries and a top-level
     /// `root_follow_up` chain (the new authoring shape). The chained node
-    /// uses `speaker = "Dr. Myst"` to verify display-speaker override.
+    /// uses `speaker = "Dr. Myst"` to verify display-speaker override,
+    /// and `trigger = on_timer 2s` to verify queue-relative delays.
     fn setup_game_with_root_follow_up(app: &mut App, station_uuid: &str) {
         setup_game_with_comms(app, station_uuid);
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
@@ -3812,7 +3958,7 @@ mod tests {
                         body: "Stand by — patching you through.".into(),
                         responses: vec![], // no [[response]] — chained monologue
                         speaker: None,
-                        delay_secs: None,
+                        trigger: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -3820,7 +3966,7 @@ mod tests {
                         body: "Captain. Dr. Myst speaking.".into(),
                         responses: vec![],
                         speaker: Some("Dr. Myst".into()),
-                        delay_secs: Some(2.0),
+                        trigger: Some(TriggerCondition::OnTimer { after_secs: 2.0 }),
                     }),
                 },
                 fired: false,
@@ -3849,11 +3995,11 @@ mod tests {
                                 body: "Welcome, Phoenix.".into(),
                                 responses: vec![],
                                 speaker: Some("Dockmaster Kade".into()),
-                                delay_secs: None,
+                                trigger: None,
                             }),
                         }],
                         speaker: None,
-                        delay_secs: None,
+                        trigger: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -4639,7 +4785,7 @@ mod tests {
                         body: "Mayday! We are under attack!".to_string(),
                         responses: vec![],
                         speaker: None,
-                        delay_secs: None,
+                        trigger: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -4699,7 +4845,7 @@ mod tests {
                         body: "Distress signal transmitted.".to_string(),
                         responses: vec![],
                         speaker: None,
-                        delay_secs: None,
+                        trigger: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -7690,7 +7836,7 @@ size_max = 2.0
                             follow_up: None,
                         }],
                         speaker: None,
-                        delay_secs: None,
+                        trigger: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -8079,7 +8225,7 @@ size_max = 2.0
                             follow_up: None,
                         }],
                         speaker: None,
-                        delay_secs: None,
+                        trigger: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -8257,5 +8403,552 @@ size_max = 2.0
         // a single response.
         let variants = enumerate_variants();
         let _ = fire_response_with_actions(variants);
+    }
+
+    // -- follow_up_trigger_holds (pure evaluator) -------------------------
+
+    fn name_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(n, u)| (n.to_string(), u.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_fires_immediately_when_trigger_is_none() {
+        let n2u = HashMap::new();
+        let flags = crate::world::flags::FlagStore::new();
+        assert!(follow_up_trigger_holds(
+            None,
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_world_loaded_always_fires() {
+        let n2u = HashMap::new();
+        let flags = crate::world::flags::FlagStore::new();
+        assert!(follow_up_trigger_holds(
+            Some(&TriggerCondition::OnWorldLoaded),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_timer_uses_elapsed_secs_not_world_events() {
+        let n2u = HashMap::new();
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnTimer { after_secs: 3.0 };
+
+        // Below threshold: does not fire.
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            2.9,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+        // At/above threshold: fires.
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            3.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            10.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_entered_region_fires_when_ship_inside_region() {
+        let n2u = name_map(&[("Axiom Dock", "axiom-dock-uuid")]);
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnEnteredRegion {
+            entity_name: "Axiom Dock".into(),
+        };
+
+        // Ship not inside: does NOT fire.
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+        // Ship inside: fires.
+        let mut inside = HashSet::new();
+        inside.insert("axiom-dock-uuid".to_string());
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &inside,
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_entered_region_unknown_entity_does_not_fire() {
+        // Even if the ship is inside some region, an unmapped entity name
+        // never resolves and the trigger never fires.
+        let n2u = HashMap::new();
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnEnteredRegion {
+            entity_name: "Nowhere".into(),
+        };
+        let mut inside = HashSet::new();
+        inside.insert("some-other-uuid".to_string());
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &inside,
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_exited_region_fires_when_ship_outside() {
+        // "Already-true" semantics: a follow-up that needs the player to
+        // be OUTSIDE the region fires immediately if they are already
+        // outside.
+        let n2u = name_map(&[("Trap Zone", "trap-uuid")]);
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnExitedRegion {
+            entity_name: "Trap Zone".into(),
+        };
+
+        // Ship inside: does NOT fire.
+        let mut inside = HashSet::new();
+        inside.insert("trap-uuid".to_string());
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &inside,
+            &HashSet::new(),
+        ));
+        // Ship outside: fires.
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_flag_set_fires_when_flag_already_set() {
+        let n2u = HashMap::new();
+        let mut flags = crate::world::flags::FlagStore::new();
+        flags.set_flag("aphelion_armed");
+        let cond = TriggerCondition::OnFlagSet {
+            name: "aphelion_armed".into(),
+        };
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_flag_set_does_not_fire_when_flag_unset() {
+        let n2u = HashMap::new();
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnFlagSet {
+            name: "aphelion_armed".into(),
+        };
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_flag_set_strips_parent_prefix() {
+        // Follow-ups don't participate in sub-world layer chains; the
+        // evaluator strips any `parent:` prefix so the predicate resolves
+        // against the base flag store.
+        let n2u = HashMap::new();
+        let mut flags = crate::world::flags::FlagStore::new();
+        flags.set_flag("aphelion_armed");
+        let cond = TriggerCondition::OnFlagSet {
+            name: "parent:aphelion_armed".into(),
+        };
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_flag_cleared_fires_when_flag_already_unset() {
+        let n2u = HashMap::new();
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnFlagCleared {
+            name: "shields_offline".into(),
+        };
+        // Unset flag is treated as "cleared" — fires immediately.
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_destroyed_fires_when_entity_already_destroyed() {
+        let n2u = name_map(&[("Ironveil", "ironveil-uuid")]);
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnDestroyed {
+            entity_name: "Ironveil".into(),
+        };
+
+        // Ironveil's UUID is registered but NOT in the live set — fires.
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_destroyed_does_not_fire_when_entity_alive() {
+        let n2u = name_map(&[("Ironveil", "ironveil-uuid")]);
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnDestroyed {
+            entity_name: "Ironveil".into(),
+        };
+        let mut live = HashSet::new();
+        live.insert("ironveil-uuid".to_string());
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &live,
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_attacked_requires_event() {
+        let n2u = name_map(&[("Ironveil", "ironveil-uuid")]);
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnAttacked {
+            entity_name: "Ironveil".into(),
+        };
+
+        // No event: does NOT fire (event-only condition; no "already
+        // attacked" state to short-circuit on).
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+        // Matching event in the snapshot: fires.
+        let events = vec![WorldEvent::Attacked {
+            uuid: "ironveil-uuid".into(),
+            attacker_uuid: "phoenix-uuid".into(),
+        }];
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &events,
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_hailed_requires_event() {
+        let n2u = name_map(&[("Axiom", "axiom-uuid")]);
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnHailed {
+            entity_name: "Axiom".into(),
+        };
+        let events = vec![WorldEvent::Hailed {
+            target_uuid: "axiom-uuid".into(),
+        }];
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &events,
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn follow_up_trigger_holds_on_all_destroyed_fires_when_all_uuids_absent() {
+        let n2u = name_map(&[("A", "a-uuid"), ("B", "b-uuid"), ("C", "c-uuid")]);
+        let flags = crate::world::flags::FlagStore::new();
+        let cond = TriggerCondition::OnAllDestroyed {
+            entity_names: vec!["A".into(), "B".into(), "C".into()],
+        };
+
+        // All three live: does NOT fire.
+        let mut live = HashSet::new();
+        live.insert("a-uuid".to_string());
+        live.insert("b-uuid".to_string());
+        live.insert("c-uuid".to_string());
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &live,
+        ));
+
+        // A destroyed, B+C still alive: does NOT fire.
+        let mut live = HashSet::new();
+        live.insert("b-uuid".to_string());
+        live.insert("c-uuid".to_string());
+        assert!(!follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &live,
+        ));
+
+        // All three destroyed: fires.
+        assert!(follow_up_trigger_holds(
+            Some(&cond),
+            0.0,
+            &[],
+            &n2u,
+            &flags,
+            &HashSet::new(),
+            &HashSet::new(),
+        ));
+    }
+
+    // -- tick_pending_follow_ups: integration of triggered follow-ups ----
+
+    /// Build a minimal app for testing `tick_pending_follow_ups` directly.
+    /// Mirrors the existing `delayed_follow_up_replacement_preserves_display_speaker`
+    /// shape but exercises the new trigger evaluator.
+    fn pending_follow_up_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<CommsInboxRes>()
+            .add_systems(Update, tick_pending_follow_ups);
+        app
+    }
+
+    /// Queue a triggered follow-up with a `...` placeholder onto the runtime.
+    fn queue_triggered_follow_up(
+        app: &mut App,
+        body: &str,
+        sender_uuid: &str,
+        thread_id: &str,
+        placeholder_id: &str,
+        trigger: TriggerCondition,
+    ) {
+        let placeholder = CommsMessage {
+            id: placeholder_id.into(),
+            sender_uuid: sender_uuid.into(),
+            sender_name: "Axiom Station".into(),
+            subject: "...".into(),
+            body: "...".into(),
+            responses: vec![],
+            selected_response: None,
+            is_read: false,
+            is_orphaned: false,
+            sender_in_range: true,
+            thread_id: thread_id.into(),
+            is_urgent: false,
+        };
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(placeholder);
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_follow_ups
+            .push(PendingFollowUp {
+                node: CommsDialogueNode {
+                    body: body.into(),
+                    responses: vec![],
+                    speaker: None,
+                    trigger: Some(trigger),
+                },
+                sender_uuid: sender_uuid.into(),
+                sender_name: "Axiom Station".into(),
+                thread_id: thread_id.into(),
+                elapsed_secs: 0.0,
+                placeholder_id: Some(placeholder_id.into()),
+                urgent: false,
+            });
+    }
+
+    #[test]
+    fn pending_follow_up_with_on_flag_set_trigger_stays_queued_until_flag_is_set() {
+        let mut app = pending_follow_up_test_app();
+        queue_triggered_follow_up(
+            &mut app,
+            "Aphelion armed — we're committed now.",
+            "axiom-uuid",
+            "thread-aphelion",
+            "placeholder-aphelion",
+            TriggerCondition::OnFlagSet {
+                name: "aphelion_armed".into(),
+            },
+        );
+
+        // Tick once with flag unset — placeholder stays, follow-up still queued.
+        app.update();
+        {
+            let messages = app.world().resource::<CommsInboxRes>().0.messages();
+            assert_eq!(messages.len(), 1);
+            assert_eq!(
+                messages[0].body, "...",
+                "placeholder must remain while the trigger is unsatisfied"
+            );
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert_eq!(runtime.pending_follow_ups.len(), 1);
+        }
+
+        // Set the flag; next tick must inject the real message.
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .flags
+            .set_flag("aphelion_armed");
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(
+            messages.len(),
+            1,
+            "placeholder must be replaced by the real message"
+        );
+        assert_eq!(messages[0].body, "Aphelion armed — we're committed now.");
+        assert_eq!(messages[0].thread_id, "thread-aphelion");
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(runtime.pending_follow_ups.is_empty());
+    }
+
+    #[test]
+    fn pending_follow_up_with_on_flag_set_fires_immediately_if_flag_already_set() {
+        // Critical case for the user request: "or immediately if it's
+        // already in range". Set the flag BEFORE queueing the follow-up;
+        // the very first tick must inject the real message.
+        let mut app = pending_follow_up_test_app();
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .flags
+            .set_flag("aphelion_armed");
+
+        queue_triggered_follow_up(
+            &mut app,
+            "Already-armed acknowledgement.",
+            "axiom-uuid",
+            "thread-aphelion",
+            "placeholder-aphelion",
+            TriggerCondition::OnFlagSet {
+                name: "aphelion_armed".into(),
+            },
+        );
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].body, "Already-armed acknowledgement.");
+    }
+
+    #[test]
+    fn pending_follow_up_with_on_timer_uses_queue_relative_elapsed_secs() {
+        let mut app = pending_follow_up_test_app();
+        queue_triggered_follow_up(
+            &mut app,
+            "Three seconds elapsed.",
+            "axiom-uuid",
+            "thread-timer",
+            "placeholder-timer",
+            TriggerCondition::OnTimer { after_secs: 3.0 },
+        );
+
+        // Force the queue-relative elapsed_secs past the threshold.
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_follow_ups[0]
+            .elapsed_secs = 4.0;
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].body, "Three seconds elapsed.");
     }
 }

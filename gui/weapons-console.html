@@ -55,6 +55,64 @@
     .ctrl-col .btn .led          { width: 18px; height: 18px; left: 18px; }
     .ctrl-col .cooldown          { padding: 8px 0; }
     .ctrl-col .cooldown .value   { font-size: 18px; }
+
+    /* ── Per-bank cooldown rows ──────────────────────────────── */
+    .cooldown-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 6px 0;
+    }
+    .cooldown-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .cooldown-row .bank-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      color: var(--ink-faint);
+      min-width: 48px;
+      text-align: right;
+      text-transform: uppercase;
+    }
+    .cooldown-row .bar {
+      flex: 1;
+      position: relative;
+      height: 12px;
+      background: var(--bg-deep);
+      border: 1px solid var(--line-faint);
+      overflow: hidden;
+    }
+    .cooldown-row .bar .fill {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 0%;
+      transition: width 0.12s linear, background 0.12s linear;
+    }
+    .cooldown-row .bar .ticks {
+      position: absolute; inset: 0;
+      background: repeating-linear-gradient(90deg,
+        transparent 0, transparent 11px,
+        rgba(0,0,0,0.4) 11px, rgba(0,0,0,0.4) 12px);
+      pointer-events: none;
+    }
+    .cooldown-row.is-ready  .bar .fill { background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); }
+    .cooldown-row.is-firing .bar .fill { background: linear-gradient(90deg, var(--tactical-dim), var(--tactical)); box-shadow: 0 0 10px rgba(240,132,56,0.5); }
+    .cooldown-row.is-cooling .bar .fill { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    .cooldown-row .value {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      letter-spacing: 0.14em;
+      min-width: 58px;
+      text-align: right;
+      color: var(--ink-faint);
+    }
+    .cooldown-row.is-ready  .value { color: var(--loaded); }
+    .cooldown-row.is-firing .value { color: var(--tactical); }
+    .cooldown-row.is-cooling .value { color: var(--reloading); }
+
     .ctrl-col .frequency         { padding: 8px 0 4px; }
     .ctrl-col .frequency .freq-bar { height: 26px; }
     .ctrl-col .tubes             { display: flex; gap: 10px; margin-top: 6px; }
@@ -103,6 +161,11 @@
       .ctrl-col .btn .led { width: 14px; height: 14px; left: 10px; }
       .ctrl-col .tube-status { height: 22px; font-size: 11px; }
       .ctrl-col .cooldown .value { font-size: 14px; }
+      .cooldown-list { gap: 4px; padding: 4px 0; }
+      .cooldown-row { gap: 8px; }
+      .cooldown-row .bank-label { font-size: 9px; min-width: 38px; letter-spacing: 0.12em; }
+      .cooldown-row .bar { height: 9px; }
+      .cooldown-row .value { font-size: 10px; min-width: 44px; letter-spacing: 0.1em; }
       .ctrl-col .frequency .freq-bar { height: 18px; }
       .radar-col > .readout { padding: 6px 14px; }
       .radar-col > .readout .v { font-size: 20px; }
@@ -264,6 +327,19 @@
         min-width: 46px;
         font-size: 10px;
       }
+      .cooldown-list { gap: 3px; padding: 3px 0; }
+      .cooldown-row { gap: 6px; }
+      .cooldown-row .bank-label {
+        font-size: clamp(7px, 2vh, 8px);
+        min-width: clamp(28px, 8vh, 36px);
+        letter-spacing: 0.1em;
+      }
+      .cooldown-row .bar { height: clamp(6px, 2vh, 8px); }
+      .cooldown-row .value {
+        font-size: clamp(8px, 2.5vh, 10px);
+        min-width: clamp(36px, 10vh, 46px);
+        letter-spacing: 0.08em;
+      }
       .ctrl-col .frequency {
         padding: 3px 0 1px;
         gap: 3px;
@@ -364,6 +440,11 @@
 
       .ctrl-col .cooldown { padding: 0.25rem 0; }
       .ctrl-col .cooldown .value { font-size: 0.8rem; }
+      .cooldown-list { gap: 0.25rem; padding: 0.25rem 0; }
+      .cooldown-row { gap: 0.4rem; }
+      .cooldown-row .bank-label { font-size: 0.55rem; min-width: 2.2rem; letter-spacing: 0.12em; }
+      .cooldown-row .bar { height: 0.6rem; }
+      .cooldown-row .value { font-size: 0.65rem; min-width: 2.8rem; letter-spacing: 0.08em; }
       .ctrl-col .frequency { padding: 0.25rem 0; }
       .ctrl-col .frequency .freq-bar { height: 1.25rem; }
 
@@ -620,13 +701,9 @@
                   </div>
                 </div>
 
-                <div class="cooldown">
-                  <div class="label">COOLDOWN</div>
-                  <div class="bar">
-                    <div class="fill" id="phaser-cooldown-fill" style="width:100%;"></div>
-                    <div class="ticks"></div>
-                  </div>
-                  <div class="value" id="phaser-cooldown-val">READY</div>
+                <div class="cooldown-list" id="phaser-cooldowns">
+                  <!-- Per-bank cooldown rows are built dynamically from
+                       `state.banks` + `state.phaserBanks` (ship config). -->
                 </div>
 
                 <!-- Beam frequency display -->
@@ -695,6 +772,11 @@
     // dropped. Buttons are now created once and updated in place.
     var _tubeRowEls = {};
 
+    // Stable per-bank cooldown DOM refs, keyed by bank id. Built once on
+    // first render (or when the ship config changes); updated in place at
+    // 10Hz so the bar can animate smoothly without DOM churn.
+    var _cooldownRowEls = {};
+
     // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
     // Handled by initConsole({ render }) — see bottom of script.
 
@@ -759,6 +841,114 @@
       row.appendChild(btns);
 
       return { row: row, nameEl: nameEl, loadBtn: loadBtn, fill: fill, lbl: lbl, fireBtn: fireBtn };
+    }
+
+    // Build the (stable) DOM nodes for one per-bank cooldown row.
+    function _buildCooldownRow(id) {
+      var row = document.createElement('div');
+      row.className = 'cooldown-row';
+      row.dataset.id = id;
+
+      var label = document.createElement('div');
+      label.className = 'bank-label';
+      // Drop the hyphen-style id (e.g. "fore_port") down to a short label.
+      label.textContent = String(id).replace(/_/g, ' ').toUpperCase();
+
+      var bar = document.createElement('div');
+      bar.className = 'bar';
+      var fill = document.createElement('div');
+      fill.className = 'fill';
+      var ticks = document.createElement('div');
+      ticks.className = 'ticks';
+      bar.appendChild(fill);
+      bar.appendChild(ticks);
+
+      var value = document.createElement('div');
+      value.className = 'value';
+      value.textContent = '—';
+
+      row.appendChild(label);
+      row.appendChild(bar);
+      row.appendChild(value);
+
+      return { row: row, fill: fill, value: value };
+    }
+
+    // Reconcile cooldown rows against the current bank set: build new
+    // rows for unseen ids, drop rows for removed ids. Returns the ordered
+    // list of bank ids (as drawn in the DOM) so the caller can update them.
+    function _ensureCooldownRows(bankIds) {
+      var listEl = document.getElementById('phaser-cooldowns');
+      if (!listEl) return [];
+
+      var seen = {};
+      bankIds.forEach(function(id) { seen[id] = true; });
+
+      // Remove stale rows (bank no longer in ship config).
+      Object.keys(_cooldownRowEls).forEach(function(id) {
+        if (!seen[id]) {
+          _cooldownRowEls[id].row.remove();
+          delete _cooldownRowEls[id];
+        }
+      });
+
+      // Add new rows (and re-order to match the ship config order).
+      bankIds.forEach(function(id) {
+        var els = _cooldownRowEls[id];
+        if (!els) {
+          els = _buildCooldownRow(id);
+          _cooldownRowEls[id] = els;
+        }
+        // Re-append in current order; this is a no-op if already last.
+        listEl.appendChild(els.row);
+      });
+
+      return bankIds;
+    }
+
+    // Update a single cooldown row's bar + value from per-bank state.
+    // `cooldownTotal` is the ship-config-provided cooldown duration for
+    // this bank (used to size the bar fill). When 0 or absent, falls back
+    // to the bank's observed peak `cooldown_remaining` since the last reset.
+    var _cooldownPeak = {};
+    function _renderCooldownRow(els, bankState, cooldownTotal) {
+      var remaining = typeof bankState.cooldown_remaining === 'number'
+        ? Math.max(0, bankState.cooldown_remaining) : 0;
+      var onCooldown = !!bankState.on_cooldown;
+
+      // Track the peak remaining we've seen so the bar still works for
+      // banks where the config didn't ship a cooldown_secs (defensive).
+      if (remaining > (_cooldownPeak[bankState.id] || 0)) {
+        _cooldownPeak[bankState.id] = remaining;
+      } else if (!onCooldown) {
+        _cooldownPeak[bankState.id] = 0;
+      }
+      var total = cooldownTotal > 0 ? cooldownTotal : (_cooldownPeak[bankState.id] || 0);
+
+      var stateClass = 'cooldown-row';
+      var fillPct = 0;
+      var valueText = '';
+
+      if (!onCooldown) {
+        // Ready to fire (modulo target lock — that's the FIRE button's job).
+        stateClass += ' is-ready';
+        fillPct = 100;
+        valueText = 'READY';
+      } else if (remaining <= 0.05) {
+        // on_cooldown but no countdown remaining = beam currently firing.
+        stateClass += ' is-firing';
+        fillPct = 100;
+        valueText = 'FIRING';
+      } else {
+        // Post-beam cooldown: bar refills as remaining drains to 0.
+        stateClass += ' is-cooling';
+        fillPct = total > 0 ? Math.max(0, Math.min(100, (1 - remaining / total) * 100)) : 0;
+        valueText = remaining.toFixed(1) + 's';
+      }
+
+      els.row.className = stateClass;
+      els.fill.style.width = fillPct.toFixed(1) + '%';
+      els.value.textContent = valueText;
     }
 
     function _renderConsole(s) {
@@ -867,21 +1057,28 @@
       if (modeMEl) modeMEl.className = 'opt' + (modeStr === 'Manual' ? ' active' : '');
       if (modeAEl) modeAEl.className = 'opt' + (modeStr !== 'Manual' ? ' active' : '');
 
-      var cooldownVal  = document.getElementById('phaser-cooldown-val');
-      var cooldownFill = document.getElementById('phaser-cooldown-fill');
-      if (anyReady) {
-        if (cooldownVal)  { cooldownVal.textContent = 'READY'; cooldownVal.style.color = 'var(--loaded)'; }
-        if (cooldownFill) cooldownFill.style.width = '100%';
-      } else {
-        var hasCooldown = banks.some(function(b) { return b.on_cooldown; });
-        if (hasCooldown) {
-          if (cooldownVal)  { cooldownVal.textContent = 'COOLING'; cooldownVal.style.color = 'var(--reloading)'; }
-          if (cooldownFill) cooldownFill.style.width = '35%';
-        } else {
-          if (cooldownVal)  { cooldownVal.textContent = 'STANDBY'; cooldownVal.style.color = 'var(--ink-faint)'; }
-          if (cooldownFill) cooldownFill.style.width = '0%';
+      // ── Per-bank phaser cooldown bars ────────────────────────────────
+      // One row per bank, each showing READY / FIRING / x.xs cooling.
+      // Ship-config-provided cooldown_secs sizes the bar; falls back to
+      // the observed peak `cooldown_remaining` when missing.
+      var bankConfigs = s.phaser_arcs || [];
+      var bankCooldownTotals = {};
+      bankConfigs.forEach(function(b) {
+        if (b && b.id && typeof b.cooldown_secs === 'number') {
+          bankCooldownTotals[b.id] = b.cooldown_secs;
         }
-      }
+      });
+      // Bank id order: prefer ship config order, fall back to broadcast order.
+      var orderedIds = bankConfigs.length > 0
+        ? bankConfigs.map(function(b) { return b.id; })
+        : banks.map(function(b) { return b.id; });
+      _ensureCooldownRows(orderedIds);
+      orderedIds.forEach(function(id) {
+        var els  = _cooldownRowEls[id];
+        var bank = banks.find(function(b) { return b.id === id; });
+        if (!els || !bank) return;
+        _renderCooldownRow(els, bank, bankCooldownTotals[id] || 0);
+      });
 
       var firePhaserBtn = document.getElementById('fire-phaser');
       if (firePhaserBtn) {

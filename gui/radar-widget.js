@@ -364,8 +364,14 @@
     this._drawOwnShip(octx, cx, cy);
 
     // ── Atomic copy to visible canvas ──────────────────────────────────────
+    // The offscreen canvas is opaque (filled at the top of _render), so a
+    // single drawImage overwrites every pixel of the visible canvas in one
+    // GPU blit. Do NOT clearRect first — the visible canvas was created
+    // without { alpha: false }, so clearRect produces transparent pixels and
+    // the browser composites whatever sits underneath (the rotating
+    // radar-bg-img <img>) for the brief moment before drawImage lands. That
+    // is the source of the movement-induced flicker.
     if (this._offscreenCanvas) {
-      this._ctx.clearRect(0, 0, W, H);
       this._ctx.drawImage(this._offscreenCanvas, 0, 0);
     }
 

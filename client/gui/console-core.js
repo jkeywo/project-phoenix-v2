@@ -149,3 +149,29 @@ export function initConsole({ name, render }) {
 if (typeof window !== 'undefined') {
   window.initConsole = initConsole;
 }
+
+/**
+ * Render (or hide) the per-console damage bar.
+ *
+ * @param {object|null} h         - own_hull from state: { current, max_hp } or null
+ * @param {string} wrapId         - id of the wrapper element to show/hide
+ * @param {string} fillId         - id of the bar fill element
+ * @param {string} valId          - id of the text value element
+ */
+export function renderDamageBar(h, wrapId, fillId, valId) {
+  var wrap = (typeof document !== 'undefined') && document.getElementById(wrapId);
+  if (!wrap) return;
+  if (!h || h.max_hp <= 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  var pct  = h.current / h.max_hp;
+  var fill = document.getElementById(fillId);
+  var val  = document.getElementById(valId);
+  if (fill) {
+    fill.style.width = (Math.max(0, Math.min(1, pct)) * 100).toFixed(1) + '%';
+    fill.className   = 'fill' + (pct <= 0.33 ? ' crit' : pct <= 0.60 ? ' warn' : '');
+  }
+  if (val) {
+    val.textContent = Math.round(h.current) + '/' + Math.round(h.max_hp);
+    val.className   = 'val' + (pct <= 0.33 ? ' crit' : pct <= 0.60 ? ' warn' : '');
+  }
+}

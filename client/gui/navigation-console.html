@@ -218,6 +218,11 @@
     <div>HDG&nbsp;<span class="hud-val" id="hud-hdg">0°</span></div>
     <div>SPD&nbsp;<span class="hud-val ok" id="hud-spd">0 kn</span></div>
     <div>IMP&nbsp;<span class="hud-val" id="hud-imp">—</span></div>
+    <div class="hull" id="hull-display" style="display:none; margin-top:6px;">
+      <span>HULL</span>
+      <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+      <span class="val" id="hull-val">—</span>
+    </div>
   </div>
 
   <div class="hud-corner" id="hud-tr">
@@ -280,7 +285,7 @@
   </div>
 
   <script type="module">
-    import { initConsole } from './console-core.js';
+    import { initConsole, renderDamageBar } from './console-core.js';
 
     const canvas = document.getElementById('map-canvas');
     const ctx    = canvas.getContext('2d');
@@ -911,6 +916,7 @@
         if (label) label.textContent = _onScreen ? 'CLEAR SCREEN' : 'ON SCREEN';
       }
       updateHiddenData(s);
+      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
       draw();
     }
 

@@ -112,6 +112,20 @@
     .cooldown-row.is-ready  .value { color: var(--loaded); }
     .cooldown-row.is-firing .value { color: var(--tactical); }
     .cooldown-row.is-cooling .value { color: var(--reloading); }
+    .cooldown-row .arc-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--bg-deep);
+      border: 1px solid var(--line-faint);
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+    .cooldown-row.arc-active .arc-dot {
+      background: var(--loaded);
+      border-color: var(--loaded);
+      box-shadow: 0 0 5px var(--loaded);
+    }
 
     .ctrl-col .frequency         { padding: 8px 0 4px; }
     .ctrl-col .frequency .freq-bar { height: 26px; }
@@ -166,6 +180,7 @@
       .cooldown-row .bank-label { font-size: 9px; min-width: 38px; letter-spacing: 0.12em; }
       .cooldown-row .bar { height: 9px; }
       .cooldown-row .value { font-size: 10px; min-width: 44px; letter-spacing: 0.1em; }
+      .cooldown-row .arc-dot { width: 7px; height: 7px; }
       .ctrl-col .frequency .freq-bar { height: 18px; }
       .radar-col > .readout { padding: 6px 14px; }
       .radar-col > .readout .v { font-size: 20px; }
@@ -340,6 +355,7 @@
         min-width: clamp(36px, 10vh, 46px);
         letter-spacing: 0.08em;
       }
+      .cooldown-row .arc-dot { width: 6px; height: 6px; }
       .ctrl-col .frequency {
         padding: 3px 0 1px;
         gap: 3px;
@@ -758,7 +774,7 @@
   <script src="radar-widget.js"></script>
 
   <script type="module">
-    import { initConsole } from './console-core.js';
+    import { initConsole, renderDamageBar } from './console-core.js';
 
     // ── State ────────────────────────────────────────────────────────────
     var _selectedBank  = 'fore';
@@ -867,11 +883,16 @@
       value.className = 'value';
       value.textContent = '—';
 
+      var arcDot = document.createElement('div');
+      arcDot.className = 'arc-dot';
+      arcDot.title = 'Target in arc';
+
       row.appendChild(label);
+      row.appendChild(arcDot);
       row.appendChild(bar);
       row.appendChild(value);
 
-      return { row: row, fill: fill, value: value };
+      return { row: row, fill: fill, value: value, arcDot: arcDot };
     }
 
     // Reconcile cooldown rows against the current bank set: build new
@@ -911,7 +932,7 @@
     // this bank (used to size the bar fill). When 0 or absent, falls back
     // to the bank's observed peak `cooldown_remaining` since the last reset.
     var _cooldownPeak = {};
-    function _renderCooldownRow(els, bankState, cooldownTotal) {
+    function _renderCooldownRow(els, bankState, cooldownTotal, targetInArc) {
       var remaining = typeof bankState.cooldown_remaining === 'number'
         ? Math.max(0, bankState.cooldown_remaining) : 0;
       var onCooldown = !!bankState.on_cooldown;
@@ -946,6 +967,7 @@
         valueText = remaining.toFixed(1) + 's';
       }
 
+      if (targetInArc) stateClass += ' arc-active';
       els.row.className = stateClass;
       els.fill.style.width = fillPct.toFixed(1) + '%';
       els.value.textContent = valueText;
@@ -1072,12 +1094,28 @@
       var orderedIds = bankConfigs.length > 0
         ? bankConfigs.map(function(b) { return b.id; })
         : banks.map(function(b) { return b.id; });
+      // Compute target bearing (degrees clockwise from ship-forward) from the
+      // locked blip's pre-projected radar coords (radar_x=starboard, radar_y=forward).
+      var targetBearingDeg = null;
+      var targetBlip = s.target_uuid
+        ? (s.blips || []).find(function(b) { return b.uuid === s.target_uuid; })
+        : null;
+      if (targetBlip && targetBlip.radar_x != null && targetBlip.radar_y != null) {
+        targetBearingDeg = Math.atan2(targetBlip.radar_x, targetBlip.radar_y) * 180 / Math.PI;
+      }
+
       _ensureCooldownRows(orderedIds);
       orderedIds.forEach(function(id) {
         var els  = _cooldownRowEls[id];
         var bank = banks.find(function(b) { return b.id === id; });
+        var cfg  = bankConfigs.find(function(b) { return b.id === id; });
         if (!els || !bank) return;
-        _renderCooldownRow(els, bank, bankCooldownTotals[id] || 0);
+        var inArc = false;
+        if (targetBearingDeg !== null && cfg && cfg.fire_arc_deg > 0) {
+          var diff = ((targetBearingDeg - cfg.facing_deg) % 360 + 540) % 360 - 180;
+          inArc = Math.abs(diff) <= cfg.fire_arc_deg / 2;
+        }
+        _renderCooldownRow(els, bank, bankCooldownTotals[id] || 0, inArc);
       });
 
       var firePhaserBtn = document.getElementById('fire-phaser');
@@ -1126,6 +1164,9 @@
           regions:      s.regions      || [],
         });
       }
+
+      // ── Damage bar ───────────────────────────────────────────────────
+      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
     }
 
     // ── Outbound actions ──────────────────────────────────────────────────

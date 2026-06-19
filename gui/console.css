@@ -680,10 +680,14 @@ html, body {
 }
 .hull .bar .fill {
   position: absolute; inset: 0;
-  background: linear-gradient(90deg, var(--loaded), #2a8040);
-  width: 100%;
+  background: linear-gradient(90deg, var(--loaded-dim), var(--loaded));
+  width: 100%; transition: width .4s ease;
 }
+.hull .bar .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+.hull .bar .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire-bright)); }
 .hull .val { color: var(--ink); }
+.hull .val.warn { color: var(--reloading); }
+.hull .val.crit { color: var(--fire-bright); }
 
 /* ── Complexity-preset hiding (issue #461) ──────────── */
 /* Applied by gui/hideable-elements.js to [data-hideable] elements

@@ -1,37 +1,30 @@
 name = "Axiom Station"
-tags = ["station", "comms_contact", "allied"]
+tags = [ "station", "comms_contact", "allied" ]
 
 [target]
-tags = ["station"]
+tags = [ "station" ]
 threat_level = "none"
 description = "Axiom Station"
 
-# (#474) Buffed from 200 to 800 HP for the combat-test scenario
-# (#475). At peak enemy DPS the starbase would be deleted in ~13s
-# at the old HP; 800 gives the player ~40s of grace under maximum
-# pressure, enough to intercept the wave that breaks through.
 [hull]
-hull_integrity = 800.0
+hull_integrity = 800
 
-# (#474) Explicit Ball collider for robust beam/torpedo hit detection.
-# Previously relied on the mesh-implicit collider, which is fragile
-# when the renderer pipeline changes.
 [collider]
 shape = "Ball"
-radius = 18.0
-length = 0.0
+radius = 12
+length = 0
 
 [radar_appearance]
-colour = [0.3, 0.8, 0.6]
-size = 18.0
+colour = [ 0.3, 0.8, 0.6 ]
+size = 18
 icon = "station"
 
 [mesh]
 model = "assets/models/alliance_starbase.glb"
 shape = "torus"
-radius = 18.0
+radius = 18
 minor_radius = 4.5
-colour = [0.3, 0.8, 0.6]
+colour = [ 0.3, 0.8, 0.6 ]
 
 [comms]
-range = 800.0
+range = 800

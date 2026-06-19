@@ -6,13 +6,14 @@
 #   - Rebalanced Harrow fleet + Axiom Station (#474)
 #   - Federation-Harrow mutual hostility (#472)
 #
-# Layout: concentric rings centred on the star at the origin.
+# Layout: outer ring of asteroids around a central star + starbase.
 #   - Star at [0, 0, 0]
-#   - Inner asteroid field: r=200..300
-#   - Clear zone: r=300..800 — where the planet, starbase, and player live
-#   - Outer asteroid field: r=800..1000
-#   - Spawn anchors beyond the outer belt, biased toward the +X hemisphere
-#     so enemies fly through the outer belt to reach the starbase.
+#   - Clear zone: r=0..800 — where the planet, starbase, and player live
+#   - Outer asteroid field: r=800..1000 (single field; the asteroid
+#     streaming lifecycle currently supports only one field per session)
+#   - Spawn anchors beyond the outer belt (r > 1000), biased toward
+#     the +X hemisphere so enemies fly through the outer belt to reach
+#     the starbase.
 #
 # Starbase Alpha sits at [500, 0, 100] — within the clear zone. Player ship
 # spawns at [400, 0, 200] (~140u from the starbase) ready to defend.
@@ -90,18 +91,19 @@ id = "earth"
 name = "earth"
 transform = { position = [550.0, 0.0, 0.0] }
 
-# Inner asteroid belt.
-[[entity]]
-template_path = "assets/entities/asteroid_field_main.toml"
-id = "inner-belt"
-transform = { position = [0.0, 0.0, 0.0] }
-
-# Outer asteroid belt. Same template — provides cover and forces enemies
-# to fly through asteroids to reach the starbase.
+# Outer asteroid belt around the starbase. The asteroid streaming
+# lifecycle currently only supports one field per session
+# (`src/asteroids/lifecycle.rs` selects `fields.iter().next()`), so we
+# ship just the outer belt — the inner belt would be silently dropped.
+# Per-instance `overrides` widens the field's inner/outer radii (the
+# stock template is r=300..350) so enemies must fly through asteroids
+# to reach the starbase from any spawn anchor (all anchors are at
+# r=1000+).
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
 id = "outer-belt"
 transform = { position = [0.0, 0.0, 0.0] }
+overrides = { asteroid_field = { inner_radius = 800.0, outer_radius = 1000.0 } }
 
 # Player ship spawn-on-game-start in the clear zone, ~140u from the starbase.
 [[entity]]

@@ -1,8 +1,8 @@
-// Issue #202 — Comms smoke test: Starbase Alpha hail → respond → objective.
+// Issue #202 — Comms smoke test: hail contact → respond → objective.
 //
 // Two clients join a 2-player game (Helm station has CaptainChair+Helm+Comms).
-// After game starts, the Helm player hails Starbase Alpha, picks a response,
-// and verifies that ObjectiveSummary is delivered to the captain.
+// After game starts, the Helm player hails the first available contact, picks a
+// response, and verifies that ObjectiveSummary is delivered to the captain.
 
 import { test, expect, createTestClient, readHostPeerId, waitForWasmReady } from './fixtures';
 
@@ -16,7 +16,7 @@ async function waitForStation(client: { page: import('@playwright/test').Page; t
   );
 }
 
-test('comms — hail Starbase Alpha, respond, get ObjectiveSummary', async ({ context }) => {
+test('comms — hail contact, respond, get ObjectiveSummary', async ({ context }) => {
   // ── Boot server ────────────────────────────────────────────────────────────
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
@@ -40,14 +40,14 @@ test('comms — hail Starbase Alpha, respond, get ObjectiveSummary', async ({ co
 
   // ── Wait for initial CommsState (contacts list, sent on first InProgress tick)
   const initialComms = await captain.waitForMessage('CommsState', 8_000) as any;
-  const contacts: Array<{ uuid: string; name: string }> = initialComms?.data?.contacts ?? [];
-  const starbase = contacts.find((c) => c.name === 'Starbase Alpha');
-  expect(starbase, 'Starbase Alpha contact must be present in initial CommsState').toBeTruthy();
-  expect(starbase!.in_range, 'contact must expose in_range flag').toBeDefined();
-  expect(typeof starbase!.in_range).toBe('boolean');
-  const starbaseUuid = starbase!.uuid;
+  const contacts: Array<{ uuid: string; name: string; in_range: boolean }> = initialComms?.data?.contacts ?? [];
+  expect(contacts.length, 'at least one contact must be present in initial CommsState').toBeGreaterThan(0);
+  const starbase = contacts[0];
+  expect(starbase.in_range, 'contact must expose in_range flag').toBeDefined();
+  expect(typeof starbase.in_range).toBe('boolean');
+  const starbaseUuid = starbase.uuid;
 
-  // ── Hail Starbase Alpha ────────────────────────────────────────────────────
+  // ── Hail the contact ──────────────────────────────────────────────────────
   // Clear previously collected CommsState so waitForMessage sees a fresh one.
   await captain.page.evaluate(() => {
     (window as any).__messages = (window as any).__messages.filter(

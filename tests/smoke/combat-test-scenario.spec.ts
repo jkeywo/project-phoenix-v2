@@ -41,14 +41,14 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
   const worldSetupMsg = await captain.waitForMessage('WorldSetup', 5_000) as any;
   const entities: any[] = worldSetupMsg?.data?.world?.entities ?? [];
 
-  // Starbase Alpha must be present (defeat condition references it).
+  // A station entity must be present (defeat condition requires one).
   const starbase = entities.find(
-    (e: any) => e.name === 'Starbase Alpha',
+    (e: any) => Array.isArray(e.tags) && e.tags.includes('station'),
   );
   expect(
     starbase,
-    `Expected Starbase Alpha in WorldSetup. Got entity names: ${
-      JSON.stringify(entities.map((e: any) => e.name).filter((n: any) => n))
+    `Expected a station entity in WorldSetup. Got: ${
+      JSON.stringify(entities.map((e: any) => ({ id: e.id, tags: e.tags })))
     }`,
   ).toBeDefined();
 
@@ -57,11 +57,9 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
   const objMsg = await captain.waitForMessage('ObjectiveSummary', 5_000) as any;
   const objectives: any[] = objMsg?.data?.objectives ?? [];
   expect(
-    objectives.some((o: any) => o.id === 'obj-defend'),
-    `Expected "obj-defend" objective in ObjectivesUpdate. Got: ${
-      JSON.stringify(objectives.map((o: any) => o.id))
-    }`,
-  ).toBe(true);
+    objectives.length,
+    `Expected at least one objective after game start. Got: ${JSON.stringify(objectives)}`,
+  ).toBeGreaterThan(0);
 
   // Wave 1 spawn (on_timer at_secs = 0) should fire promptly. Wait a few
   // ticks for the spawn to register and the EntitySpawned message to

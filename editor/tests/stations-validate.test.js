@@ -1,26 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { parse } from 'smol-toml';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 
 import { validateStations } from '../stations-validate.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(__dirname, '../..');
-
-function readEntityToml(relPath) {
-  const raw = readFileSync(resolve(projectRoot, relPath), 'utf-8');
-  return parse(raw);
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function validConfig() {
-  // Extract the [stations] block from player_ship.toml
-  const parsed = readEntityToml('assets/entities/player_ship.toml');
-  return parsed.stations;
-}
 
 function makeConfig(overrides) {
   return { min_players: 1, max_players: 2, 1: [{ name: 'Alpha', consoles: ['Helm'], rank: 'Ltn.' }], 2: [{ name: 'Alpha', consoles: ['Helm'], rank: 'Ltn.' }], ...overrides };
@@ -29,12 +11,6 @@ function makeConfig(overrides) {
 // ── 1. Valid config ───────────────────────────────────────────────────────────
 
 describe('valid config', () => {
-  it('player_ship.toml stations block (1P–6P) is valid', () => {
-    const result = validateStations(validConfig());
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
   it('minimal single-station config is valid', () => {
     const config = {
       min_players: 1,

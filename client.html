@@ -1103,7 +1103,7 @@
         pushCaptainConsoleState();
       }
       if (activeConsole === 'Helm') {
-        pushHelmConsoleState();
+        pushHelmConsoleState('renderGame');
       }
       if (activeConsole === 'Repair') {
         pushRepairConsoleState();
@@ -1145,16 +1145,25 @@
 
     function buildHelmConsoleState() {
       if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Helm', state);
+      if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
+        console.warn('[client] buildHelmConsoleState FALLBACK (window.buildConsoleState missing) — empty blips!');
+      }
       return JSON.stringify({ heading: 0, speed: 0, x: 0, z: 0, yaw: 0, impulse_charge_progress: 0, on_screen: false, lock_id: null, blips: [] });
     }
 
-    function pushHelmConsoleState() {
+    function pushHelmConsoleState(_origin) {
       if (activeConsole !== 'Helm') return;
+      if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
+        var asteroidCount = (state.asteroids || []).length;
+        console.log('[client] pushHelmConsoleState origin=' + (_origin || '?'),
+          'asteroids=' + asteroidCount,
+          'simStateLive=' + (window.simState ? window.simState.world.entities.length : 'no'));
+      }
       _pushIframe($('helm-iframe'), 'Helm', buildHelmConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState(); injectSwipeRelay($('helm-iframe')); });
+    if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState('iframe-load'); injectSwipeRelay($('helm-iframe')); });
 
     // ── Repair console iframe bridge (issue #425) ────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1603,7 +1612,7 @@
             ? window.simState.world.entities
             : ((msg.data.world && msg.data.world.entities) || []);
           pushWeaponsConsoleState();
-          pushHelmConsoleState();
+          pushHelmConsoleState('WorldSetup');
           pushSensorsConsoleState();
           pushNavigationConsoleState();
           return;
@@ -1615,7 +1624,7 @@
           if (!window.simState) return;
           state.asteroids = window.simState.world.entities;
           pushWeaponsConsoleState();
-          pushHelmConsoleState();
+          pushHelmConsoleState('Entity/AsteroidSpawned');
           pushSensorsConsoleState();
           pushNavigationConsoleState();
           return;
@@ -1719,7 +1728,7 @@
           }
           if (state.sensorsTarget === uuid) state.sensorsTarget = null;
           pushWeaponsConsoleState();
-          pushHelmConsoleState();
+          pushHelmConsoleState('AsteroidDestroyed');
           pushSensorsConsoleState();
           return;
         }
@@ -1737,7 +1746,7 @@
           }
           if (state.sensorsTarget === uuid) state.sensorsTarget = null;
           pushWeaponsConsoleState();
-          pushHelmConsoleState();
+          pushHelmConsoleState('EntityDespawned');
           pushSensorsConsoleState();
           return;
         }

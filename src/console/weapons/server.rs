@@ -95,7 +95,7 @@ pub struct CurrentPhaserMode(pub crate::messages::PhaserMode);
 
 impl Default for CurrentPhaserMode {
     fn default() -> Self {
-        Self(crate::messages::PhaserMode::Auto)
+        Self(crate::messages::PhaserMode::Manual)
     }
 }
 
@@ -2968,6 +2968,16 @@ mod tests {
     fn non_weapons_player_cannot_set_phaser_mode() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
+        // Establish a known mode (Auto) via the authorised player first.
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserMode {
+                mode: crate::messages::PhaserMode::Auto,
+            },
+        );
+        tick(&mut app);
+        // Non-weapons player attempts to switch back to Manual — must be ignored.
         push(
             &mut app,
             "captain",

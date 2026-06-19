@@ -1102,14 +1102,64 @@ where
 /// Used by `wasm_load_world` to queue entity TOML fetches via the JS preload
 /// callback (PRD #338). Returned in stable iteration order so the queue
 /// sequence is deterministic across runs.
+///
+/// Walks three reference surfaces:
+/// 1. Static `[[entity]]` declarations.
+/// 2. `[[trigger.action]] type = "spawn_entity"` references (needed for
+///    timer-driven wave spawns and similar — discovered too late by the
+///    asset-preload pipeline otherwise, since trigger actions don't run
+///    until after preload completes). (#475)
+/// 3. `[[comms.response.action]] type = "spawn_entity"` references nested
+///    arbitrarily deep in dialogue follow-ups. (#475)
 pub fn entity_template_paths(world: &WorldConfig) -> Vec<String> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<String> = Vec::new();
+
+    // 1. Static `[[entity]]` declarations.
     for ent in &world.entities {
         if seen.insert(ent.template_path.clone()) {
             out.push(ent.template_path.clone());
         }
     }
+
+    // 2. `[[trigger.action]]` spawn_entity references.
+    for trigger in &world.triggers {
+        for action in &trigger.actions {
+            if let TriggerAction::SpawnEntity { template_path, .. } = action {
+                if seen.insert(template_path.clone()) {
+                    out.push(template_path.clone());
+                }
+            }
+        }
+    }
+
+    // 3. Comms dialogue spawn_entity references (root + arbitrarily-nested
+    //    response follow-ups + the optional `root_follow_up` chained node).
+    fn walk_node(
+        node: &CommsDialogueNode,
+        seen: &mut std::collections::HashSet<String>,
+        out: &mut Vec<String>,
+    ) {
+        for resp in &node.responses {
+            for action in &resp.actions {
+                if let TriggerAction::SpawnEntity { template_path, .. } = action {
+                    if seen.insert(template_path.clone()) {
+                        out.push(template_path.clone());
+                    }
+                }
+            }
+            if let Some(fu) = &resp.follow_up {
+                walk_node(fu, seen, out);
+            }
+        }
+    }
+    for tmpl in &world.comms {
+        walk_node(&tmpl.node, &mut seen, &mut out);
+        if let Some(rfu) = &tmpl.root_follow_up {
+            walk_node(rfu, &mut seen, &mut out);
+        }
+    }
+
     out
 }
 
@@ -2812,6 +2862,123 @@ transform = { position = [0.0, 0.0, 0.0] }
             ],
             "iteration order must follow first-occurrence in the entity list"
         );
+    }
+
+    // -- entity_template_paths: trigger / comms walks (#475) ----------------
+
+    #[test]
+    fn entity_template_paths_includes_trigger_spawn_entity_templates() {
+        // (#475) Regression: SpawnEntity actions inside `[[trigger.action]]`
+        // blocks reference entity templates that must be preloaded into the
+        // EntityConfig cache before the trigger fires. Without this walk,
+        // timer-driven wave spawns silently fail on WASM (cache miss →
+        // `continue` in handle_ai_events).
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/wave_destroyer.toml"
+  name          = "wave_1"
+  position      = [0.0, 0.0, 0.0]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let paths = entity_template_paths(&cfg);
+        assert!(
+            paths.contains(&"assets/entities/wave_destroyer.toml".to_string()),
+            "trigger spawn_entity template must be discovered for preload, got {paths:?}"
+        );
+    }
+
+    #[test]
+    fn entity_template_paths_includes_comms_response_spawn_entity_templates() {
+        // (#475) Comms response actions can also spawn entities (used by
+        // the Before-the-Fire scenario for "Varen Escape Pod" etc).
+        let toml = r#"
+[[comms]]
+from    = "Axiom Station"
+trigger = "on_world_loaded"
+message = "Greetings."
+
+  [[comms.response]]
+  text = "Hi."
+    [[comms.response.action]]
+    type          = "spawn_entity"
+    template_path = "assets/entities/escape_pod.toml"
+    name          = "pod_1"
+    position      = [0.0, 0.0, 0.0]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let paths = entity_template_paths(&cfg);
+        assert!(
+            paths.contains(&"assets/entities/escape_pod.toml".to_string()),
+            "comms response spawn_entity template must be discovered for preload, got {paths:?}"
+        );
+    }
+
+    #[test]
+    fn entity_template_paths_dedups_across_entity_trigger_and_comms_walks() {
+        // (#475) Same template referenced from a static [[entity]] block, a
+        // trigger spawn_entity action, and a comms response must appear
+        // exactly once in the output.
+        let toml = r#"
+[[entity]]
+template_path = "assets/entities/ship.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/ship.toml"
+  name          = "wave_1"
+  position      = [10.0, 0.0, 0.0]
+
+[[comms]]
+from    = "Cmd"
+trigger = "on_world_loaded"
+message = "."
+
+  [[comms.response]]
+  text = "OK"
+    [[comms.response.action]]
+    type          = "spawn_entity"
+    template_path = "assets/entities/ship.toml"
+    name          = "wave_2"
+    position      = [20.0, 0.0, 0.0]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let paths = entity_template_paths(&cfg);
+        let ship_count = paths
+            .iter()
+            .filter(|p| p.as_str() == "assets/entities/ship.toml")
+            .count();
+        assert_eq!(ship_count, 1, "must dedup across all three walks");
+    }
+
+    #[test]
+    fn entity_template_paths_combat_test_includes_wave_templates() {
+        // (#475) Pin the exact bug: combat_test.toml references three
+        // wave templates (destroyer, cruiser, battleship) only inside
+        // [[trigger.action]] spawn_entity blocks. All three must appear
+        // in the preload list.
+        let toml = include_str!("../../assets/worlds/combat_test.toml");
+        let cfg = parse_world(toml).expect("combat_test.toml must parse");
+        let paths = entity_template_paths(&cfg);
+        for required in &[
+            "assets/entities/pirate_raider.toml",
+            "assets/entities/ship_harrow_patrol.toml",
+            "assets/entities/ship_harrow_warhawk.toml",
+        ] {
+            assert!(
+                paths.contains(&required.to_string()),
+                "combat_test wave template {required:?} must be preloaded, got {paths:?}"
+            );
+        }
     }
 
     // -- partition_immediate_entities --------------------------------------

@@ -15,6 +15,88 @@
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
+  <!-- Background-tab sim heartbeat ─────────────────────────────────────────
+       Bevy's WASM runner (winit) uses requestAnimationFrame when visible and
+       setTimeout(fn, wait_ms) when the document is hidden.  Chrome throttles
+       background tab timers to a minimum of 1 s, which caps the sim loop at
+       ~1 Hz and makes the tactical radar update once per second.
+
+       Fix: intercept short-delay setTimeout calls made while the document is
+       hidden and route them through a MessageChannel instead.  MessageChannel
+       messages are processed as regular tasks and are NOT subject to Chrome's
+       background timer throttling, while still honouring the requested delay
+       via performance.now() so winit's 50 ms unfocused cadence is preserved.
+  -->
+  <script>
+  (function () {
+    var _origSetTimeout  = window.setTimeout.bind(window);
+    var _origClearTimeout = window.clearTimeout.bind(window);
+
+    // One shared channel drives all intercepted timers.
+    var _mc = new MessageChannel();
+    // Queue of { fn, readyAt, id } entries waiting for their delay to elapse.
+    var _queue = [];
+    // Counter for fake timer ids returned to callers.
+    var _nextId = 0x8000000;
+    // Set of active fake ids (used by clearTimeout).
+    var _active = {};
+    // Whether a MC tick is already scheduled (avoids duplicate port1.postMessage).
+    var _scheduled = false;
+
+    function _schedule() {
+      if (!_scheduled) {
+        _scheduled = true;
+        _mc.port1.postMessage('');
+      }
+    }
+
+    _mc.port2.onmessage = function () {
+      _scheduled = false;
+      var now = performance.now();
+      var next = [];
+      for (var i = 0; i < _queue.length; i++) {
+        var entry = _queue[i];
+        if (!_active[entry.id]) continue; // was clearTimeout'd
+        if (now >= entry.readyAt) {
+          delete _active[entry.id];
+          try { entry.fn(); } catch (e) { console.error(e); }
+        } else {
+          next.push(entry);
+        }
+      }
+      _queue = next;
+      if (_queue.length > 0) _schedule();
+    };
+
+    window.setTimeout = function (fn, delay) {
+      var args = Array.prototype.slice.call(arguments, 2);
+      // Only intercept short-delay timers when the tab is hidden.
+      // winit uses delays of ≤ unfocused_mode.wait (50 ms here); we intercept
+      // anything under 500 ms to be safe against minor drift.
+      if (document.hidden && typeof delay === 'number' && delay < 500) {
+        var id = ++_nextId;
+        var wrappedFn = args.length
+          ? function () { fn.apply(null, args); }
+          : fn;
+        var entry = { fn: wrappedFn, readyAt: performance.now() + (delay || 0), id: id };
+        _active[id] = true;
+        _queue.push(entry);
+        _schedule();
+        return id;
+      }
+      return _origSetTimeout.apply(window, arguments);
+    };
+
+    window.clearTimeout = function (id) {
+      if (_active[id]) {
+        delete _active[id];
+        return;
+      }
+      _origClearTimeout(id);
+    };
+  })();
+  </script>
+
   <!-- HUD overlay fonts (match raw/gui/borders/demo.html) -->
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 

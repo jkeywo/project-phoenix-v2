@@ -45,13 +45,38 @@ import { applyHiddenElements } from './hideable-elements.js';
 import { mountHelp } from './help-panel.js';
 
 export function initConsole({ name, render }) {
-  var _bc = (typeof BroadcastChannel !== 'undefined')
-    ? new BroadcastChannel('phoenix-console-state')
-    : null;
-
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
   // Evaluated at call-time so tests can set global.window before calling initConsole.
   var _root = (typeof window !== 'undefined') ? window : globalThis;
+
+  // The console can run in four contexts (ADR-0001 §3 transport targets):
+  //   1. Inside a `client.html` iframe — parent owns the push contract
+  //      and calls `iframeEl.contentWindow.__updateConsole` directly.
+  //   2. Inside a wry native webview — host calls `__updateConsole` via
+  //      `webview.evaluate_script`.
+  //   3. Inside a browser WASM page — Bevy's `set_console_state_callback`
+  //      calls `__updateConsole` directly.
+  //   4. As its own browser tab — same-origin server.html broadcasts state
+  //      on `BroadcastChannel('phoenix-console-state')`.
+  //
+  // Only target 4 needs the BroadcastChannel inbound listener. In contexts
+  // 1-3 a direct caller already owns __updateConsole, and turning on the
+  // BC listener creates a SECOND state source that races with the direct
+  // push (e.g. helm iframe receiving server.html's minimal HelmConsoleState
+  // alternating with client.html's full state-with-blips — see #482).
+  //
+  // Match the same priority order as outbound (sendAction below): the
+  // BC listener is only attached when there is no parent / no wry host /
+  // no browser-WASM bindings.
+  var _hasParent     = (typeof window !== 'undefined') && window !== window.parent;
+  var _hasWryHost    = (typeof window !== 'undefined') && !!window.ipc;
+  var _hasWasmAction = (typeof window !== 'undefined') && !!(window.wasmBindings
+    && typeof window.wasmBindings.wasm_ui_action === 'function');
+  var _useBroadcastInbound = !_hasParent && !_hasWryHost && !_hasWasmAction;
+
+  var _bc = (_useBroadcastInbound && typeof BroadcastChannel !== 'undefined')
+    ? new BroadcastChannel('phoenix-console-state')
+    : null;
 
   // ── Inbound: __updateConsole (ADR-0001 §2) ─────────────────────────────
   _root.__updateConsole = function(consoleName, stateJson) {

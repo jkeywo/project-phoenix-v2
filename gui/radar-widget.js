@@ -180,15 +180,6 @@
       var newH = Math.round(rect.height * dpr);
       if (newW > 0 && newH > 0 &&
           (self._canvas.width !== newW || self._canvas.height !== newH)) {
-        // DIAG: log every actual resize. If this fires per-tick during ship
-        // motion the canvas is being cleared and the user sees flicker.
-        if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
-          console.log('[radar:' + self._consoleId + '] RESIZE',
-            self._canvas.width + 'x' + self._canvas.height,
-            '->', newW + 'x' + newH,
-            'rect=' + rect.width.toFixed(3) + 'x' + rect.height.toFixed(3),
-            'dpr=' + dpr);
-        }
         self._canvas.width  = newW;
         self._canvas.height = newH;
         // Resize clears the canvas; redraw immediately so there's no blank frame.
@@ -235,11 +226,6 @@
    */
   RadarWidget.prototype.update = function (data) {
     this._data = data;
-    if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
-      var nb = (data && data.blips) ? data.blips.length : 0;
-      var nr = (data && data.regions) ? data.regions.length : 0;
-      console.log('[radar:' + this._consoleId + '] UPDATE blips=' + nb + ' regions=' + nr + ' mode=' + (data && data.mode));
-    }
     // Render immediately so the canvas never lags one rAF frame behind a state
     // push — prevents the blank-frame flicker on console tab switch.
     this._render();
@@ -312,16 +298,6 @@
     var cx = W / 2, cy = H / 2;
     var R  = Math.min(W, H) / 2 - 8;
     var data = this._data;
-
-    if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
-      var dbg = window.__radarDebug = window.__radarDebug || { renders: 0, resizes: 0, updates: 0, lastT: 0 };
-      dbg.renders++;
-      var now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-      var dt = dbg.lastT ? (now - dbg.lastT).toFixed(1) : '0';
-      dbg.lastT = now;
-      var dataBlips = data && data.blips ? data.blips.length : 0;
-      console.log('[radar:' + this._consoleId + '] RENDER #' + dbg.renders + ' Δt=' + dt + 'ms blips=' + dataBlips + ' canvas=' + W + 'x' + H);
-    }
 
     // ── Double-buffer via offscreen canvas ─────────────────────────────────
     // Render the full frame to an offscreen canvas first, then copy to the

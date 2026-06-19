@@ -249,3 +249,108 @@ describe('initConsole — window.__updateConsole', () => {
     expect(render).toHaveBeenCalledWith(state);
   });
 });
+
+// ── Inbound: BroadcastChannel listener gated by context (#482) ───────────────
+//
+// When the console runs inside a parent iframe / wry host / browser-WASM,
+// it must NOT listen on the BroadcastChannel — a direct caller already
+// owns __updateConsole, and turning on the BC listener creates a SECOND
+// state source that races with the direct push. Helm regression: in
+// same-origin same-browser play, server.html broadcast minimal
+// HelmConsoleState (no `blips`) and client.html iframe-pushed the full
+// state-with-blips; the iframe received both, alternating, producing
+// per-tick canvas flicker as blips disappeared and reappeared.
+
+describe('initConsole — BroadcastChannel inbound context gating (#482)', () => {
+  let bcConstructed;
+
+  function withBC(setup, runTest) {
+    bcConstructed = 0;
+    const stub = makeBCStub();
+    const savedBC = global.BroadcastChannel;
+    global.BroadcastChannel = function() {
+      bcConstructed++;
+      return stub.instance;
+    };
+    try {
+      setup();
+      runTest(stub);
+    } finally {
+      global.BroadcastChannel = savedBC;
+    }
+  }
+
+  it('attaches the BC listener in baseline / separate-tab mode', () => {
+    withBC(
+      () => { /* baseline: no parent, no ipc, no wasmBindings */ },
+      (stub) => {
+        const render = vi.fn();
+        initConsole({ name: 'Helm', render });
+        expect(bcConstructed).toBe(1);
+        expect(typeof stub.instance.onmessage).toBe('function');
+      },
+    );
+  });
+
+  it('does NOT attach the BC listener when running in an iframe (window !== parent)', () => {
+    withBC(
+      () => {
+        Object.defineProperty(global.window, 'parent', {
+          value: { postMessage: vi.fn() },
+          configurable: true,
+        });
+      },
+      () => {
+        const render = vi.fn();
+        initConsole({ name: 'Helm', render });
+        expect(bcConstructed).toBe(0);
+      },
+    );
+  });
+
+  it('does NOT attach the BC listener when window.ipc is present (wry mode)', () => {
+    withBC(
+      () => { global.window.ipc = { postMessage: vi.fn() }; },
+      () => {
+        const render = vi.fn();
+        initConsole({ name: 'Helm', render });
+        expect(bcConstructed).toBe(0);
+      },
+    );
+  });
+
+  it('does NOT attach the BC listener when wasmBindings.wasm_ui_action is present (WASM mode)', () => {
+    withBC(
+      () => { global.window.wasmBindings = { wasm_ui_action: vi.fn() }; },
+      () => {
+        const render = vi.fn();
+        initConsole({ name: 'Helm', render });
+        expect(bcConstructed).toBe(0);
+      },
+    );
+  });
+
+  it('iframe-mode console ignores cross-origin BC pushes for its own name', () => {
+    // Regression for #482: even if a BC message for this console fires
+    // somehow, the inbound listener must not be attached, so no second
+    // render path can interfere with the parent-direct push.
+    withBC(
+      () => {
+        Object.defineProperty(global.window, 'parent', {
+          value: { postMessage: vi.fn() },
+          configurable: true,
+        });
+      },
+      () => {
+        const render = vi.fn();
+        initConsole({ name: 'Helm', render });
+        // Parent-direct push is still wired and works:
+        window.__updateConsole('Helm', JSON.stringify({ heading: 42 }));
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(render).toHaveBeenCalledWith({ heading: 42 });
+        // BC was not constructed, so no second receive path exists.
+        expect(bcConstructed).toBe(0);
+      },
+    );
+  });
+});

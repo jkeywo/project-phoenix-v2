@@ -471,6 +471,10 @@ pub fn spawn_immediate_entities_internal(
                 continue;
             }
         };
+        let mut config = config;
+        if entity_inst.name.is_some() {
+            config.name = entity_inst.name.clone();
+        }
         let entity = crate::entity_spawner::spawn_entity(
             commands,
             &config,

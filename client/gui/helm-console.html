@@ -539,6 +539,16 @@
     function _renderConsole(s) {
       _state = s;
 
+      // DIAG #482-followup: log every _renderConsole call so we can see
+      // who pushes empty-blip state. Toggle in DevTools:
+      //   window.PHOENIX_RADAR_DEBUG = true
+      if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
+        var _hasBlips    = Array.isArray(s.blips);
+        var _blipCount   = _hasBlips ? s.blips.length : 'no-key';
+        var _keys        = Object.keys(s).sort().join(',');
+        console.log('[helm] _renderConsole blips=' + _blipCount + ' keys=' + _keys);
+      }
+
       document.getElementById('hdg').dataset.heading = String(s.heading || 0);
       document.getElementById('spd').dataset.speed   = String(s.speed || 0);
       document.getElementById('pos-x').dataset.x     = String(s.x || 0);

@@ -609,6 +609,21 @@
         };
         var radarJson = JSON.stringify(radarPayload);
         if ((!impulseCharging || !_lastRadarJson) && radarJson !== _lastRadarJson) {
+          if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
+            console.log('[helm-console] STATE PUSH',
+              'blips=' + radarPayload.blips.length,
+              'heading=' + (s.heading || 0).toFixed(1),
+              'speed=' + (s.speed || 0).toFixed(1),
+              'x=' + (s.x || 0).toFixed(1),
+              'z=' + (s.z || 0).toFixed(1));
+            if (radarPayload.blips.length === 0) {
+              // The empty-blips push is the suspected flicker source.
+              // Dump the full incoming state object so we can see WHO sent it
+              // and what fields are missing.
+              console.log('[helm-console] EMPTY-BLIPS PUSH state=', JSON.parse(JSON.stringify(s)));
+              console.trace('[helm-console] EMPTY-BLIPS PUSH call site');
+            }
+          }
           _lastRadarJson = radarJson;
           _radarWidget.update(radarPayload);
         } else if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {

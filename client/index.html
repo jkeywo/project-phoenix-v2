@@ -1150,17 +1150,7 @@
 
     function pushHelmConsoleState() {
       if (activeConsole !== 'Helm') return;
-      var _json = buildHelmConsoleState();
-      // DIAG #482-followup: log every push to the helm iframe with the
-      // call site identified via a stack trace prefix. Toggle in DevTools:
-      //   window.PHOENIX_RADAR_DEBUG = true
-      if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
-        var _parsed; try { _parsed = JSON.parse(_json); } catch (_) {}
-        var _blips = (_parsed && Array.isArray(_parsed.blips)) ? _parsed.blips.length : 'no-key';
-        var _caller = (new Error('helm push').stack || '').split('\n').slice(2, 5).join(' | ');
-        console.log('[parent] pushHelmConsoleState blips=' + _blips + ' caller=' + _caller);
-      }
-      _pushIframe($('helm-iframe'), 'Helm', _json);
+      _pushIframe($('helm-iframe'), 'Helm', buildHelmConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.

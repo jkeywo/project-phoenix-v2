@@ -85,20 +85,6 @@ export function initConsole({ name, render }) {
       console.warn('[' + name + '] bad state json', e);
       return;
     }
-    // DIAG #482-followup: log every __updateConsole call so we can see
-    // whether the BC inbound gating (#482 fix) actually blocked the
-    // second state source. Toggle in DevTools:
-    //   window.PHOENIX_RADAR_DEBUG = true
-    if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
-      var _blips = (s && Array.isArray(s.blips)) ? s.blips.length : 'no-key';
-      var _trace = (new Error('__updateConsole').stack || '').split('\n').slice(2, 4).join(' | ');
-      console.log('[' + name + '] __updateConsole blips=' + _blips
-        + ' bcGated=' + !!_useBroadcastInbound
-        + ' parent=' + _hasParent
-        + ' wry=' + _hasWryHost
-        + ' wasm=' + _hasWasmAction
-        + ' from=' + _trace);
-    }
     render(s);
     // ── Complexity-preset hiding (issue #461) ──────────────────────────
     // When the state push carries a preset name, toggle `.cpx-hidden` on

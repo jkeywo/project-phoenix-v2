@@ -899,15 +899,6 @@ pub enum ClientMessage {
     ClearNavigationWaypoint,
 }
 
-/// Progress of server-side asset pre-cache, broadcast during the `Loading`
-/// phase so clients can show a progress bar while GLB models and rig sidecars
-/// finish loading before the game starts.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct LoadingProgress {
-    /// 0.0 (nothing loaded) to 1.0 (all assets ready).
-    pub fraction: f32,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 #[allow(clippy::large_enum_variant)]
@@ -933,10 +924,12 @@ pub enum ServerMessage {
         name: String,
     },
     GameStarted,
-    /// Broadcast during the `Loading` phase at ~2 Hz. Clients show a progress
+    /// Broadcast during the `Loading` phase at ~10 Hz. Clients show a progress
     /// bar until `GameStarted` arrives, which transitions the phase to `InProgress`.
+    ///
+    /// `fraction` is `0.0` (nothing loaded) to `1.0` (all assets ready).
     LoadingProgress {
-        data: LoadingProgress,
+        fraction: f32,
     },
     SimState {
         snapshot: SimSnapshot,

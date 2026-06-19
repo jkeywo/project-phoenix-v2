@@ -8,9 +8,12 @@ sources: [
   src/entities/config_cache.rs,
   src/entities/model_rig.rs,
   src/lobby/server.rs,
+  src/core/messages.rs,
+  src/core/codec.rs,
   server.html,
+  client.html,
 ]
-updated: 2026-06-17
+updated: 2026-06-19
 ---
 
 # Asset Preload
@@ -137,6 +140,52 @@ The gate treats two non-`complete` cases as still-pass-through:
    observed the lobby state yet on the first frame, especially under
    `init_state()` which doesn't fire `OnEnter`. Treating "not yet started"
    as "complete" avoids a one-frame deadlock the first time the lobby opens.
+
+## The `LoadingProgress` wire format (and the 0%-forever bug)
+
+`ServerMessage` is `#[serde(tag = "type", content = "data")]`
+(`src/core/messages.rs:911-912`), so every variant's payload sits at the
+top-level `data` key on the wire. The `LoadingProgress` variant carries
+just one number, `fraction`, and is declared inline:
+
+```rust
+LoadingProgress { fraction: f32 },
+```
+
+Encoded JSON: `{"type":"LoadingProgress","data":{"fraction":0.5}}`. JS
+handlers in `server.html:1156` and `client.html:1538` read
+`parsed.data?.fraction ?? 0` and update `#asset-loading-pct` accordingly.
+
+**Earlier (broken) form** — the variant wrapped a separate
+`LoadingProgress` struct in a field also called `data`:
+
+```rust
+LoadingProgress { data: LoadingProgress },
+pub struct LoadingProgress { pub fraction: f32 }
+```
+
+That collided with serde's `content = "data"`, producing
+`{"type":"LoadingProgress","data":{"data":{"fraction":0.5}}}`. The JS
+handlers then read `parsed.data` (a `{ data: { fraction } }` object) and
+`.fraction` on it was `undefined`. `undefined ?? 0 = 0`, so every update
+displayed `0`. The bar appeared at 0 % the moment Loading started, sat
+there for the entire phase, and "jumped" to the game when the
+`GameStarted` follow-up message hid the overlay. The 100 % final value
+sent by `auto_transition_from_loading` (`asset_preload.rs:755-760`) was
+also rendered as 0, but the overlay vanished before the next paint so
+the user never saw a 100 % flicker.
+
+The fix is enforced by a codec round-trip test
+(`src/core/codec.rs::server_loading_progress_wire_format`) that asserts
+the exact string `{"type":"LoadingProgress","data":{"fraction":0.5}}`.
+A Playwright regression at `tests/smoke/loading-progress.spec.ts`
+slows GLB fetches by 600 ms so Loading is reachable, then verifies the
+host's `#asset-loading-pct` shows at least one intermediate (non-0,
+non-100) value while the overlay is visible.
+
+When extending `ServerMessage`, never use a field called `data` on a
+named-field variant — the encoder will double-nest and silently break
+every JS consumer that reads `parsed.data.<field>`.
 
 ## Diagnostic logging
 

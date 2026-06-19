@@ -8,7 +8,7 @@
 //! If the captain presses Engage before preload completes, the phase
 //! transitions to `GamePhase::Loading` instead of `InProgress`. During
 //! `Loading` the system broadcasts `LoadingProgress { fraction }` to clients
-//! at ~2 Hz. Once all assets are ready, it auto-transitions to `InProgress`
+//! at ~10 Hz. Once all assets are ready, it auto-transitions to `InProgress`
 //! and sends `GameStarted`.
 
 use std::collections::{HashMap, HashSet};
@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use bevy::asset::LoadState;
 use bevy::prelude::*;
 
-use crate::core::messages::{GamePhase, LoadingProgress, ServerMessage};
+use crate::core::messages::{GamePhase, ServerMessage};
 use crate::entity_config::EntityConfig;
 use crate::lobby::server::LobbyOutbox;
 use crate::lobby::Target;
@@ -692,7 +692,7 @@ pub fn poll_asset_preload(
     }
 }
 
-/// Broadcast `LoadingProgress` at ~2 Hz during the `Loading` phase.
+/// Broadcast `LoadingProgress` at ~10 Hz during the `Loading` phase.
 ///
 /// Sends the current fraction immediately on first entry (before the timer
 /// fires) so the user sees progress even when assets complete before the
@@ -709,7 +709,7 @@ pub fn broadcast_loading_progress(
     preload.progress_timer.tick(time.delta());
 
     // Send on first entry regardless of timer state, then let the timer
-    // throttle subsequent updates to ~2 Hz.  Without this gate the very
+    // throttle subsequent updates to ~10 Hz.  Without this gate the very
     // first `LoadingProgress` (after the initial 0 %) would be delayed by
     // 0.1 s, and if `poll_asset_preload` sets complete=true before the
     // timer fires, the user would never see anything but 0 %.
@@ -721,9 +721,7 @@ pub fn broadcast_loading_progress(
     let fraction = preload.fraction();
     outbox.0.push((
         Target::All,
-        ServerMessage::LoadingProgress {
-            data: LoadingProgress { fraction },
-        },
+        ServerMessage::LoadingProgress { fraction },
     ));
 }
 
@@ -732,9 +730,7 @@ pub fn broadcast_loading_progress(
 pub fn broadcast_loading_start(mut outbox: ResMut<LobbyOutbox>) {
     outbox.0.push((
         Target::All,
-        ServerMessage::LoadingProgress {
-            data: LoadingProgress { fraction: 0.0 },
-        },
+        ServerMessage::LoadingProgress { fraction: 0.0 },
     ));
 }
 
@@ -754,9 +750,7 @@ pub fn auto_transition_from_loading(
     // even when assets completed before the 0.1s timer fired.
     outbox.0.push((
         Target::All,
-        ServerMessage::LoadingProgress {
-            data: LoadingProgress { fraction: 1.0 },
-        },
+        ServerMessage::LoadingProgress { fraction: 1.0 },
     ));
     outbox.0.push((Target::All, ServerMessage::GameStarted));
 }

@@ -326,6 +326,37 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    /// Regression: the on-the-wire JSON for `LoadingProgress` must place
+    /// `fraction` directly under `data`, not under `data.data`.
+    ///
+    /// Earlier the variant carried a nested `data: LoadingProgress` field,
+    /// which combined with `#[serde(content = "data")]` produced
+    /// `{"type":"LoadingProgress","data":{"data":{"fraction":0.5}}}` —
+    /// the JS handlers in `server.html` and `client.html` read
+    /// `parsed.data?.fraction` and got `undefined` (an object has no
+    /// `fraction`), so the loading bar stuck at 0 % for the entire
+    /// duration of `GamePhase::Loading`.
+    #[test]
+    fn server_loading_progress_wire_format() {
+        let msg = ServerMessage::LoadingProgress { fraction: 0.5 };
+        let encoded = JsonCodec.encode_server(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"LoadingProgress","data":{"fraction":0.5}}"#,
+            "LoadingProgress wire format must put `fraction` at data.fraction (not data.data.fraction); JS clients depend on this exact layout",
+        );
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_loading_progress_bounds() {
+        for fraction in [0.0_f32, 0.25, 1.0] {
+            let msg = ServerMessage::LoadingProgress { fraction };
+            assert_server_roundtrip(&JsonCodec, msg);
+        }
+    }
+
     #[test]
     fn server_sim_state() {
         let msg = ServerMessage::SimState {

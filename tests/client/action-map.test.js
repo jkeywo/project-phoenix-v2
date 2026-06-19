@@ -348,6 +348,37 @@ describe('set_navigation_waypoint', () => {
     ACTION_MAP.set_navigation_waypoint({ action: 'set_navigation_waypoint', x: Number.NaN, z: -8 }, send);
     expect(send).not.toHaveBeenCalled();
   });
+
+  it('forwards source_uuid when present and non-empty (entity-anchored waypoint)', () => {
+    const send = mkSend();
+    ACTION_MAP.set_navigation_waypoint(
+      { action: 'set_navigation_waypoint', x: 50, z: -100, source_uuid: 'station-alpha' },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('SetNavigationWaypoint', {
+      x: 50,
+      z: -100,
+      source_uuid: 'station-alpha',
+    });
+  });
+
+  it('omits source_uuid when empty string (treated as free waypoint)', () => {
+    const send = mkSend();
+    ACTION_MAP.set_navigation_waypoint(
+      { action: 'set_navigation_waypoint', x: 1, z: 2, source_uuid: '' },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('SetNavigationWaypoint', { x: 1, z: 2 });
+  });
+
+  it('omits source_uuid when null (legacy free-waypoint path)', () => {
+    const send = mkSend();
+    ACTION_MAP.set_navigation_waypoint(
+      { action: 'set_navigation_waypoint', x: 3, z: 4, source_uuid: null },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('SetNavigationWaypoint', { x: 3, z: 4 });
+  });
 });
 
 describe('clear_navigation_waypoint', () => {

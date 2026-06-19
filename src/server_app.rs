@@ -418,7 +418,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let last_helm = world.get_resource::<crate::ship_plugin::LastHelmInput>();
             let navigation_waypoint = world
                 .get_resource::<crate::navigation_plugin::NavigationWaypoint>()
-                .and_then(|w| w.0.clone());
+                .and_then(|w| w.snapshot());
 
             let power_levels = power
                 .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))

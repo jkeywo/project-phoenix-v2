@@ -268,9 +268,44 @@ mod tests {
 
     #[test]
     fn client_set_navigation_waypoint() {
-        let msg = ClientMessage::SetNavigationWaypoint { x: 120.0, z: -45.0 };
+        let msg = ClientMessage::SetNavigationWaypoint {
+            x: 120.0,
+            z: -45.0,
+            source_uuid: None,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_navigation_waypoint_with_source_uuid() {
+        let msg = ClientMessage::SetNavigationWaypoint {
+            x: 120.0,
+            z: -45.0,
+            source_uuid: Some("anchor-target-1".into()),
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_navigation_waypoint_legacy_payload_deserialises() {
+        // Older clients that don't know about `source_uuid` send a payload
+        // without it. The wire field carries `#[serde(default)]` so the
+        // decoder must accept the legacy shape and produce `None`.
+        let json = r#"{"type":"SetNavigationWaypoint","data":{"x":120.0,"z":-45.0}}"#;
+        let codec = JsonCodec;
+        let msg = codec
+            .decode_client(json)
+            .expect("legacy SetNavigationWaypoint payload should decode");
+        assert_eq!(
+            msg,
+            ClientMessage::SetNavigationWaypoint {
+                x: 120.0,
+                z: -45.0,
+                source_uuid: None,
+            }
+        );
     }
 
     #[test]
@@ -488,7 +523,38 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
-                navigation_waypoint: Some(WaypointSnapshot { x: 12.5, z: -8.0 }),
+                navigation_waypoint: Some(WaypointSnapshot {
+                    x: 12.5,
+                    z: -8.0,
+                    source_uuid: None,
+                }),
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn sim_snapshot_with_anchored_navigation_waypoint_round_trips() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
+                forward_speed: 0.0,
+                power_levels: (2, 2, 2),
+                flags: vec![],
+                entity_states: vec![],
+                impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
+                console_hull: vec![],
+                navigation_waypoint: Some(WaypointSnapshot {
+                    x: 12.5,
+                    z: -8.0,
+                    source_uuid: Some("anchor-entity-1".into()),
+                }),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

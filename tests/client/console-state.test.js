@@ -856,6 +856,31 @@ describe('buildNavigationConsoleState', () => {
     expect(wp.world_z).toBe(-400);
   });
 
+  it('free waypoint is non-selectable and source_uuid is null', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      navigationWaypoint: { x: 500, z: -300 },
+    };
+    const out = parse(buildNavigationConsoleState(state));
+    const wp = out.blips.find(b => b.kind === 'waypoint');
+    expect(wp).toBeDefined();
+    expect(wp.selectable).toBe(false);
+    expect(wp.source_uuid).toBeNull();
+  });
+
+  it('anchored waypoint forwards source_uuid and is selectable', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      navigationWaypoint: { x: 500, z: -300, source_uuid: 'station-alpha' },
+    };
+    const out = parse(buildNavigationConsoleState(state));
+    expect(out.waypoint).toEqual({ x: 500, z: -300, source_uuid: 'station-alpha' });
+    const wp = out.blips.find(b => b.kind === 'waypoint');
+    expect(wp).toBeDefined();
+    expect(wp.source_uuid).toBe('station-alpha');
+    expect(wp.selectable).toBe(true);
+  });
+
   it('includes active objective marker beacons and hides inactive ones', () => {
     const state = {
       shipX: 0, shipZ: 0,

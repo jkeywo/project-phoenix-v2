@@ -109,10 +109,22 @@ export const ACTION_MAP = Object.freeze({
     send('SetView', { mode: { kind: 'NavigationChart' } });
   },
 
-  /** Set the shared custom navigation waypoint. */
+  /**
+   * Set the shared custom navigation waypoint.
+   *
+   * When `source_uuid` is provided (non-empty string), the waypoint is
+   * anchored to that entity: the server overwrites x/z from the entity's
+   * live transform every tick and auto-clears the waypoint on despawn.
+   * Without `source_uuid`, the waypoint is a free position from
+   * tap-to-place.
+   */
   set_navigation_waypoint: (a, send) => {
     if (Number.isFinite(a.x) && Number.isFinite(a.z)) {
-      send('SetNavigationWaypoint', { x: a.x, z: a.z });
+      const payload = { x: a.x, z: a.z };
+      if (typeof a.source_uuid === 'string' && a.source_uuid.length > 0) {
+        payload.source_uuid = a.source_uuid;
+      }
+      send('SetNavigationWaypoint', payload);
     }
   },
 

@@ -567,6 +567,13 @@ fn default_power_levels() -> (u8, u8, u8) {
 pub struct WaypointSnapshot {
     pub x: f32,
     pub z: f32,
+    /// When `Some`, the waypoint is anchored to the named entity's UUID and
+    /// the server rewrites `x`/`z` from the entity's live transform every
+    /// tick. When the parent entity despawns, the navigation waypoint is
+    /// auto-cleared. When `None`, the waypoint is a free position placed by
+    /// tap-to-place and never moves on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_uuid: Option<String>,
 }
 
 /// A single entity in the unified wire format.
@@ -890,9 +897,17 @@ pub enum ClientMessage {
     },
     /// Set the shared custom navigation waypoint. Sender must hold
     /// `Console::Navigation`.
+    ///
+    /// When `source_uuid` is `Some`, the waypoint is anchored to that
+    /// entity: the server treats `x`/`z` as a seed position and overwrites
+    /// them from the entity's live transform every tick. When the parent
+    /// despawns, the waypoint is auto-cleared. When `None`, the waypoint is
+    /// a free position that never moves on its own.
     SetNavigationWaypoint {
         x: f32,
         z: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_uuid: Option<String>,
     },
     /// Clear the shared custom navigation waypoint. Sender must hold
     /// `Console::Navigation`.
@@ -1510,10 +1525,15 @@ pub enum UiAction {
     /// Set the shared Navigation waypoint.
     ///
     /// The HTML navigation panel sends
-    /// `{ action: "set_navigation_waypoint", console: "Navigation", x: 120.0, z: -45.0 }`.
+    /// `{ action: "set_navigation_waypoint", console: "Navigation", x: 120.0, z: -45.0 }`
+    /// for tap-to-place, or
+    /// `{ action: "set_navigation_waypoint", console: "Navigation", x: 120.0, z: -45.0, source_uuid: "..." }`
+    /// when anchoring to the currently-selected entity.
     SetNavigationWaypoint {
         x: f32,
         z: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_uuid: Option<String>,
     },
     /// Clear the shared Navigation waypoint.
     ///
@@ -1575,8 +1595,12 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::SetNavigationChart => ClientMessage::SetView {
             mode: ViewMode::NavigationChart,
         },
-        UiAction::SetNavigationWaypoint { x, z } => {
-            ClientMessage::SetNavigationWaypoint { x: *x, z: *z }
+        UiAction::SetNavigationWaypoint { x, z, source_uuid } => {
+            ClientMessage::SetNavigationWaypoint {
+                x: *x,
+                z: *z,
+                source_uuid: source_uuid.clone(),
+            }
         }
         UiAction::ClearNavigationWaypoint => ClientMessage::ClearNavigationWaypoint,
     }
@@ -1734,10 +1758,35 @@ mod ui_action_tests {
 
     #[test]
     fn set_navigation_waypoint_maps_to_client_message() {
-        let action = UiAction::SetNavigationWaypoint { x: 12.5, z: -8.0 };
+        let action = UiAction::SetNavigationWaypoint {
+            x: 12.5,
+            z: -8.0,
+            source_uuid: None,
+        };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::SetNavigationWaypoint { x: 12.5, z: -8.0 }
+            ClientMessage::SetNavigationWaypoint {
+                x: 12.5,
+                z: -8.0,
+                source_uuid: None
+            }
+        );
+    }
+
+    #[test]
+    fn set_navigation_waypoint_with_source_uuid_maps_to_client_message() {
+        let action = UiAction::SetNavigationWaypoint {
+            x: 12.5,
+            z: -8.0,
+            source_uuid: Some("abc-123".into()),
+        };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::SetNavigationWaypoint {
+                x: 12.5,
+                z: -8.0,
+                source_uuid: Some("abc-123".into())
+            }
         );
     }
 

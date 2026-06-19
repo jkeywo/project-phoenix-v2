@@ -19,6 +19,7 @@ People, things, and game objects.
 - **[Console](./entities/console.md)** — A role on the bridge (one seat each).
 - **[Captain Console](./entities/captain-console.md)** — Red Alert + View selector. Game-start authority.
 - **[Helm Console](./entities/helm-console.md)** — Thrust + steering. The only console that moves the ship. Radar overlay.
+- **[Navigation Console](./entities/navigation-console.md)** — System chart at long range; sets the shared navigation waypoint (free or entity-anchored).
 - **[Console](./entities/console.md)** — All four consoles (CaptainChair, Helm, Tactical, Engineering) and how to add more.
 - **[Ship](./entities/ship.md)** — The player-controlled vessel. Capsule collider, XZ plane, Y-up.
 - **[Asteroid](./entities/asteroid.md)** — Static obstacle in the field. Sphere collider.

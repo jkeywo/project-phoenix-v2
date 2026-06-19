@@ -240,6 +240,15 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
     radar_y *= scale;
   }
 
+  // When the waypoint is anchored to a parent entity, expose the parent
+  // UUID so the navigation iframe can route a tap on the waypoint blip
+  // back to the parent's selection. Anchored waypoints are selectable;
+  // free waypoints remain non-selectable (no meaningful target).
+  const sourceUuid =
+    typeof waypoint.source_uuid === 'string' && waypoint.source_uuid.length > 0
+      ? waypoint.source_uuid
+      : null;
+
   return {
     uuid: 'navigation-waypoint',
     radar_x,
@@ -249,11 +258,12 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
     icon: 'waypoint',
     color: [0.45, 0.95, 1.0],
     name: 'WAYPOINT',
-    selectable: false,
+    selectable: sourceUuid !== null,
     objective_target: false,
     edge,
     world_x: waypoint.x,
     world_z: waypoint.z,
+    source_uuid: sourceUuid,
   };
 }
 

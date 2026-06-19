@@ -253,6 +253,11 @@
         <span class="led cyan"></span>
         <span class="label">ON SCREEN</span>
       </button>
+      <button class="btn tactical" id="btn-add-waypoint" type="button">
+        <span class="btn-bg"></span>
+        <span class="led cyan"></span>
+        <span class="label">ADD WAYPOINT</span>
+      </button>
       <button class="btn tactical" id="btn-set-waypoint" type="button">
         <span class="btn-bg"></span>
         <span class="led amber"></span>
@@ -672,8 +677,29 @@
         const thresh = 55/zoom;
         if (d < thresh && d < bestD) { bestD = d; best = e; }
       });
+
+      // Anchored waypoints participate in tap hit-testing: tapping the
+      // waypoint blip forwards selection to its parent entity. Free
+      // waypoints (no source_uuid) remain non-selectable.
+      if (_waypoint && _waypoint.source_uuid &&
+          Number.isFinite(_waypoint.x) && Number.isFinite(_waypoint.z)) {
+        const wd = Math.hypot(_waypoint.x - wx2, _waypoint.z - wy2);
+        const wthresh = 55 / zoom;
+        if (wd < wthresh && wd < bestD) {
+          const parent = _entities.find(e => e.id === _waypoint.source_uuid);
+          if (parent) {
+            _selectedId = parent.id;
+            updateEntityPanel(parent);
+            updateWaypointButtons();
+            draw();
+            return;
+          }
+        }
+      }
+
       _selectedId = best ? best.id : null;
       updateEntityPanel(best);
+      updateWaypointButtons();
       draw();
     }
 
@@ -725,8 +751,21 @@
 
     function updateWaypointButtons() {
       const hasWp = !!_waypoint;
+      // SET WAYPOINT (tap-to-place) and CLEAR WP toggle by waypoint
+      // presence as before.
       document.getElementById('btn-set-waypoint').style.display   = hasWp ? 'none' : '';
       document.getElementById('btn-clear-waypoint').style.display = hasWp ? '' : 'none';
+
+      // ADD WAYPOINT shows only when a selectable entity (other than the
+      // own ship) is currently selected on the chart.
+      const addBtn = document.getElementById('btn-add-waypoint');
+      if (addBtn) {
+        const sel = _selectedId
+          ? _entities.find(e => e.id === _selectedId)
+          : null;
+        const showAdd = !!(sel && sel.id !== 'own');
+        addBtn.style.display = showAdd ? '' : 'none';
+      }
     }
 
     let drag = null;
@@ -898,6 +937,30 @@
         if (e) { panX = e.x; panY = e.y; draw(); return; }
       }
       panX = _ownX; panY = _ownY; draw();
+    });
+
+    document.getElementById('btn-add-waypoint').addEventListener('click', () => {
+      const sel = _selectedId
+        ? _entities.find(e => e.id === _selectedId)
+        : null;
+      if (!sel || sel.id === 'own') return;
+      // Anchor the waypoint to the selected entity's UUID. The server
+      // refreshes x/z from the entity's live transform every tick and
+      // auto-clears the waypoint if the entity despawns.
+      if (_sendAction) _sendAction('set_navigation_waypoint', {
+        x: sel.x,
+        z: sel.y,
+        source_uuid: sel.id,
+      });
+      _waypoint = { x: sel.x, z: sel.y, source_uuid: sel.id };
+      const wpVal = document.getElementById('ent-wp-val');
+      if (wpVal) {
+        wpVal.textContent = 'SET (' + Math.round(sel.x) + ', ' + Math.round(sel.y) + ')';
+        wpVal.style.color = 'var(--tactical)';
+      }
+      updateWaypointButtons();
+      showToast('WAYPOINT SET');
+      draw();
     });
 
     document.getElementById('btn-set-waypoint').addEventListener('click', () => {

@@ -140,6 +140,15 @@ cannot continue without them. Please respond."""
   [[comms.response]]
   text = "Understood, Axiom Station. We are proceeding to your location."
 
+    # Follow-up gated on entering the docking region — fires immediately if
+    # the ship is already inside. Lets Axiom Station acknowledge the rendezvous
+    # at the moment the player physically arrives, even though the same
+    # boundary crossing also loads the Diplomat branch (`btf_path_a.toml`).
+    [comms.response.follow_up]
+    trigger = "on_entered_region"
+    entity  = "Axiom Station Dock"
+    message = "Ardent, we have you on the dock approach. Welcome to Axiom. Administrator Chen is preparing the full briefing now — stand by."
+
   [[comms.response]]
   text = "Axiom Station, do you know where the Harrow patrol is operating?"
     [comms.response.follow_up]
@@ -152,7 +161,49 @@ thread_id = "research-scholar"
 from    = "Research Outpost"
 trigger = "on_hailed"
 entity  = "Research Outpost"
+urgent  = true
 message = "A.E.V. Ardent, this is the Research Outpost. We read you. Stand by — patching you through to Dr. Myst now."
+
+  # Auto-chained follow-up: 3 seconds after the operator hails, Dr. Myst
+  # comes on the line. The chained node carries its own response tree, so
+  # the operator can engage a multi-turn conversation without crossing a
+  # sub-world boundary. Inherits `thread_id = "research-scholar"` and
+  # `urgent = true` from the parent template.
+  [comms.follow_up]
+  speaker    = "Dr. Myst"
+  trigger    = "on_timer"
+  after_secs = 3.0
+  message    = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying to reach someone for hours. I'm detecting an intermittent stellar resonance signature from the deep outer system — beyond the Kaleth Nebula. The frequency profile matches a theoretical class of weapon I've encountered in Imperium research archives. Whatever is out there is charging."
+
+    [[comms.follow_up.response]]
+    text = "What happens if it fires?"
+
+      [comms.follow_up.response.follow_up]
+      speaker    = "Dr. Myst"
+      trigger    = "on_timer"
+      after_secs = 2.0
+      message    = "If it fires at full charge it will create a persistent quantum interference zone across this system. It's not a targeted weapon — it's a geography weapon. Navigation through this system will be effectively impossible for decades. The charge cycle is approximately twenty minutes. I don't know how far along they are. The signature is already strong."
+
+        [[comms.follow_up.response.follow_up.response]]
+        text = "Can you pinpoint the source?"
+
+          [[comms.follow_up.response.follow_up.response.action]]
+          type      = "add_objective"
+          id        = "obj-locate-ashrender"
+          text      = "Locate the weapon source beyond the Kaleth Nebula."
+          mandatory = false
+
+    [[comms.follow_up.response]]
+    text = "Is there anything unusual about the signal?"
+
+      [comms.follow_up.response.follow_up]
+      speaker    = "Dr. Myst"
+      trigger    = "on_timer"
+      after_secs = 2.0
+      message    = "Yes — there's a sub-harmonic embedded in the resonance signature I cannot explain. It doesn't match any known Harrow or Imperium technology. It may be nothing. Or it may be something this system has been doing for longer than the Harrow have been pointing weapons at it. I've flagged it in my logs."
+
+        [[comms.follow_up.response.follow_up.response]]
+        text = "Understood. Keep monitoring."
 
 [[comms]]
 thread_id = "requiem-override"

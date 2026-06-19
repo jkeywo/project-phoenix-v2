@@ -54,7 +54,7 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
 
   // The on_world_loaded objective must fire as part of the initial
   // ObjectivesUpdate broadcast.
-  const objMsg = await captain.waitForMessage('ObjectivesUpdate', 5_000) as any;
+  const objMsg = await captain.waitForMessage('ObjectiveSummary', 5_000) as any;
   const objectives: any[] = objMsg?.data?.objectives ?? [];
   expect(
     objectives.some((o: any) => o.id === 'obj-defend'),

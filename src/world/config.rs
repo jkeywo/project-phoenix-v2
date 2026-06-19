@@ -224,6 +224,13 @@ struct RawActionEntry {
     /// Per-axis scale for `spawn_entity` (optional).
     #[serde(default)]
     scale: Option<[f32; 3]>,
+    /// Faction `name` for `add_faction_enemy` / `remove_faction_enemy`.
+    /// Resolved via `FactionRegistry::uuid_by_name` at dispatch time.
+    #[serde(default)]
+    faction: Option<String>,
+    /// Enemy faction `name` for `add_faction_enemy` / `remove_faction_enemy`.
+    #[serde(default)]
+    enemy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -473,6 +480,36 @@ pub enum TriggerAction {
     /// despawns the underlying entity.
     DestroyEntity {
         entity: String,
+    },
+    /// Add `enemy` to `faction`'s enemies list in the live
+    /// `FactionRegistry`. Both fields are faction `name` strings
+    /// (e.g. `"Harrow"`, `"Federation"`) and are resolved to UUIDs via
+    /// `FactionRegistry::uuid_by_name` at dispatch time.
+    ///
+    /// `is_enemy(a, b)` is asymmetric, so flipping a relationship in both
+    /// directions requires two actions. Idempotent — listing the same
+    /// enemy twice is a no-op. Unknown faction names log a warning and
+    /// skip the action.
+    ///
+    /// Used by scenarios that need to make an otherwise-neutral faction
+    /// hostile (e.g. `assets/worlds/combat_test.toml` arms the
+    /// Federation<->Harrow rivalry on world load).
+    AddFactionEnemy {
+        faction: String,
+        enemy: String,
+    },
+    /// Remove `enemy` from `faction`'s enemies list in the live
+    /// `FactionRegistry`. Mirror of `AddFactionEnemy` — same name-lookup
+    /// semantics, same asymmetric model, idempotent.
+    ///
+    /// After removal, the dispatcher re-validates all AI controllers'
+    /// blackboard targets: any controller whose `target` faction is no
+    /// longer hostile to the controller's own faction has its `target`
+    /// cleared so an in-progress engagement does not stick on a now-
+    /// friendly entity.
+    RemoveFactionEnemy {
+        faction: String,
+        enemy: String,
     },
 }
 
@@ -789,6 +826,22 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                 "destroy_entity" => TriggerAction::DestroyEntity {
                     entity: raw_action.entity.clone().ok_or_else(|| {
                         "Action 'destroy_entity' requires an 'entity' field".to_string()
+                    })?,
+                },
+                "add_faction_enemy" => TriggerAction::AddFactionEnemy {
+                    faction: raw_action.faction.clone().ok_or_else(|| {
+                        "Action 'add_faction_enemy' requires a 'faction' field".to_string()
+                    })?,
+                    enemy: raw_action.enemy.clone().ok_or_else(|| {
+                        "Action 'add_faction_enemy' requires an 'enemy' field".to_string()
+                    })?,
+                },
+                "remove_faction_enemy" => TriggerAction::RemoveFactionEnemy {
+                    faction: raw_action.faction.clone().ok_or_else(|| {
+                        "Action 'remove_faction_enemy' requires a 'faction' field".to_string()
+                    })?,
+                    enemy: raw_action.enemy.clone().ok_or_else(|| {
+                        "Action 'remove_faction_enemy' requires an 'enemy' field".to_string()
                     })?,
                 },
                 other => return Err(format!("Unknown trigger action '{}'", other)),
@@ -3569,5 +3622,103 @@ condition = "on_world_loaded"
 "#;
         let err = parse_world(toml).expect_err("must reject");
         assert!(err.contains("entity"), "error must mention entity: {err}");
+    }
+
+    #[test]
+    fn parse_world_reads_add_faction_enemy_action() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::AddFactionEnemy { faction, enemy } => {
+                assert_eq!(faction, "Harrow");
+                assert_eq!(enemy, "Federation");
+            }
+            other => panic!("expected AddFactionEnemy, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_reads_remove_faction_enemy_action() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "remove_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::RemoveFactionEnemy { faction, enemy } => {
+                assert_eq!(faction, "Harrow");
+                assert_eq!(enemy, "Federation");
+            }
+            other => panic!("expected RemoveFactionEnemy, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_add_faction_enemy_rejects_missing_faction() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type  = "add_faction_enemy"
+  enemy = "Federation"
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("faction"), "error must mention faction: {err}");
+    }
+
+    #[test]
+    fn parse_world_add_faction_enemy_rejects_missing_enemy() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("enemy"), "error must mention enemy: {err}");
+    }
+
+    #[test]
+    fn parse_world_remove_faction_enemy_rejects_missing_faction() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type  = "remove_faction_enemy"
+  enemy = "Federation"
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("faction"), "error must mention faction: {err}");
+    }
+
+    #[test]
+    fn parse_world_remove_faction_enemy_rejects_missing_enemy() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "remove_faction_enemy"
+  faction = "Harrow"
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("enemy"), "error must mention enemy: {err}");
     }
 }

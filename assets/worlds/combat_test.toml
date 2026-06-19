@@ -44,6 +44,14 @@
 #   would run. The `enemy_in_range` approach is robust and uses only
 #   existing engine mechanisms.
 #
+#   Harrow defaults to neutral so non-combat worlds (Starbase Alpha,
+#   Before the Fire) can reuse the same ship templates as ambient
+#   patrols. This scenario flips both directions of the Federation
+#   <-> Harrow relationship hostile on `on_world_loaded` via two
+#   `add_faction_enemy` actions, *before* the first wave's
+#   `enemy_in_range` tick — guaranteeing the first wave engages
+#   immediately rather than drifting past the player.
+#
 # Victory: all 8 waves destroyed → game_over "VICTORY".
 # Defeat:  Starbase Alpha destroyed → game_over "DEFEAT".
 #          Player ship destroyed → handled by the built-in apply_hull_damage
@@ -122,6 +130,31 @@ name = "Starbase Alpha"
 transform = { position = [500.0, 0.0, 100.0] }
 
 # ── Wave spawn triggers ──────────────────────────────────────────────────────
+
+# Make Harrow hostile to the Federation (and vice versa) for the duration
+# of this scenario. The faction TOMLs default both sides to neutral so the
+# same Harrow ship templates can appear as ambient patrols in non-combat
+# worlds (Starbase Alpha, Before the Fire). Two `add_faction_enemy`
+# actions flip both directions of the asymmetric `is_enemy` relationship
+# at world-load time, *before* any wave's `enemy_in_range` transition
+# ticks — guaranteeing the first wave engages on detection rather than
+# drifting past as a neutral patrol.
+#
+# Idempotent. Re-running the trigger (e.g. via load_world layering) is
+# a no-op. Faction names are case-sensitive and must match the `name`
+# field in the corresponding `assets/factions/*.toml`.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
 
 # Wave 1: destroyer at t=0
 [[trigger]]

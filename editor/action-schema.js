@@ -151,6 +151,24 @@ export const ACTION_SCHEMA = {
       { key: 'path', type: 'string', required: true },
     ],
   },
+
+  add_faction_enemy: {
+    type: 'add_faction_enemy',
+    label: 'Add Faction Enemy',
+    fields: [
+      { key: 'faction', type: 'string', required: true },
+      { key: 'enemy', type: 'string', required: true },
+    ],
+  },
+
+  remove_faction_enemy: {
+    type: 'remove_faction_enemy',
+    label: 'Remove Faction Enemy',
+    fields: [
+      { key: 'faction', type: 'string', required: true },
+      { key: 'enemy', type: 'string', required: true },
+    ],
+  },
 };
 
 /**

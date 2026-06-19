@@ -58,6 +58,50 @@ impl FactionRegistry {
     pub fn is_empty(&self) -> bool {
         self.factions.is_empty()
     }
+
+    /// Look up a faction's UUID by its human-readable `name` field
+    /// (case-sensitive exact match). Returns `None` if no faction matches.
+    ///
+    /// Used by world trigger actions that reference factions by name
+    /// (e.g. `add_faction_enemy { faction = "Harrow", enemy = "Federation" }`)
+    /// so scenario authors don't have to write raw UUIDs in TOML.
+    pub fn uuid_by_name(&self, name: &str) -> Option<Uuid> {
+        self.factions
+            .values()
+            .find(|fc| fc.name == name)
+            .map(|fc| fc.uuid)
+    }
+
+    /// Add `enemy_uuid` to `faction_uuid`'s enemies list.
+    ///
+    /// Returns `true` if the relationship was newly added, `false` if
+    /// either faction is unknown or the enemy was already listed.
+    /// Idempotent: calling twice with the same arguments is a no-op
+    /// (matching `Vec::contains` semantics).
+    pub fn add_enemy(&mut self, faction_uuid: Uuid, enemy_uuid: Uuid) -> bool {
+        let Some(fc) = self.factions.get_mut(&faction_uuid) else {
+            return false;
+        };
+        if fc.enemies.contains(&enemy_uuid) {
+            return false;
+        }
+        fc.enemies.push(enemy_uuid);
+        true
+    }
+
+    /// Remove `enemy_uuid` from `faction_uuid`'s enemies list.
+    ///
+    /// Returns `true` if the relationship was actually removed, `false`
+    /// if either faction is unknown or the enemy was not listed.
+    /// Idempotent: calling twice with the same arguments is a no-op.
+    pub fn remove_enemy(&mut self, faction_uuid: Uuid, enemy_uuid: Uuid) -> bool {
+        let Some(fc) = self.factions.get_mut(&faction_uuid) else {
+            return false;
+        };
+        let before = fc.enemies.len();
+        fc.enemies.retain(|e| *e != enemy_uuid);
+        fc.enemies.len() != before
+    }
 }
 
 /// Parse a `FactionConfig` from a TOML string.
@@ -242,10 +286,11 @@ name = "Pirate"
     }
 
     #[test]
-    fn federation_and_harrow_are_mutually_hostile() {
-        // (#472) Federation now lists Harrow as an enemy so the player
-        // ship's auto-fire engages Harrow patrols, cruisers, and
-        // battleships in the combat-test scenario (#475).
+    fn federation_and_harrow_are_neutral_by_default() {
+        // Harrow defaults to neutral so it can be reused as ambient
+        // patrols in non-combat worlds (e.g. Starbase Alpha, Before the
+        // Fire). Hostile scenarios (combat test) flip the relationship at
+        // runtime via the `add_faction_enemy` trigger action.
         let fed_toml = include_str!("../../assets/factions/federation.toml");
         let harrow_toml = include_str!("../../assets/factions/harrow.toml");
         let fed = parse_faction_config(fed_toml).unwrap();
@@ -256,12 +301,95 @@ name = "Pirate"
         reg.insert(harrow.clone());
 
         assert!(
-            is_enemy(Some(fed.uuid), Some(harrow.uuid), &reg),
-            "Federation must consider Harrow as enemies (#472)"
+            !is_enemy(Some(fed.uuid), Some(harrow.uuid), &reg),
+            "Federation must default to neutral toward Harrow"
         );
         assert!(
-            is_enemy(Some(harrow.uuid), Some(fed.uuid), &reg),
-            "Harrow must consider Federation as enemies"
+            !is_enemy(Some(harrow.uuid), Some(fed.uuid), &reg),
+            "Harrow must default to neutral toward Federation"
         );
+    }
+
+    // ── Mutators ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn uuid_by_name_finds_existing_faction() {
+        let reg = make_registry_fed_hostile_to_pirate();
+        assert_eq!(reg.uuid_by_name("Federation"), Some(fed_uuid()));
+        assert_eq!(reg.uuid_by_name("Pirate"), Some(pirate_uuid()));
+    }
+
+    #[test]
+    fn uuid_by_name_returns_none_for_unknown() {
+        let reg = make_registry_fed_hostile_to_pirate();
+        assert!(reg.uuid_by_name("Klingon").is_none());
+    }
+
+    #[test]
+    fn uuid_by_name_is_case_sensitive() {
+        let reg = make_registry_fed_hostile_to_pirate();
+        assert!(reg.uuid_by_name("federation").is_none());
+        assert!(reg.uuid_by_name("FEDERATION").is_none());
+    }
+
+    #[test]
+    fn add_enemy_creates_new_relationship() {
+        let mut reg = FactionRegistry::new();
+        let alpha = Uuid::parse_str("cccccccc-0000-0000-0000-000000000003").unwrap();
+        let beta = Uuid::parse_str("dddddddd-0000-0000-0000-000000000004").unwrap();
+        reg.insert(FactionConfig {
+            uuid: alpha,
+            name: "Alpha".to_string(),
+            enemies: vec![],
+        });
+        reg.insert(FactionConfig {
+            uuid: beta,
+            name: "Beta".to_string(),
+            enemies: vec![],
+        });
+        assert!(!is_enemy(Some(alpha), Some(beta), &reg));
+        assert!(reg.add_enemy(alpha, beta), "first add returns true");
+        assert!(is_enemy(Some(alpha), Some(beta), &reg));
+        // Asymmetric — Beta still does not consider Alpha an enemy.
+        assert!(!is_enemy(Some(beta), Some(alpha), &reg));
+    }
+
+    #[test]
+    fn add_enemy_is_idempotent() {
+        let mut reg = make_registry_fed_hostile_to_pirate();
+        // Federation already lists Pirate as an enemy.
+        assert!(!reg.add_enemy(fed_uuid(), pirate_uuid()));
+        // And the relationship hasn't been duplicated.
+        let fed = reg.get(&fed_uuid()).unwrap();
+        assert_eq!(fed.enemies.iter().filter(|u| **u == pirate_uuid()).count(), 1);
+    }
+
+    #[test]
+    fn add_enemy_returns_false_for_unknown_faction() {
+        let mut reg = make_registry_fed_hostile_to_pirate();
+        let unknown = Uuid::new_v4();
+        assert!(!reg.add_enemy(unknown, fed_uuid()));
+    }
+
+    #[test]
+    fn remove_enemy_clears_relationship() {
+        let mut reg = make_registry_fed_hostile_to_pirate();
+        assert!(is_enemy(Some(fed_uuid()), Some(pirate_uuid()), &reg));
+        assert!(reg.remove_enemy(fed_uuid(), pirate_uuid()));
+        assert!(!is_enemy(Some(fed_uuid()), Some(pirate_uuid()), &reg));
+    }
+
+    #[test]
+    fn remove_enemy_is_idempotent() {
+        let mut reg = make_registry_fed_hostile_to_pirate();
+        // Pirate has no enemies listed → removing Federation is a no-op.
+        assert!(!reg.remove_enemy(pirate_uuid(), fed_uuid()));
+    }
+
+    #[test]
+    fn remove_enemy_returns_false_for_unknown_faction() {
+        let mut reg = make_registry_fed_hostile_to_pirate();
+        let unknown = Uuid::new_v4();
+        assert!(!reg.remove_enemy(unknown, fed_uuid()));
     }
 }

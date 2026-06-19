@@ -24,6 +24,8 @@ describe('ACTION_SCHEMA', () => {
       'game_over',
       'load_world',
       'unload_world',
+      'add_faction_enemy',
+      'remove_faction_enemy',
     ];
     const schemaTypes = Object.keys(ACTION_SCHEMA).sort();
     expect(schemaTypes).toEqual([...expectedTypes].sort());
@@ -213,6 +215,39 @@ describe('validateAction', () => {
     const action = { type: 'set_ai_state', entity: 'raider', state: 'attack', target: 'player_ship' };
     const result = validateAction(action);
     expect(result.valid).toBe(true);
+  });
+
+  it('add_faction_enemy with both faction names returns valid', () => {
+    const action = { type: 'add_faction_enemy', faction: 'Harrow', enemy: 'Federation' };
+    const result = validateAction(action);
+    expect(result.valid).toBe(true);
+  });
+
+  it('add_faction_enemy missing faction returns error', () => {
+    const action = { type: 'add_faction_enemy', enemy: 'Federation' };
+    const result = validateAction(action);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('faction');
+  });
+
+  it('add_faction_enemy missing enemy returns error', () => {
+    const action = { type: 'add_faction_enemy', faction: 'Harrow' };
+    const result = validateAction(action);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('enemy');
+  });
+
+  it('remove_faction_enemy with both faction names returns valid', () => {
+    const action = { type: 'remove_faction_enemy', faction: 'Harrow', enemy: 'Federation' };
+    const result = validateAction(action);
+    expect(result.valid).toBe(true);
+  });
+
+  it('remove_faction_enemy missing faction returns error', () => {
+    const action = { type: 'remove_faction_enemy', enemy: 'Federation' };
+    const result = validateAction(action);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('faction');
   });
 });
 

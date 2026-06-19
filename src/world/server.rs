@@ -1077,7 +1077,12 @@ fn handle_respond_to_message(
     mut inbox: ResMut<CommsInboxRes>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut commands: Commands,
-    mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
+    mut ai_query: Query<(
+        &EntityUuid,
+        &mut AiControllerComponent,
+        &BehaviourSection,
+        Option<&crate::entities::spawner::FactionComponent>,
+    )>,
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
@@ -1085,6 +1090,7 @@ fn handle_respond_to_message(
     mut layer_map: Option<ResMut<WorldLayerMap>>,
     base_world_config: Option<Res<crate::world::config::WorldConfig>>,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    mut faction_dispatch: FactionDispatchParams,
 ) {
     for ev in reader.read() {
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
@@ -1192,7 +1198,7 @@ fn handle_respond_to_message(
                             continue;
                         }
                     };
-                    for (uuid_comp, mut ctrl, behaviour) in ai_query.iter_mut() {
+                    for (uuid_comp, mut ctrl, behaviour, _faction) in ai_query.iter_mut() {
                         if uuid_comp.0 != target_uuid {
                             continue;
                         }
@@ -1565,6 +1571,80 @@ fn handle_respond_to_message(
                         commands.entity(ent).despawn();
                     }
                 }
+                TriggerAction::AddFactionEnemy { faction, enemy } => {
+                    let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: AddFactionEnemy skipped: FactionRegistryResource not present"
+                        );
+                        continue;
+                    };
+                    let faction_uuid = match registry.0.uuid_by_name(faction) {
+                        Some(u) => u,
+                        None => {
+                            bevy::log::warn!(
+                                "handle_respond_to_message: AddFactionEnemy: unknown faction name '{faction}'"
+                            );
+                            continue;
+                        }
+                    };
+                    let enemy_uuid = match registry.0.uuid_by_name(enemy) {
+                        Some(u) => u,
+                        None => {
+                            bevy::log::warn!(
+                                "handle_respond_to_message: AddFactionEnemy: unknown enemy faction name '{enemy}'"
+                            );
+                            continue;
+                        }
+                    };
+                    // Idempotent. No target re-validation needed for the
+                    // add path — see handle_ai_events for the rationale.
+                    registry.0.add_enemy(faction_uuid, enemy_uuid);
+                }
+                TriggerAction::RemoveFactionEnemy { faction, enemy } => {
+                    let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveFactionEnemy skipped: FactionRegistryResource not present"
+                        );
+                        continue;
+                    };
+                    let faction_uuid = match registry.0.uuid_by_name(faction) {
+                        Some(u) => u,
+                        None => {
+                            bevy::log::warn!(
+                                "handle_respond_to_message: RemoveFactionEnemy: unknown faction name '{faction}'"
+                            );
+                            continue;
+                        }
+                    };
+                    let enemy_uuid = match registry.0.uuid_by_name(enemy) {
+                        Some(u) => u,
+                        None => {
+                            bevy::log::warn!(
+                                "handle_respond_to_message: RemoveFactionEnemy: unknown enemy faction name '{enemy}'"
+                            );
+                            continue;
+                        }
+                    };
+                    let removed = registry.0.remove_enemy(faction_uuid, enemy_uuid);
+                    if removed {
+                        let ai_factions: Vec<(uuid::Uuid, uuid::Uuid)> = ai_query
+                            .iter()
+                            .filter_map(|(uid, _, _, fc)| {
+                                let self_uuid = uuid::Uuid::parse_str(&uid.0).ok()?;
+                                fc.map(|fc| (self_uuid, fc.0))
+                            })
+                            .collect();
+                        let uuid_to_faction = build_uuid_to_faction(
+                            &faction_dispatch.non_ai_factions,
+                            &ai_factions,
+                        );
+                        revalidate_ai_targets_after_faction_change(
+                            &mut ai_query,
+                            &registry.0,
+                            &uuid_to_faction,
+                        );
+                    }
+                }
             }
         }
 
@@ -1933,15 +2013,20 @@ fn handle_ai_events(
     mut commands: Commands,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
-    mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
+    mut ai_query: Query<(
+        &EntityUuid,
+        &mut AiControllerComponent,
+        &BehaviourSection,
+        Option<&crate::entities::spawner::FactionComponent>,
+    )>,
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
-    _pending: Option<ResMut<PendingScenarioLoad>>,
     mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
     mut layer_map: Option<ResMut<WorldLayerMap>>,
     base_world_config: Option<Res<crate::world::config::WorldConfig>>,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
 ) {
     let mut world_events: Vec<WorldEvent> = Vec::new();
@@ -2184,7 +2269,7 @@ fn handle_ai_events(
                             }
                         };
                         // Find the Bevy entity with that UUID and mutate its controller.
-                        for (uuid_comp, mut ctrl, behaviour) in ai_query.iter_mut() {
+                        for (uuid_comp, mut ctrl, behaviour, _faction) in ai_query.iter_mut() {
                             if uuid_comp.0 != target_uuid {
                                 continue;
                             }
@@ -2591,6 +2676,89 @@ fn handle_ai_events(
                             commands.entity(ent).despawn();
                         }
                     }
+                    TriggerAction::AddFactionEnemy { faction, enemy } => {
+                        let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
+                            bevy::log::warn!(
+                                "handle_ai_events: AddFactionEnemy skipped: FactionRegistryResource not present"
+                            );
+                            continue;
+                        };
+                        let faction_uuid = match registry.0.uuid_by_name(faction) {
+                            Some(u) => u,
+                            None => {
+                                bevy::log::warn!(
+                                    "handle_ai_events: AddFactionEnemy: unknown faction name '{faction}'"
+                                );
+                                continue;
+                            }
+                        };
+                        let enemy_uuid = match registry.0.uuid_by_name(enemy) {
+                            Some(u) => u,
+                            None => {
+                                bevy::log::warn!(
+                                    "handle_ai_events: AddFactionEnemy: unknown enemy faction name '{enemy}'"
+                                );
+                                continue;
+                            }
+                        };
+                        // Idempotent: returns false if `enemy_uuid` is
+                        // already listed. Either way no target re-validation
+                        // is needed because adding a new hostility cannot
+                        // invalidate an existing engagement — the next
+                        // `enemy_in_range` tick organically picks up the
+                        // new relationship.
+                        registry.0.add_enemy(faction_uuid, enemy_uuid);
+                    }
+                    TriggerAction::RemoveFactionEnemy { faction, enemy } => {
+                        let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveFactionEnemy skipped: FactionRegistryResource not present"
+                            );
+                            continue;
+                        };
+                        let faction_uuid = match registry.0.uuid_by_name(faction) {
+                            Some(u) => u,
+                            None => {
+                                bevy::log::warn!(
+                                    "handle_ai_events: RemoveFactionEnemy: unknown faction name '{faction}'"
+                                );
+                                continue;
+                            }
+                        };
+                        let enemy_uuid = match registry.0.uuid_by_name(enemy) {
+                            Some(u) => u,
+                            None => {
+                                bevy::log::warn!(
+                                    "handle_ai_events: RemoveFactionEnemy: unknown enemy faction name '{enemy}'"
+                                );
+                                continue;
+                            }
+                        };
+                        let removed = registry.0.remove_enemy(faction_uuid, enemy_uuid);
+                        if removed {
+                            // Snapshot every AI controller's own faction
+                            // BEFORE we take the &mut on the query for
+                            // re-validation. `iter()` on a `&mut Query`
+                            // yields immutable refs so no borrow conflict
+                            // with the subsequent `iter_mut()`.
+                            let ai_factions: Vec<(uuid::Uuid, uuid::Uuid)> = ai_query
+                                .iter()
+                                .filter_map(|(uid, _, _, fc)| {
+                                    let self_uuid = uuid::Uuid::parse_str(&uid.0).ok()?;
+                                    fc.map(|fc| (self_uuid, fc.0))
+                                })
+                                .collect();
+                            let uuid_to_faction = build_uuid_to_faction(
+                                &faction_dispatch.non_ai_factions,
+                                &ai_factions,
+                            );
+                            revalidate_ai_targets_after_faction_change(
+                                &mut ai_query,
+                                &registry.0,
+                                &uuid_to_faction,
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -2606,6 +2774,92 @@ fn handle_ai_events(
             break;
         }
         current_events = next_events;
+    }
+}
+
+/// Build a `UUID → faction UUID` map from every entity that carries a
+/// `FactionComponent`. Used by `revalidate_ai_targets_after_faction_change`
+/// to resolve a controller's `blackboard.target` UUID back to a faction so
+/// the new `is_enemy` relationship can be evaluated.
+///
+/// The two queries cover disjoint sets of entities: `non_ai_factions`
+/// holds factioned entities without an `AiControllerComponent` (player
+/// ship, stations, factioned beacons) and the AI controllers themselves
+/// (which may also carry a faction) are gathered from `ai_factions`.
+fn build_uuid_to_faction(
+    non_ai_factions: &Query<
+        (&EntityUuid, &crate::entities::spawner::FactionComponent),
+        Without<AiControllerComponent>,
+    >,
+    ai_factions: &[(uuid::Uuid, uuid::Uuid)],
+) -> std::collections::HashMap<uuid::Uuid, uuid::Uuid> {
+    let mut map = std::collections::HashMap::new();
+    for (uid, fc) in non_ai_factions.iter() {
+        if let Ok(uuid) = uuid::Uuid::parse_str(&uid.0) {
+            map.insert(uuid, fc.0);
+        }
+    }
+    for (self_uuid, faction_uuid) in ai_factions {
+        map.insert(*self_uuid, *faction_uuid);
+    }
+    map
+}
+
+/// Bundle of system params used by the two trigger-dispatch sites for
+/// the `add_faction_enemy` / `remove_faction_enemy` actions. Grouping
+/// these keeps both `handle_ai_events` and `handle_respond_to_message`
+/// under Bevy's per-system parameter cap (16).
+///
+/// `registry` is `Option<ResMut<_>>` so test apps that don't insert
+/// `FactionRegistryResource` (most of `world::server::tests`) still load
+/// the systems without a "resource does not exist" panic. Production
+/// builds always insert the registry via `init_world_runtime`, so the
+/// `None` branch is a test-only safety net that logs and skips the
+/// action.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct FactionDispatchParams<'w, 's> {
+    pub registry: Option<ResMut<'w, crate::config_cache::FactionRegistryResource>>,
+    pub non_ai_factions: Query<
+        'w,
+        's,
+        (&'static EntityUuid, &'static crate::entities::spawner::FactionComponent),
+        Without<AiControllerComponent>,
+    >,
+}
+
+/// After a faction relationship is mutated, walk every AI controller and
+/// clear `blackboard.target` if the controller's `target` faction is no
+/// longer hostile to the controller's own faction.
+///
+/// Required because `enemy_in_range` only seeds `blackboard.target` —
+/// once set, the controller's current state (`Pursuing`, `Attacking`,
+/// `Fleeing`) keeps engaging the target via the blackboard UUID without
+/// re-checking the faction relationship. A scenario that demotes a
+/// faction from hostile to neutral via `remove_faction_enemy` would
+/// otherwise leave existing engagements stuck on a now-friendly target.
+///
+/// Controllers with no target, no faction, or a target that has no
+/// faction (factionless entities like the starbase or an asteroid) are
+/// left untouched.
+fn revalidate_ai_targets_after_faction_change(
+    ai_query: &mut Query<(
+        &EntityUuid,
+        &mut AiControllerComponent,
+        &BehaviourSection,
+        Option<&crate::entities::spawner::FactionComponent>,
+    )>,
+    registry: &crate::faction::FactionRegistry,
+    uuid_to_faction: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
+) {
+    for (_uid, mut ctrl, _bhv, self_faction_comp) in ai_query.iter_mut() {
+        let Some(target_uuid) = ctrl.controller.blackboard.target else {
+            continue;
+        };
+        let self_faction = self_faction_comp.map(|fc| fc.0);
+        let target_faction = uuid_to_faction.get(&target_uuid).copied();
+        if !crate::faction::is_enemy(self_faction, target_faction, registry) {
+            ctrl.controller.blackboard.target = None;
+        }
     }
 }
 
@@ -4783,6 +5037,266 @@ mod tests {
         assert!(
             matches!(ctrl.controller.current_state, AiState::Pursuing { .. }),
             "current_state must be Pursuing after SetAiState to 'chase'"
+        );
+    }
+
+    // -- add_faction_enemy / remove_faction_enemy dispatch tests --------------
+
+    /// Helper: fire a single trigger with the given action via
+    /// `handle_ai_events`. Uses `on_world_loaded` so we only need a
+    /// `WorldLoaded` event to fire it. Returns the post-update App so
+    /// tests can inspect mutated resources.
+    fn fire_world_loaded_action(actions: Vec<TriggerAction>) -> App {
+        let mut app = ai_trigger_test_app();
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnWorldLoaded,
+                    actions,
+                    when: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+            }];
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+        }
+        app.update();
+        app
+    }
+
+    /// Convenience: faction UUIDs from the bundled TOML asset files
+    /// (loaded by `get_faction_registry`). Centralises the literal UUIDs
+    /// so the tests can refer to them by symbolic name.
+    fn fed_faction_uuid() -> uuid::Uuid {
+        uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap()
+    }
+    fn harrow_faction_uuid() -> uuid::Uuid {
+        uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap()
+    }
+
+    #[test]
+    fn add_faction_enemy_action_makes_factions_mutually_hostile() {
+        // Pre-condition: Harrow and Federation default to neutral.
+        let app = ai_trigger_test_app();
+        {
+            let reg = &app
+                .world()
+                .resource::<crate::config_cache::FactionRegistryResource>()
+                .0;
+            assert!(
+                !crate::faction::is_enemy(
+                    Some(fed_faction_uuid()),
+                    Some(harrow_faction_uuid()),
+                    reg
+                ),
+                "precondition: Federation must not consider Harrow hostile by default"
+            );
+            assert!(
+                !crate::faction::is_enemy(
+                    Some(harrow_faction_uuid()),
+                    Some(fed_faction_uuid()),
+                    reg
+                ),
+                "precondition: Harrow must not consider Federation hostile by default"
+            );
+        }
+
+        // Fire a trigger that flips both directions hostile.
+        let app = fire_world_loaded_action(vec![
+            TriggerAction::AddFactionEnemy {
+                faction: "Harrow".into(),
+                enemy: "Federation".into(),
+            },
+            TriggerAction::AddFactionEnemy {
+                faction: "Federation".into(),
+                enemy: "Harrow".into(),
+            },
+        ]);
+
+        let reg = &app
+            .world()
+            .resource::<crate::config_cache::FactionRegistryResource>()
+            .0;
+        assert!(
+            crate::faction::is_enemy(Some(fed_faction_uuid()), Some(harrow_faction_uuid()), reg),
+            "Federation must consider Harrow hostile after add_faction_enemy"
+        );
+        assert!(
+            crate::faction::is_enemy(Some(harrow_faction_uuid()), Some(fed_faction_uuid()), reg),
+            "Harrow must consider Federation hostile after add_faction_enemy"
+        );
+    }
+
+    #[test]
+    fn add_faction_enemy_action_with_unknown_faction_name_is_noop() {
+        // The Federation registry stays unchanged when the named faction
+        // is missing. Verifies the warn-and-skip dispatch path.
+        let app = fire_world_loaded_action(vec![TriggerAction::AddFactionEnemy {
+            faction: "Klingon".into(), // not a registered faction
+            enemy: "Federation".into(),
+        }]);
+
+        let reg = &app
+            .world()
+            .resource::<crate::config_cache::FactionRegistryResource>()
+            .0;
+        // Federation's enemies list must still contain Pirate (its default)
+        // and nothing else from the AddFactionEnemy dispatch.
+        let fed = reg.get(&fed_faction_uuid()).expect("federation present");
+        let pirate_uuid =
+            uuid::Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap();
+        assert_eq!(
+            fed.enemies,
+            vec![pirate_uuid],
+            "unknown faction name must not mutate any other faction's enemy list"
+        );
+    }
+
+    #[test]
+    fn remove_faction_enemy_action_removes_relationship() {
+        // First add the relationship, then verify remove undoes it.
+        let app = fire_world_loaded_action(vec![
+            TriggerAction::AddFactionEnemy {
+                faction: "Harrow".into(),
+                enemy: "Federation".into(),
+            },
+            TriggerAction::RemoveFactionEnemy {
+                faction: "Harrow".into(),
+                enemy: "Federation".into(),
+            },
+        ]);
+
+        let reg = &app
+            .world()
+            .resource::<crate::config_cache::FactionRegistryResource>()
+            .0;
+        assert!(
+            !crate::faction::is_enemy(
+                Some(harrow_faction_uuid()),
+                Some(fed_faction_uuid()),
+                reg
+            ),
+            "remove_faction_enemy must undo the prior add_faction_enemy"
+        );
+    }
+
+    #[test]
+    fn remove_faction_enemy_action_clears_blackboard_target_when_target_becomes_friendly() {
+        // Scenario:
+        //   1. Spawn a Harrow-factioned NPC that targets a Federation
+        //      player ship (set blackboard.target manually to simulate a
+        //      prior `enemy_in_range` engagement).
+        //   2. Make Federation hostile to Harrow via add_faction_enemy
+        //      so the precondition is mutually hostile.
+        //   3. Fire remove_faction_enemy for Harrow → Federation.
+        //   4. Assert: the NPC's blackboard.target is now None (the
+        //      revalidation kicked in because target_faction is no
+        //      longer hostile to self_faction).
+        use crate::entity_config::BehaviourConfig;
+
+        let mut app = ai_trigger_test_app();
+
+        // Prepare a Federation-factioned "player ship" entity.
+        let player_uuid_str = "11111111-1111-1111-1111-111111111111";
+        let player_uuid = uuid::Uuid::parse_str(player_uuid_str).unwrap();
+        app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            EntityUuid(player_uuid_str.to_string()),
+            crate::entities::spawner::FactionComponent(fed_faction_uuid()),
+        ));
+
+        // Prepare a Harrow-factioned NPC entity with an AI behaviour.
+        let npc_uuid_str = "22222222-2222-2222-2222-222222222222";
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(10.0, 0.0, 0.0),
+                EntityUuid(npc_uuid_str.to_string()),
+                BehaviourSection(BehaviourConfig {
+                    initial_state: "idle".to_string(),
+                    state: vec![],
+                    transition: vec![],
+                    ..Default::default()
+                }),
+                crate::entities::spawner::FactionComponent(harrow_faction_uuid()),
+            ))
+            .id();
+
+        // First update: attach the AiControllerComponent.
+        app.update();
+
+        // Manually seed the engagement: NPC's blackboard.target = player.
+        {
+            let mut ctrl = app
+                .world_mut()
+                .get_mut::<AiControllerComponent>(npc_entity)
+                .expect("controller must be attached");
+            ctrl.controller.blackboard.target = Some(player_uuid);
+        }
+
+        // Bring both sides into mutual hostility, then fire
+        // remove_faction_enemy on Harrow's side. Two trigger states ⇒ the
+        // first establishes the relationship that the second tears down.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.trigger_states = vec![
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnWorldLoaded,
+                        actions: vec![
+                            TriggerAction::AddFactionEnemy {
+                                faction: "Harrow".into(),
+                                enemy: "Federation".into(),
+                            },
+                            TriggerAction::AddFactionEnemy {
+                                faction: "Federation".into(),
+                                enemy: "Harrow".into(),
+                            },
+                        ],
+                        when: None,
+                    },
+                    fired: false,
+                    origin_layer: None,
+                    seen_destroyed: HashSet::new(),
+                },
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnFlagSet {
+                            name: "peace".into(),
+                        },
+                        actions: vec![TriggerAction::RemoveFactionEnemy {
+                            faction: "Harrow".into(),
+                            enemy: "Federation".into(),
+                        }],
+                        when: None,
+                    },
+                    fired: false,
+                    origin_layer: None,
+                    seen_destroyed: HashSet::new(),
+                },
+            ];
+            runtime
+                .pending_world_events
+                .push(WorldEvent::WorldLoaded);
+            runtime.pending_world_events.push(WorldEvent::FlagSet {
+                name: "peace".into(),
+                origin_layer: None,
+            });
+        }
+
+        app.update();
+
+        // The NPC's blackboard.target must be cleared because Harrow
+        // no longer considers Federation hostile.
+        let ctrl = app
+            .world()
+            .get::<AiControllerComponent>(npc_entity)
+            .unwrap();
+        assert_eq!(
+            ctrl.controller.blackboard.target, None,
+            "remove_faction_enemy must clear blackboard.target when target is no longer hostile"
         );
     }
 
@@ -8518,6 +9032,14 @@ size_max = 2.0
                     scale: None,
                 },
                 TriggerAction::DestroyEntity { entity: "x".into() },
+                TriggerAction::AddFactionEnemy {
+                    faction: "x".into(),
+                    enemy: "y".into(),
+                },
+                TriggerAction::RemoveFactionEnemy {
+                    faction: "x".into(),
+                    enemy: "y".into(),
+                },
             ];
             // Exhaustiveness check: this match must cover every variant. If
             // a new variant is added to `TriggerAction`, this match becomes
@@ -8542,7 +9064,9 @@ size_max = 2.0
                     | TriggerAction::IncrementWorldFlag { .. }
                     | TriggerAction::SetWorldFlagValue { .. }
                     | TriggerAction::SpawnEntity { .. }
-                    | TriggerAction::DestroyEntity { .. } => {}
+                    | TriggerAction::DestroyEntity { .. }
+                    | TriggerAction::AddFactionEnemy { .. }
+                    | TriggerAction::RemoveFactionEnemy { .. } => {}
                 }
             }
             variants

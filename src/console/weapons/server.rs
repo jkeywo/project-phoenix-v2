@@ -222,6 +222,7 @@ impl Plugin for WeaponsPlugin {
                 (
                     handle_set_target.in_set(crate::sim_sets::SimSet::Input),
                     handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
+                    tick_phaser_auto_fire.in_set(crate::sim_sets::SimSet::Input),
                     handle_fire_phaser_npc.in_set(crate::sim_sets::SimSet::Damage),
                     handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
@@ -432,6 +433,96 @@ fn handle_fire_phaser(
             target_uuid: target_uuid.clone(),
         });
     }
+}
+
+/// When phaser mode is Auto, fires the first ready in-arc bank at the locked
+/// target each tick. Mirrors the arc/range guard in `handle_fire_phaser`.
+fn tick_phaser_auto_fire(
+    mut commands: Commands,
+    phaser_mode: Res<CurrentPhaserMode>,
+    weapons_target: Res<WeaponsTarget>,
+    mut beam: ResMut<ActiveBeam>,
+    cooldown: Res<PhaserCooldown>,
+    modifiers: Res<crate::modifiers::ShipModifiers>,
+    combat_config: Res<PhaserCombatConfigResource>,
+    ship: Res<ShipState>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+) {
+    if phaser_mode.0 != PhaserMode::Auto {
+        return;
+    }
+    if beam.target_uuid.is_some() {
+        return;
+    }
+    let Some(target_uuid) = &weapons_target.0 else {
+        return;
+    };
+    let Some((tx, tz)) = live_entity_xz(target_uuid, &asteroid_q, &entity_q) else {
+        return;
+    };
+
+    use crate::entity_config::PhaserCombatConfig;
+
+    // Find the first bank that is off-cooldown and has the target in its auto arc.
+    let bank_id: Option<String> = if combat_config.0.banks.is_empty() {
+        let effective_range = PhaserCombatConfig::DEFAULT_PHASER_RANGE
+            * modifiers.get(&ModifierSlot::RadarRange);
+        let ready = crate::radar::is_fire_ready_with_range(
+            tx, tz, ship.x, ship.z, ship.yaw, effective_range,
+        );
+        if ready && !cooldown.is_bank_active("") {
+            Some(String::new())
+        } else {
+            None
+        }
+    } else {
+        combat_config.0.banks.iter().find_map(|b| {
+            if cooldown.is_bank_active(&b.id) {
+                return None;
+            }
+            let bank_base_range = if b.beam_range > 0.0 {
+                b.beam_range
+            } else {
+                PhaserCombatConfig::DEFAULT_PHASER_RANGE
+            };
+            let effective_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
+            let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
+                <= effective_range * effective_range;
+            let (rx, ry) =
+                crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
+            let arc_ok = crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
+            if range_ok && arc_ok {
+                Some(b.id.clone())
+            } else {
+                None
+            }
+        })
+    };
+
+    let Some(bank_id) = bank_id else {
+        return;
+    };
+    let bank_cfg = combat_config.0.bank_by_id(&bank_id);
+    let beam_duration_secs = bank_cfg
+        .map(|b| {
+            if b.beam_duration_secs > 0.0 {
+                b.beam_duration_secs
+            } else {
+                PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS
+            }
+        })
+        .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
+
+    beam.target_uuid = Some(target_uuid.clone());
+    beam.remaining_secs = beam_duration_secs;
+    beam.damage_accumulator = 0.0;
+    beam.bank = Some(bank_id.clone());
+
+    commands.trigger(BeamStartedEvent {
+        bank: bank_id,
+        target_uuid: target_uuid.clone(),
+    });
 }
 
 /// Handles `FirePhaser` messages emitted by NPC AI controllers (tokens that

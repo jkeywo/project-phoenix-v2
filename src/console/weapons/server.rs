@@ -963,9 +963,40 @@ fn tick_torpedo_system(
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    // Virtual entities (asteroid-field anchors, region trigger volumes) are
+    // organisational/effect-only. They carry an `EntityUuid` and a non-zero
+    // `radius` in the world snapshot (from `outer_radius` or region shape),
+    // so without this filter `find_detonation_hits` treats them as giant
+    // hittable targets — and a torpedo fired anywhere inside a 350 m
+    // asteroid-field annulus detonates on the field anchor on its first
+    // physics tick. (Regression that made torpedoes invisible from the
+    // viewscreen because the sphere lifetime was a single frame.)
+    virtual_entity_q: Query<
+        &crate::entity_spawner::EntityUuid,
+        Or<(
+            With<crate::entity_spawner::AsteroidFieldSection>,
+            With<crate::entity_spawner::RegionShapeSection>,
+        )>,
+    >,
     mut weapons_target: ResMut<WeaponsTarget>,
 ) {
     let dt = time.delta_secs();
+
+    // UUIDs of virtual (non-hittable) entities — anchors / regions. Used to
+    // exclude them from the detonation target list below.
+    let virtual_uuids: std::collections::HashSet<String> =
+        virtual_entity_q.iter().map(|u| u.0.clone()).collect();
+    // World snapshot also carries virtual entities — recognise them by the
+    // shape field (`Some("torus" | "sphere" | "box")` marks a region or
+    // asteroid-field anchor). The live ECS filter above is the source of
+    // truth when the entity is present; this catches snapshot-only entries.
+    let virtual_snapshot_uuids: std::collections::HashSet<String> = world
+        .0
+        .entities
+        .iter()
+        .filter(|e| e.shape.is_some())
+        .map(|e| e.uuid.clone())
+        .collect();
 
     // Build target positions from *live* ECS transforms, falling back to the
     // (stale) WorldResource snapshot for entities not currently in the ECS.
@@ -1008,6 +1039,9 @@ fn tick_torpedo_system(
             map.insert(u.0.clone(), (t.translation.x, t.translation.z, radius));
         }
         for (u, t) in entity_q.iter() {
+            if virtual_uuids.contains(&u.0) || virtual_snapshot_uuids.contains(&u.0) {
+                continue;
+            }
             let radius = world
                 .0
                 .entities
@@ -1019,6 +1053,9 @@ fn tick_torpedo_system(
         }
         // Fill remaining from WorldResource snapshot (entities not currently in ECS).
         for e in world.0.entities.iter() {
+            if virtual_uuids.contains(&e.uuid) || virtual_snapshot_uuids.contains(&e.uuid) {
+                continue;
+            }
             map.entry(e.uuid.clone())
                 .or_insert_with(|| (e.x(), e.z(), e.radius_or_zero()));
         }
@@ -3052,6 +3089,94 @@ mod tests {
             matches!(&launched.target, Target::All),
             "TorpedoLaunched should be broadcast to All, not {:?}",
             launched.target
+        );
+    }
+
+    #[test]
+    fn torpedo_does_not_detonate_on_asteroid_field_anchor_entity() {
+        // Regression for "torpedoes don't appear when you hit fire": the
+        // default scenario seats the player ship at (280, 0, 0), 280 m from
+        // an `asteroid_field_main` anchor entity at the origin. That anchor
+        // entity carries an `[asteroid_field]` section with
+        // `outer_radius = 350`, and `EntitySnapshot.radius` is populated from
+        // that outer radius. `find_detonation_hits` treats every entity in
+        // the world with a non-zero radius as a hittable target, so the
+        // torpedo detonated on the field anchor on its first physics tick —
+        // before the firing crew ever saw a sphere on the viewscreen.
+        //
+        // Asteroid-field anchors are virtual organisational entities and
+        // must never act as torpedo detonation targets.
+        use crate::entity_spawner::{AsteroidFieldSection, EntityUuid};
+        use crate::entity_config::AsteroidFieldConfig;
+
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+
+        let field_uuid = "field-uuid".to_string();
+        // Mirror the production code path: the WorldResource snapshot for the
+        // field anchor reports radius = outer_radius.
+        app.world_mut()
+            .insert_resource(WorldResource(crate::messages::WorldData {
+                entities: vec![crate::messages::EntitySnapshot {
+                    uuid: field_uuid.clone(),
+                    position: Some([0.0, 0.0, 0.0]),
+                    radius: Some(350.0),
+                    inner_radius: Some(300.0),
+                    shape: Some("torus".into()),
+                    tags: vec!["asteroid_field".into()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }));
+        // Real ECS-side anchor entity so the live-position path also sees it.
+        app.world_mut().spawn((
+            EntityUuid(field_uuid.clone()),
+            AsteroidFieldSection(AsteroidFieldConfig {
+                inner_radius: 300.0,
+                outer_radius: 350.0,
+                density: 0.005,
+                spawn_distance: 250.0,
+                despawn_distance: 300.0,
+                asteroid_type_paths: vec![],
+                cosmetic_type_paths: vec![],
+                shape: None,
+                anchor: None,
+                anchor_offset: [0.0, 0.0, 0.0],
+                shield_pierce: 0.0,
+                tags: vec![],
+                grid: None,
+            }),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+
+        // Move the ship inside the field-anchor's "radius" (300 < 350).
+        app.world_mut().resource_mut::<ShipState>().x = 280.0;
+        load_tube_now(&mut app, "fore_port");
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: "fore_port".to_string(),
+                target_uuid: None,
+            },
+        );
+        // First tick processes the FireTorpedo; second tick is where
+        // `tick_torpedo_system` evaluates detonations against the live
+        // target list (including the field anchor at the origin).
+        tick(&mut app);
+        tick(&mut app);
+
+        let in_flight_len = app
+            .world()
+            .resource::<TorpedoSystemResource>()
+            .0
+            .in_flight
+            .len();
+        assert_eq!(
+            in_flight_len, 1,
+            "torpedo should still be in flight after ticking — the asteroid \
+             field anchor entity must not be treated as a detonation target"
         );
     }
 

@@ -1069,4 +1069,123 @@ mod tests {
         assert_eq!(to_spawn, vec!["c".to_string()]);
         assert_eq!(to_despawn, vec!["a".to_string()]);
     }
+
+    // ── sync_torpedo_entities integration tests ────────────────────────────
+    //
+    // These exercise the Bevy system end-to-end against a minimal App so a
+    // regression in the renderer pipeline (the part that turns
+    // `TorpedoSystemResource.in_flight` into visible 3D sphere entities)
+    // surfaces as a test failure instead of an invisible viewscreen.
+
+    use crate::torpedo::{TorpedoConfig, TorpedoSystem};
+
+    fn sync_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_resource::<TorpedoEntityMap>()
+            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
+                TorpedoConfig::default(),
+            )))
+            .add_systems(Update, sync_torpedo_entities);
+        app
+    }
+
+    fn push_inflight_torpedo(app: &mut App, uuid: &str, x: f32, z: f32) {
+        let mut sys = app.world_mut().resource_mut::<TorpedoSystemResource>();
+        sys.0.in_flight.push(crate::torpedo::Torpedo {
+            uuid: uuid.to_string(),
+            x,
+            z,
+            heading: 0.0,
+            lifespan_remaining: 5.0,
+            target_uuid: None,
+            source_uuid: None,
+            shield_pierce: 0.0,
+        });
+    }
+
+    fn count_torpedo_spheres(app: &mut App) -> usize {
+        let mut q = app.world_mut().query::<&TorpedoSphere>();
+        q.iter(app.world()).count()
+    }
+
+    #[test]
+    fn sync_torpedo_entities_spawns_sphere_for_each_in_flight_torpedo() {
+        let mut app = sync_test_app();
+        push_inflight_torpedo(&mut app, "t1", 10.0, 20.0);
+        push_inflight_torpedo(&mut app, "t2", -5.0, 0.0);
+
+        app.update();
+
+        assert_eq!(
+            count_torpedo_spheres(&mut app),
+            2,
+            "expected one TorpedoSphere entity per in-flight torpedo"
+        );
+        assert_eq!(
+            app.world().resource::<TorpedoEntityMap>().0.len(),
+            2,
+            "TorpedoEntityMap should track both spawned entities"
+        );
+    }
+
+    #[test]
+    fn sync_torpedo_entities_despawns_sphere_when_torpedo_leaves_in_flight() {
+        let mut app = sync_test_app();
+        push_inflight_torpedo(&mut app, "t1", 0.0, 0.0);
+        app.update();
+        assert_eq!(count_torpedo_spheres(&mut app), 1);
+
+        // Torpedo expires / detonates → leaves in_flight
+        app.world_mut()
+            .resource_mut::<TorpedoSystemResource>()
+            .0
+            .in_flight
+            .clear();
+        app.update();
+
+        assert_eq!(
+            count_torpedo_spheres(&mut app),
+            0,
+            "TorpedoSphere should be despawned when the torpedo leaves in_flight"
+        );
+        assert!(
+            app.world().resource::<TorpedoEntityMap>().0.is_empty(),
+            "TorpedoEntityMap should be empty after despawn"
+        );
+    }
+
+    #[test]
+    fn sync_torpedo_entities_updates_transform_to_match_torpedo_position() {
+        let mut app = sync_test_app();
+        push_inflight_torpedo(&mut app, "t1", 0.0, 0.0);
+        app.update();
+
+        // Torpedo moves forward
+        {
+            let mut sys = app.world_mut().resource_mut::<TorpedoSystemResource>();
+            let t = &mut sys.0.in_flight[0];
+            t.x = 42.0;
+            t.z = -17.0;
+        }
+        app.update();
+
+        let mut q = app.world_mut().query::<(&TorpedoSphere, &Transform)>();
+        let (_, transform) = q
+            .iter(app.world())
+            .next()
+            .expect("expected one TorpedoSphere entity");
+        assert!(
+            (transform.translation.x - 42.0).abs() < 1e-3,
+            "x should track torpedo x, got {}",
+            transform.translation.x
+        );
+        assert!(
+            (transform.translation.z - (-17.0)).abs() < 1e-3,
+            "z should track torpedo z, got {}",
+            transform.translation.z
+        );
+    }
 }

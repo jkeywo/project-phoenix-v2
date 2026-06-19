@@ -224,6 +224,42 @@ and the center marker uses the existing `assets/phone_border/compass-ring.png`
 and `needle.png` bitmaps so the console more closely matches the mockup's
 image-heavy treatment.
 
+## Virtual entities are excluded from torpedo detonation
+
+`tick_torpedo_system` (`src/console/weapons/server.rs:949`) builds the
+proximity-detonation target list from both live ECS entities and the
+`WorldResource` snapshot. Every entry carries an `(uuid, x, z, radius)`
+that `find_detonation_hits` (`src/weapons/torpedo.rs:498`) tests against
+each in-flight torpedo: a hit fires when
+`distance(torpedo, entity) ≤ detonation_radius + entity.radius`.
+
+Two entity kinds are **virtual** — organisational/effect-only anchors
+with no physical body that the player should pass through:
+
+- **Asteroid-field anchors** carry an `AsteroidFieldSection`. Their
+  `EntitySnapshot.radius` is populated from the field's `outer_radius`
+  (`src/server_app.rs:1081`), so a `default.toml`-style field at the
+  world origin with `outer_radius = 350` registers as a 350 m torpedo
+  target. With the player ship at `(280, 0, 0)`, every torpedo fired
+  from the ship detonated on the field anchor on its first physics
+  tick — invisible from the viewscreen because the sphere lifetime was
+  a single frame.
+- **Region trigger volumes** carry a `RegionShapeSection`. Their
+  snapshot radius comes from the region shape (`Sphere.radius`,
+  `Box.max_he`, or `Torus.outer_radius`) at `src/server_app.rs:1058`.
+
+`tick_torpedo_system` excludes both via a `virtual_entity_q` query
+(`Or<(With<AsteroidFieldSection>, With<RegionShapeSection>)>`) plus a
+shape-based filter for snapshot-only entries (anything with
+`EntitySnapshot.shape.is_some()` is treated as virtual). The exclusion
+applies to the **proximity-detonation** target list only; the homing
+`target_positions` map is left intact (locked-target homing pre-filters
+to real targets via `SetTarget` authorisation).
+
+Regression test:
+`torpedo_does_not_detonate_on_asteroid_field_anchor_entity`
+(`src/console/weapons/server.rs`).
+
 ## Sources
 
 - `src/weapons_plugin.rs`

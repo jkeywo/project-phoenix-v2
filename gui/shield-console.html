@@ -239,11 +239,6 @@
           <div><span class="k">FOCUS</span> <span class="v" id="focus-display">OMNI</span></div>
           <div><span class="k">STATUS</span> <span class="v" id="grid-status">GRID NOMINAL</span></div>
         </div>
-        <div class="hull" id="hull-display" style="display:none;">
-          <span>HULL</span>
-          <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
-          <span class="val" id="hull-val">—</span>
-        </div>
       </div>
 
       <!-- MAIN STAGE -->
@@ -669,11 +664,8 @@
     });
   </script>
   <script type="module">
-    import { initConsole, renderDamageBar } from './console-core.js';
-    var _c = initConsole({ name: 'Shields', render: function(s) {
-      _apply(s);
-      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
-    } });
+    import { initConsole } from './console-core.js';
+    var _c = initConsole({ name: 'Shields', render: function(s) { _apply(s); } });
     window._sendShieldAction = function(action, payload) { _c.sendAction(action, payload); };
   </script>
   <script>

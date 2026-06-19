@@ -495,7 +495,6 @@
         ftgt.style.color  = 'var(--ink-faint)';
       }
 
-      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
     }
 
     function _renderTargetPanel(s, blips) {
@@ -843,7 +842,7 @@
   </script>
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
-    var _c = initConsole({ name: 'Sensors', render: function(s) { _apply(s); } });
+    var _c = initConsole({ name: 'Sensors', render: function(s) { _apply(s); renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val'); } });
     window._sendSensorsAction = function(action, payload) { _c.sendAction(action, payload); };
   </script>
 

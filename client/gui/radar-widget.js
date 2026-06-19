@@ -78,7 +78,16 @@
     opts = opts || {};
 
     this._canvas       = canvasElement;
-    this._ctx          = canvasElement.getContext('2d');
+    // alpha: false makes the visible canvas an opaque surface. Any moment
+    // where the canvas buffer is cleared (canvas.width/height reassignment
+    // on DPR/size change, mid-frame compositor sampling between draws, etc.)
+    // shows opaque black instead of transparent pixels. The radar is always
+    // drawn over an opaque dark fill (#07080c) anyway, so this is visually
+    // equivalent to the rendered state and eliminates the see-through flash
+    // that exposes the rotating radar-bg-img / scan sweep / crosshairs
+    // underneath when the canvas momentarily loses content during ship
+    // motion (movement-induced flicker, helm console).
+    this._ctx          = canvasElement.getContext('2d', { alpha: false });
     this._consoleId    = opts.consoleId    || 'tactical';
     this._orientation  = opts.orientation  || 'ship_relative';
     this._clipMode     = opts.clipMode     || 'circle';
@@ -366,11 +375,11 @@
     // ── Atomic copy to visible canvas ──────────────────────────────────────
     // The offscreen canvas is opaque (filled at the top of _render), so a
     // single drawImage overwrites every pixel of the visible canvas in one
-    // GPU blit. Do NOT clearRect first — the visible canvas was created
-    // without { alpha: false }, so clearRect produces transparent pixels and
-    // the browser composites whatever sits underneath (the rotating
-    // radar-bg-img <img>) for the brief moment before drawImage lands. That
-    // is the source of the movement-induced flicker.
+    // GPU blit. Do NOT clearRect first — even with { alpha: false } on the
+    // visible context, a clear-then-draw sequence opens a window where the
+    // browser compositor can sample the canvas between the two operations
+    // and show whatever sits underneath the canvas in the DOM (rotating
+    // radar-bg-img, scan sweep, crosshairs) — the movement-induced flicker.
     if (this._offscreenCanvas) {
       this._ctx.drawImage(this._offscreenCanvas, 0, 0);
     }

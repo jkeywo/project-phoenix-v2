@@ -611,6 +611,10 @@
         if ((!impulseCharging || !_lastRadarJson) && radarJson !== _lastRadarJson) {
           _lastRadarJson = radarJson;
           _radarWidget.update(radarPayload);
+        } else if (typeof window !== 'undefined' && window.PHOENIX_RADAR_DEBUG) {
+          console.log('[helm-console] STATE SUPPRESSED (cache hit or impulse-charge)',
+            'impulseCharging=' + impulseCharging,
+            'jsonChanged=' + (radarJson !== _lastRadarJson));
         }
       }
     }
@@ -719,6 +723,28 @@
           sendAction('set_target', { uuid: uuid });
         },
       });
+    })();
+
+    // DIAG: watch the radar canvas & its surrounding DOM for unexpected
+    // mutations during motion. Toggle reporting in DevTools console:
+    //     window.PHOENIX_RADAR_DEBUG = true
+    // (No reload needed; the observer is always wired, logging is gated.)
+    (function() {
+      var radarEl = document.querySelector('.radar');
+      if (!radarEl || typeof MutationObserver === 'undefined') return;
+      var mo = new MutationObserver(function(records) {
+        if (typeof window === 'undefined' || !window.PHOENIX_RADAR_DEBUG) return;
+        records.forEach(function(r) {
+          var oldVal = r.attributeName ? ' oldVal="' + r.oldValue + '"' : '';
+          console.log('[helm-console] MUTATION',
+            'type=' + r.type,
+            'target=' + (r.target && r.target.tagName ? r.target.tagName + (r.target.id ? '#' + r.target.id : '') : '?'),
+            'attr=' + r.attributeName + oldVal,
+            'addedNodes=' + r.addedNodes.length,
+            'removedNodes=' + r.removedNodes.length);
+        });
+      });
+      mo.observe(radarEl, { attributes: true, childList: true, subtree: true, attributeOldValue: true });
     })();
 
     var sendAction = initConsole({ name: 'Helm', render: _renderConsole }).sendAction;

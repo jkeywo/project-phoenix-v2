@@ -488,4 +488,70 @@ mod tests {
         let sys = PhaserSystem::from_configs(&[b], 3.0, 50.0);
         assert_eq!(sys.bank("port").unwrap().beam_range, 25.0);
     }
+
+    // ── Production fore/aft 270° geometry at non-zero yaw ─────────────────
+    //
+    // These tests use the same `ship_local` + `in_arc` helpers the runtime
+    // gate uses (see `console::weapons::server::handle_fire_phaser`). They
+    // exercise the *actual* player ship config: fore facing 0°, aft facing
+    // 180°, each with a 270° arc — so the blind cone is the 90° wedge
+    // directly opposite each bank's facing.
+    //
+    // We sweep over a range of ship yaws to catch any rotation-frame bugs.
+
+    fn fwd_xz(yaw: f32) -> (f32, f32) {
+        // Matches `src/ship/physics.rs`: forward = (sin yaw, -cos yaw).
+        (yaw.sin(), -yaw.cos())
+    }
+
+    #[test]
+    fn fore_bank_270_rejects_target_directly_aft_at_any_yaw() {
+        for &yaw in &[0.0_f32, 0.5, 1.0, std::f32::consts::FRAC_PI_2, 2.0, PI, -1.0, -2.5] {
+            let (fwd_x, fwd_z) = fwd_xz(yaw);
+            // Place target 20 units directly behind the ship in world space.
+            let tx = -fwd_x * 20.0;
+            let tz = -fwd_z * 20.0;
+            let (rx, ry) = ship_local(tx, tz, 0.0, 0.0, yaw);
+            assert!(
+                !in_arc(rx, ry, 0.0, 270.0),
+                "fore bank (facing 0°, 270° arc) must reject directly-aft target at yaw={yaw}: rx={rx}, ry={ry}"
+            );
+        }
+    }
+
+    #[test]
+    fn aft_bank_270_rejects_target_directly_ahead_at_any_yaw() {
+        for &yaw in &[0.0_f32, 0.5, 1.0, std::f32::consts::FRAC_PI_2, 2.0, PI, -1.0, -2.5] {
+            let (fwd_x, fwd_z) = fwd_xz(yaw);
+            // Place target 20 units directly ahead of the ship in world space.
+            let tx = fwd_x * 20.0;
+            let tz = fwd_z * 20.0;
+            let (rx, ry) = ship_local(tx, tz, 0.0, 0.0, yaw);
+            assert!(
+                !in_arc(rx, ry, 180.0, 270.0),
+                "aft bank (facing 180°, 270° arc) must reject directly-ahead target at yaw={yaw}: rx={rx}, ry={ry}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_banks_accept_target_abeam_at_any_yaw() {
+        for &yaw in &[0.0_f32, 0.5, 1.0, std::f32::consts::FRAC_PI_2, 2.0, PI, -1.0, -2.5] {
+            // Right (starboard) vector: (cos yaw, sin yaw) per beam_render.rs.
+            let right_x = yaw.cos();
+            let right_z = yaw.sin();
+            // Place target 20 units directly to starboard.
+            let tx = right_x * 20.0;
+            let tz = right_z * 20.0;
+            let (rx, ry) = ship_local(tx, tz, 0.0, 0.0, yaw);
+            assert!(
+                in_arc(rx, ry, 0.0, 270.0),
+                "fore bank must accept abeam-starboard target at yaw={yaw}: rx={rx}, ry={ry}"
+            );
+            assert!(
+                in_arc(rx, ry, 180.0, 270.0),
+                "aft bank must accept abeam-starboard target at yaw={yaw}: rx={rx}, ry={ry}"
+            );
+        }
+    }
 }

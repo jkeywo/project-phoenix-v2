@@ -127,13 +127,23 @@ pub struct TorpedoTubeState {
 }
 
 /// Static, per-bank configuration sent to clients in `Welcome` so the
-/// Tactical UI can render the bank's fire arc on the radar. Only
-/// `fire_arc_deg` is exposed — `auto_arc_deg` is a server-side concern.
+/// Tactical UI can render the bank's fire arc on the radar and the
+/// per-bank cooldown bar. Only `fire_arc_deg` is exposed —
+/// `auto_arc_deg` is a server-side concern.
+///
+/// `cooldown_secs` is the bank's post-beam cooldown duration in seconds,
+/// used by the client as the denominator when rendering the per-bank
+/// cooldown bar from `PhaserBankState.cooldown_remaining`. `0.0` means
+/// the server is using its default cooldown (the client should render
+/// the bar from the live remaining value alone, capped at its own
+/// historic peak).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PhaserBankClientConfig {
     pub id: PhaserBank,
     pub facing_deg: f32,
     pub fire_arc_deg: f32,
+    #[serde(default)]
+    pub cooldown_secs: f32,
 }
 
 /// Static, per-tube configuration sent to clients in `Welcome` so the

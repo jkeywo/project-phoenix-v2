@@ -26,6 +26,11 @@ test('weapons console: __updateConsole renders banks, tubes and torpedo count', 
     ],
     torpedo_count: 7,
     phaser_mode: 'Auto',
+    // Per-bank cooldown bars need the ship-config bank list (carries cooldown_secs).
+    phaser_arcs: [
+      { id: 'fore', facing_deg: 0,   fire_arc_deg: 270, cooldown_secs: 6.0 },
+      { id: 'aft',  facing_deg: 180, fire_arc_deg: 270, cooldown_secs: 6.0 },
+    ],
   };
 
   await page.evaluate((s) => (window as any).__updateConsole('Tactical', JSON.stringify(s)), state);
@@ -34,6 +39,14 @@ test('weapons console: __updateConsole renders banks, tubes and torpedo count', 
   await expect(page.locator('#banks .bank')).toHaveCount(2);
   await expect(page.locator('.bank[data-id="fore"]')).toHaveAttribute('data-fire-ready', 'true');
   await expect(page.locator('.bank[data-id="aft"]')).toHaveAttribute('data-on-cooldown', 'true');
+
+  // Per-bank cooldown rows: one row per bank, ready/cooling state visible
+  // in the row class and value text.
+  await expect(page.locator('#phaser-cooldowns .cooldown-row')).toHaveCount(2);
+  await expect(page.locator('.cooldown-row[data-id="fore"]')).toHaveClass(/is-ready/);
+  await expect(page.locator('.cooldown-row[data-id="fore"] .value')).toHaveText('READY');
+  await expect(page.locator('.cooldown-row[data-id="aft"]')).toHaveClass(/is-cooling/);
+  await expect(page.locator('.cooldown-row[data-id="aft"] .value')).toHaveText('1.5s');
 
   // Tubes rendered.
   await expect(page.locator('#tubes .tube')).toHaveCount(2);

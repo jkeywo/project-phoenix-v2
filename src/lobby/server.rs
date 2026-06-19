@@ -132,9 +132,10 @@ fn update_session_with_config(
             next.repair_travel_secs = rc.travel_duration_secs;
             next.repair_rate_hp_per_sec = rc.repair_rate_hp_per_sec;
         }
-        // [weapons_console] — push phaser banks (id/facing/fire_arc only;
-        // auto_arc_deg stays server-side) and the beam/arc colours so the
-        // Tactical UI can render fire arcs and colour fire buttons.
+        // [weapons_console] — push phaser banks (id/facing/fire_arc/cooldown
+        // only; auto_arc_deg stays server-side) and the beam/arc colours so
+        // the Tactical UI can render fire arcs, colour fire buttons, and
+        // size the per-bank cooldown bar.
         if let Some(wc) = &ship_config.weapons_console {
             next.phaser_banks = wc
                 .phaser_banks
@@ -143,6 +144,13 @@ fn update_session_with_config(
                     id: b.id.clone(),
                     facing_deg: b.facing_deg,
                     fire_arc_deg: b.fire_arc_deg,
+                    // Mirror the server's "zero means absent" fallback so
+                    // the client always sees the real cooldown duration.
+                    cooldown_secs: if b.cooldown_secs > 0.0 {
+                        b.cooldown_secs
+                    } else {
+                        crate::entity_config::PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
+                    },
                 })
                 .collect();
             let empty_color: Vec<f32> = vec![];

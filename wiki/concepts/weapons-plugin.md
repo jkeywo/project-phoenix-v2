@@ -316,7 +316,7 @@ knowing the server-side `auto_arc_deg`:
 
 ```rust
 ShipClientConfig {
-    phaser_banks: Vec<PhaserBankClientConfig>,     // id, facing_deg, fire_arc_deg
+    phaser_banks: Vec<PhaserBankClientConfig>,     // id, facing_deg, fire_arc_deg, cooldown_secs
     torpedo_tubes: Vec<TorpedoTubeClientConfig>,   // id, facing_deg, fire_arc_deg
     phaser_beam_color: [f32; 4],
     torpedo_arc_color: [f32; 4],
@@ -325,29 +325,46 @@ ShipClientConfig {
 ```
 
 Populated by `lobby/server.rs::update_session_with_config` from the
-ship's `[weapons_console]` and `[torpedoes]` blocks.
+ship's `[weapons_console]` and `[torpedoes]` blocks. `cooldown_secs`
+mirrors the server's "zero means absent" fallback to
+`PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS` so the client always
+sees the real per-bank cooldown duration; this lets the Tactical UI
+render an accurate per-bank cooldown bar (denominator = `cooldown_secs`,
+numerator = `PhaserBankState.cooldown_remaining`).
 
 ### Client UI
 
-`src/console/weapons/client.rs` spawns the Tactical panel dynamically
-from `lobby.ship_config`. A `WeaponsPanelLayoutKey { banks, tubes }`
-resource caches the spawned layout; `respawn_weapons_on_layout_change`
-despawns and rebuilds the panel when the lobby's ship config no longer
-matches it (mirrors `respawn_weapons_on_orientation_change`). Marker
-components carry stable ids: `FirePhaserButton(String)`,
-`FirePhaserLabel(String)`, `TubeStatusLabel(TorpedoTube)`,
-`TubeRadioGroup(Vec<String>)`. Fire-button enablement and tube reload
-display delegate to per-id helpers on `ClientSimState`
-(`is_fire_button_enabled`, `is_tube_loaded`, `tube_reload_secs`).
+The Tactical console UI is **`gui/weapons-console.html`** — a static
+HTML/JS panel (no Rust client; the Bevy client was removed in #463).
+`gui/console-state.js` projects `WeaponsUpdate` (per-bank `banks` and
+per-tube `tubes`) plus the `Welcome` ship config (`phaser_arcs` /
+`torpedo_arcs`, both carrying their own `cooldown_secs` / arc data) into
+the panel's render input.
 
-Radar fire arcs are attached at panel-spawn time as a `RadarArcs`
-component on the `WeaponsRadarWidget` entity. Each arc carries
-`{ id: "phaser:<bank>" | "torpedo:<tube>", facing_deg, fire_arc_deg,
-color }`. A `RadarTargetHighlight(Option<String>)` component on the
-same widget tracks `ClientSimState::last_phaser_target`, and every blip
-spawned by `bridge_client_sim_to_weapons_radar` carries
-`RadarEntityUuid(uuid)` so the arc renderer can locate the highlighted
-target by id.
+The panel keeps stable DOM nodes per id, both for torpedo tube rows
+(`_tubeRowEls`) and per-bank cooldown rows (`_cooldownRowEls`), so 10 Hz
+state pushes don't churn click targets and bar transitions can animate.
+
+**Per-bank cooldown bars** — the `#phaser-cooldowns` block renders one
+`.cooldown-row` per bank, in ship-config order. Each row has three
+states driven by `PhaserBankState`:
+
+| Bank state | Row class | Bar | Value |
+|---|---|---|---|
+| `!on_cooldown` | `is-ready` (green) | full | `READY` |
+| `on_cooldown && cooldown_remaining ≈ 0` (beam firing) | `is-firing` (orange) | full | `FIRING` |
+| `on_cooldown && cooldown_remaining > 0` (post-beam cool) | `is-cooling` (amber) | refilling `1 - remaining/cooldown_secs` | `x.xs` countdown |
+
+The bar's denominator is `PhaserBankClientConfig.cooldown_secs` from
+`Welcome`. If a bank ships without `cooldown_secs` (defensive — should
+not happen in practice because the lobby producer always falls back to
+`PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS`), the renderer tracks
+the per-bank peak `cooldown_remaining` it has observed and uses that as
+the denominator instead.
+
+Radar fire arcs are drawn by `gui/radar-widget.js` from the
+`phaser_arcs` (per-bank) and `torpedo_arcs` (per-tube) lists projected
+into render state by `gui/console-state.js`.
 
 ### Drift guards and tests
 
@@ -358,10 +375,7 @@ target by id.
 - `tests/smoke/tactical-fire-flow.spec.ts` exercises `FirePhaser { bank }`
   on the live wire and aggregates `WeaponsUpdate.banks` for fire-ready
   detection.
-
-### Legacy HTML compat
-
-`client.html`'s legacy weapons UI (predates the Bevy tactical panel)
-aggregates `WeaponsUpdate.banks` to derive a single `fire_ready` /
-`on_cooldown` indicator and sends `FirePhaser { bank: <first ready> }`.
-This is purely backwards-compat; the Bevy panel is the authoritative UI.
+- `tests/smoke/weapons-console.spec.ts` injects bank state through
+  `__updateConsole('Tactical', …)` and asserts on per-bank
+  `.cooldown-row[data-id]` classes (`is-ready` / `is-cooling`) and the
+  countdown text (`READY` / `1.5s`).

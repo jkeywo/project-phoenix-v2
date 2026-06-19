@@ -236,6 +236,11 @@
             <span class="sub" id="hero-sub">STRATEGIC · OVERVIEW</span>
           </h1>
           <div class="spacer"></div>
+          <div class="hull" id="hull-display" style="display:none;">
+            <span>HULL</span>
+            <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+            <span class="val" id="hull-val">—</span>
+          </div>
           <div class="complexity" id="cpx-display">CAPTAIN</div>
         </header>
 
@@ -307,7 +312,7 @@
   </div>
 
   <script type="module">
-    import { initConsole } from './console-core.js';
+    import { initConsole, renderDamageBar } from './console-core.js';
 
     // ── State ────────────────────────────────────────────────────────────
     var _state         = null;
@@ -435,6 +440,8 @@
         var dirLabel = dirLabels[dir] || 'ON SCREEN';
         footerEl.textContent = 'CAPTAIN · ' + dirLabel + ' · ' + (s.red_alert ? 'RED ALERT' : 'STANDARD');
       }
+
+      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
     }
 
     var dirLabels = { Fore: 'FORE', Port: 'PORT', Starboard: 'STBD', Aft: 'AFT' };

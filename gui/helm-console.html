@@ -388,6 +388,11 @@
             <span class="sub" id="hero-sub">NAVIGATION · STATION</span>
           </h1>
           <div class="spacer"></div>
+          <div class="hull" id="hull-display" style="display:none;">
+            <span>HULL</span>
+            <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+            <span class="val" id="hull-val">—</span>
+          </div>
           <div class="complexity">CPX: STD ▾</div>
         </header>
 
@@ -518,7 +523,7 @@
   <script src="radar-widget.js"></script>
 
   <script type="module">
-    import { initConsole } from './console-core.js';
+    import { initConsole, renderDamageBar } from './console-core.js';
 
     var _state         = null;
     var _radarWidget   = null;
@@ -613,6 +618,8 @@
           _radarWidget.update(radarPayload);
         }
       }
+
+      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
     }
 
     var _stickValue = { x: 0, y: 0 };

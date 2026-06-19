@@ -263,6 +263,11 @@
         <div class="bar"></div>
         <h1>SENSORS<span class="sub">LONG RANGE · SCIENCE STATION</span></h1>
         <div class="spacer"></div>
+        <div class="hull" id="hull-display" style="display:none;">
+          <span>HULL</span>
+          <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+          <span class="val" id="hull-val">—</span>
+        </div>
         <div class="complexity" id="cpx-badge"
              style="cursor:pointer" title="Click to cycle complexity">CPX: FULL ▾</div>
       </header>
@@ -437,6 +442,7 @@
       // Single-facing NPC shield bar (#473). Use `in s` (not `!== undefined`)
       // so explicit nulls clear the previous value.
       if ('target_shield_fraction' in s) _state.target_shield_fraction = s.target_shield_fraction;
+      if ('own_hull' in s) _state.own_hull = s.own_hull;
       _render(_state);
     }
 
@@ -488,6 +494,8 @@
         ftgt.textContent  = 'NO TARGET';
         ftgt.style.color  = 'var(--ink-faint)';
       }
+
+      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
     }
 
     function _renderTargetPanel(s, blips) {
@@ -834,7 +842,7 @@
     }, 900);
   </script>
   <script type="module">
-    import { initConsole } from './console-core.js';
+    import { initConsole, renderDamageBar } from './console-core.js';
     var _c = initConsole({ name: 'Sensors', render: function(s) { _apply(s); } });
     window._sendSensorsAction = function(action, payload) { _c.sendAction(action, payload); };
   </script>

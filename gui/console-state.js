@@ -57,6 +57,10 @@ function entityMatchesObjectiveTarget(entity, targets) {
   return [entity.name, entity.id, entity.uuid].some(v => v != null && targets.has(String(v)));
 }
 
+function ownHull(consoleName, state) {
+  return (state.consoleHull || []).find(h => h.console === consoleName) || null;
+}
+
 function withObjectiveTargets(entities, objectives) {
   const targets = activeObjectiveTargetNames(objectives);
   if (targets.size === 0) return entities || [];
@@ -303,6 +307,7 @@ export function buildWeaponsConsoleState(state) {
     // Server complexity preset name (issue #461); drives [data-hideable]
     // element hiding via gui/hideable-elements.js in console-core.
     complexityPreset: state.complexity?.Tactical || 'Std',
+    own_hull: ownHull('Tactical', state),
   });
 }
 
@@ -322,6 +327,7 @@ export function buildCaptainConsoleState(state) {
                           ? 'RED ALERT — All hands to battlestations.'
                           : 'Standing by. All systems nominal.',
     blips:              state.blips       || [],
+    own_hull: ownHull('CaptainChair', state),
   });
 }
 
@@ -360,6 +366,7 @@ export function buildHelmConsoleState(state) {
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
+    own_hull: ownHull('Helm', state),
   });
 }
 
@@ -391,6 +398,7 @@ export function buildPowerConsoleState(state) {
     // Server complexity preset name (issue #461); drives [data-hideable]
     // element hiding via gui/hideable-elements.js in console-core.
     complexityPreset: state.complexity?.Power || 'Std',
+    own_hull: ownHull('Power', state),
   });
 }
 
@@ -416,6 +424,7 @@ export function buildShieldsConsoleState(state) {
     target_bearing:     targetBearing,
     grid_status:        (state.shieldFacings && state.shieldFacings.length > 0)
                           ? 'GRID NOMINAL' : 'GRID OFFLINE',
+    own_hull: ownHull('Shields', state),
   });
 }
 
@@ -507,6 +516,7 @@ export function buildSensorsConsoleState(state) {
     target_shield_freq: targetShieldFreq,
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
+    own_hull: ownHull('Sensors', state),
   });
 }
 
@@ -519,6 +529,7 @@ export function buildCommsConsoleState(state) {
     messages: state.commsMessages || [],
     contacts: state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
+    own_hull: ownHull('Comms', state),
   });
 }
 
@@ -596,6 +607,7 @@ export function buildNavigationConsoleState(state) {
     ship_x:                  state.shipX || 0,
     ship_z:                  state.shipZ || 0,
     ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
+    own_hull: ownHull('Navigation', state),
     ship_speed:              state.forwardSpeed || 0,
     impulse_charge_progress: charge,
     cancel_visible:          charge > 0,

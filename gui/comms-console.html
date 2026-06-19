@@ -296,6 +296,11 @@
           <div class="bar"></div>
           <h1>COMMS <span class="sub">COMMUNICATIONS · OFFICER</span></h1>
           <div style="flex:1"></div>
+          <div class="hull" id="hull-display" style="display:none;">
+            <span>HULL</span>
+            <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+            <span class="val" id="hull-val">—</span>
+          </div>
         </header>
 
         <!-- ── Main split: inbox (left) + chat (right) ──────────── -->
@@ -911,8 +916,12 @@
     window.__updateConsole('Comms', JSON.stringify(_DEMO));
   </script>
   <script type="module">
-    import { initConsole } from './console-core.js';
-    var _c = initConsole({ name: 'Comms', render: function(s) { _state = s; _render(s); } });
+    import { initConsole, renderDamageBar } from './console-core.js';
+    var _c = initConsole({ name: 'Comms', render: function(s) {
+      _state = s;
+      _render(s);
+      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+    } });
     window._sendCommsAction = function(action, payload) { _c.sendAction(action, payload); };
   </script>
 

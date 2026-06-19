@@ -74,6 +74,13 @@ pub struct WorldContentRuntime {
     /// Response follow-ups carry a `placeholder_id` so the inbox shows a
     /// `...` row while the trigger is pending; chained roots stay silent.
     pub pending_follow_ups: Vec<PendingFollowUp>,
+    /// `Time::elapsed_secs()` snapshot taken when the base world was loaded
+    /// (set by `init_world_runtime`). `on_timer` triggers fire when
+    /// `time.elapsed_secs() - world_loaded_at_secs >= after_secs`.
+    /// `None` while no world is loaded (lobby, fallback bootstrap), in
+    /// which case `handle_ai_events` skips emitting `TimerElapsed` events.
+    /// (#475)
+    pub world_loaded_at_secs: Option<f32>,
 }
 
 /// Resolve the current `sender_in_range` flag for an injection-time message,
@@ -616,10 +623,21 @@ fn init_world_runtime(
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut world_resource: ResMut<WorldResource>,
+    time: Option<Res<bevy::time::Time>>,
 ) {
     let Some(world_config) = world_config else {
         return;
     };
+
+    // (#475) Stamp the load-time anchor for `on_timer` triggers. All
+    // `after_secs` values are measured relative to this; `handle_ai_events`
+    // emits `WorldEvent::TimerElapsed { elapsed_secs }` each tick using
+    // `time.elapsed_secs() - world_loaded_at_secs`. `Time` is wrapped in
+    // `Option` so older test apps that don't install `TimePlugin` continue
+    // to work (they just never see `TimerElapsed` events — same as today).
+    if let Some(t) = time {
+        runtime.world_loaded_at_secs = Some(t.elapsed_secs());
+    }
 
     // Populate scenario metadata so the lobby title/description render correctly.
     world_resource.0.scenario_title = world_config.global.title.clone().unwrap_or_default();
@@ -1924,6 +1942,7 @@ fn handle_ai_events(
     mut layer_map: Option<ResMut<WorldLayerMap>>,
     base_world_config: Option<Res<crate::world::config::WorldConfig>>,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    time: Option<Res<bevy::time::Time>>,
 ) {
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in attacked_reader.read() {
@@ -1944,6 +1963,18 @@ fn handle_ai_events(
     if !runtime.pending_world_events.is_empty() {
         let drained: Vec<WorldEvent> = runtime.pending_world_events.drain(..).collect();
         world_events.extend(drained);
+    }
+    // (#475) Emit a `TimerElapsed` event each tick once the world has
+    // loaded. `on_timer` triggers fire when `elapsed_secs >= after_secs`,
+    // measured from `world_loaded_at_secs` (so `after_secs = 0` fires on
+    // the first post-load tick, and `after_secs = 300` fires 300s into
+    // the scenario regardless of how long the lobby was up beforehand).
+    // Single-shot semantics on `TriggerState.fired` prevent re-firing.
+    // `Time` is optional so test apps without `TimePlugin` continue to
+    // work (they just never see `TimerElapsed`).
+    if let (Some(t), Some(loaded_at)) = (time.as_ref(), runtime.world_loaded_at_secs) {
+        let elapsed_secs = (t.elapsed_secs() - loaded_at).max(0.0);
+        world_events.push(WorldEvent::TimerElapsed { elapsed_secs });
     }
     if world_events.is_empty() {
         return;
@@ -7740,6 +7771,127 @@ size_max = 2.0
             found,
             "spawned entity must exist in ECS with the registered UUID"
         );
+    }
+
+    /// (#475) `on_timer` triggers fire when `time.elapsed_secs() -
+    /// runtime.world_loaded_at_secs >= after_secs`. Verify the producer
+    /// in `handle_ai_events` emits `TimerElapsed` events using the
+    /// load-time anchor, and that an `on_timer` trigger correctly fires
+    /// a `spawn_entity` action.
+    #[test]
+    fn on_timer_trigger_fires_spawn_entity_action() {
+        use crate::entities::spawner::EntityUuid;
+
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+
+        // Stamp world load time to `now` and install an on_timer trigger
+        // with `after_secs = 0.0` so it should fire on the first tick.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.world_loaded_at_secs = Some(0.0);
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnTimer { after_secs: 0.0 },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "wave_now".to_string(),
+                        anchor: None,
+                        position: Some([1.0, 0.0, 1.0]),
+                        rotation: None,
+                        scale: None,
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+            }];
+        }
+
+        // Tick twice: first runs handle_ai_events which fires the trigger
+        // and queues the spawn via Commands; second flushes Commands.
+        app.update();
+        app.update();
+
+        let uuid = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("wave_now")
+            .cloned();
+        assert!(
+            uuid.is_some(),
+            "on_timer after_secs=0 must have fired its SpawnEntity action — \
+             handle_ai_events must emit TimerElapsed events when \
+             world_loaded_at_secs is set"
+        );
+
+        // And the trigger must be marked fired (single-shot).
+        let fired = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states[0]
+            .fired;
+        assert!(fired, "on_timer trigger must latch fired=true after firing");
+
+        // ECS must contain the spawned entity.
+        let uuid_val = uuid.unwrap();
+        let mut q = app.world_mut().query::<&EntityUuid>();
+        let found = q.iter(app.world()).any(|eu| eu.0 == uuid_val);
+        assert!(found, "spawned entity must exist in ECS");
+    }
+
+    /// (#475) `on_timer` triggers with `after_secs > now - world_loaded_at`
+    /// must NOT fire yet. Pin the elapsed-secs comparison.
+    #[test]
+    fn on_timer_trigger_does_not_fire_before_after_secs_elapses() {
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            // World loaded "in the future" so elapsed will be negative,
+            // clamped to 0, never satisfying after_secs = 100.
+            runtime.world_loaded_at_secs = Some(0.0);
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnTimer { after_secs: 100.0 },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "wave_future".to_string(),
+                        anchor: None,
+                        position: Some([0.0, 0.0, 0.0]),
+                        rotation: None,
+                        scale: None,
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+            }];
+        }
+
+        app.update();
+        app.update();
+
+        let uuid = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("wave_future")
+            .cloned();
+        assert!(
+            uuid.is_none(),
+            "on_timer after_secs=100 must not fire when only a few ms have elapsed"
+        );
+        let fired = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states[0]
+            .fired;
+        assert!(!fired, "trigger must not be marked fired");
     }
 
     // -- PRD #397 fix 2: comms-response action dispatch parity ----------------

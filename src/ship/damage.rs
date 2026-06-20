@@ -53,16 +53,14 @@ pub fn split_damage_for_pierce(damage: f32, shield_pierce: f32) -> (f32, f32) {
     (pierced, absorbed)
 }
 
-/// Compute collision damage to the ship hull.
+/// Compute collision damage proportional to absolute speed.
 ///
-/// Formula: `floor(clamp(5 + (forward_speed / max_speed) * 10, 5, 15))`
+/// Formula: `round(|forward_speed| * 0.5)`
 ///
-/// - At zero speed the damage is always 5.
-/// - At full speed (forward_speed == max_speed) the damage is 15.
-/// - Clamped to the range [5, 15] regardless of input.
-pub fn collision_damage(forward_speed: f32, max_speed: f32) -> i32 {
-    let raw = 5.0 + (forward_speed / max_speed) * 10.0;
-    raw.clamp(5.0, 15.0).floor() as i32
+/// - At zero speed the damage is 0.
+/// - At full impulse (~250 u/s) the damage is ~125.
+pub fn collision_damage(forward_speed: f32) -> i32 {
+    (forward_speed.abs() * 0.5).round() as i32
 }
 
 // ── ConsoleHull ───────────────────────────────────────────────────────────────
@@ -259,36 +257,24 @@ mod tests {
     // ── collision_damage formula ──────────────────────────────────────────
 
     #[test]
-    fn zero_speed_gives_minimum_damage() {
-        assert_eq!(collision_damage(0.0, 50.0), 5);
+    fn zero_speed_gives_zero_damage() {
+        assert_eq!(collision_damage(0.0), 0);
     }
 
     #[test]
-    fn max_speed_gives_maximum_damage() {
-        assert_eq!(collision_damage(50.0, 50.0), 15);
+    fn full_impulse_gives_125_damage() {
+        // 250 u/s * 0.5 = 125
+        assert_eq!(collision_damage(250.0), 125);
     }
 
     #[test]
-    fn mid_speed_floors_to_integer() {
-        // At half max speed: 5 + 0.5 * 10 = 10.0 → 10
-        assert_eq!(collision_damage(25.0, 50.0), 10);
+    fn half_impulse_rounds_correctly() {
+        assert_eq!(collision_damage(125.0), 63);
     }
 
     #[test]
-    fn one_third_speed_floors_correctly() {
-        // 5 + (1/3) * 10 = 5 + 3.333… = 8.333… → floors to 8
-        let speed = 50.0_f32 / 3.0;
-        assert_eq!(collision_damage(speed, 50.0), 8);
-    }
-
-    #[test]
-    fn above_max_speed_is_clamped_to_15() {
-        assert_eq!(collision_damage(100.0, 50.0), 15);
-    }
-
-    #[test]
-    fn negative_speed_is_clamped_to_5() {
-        assert_eq!(collision_damage(-10.0, 50.0), 5);
+    fn negative_speed_uses_absolute_value() {
+        assert_eq!(collision_damage(-100.0), 50);
     }
 
     fn near(a: f32, b: f32) -> bool {

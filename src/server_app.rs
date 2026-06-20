@@ -638,13 +638,12 @@ fn handle_collisions(
 
     if contact.is_some() {
         let speed_at_impact = ship.forward_speed;
-        ship.forward_speed = 0.0;
+        ship.forward_speed = -0.5 * speed_at_impact;
 
         if cooldown.remaining_secs > 0.0 {
             return;
         }
-        let max_speed = ShipPhysicsConfig::new().max_speed;
-        let damage = collision_damage(speed_at_impact, max_speed) as f32
+        let damage = collision_damage(speed_at_impact) as f32
             * modifiers.get(&ModifierSlot::HullDamageTaken);
 
         let bearing = contact
@@ -4424,22 +4423,21 @@ mod tests {
         }
 
         // Apply collision damage directly through the formula used in handle_collisions.
-        // Ship at zero speed: collision_damage(0, max_speed) = 5.
-        // With 0.5Ã— modifier: (5 * 0.5).round() = 3.
+        // At 200 u/s: collision_damage(200) = round(200 * 0.5) = 100.
+        // With 0.5Ã— modifier: round(100 * 0.5) = 50.
         fn near(a: f32, b: f32) -> bool {
             (a - b).abs() < 1e-6
         }
-        let max_speed = ShipPhysicsConfig::new().max_speed;
         let mods = app.world().resource::<ShipModifiers>().clone();
-        let base_damage = collision_damage(0.0, max_speed) as f32; // 5
+        let base_damage = collision_damage(200.0) as f32; // 100
         let scaled_damage = (base_damage * mods.get(&ModifierSlot::HullDamageTaken)).round();
         assert!(
-            near(base_damage, 5.0),
-            "base collision damage at zero speed should be 5"
+            near(base_damage, 100.0),
+            "collision_damage(200) should be 100"
         );
         assert!(
-            near(scaled_damage, 3.0),
-            "with 0.5Ã— modifier, damage should be 3 (round(5Ã—0.5)=3)"
+            near(scaled_damage, 50.0),
+            "with 0.5Ã— modifier, damage should be 50"
         );
 
         // Verify the hull loses only the scaled amount by triggering damage through the resource.
@@ -4460,8 +4458,8 @@ mod tests {
             .expect("expected ConsoleHullUpdate");
         let total: f32 = entries.iter().map(|c| c.current).sum();
         assert!(
-            near(total, 97.0),
-            "hull should be 100 - 3 = 97 with halved collision damage"
+            near(total, 50.0),
+            "hull should be 100 - 50 = 50 with halved collision damage"
         );
     }
 

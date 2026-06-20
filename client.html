@@ -1588,12 +1588,18 @@
             state.repairTarget = repairTarget;
           }
           if (snap.console_hull) state.consoleHull = snap.console_hull;
+          // Refresh every radar-bearing console each tick. The tactical radar
+          // blips are built client-side from ship_x/z/yaw + the entity array
+          // (same as sensors), so the weapons console must be pushed here too —
+          // otherwise it only refreshes on the sparse WeaponsUpdate/TargetLock
+          // events and the radar appears to crawl at ~1 Hz while sensors is
+          // smooth at the 10 Hz SimState cadence.
+          pushWeaponsConsoleState();
           pushRepairConsoleState();
           pushSensorsConsoleState();
           pushNavigationConsoleState();
           // Fall through to scheduleRender() so the helm + captain iframes
-          // receive updated state (the weapons console is pushed above so
-          // it doesn't need renderGame dispatch).
+          // receive updated state.
           break;
         }
         case 'WorldSetup': {

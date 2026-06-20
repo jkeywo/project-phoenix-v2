@@ -1431,6 +1431,7 @@
             // pick up the Welcome repair-team pre-seed.
             state.asteroids   = window.simState.world.entities;
             state.repairTeams = window.simState.repairTeams;
+            state.consoleHull = window.simState.consoleHull;
             // Radar ranges + arc configs from server ship_config (data-driven).
             state.weaponsRadarRange = window.simState.weaponsRadarRange;
             state.helmRadarRange    = window.simState.helmRadarRange;
@@ -1677,6 +1678,13 @@
         case 'BeamEnded': {
           state.weaponsFiring = false;
           pushWeaponsConsoleState();
+          return;
+        }
+        case 'ConsoleHullUpdate': {
+          state.consoleHull = window.simState
+            ? window.simState.consoleHull
+            : (msg.data.entries || []);
+          pushRepairConsoleState();
           return;
         }
         case 'RepairState': {

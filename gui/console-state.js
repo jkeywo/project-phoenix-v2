@@ -334,7 +334,8 @@ export function buildCaptainConsoleState(state) {
 /**
  * Helm console.
  * @param {{ shipYaw, forwardSpeed, shipX, shipZ, impulseChargeProgress,
- *           currentView, weaponsTarget, asteroids }} state
+ *           currentView, weaponsTarget, asteroids,
+ *           boostEnabled, boostBattery, boostActive }} state
  */
 export function buildHelmConsoleState(state) {
   const range = state.helmRadarRange ?? HELM_RADAR_RANGE;
@@ -366,7 +367,10 @@ export function buildHelmConsoleState(state) {
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
-    own_hull: ownHull('Helm', state),
+    own_hull:                ownHull('Helm', state),
+    boost_enabled:           !!state.boostEnabled,
+    boost_battery:           state.boostBattery        || 0,
+    boost_active:            !!state.boostActive,
   });
 }
 

@@ -104,6 +104,9 @@ impl ShipState {
             engine_thrust: 0.0,
             console_hull: vec![],
             navigation_waypoint: None,
+            boost_battery: 0.0,
+            boost_active: false,
+            boost_enabled: false,
         }
     }
 }

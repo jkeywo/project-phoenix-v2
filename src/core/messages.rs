@@ -567,6 +567,17 @@ pub struct SimSnapshot {
     /// Shared custom waypoint set by the Navigation console.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub navigation_waypoint: Option<WaypointSnapshot>,
+    /// Boost drive battery charge (0.0 empty → 1.0 full).
+    /// Defaults to 0 on clients that receive snapshots from pre-boost servers.
+    #[serde(default)]
+    pub boost_battery: f32,
+    /// True while the boost drive is engaged and draining the battery.
+    #[serde(default)]
+    pub boost_active: bool,
+    /// True when the ship's TOML provides a `[helm_console.boost]` table.
+    /// Drives client-side button visibility without a separate config request.
+    #[serde(default)]
+    pub boost_enabled: bool,
 }
 
 fn default_power_levels() -> (u8, u8, u8) {

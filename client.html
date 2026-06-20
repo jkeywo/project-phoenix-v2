@@ -674,7 +674,7 @@
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
+      shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, boostEnabled: false, boostBattery: 0, boostActive: false, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
       stations: [], maxPlayers: 0, complexity: {}, allFilled: false,
       // Weapons console iframe state (issue #422)
@@ -1566,6 +1566,9 @@
           state.shipYaw = snap.ship_yaw || 0;
           state.forwardSpeed = snap.forward_speed || 0;
           state.impulseChargeProgress = snap.impulse_charge_progress || 0;
+          state.boostEnabled = !!snap.boost_enabled;
+          state.boostBattery = snap.boost_battery || 0;
+          state.boostActive  = !!snap.boost_active;
             state.navigationWaypoint = window.simState
               ? window.simState.navigationWaypoint
               : (snap.navigation_waypoint || null);

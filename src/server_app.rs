@@ -426,6 +426,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             ship_view_mode,
             navigation_waypoint,
             current_hull,
+            boost_battery,
+            boost_active,
+            boost_enabled,
         ) = {
             let ship = world.resource::<ShipState>();
             let hull = world.resource::<ShipHullIntegrity>();
@@ -436,6 +439,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let navigation_waypoint = world
                 .get_resource::<crate::navigation_plugin::NavigationWaypoint>()
                 .and_then(|w| w.snapshot());
+            let boost = world.get_resource::<ShipBoost>();
+            let boost_config =
+                world.get_resource::<crate::ship_plugin::BoostConfigResource>();
 
             let power_levels = power
                 .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
@@ -456,6 +462,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             } else {
                 last_helm.map(|h| h.thrust.abs()).unwrap_or(0.0)
             };
+            let boost_enabled = boost_config.map(|c| c.enabled).unwrap_or(false);
+            let boost_battery = boost.map(|b| b.0.battery).unwrap_or(0.0);
+            let boost_active = boost.map(|b| b.0.is_active()).unwrap_or(false);
             (
                 power_levels,
                 flags,
@@ -469,6 +478,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 ship.view_mode.clone(),
                 navigation_waypoint,
                 current_hull,
+                boost_battery,
+                boost_active,
+                boost_enabled,
             )
         };
 
@@ -500,6 +512,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             impulse_charge_progress: charge_progress,
             engine_thrust,
             navigation_waypoint,
+            boost_battery,
+            boost_active,
+            boost_enabled,
         };
         vec![ServerMessage::SimState { snapshot }]
     })

@@ -409,6 +409,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -432,6 +435,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -455,6 +461,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -478,6 +487,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -501,6 +513,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -528,6 +543,9 @@ mod tests {
                     z: -8.0,
                     source_uuid: None,
                 }),
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -555,6 +573,9 @@ mod tests {
                     z: -8.0,
                     source_uuid: Some("anchor-entity-1".into()),
                 }),
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1467,6 +1488,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1490,6 +1514,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         // Encoding then decoding should preserve (2, 2, 2) for power_levels.
@@ -1841,6 +1868,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1873,6 +1903,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1917,6 +1950,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2440,6 +2476,9 @@ mod tests {
                 engine_thrust: 0.0,
                 console_hull: vec![],
                 navigation_waypoint: None,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

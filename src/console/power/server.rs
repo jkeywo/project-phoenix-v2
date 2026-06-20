@@ -254,9 +254,9 @@ mod tests {
     use crate::modifiers::ShipModifiers;
     use crate::shield::ShieldSystem;
     use crate::simulation::{
-    LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
-    ShipImpulse, ShipShields, SimOutbox,
-};
+        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
+        ShipImpulse, ShipShields, SimOutbox,
+    };
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);

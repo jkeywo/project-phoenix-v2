@@ -12,9 +12,9 @@ pub use radar::{
     world_size_to_px, AutoScaleRadar, BlipWorldPose, ConsoleRadar, GenericRadar,
     GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarArc, RadarArcKind,
     RadarArcs, RadarBlipClicked, RadarBlipLabels, RadarBlipMap, RadarCenter, RadarCenterPose,
-    RadarClipMode, RadarEntityUuid, RadarFilter, RadarIconLookup, RadarLastGeom,
-    RadarRegionNode, RadarTargetHighlight, RadarTargetRing, RadarViewControl, RegionRadarShape,
-    WorldCentredRadar, RADAR_MAX_ZOOM, RADAR_MIN_ZOOM,
+    RadarClipMode, RadarEntityUuid, RadarFilter, RadarIconLookup, RadarLastGeom, RadarRegionNode,
+    RadarTargetHighlight, RadarTargetRing, RadarViewControl, RegionRadarShape, WorldCentredRadar,
+    RADAR_MAX_ZOOM, RADAR_MIN_ZOOM,
 };
 
 pub mod radar;

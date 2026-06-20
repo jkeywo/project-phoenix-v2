@@ -94,16 +94,11 @@ fn collect_comms_action_paths(
 }
 
 /// Extract GLB model, radar icon, and sidecar paths from one entity config.
-fn discover_entity_config_assets(
-    config: &EntityConfig,
-    manifest: &mut AssetManifest,
-) {
+fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetManifest) {
     // GLB model + sidecar
     if let Some(ref mesh) = config.mesh {
         if let Some(ref model_path) = mesh.model {
-            let rel = model_path
-                .strip_prefix("assets/")
-                .unwrap_or(model_path);
+            let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
             if !manifest.glb_models.contains(&rel.to_string()) {
                 manifest.glb_models.push(rel.to_string());
             }
@@ -175,7 +170,12 @@ fn discover_world_assets(
 ) {
     // Walk every [[entity]] in the world
     for entity_inst in &world.entities {
-        walk_entity(&entity_inst.template_path, config_cache, seen_entities, manifest);
+        walk_entity(
+            &entity_inst.template_path,
+            config_cache,
+            seen_entities,
+            manifest,
+        );
         // If the entity has overrides with a model, we can't discover those
         // statically — they'd only be resolved at runtime. Acceptable gap.
     }
@@ -184,11 +184,19 @@ fn discover_world_assets(
     let mut entity_paths_from_triggers = Vec::new();
     let mut world_paths_from_triggers = Vec::new();
     for trigger in &world.triggers {
-        collect_action_paths(&trigger.actions, &mut entity_paths_from_triggers, &mut world_paths_from_triggers);
+        collect_action_paths(
+            &trigger.actions,
+            &mut entity_paths_from_triggers,
+            &mut world_paths_from_triggers,
+        );
     }
 
     // Walk comms responses for the same
-    collect_comms_action_paths(&world.comms, &mut entity_paths_from_triggers, &mut world_paths_from_triggers);
+    collect_comms_action_paths(
+        &world.comms,
+        &mut entity_paths_from_triggers,
+        &mut world_paths_from_triggers,
+    );
 
     // Process discovered entity paths
     for path in entity_paths_from_triggers {
@@ -333,7 +341,6 @@ impl Default for AssetPreloadResource {
 }
 
 impl AssetPreloadResource {
-
     /// Progress fraction 0.0–1.0.
     pub fn fraction(&self) -> f32 {
         if self.total_count == 0 {
@@ -387,7 +394,8 @@ pub fn begin_asset_preload(
     }
 
     // Initial discovery from base world
-    let (mut manifest, pending_worlds, base_seen_entities) = discover_base_assets(&world_config, &config_cache);
+    let (mut manifest, pending_worlds, base_seen_entities) =
+        discover_base_assets(&world_config, &config_cache);
 
     // Start loading GLB models
     let mut glb_handles = Vec::new();
@@ -645,14 +653,9 @@ pub fn poll_asset_preload(
     // are included: `registered_sidecars` only grows, and `seen_worlds`
     // tracks every world ever processed (minus the synthetic "(base)" entry).
     let total_sidecars = preload.registered_sidecars.len();
-    let total_sub_worlds = preload
-        .seen_worlds
-        .len()
-        .saturating_sub(1); // subtract "(base)"
-    preload.total_count = preload.icon_handles.len()
-        + total_sidecars
-        + total_sub_worlds
-        + preload.glb_handles.len();
+    let total_sub_worlds = preload.seen_worlds.len().saturating_sub(1); // subtract "(base)"
+    preload.total_count =
+        preload.icon_handles.len() + total_sidecars + total_sub_worlds + preload.glb_handles.len();
 
     let sidecars_done = preload.pending_sidecars.is_empty();
     let sub_worlds_done = preload.pending_sub_worlds.is_empty();
@@ -719,10 +722,9 @@ pub fn broadcast_loading_progress(
     preload.progress_sent = true;
 
     let fraction = preload.fraction();
-    outbox.0.push((
-        Target::All,
-        ServerMessage::LoadingProgress { fraction },
-    ));
+    outbox
+        .0
+        .push((Target::All, ServerMessage::LoadingProgress { fraction }));
 }
 
 /// Sends an immediate LoadingProgress(0%) on the first frame of Loading so
@@ -741,10 +743,14 @@ pub fn auto_transition_from_loading(
     mut outbox: ResMut<LobbyOutbox>,
 ) {
     if !preload.complete {
-        bevy::log::debug!("auto_transition_from_loading: preload.complete=false, staying in Loading");
+        bevy::log::debug!(
+            "auto_transition_from_loading: preload.complete=false, staying in Loading"
+        );
         return;
     }
-    bevy::log::info!("auto_transition_from_loading: preload.complete=true, transitioning to InProgress");
+    bevy::log::info!(
+        "auto_transition_from_loading: preload.complete=true, transitioning to InProgress"
+    );
     next_state.set(GamePhase::InProgress);
     // Send 100% before GameStarted so clients always see the final value,
     // even when assets completed before the 0.1s timer fired.
@@ -764,9 +770,15 @@ mod tests {
 
     #[test]
     fn icon_asset_path_capitalizes_first_letter() {
-        assert_eq!(icon_asset_path("destroyer"), "radar_icons/Icon-Destroyer.png");
+        assert_eq!(
+            icon_asset_path("destroyer"),
+            "radar_icons/Icon-Destroyer.png"
+        );
         assert_eq!(icon_asset_path("Star"), "radar_icons/Icon-Star.png");
-        assert_eq!(icon_asset_path("playerShip"), "radar_icons/Icon-PlayerShip.png");
+        assert_eq!(
+            icon_asset_path("playerShip"),
+            "radar_icons/Icon-PlayerShip.png"
+        );
     }
 
     #[test]
@@ -803,7 +815,10 @@ mod tests {
         discover_entity_config_assets(&config, &mut manifest);
 
         assert_eq!(manifest.glb_models, vec!["models/test_ship.glb"]);
-        assert!(manifest.sidecars.iter().any(|s| s.contains("test_ship.model.toml")));
+        assert!(manifest
+            .sidecars
+            .iter()
+            .any(|s| s.contains("test_ship.model.toml")));
         assert_eq!(manifest.radar_icons, vec!["radar_icons/Icon-TestShip.png"]);
     }
 

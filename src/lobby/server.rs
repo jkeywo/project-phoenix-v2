@@ -154,7 +154,11 @@ fn update_session_with_config(
                 })
                 .collect();
             let empty_color: Vec<f32> = vec![];
-            let beam_color_src = wc.phaser_banks.first().map(|b| &b.beam_color).unwrap_or(&empty_color);
+            let beam_color_src = wc
+                .phaser_banks
+                .first()
+                .map(|b| &b.beam_color)
+                .unwrap_or(&empty_color);
             if beam_color_src.len() == 4 {
                 next.phaser_beam_color = [
                     beam_color_src[0],

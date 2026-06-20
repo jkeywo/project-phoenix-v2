@@ -60,13 +60,13 @@ impl Plugin for ServerViewscreenRadarPlugin {
         }
 
         app.add_systems(Startup, spawn_viewscreen_radar_widgets)
-        .add_systems(
-            Update,
-            (
-                sync_server_radar_bridge.run_if(in_state(GamePhase::InProgress)),
-                toggle_viewscreen_radar_widgets,
-            ),
-        );
+            .add_systems(
+                Update,
+                (
+                    sync_server_radar_bridge.run_if(in_state(GamePhase::InProgress)),
+                    toggle_viewscreen_radar_widgets,
+                ),
+            );
     }
 }
 

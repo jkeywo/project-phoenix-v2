@@ -8,7 +8,7 @@ use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
-use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse};
+use crate::simulation::{Ship, ShipBoost, ShipHullIntegrity, ShipImpulse};
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Resources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -45,6 +45,30 @@ impl Default for ImpulseConfigResource {
     }
 }
 
+/// Runtime boost drive config, loaded from `[helm_console.boost]` in the entity
+/// TOML. `enabled` is false (the default) when the TOML omits the table, which
+/// disables the feature entirely.
+#[derive(Resource, Clone)]
+pub struct BoostConfigResource {
+    pub enabled: bool,
+    pub multiplier: f32,
+    pub steering_multiplier: f32,
+    pub active_duration: f32,
+    pub recharge_duration: f32,
+}
+
+impl Default for BoostConfigResource {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            multiplier: crate::boost::BOOST_MULTIPLIER,
+            steering_multiplier: crate::boost::BOOST_STEERING_MULTIPLIER,
+            active_duration: crate::boost::BOOST_ACTIVE_DURATION,
+            recharge_duration: crate::boost::BOOST_RECHARGE_DURATION,
+        }
+    }
+}
+
 /// Runtime banking config, loaded from `[helm_console] max_bank_deg` in the entity TOML.
 #[derive(Resource, Clone)]
 pub struct BankConfigResource {
@@ -77,16 +101,20 @@ impl Plugin for ShipPlugin {
         )))
         .init_resource::<LastHelmInput>()
         .init_resource::<ImpulseConfigResource>()
+        .init_resource::<BoostConfigResource>()
+        .init_resource::<ShipBoost>()
         .init_resource::<BankConfigResource>()
         .add_systems(
             Update,
             (
                 process_helm_inputs.in_set(crate::sim_sets::SimSet::Physics),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
+                tick_boost.in_set(crate::sim_sets::SimSet::Physics),
                 sync_ship_position
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .before(crate::sim_sets::AiTickLabel),
                 handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
+                handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
             )
                 .after(crate::lobby::process_lobby),
         );
@@ -106,6 +134,8 @@ fn process_helm_inputs(
     ship_physics_config: Option<Res<ShipPhysicsConfigResource>>,
     impulse: Res<ShipImpulse>,
     impulse_config: Res<ImpulseConfigResource>,
+    boost: Res<ShipBoost>,
+    boost_config: Res<BoostConfigResource>,
     bank_config: Res<BankConfigResource>,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
@@ -184,6 +214,14 @@ fn process_helm_inputs(
         };
         config.acceleration *= mult;
     }
+    // Boost drive: while engaged, multiply max speed and acceleration. Only
+    // applies when the ship's TOML enabled the feature.
+    if boost_config.enabled && boost.0.is_active() {
+        config.max_speed *= boost_config.multiplier;
+        config.max_reverse_speed *= boost_config.multiplier;
+        config.acceleration *= boost_config.multiplier;
+        config.max_yaw_rate *= boost_config.steering_multiplier;
+    }
     let result = compute_physics(state, input, dt, &config);
 
     ship.x = result.x;
@@ -252,6 +290,58 @@ fn tick_impulse(
     config: Res<ImpulseConfigResource>,
 ) {
     impulse.0.tick(time.delta_secs(), config.charge_duration);
+}
+
+/// Toggle the boost drive in response to `ToggleBoost` from the helm. No-op when
+/// the feature is disabled for this ship. Mirrors `handle_impulse_messages`,
+/// which likewise does not gate on the helm token holder.
+pub fn handle_boost_messages(
+    mut reader: MessageReader<InboundMessage>,
+    mut boost: ResMut<ShipBoost>,
+    config: Res<BoostConfigResource>,
+) {
+    if !config.enabled {
+        return;
+    }
+    for msg in reader.read() {
+        if matches!(msg.msg, ClientMessage::ToggleBoost) {
+            boost.0.toggle();
+        }
+    }
+}
+
+fn normalized_boost_drain_factor(thrust: f32, steering: f32) -> f32 {
+    thrust.clamp(-1.0, 1.0).abs() + steering.clamp(-1.0, 1.0).abs()
+}
+
+fn tick_boost(
+    time: Res<Time>,
+    mut boost: ResMut<ShipBoost>,
+    config: Res<BoostConfigResource>,
+    last_input: Res<LastHelmInput>,
+    sessions: Res<Sessions>,
+    impulse: Res<ShipImpulse>,
+) {
+    if !config.enabled {
+        return;
+    }
+    let has_helm = sessions
+        .0
+        .console_holder(crate::messages::Console::Helm)
+        .is_some();
+    let drain_factor = if !has_helm {
+        0.0
+    } else if impulse.0.is_active() {
+        normalized_boost_drain_factor(1.0, 0.0)
+    } else {
+        normalized_boost_drain_factor(last_input.thrust, last_input.steering)
+    };
+    boost.0.tick_with_drain_factor(
+        time.delta_secs(),
+        config.active_duration,
+        config.recharge_duration,
+        drain_factor,
+    );
 }
 
 fn is_inside_blocks_impulse(
@@ -694,6 +784,177 @@ mod tests {
             "zero acceleration_multiplier must fall back to const; \
              got forward_speed={}",
             ship.forward_speed
+        );
+    }
+
+    // ── Boost drive tests ─────────────────────────────────────────────
+
+    fn enabled_boost_config() -> BoostConfigResource {
+        BoostConfigResource {
+            enabled: true,
+            multiplier: 3.0,
+            steering_multiplier: 2.0,
+            active_duration: 4.0,
+            recharge_duration: 20.0,
+        }
+    }
+
+    /// With boost enabled and engaged, the ship accelerates ~3× faster than the
+    /// un-boosted baseline (multiplier applies to both accel and max speed).
+    #[test]
+    fn active_boost_triples_acceleration() {
+        let mut app = test_app();
+        app.insert_resource(enabled_boost_config());
+        start_game_with_helm_and_science(&mut app);
+        app.world_mut().resource_mut::<ShipBoost>().0.toggle(); // engage
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::HelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+            },
+        );
+        tick(&mut app);
+        let boosted = app.world().resource::<ShipState>().forward_speed;
+
+        // Baseline: identical run with boost left disabled.
+        let mut base = test_app();
+        start_game_with_helm_and_science(&mut base);
+        push(
+            &mut base,
+            "helm",
+            ClientMessage::HelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+            },
+        );
+        tick(&mut base);
+        let baseline = base.world().resource::<ShipState>().forward_speed;
+
+        assert!(baseline > 0.0, "baseline should move; got {baseline}");
+        assert!(
+            (boosted - baseline * 3.0).abs() < baseline * 0.1,
+            "boosted ({boosted}) should be ~3× baseline ({baseline})"
+        );
+    }
+
+    /// With boost enabled and engaged, steering uses the separate configured
+    /// yaw-rate multiplier.
+    #[test]
+    fn active_boost_multiplies_steering_rate() {
+        let mut app = test_app();
+        app.insert_resource(enabled_boost_config());
+        start_game_with_helm_and_science(&mut app);
+        app.world_mut().resource_mut::<ShipBoost>().0.toggle();
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::HelmInput {
+                thrust: 0.0,
+                steering: 1.0,
+            },
+        );
+        tick(&mut app);
+        let boosted_yaw = app.world().resource::<ShipState>().yaw;
+
+        let mut base = test_app();
+        start_game_with_helm_and_science(&mut base);
+        push(
+            &mut base,
+            "helm",
+            ClientMessage::HelmInput {
+                thrust: 0.0,
+                steering: 1.0,
+            },
+        );
+        tick(&mut base);
+        let baseline_yaw = base.world().resource::<ShipState>().yaw;
+
+        assert!(
+            baseline_yaw > 0.0,
+            "baseline should turn; got {baseline_yaw}"
+        );
+        assert!(
+            (boosted_yaw - baseline_yaw * 2.0).abs() < baseline_yaw * 0.1,
+            "boosted yaw ({boosted_yaw}) should be ~2× baseline ({baseline_yaw})"
+        );
+    }
+
+    #[test]
+    fn active_boost_battery_drain_scales_with_helm_demand() {
+        let mut app = test_app();
+        app.insert_resource(enabled_boost_config());
+        start_game_with_helm_and_science(&mut app);
+
+        {
+            let mut boost = app.world_mut().resource_mut::<ShipBoost>();
+            boost.0.toggle();
+        }
+        {
+            let mut last_input = app.world_mut().resource_mut::<LastHelmInput>();
+            last_input.thrust = 1.0;
+            last_input.steering = 1.0;
+        }
+
+        tick(&mut app);
+
+        let battery = app.world().resource::<ShipBoost>().0.battery;
+        assert!(
+            (battery - 0.9).abs() < 0.001,
+            "full thrust + full steering should drain twice the base rate; got {battery}"
+        );
+    }
+
+    #[test]
+    fn active_boost_battery_does_not_drain_with_idle_helm() {
+        let mut app = test_app();
+        app.insert_resource(enabled_boost_config());
+        start_game_with_helm_and_science(&mut app);
+
+        {
+            let mut boost = app.world_mut().resource_mut::<ShipBoost>();
+            boost.0.toggle();
+        }
+
+        tick(&mut app);
+
+        let battery = app.world().resource::<ShipBoost>().0.battery;
+        assert!(
+            (battery - 1.0).abs() < f32::EPSILON,
+            "idle helm should not spend boost battery; got {battery}"
+        );
+    }
+
+    /// A `ToggleBoost` message engages the drive only when the feature is
+    /// enabled for this ship.
+    #[test]
+    fn toggle_boost_engages_when_enabled() {
+        let mut app = test_app();
+        app.insert_resource(enabled_boost_config());
+        start_game_with_helm_and_science(&mut app);
+
+        push(&mut app, "helm", ClientMessage::ToggleBoost);
+        tick(&mut app);
+        assert!(app.world().resource::<ShipBoost>().0.is_active());
+
+        push(&mut app, "helm", ClientMessage::ToggleBoost);
+        tick(&mut app);
+        assert!(!app.world().resource::<ShipBoost>().0.is_active());
+    }
+
+    /// When boost is disabled (no TOML), `ToggleBoost` is ignored and the
+    /// multiplier never applies even if the state were somehow active.
+    #[test]
+    fn toggle_boost_ignored_when_disabled() {
+        let mut app = test_app(); // BoostConfigResource defaults to disabled
+        start_game_with_helm_and_science(&mut app);
+
+        push(&mut app, "helm", ClientMessage::ToggleBoost);
+        tick(&mut app);
+        assert!(
+            !app.world().resource::<ShipBoost>().0.is_active(),
+            "ToggleBoost must be a no-op when boost is disabled"
         );
     }
 

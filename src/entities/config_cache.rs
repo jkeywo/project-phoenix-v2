@@ -18,11 +18,8 @@
 
 #[cfg(target_arch = "wasm32")]
 use {
-    crate::entity_config::EntityConfig,
-    bevy::prelude::*,
-    js_sys::Function,
-    std::collections::VecDeque,
-    wasm_bindgen::prelude::*,
+    crate::entity_config::EntityConfig, bevy::prelude::*, js_sys::Function,
+    std::collections::VecDeque, wasm_bindgen::prelude::*,
 };
 
 // `RefCell` + `HashMap` are used by both the WASM thread-locals AND the

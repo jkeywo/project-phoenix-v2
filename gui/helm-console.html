@@ -22,13 +22,14 @@
     }
     .panel-mid > .radar-col   { flex: 1; display: flex; flex-direction: column; gap: 14px; min-height: 0; min-width: 0; }
     .panel-mid > .ctrl-col    { width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 18px; min-height: 0; }
-    .hero h1 { font-size: 48px; letter-spacing: 0.30em; }
-    .hero h1 .sub { font-size: 14px; margin-top: 2px; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; }
+    .hero h1 .sub { font-size: 12px; margin-top: 2px; }
     .hero .bar { width: 6px; }
-    .hero { gap: 18px; }
+    .hero { gap: 12px; padding: 4px 0; }
 
     .radar-col .radar-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: 100%; max-height: 720px; max-width: 720px; display: flex; align-items: center; justify-content: center; }
+    /* Radar fills the full available height in landscape (no fixed cap). */
+    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: 100%; max-height: none; max-width: 100%; display: flex; align-items: center; justify-content: center; }
     .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }
 
     .ctrl-col .stick-area { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
@@ -272,6 +273,32 @@
       animation: none;
       opacity: 0.35;
     }
+    .boost-battery-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .boost-battery-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--ink-faint);
+    }
+    .boost-battery-track {
+      flex: 1;
+      height: 8px;
+      background: var(--bg-deep);
+      border: 1px solid var(--line-faint);
+    }
+    .boost-battery-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, var(--amber, #d8a23a), var(--amber, #f0c057));
+      transform: scaleX(1);
+      transform-origin: left;
+      transition: none;
+    }
   /* ── Landscape: compact for phone screens ──────────────────── */
   @media (orientation: landscape) and (max-width: 900px) {
     .panel-inner { padding: 14px 20px 16px; gap: 8px; }
@@ -291,7 +318,7 @@
     .readout .v { font-size: 24px; }
     .radar-col > .readout { padding: 6px 14px; }
     .radar-col > .readout .v { font-size: 18px; }
-    .radar-col .radar-surround-frame { max-height: 50vh; max-width: 50vh; }
+    .radar-col .radar-surround-frame { max-height: none; max-width: 100%; }
     .helm-readout-overlay { font-size: 10px; }
     .helm-readout-overlay .v { font-size: 11px; }
     .readout-hdg { top: 8px; left: 12%; }
@@ -338,7 +365,8 @@
     .side-rail { display: none; }
 
     .radar-col .radar-wrap { min-height: 35vh; }
-    .radar-col .radar-surround-frame { max-height: none; max-width: none; }
+    /* Portrait: radar fills the full available width. */
+    .radar-col .radar-surround-frame { width: 100%; height: auto; max-height: none; max-width: none; }
     .radar-col > .readout { padding: 0.4rem 0.6rem; }
     .radar-col > .readout .v { font-size: 1.25rem; }
 
@@ -503,6 +531,16 @@
                 <span class="label">IMPULSE</span>
               </button>
             </div>
+            <div class="boost-control" id="boost-control" style="display:none;">
+              <button id="boost-btn" class="btn" type="button">
+                <span class="btn-bg"></span>
+                <span class="led" id="boost-led"></span>
+                <span class="label">BOOST</span>
+              </button>
+              <div class="boost-battery-track">
+                <div class="boost-battery-fill" id="boost-battery-fill"></div>
+              </div>
+            </div>
           </section>
 
         </div>
@@ -595,6 +633,24 @@
         if (radarEl) radarEl.classList.remove('impulse-stabilized');
         if (impulseLed.className !== 'led') impulseLed.className = 'led';
         if (impulseBtn.className !== 'btn') impulseBtn.className = 'btn';
+      }
+
+      var boostBtn = document.getElementById('boost-btn');
+      var boostWrap = document.getElementById('boost-battery-wrap');
+      if (s.boost_enabled) {
+        boostBtn.style.display = '';
+        boostWrap.style.display = '';
+        var batt = s.boost_battery || 0;
+        document.getElementById('boost-battery-fill').style.transform = 'scaleX(' + batt + ')';
+        var boostLed = document.getElementById('boost-led');
+        var boostLedTarget = s.boost_active ? 'led on' : 'led';
+        if (boostLed.className !== boostLedTarget) boostLed.className = boostLedTarget;
+        // engaged → danger; empty & idle → disabled (can't engage); else ready.
+        var boostCls = s.boost_active ? 'btn danger' : (batt <= 0 ? 'btn disabled' : 'btn');
+        if (boostBtn.className !== boostCls) boostBtn.className = boostCls;
+      } else {
+        boostBtn.style.display = 'none';
+        boostWrap.style.display = 'none';
       }
 
       var footerMode = document.getElementById('footer-mode');
@@ -714,6 +770,10 @@
 
     document.getElementById('cancel-impulse-btn').addEventListener('click', function() {
       sendAction('cancel_impulse', {});
+    });
+
+    document.getElementById('boost-btn').addEventListener('click', function() {
+      sendAction('toggle_boost', {});
     });
 
     _radarWidget = (function() {

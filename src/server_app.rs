@@ -82,6 +82,11 @@ pub struct ShipShields(pub ShieldSystem);
 #[derive(Resource)]
 pub struct ShipImpulse(pub ImpulseState);
 
+/// The ship's boost drive battery state. Toggle/partial-drain model; only
+/// active when the ship's TOML enables it (see `BoostConfigResource`).
+#[derive(Resource, Default)]
+pub struct ShipBoost(pub crate::boost::BoostState);
+
 /// Carries the reason string when the game ends. Set to `Some(reason)` before
 /// transitioning to `GamePhase::GameOver`. The `OnEnter(GameOver)` system reads
 /// this resource and broadcasts the reason to all clients.
@@ -194,6 +199,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     ])))
     .insert_resource(ShipShields(ShieldSystem::default()))
     .insert_resource(ShipImpulse(ImpulseState::new()))
+    .insert_resource(ShipBoost(crate::boost::BoostState::new()))
     .insert_resource(crate::config_cache::FactionRegistryResource(
         crate::config_cache::get_faction_registry(),
     ))
@@ -308,7 +314,11 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 .filter_map(|(uuid, hull_comp, shield_comp)| {
                     let hull_fraction = hull_comp.map(|h| {
                         let max = h.0.total_max();
-                        if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+                        if max > 0.0 {
+                            h.0.total_current() / max
+                        } else {
+                            1.0
+                        }
                     });
                     let shield_fraction = shield_comp.map(|s| s.fraction());
                     // Omit entry entirely when there is nothing to update.
@@ -344,11 +354,21 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 .map(|(transform, uuid, hull_comp, shield_comp)| {
                     let hull_fraction = hull_comp.map(|h| {
                         let max = h.0.total_max();
-                        if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+                        if max > 0.0 {
+                            h.0.total_current() / max
+                        } else {
+                            1.0
+                        }
                     });
                     let shield_fraction = shield_comp.map(|s| s.fraction());
                     let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
-                    (uuid.0.clone(), transform.translation, yaw, hull_fraction, shield_fraction)
+                    (
+                        uuid.0.clone(),
+                        transform.translation,
+                        yaw,
+                        hull_fraction,
+                        shield_fraction,
+                    )
                 })
                 .collect()
         };
@@ -356,7 +376,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         // Compare against last-broadcast positions; only include position/yaw
         // when the entity actually moved (delta > ~1 cm).
         const POS_THRESHOLD_SQ: f32 = 0.0001; // 0.01 world-unit radius
-        const YAW_THRESHOLD: f32 = 0.001;     // ~0.057 degrees
+        const YAW_THRESHOLD: f32 = 0.001; // ~0.057 degrees
         let npc_states: Vec<crate::messages::EntityStateSnapshot> = {
             let mut last = world.resource_mut::<LastBroadcastEntityPositions>();
             npc_raw
@@ -390,10 +410,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 .collect()
         };
 
-        let entity_states: Vec<_> = asteroid_states
-            .into_iter()
-            .chain(npc_states)
-            .collect();
+        let entity_states: Vec<_> = asteroid_states.into_iter().chain(npc_states).collect();
 
         // ── Extract ship state and hull (borrows confined to this block).
         let (
@@ -1480,7 +1497,13 @@ fn spawn_game_start_entities(
                     first_bank.map(|b| &b.beam_color).unwrap_or(&vec![]),
                 );
                 let beam_range = first_bank
-                    .map(|b| if b.beam_range > 0.0 { b.beam_range } else { 40.0 })
+                    .map(|b| {
+                        if b.beam_range > 0.0 {
+                            b.beam_range
+                        } else {
+                            40.0
+                        }
+                    })
                     .unwrap_or(40.0);
                 commands.insert_resource(PhaserRenderConfig {
                     beam_color,
@@ -1581,6 +1604,21 @@ fn spawn_game_start_entities(
                         acceleration_multiplier: hc.impulse_acceleration_multiplier,
                     });
             commands.insert_resource(impulse_cfg.unwrap_or_default());
+
+            // Boost config from [helm_console.boost] TOML. Absent table ⇒
+            // feature disabled (default resource has `enabled: false`).
+            let boost_cfg = config
+                .helm_console
+                .as_ref()
+                .and_then(|hc| hc.boost.as_ref())
+                .map(|b| crate::ship_plugin::BoostConfigResource {
+                    enabled: true,
+                    multiplier: b.multiplier,
+                    steering_multiplier: b.steering_multiplier,
+                    active_duration: b.active_duration,
+                    recharge_duration: b.recharge_duration,
+                });
+            commands.insert_resource(boost_cfg.unwrap_or_default());
 
             // Bank config from [helm_console] TOML, or default
             let bank_cfg =
@@ -1831,7 +1869,10 @@ fn render_spawned_entities(
                 // `Assets<Scene>`, so the `scenes.get(...).is_some()` check would
                 // spin forever. Mark such entities `RenderProcessed` so we stop
                 // retrying them every frame, and warn once per entity.
-                if matches!(asset_server.load_state(scene.id()), bevy::asset::LoadState::Failed(_)) {
+                if matches!(
+                    asset_server.load_state(scene.id()),
+                    bevy::asset::LoadState::Failed(_)
+                ) {
                     bevy::log::warn!(
                         "render_spawned_entities: GLB failed to load for entity {entity:?}, path={model_path} — entity will exist without a mesh"
                     );
@@ -2082,78 +2123,78 @@ mod tests {
                 .chain(),
         )
         .add_plugins(LobbyPlugin)
-            .add_plugins(bevy::time::TimePlugin)
-            // Advance time by 200 ms per tick so Hz-based SimBroadcaster timers
-            // (period = 100 ms) always fire within a single update call.
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
-            .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-                (Console::Power, 25.0),
-                (Console::Shields, 25.0),
-            ])))
-            .insert_resource(ShipShields(ShieldSystem::default()))
-            .insert_resource(ShipImpulse(ImpulseState::new()))
-            .init_resource::<WorldResource>()
-            .insert_resource(crate::modifiers::ShipModifiers::new())
-            .init_resource::<TrackedEntities>()
-            .insert_resource(SimBroadcastTimer(Timer::new(
-                std::time::Duration::from_nanos(1),
-                TimerMode::Repeating,
-            )))
-            .init_resource::<WorldSetupBroadcast>()
-            .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
-            .insert_resource(test_complexity_rules())
-            .init_resource::<SimOutbox>()
-            .init_resource::<LastBroadcastEntityPositions>()
-            .init_resource::<LastBroadcastHull>()
-            .init_resource::<LastBroadcastShields>()
-            .init_resource::<Outbox>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
-            .add_plugins(crate::captain_plugin::CaptainPlugin)
-            .add_plugins(crate::weapons_plugin::WeaponsPlugin)
-            .add_plugins(crate::repair_plugin::RepairPlugin)
-            .add_plugins(crate::power_plugin::PowerPlugin)
-            .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
-            .add_plugins(crate::science_plugin::SciencePlugin)
-            .add_plugins(crate::comms_plugin::CommsConsolePlugin)
-            .add_systems(
-                OnEnter(GamePhase::InProgress),
-                reset_broadcast_caches_on_start,
-            )
-            .add_systems(
-                Update,
-                (
-                    handle_set_sensors_target,
-                    handle_impulse_messages,
-                    handle_set_shield_focus,
-                    broadcast_shield_status,
-                    reconcile_runtime_entities
-                        .after(crate::lobby::process_lobby)
-                        .before(broadcast_world_setup_on_start),
-                    broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-                    refresh_caches_on_midgame_reconnect.after(crate::lobby::process_lobby),
-                ),
-            )
-            .add_systems(
-                Update,
-                crate::modifier_coordination::translate_power_modifiers
-                    .after(crate::power_plugin::handle_power_messages)
-                    .after(crate::power_plugin::tick_power_system),
-            )
-            .add_systems(
-                Update,
-                crate::modifier_coordination::translate_impulse_modifiers
-                    .after(handle_impulse_messages),
-            )
-            .add_systems(Update, sim_processing_anchor)
-            .add_plugins(weapons_update_broadcaster())
-            .add_plugins(sim_state_broadcaster())
-            .add_plugins(modifier_events_broadcaster())
-            .add_systems(PostUpdate, collect);
+        .add_plugins(bevy::time::TimePlugin)
+        // Advance time by 200 ms per tick so Hz-based SimBroadcaster timers
+        // (period = 100 ms) always fire within a single update call.
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(200),
+        ))
+        .insert_resource(ShipState::new())
+        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+            (Console::Helm, 25.0),
+            (Console::Tactical, 25.0),
+            (Console::Power, 25.0),
+            (Console::Shields, 25.0),
+        ])))
+        .insert_resource(ShipShields(ShieldSystem::default()))
+        .insert_resource(ShipImpulse(ImpulseState::new()))
+        .init_resource::<WorldResource>()
+        .insert_resource(crate::modifiers::ShipModifiers::new())
+        .init_resource::<TrackedEntities>()
+        .insert_resource(SimBroadcastTimer(Timer::new(
+            std::time::Duration::from_nanos(1),
+            TimerMode::Repeating,
+        )))
+        .init_resource::<WorldSetupBroadcast>()
+        .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
+        .insert_resource(test_complexity_rules())
+        .init_resource::<SimOutbox>()
+        .init_resource::<LastBroadcastEntityPositions>()
+        .init_resource::<LastBroadcastHull>()
+        .init_resource::<LastBroadcastShields>()
+        .init_resource::<Outbox>()
+        .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+        .add_plugins(crate::captain_plugin::CaptainPlugin)
+        .add_plugins(crate::weapons_plugin::WeaponsPlugin)
+        .add_plugins(crate::repair_plugin::RepairPlugin)
+        .add_plugins(crate::power_plugin::PowerPlugin)
+        .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
+        .add_plugins(crate::science_plugin::SciencePlugin)
+        .add_plugins(crate::comms_plugin::CommsConsolePlugin)
+        .add_systems(
+            OnEnter(GamePhase::InProgress),
+            reset_broadcast_caches_on_start,
+        )
+        .add_systems(
+            Update,
+            (
+                handle_set_sensors_target,
+                handle_impulse_messages,
+                handle_set_shield_focus,
+                broadcast_shield_status,
+                reconcile_runtime_entities
+                    .after(crate::lobby::process_lobby)
+                    .before(broadcast_world_setup_on_start),
+                broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
+                refresh_caches_on_midgame_reconnect.after(crate::lobby::process_lobby),
+            ),
+        )
+        .add_systems(
+            Update,
+            crate::modifier_coordination::translate_power_modifiers
+                .after(crate::power_plugin::handle_power_messages)
+                .after(crate::power_plugin::tick_power_system),
+        )
+        .add_systems(
+            Update,
+            crate::modifier_coordination::translate_impulse_modifiers
+                .after(handle_impulse_messages),
+        )
+        .add_systems(Update, sim_processing_anchor)
+        .add_plugins(weapons_update_broadcaster())
+        .add_plugins(sim_state_broadcaster())
+        .add_plugins(modifier_events_broadcaster())
+        .add_systems(PostUpdate, collect);
         app
     }
 

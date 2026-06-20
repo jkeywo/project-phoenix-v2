@@ -1191,7 +1191,6 @@ max_hp = 50.0
         assert_eq!(shields.regen_per_sec, 0.0, "regen defaults to 0");
     }
 
-
     #[test]
     fn hull_integrity_maps_to_captain_chair_slot() {
         // Stations and asteroids still use hull_integrity in TOML â€” must keep working.
@@ -1238,5 +1237,4 @@ max_hp = 50.0
         let entries = hull_comp.0.entries();
         assert_eq!(entries[0].0, crate::messages::Console::CaptainChair);
     }
-
 }

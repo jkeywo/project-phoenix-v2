@@ -741,7 +741,9 @@ fn tick_attacking(
     let mut inputs = vec![AiInput::Helm { thrust, steering }];
 
     // Fire phasers when in beam range and ready.
-    let beam_range = world_view.entity_weapons_range.unwrap_or(crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
+    let beam_range = world_view
+        .entity_weapons_range
+        .unwrap_or(crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
     if dist <= beam_range && world_view.entity_phaser_ready {
         inputs.push(AiInput::SetTarget { uuid: target_uuid });
         inputs.push(AiInput::FirePhaser);
@@ -921,7 +923,9 @@ fn evaluate_transitions(
             }
             "in_weapons_range" => {
                 // Fires when the blackboard target is within the entity's weapons range.
-                let weapons_range = world_view.entity_weapons_range.unwrap_or(crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
+                let weapons_range = world_view
+                    .entity_weapons_range
+                    .unwrap_or(crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
                 if let Some(target_uuid) = controller.blackboard.target {
                     let pos = world_view.entity_pos;
                     let in_range = world_view.entities.iter().any(|e| {

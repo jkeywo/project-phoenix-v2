@@ -806,8 +806,7 @@ fn handle_hail(
             // for follow-ups, not roots — the template-level `trigger`
             // already controls when the root arrives.
             let msg_id = uuid::Uuid::new_v4().to_string();
-            let responses: Vec<String> =
-                f.node.responses.iter().map(|r| r.text.clone()).collect();
+            let responses: Vec<String> = f.node.responses.iter().map(|r| r.text.clone()).collect();
             let msg = CommsMessage {
                 id: msg_id.clone(),
                 sender_uuid: sender_uuid.clone(),
@@ -913,8 +912,7 @@ fn tick_pending_follow_ups(
     let live_uuids: HashSet<String> = entity_uuid_q.iter().map(|u| u.0.clone()).collect();
 
     let mut ready: Vec<PendingFollowUp> = Vec::new();
-    let mut keep: Vec<PendingFollowUp> =
-        Vec::with_capacity(runtime.pending_follow_ups.len());
+    let mut keep: Vec<PendingFollowUp> = Vec::with_capacity(runtime.pending_follow_ups.len());
 
     for mut pfu in runtime.pending_follow_ups.drain(..) {
         pfu.elapsed_secs += dt;
@@ -1027,9 +1025,9 @@ pub(crate) fn follow_up_trigger_holds(
                 .get(entity_name)
                 .map(|u| {
                     !live_uuids.contains(u)
-                        || events.iter().any(|e| {
-                            matches!(e, WorldEvent::Destroyed { uuid } if uuid == u)
-                        })
+                        || events
+                            .iter()
+                            .any(|e| matches!(e, WorldEvent::Destroyed { uuid } if uuid == u))
                 })
                 .unwrap_or(false)
         }
@@ -1050,9 +1048,9 @@ pub(crate) fn follow_up_trigger_holds(
         TriggerCondition::OnHailed { entity_name } => name_to_uuid
             .get(entity_name)
             .map(|u| {
-                events.iter().any(|e| {
-                    matches!(e, WorldEvent::Hailed { target_uuid } if target_uuid == u)
-                })
+                events
+                    .iter()
+                    .any(|e| matches!(e, WorldEvent::Hailed { target_uuid } if target_uuid == u))
             })
             .unwrap_or(false),
     }
@@ -1634,10 +1632,8 @@ fn handle_respond_to_message(
                                 fc.map(|fc| (self_uuid, fc.0))
                             })
                             .collect();
-                        let uuid_to_faction = build_uuid_to_faction(
-                            &faction_dispatch.non_ai_factions,
-                            &ai_factions,
-                        );
+                        let uuid_to_faction =
+                            build_uuid_to_faction(&faction_dispatch.non_ai_factions, &ai_factions);
                         revalidate_ai_targets_after_faction_change(
                             &mut ai_query,
                             &registry.0,
@@ -2280,7 +2276,9 @@ fn handle_ai_events(
                                     transition: behaviour.0.transition.clone(),
                                     waypoint_arrival_radius: behaviour.0.waypoint_arrival_radius,
                                     avoidance_buffer: behaviour.0.avoidance_buffer,
-                                    avoidance_look_ahead_secs: behaviour.0.avoidance_look_ahead_secs,
+                                    avoidance_look_ahead_secs: behaviour
+                                        .0
+                                        .avoidance_look_ahead_secs,
                                 },
                             );
                             ctrl.controller.current_state = new_ai_state;
@@ -2822,7 +2820,10 @@ pub struct FactionDispatchParams<'w, 's> {
     pub non_ai_factions: Query<
         'w,
         's,
-        (&'static EntityUuid, &'static crate::entities::spawner::FactionComponent),
+        (
+            &'static EntityUuid,
+            &'static crate::entities::spawner::FactionComponent,
+        ),
         Without<AiControllerComponent>,
     >,
 }
@@ -4029,7 +4030,11 @@ mod tests {
         // placeholder for root chains).
         {
             let messages = app.world().resource::<CommsInboxRes>().0.messages();
-            assert_eq!(messages.len(), 1, "only the root message visible during wait");
+            assert_eq!(
+                messages.len(),
+                1,
+                "only the root message visible during wait"
+            );
             assert_eq!(messages[0].body, "Stand by — patching you through.");
             let runtime = app.world().resource::<WorldContentRuntime>();
             assert_eq!(
@@ -5145,8 +5150,7 @@ mod tests {
         // Federation's enemies list must still contain Pirate (its default)
         // and nothing else from the AddFactionEnemy dispatch.
         let fed = reg.get(&fed_faction_uuid()).expect("federation present");
-        let pirate_uuid =
-            uuid::Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap();
+        let pirate_uuid = uuid::Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap();
         assert_eq!(
             fed.enemies,
             vec![pirate_uuid],
@@ -5173,11 +5177,7 @@ mod tests {
             .resource::<crate::config_cache::FactionRegistryResource>()
             .0;
         assert!(
-            !crate::faction::is_enemy(
-                Some(harrow_faction_uuid()),
-                Some(fed_faction_uuid()),
-                reg
-            ),
+            !crate::faction::is_enemy(Some(harrow_faction_uuid()), Some(fed_faction_uuid()), reg),
             "remove_faction_enemy must undo the prior add_faction_enemy"
         );
     }
@@ -5277,9 +5277,7 @@ mod tests {
                     seen_destroyed: HashSet::new(),
                 },
             ];
-            runtime
-                .pending_world_events
-                .push(WorldEvent::WorldLoaded);
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
             runtime.pending_world_events.push(WorldEvent::FlagSet {
                 name: "peace".into(),
                 origin_layer: None,
@@ -8342,11 +8340,7 @@ size_max = 2.0
         );
 
         // And the trigger must be marked fired (single-shot).
-        let fired = app
-            .world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states[0]
-            .fired;
+        let fired = app.world().resource::<WorldContentRuntime>().trigger_states[0].fired;
         assert!(fired, "on_timer trigger must latch fired=true after firing");
 
         // ECS must contain the spawned entity.
@@ -8400,11 +8394,7 @@ size_max = 2.0
             uuid.is_none(),
             "on_timer after_secs=100 must not fire when only a few ms have elapsed"
         );
-        let fired = app
-            .world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states[0]
-            .fired;
+        let fired = app.world().resource::<WorldContentRuntime>().trigger_states[0].fired;
         assert!(!fired, "trigger must not be marked fired");
     }
 

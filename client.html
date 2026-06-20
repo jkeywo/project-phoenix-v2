@@ -239,7 +239,9 @@
       pointer-events: auto;
       display: flex;
       flex-direction: row;
-      flex-wrap: wrap;
+      /* nowrap: the console-select buttons must stay on a single line and
+         shrink (truncating their text) rather than spilling onto a 2nd row. */
+      flex-wrap: nowrap;
       justify-content: flex-start;
       align-items: stretch;
       flex-shrink: 0;
@@ -267,15 +269,22 @@
       text-align: center;
       cursor: pointer;
       text-transform: uppercase;
+      /* Shrink to share the row; truncate the label rather than wrap so the
+         bar never grows to a 2nd line (see flex-wrap: nowrap above). */
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       /* Eliminates the 300 ms double-tap-to-zoom delay on mobile so
          buttons feel instant alongside the pointerdown listener. */
       touch-action: manipulation;
     }
     @media (orientation: portrait) {
-      #console-tab-bar .tab-button { flex: 0 1 auto; font-size: 0.7rem; padding: 0.3rem 0.5rem; }
+      #console-tab-bar .tab-button { font-size: 0.7rem; padding: 0.3rem 0.5rem; }
     }
     @media (orientation: landscape) {
-      #console-tab-bar .tab-button { flex: 0 0 auto; font-size: 1rem; padding: 0.5rem 1rem; min-width: 6rem; }
+      #console-tab-bar .tab-button { font-size: 1rem; padding: 0.5rem 1rem; }
     }
     #console-tab-bar .tab-button:active { background: #1a2230; }
     #console-tab-bar .tab-button.active {

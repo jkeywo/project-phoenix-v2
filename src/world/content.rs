@@ -805,8 +805,7 @@ mod tests {
         let mut flag_store_set = FlagStore::default();
         flag_store_set.set_flag("armed");
         let chain_set: [&FlagStore; 1] = [&flag_store_set];
-        let fired_tick2 =
-            evaluate_triggers_with_flags(&mut states, &[], &name_to_uuid, &chain_set);
+        let fired_tick2 = evaluate_triggers_with_flags(&mut states, &[], &name_to_uuid, &chain_set);
         assert_eq!(fired_tick2.len(), 1);
         assert!(states[0].fired);
     }

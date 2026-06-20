@@ -904,9 +904,8 @@ fn parse_trigger_condition_from_string(
                 .ok_or_else(|| format!("{ctx} 'on_destroyed' requires an 'entity' field"))?,
         }),
         "on_all_destroyed" => {
-            let entity_names = entities.ok_or_else(|| {
-                format!("{ctx} 'on_all_destroyed' requires an 'entities' field")
-            })?;
+            let entity_names = entities
+                .ok_or_else(|| format!("{ctx} 'on_all_destroyed' requires an 'entities' field"))?;
             if entity_names.is_empty() {
                 return Err(format!(
                     "{ctx} 'on_all_destroyed' requires a non-empty 'entities' list"
@@ -2135,7 +2134,10 @@ message = "Stand by — patching you through to Dr. Myst now."
             .as_ref()
             .expect("root_follow_up must parse");
         assert_eq!(fu.speaker.as_deref(), Some("Dr. Myst"));
-        assert_eq!(fu.trigger, Some(TriggerCondition::OnTimer { after_secs: 2.0 }));
+        assert_eq!(
+            fu.trigger,
+            Some(TriggerCondition::OnTimer { after_secs: 2.0 })
+        );
         assert_eq!(fu.body, "Captain. Dr. Myst speaking.");
         assert!(
             fu.responses.is_empty(),
@@ -2188,8 +2190,7 @@ message = "Stand by."
   [comms.follow_up]
   message = "Captain. Dr. Myst speaking."
 "#;
-        let err = parse_world(toml)
-            .expect_err("must reject mixed responses + root follow_up");
+        let err = parse_world(toml).expect_err("must reject mixed responses + root follow_up");
         assert!(
             err.contains("Research Outpost"),
             "error must name the offending sender: {err}"
@@ -2755,11 +2756,18 @@ entity    = "raider"
                 TriggerCondition::OnDestroyed { entity_name } if entity_name == "Starbase Alpha"
             )
         });
-        assert!(defeat, "must have on_destroyed Starbase Alpha defeat trigger");
+        assert!(
+            defeat,
+            "must have on_destroyed Starbase Alpha defeat trigger"
+        );
 
         // Comms: 1 on_world_loaded urgent intro + 8 on_timer wave
         // announcements = 9 total.
-        assert_eq!(cfg.comms.len(), 9, "combat_test must have 9 comms templates");
+        assert_eq!(
+            cfg.comms.len(),
+            9,
+            "combat_test must have 9 comms templates"
+        );
 
         // Eight wave-announce comms use `on_timer` triggers; the urgent
         // intro fires on `on_world_loaded`.
@@ -2848,7 +2856,10 @@ entity    = "raider"
             .as_ref()
             .expect("Dr. Myst chained follow-up must be present");
         assert_eq!(myst.speaker.as_deref(), Some("Dr. Myst"));
-        assert_eq!(myst.trigger, Some(TriggerCondition::OnTimer { after_secs: 3.0 }));
+        assert_eq!(
+            myst.trigger,
+            Some(TriggerCondition::OnTimer { after_secs: 3.0 })
+        );
         assert!(
             myst.responses.len() >= 2,
             "Dr. Myst should have reply options after appearing"

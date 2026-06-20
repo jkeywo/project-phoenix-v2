@@ -362,6 +362,26 @@ pub struct HelmConsoleConfig {
     /// [`crate::ship_plugin::BANK_LERP_RATE`] when absent.
     #[serde(default = "default_bank_lerp_rate")]
     pub bank_lerp_rate: f32,
+    /// Optional boost drive config, from `[helm_console.boost]`. When absent the
+    /// boost feature is disabled entirely (no button on the helm).
+    #[serde(default)]
+    pub boost: Option<BoostConfig>,
+}
+
+/// Boost drive tuning, from `[helm_console.boost]`. Presence of this table is
+/// what enables the boost feature on a ship.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoostConfig {
+    /// Multiplier applied to both max speed and acceleration while engaged.
+    pub multiplier: f32,
+    /// Multiplier applied to max yaw rate while engaged.
+    #[serde(default = "default_boost_steering_multiplier")]
+    pub steering_multiplier: f32,
+    /// Seconds a full battery lasts while boost is engaged.
+    pub active_duration: f32,
+    /// Seconds for an empty battery to recharge to full.
+    pub recharge_duration: f32,
 }
 
 impl HelmConsoleConfig {
@@ -386,6 +406,10 @@ fn default_impulse_speed_multiplier() -> f32 {
 
 fn default_impulse_acceleration_multiplier() -> f32 {
     crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
+}
+
+fn default_boost_steering_multiplier() -> f32 {
+    crate::boost::BOOST_STEERING_MULTIPLIER
 }
 
 /// Stable identifier for a phaser bank, parsed verbatim from the TOML
@@ -884,7 +908,7 @@ fn default_torpedo_damage_shields() -> i32 {
     5
 }
 fn default_torpedo_speed() -> f32 {
-    30.0
+    15.0
 }
 fn default_torpedo_turn_rate_deg_per_sec() -> f32 {
     45.0
@@ -1362,6 +1386,61 @@ max_speed = 30.0
         let h = config.helm_console.expect("helm_console must be Some");
         assert!(h.radar.is_none());
         assert_eq!(h.effective_radar_range(), 0.0);
+    }
+
+    #[test]
+    fn helm_console_boost_table_parses_when_present() {
+        let toml_str = r##"
+[helm_console]
+max_speed = 30.0
+
+[helm_console.boost]
+multiplier = 3.0
+steering_multiplier = 2.0
+active_duration = 4.0
+recharge_duration = 20.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        let boost = h.boost.as_ref().expect("helm_console.boost must parse");
+        assert_eq!(boost.multiplier, 3.0);
+        assert_eq!(boost.steering_multiplier, 2.0);
+        assert_eq!(boost.active_duration, 4.0);
+        assert_eq!(boost.recharge_duration, 20.0);
+    }
+
+    #[test]
+    fn helm_console_boost_steering_multiplier_defaults_to_identity() {
+        let toml_str = r##"
+[helm_console]
+max_speed = 30.0
+
+[helm_console.boost]
+multiplier = 3.0
+active_duration = 4.0
+recharge_duration = 20.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        let boost = h.boost.as_ref().expect("helm_console.boost must parse");
+        assert_eq!(
+            boost.steering_multiplier,
+            crate::boost::BOOST_STEERING_MULTIPLIER
+        );
+    }
+
+    #[test]
+    fn helm_console_boost_none_when_table_absent() {
+        let toml_str = r##"
+[helm_console]
+max_speed = 30.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        assert!(
+            h.boost.is_none(),
+            "missing boost table must disable the feature"
+        );
     }
 
     #[test]
@@ -2386,8 +2465,7 @@ target_speed = 0.5
     fn ship_harrow_patrol_template_has_two_phaser_banks_and_shields() {
         // (#474) Cruiser gained weapons + shields.
         let toml_str = include_str!("../../assets/entities/ship_harrow_patrol.toml");
-        let config = EntityConfig::from_toml(toml_str)
-            .expect("ship_harrow_patrol.toml must parse");
+        let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_patrol.toml must parse");
         let wc = config
             .weapons_console
             .as_ref()
@@ -2410,8 +2488,8 @@ target_speed = 0.5
         // (#474) Battleship gained a full behaviour tree + weapons +
         // shields. Previously was a stub.
         let toml_str = include_str!("../../assets/entities/ship_harrow_warhawk.toml");
-        let config = EntityConfig::from_toml(toml_str)
-            .expect("ship_harrow_warhawk.toml must parse");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("ship_harrow_warhawk.toml must parse");
         let wc = config
             .weapons_console
             .as_ref()
@@ -2419,7 +2497,7 @@ target_speed = 0.5
         assert_eq!(wc.phaser_banks.len(), 2, "battleship must have 2 banks");
         let bank = &wc.phaser_banks[0];
         assert!((bank.beam_damage_per_sec - 12.0).abs() < 1e-6);
-        assert!((bank.beam_range - 150.0).abs() < 1e-6);
+        assert!((bank.beam_range - 75.0).abs() < 1e-6);
         let shields = config
             .shields
             .as_ref()
@@ -2558,7 +2636,7 @@ count = 99
         assert_eq!(t.count, 99, "override applied");
         assert_eq!(t.damage_hull, 50, "default preserved");
         assert_eq!(t.damage_shields, 5, "default preserved");
-        assert_eq!(t.speed, 30.0, "default preserved");
+        assert_eq!(t.speed, 15.0, "default preserved");
         assert_eq!(t.turn_rate_deg_per_sec, 45.0, "default preserved");
         assert_eq!(t.lifespan, 20.0, "default preserved");
         assert_eq!(t.load_time, 10.0, "default preserved");

@@ -32,8 +32,8 @@
       scrollbar-color: var(--line-soft) transparent;
     }
 
-    .hero          { gap: 16px; padding: 2px 0 2px; }
-    .hero h1       { font-size: 44px; letter-spacing: .30em; }
+    .hero          { gap: 12px; padding: 2px 0 2px; }
+    .hero h1       { font-size: 26px; letter-spacing: .22em; }
     .hero h1 .sub  { font-size: 13px; margin-top: 2px; }
     .hero .bar     { width: 6px; }
 
@@ -41,9 +41,10 @@
       flex: 1; min-height: 0;
       display: flex; align-items: center; justify-content: center;
     }
+    /* Radar fills the full available height in landscape (no fixed cap). */
     .radar-col .radar-surround-frame {
       aspect-ratio: 1/1; height: 100%; width: auto;
-      max-height: 680px; max-width: 680px;
+      max-height: none; max-width: 100%;
       display: flex; align-items: center; justify-content: center;
     }
     .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }

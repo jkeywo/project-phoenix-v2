@@ -56,7 +56,7 @@ impl Default for TorpedoConfig {
             count: 10,
             damage_hull: 50,
             damage_shields: 5,
-            speed: 30.0,
+            speed: 15.0,
             turn_rate: PI / 4.0,
             lifespan: 20.0,
             load_time: 10.0,

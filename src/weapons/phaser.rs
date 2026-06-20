@@ -506,7 +506,16 @@ mod tests {
 
     #[test]
     fn fore_bank_270_rejects_target_directly_aft_at_any_yaw() {
-        for &yaw in &[0.0_f32, 0.5, 1.0, std::f32::consts::FRAC_PI_2, 2.0, PI, -1.0, -2.5] {
+        for &yaw in &[
+            0.0_f32,
+            0.5,
+            1.0,
+            std::f32::consts::FRAC_PI_2,
+            2.0,
+            PI,
+            -1.0,
+            -2.5,
+        ] {
             let (fwd_x, fwd_z) = fwd_xz(yaw);
             // Place target 20 units directly behind the ship in world space.
             let tx = -fwd_x * 20.0;
@@ -521,7 +530,16 @@ mod tests {
 
     #[test]
     fn aft_bank_270_rejects_target_directly_ahead_at_any_yaw() {
-        for &yaw in &[0.0_f32, 0.5, 1.0, std::f32::consts::FRAC_PI_2, 2.0, PI, -1.0, -2.5] {
+        for &yaw in &[
+            0.0_f32,
+            0.5,
+            1.0,
+            std::f32::consts::FRAC_PI_2,
+            2.0,
+            PI,
+            -1.0,
+            -2.5,
+        ] {
             let (fwd_x, fwd_z) = fwd_xz(yaw);
             // Place target 20 units directly ahead of the ship in world space.
             let tx = fwd_x * 20.0;
@@ -536,7 +554,16 @@ mod tests {
 
     #[test]
     fn both_banks_accept_target_abeam_at_any_yaw() {
-        for &yaw in &[0.0_f32, 0.5, 1.0, std::f32::consts::FRAC_PI_2, 2.0, PI, -1.0, -2.5] {
+        for &yaw in &[
+            0.0_f32,
+            0.5,
+            1.0,
+            std::f32::consts::FRAC_PI_2,
+            2.0,
+            PI,
+            -1.0,
+            -2.5,
+        ] {
             // Right (starboard) vector: (cos yaw, sin yaw) per beam_render.rs.
             let right_x = yaw.cos();
             let right_z = yaw.sin();

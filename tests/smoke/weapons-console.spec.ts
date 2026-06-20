@@ -149,7 +149,7 @@ test('weapons console: short landscape keeps action buttons on screen', async ({
     phaser_mode: 'Auto',
   });
 
-  const buttons = ['#tube-list .tube-row:first-child .fire-btn', '#fire-phaser', '#phaser-mode-btn'];
+  const buttons = ['#tube-list .tube-row:first-child .fire-btn', '#fire-phaser', '#phaser-mode-toggle'];
   for (const selector of buttons) {
     const box = await page.locator(selector).boundingBox();
     expect(box, `${selector} should have layout bounds`).not.toBeNull();

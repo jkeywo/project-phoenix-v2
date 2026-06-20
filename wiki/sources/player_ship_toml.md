@@ -32,7 +32,7 @@ parsed into `EntityConfig` (`src/entities/config.rs`), and consumed by:
 | `[sensors_console]` + `[sensors_console.long_range_radar]` | `SciencePlugin`, Sensors panel | Detection range + filter. |
 | `[shields_console]` + `[shields_console.base]` | `ShieldSystem` | `num_facings = 4` (UI assumption). |
 | `[power]` | `PowerPlugin` | `capacity`, per-level `rates`, `emergency_threshold`. |
-| `[helm_console]` | `HelmPlugin`, `ImpulseConfigResource` | Speed/accel/yaw + `impulse_*` multipliers. |
+| `[helm_console]` + `[helm_console.boost]` | `HelmPlugin`, `ImpulseConfigResource`, `BoostConfigResource` | Speed/accel/yaw + `impulse_*`; boost speed/accel, steering-rate multiplier, battery timings. |
 | `[navigation_console.system_chart]` | Navigation panel | Range + filter. |
 | `[comms]` | `CommsPlugin` | `range` for the ship's own hailing radius. |
 | `[stations]` | `lobby/stations_config.rs` | Per-player-count `[[stations.N]]` entries. |

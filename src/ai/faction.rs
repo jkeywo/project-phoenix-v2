@@ -361,7 +361,10 @@ name = "Pirate"
         assert!(!reg.add_enemy(fed_uuid(), pirate_uuid()));
         // And the relationship hasn't been duplicated.
         let fed = reg.get(&fed_uuid()).unwrap();
-        assert_eq!(fed.enemies.iter().filter(|u| **u == pirate_uuid()).count(), 1);
+        assert_eq!(
+            fed.enemies.iter().filter(|u| **u == pirate_uuid()).count(),
+            1
+        );
     }
 
     #[test]

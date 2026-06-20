@@ -421,7 +421,13 @@ fn handle_fire_phaser(
         }
 
         let beam_duration_secs = bank_cfg
-            .map(|b| if b.beam_duration_secs > 0.0 { b.beam_duration_secs } else { PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS })
+            .map(|b| {
+                if b.beam_duration_secs > 0.0 {
+                    b.beam_duration_secs
+                } else {
+                    PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS
+                }
+            })
             .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
         beam.target_uuid = Some(target_uuid.clone());
         beam.remaining_secs = beam_duration_secs;
@@ -466,10 +472,15 @@ fn tick_phaser_auto_fire(
 
     // Find the first bank that is off-cooldown and has the target in its auto arc.
     let bank_id: Option<String> = if combat_config.0.banks.is_empty() {
-        let effective_range = PhaserCombatConfig::DEFAULT_PHASER_RANGE
-            * modifiers.get(&ModifierSlot::RadarRange);
+        let effective_range =
+            PhaserCombatConfig::DEFAULT_PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
         let ready = crate::radar::is_fire_ready_with_range(
-            tx, tz, ship.x, ship.z, ship.yaw, effective_range,
+            tx,
+            tz,
+            ship.x,
+            ship.z,
+            ship.yaw,
+            effective_range,
         );
         if ready && !cooldown.is_bank_active("") {
             Some(String::new())
@@ -487,10 +498,9 @@ fn tick_phaser_auto_fire(
                 PhaserCombatConfig::DEFAULT_PHASER_RANGE
             };
             let effective_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-            let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
-                <= effective_range * effective_range;
-            let (rx, ry) =
-                crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
+            let range_ok =
+                (tx - ship.x).powi(2) + (tz - ship.z).powi(2) <= effective_range * effective_range;
+            let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
             let arc_ok = crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
             if range_ok && arc_ok {
                 Some(b.id.clone())
@@ -626,15 +636,33 @@ fn handle_fire_phaser_npc(
         let first_bank = weapons_section.and_then(|wc| wc.0.phaser_banks.first().cloned());
         let beam_range = first_bank
             .as_ref()
-            .map(|b| if b.beam_range > 0.0 { b.beam_range } else { PhaserCombatConfig::DEFAULT_PHASER_RANGE })
+            .map(|b| {
+                if b.beam_range > 0.0 {
+                    b.beam_range
+                } else {
+                    PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                }
+            })
             .unwrap_or(PhaserCombatConfig::DEFAULT_PHASER_RANGE);
         let damage_per_sec = first_bank
             .as_ref()
-            .map(|b| if b.beam_damage_per_sec > 0.0 { b.beam_damage_per_sec } else { PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC })
+            .map(|b| {
+                if b.beam_damage_per_sec > 0.0 {
+                    b.beam_damage_per_sec
+                } else {
+                    PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC
+                }
+            })
             .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC);
         let beam_duration = first_bank
             .as_ref()
-            .map(|b| if b.beam_duration_secs > 0.0 { b.beam_duration_secs } else { PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS })
+            .map(|b| {
+                if b.beam_duration_secs > 0.0 {
+                    b.beam_duration_secs
+                } else {
+                    PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS
+                }
+            })
             .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
 
         let npc_x = transform.translation.x;
@@ -1319,7 +1347,13 @@ fn tick_active_beam(
     use crate::entity_config::PhaserCombatConfig;
     let active_bank_cfg = combat_config.0.bank_by_id(&active_bank);
     let active_bank_cooldown_secs_early = active_bank_cfg
-        .map(|b| if b.cooldown_secs > 0.0 { b.cooldown_secs } else { PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS })
+        .map(|b| {
+            if b.cooldown_secs > 0.0 {
+                b.cooldown_secs
+            } else {
+                PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
+            }
+        })
         .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS);
 
     // Use live ECS position for arc/range check — WorldResource snapshot is stale.
@@ -1383,7 +1417,13 @@ fn tick_active_beam(
     }
 
     let active_bank_damage_per_sec = active_bank_cfg
-        .map(|b| if b.beam_damage_per_sec > 0.0 { b.beam_damage_per_sec } else { PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC })
+        .map(|b| {
+            if b.beam_damage_per_sec > 0.0 {
+                b.beam_damage_per_sec
+            } else {
+                PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC
+            }
+        })
         .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC);
     beam.damage_accumulator +=
         active_bank_damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
@@ -1401,9 +1441,7 @@ fn tick_active_beam(
         // fraction hits the shield (with overflow leaking to hull).
         // Asteroids carry no `EntityShield` so the routing is a no-op
         // for them. (#471)
-        let bank_pierce = active_bank_cfg
-            .and_then(|b| b.shield_pierce)
-            .unwrap_or(0.0);
+        let bank_pierce = active_bank_cfg.and_then(|b| b.shield_pierce).unwrap_or(0.0);
 
         for (entity, asteroid_uuid, entity_uuid, mut hull_comp, mut shield_comp) in
             hull_query.iter_mut()
@@ -1424,10 +1462,8 @@ fn tick_active_beam(
                 if shield.broken {
                     damage_to_apply as f32
                 } else {
-                    let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
-                        damage_to_apply as f32,
-                        bank_pierce,
-                    );
+                    let (pierced, absorbed) =
+                        crate::damage::split_damage_for_pierce(damage_to_apply as f32, bank_pierce);
                     let leak = shield.apply_damage(absorbed);
                     pierced + leak
                 }
@@ -1638,7 +1674,9 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             };
 
             let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
-                let effective_phaser_range = crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
+                let effective_phaser_range =
+                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                        * radar_range_mult;
                 let fire_ready = match target_live_pos {
                     None => false,
                     Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
@@ -1922,7 +1960,8 @@ fn recompute_weapons_console_state(
     });
 
     let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
-        let effective_phaser_range = crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
+        let effective_phaser_range =
+            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
         let fire_ready = match target_live_pos {
             None => false,
             Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
@@ -2195,74 +2234,74 @@ mod tests {
                 .chain(),
         )
         .add_plugins(LobbyPlugin)
-            .add_plugins(bevy::time::TimePlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
-            .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-                (Console::Power, 25.0),
-                (Console::Shields, 25.0),
-            ])))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .init_resource::<WorldResource>()
-            .init_resource::<WeaponsTarget>()
-            .init_resource::<ActiveBeam>()
-            .add_message::<AsteroidDestroyedVfx>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
-            .init_resource::<PhaserCooldown>()
-            .init_resource::<CurrentPhaserMode>()
-            .insert_resource(ShipModifiers::new())
-            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
-                TorpedoConfig::default(),
-            )))
-            .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
-            .insert_resource(test_complexity_rules())
-            .init_resource::<SimOutbox>()
-            .init_resource::<Outbox>()
-            .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
-            .add_plugins(WeaponsPlugin)
-            // Override with two banks so per-bank arc checks work.
-            // Uses wide (270°) arcs so existing tests that fire "port" at a
-            // target ahead still pass. Tighter arcs are tested in dedicated
-            // per-bank arc severance tests.
-            .insert_resource(PhaserCombatConfigResource(
-                crate::entity_config::PhaserCombatConfig {
-                    banks: vec![
-                        crate::entity_config::PhaserBankConfig {
-                            id: "port".into(),
-                            facing_deg: -90.0,
-                            fire_arc_deg: 270.0,
-                            auto_arc_deg: 240.0,
-                            beam_range: 0.0,
-                            beam_damage_per_sec: 5.0,
-                            beam_duration_secs: 6.0,
-                            cooldown_secs: 6.0,
-                            beam_color: vec![],
-                            shield_pierce: None,
-                            marker: None,
-                        },
-                        crate::entity_config::PhaserBankConfig {
-                            id: "starboard".into(),
-                            facing_deg: 90.0,
-                            fire_arc_deg: 270.0,
-                            auto_arc_deg: 240.0,
-                            beam_range: 0.0,
-                            beam_damage_per_sec: 5.0,
-                            beam_duration_secs: 6.0,
-                            cooldown_secs: 6.0,
-                            beam_color: vec![],
-                            shield_pierce: None,
-                            marker: None,
-                        },
-                    ],
-                },
-            ))
-            .add_systems(Update, (tick_active_beam, tick_torpedo_system))
-            .add_plugins(weapons_update_broadcaster())
-            .add_systems(PostUpdate, collect);
+        .add_plugins(bevy::time::TimePlugin)
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(200),
+        ))
+        .insert_resource(ShipState::new())
+        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+            (Console::Helm, 25.0),
+            (Console::Tactical, 25.0),
+            (Console::Power, 25.0),
+            (Console::Shields, 25.0),
+        ])))
+        .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+        .init_resource::<WorldResource>()
+        .init_resource::<WeaponsTarget>()
+        .init_resource::<ActiveBeam>()
+        .add_message::<AsteroidDestroyedVfx>()
+        .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+        .init_resource::<PhaserCooldown>()
+        .init_resource::<CurrentPhaserMode>()
+        .insert_resource(ShipModifiers::new())
+        .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
+            TorpedoConfig::default(),
+        )))
+        .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
+        .insert_resource(test_complexity_rules())
+        .init_resource::<SimOutbox>()
+        .init_resource::<Outbox>()
+        .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
+        .add_plugins(WeaponsPlugin)
+        // Override with two banks so per-bank arc checks work.
+        // Uses wide (270°) arcs so existing tests that fire "port" at a
+        // target ahead still pass. Tighter arcs are tested in dedicated
+        // per-bank arc severance tests.
+        .insert_resource(PhaserCombatConfigResource(
+            crate::entity_config::PhaserCombatConfig {
+                banks: vec![
+                    crate::entity_config::PhaserBankConfig {
+                        id: "port".into(),
+                        facing_deg: -90.0,
+                        fire_arc_deg: 270.0,
+                        auto_arc_deg: 240.0,
+                        beam_range: 0.0,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 6.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    },
+                    crate::entity_config::PhaserBankConfig {
+                        id: "starboard".into(),
+                        facing_deg: 90.0,
+                        fire_arc_deg: 270.0,
+                        auto_arc_deg: 240.0,
+                        beam_range: 0.0,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 6.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    },
+                ],
+            },
+        ))
+        .add_systems(Update, (tick_active_beam, tick_torpedo_system))
+        .add_plugins(weapons_update_broadcaster())
+        .add_systems(PostUpdate, collect);
         app
     }
 
@@ -3091,9 +3130,15 @@ mod tests {
         let fore = &combat.banks[0];
         assert_eq!(fore.id, "fore");
         assert_eq!(fore.cooldown_secs, 6.0, "cooldown_secs from TOML bank");
-        assert_eq!(fore.beam_duration_secs, 6.0, "beam_duration_secs from TOML bank");
-        assert_eq!(fore.beam_damage_per_sec, 5.0, "beam_damage_per_sec from TOML bank");
-        assert_eq!(fore.beam_range, 100.0, "beam_range from TOML bank");
+        assert_eq!(
+            fore.beam_duration_secs, 6.0,
+            "beam_duration_secs from TOML bank"
+        );
+        assert_eq!(
+            fore.beam_damage_per_sec, 5.0,
+            "beam_damage_per_sec from TOML bank"
+        );
+        assert_eq!(fore.beam_range, 50.0, "beam_range from TOML bank");
 
         // And starting the cooldown produces exactly that value, so it flows
         // through to live `PhaserCooldown.bank_remaining_secs`.
@@ -3211,8 +3256,8 @@ mod tests {
         //
         // Asteroid-field anchors are virtual organisational entities and
         // must never act as torpedo detonation targets.
-        use crate::entity_spawner::{AsteroidFieldSection, EntityUuid};
         use crate::entity_config::AsteroidFieldConfig;
+        use crate::entity_spawner::{AsteroidFieldSection, EntityUuid};
 
         let mut app = test_app();
         start_game_with_weapons(&mut app);
@@ -3766,7 +3811,9 @@ mod tests {
 
         // Apply 5 units of damage. With pierce=0 (default in test config),
         // the entire amount lands on the shield, hull is unchanged.
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 5.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 5.0;
         app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
         tick(&mut app);
 
@@ -3817,7 +3864,9 @@ mod tests {
 
         // Apply 15 units of damage. With shield=10, shield depletes
         // and 5 units leak to hull.
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 15.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 15.0;
         app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
         tick(&mut app);
 
@@ -3882,7 +3931,9 @@ mod tests {
         );
         tick(&mut app);
 
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 5.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 5.0;
         app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
         tick(&mut app);
 

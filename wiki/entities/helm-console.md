@@ -1,9 +1,9 @@
 ---
 title: Helm Console
 type: entity
-tags: [console, helm, input, ship, physics, radar, impulse]
-sources: [gui/helm-console.html, gui/console-state.js, gui/radar-widget.js, src/ship_plugin.rs, src/ship/physics.rs, src/ship/impulse.rs, src/modifiers/coordination.rs, PRD-022]
-updated: 2026-06-15
+tags: [console, helm, input, ship, physics, radar, impulse, boost]
+sources: [gui/helm-console.html, gui/console-state.js, gui/radar-widget.js, src/ship_plugin.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/modifiers/coordination.rs, PRD-022]
+updated: 2026-06-20
 ---
 
 # Helm Console
@@ -17,6 +17,7 @@ The pilot's seat. The **only** console that can move the ship.
 - Sends `HelmInput { thrust, steering }` at **10 Hz** while controls are active.
 - **Impulse button:** issues `StartImpulseCharge` when phase is `Idle`.
 - **Impulse overlay (Charging + Active):** the joystick is hidden and replaced with a charging progress bar, a `CANCEL IMPULSE` button, and a status readout (`x.x / y.y s` while charging, `ENGAGED` while active). See [Impulse drive](#impulse-drive).
+- **Boost button:** toggles the boost drive when `[helm_console.boost]` is present. While active, boost multiplies speed/acceleration by `multiplier` and yaw rate by `steering_multiplier`.
 
 ## Impulse drive
 
@@ -27,6 +28,14 @@ When the impulse drive enters `ImpulsePhase::Charging` (`ShipView.impulse_charge
 - The speed cap during Active is driven by `ImpulseConfigResource.speed_multiplier` flowing through `translate_impulse_modifiers` → `ModifierSlot::MaxSpeed` (under `ModifierSource::ImpulseDrive`).
 
 Cancel buttons live on Helm, Sensors (`ScienceCancelImpulseButton`) and Navigation (`NavCancelImpulseButton`); all three emit `ClientMessage::CancelImpulse`.
+
+## Boost drive
+
+Boost is enabled by `[helm_console.boost]` in `assets/entities/player_ship.toml`.
+
+- `multiplier` applies to max forward speed, max reverse speed, and acceleration while engaged.
+- `steering_multiplier` applies separately to `ShipPhysicsConfig.max_yaw_rate`; the player ship sets this to `2.0`.
+- Battery drain is scaled by `abs(thrust) + abs(steering)` after clamping each input to `[-1, 1]`. Idle boost spends no battery; full thrust or full steering spends at the base rate; full thrust plus full steering spends at double rate.
 
 ## Server reception
 
@@ -60,6 +69,8 @@ From PRD #22, loaded from `[helm_console]` in `assets/entities/player_ship.toml`
 - `impulse_charge_duration` (default `3.0 s`) — total charge time; broadcast to clients on `Welcome` via `ShipClientConfig.impulse_charge_duration`.
 - `impulse_speed_multiplier` (default `10.0`) — `MaxSpeed` factor applied during Active impulse.
 - `impulse_acceleration_multiplier` (default `5.0`) — acceleration factor applied during Active impulse; `≤ 0.0` falls back to the const.
+- `[helm_console.boost].steering_multiplier` (player ship: `2.0`) — yaw-rate factor while boost is engaged.
+- Boost battery drain factor: `abs(thrust) + abs(steering)`.
 
 These live as constants in `compute_physics`'s `ShipPhysicsConfig` so they can be tuned without touching simulation/Bevy code.
 

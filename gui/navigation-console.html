@@ -134,6 +134,20 @@
     }
     #ent-wp-val { color: var(--tactical); }
 
+    /* "Set as waypoint" action sits inline with the target info, between the
+       entity name/badges and its bearing/range details. Compact so it does
+       not dominate the overlay. Shown only when a target is selected. */
+    #entity-info .wp-inline-btn {
+      --h: 38px;
+      width: 100%;
+      margin: 8px 0 2px;
+      font-size: 11px; letter-spacing: .2em;
+      padding: 0 12px 0 32px;
+      cursor: pointer;
+    }
+    #entity-info .wp-inline-btn .led { width: 10px; height: 10px; left: 10px; }
+    #entity-info .wp-inline-btn:active > .btn-bg { opacity: .7; }
+
     #action-btns {
       display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
     }
@@ -235,6 +249,11 @@
     <div id="entity-info">
       <div class="ent-name empty" id="ent-name">TAP MAP TO SELECT</div>
       <div class="badges" id="ent-badges"></div>
+      <button class="btn tactical wp-inline-btn" id="btn-add-waypoint" type="button">
+        <span class="btn-bg"></span>
+        <span class="led cyan"></span>
+        <span class="label">SET AS WAYPOINT</span>
+      </button>
       <div class="pos-strip">
         <div class="ps-item">
           <span class="ps-k">BRG</span>
@@ -257,11 +276,6 @@
         <span class="btn-bg"></span>
         <span class="led cyan"></span>
         <span class="label">ON SCREEN</span>
-      </button>
-      <button class="btn tactical" id="btn-add-waypoint" type="button">
-        <span class="btn-bg"></span>
-        <span class="led cyan"></span>
-        <span class="label">ADD WAYPOINT</span>
       </button>
       <button class="btn tactical" id="btn-set-waypoint" type="button">
         <span class="btn-bg"></span>

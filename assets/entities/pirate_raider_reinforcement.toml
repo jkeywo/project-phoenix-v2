@@ -31,10 +31,10 @@ radius = 2.0
 length = 4.0
 
 [helm_console]
-max_speed = 40.0
+max_speed = 20.0
 max_reverse_speed = 0.0
-acceleration = 25.0
-deceleration = 60.0
+acceleration = 12.5
+deceleration = 30.0
 max_yaw_rate = 2.0
 max_bank_deg = 15.0
 
@@ -45,7 +45,7 @@ id = "fore"
 facing_deg = 0.0
 fire_arc_deg = 180.0
 auto_arc_deg = 180.0
-beam_range = 75.0
+beam_range = 37.5
 beam_damage_per_sec = 6.0
 beam_duration_secs = 4.0
 cooldown_secs = 4.0
@@ -91,7 +91,7 @@ target_speed = 0.9
 [[behaviour.state]]
 name = "attack"
 kind = "attacking"
-maintain_range = 50.0
+maintain_range = 25.0
 target_speed = 0.8
 
 [[behaviour.state]]

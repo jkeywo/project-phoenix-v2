@@ -40,10 +40,10 @@ size = [6.0, 2.0, 10.0]
 colour = [0.8, 0.3, 0.1]
 
 [helm_console]
-max_speed = 25.0
-max_reverse_speed = 12.5
-acceleration = 8.333
-deceleration = 25.0
+max_speed = 12.5
+max_reverse_speed = 6.25
+acceleration = 4.1665
+deceleration = 12.5
 max_yaw_rate = 0.196
 max_bank_deg = 10.0
 
@@ -57,7 +57,7 @@ id = "port"
 facing_deg = -90.0
 fire_arc_deg = 180.0
 auto_arc_deg = 180.0
-beam_range = 100.0
+beam_range = 50.0
 beam_damage_per_sec = 8.0
 beam_duration_secs = 5.0
 cooldown_secs = 4.0
@@ -70,7 +70,7 @@ id = "starboard"
 facing_deg = 90.0
 fire_arc_deg = 180.0
 auto_arc_deg = 180.0
-beam_range = 100.0
+beam_range = 50.0
 beam_damage_per_sec = 8.0
 beam_duration_secs = 5.0
 cooldown_secs = 4.0
@@ -105,7 +105,7 @@ target_speed = 0.9
 [[behaviour.state]]
 name = "attacking"
 kind = "attacking"
-maintain_range = 90.0
+maintain_range = 45.0
 target_speed = 0.7
 
 [[behaviour.state]]

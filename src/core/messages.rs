@@ -811,6 +811,8 @@ pub enum ClientMessage {
     StartImpulseCharge,
     /// Sent by the Science officer to cancel an active or charging impulse drive.
     CancelImpulse,
+    /// Sent by the Helm officer to toggle the boost drive on/off.
+    ToggleBoost,
     SetView {
         mode: ViewMode,
     },
@@ -1349,6 +1351,15 @@ pub struct HelmConsoleState {
     pub impulse_charge_progress: f32,
     #[serde(default)]
     pub on_screen: bool,
+    /// Boost battery charge fraction, 0.0 (empty) to 1.0 (full).
+    #[serde(default)]
+    pub boost_battery: f32,
+    /// Whether the boost drive is currently engaged.
+    #[serde(default)]
+    pub boost_active: bool,
+    /// Whether this ship has the boost feature at all (drives button visibility).
+    #[serde(default)]
+    pub boost_enabled: bool,
 }
 
 /// Serialised Shields console state pushed to the HTML shields panel (issue #423).
@@ -1474,6 +1485,8 @@ pub enum UiAction {
     StartImpulseCharge,
     /// Cancel the impulse drive charge (helm console).
     CancelImpulse,
+    /// Toggle the boost drive on/off (helm BOOST button).
+    ToggleBoost,
     /// Switch the viewscreen to radar mode (helm ON SCREEN button).
     SetRadarView,
     /// Increase power for the named powered console (power console).
@@ -1572,6 +1585,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         },
         UiAction::StartImpulseCharge => ClientMessage::StartImpulseCharge,
         UiAction::CancelImpulse => ClientMessage::CancelImpulse,
+        UiAction::ToggleBoost => ClientMessage::ToggleBoost,
         UiAction::SetRadarView => ClientMessage::SetView {
             mode: ViewMode::Radar,
         },
@@ -1712,6 +1726,14 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&UiAction::CancelImpulse),
             ClientMessage::CancelImpulse
+        );
+    }
+
+    #[test]
+    fn toggle_boost_maps_to_client_message() {
+        assert_eq!(
+            ui_action_to_client_message(&UiAction::ToggleBoost),
+            ClientMessage::ToggleBoost
         );
     }
 

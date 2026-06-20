@@ -419,8 +419,13 @@ fn tick_ai_controllers(
         let (entity_phaser_ready, entity_weapons_range) = match weapons_section {
             Some(wc) => {
                 let ready = phaser_state.map(|ps| ps.is_ready()).unwrap_or(false);
-                let range = wc.0.phaser_banks.first()
-                    .and_then(|b| if b.beam_range > 0.0 { Some(b.beam_range) } else { None });
+                let range = wc.0.phaser_banks.first().and_then(|b| {
+                    if b.beam_range > 0.0 {
+                        Some(b.beam_range)
+                    } else {
+                        None
+                    }
+                });
                 (ready, range)
             }
             None => (false, None),
@@ -1363,7 +1368,12 @@ mod tests {
             "WeaponsConsoleSection must be attached when config has weapons_console"
         );
         assert!(
-            wc.unwrap().0.phaser_banks.first().map(|b| (b.beam_range - 80.0).abs() < 0.01).unwrap_or(false),
+            wc.unwrap()
+                .0
+                .phaser_banks
+                .first()
+                .map(|b| (b.beam_range - 80.0).abs() < 0.01)
+                .unwrap_or(false),
             "beam_range must match config"
         );
     }

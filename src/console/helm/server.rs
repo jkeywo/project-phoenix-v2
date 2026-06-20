@@ -2,7 +2,8 @@ use bevy::prelude::*;
 
 use crate::console_bridge::ConsoleStateChanged;
 use crate::messages::{HelmConsoleState, ViewMode};
-use crate::server_app::ShipImpulse;
+use crate::server_app::{ShipBoost, ShipImpulse};
+use crate::ship_plugin::BoostConfigResource;
 use crate::ship_state::ShipState;
 
 pub struct HelmPlugin;
@@ -34,6 +35,9 @@ fn spawn_helm_console_state_entity(mut commands: Commands) {
         yaw: 0.0,
         impulse_charge_progress: 0.0,
         on_screen: false,
+        boost_battery: 0.0,
+        boost_active: false,
+        boost_enabled: false,
     }));
 }
 
@@ -44,6 +48,8 @@ fn heading_from_yaw(yaw_rad: f32) -> f32 {
 fn recompute_helm_console_state(
     ship: Res<ShipState>,
     impulse: Option<Res<ShipImpulse>>,
+    boost: Option<Res<ShipBoost>>,
+    boost_config: Option<Res<BoostConfigResource>>,
     mut comp_q: Query<&mut HelmConsoleStateComp>,
 ) {
     let heading = heading_from_yaw(ship.yaw);
@@ -52,6 +58,9 @@ fn recompute_helm_console_state(
         .as_ref()
         .map(|imp| imp.0.charge_progress)
         .unwrap_or(0.0);
+    let boost_enabled = boost_config.as_ref().map(|c| c.enabled).unwrap_or(false);
+    let boost_battery = boost.as_ref().map(|b| b.0.battery).unwrap_or(0.0);
+    let boost_active = boost.as_ref().map(|b| b.0.is_active()).unwrap_or(false);
 
     let next = HelmConsoleState {
         heading,
@@ -61,6 +70,9 @@ fn recompute_helm_console_state(
         yaw: ship.yaw,
         impulse_charge_progress: charge_progress,
         on_screen,
+        boost_battery,
+        boost_active,
+        boost_enabled,
     };
 
     for mut comp in comp_q.iter_mut() {
@@ -127,6 +139,9 @@ mod tests {
                 yaw: 0.0,
                 impulse_charge_progress: 0.0,
                 on_screen: false,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             }));
         app.insert_resource(ShipState::new());
         app.insert_resource(ShipImpulse(ImpulseState::new()));
@@ -198,6 +213,40 @@ mod tests {
         assert!((comp.0.impulse_charge_progress - 0.5).abs() < 0.001);
     }
 
+    #[test]
+    fn recompute_reflects_boost_state_and_enabled() {
+        let mut app = recompute_test_app();
+        app.insert_resource(BoostConfigResource {
+            enabled: true,
+            multiplier: 3.0,
+            steering_multiplier: 2.0,
+            active_duration: 4.0,
+            recharge_duration: 20.0,
+        });
+        app.insert_resource(ShipBoost(crate::boost::BoostState {
+            active: true,
+            battery: 0.75,
+        }));
+        app.update();
+
+        let mut q = app.world_mut().query::<&HelmConsoleStateComp>();
+        let comp = q.single(app.world()).unwrap();
+        assert!(comp.0.boost_enabled);
+        assert!(comp.0.boost_active);
+        assert!((comp.0.boost_battery - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn recompute_boost_disabled_when_no_config() {
+        let mut app = recompute_test_app();
+        app.update();
+
+        let mut q = app.world_mut().query::<&HelmConsoleStateComp>();
+        let comp = q.single(app.world()).unwrap();
+        assert!(!comp.0.boost_enabled);
+        assert!(!comp.0.boost_active);
+    }
+
     // ── Push tests ──
 
     #[test]
@@ -219,6 +268,9 @@ mod tests {
                 yaw: std::f32::consts::PI,
                 impulse_charge_progress: 0.0,
                 on_screen: true,
+                boost_battery: 0.0,
+                boost_active: false,
+                boost_enabled: false,
             };
         }
         app.update();

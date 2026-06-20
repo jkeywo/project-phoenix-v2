@@ -615,7 +615,7 @@ mod tests {
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_size: None,
-                    region_colour: None,
+                        region_colour: None,
                         half_extents: None,
                         radar_icon: None,
                         objective_target: false,
@@ -638,7 +638,7 @@ mod tests {
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_size: None,
-                    region_colour: None,
+                        region_colour: None,
                         half_extents: None,
                         radar_icon: None,
                         objective_target: false,
@@ -677,7 +677,7 @@ mod tests {
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_size: None,
-                    region_colour: None,
+                        region_colour: None,
                         half_extents: None,
                         radar_icon: None,
                         objective_target: false,
@@ -1776,7 +1776,7 @@ mod tests {
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_size: None,
-                    region_colour: None,
+                        region_colour: None,
                         half_extents: None,
                         radar_icon: None,
                         objective_target: false,
@@ -1799,7 +1799,7 @@ mod tests {
                         inner_radius: Some(10.0),
                         warp_out_remaining_secs: None,
                         radar_size: None,
-                    region_colour: None,
+                        region_colour: None,
                         half_extents: None,
                         radar_icon: None,
                         objective_target: false,
@@ -1878,7 +1878,6 @@ mod tests {
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
-
 
     #[test]
     fn sim_snapshot_with_multiple_entity_states_round_trips() {
@@ -1992,7 +1991,7 @@ mod tests {
                 inner_radius: Some(2.0),
                 warp_out_remaining_secs: None,
                 radar_size: None,
-                    region_colour: None,
+                region_colour: None,
                 half_extents: None,
                 radar_icon: None,
                 objective_target: false,
@@ -2023,7 +2022,7 @@ mod tests {
                 inner_radius: None,
                 warp_out_remaining_secs: None,
                 radar_size: None,
-                    region_colour: None,
+                region_colour: None,
                 half_extents: None,
                 radar_icon: None,
                 objective_target: false,
@@ -2595,6 +2594,9 @@ mod tests {
             yaw: 0.785,
             impulse_charge_progress: 0.0,
             on_screen: false,
+            boost_battery: 0.5,
+            boost_active: true,
+            boost_enabled: true,
         };
         let json = encode_console_state(&state).expect("encode helm console");
         let decoded: HelmConsoleState = serde_json::from_str(&json).unwrap();
@@ -2758,6 +2760,13 @@ mod tests {
                 target: Console::Tactical
             }
         );
+    }
+
+    #[test]
+    fn decode_ui_action_toggle_boost() {
+        let json = r#"{"action":"toggle_boost","console":"Helm"}"#;
+        let action = decode_ui_action(json).expect("decode toggle_boost");
+        assert_eq!(action, UiAction::ToggleBoost);
     }
 
     #[test]

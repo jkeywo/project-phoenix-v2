@@ -273,20 +273,17 @@
       animation: none;
       opacity: 0.35;
     }
-    .boost-battery-wrap {
+    .boost-control {
       display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 8px;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
     }
-    .boost-battery-label {
-      font-family: "JetBrains Mono", monospace;
-      font-size: 11px;
-      letter-spacing: 0.1em;
-      color: var(--ink-faint);
+    .boost-control .btn {
+      width: 100%;
     }
     .boost-battery-track {
-      flex: 1;
+      width: 100%;
       height: 8px;
       background: var(--bg-deep);
       border: 1px solid var(--line-faint);
@@ -635,22 +632,20 @@
         if (impulseBtn.className !== 'btn') impulseBtn.className = 'btn';
       }
 
-      var boostBtn = document.getElementById('boost-btn');
-      var boostWrap = document.getElementById('boost-battery-wrap');
+      var boostControl = document.getElementById('boost-control');
       if (s.boost_enabled) {
-        boostBtn.style.display = '';
-        boostWrap.style.display = '';
+        boostControl.style.display = '';
         var batt = s.boost_battery || 0;
         document.getElementById('boost-battery-fill').style.transform = 'scaleX(' + batt + ')';
         var boostLed = document.getElementById('boost-led');
         var boostLedTarget = s.boost_active ? 'led on' : 'led';
         if (boostLed.className !== boostLedTarget) boostLed.className = boostLedTarget;
         // engaged → danger; empty & idle → disabled (can't engage); else ready.
+        var boostBtn = document.getElementById('boost-btn');
         var boostCls = s.boost_active ? 'btn danger' : (batt <= 0 ? 'btn disabled' : 'btn');
         if (boostBtn.className !== boostCls) boostBtn.className = boostCls;
       } else {
-        boostBtn.style.display = 'none';
-        boostWrap.style.display = 'none';
+        boostControl.style.display = 'none';
       }
 
       var footerMode = document.getElementById('footer-mode');

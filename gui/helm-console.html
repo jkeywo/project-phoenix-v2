@@ -298,20 +298,23 @@
     }
   /* ── Landscape: compact for phone screens ──────────────────── */
   @media (orientation: landscape) and (max-width: 900px) {
-    .panel-inner { padding: 14px 20px 16px; gap: 8px; }
-    .panel-mid { gap: 16px; }
-    .panel-mid > .ctrl-col { width: 300px; gap: 10px; }
-    .hero h1 { font-size: 28px; letter-spacing: 0.18em; }
-    .hero { gap: 10px; }
-    .hero .sub { font-size: 11px; }
-    .hero .complexity { display: none; }
-    .stick-container { width: min(200px, 45dvh); height: min(200px, 45dvh); }
+    /* Minimal top padding, near-zero bottom — buttons sit at the screen edge */
+    .panel-inner { padding: 8px 20px 4px; gap: 6px; }
+    .panel-mid { gap: 12px; }
+    /* Tighter ctrl-col gaps push buttons as low as possible */
+    .panel-mid > .ctrl-col { width: 300px; gap: 4px; }
+    /* Footer takes vertical space away from the joystick; hide it on small landscape */
+    .console-footer { display: none; }
+    /* Larger joystick: fills the freed space (60dvh on a 390px phone ≈ 234px) */
+    .stick-container { width: min(260px, 60dvh); height: min(260px, 60dvh); }
+    /* Stick readout text is visible in the radar overlay; hide here to save space */
+    .stick-readout { display: none; }
+    .stick-directions { display: none; }
+    .ctrl-col .stick-area { gap: 0; }
     .ctrl-col .btn-row .btn { --h: 44px; font-size: 14px; padding: 0 10px 0 36px; }
     .ctrl-col .btn-row .btn .led { width: 14px; height: 14px; left: 10px; }
     .stick-nub { width: 40px; height: 40px; }
     .stick-nub::after { inset: 12px; }
-    .stick-readout { font-size: 11px; }
-    .stick-directions { font-size: 9px; }
     .readout .v { font-size: 24px; }
     .radar-col > .readout { padding: 6px 14px; }
     .radar-col > .readout .v { font-size: 18px; }
@@ -322,9 +325,6 @@
     .readout-spd { top: 8px; right: 12%; }
     .readout-x { bottom: 8px; left: 12%; }
     .readout-z { bottom: 8px; right: 12%; }
-    .side-rail { font-size: 9px; }
-    .side-rail.top { top: 10px; }
-    .side-rail.bottom { bottom: 10px; }
     .lock-tag { right: 5%; }
     .lock-tag .k { font-size: 7px; }
     .lock-tag .id { font-size: 8px; }

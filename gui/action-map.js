@@ -79,6 +79,11 @@ export const ACTION_MAP = Object.freeze({
     send('CancelImpulse');
   },
 
+  /** Toggle the boost drive on/off. */
+  toggle_boost: (a, send) => {
+    send('ToggleBoost');
+  },
+
   /** Switch the view-screen to the radar mode. */
   set_radar_view: (a, send) => {
     send('SetView', { mode: { kind: 'Radar' } });

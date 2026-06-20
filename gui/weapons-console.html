@@ -27,18 +27,21 @@
     .panel-inner > .footer-bar { flex-shrink: 0; }
 
     /* Compress hero on landscape */
-    .hero h1 { font-size: 48px; letter-spacing: 0.30em; }
-    .hero h1 .sub { font-size: 14px; margin-top: 2px; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; }
+    .hero h1 .sub { font-size: 12px; margin-top: 2px; }
     .hero .bar { width: 6px; }
-    .hero { gap: 18px; }
+    .hero { gap: 12px; }
 
-    /* Radar — fills column, square aspect, capped at 720px */
+    /* Radar — fills the full available height in landscape (no fixed cap) */
     .radar-col .radar-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: 100%; max-height: 720px; max-width: 720px; display: flex; align-items: center; justify-content: center; }
+    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: 100%; max-height: none; max-width: 100%; display: flex; align-items: center; justify-content: center; }
     .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }
 
     /* Compress inset bodies */
     .ctrl-col .inset             { flex: 1; min-height: 0; }
+    /* Torpedo bay sizes to its content so every tube row stays visible
+       (no internal scroll); the phaser array takes the remaining height. */
+    .ctrl-col .torpedo-bay       { flex: 0 0 auto; }
     .ctrl-col .inset .inset-body { padding: 14px 26px; }
     .ctrl-col .section-header    { margin-bottom: 8px; font-size: 18px; }
     .ctrl-col .section-header .tag { font-size: 10px; }
@@ -131,6 +134,24 @@
     .ctrl-col .frequency .freq-bar { height: 26px; }
     .ctrl-col .tubes             { display: flex; gap: 10px; margin-top: 6px; }
     .ctrl-col .fire-row          { margin-top: 12px; }
+
+    /* Compact MAN/AUTO phaser-mode toggle that lives beside the fire button. */
+    .phaser-mode-toggle {
+      flex-direction: column;
+      justify-content: center;
+      flex-shrink: 0;
+      align-self: stretch;
+    }
+    .phaser-mode-toggle .opt {
+      text-align: center;
+      cursor: pointer;
+      padding: 4px 14px;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .phaser-mode-toggle .opt:first-child { border-bottom: 1px solid var(--line-faint); }
     .radar-col > .readout        { padding: 10px 22px; }
     .radar-col > .readout .v     { font-size: 28px; }
     .torpedo-bay .inset-body {
@@ -149,7 +170,7 @@
     }
     #tube-list {
       min-width: 0;
-      overflow-y: auto;
+      overflow-y: visible;
       padding-right: 2px;
     }
 
@@ -162,7 +183,7 @@
       .hero { gap: 10px; }
       .hero .sub { font-size: 11px; }
       .hero .complexity { display: none; }
-      .radar-col .radar-surround-frame { max-height: 50vh; max-width: 50vh; }
+      .radar-col .radar-surround-frame { max-height: none; max-width: 100%; }
       .side-rail { font-size: 9px; }
       .side-rail.top { top: 10px; }
       .side-rail.bottom { bottom: 10px; }
@@ -275,7 +296,7 @@
         gap: 7px;
       }
       #tube-list {
-        max-height: 100%;
+        max-height: none;
       }
       .ctrl-col .tubes {
         gap: 4px;
@@ -431,6 +452,8 @@
       .side-rail { display: none; }
 
       .radar-col .radar-wrap { min-height: 30vh; }
+      /* Portrait: radar fills the full available width. */
+      .radar-col .radar-surround-frame { width: 100%; height: auto; max-height: none; max-width: none; }
       .radar-col .radar { max-height: none; max-width: none; }
       .radar-col > .readout { padding: 0.4rem 0.6rem; }
       .radar-col > .readout .v { font-size: 1.25rem; }
@@ -704,51 +727,24 @@
                   <span class="tag" id="phaser-tag">BEAM</span>
                 </div>
 
-                <!-- Mode toggle row (hidden by Tactical Low preset) -->
-                <div style="display:flex; gap:18px; align-items:stretch;" data-hideable="phaser_mode_selector">
-                  <button class="btn" id="phaser-mode-btn" style="flex:1;" type="button">
-                    <span class="btn-bg"></span>
-                    <span class="led cyan"></span>
-                    <span class="label" id="phaser-mode-label">MODE: AUTO</span>
-                  </button>
-                  <div class="mini-toggle" style="align-self:center;">
-                    <div class="opt" id="mode-man">MAN</div>
-                    <div class="opt active" id="mode-auto">AUTO</div>
-                  </div>
-                </div>
-
                 <div class="cooldown-list" id="phaser-cooldowns">
                   <!-- Per-bank cooldown rows are built dynamically from
                        `state.banks` + `state.phaserBanks` (ship config). -->
                 </div>
 
-                <!-- Beam frequency display -->
-                <div>
-                  <div class="frequency" id="phaser-freq-bars">
-                    <div class="freq-bar"></div>
-                    <div class="freq-bar"></div>
-                    <div class="freq-bar tgt"></div>
-                    <div class="freq-bar on"></div>
-                    <div class="freq-bar"></div>
-                    <div class="freq-bar"></div>
-                    <div class="freq-bar"></div>
-                    <div class="freq-bar"></div>
-                    <div class="freq-bar"></div>
-                    <div class="freq-bar"></div>
-                  </div>
-                  <div class="freq-row">
-                    <span>PHASER FREQ</span>
-                    <span id="phaser-freq-info">—</span>
-                  </div>
-                </div>
-
-                <!-- Fire phasers -->
-                <div class="fire-row" style="margin-top:auto; padding-top:18px;">
-                  <button id="fire-phaser" class="btn danger" style="width:100%;" type="button">
+                <!-- Fire phasers + compact MAN/AUTO mode toggle.
+                     The toggle (hidden by the Tactical Low preset) sits next
+                     to the fire button; the button itself is always visible. -->
+                <div class="fire-row" style="margin-top:auto; padding-top:18px; display:flex; gap:12px; align-items:stretch;">
+                  <button id="fire-phaser" class="btn danger" style="flex:1;" type="button">
                     <span class="btn-bg"></span>
                     <span class="led fire"></span>
                     <span class="label">FIRE PHASERS</span>
                   </button>
+                  <div class="mini-toggle phaser-mode-toggle" id="phaser-mode-toggle" data-hideable="phaser_mode_selector">
+                    <div class="opt" id="mode-man">MAN</div>
+                    <div class="opt active" id="mode-auto">AUTO</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1072,10 +1068,8 @@
       }
 
       var modeStr        = String(s.phaser_mode || 'Auto');
-      var phaserModeLabel = document.getElementById('phaser-mode-label');
       var modeMEl        = document.getElementById('mode-man');
       var modeAEl        = document.getElementById('mode-auto');
-      if (phaserModeLabel) phaserModeLabel.textContent = 'MODE: ' + modeStr.toUpperCase();
       if (modeMEl) modeMEl.className = 'opt' + (modeStr === 'Manual' ? ' active' : '');
       if (modeAEl) modeAEl.className = 'opt' + (modeStr !== 'Manual' ? ' active' : '');
 
@@ -1180,10 +1174,14 @@
       sendAction('fire_phaser', { bank: bank });
     });
 
-    document.getElementById('phaser-mode-btn').addEventListener('click', function() {
-      var currentMode = (_state && _state.phaser_mode) ? _state.phaser_mode : 'Auto';
-      var nextMode = currentMode === 'Auto' ? 'Manual' : 'Auto';
-      sendAction('set_phaser_mode', { mode: nextMode });
+    // MAN/AUTO toggle beside the fire button — each option sets its mode.
+    var _modeManEl = document.getElementById('mode-man');
+    var _modeAutoEl = document.getElementById('mode-auto');
+    if (_modeManEl) _modeManEl.addEventListener('click', function() {
+      sendAction('set_phaser_mode', { mode: 'Manual' });
+    });
+    if (_modeAutoEl) _modeAutoEl.addEventListener('click', function() {
+      sendAction('set_phaser_mode', { mode: 'Auto' });
     });
 
     // ── Radar tap-to-lock via RadarWidget ────────────────────────────────

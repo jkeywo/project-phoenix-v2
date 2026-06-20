@@ -34,7 +34,7 @@ power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
 
 [weapons_console.radar]
-range = 300
+range = 150
 shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
 selects = [ "ship", "station", "asteroid" ]
 
@@ -43,7 +43,7 @@ id = "fore"
 facing_deg = 0
 fire_arc_deg = 270
 auto_arc_deg = 180
-beam_range = 100
+beam_range = 50
 beam_damage_per_sec = 5
 beam_duration_secs = 6
 cooldown_secs = 6
@@ -55,7 +55,7 @@ id = "aft"
 facing_deg = 180
 fire_arc_deg = 270
 auto_arc_deg = 180
-beam_range = 100
+beam_range = 50
 beam_damage_per_sec = 5
 beam_duration_secs = 6
 cooldown_secs = 6
@@ -66,7 +66,7 @@ marker = "phasers_a"
 count = 10
 damage_hull = 50
 damage_shields = 5
-speed = 30
+speed = 15
 turn_rate_deg_per_sec = 45
 lifespan = 20
 load_time = 10
@@ -98,7 +98,7 @@ complexity_toml = "assets/complexity/sensors.toml"
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
 [sensors_console.long_range_radar]
-range = 400
+range = 200
 shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
@@ -110,10 +110,10 @@ emergency_threshold = 25
 
 [captain_console]
 [helm_console]
-max_speed = 25
-max_reverse_speed = 10
-acceleration = 10
-deceleration = 25
+max_speed = 12.5
+max_reverse_speed = 5
+acceleration = 5
+deceleration = 12.5
 max_yaw_rate = 0.5
 max_bank_deg = 10
 impulse_charge_duration = 3
@@ -121,8 +121,14 @@ impulse_speed_multiplier = 10
 impulse_acceleration_multiplier = 5
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
+[helm_console.boost]
+multiplier = 3.0
+steering_multiplier = 2.0
+active_duration = 4.0
+recharge_duration = 20.0
+
 [helm_console.radar]
-range = 250
+range = 125
 shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
 
 [navigation_console]

@@ -1152,7 +1152,7 @@
         { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
       ];
       try {
-        const r = await fetch('https://project-phoenix.workers.dev');
+        const r = await fetch('https://phoenix-turn-credentials.project-phoenix.workers.dev');
         if (r.ok) {
           const extra = await r.json();
           console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);

@@ -76,13 +76,15 @@ export function tabBarLayout(consoles, active, orientation, inGame) {
   const list = Array.isArray(consoles) ? consoles : [];
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   const initials = useInitials(list, orient);
-  // Bevy parity: hide when not in-game or when there's <= 1 console.
-  const hidden = !inGame || list.length < 2;
-  const buttons = list.map((c) => ({
+  // Hide when not in-game or when there are no consoles.
+  // Single-console players still see the bar (for the title label).
+  const hidden = !inGame || list.length === 0;
+  // Only render tab buttons when there are 2+ consoles to switch between.
+  const buttons = list.length >= 2 ? list.map((c) => ({
     console: c,
     label: initials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c),
     active: c === active,
-  }));
+  })) : [];
   return { hidden, orientation: orient, useInitials: initials, buttons };
 }
 

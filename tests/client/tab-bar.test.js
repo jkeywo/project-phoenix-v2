@@ -147,9 +147,10 @@ describe('tabBarLayout — hidden conditions', () => {
     expect(out.hidden).toBe(true);
   });
 
-  it('hides when in-game with exactly 1 console (single-console players see no tabs)', () => {
+  it('shows when in-game with exactly 1 console (bar visible for title, no tab buttons)', () => {
     const out = tabBarLayout(['CaptainChair'], 'CaptainChair', 'portrait', true);
-    expect(out.hidden).toBe(true);
+    expect(out.hidden).toBe(false);
+    expect(out.buttons).toHaveLength(0);
   });
 
   it('shows when in-game with 2 consoles', () => {
@@ -224,13 +225,21 @@ describe('renderTabBar — DOM mutations', () => {
     expect(renderTabBar(null, layout)).toBe(layout);
   });
 
-  it('sets aria-hidden=true and clears children when layout is hidden (does not touch inline style — CSS drives display via [aria-hidden])', () => {
+  it('sets aria-hidden=true and clears children when layout is hidden (not in-game)', () => {
     const root = fakeRoot();
-    const layout = tabBarLayout(['CaptainChair'], 'CaptainChair', 'portrait', true);
+    const layout = tabBarLayout(['CaptainChair'], 'CaptainChair', 'portrait', false);
     renderTabBar(root, layout);
     expect(root.getAttribute('aria-hidden')).toBe('true');
     // No inline style.display is set — CSS rule [aria-hidden="true"] handles it.
     expect(root.style.display).toBeUndefined();
+    expect(root.children.length).toBe(0);
+  });
+
+  it('sets aria-hidden=false with no buttons for single-console player (bar visible for title)', () => {
+    const root = fakeRoot();
+    const layout = tabBarLayout(['CaptainChair'], 'CaptainChair', 'portrait', true);
+    renderTabBar(root, layout);
+    expect(root.getAttribute('aria-hidden')).toBe('false');
     expect(root.children.length).toBe(0);
   });
 
@@ -298,13 +307,21 @@ describe('renderTabBar — DOM mutations', () => {
     expect(root.children.map((c) => c.dataset.console)).toEqual(['CaptainChair', 'Helm']);
   });
 
-  it('flipping from shown to hidden clears the buttons and flips aria-hidden', () => {
+  it('reducing to 1 console clears buttons but keeps bar visible (for title)', () => {
     const root = fakeRoot();
     renderTabBar(root, tabBarLayout(['CaptainChair', 'Tactical'], 'CaptainChair', 'portrait', true));
     expect(root.children.length).toBe(2);
     expect(root.getAttribute('aria-hidden')).toBe('false');
     renderTabBar(root, tabBarLayout(['CaptainChair'], 'CaptainChair', 'portrait', true));
     expect(root.children.length).toBe(0);
+    expect(root.getAttribute('aria-hidden')).toBe('false');
+  });
+
+  it('going out of game hides the bar', () => {
+    const root = fakeRoot();
+    renderTabBar(root, tabBarLayout(['CaptainChair', 'Tactical'], 'CaptainChair', 'portrait', true));
+    expect(root.getAttribute('aria-hidden')).toBe('false');
+    renderTabBar(root, tabBarLayout(['CaptainChair', 'Tactical'], 'CaptainChair', 'portrait', false));
     expect(root.getAttribute('aria-hidden')).toBe('true');
   });
 });

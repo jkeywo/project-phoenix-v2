@@ -231,19 +231,16 @@
     /* ── Console tab bar (issue #441) ──────────────────────────────────
        First flex child of #console-container. In-flow so it takes up
        space and the console content below it is not obscured.
-       Two layouts driven by [data-orientation] on the container:
-         portrait  — horizontal strip; horizontal padding clears corner art
-         landscape — vertical strip on the left (width 84px)
-       pointer-events: auto so taps are received. */
+       pointer-events: auto so taps are received.
+       In landscape: single row — buttons left, console title right.
+       In portrait: wraps — buttons on first row, title on second row. */
     #console-tab-bar {
       pointer-events: auto;
       display: flex;
       flex-direction: row;
-      /* nowrap: the console-select buttons must stay on a single line and
-         shrink (truncating their text) rather than spilling onto a 2nd row. */
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
       justify-content: flex-start;
-      align-items: stretch;
+      align-items: center;
       flex-shrink: 0;
       gap: 0.25rem;
       padding: 0.25rem clamp(50px, 20vw, 120px);
@@ -269,8 +266,7 @@
       text-align: center;
       cursor: pointer;
       text-transform: uppercase;
-      /* Shrink to share the row; truncate the label rather than wrap so the
-         bar never grows to a 2nd line (see flex-wrap: nowrap above). */
+      /* Shrink to fit the row; truncate rather than wrap. */
       flex: 0 1 auto;
       min-width: 0;
       overflow: hidden;
@@ -284,6 +280,7 @@
       #console-tab-bar .tab-button { font-size: 0.7rem; padding: 0.3rem 0.5rem; }
     }
     @media (orientation: landscape) {
+      #console-tab-bar { flex-wrap: nowrap; }
       #console-tab-bar .tab-button { font-size: 1rem; padding: 0.5rem 1rem; }
     }
     #console-tab-bar .tab-button:active { background: #1a2230; }
@@ -291,6 +288,36 @@
       background: rgba(95, 216, 232, 0.18);
       border-color: var(--signal-cyan);
       color: var(--signal-cyan);
+    }
+    /* Console title label — appended to the tab bar by render() */
+    #phase-title {
+      font-family: 'Chakra Petch', monospace;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--signal-cyan);
+      padding: 0.3rem 0.5rem;
+      text-transform: uppercase;
+      white-space: nowrap;
+      flex-shrink: 0;
+      line-height: 1;
+      align-self: center;
+    }
+    @media (orientation: portrait) {
+      /* Title wraps to its own full-width row below the buttons */
+      #phase-title {
+        flex-basis: 100%;
+        order: 99;
+        font-size: 0.7rem;
+      }
+    }
+    @media (orientation: landscape) {
+      /* Title stays inline, pushed to the right of the buttons */
+      #phase-title {
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+        margin-left: auto;
+      }
     }
 
     /* ── Lobby section: full-viewport when active ──────────────────────── */
@@ -532,8 +559,10 @@
 
   <div id="status">Connecting…</div>
 
+  <!-- #phase-title lives outside the DOM flow; render() moves it into the tab bar each frame -->
+  <span id="phase-title"></span>
+
   <div id="top-bar">
-    <span id="phase-title" style="font-size:0.9rem;color:#8af;display:none"></span>
     <span id="conn-label"></span>
     <span id="conn-dot"></span>
     <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
@@ -797,6 +826,10 @@
       }
     }
 
+    // Persistent reference to the console title label — moved into the tab
+    // bar on each render() so it survives renderTabBar's innerHTML clear.
+    const _consoleTitleEl = document.getElementById('phase-title');
+
     // Defer re-render so rapid server messages don't steal pointer events.
     let _renderFrame = null;
     function scheduleRender() {
@@ -820,17 +853,6 @@
             game: s.phase === 'InProgress' || s.phase === 'GameOver',
             bezel: s.phase === 'InProgress' || s.phase === 'GameOver' };
       const inGame = vis.game;
-      // Show the active console name in the top-bar during game phase.
-      const titleEl = $('phase-title');
-      if (!inGame) {
-        titleEl.style.display = 'none';
-      } else if (activeConsole) {
-        titleEl.style.display = '';
-        titleEl.textContent = consoleLabel(activeConsole);
-      } else {
-        titleEl.style.display = '';
-        titleEl.textContent = 'Bridge';
-      }
       $('lobby-ui').className = vis.lobby ? 'active' : '';
       // Phone bezel (issue #439) is part of the game shell only — the lobby
       // is borderless. Toggle visibility via aria-hidden so the CSS
@@ -885,15 +907,24 @@
       if (container) container.dataset.orientation = orientation;
 
       // Console tab bar (issue #441): render into #console-tab-bar via
-      // gui/tab-bar.js. Hidden in lobby and for single-console players.
+      // gui/tab-bar.js. Hidden in lobby; shows title for 1-console players,
+      // shows tab buttons + title for multi-console players.
       const tabRoot = $('console-tab-bar');
       if (tabRoot && typeof window.tabBarLayout === 'function'
           && typeof window.renderTabBar === 'function') {
         const layout = window.tabBarLayout(mine, activeConsole, orientation, inGame);
+        // Capture title ref before renderTabBar clears the bar's children.
+        const titleEl = _consoleTitleEl;
+        if (inGame) {
+          titleEl.textContent = activeConsole ? consoleLabel(activeConsole) : 'Bridge';
+        }
         window.renderTabBar(tabRoot, layout, { onPress: (name) => {
           setActiveConsole(name);
           scheduleRender();
         }});
+        // Append title into the bar so it sits inline (landscape) or wraps
+        // below the buttons (portrait) — CSS handles the two layouts.
+        if (inGame) tabRoot.appendChild(titleEl);
       }
 
       if (inGame) renderGame(s);

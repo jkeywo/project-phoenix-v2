@@ -1816,59 +1816,142 @@
     if (!hostPeerId) {
       setStatus('No host ID in URL. Scan the QR code on the view screen.');
     } else {
-      const clientPeer = new Peer({ config: { iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
-      ] } });
-
-      clientPeer.on('open', () => {
-        let connectTimeout;
-
-        function startConnect() {
-          setStatus('Connecting to host…');
-          conn = clientPeer.connect(hostPeerId, { reliable: true });
-
-          // If the DataConnection doesn't open within 8 s, retry — PeerJS
-          // can silently stall when NAT traversal fails or the host is
-          // temporarily unreachable.
-          connectTimeout = setTimeout(() => {
-            if (conn && !conn.open) {
-              conn.close();
-              conn = null;
-              startConnect();
+      (async () => {
+        async function getIceServers() {
+          const base = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
+          ];
+          try {
+            const r = await fetch('https://project-phoenix.workers.dev');
+            if (r.ok) {
+              const extra = await r.json();
+              console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
+              return [...base, ...extra];
             }
-          }, 8000);
-
-          conn.on('open', () => {
-            clearTimeout(connectTimeout);
-            setConnectionStatus('ready');
-            acquireWakeLock();
-            send('Identify', { token: myToken, name: myName });
-            setStatus('Waiting for server…');
-          });
-
-          conn.on('data', raw => {
-            try {
-              const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-              handleMessage(JSON.parse(str));
-            } catch (e) { console.error('[client] bad message', e, raw); }
-          });
-
-          conn.on('close', () => { clearTimeout(connectTimeout); setConnectionStatus('disconnected'); setStatus('Disconnected'); conn = null; releaseWakeLock(); });
-          conn.on('error', e  => { clearTimeout(connectTimeout); setStatus('Connection error: ' + e.type); });
+            console.warn('[ICE] Metered.ca fetch returned', r.status, '— using OpenRelay only');
+          } catch (e) {
+            console.warn('[ICE] Metered.ca fetch failed (placeholder or network error) — using OpenRelay only:', e.message);
+          }
+          return base;
         }
 
-        startConnect();
-      });
+        console.log('[PeerJS] fetching ICE servers…');
+        const iceServers = await getIceServers();
+        console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
+        console.log(`[PeerJS] connecting to host peer ID: ${hostPeerId}`);
+        const clientPeer = new Peer({ config: { iceServers } });
 
-      clientPeer.on('disconnected', () => {
-        setConnectionStatus('disconnected');
-        clientPeer.reconnect();
-      });
+        clientPeer.on('open', () => {
+          console.log('[PeerJS] client peer open — starting DataChannel connect');
+          let connectTimeout;
+          let connectAttempts = 0;
 
-      clientPeer.on('error', e => { setConnectionStatus('error'); setStatus('Peer error: ' + e.type); });
+          function startConnect() {
+            console.log(`[PeerJS] connect attempt ${connectAttempts + 1}…`);
+            setStatus('Connecting to host…');
+            conn = clientPeer.connect(hostPeerId, { reliable: true });
+
+            // Hook ICE state immediately so we see gathering/checking/connected
+            const pc = conn.peerConnection;
+            if (pc) {
+              pc.addEventListener('iceconnectionstatechange', () =>
+                console.log(`[ICE] state → ${pc.iceConnectionState}`));
+              pc.addEventListener('icegatheringstatechange', () =>
+                console.log(`[ICE] gathering → ${pc.iceGatheringState}`));
+            }
+
+            // If the DataConnection doesn't open within 8 s, retry — PeerJS
+            // can silently stall when NAT traversal fails or the host is
+            // temporarily unreachable.
+            connectTimeout = setTimeout(() => {
+              if (conn && !conn.open) {
+                console.warn(`[PeerJS] ICE timed out on attempt ${connectAttempts + 1} — closing and retrying`);
+                conn.close();
+                conn = null;
+                connectAttempts++;
+                if (connectAttempts >= 3) {
+                  console.error('[PeerJS] giving up after 3 failed ICE attempts');
+                  setConnectionStatus('error');
+                  setStatus('Cannot reach host after 3 attempts — the network may be blocking WebRTC relay traffic. Try a different network.');
+                  return;
+                }
+                startConnect();
+              }
+            }, 8000);
+
+            conn.on('open', () => {
+              clearTimeout(connectTimeout);
+              console.log('[PeerJS] DataChannel open');
+              // Report the winning ICE candidate type so it's clear whether
+              // traffic is direct (host), STUN-reflexive (srflx), or relayed (relay/TURN)
+              const pc = conn.peerConnection;
+              if (pc) {
+                setTimeout(() => {
+                  pc.getStats().then(stats => {
+                    const vals = [...stats.values()];
+                    const pair = vals.find(r => r.type === 'candidate-pair' && r.nominated);
+                    if (pair) {
+                      const loc = vals.find(r => r.id === pair.localCandidateId);
+                      const rem = vals.find(r => r.id === pair.remoteCandidateId);
+                      console.log(`[ICE] active path: local=${loc?.candidateType} remote=${rem?.candidateType}`);
+                      if (loc?.candidateType === 'relay' || rem?.candidateType === 'relay') {
+                        console.log('[ICE] traffic is being relayed through a TURN server');
+                      }
+                    }
+                  }).catch(() => {});
+                }, 1500);
+              }
+              setConnectionStatus('ready');
+              acquireWakeLock();
+              send('Identify', { token: myToken, name: myName });
+              setStatus('Waiting for server…');
+            });
+
+            conn.on('data', raw => {
+              try {
+                const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+                handleMessage(JSON.parse(str));
+              } catch (e) { console.error('[client] bad message', e, raw); }
+            });
+
+            conn.on('close', () => {
+              clearTimeout(connectTimeout);
+              console.log('[PeerJS] DataChannel closed');
+              setConnectionStatus('disconnected');
+              setStatus('Disconnected');
+              conn = null;
+              releaseWakeLock();
+            });
+            conn.on('error', e => {
+              clearTimeout(connectTimeout);
+              console.error(`[PeerJS] connection error (type: ${e.type})`, e);
+              setStatus('Connection error: ' + e.type);
+            });
+          }
+
+          startConnect();
+        });
+
+        clientPeer.on('disconnected', () => {
+          console.warn('[PeerJS] signaling disconnected — reconnecting…');
+          setConnectionStatus('disconnected');
+          clientPeer.reconnect();
+        });
+
+        clientPeer.on('error', e => {
+          console.error(`[PeerJS] client error (type: ${e.type})`, e);
+          setConnectionStatus('error');
+          if (e.type === 'peer-unavailable') {
+            setStatus('Host not found — rescan the QR code on the view screen.');
+          } else {
+            setStatus('Peer error: ' + e.type);
+          }
+        });
+      })();
     }
   </script>
 </body>

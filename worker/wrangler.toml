@@ -1,0 +1,12 @@
+name = "phoenix-turn-credentials"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+# Your Metered.ca app subdomain — the part before ".metered.live"
+METERED_APP = "projectphoenix"
+# The origin of your deployed site, used for CORS.
+ALLOWED_ORIGIN = "https://jkeywo.github.io"
+
+# METERED_KEY is NOT here — set it with:
+#   wrangler secret put METERED_KEY

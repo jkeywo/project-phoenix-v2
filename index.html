@@ -626,7 +626,47 @@
         window.wasmBindings.wasm_ui_action(json); // browser WASM (server or client)
       }
     };
+
+    // ── WASM panic capture ─────────────────────────────────────────────────
+    // console_error_panic_hook writes "panicked at …" via console.error before
+    // the WASM trap propagates.  We intercept that call to show the message on
+    // screen; the original console.error still fires so DevTools also shows it.
+    (function installPanicCapture() {
+      const _orig = console.error.bind(console);
+      console.error = function(...args) {
+        _orig(...args);
+        const msg = args.map(a => (a instanceof Error ? (a.stack || a.message) : String(a))).join('\n');
+        if (msg.includes('panicked at')) {
+          const overlay = document.getElementById('panic-overlay');
+          if (overlay) {
+            document.getElementById('panic-message').textContent = msg;
+            overlay.style.display = 'flex';
+          }
+        }
+      };
+      // Safety net: surface any unhandled JS/WASM error that didn't go through
+      // console.error (e.g. a RuntimeError thrown after the initial panic trap).
+      window.addEventListener('error', ev => {
+        const overlay = document.getElementById('panic-overlay');
+        if (!overlay || overlay.style.display !== 'none') return; // already shown
+        const msg = ev.error ? (ev.error.stack || ev.error.message) : ev.message;
+        if (msg && (msg.includes('RuntimeError') || msg.includes('unreachable'))) {
+          document.getElementById('panic-message').textContent =
+            'WASM trap (RuntimeError) — check the DevTools console for the Rust panic message.\n\n' + msg;
+          overlay.style.display = 'flex';
+        }
+      });
+    })();
   </script>
+
+  <!-- WASM panic full-screen overlay -->
+  <div id="panic-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:#0d0000;color:#ff8888;font-family:monospace;font-size:0.85rem;padding:2.5rem;overflow:auto;flex-direction:column;align-items:flex-start;justify-content:flex-start;">
+    <div style="max-width:90ch;">
+      <div style="color:#ff4444;font-size:1.1rem;font-weight:bold;margin-bottom:1.2rem;">&#9888; WASM PANIC — server has crashed</div>
+      <pre id="panic-message" style="background:#1a0000;border:1px solid #550000;padding:1.2rem;white-space:pre-wrap;word-break:break-all;line-height:1.6;margin:0 0 1.2rem;"></pre>
+      <p style="color:#888;margin:0;">The full stack trace is in the browser DevTools console (F12). Reload the page to restart the server.</p>
+    </div>
+  </div>
 
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
   <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
@@ -1114,16 +1154,38 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       .map(b => b.toString(16).padStart(2, '0')).join('');
     const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/index.html#' + hostPeerId;
 
-    function initPeerJS() {
-      setConnectionStatus('connecting');
-      const peer = new Peer(hostPeerId, { config: { iceServers: [
+    async function getIceServers() {
+      const base = [
         { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
         { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
         { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
-      ] } });
+      ];
+      try {
+        const r = await fetch('https://project-phoenix.workers.dev');
+        if (r.ok) {
+          const extra = await r.json();
+          console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
+          return [...base, ...extra];
+        }
+        console.warn('[ICE] Metered.ca fetch returned', r.status, '— using OpenRelay only');
+      } catch (e) {
+        console.warn('[ICE] Metered.ca fetch failed (placeholder or network error) — using OpenRelay only:', e.message);
+      }
+      return base;
+    }
+
+    async function initPeerJS() {
+      setConnectionStatus('connecting');
+      console.log('[PeerJS] fetching ICE servers…');
+      const iceServers = await getIceServers();
+      console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
+      console.log(`[PeerJS] host peer ID: ${hostPeerId}`);
+      const peer = new Peer(hostPeerId, { config: { iceServers } });
 
       peer.on('open', () => {
+        console.log('[PeerJS] signaling open — ready for clients');
         setConnectionStatus('ready');
         const canvas = document.getElementById('qr');
         canvas.style.display = 'block';
@@ -1132,11 +1194,36 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       });
 
       peer.on('disconnected', () => {
+        console.warn('[PeerJS] signaling disconnected — reconnecting…');
         setConnectionStatus('disconnected');
         peer.reconnect();
       });
 
       peer.on('connection', (conn) => {
+        const shortId = conn.peer.slice(0, 8);
+        console.log(`[PeerJS] inbound connection from ${shortId}…`);
+
+        conn.on('open', () => {
+          console.log(`[PeerJS] DataChannel open — ${shortId}…`);
+          // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
+          const pc = conn.peerConnection;
+          if (pc) {
+            pc.addEventListener('iceconnectionstatechange', () =>
+              console.log(`[ICE] ${shortId}… → ${pc.iceConnectionState}`));
+            setTimeout(() => {
+              pc.getStats().then(stats => {
+                const vals = [...stats.values()];
+                const pair = vals.find(r => r.type === 'candidate-pair' && r.nominated);
+                if (pair) {
+                  const loc = vals.find(r => r.id === pair.localCandidateId);
+                  const rem = vals.find(r => r.id === pair.remoteCandidateId);
+                  console.log(`[ICE] ${shortId}… active path: local=${loc?.candidateType} remote=${rem?.candidateType}`);
+                }
+              }).catch(() => {});
+            }, 1500);
+          }
+        });
+
         conn.on('data', (raw) => {
           const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
           let token = peerTokens.get(conn.peer);
@@ -1149,6 +1236,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
                 token = msg.data.token;
                 peerTokens.set(conn.peer, token);
                 tokenConns.set(token, conn);
+                console.log(`[PeerJS] ${shortId}… identified as token ${token.slice(0, 8)}…`);
               }
             } catch (_) { return; }
           }
@@ -1158,6 +1246,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
         conn.on('close', () => {
           const token = peerTokens.get(conn.peer);
+          console.log(`[PeerJS] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
           peerTokens.delete(conn.peer);
           if (!token) return;
           // On a browser refresh the new page may have already reconnected
@@ -1170,10 +1259,21 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           tokenConns.delete(token);
         });
 
-        conn.on('error', (err) => console.error('[PeerJS conn]', err));
+        conn.on('error', (err) => console.error(`[PeerJS] connection error — ${shortId}…`, err));
       });
 
-      peer.on('error', (err) => { console.error('[PeerJS host]', err); setConnectionStatus('error'); });
+      peer.on('error', (err) => {
+        console.error(`[PeerJS] host error (type: ${err.type})`, err);
+        setConnectionStatus('error');
+        // Transient signaling errors — retry after a short delay rather than
+        // requiring a page refresh. Fatal errors (browser-incompatible,
+        // unavailable-id) are not retried.
+        const retryable = new Set(['network', 'server-error', 'socket-error', 'socket-closed']);
+        if (retryable.has(err.type)) {
+          console.warn(`[PeerJS] retryable error — re-initializing in 3 s…`);
+          setTimeout(initPeerJS, 3000);
+        }
+      });
     }
 
     // ── Scenario selection ────────────────────────────────────────────────
@@ -1271,13 +1371,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       } catch (_) {}
 
       if (target === 'all') {
-        for (const conn of tokenConns.values()) conn.send(payload);
+        for (const conn of tokenConns.values()) { if (conn.open) conn.send(payload); }
       } else if (target.startsWith('token:')) {
-        tokenConns.get(target.slice(6))?.send(payload);
+        const conn = tokenConns.get(target.slice(6));
+        if (conn?.open) conn.send(payload);
       } else if (target.startsWith('except:')) {
         const exc = target.slice(7);
         for (const [t, conn] of tokenConns.entries()) {
-          if (t !== exc) conn.send(payload);
+          if (t !== exc && conn.open) conn.send(payload);
         }
       }
     }

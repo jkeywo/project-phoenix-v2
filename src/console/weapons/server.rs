@@ -991,6 +991,7 @@ fn handle_fire_torpedo(
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
+    weapons_target: Res<WeaponsTarget>,
 ) {
     for ev in reader.read() {
         let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else {
@@ -1007,6 +1008,9 @@ fn handle_fire_torpedo(
             .unwrap_or(0.0);
         let launch_heading = ship.yaw + tube_facing_rad;
         let source_uuid = player_ship_q.single().map(|u| u.0.clone()).ok();
+        // Use the server-side locked target as the authoritative homing UUID.
+        // Fall back to whatever the client sent in case there's no server lock.
+        let homing_uuid = weapons_target.0.clone().or_else(|| target_uuid.clone());
         use crate::torpedo::LaunchResult;
         match torpedo_sys.0.launch(
             tube.as_str(),
@@ -1014,7 +1018,7 @@ fn handle_fire_torpedo(
             ship.x,
             ship.z,
             launch_heading,
-            target_uuid.clone(),
+            homing_uuid,
             source_uuid,
         ) {
             LaunchResult::Launched {

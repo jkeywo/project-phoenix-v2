@@ -184,7 +184,7 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
     const radius = (a.radar_size !== undefined && a.radar_size !== null)
       ? a.radar_size
       : entityRadius(a);
-    const targetTags = (a.target_tags || []).map(t => String(t).toLowerCase());
+    const targetTags = (a.target_tags && a.target_tags.length > 0 ? a.target_tags : (a.tags || [])).map(t => String(t).toLowerCase());
     const selectable = selects.length > 0 && targetTags.some(t => selects.includes(t));
     const blip = {
       uuid: a.uuid,

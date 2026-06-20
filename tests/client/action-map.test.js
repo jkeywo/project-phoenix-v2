@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 25 expected action keys', () => {
+  it('contains exactly the 26 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'clear_comms',
@@ -33,6 +33,7 @@ describe('ACTION_MAP', () => {
       'set_view',
       'show_on_screen',
       'start_impulse_charge',
+      'toggle_boost',
       'toggle_red_alert',
       'unload_tube',
     ]);
@@ -176,6 +177,14 @@ describe('start_impulse_charge', () => {
     const send = mkSend();
     ACTION_MAP.start_impulse_charge({}, send);
     expect(send).toHaveBeenCalledWith('StartImpulseCharge');
+  });
+});
+
+describe('toggle_boost', () => {
+  it('calls send ToggleBoost', () => {
+    const send = mkSend();
+    ACTION_MAP.toggle_boost({ action: 'toggle_boost' }, send);
+    expect(send).toHaveBeenCalledWith('ToggleBoost');
   });
 });
 

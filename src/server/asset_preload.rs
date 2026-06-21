@@ -803,6 +803,7 @@ mod tests {
             emissive: None,
             scale: 1.0,
             rotation: [0.0, 0.0, 0.0],
+            no_render: false,
         });
         config.radar_appearance = Some(RadarAppearanceConfig {
             icon: Some("testShip".into()),

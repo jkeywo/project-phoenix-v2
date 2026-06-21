@@ -1179,7 +1179,17 @@
         const canvas = document.getElementById('qr');
         canvas.style.display = 'block';
         QRCode.toCanvas(canvas, joinUrl, { width: 200 });
-        document.getElementById('qr-link').href = joinUrl;
+        const qrLink = document.getElementById('qr-link');
+        qrLink.href = joinUrl;
+        // Clicking the QR opens the client in a separate WINDOW, not a tab, so
+        // testers can run several clients side-by-side on one desktop. A
+        // features string (size) is what makes the browser spawn a window
+        // rather than a tab; '_blank' name gives each click its own window.
+        // The href is kept for QR scanning and right-click "copy link".
+        qrLink.onclick = (e) => {
+          e.preventDefault();
+          window.open(joinUrl, '_blank', 'popup,noopener,width=440,height=900');
+        };
       });
 
       peer.on('disconnected', () => {

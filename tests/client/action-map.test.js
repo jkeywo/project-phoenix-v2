@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 26 expected action keys', () => {
+  it('contains exactly the 27 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'clear_comms',
@@ -23,6 +23,7 @@ describe('ACTION_MAP', () => {
       'load_tube',
       'respond_to_message',
       'select_comms_message',
+      'set_boost',
       'set_navigation_chart',
       'set_navigation_waypoint',
       'set_phaser_mode',
@@ -32,7 +33,6 @@ describe('ACTION_MAP', () => {
       'set_target',
       'set_view',
       'show_on_screen',
-      'set_boost',
       'start_impulse_charge',
       'toggle_boost',
       'toggle_red_alert',

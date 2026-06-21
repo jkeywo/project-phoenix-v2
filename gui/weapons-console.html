@@ -32,9 +32,9 @@
     .hero .bar { width: 6px; }
     .hero { gap: 12px; }
 
-    /* Radar — fills the full available height in landscape (no fixed cap) */
+    /* Radar circle fills full screen height in landscape (surround-frame at 125dvh so 80% = 100dvh). */
     .radar-col .radar-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: 100%; max-height: none; max-width: 100%; display: flex; align-items: center; justify-content: center; }
+    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: calc(100dvh * 1.25); max-height: none; max-width: none; display: flex; align-items: center; justify-content: center; }
     .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }
 
     /* Compress inset bodies */
@@ -183,7 +183,7 @@
       .hero { gap: 10px; }
       .hero .sub { font-size: 11px; }
       .hero .complexity { display: none; }
-      .radar-col .radar-surround-frame { max-height: none; max-width: 100%; }
+      .radar-col .radar-surround-frame { max-height: none; max-width: none; }
       .side-rail { font-size: 9px; }
       .side-rail.top { top: 10px; }
       .side-rail.bottom { bottom: 10px; }
@@ -250,8 +250,9 @@
         display: none;
       }
       .radar-col .radar-surround-frame {
-        max-height: calc(100dvh - 54px);
-        max-width: calc(100dvh - 54px);
+        height: calc(100dvh * 1.25);
+        max-height: none;
+        max-width: none;
       }
       .radar-col > .readout {
         padding: 4px 9px;
@@ -452,8 +453,8 @@
       .side-rail { display: none; }
 
       .radar-col .radar-wrap { min-height: 30vh; }
-      /* Portrait: radar fills the full available width. */
-      .radar-col .radar-surround-frame { width: 100%; height: auto; max-height: none; max-width: none; }
+      /* Portrait: radar circle fills full screen width (surround-frame at 125vw so 80% = 100vw). */
+      .radar-col .radar-surround-frame { width: calc(100vw * 1.25); height: auto; max-height: none; max-width: none; }
       .radar-col .radar { max-height: none; max-width: none; }
       .radar-col > .readout { padding: 0.4rem 0.6rem; }
       .radar-col > .readout .v { font-size: 1.25rem; }

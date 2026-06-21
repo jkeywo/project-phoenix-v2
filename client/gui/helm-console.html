@@ -28,8 +28,8 @@
     .hero { gap: 12px; padding: 4px 0; }
 
     .radar-col .radar-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
-    /* Radar fills the full available height in landscape (no fixed cap). */
-    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: 100%; max-height: none; max-width: 100%; display: flex; align-items: center; justify-content: center; }
+    /* Radar circle fills full screen height in landscape (surround-frame at 125dvh so 80% = 100dvh). */
+    .radar-col .radar-surround-frame { aspect-ratio: 1/1; width: auto; height: calc(100dvh * 1.25); max-height: none; max-width: none; display: flex; align-items: center; justify-content: center; }
     .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }
 
     .ctrl-col .stick-area { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
@@ -318,7 +318,7 @@
     .readout .v { font-size: 24px; }
     .radar-col > .readout { padding: 6px 14px; }
     .radar-col > .readout .v { font-size: 18px; }
-    .radar-col .radar-surround-frame { max-height: none; max-width: 100%; }
+    .radar-col .radar-surround-frame { max-height: none; max-width: none; }
     .helm-readout-overlay { font-size: 10px; }
     .helm-readout-overlay .v { font-size: 11px; }
     .readout-hdg { top: 8px; left: 12%; }
@@ -362,8 +362,8 @@
     .side-rail { display: none; }
 
     .radar-col .radar-wrap { min-height: 35vh; }
-    /* Portrait: radar fills the full available width. */
-    .radar-col .radar-surround-frame { width: 100%; height: auto; max-height: none; max-width: none; }
+    /* Portrait: radar circle fills full screen width (surround-frame at 125vw so 80% = 100vw). */
+    .radar-col .radar-surround-frame { width: calc(100vw * 1.25); height: auto; max-height: none; max-width: none; }
     .radar-col > .readout { padding: 0.4rem 0.6rem; }
     .radar-col > .readout .v { font-size: 1.25rem; }
 

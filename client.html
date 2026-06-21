@@ -218,14 +218,16 @@
 
     /* Iframe content sits inside the bezel safe zone.
        No top padding — the container's padding-top + the tab bar already
-       clear the top bezel edge. Side + bottom still needed. */
-    #weapons-ui.active,
-    #captain-ui.active,
+       clear the top bezel edge. Side + bottom still needed for most consoles.
+       Radar consoles (helm/weapons/sensors) get no padding so the iframe
+       fills to the screen edge, letting the radar circle meet the bezel. */
     #helm-ui.active,
+    #weapons-ui.active,
+    #sensors-ui.active { padding: 0; }
+    #captain-ui.active,
     #power-ui.active,
     #repair-ui.active,
     #shields-ui.active,
-    #sensors-ui.active,
     #comms-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────

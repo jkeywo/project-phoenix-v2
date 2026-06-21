@@ -590,7 +590,7 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{
         uuid: 'target-1', x: 0, z: -100,
         tags: ['ship'], name: 'Patrol', stance: 'neutral', faction: 'harrow',
-        hull_pct: 75, heading: 45, speed: 10,
+        hull_pct: 75, yaw: 45 * Math.PI / 180, speed: 10,
       }],
     };
     const s = parse(buildSensorsConsoleState(state));

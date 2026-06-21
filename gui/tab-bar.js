@@ -63,27 +63,39 @@ export function useInitials(consoles, orientation) {
 //   active      — currently-selected console name (or null)
 //   orientation — 'portrait' | 'landscape'
 //   inGame      — boolean; tab bar is hidden in the lobby
+//   consoleHull — optional [{ console, current, max_hp }] from server state
 // Returns:
 //   {
 //     hidden: bool,
 //     orientation: 'portrait'|'landscape',
 //     useInitials: bool,
-//     buttons: [{ console, label, active }],
+//     buttons: [{ console, label, active, hullPct }],
 //   }
+// hullPct is 0-100 for damageable consoles, null for non-damageable.
 // Tab is always a horizontal strip across the top; orientation only affects
 // button size and whether initials or full labels are used.
-export function tabBarLayout(consoles, active, orientation, inGame) {
+export function tabBarLayout(consoles, active, orientation, inGame, consoleHull) {
   const list = Array.isArray(consoles) ? consoles : [];
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   const initials = useInitials(list, orient);
   // Hide when not in-game or when there are no consoles.
   // Single-console players still see the bar (for the title label).
   const hidden = !inGame || list.length === 0;
+  // Build a lookup from console name → hull pct for damageable consoles.
+  const hullMap = {};
+  if (Array.isArray(consoleHull)) {
+    for (const h of consoleHull) {
+      if (h && h.console && h.max_hp > 0) {
+        hullMap[h.console] = Math.max(0, Math.min(100, (h.current / h.max_hp) * 100));
+      }
+    }
+  }
   // Only render tab buttons when there are 2+ consoles to switch between.
   const buttons = list.length >= 2 ? list.map((c) => ({
     console: c,
     label: initials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c),
     active: c === active,
+    hullPct: hullMap[c] !== undefined ? hullMap[c] : null,
   })) : [];
   return { hidden, orientation: orient, useInitials: initials, buttons };
 }
@@ -116,12 +128,23 @@ export function renderTabBar(root, layout, options) {
     el.type = 'button';
     el.className = 'tab-button' + (btn.active ? ' active' : '');
     el.dataset.console = btn.console;
-    el.textContent = btn.label;
     // role="tab" + aria-selected matches the role="tablist" container on
     // the parent (ARIA contract — toggle buttons would use aria-pressed,
     // but inside a tablist screen readers expect tabs with aria-selected).
     el.setAttribute('role', 'tab');
     el.setAttribute('aria-selected', btn.active ? 'true' : 'false');
+    const labelEl = (root.ownerDocument || document).createElement('span');
+    labelEl.className = 'tab-label';
+    labelEl.textContent = btn.label;
+    el.appendChild(labelEl);
+    if (btn.hullPct !== null) {
+      const bar = (root.ownerDocument || document).createElement('span');
+      bar.className = 'tab-hull-bar';
+      bar.style.setProperty('--hull-pct', btn.hullPct + '%');
+      const color = btn.hullPct > 60 ? '#4caf50' : btn.hullPct > 25 ? '#f59e0b' : '#ef4444';
+      bar.style.setProperty('--hull-color', color);
+      el.appendChild(bar);
+    }
     if (typeof opts.onPress === 'function') {
       // pointerdown fires immediately on touch (no 300 ms click-delay).
       el.addEventListener('pointerdown', (e) => { e.preventDefault(); opts.onPress(btn.console); });

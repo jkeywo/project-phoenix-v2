@@ -615,7 +615,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-5e8a0d59d8c078e9.js" crossorigin="anonymous" integrity="sha384-hnrOnt0XUTd0LZSOBcno8W/s7n6ok6pOdKaJSNDmy/GvhT0ziUpyUtzyTuFvElLM"><link rel="preload" href="./project-phoenix-5e8a0d59d8c078e9_bg.wasm" crossorigin="anonymous" integrity="sha384-kHJ2pAS0P+Aca1ObAHiPjjG8lsJ3TdnkCRn80mtbEdbg2ovfpAtumWHTigdK62gv" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-475b6c8477cf81da.js" crossorigin="anonymous" integrity="sha384-qZcdwHovmm010ODDu1IZg8/HhwPKv9DseK32MjaB4wHV1xuWArzqdhXxvL2nh6zb"><link rel="preload" href="./project-phoenix-475b6c8477cf81da_bg.wasm" crossorigin="anonymous" integrity="sha384-l+tfIufwwV8/dlQIRl+AtDCaMCz10POHSiNFYMRIKWoSc3bGxZrSnACvtrQ0k+8p" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -817,8 +817,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-5e8a0d59d8c078e9.js';
-const wasm = await init({ module_or_path: './project-phoenix-5e8a0d59d8c078e9_bg.wasm' });
+import init, * as bindings from './project-phoenix-475b6c8477cf81da.js';
+const wasm = await init({ module_or_path: './project-phoenix-475b6c8477cf81da_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1190,7 +1190,17 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         const canvas = document.getElementById('qr');
         canvas.style.display = 'block';
         QRCode.toCanvas(canvas, joinUrl, { width: 200 });
-        document.getElementById('qr-link').href = joinUrl;
+        const qrLink = document.getElementById('qr-link');
+        qrLink.href = joinUrl;
+        // Clicking the QR opens the client in a separate WINDOW, not a tab, so
+        // testers can run several clients side-by-side on one desktop. A
+        // features string (size) is what makes the browser spawn a window
+        // rather than a tab; '_blank' name gives each click its own window.
+        // The href is kept for QR scanning and right-click "copy link".
+        qrLink.onclick = (e) => {
+          e.preventDefault();
+          window.open(joinUrl, '_blank', 'popup,noopener,width=440,height=900');
+        };
       });
 
       peer.on('disconnected', () => {
@@ -1234,6 +1244,22 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
               const msg = JSON.parse(json);
               if (msg.type === 'Identify') {
                 token = msg.data.token;
+                // Duplicate-token detection (issue: 4P Engineering "data shown,
+                // taps did nothing"). If another OPEN connection already claims
+                // this token, the two devices share a session-token: outbound
+                // state routes only to whichever wins this overwrite, while the
+                // loser's taps are still accepted server-side but produce no
+                // visible feedback — a "ghost" console. Warn loudly so this is
+                // obvious in the host log instead of silently mis-routing.
+                const prior = tokenConns.get(token);
+                if (prior && prior !== conn && prior.open) {
+                  console.warn(
+                    `[PeerJS] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +
+                    `identified with a token already held by an open connection. ` +
+                    `The earlier device will become a ghost (state routes here; its ` +
+                    `taps succeed but show no feedback).`,
+                  );
+                }
                 peerTokens.set(conn.peer, token);
                 tokenConns.set(token, conn);
                 console.log(`[PeerJS] ${shortId}… identified as token ${token.slice(0, 8)}…`);

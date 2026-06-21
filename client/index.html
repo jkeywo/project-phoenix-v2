@@ -19,6 +19,11 @@
   <script type="module" src="gui/console-registry.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
   <script type="module" src="gui/active-console.js"></script>
+  <!-- Per-tab session identity (issue: multiple clients on one desktop).
+       localStorage is shared across all tabs of an origin, so every console
+       tab read the same session-token and the host collapsed them onto one
+       player. installSessionToken() gives each tab its own token. -->
+  <script type="module" src="gui/session-token.js"></script>
   <script type="module" src="gui/iframe-bridge.js"></script>
   <script type="module" src="gui/console-state.js"></script>
   <script type="module" src="gui/action-map.js"></script>
@@ -708,12 +713,13 @@
       return NAMES[Math.floor(Math.random() * NAMES.length)];
     }
 
-    let myToken = localStorage.getItem('session-token');
-    if (!myToken) {
-      myToken = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem('session-token', myToken);
-    }
+    // Session identity is resolved per-tab by gui/session-token.js
+    // (installSessionToken) just before we Identify — see the connection block
+    // below. It is not resolved here because that module is deferred and has
+    // not executed yet at parse time. Resolving per-tab (sessionStorage) rather
+    // than per-origin (localStorage) is what lets several console tabs run on
+    // one desktop without colliding on a single shared token.
+    let myToken = null;
 
     let myName = localStorage.getItem('player-name') || randomName();
     localStorage.setItem('player-name', myName);
@@ -1904,6 +1910,23 @@
           }
           return base;
         }
+
+        // Resolve this tab's session token now that gui/session-token.js has
+        // loaded (it is deferred, so it was not available at parse time). Each
+        // tab gets its own token — this is what allows several console tabs on
+        // one desktop to connect as distinct players. The inline branch is a
+        // last-ditch fallback for the rare case the module failed to load.
+        myToken = (typeof window.installSessionToken === 'function')
+          ? window.installSessionToken()
+          : (() => {
+              let t = sessionStorage.getItem('session-token');
+              if (!t) {
+                t = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+                  .map(b => b.toString(16).padStart(2, '0')).join('');
+                sessionStorage.setItem('session-token', t);
+              }
+              return t;
+            })();
 
         console.log('[PeerJS] fetching ICE servers…');
         const iceServers = await getIceServers();

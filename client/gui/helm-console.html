@@ -648,7 +648,7 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
     }
 
     var _stickValue = { x: 0, y: 0 };
-    var _dragging = false;
+    var _stickPointerId = null;
     var _stickRaf;
 
     function _stickFmt(v) {
@@ -679,7 +679,7 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
       _stickUpdateNub();
     }
     function _stickDecay() {
-      if (_dragging) return;
+      if (_stickPointerId !== null) return;
       var k = 0.15;
       _stickValue.x *= (1 - k);
       _stickValue.y *= (1 - k);
@@ -702,19 +702,21 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
         // setPointerCapture() steals all subsequent pointer events from the
         // button so its click listener never fires.
         if (e.target && e.target.closest && e.target.closest('#impulse-overlay')) return;
-        _dragging = true;
+        // Only claim the first touch — additional fingers must reach other controls.
+        if (_stickPointerId !== null) return;
+        _stickPointerId = e.pointerId;
         if (bezel.setPointerCapture) bezel.setPointerCapture(e.pointerId);
         cancelAnimationFrame(_stickRaf);
         _stickSetFromPointer(e.clientX, e.clientY);
         e.preventDefault();
       }
       function move(e) {
-        if (!_dragging) return;
+        if (e.pointerId !== _stickPointerId) return;
         _stickSetFromPointer(e.clientX, e.clientY);
       }
       function up(e) {
-        if (!_dragging) return;
-        _dragging = false;
+        if (e.pointerId !== _stickPointerId) return;
+        _stickPointerId = null;
         try { if (bezel.releasePointerCapture) bezel.releasePointerCapture(e.pointerId); } catch(_) {}
         _stickRaf = requestAnimationFrame(_stickDecay);
       }
@@ -726,7 +728,7 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
       // still. Without this the server only receives an update when the pointer
       // actually moves, leaving the last-received value stale if the connection
       // drops a packet while dragging.
-      setInterval(function() { if (_dragging) _stickUpdateNub(); }, 100);
+      setInterval(function() { if (_stickPointerId !== null) _stickUpdateNub(); }, 100);
     })();
 
     document.getElementById('on-screen-btn').addEventListener('click', function() {
@@ -741,9 +743,26 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
       sendAction('cancel_impulse', {});
     });
 
-    document.getElementById('boost-btn').addEventListener('click', function() {
-      sendAction('toggle_boost', {});
-    });
+    (function initBoostBtn() {
+      var btn = document.getElementById('boost-btn');
+      if (!btn) return;
+      var _boostPointerId = null;
+      btn.addEventListener('pointerdown', function(e) {
+        if (_boostPointerId !== null) return;
+        _boostPointerId = e.pointerId;
+        if (btn.setPointerCapture) btn.setPointerCapture(e.pointerId);
+        sendAction('set_boost', { active: true });
+        e.preventDefault();
+      });
+      function release(e) {
+        if (e.pointerId !== _boostPointerId) return;
+        _boostPointerId = null;
+        try { if (btn.releasePointerCapture) btn.releasePointerCapture(e.pointerId); } catch(_) {}
+        sendAction('set_boost', { active: false });
+      }
+      btn.addEventListener('pointerup', release);
+      btn.addEventListener('pointercancel', release);
+    })();
 
     _radarWidget = (function() {
       var canvas = document.getElementById('radar');

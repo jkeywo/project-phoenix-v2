@@ -84,6 +84,11 @@ export const ACTION_MAP = Object.freeze({
     send('ToggleBoost');
   },
 
+  /** Explicitly set boost on or off (hold-to-boost). */
+  set_boost: (a, send) => {
+    send('SetBoost', { active: !!a.active });
+  },
+
   /** Switch the view-screen to the radar mode. */
   set_radar_view: (a, send) => {
     send('SetView', { mode: { kind: 'Radar' } });

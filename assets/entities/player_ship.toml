@@ -2,6 +2,12 @@ name = "Player Ship"
 tags = [ "player", "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
+[mesh]
+model = "assets/models/alliance_cruiser.glb"
+shape = "Sphere"
+colour = []
+no_render = true
+
 [collider]
 shape = "Capsule"
 radius = 1.5

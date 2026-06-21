@@ -1851,10 +1851,24 @@ fn render_spawned_entities(
             let cfg = &mesh_sec.0;
 
             if let Some(model_path) = &cfg.model {
-                // PATH A: GLB model — issue the load once and store the handle so the
-                // asset server keeps the asset alive. On subsequent frames the same
-                // strong handle is retrieved via `pending`, and we check readiness
-                // against that stable handle.
+                // PATH A: GLB model. When `no_render` is true we only need the
+                // sidecar (for ModelMarkers); we skip loading the GLB entirely.
+                if cfg.no_render {
+                    // Sidecar-only path: resolve once, attach markers, done.
+                    let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
+                        Some(rig) => rig,
+                        None => {
+                            // Sidecar fetch still in flight (wasm) — retry next frame.
+                            continue;
+                        }
+                    };
+                    ec.insert(crate::model_rig::ModelMarkers(rig.markers.clone()));
+                    rendered = true;
+                } else {
+                // PATH A (render): load the GLB scene and its sidecar. Issue the
+                // load once and store the handle so the asset server keeps the
+                // asset alive. On subsequent frames the same strong handle is
+                // retrieved via `pending`, and we check readiness against it.
                 let scene: Handle<bevy::scene::Scene> = match pending {
                     Some(p) => p.0.clone(),
                     None => {
@@ -1928,6 +1942,7 @@ fn render_spawned_entities(
 
                     rendered = true;
                 }
+                } // end else (render path)
             } else {
                 // PATH B: Procedural primitive.
                 let color = if cfg.colour.len() >= 3 {

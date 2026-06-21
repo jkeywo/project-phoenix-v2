@@ -14,6 +14,7 @@ import {
 // behaviour can be asserted without pulling in jsdom.
 function fakeDoc() {
   function makeEl(tag) {
+    let _textContent = '';
     const el = {
       tagName: tag.toUpperCase(),
       children: [],
@@ -25,7 +26,11 @@ function fakeDoc() {
       ownerDocument: null,
       type: '',
       className: '',
-      textContent: '',
+      get textContent() {
+        if (this.children.length === 0) return _textContent;
+        return this.children.map((c) => c.textContent).join('');
+      },
+      set textContent(v) { _textContent = v; },
       get childNodes() { return this.children; },
       setAttribute(k, v) { this.attrs[k] = v; },
       getAttribute(k) { return this.attrs[k]; },

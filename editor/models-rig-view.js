@@ -92,6 +92,20 @@ export function createRigScene(host, deps = {}) {
   scene.add(baseGroup);
   let modelRoot = null; // the loaded gltf.scene
 
+  // ── Forward-direction arrow ─────────────────────────────────────────
+  // World-space arrow at the origin pointing -Z (game forward = [0,0,-1]).
+  // Stays fixed in world space so it always shows the canonical forward
+  // direction regardless of base-rig rotation.
+  const forwardArrow = new THREE.ArrowHelper(
+    new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(0, 0, 0),
+    3,
+    0xffffff,
+    0.8,
+    0.4,
+  );
+  scene.add(forwardArrow);
+
   const markers = new Map(); // name -> { anchor, arrow }
   let selectedName = null;
   let onChangeCb = null;
@@ -291,6 +305,8 @@ export function createRigScene(host, deps = {}) {
     clearMarkers();
     if (modelRoot) disposeObject(THREE, modelRoot);
     disposeGizmo(gizmo, scene);
+    scene.remove(forwardArrow);
+    disposeObject(THREE, forwardArrow);
     disposeObject(THREE, grid);
     controls.dispose?.();
     renderer.dispose?.();
@@ -319,6 +335,20 @@ export function createRigScene(host, deps = {}) {
     camera.updateProjectionMatrix();
     controls.update?.();
     resizeGridToExtents(ext);
+    resizeForwardArrow(ext);
+  }
+
+  function resizeForwardArrow(ext) {
+    const span = Math.max(ext.size[0], ext.size[1], ext.size[2], 1);
+    const len = span * 0.8;
+    const headLen = len * 0.25;
+    const headWidth = headLen * 0.5;
+    forwardArrow.setLength(len, headLen, headWidth);
+    forwardArrow.position.set(
+      (ext.min[0] + ext.max[0]) / 2,
+      ext.min[1],
+      (ext.min[2] + ext.max[2]) / 2,
+    );
   }
 
   function resizeGridToExtents(ext) {

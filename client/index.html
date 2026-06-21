@@ -289,6 +289,27 @@
       border-color: var(--signal-cyan);
       color: var(--signal-cyan);
     }
+    /* Hull damage bar — slim strip at the bottom of damageable tab buttons. */
+    #console-tab-bar .tab-button {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.2rem;
+    }
+    #console-tab-bar .tab-label {
+      display: block;
+    }
+    #console-tab-bar .tab-hull-bar {
+      display: block;
+      width: 100%;
+      height: 3px;
+      border-radius: 2px;
+      background: linear-gradient(
+        to right,
+        var(--hull-color, #4caf50) var(--hull-pct, 100%),
+        rgba(255,255,255,0.12) var(--hull-pct, 100%)
+      );
+    }
     /* Console title label — appended to the tab bar by render() */
     #phase-title {
       font-family: 'Chakra Petch', monospace;
@@ -912,7 +933,7 @@
       const tabRoot = $('console-tab-bar');
       if (tabRoot && typeof window.tabBarLayout === 'function'
           && typeof window.renderTabBar === 'function') {
-        const layout = window.tabBarLayout(mine, activeConsole, orientation, inGame);
+        const layout = window.tabBarLayout(mine, activeConsole, orientation, inGame, state.consoleHull);
         // Capture title ref before renderTabBar clears the bar's children.
         const titleEl = _consoleTitleEl;
         if (inGame) {

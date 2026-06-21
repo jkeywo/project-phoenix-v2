@@ -477,7 +477,9 @@ export function buildSensorsConsoleState(state) {
       targetFaction   = tgt.faction   || null;
       targetClass     = tgt.shipClass || null;
       targetHullPct   = tgt.hull_pct  !== undefined ? tgt.hull_pct  : null;
-      targetHeading   = tgt.heading   !== undefined ? tgt.heading   : null;
+      targetHeading   = tgt.yaw != null
+        ? (((tgt.yaw * 180 / Math.PI) % 360) + 360) % 360
+        : null;
       targetSpeed     = tgt.speed     !== undefined ? tgt.speed     : null;
       targetThreat    = tgt.threat    || (targetStance === 'hostile' ? 'high' : 'low');
       targetShieldFreq = tgt.shield_freq || null;

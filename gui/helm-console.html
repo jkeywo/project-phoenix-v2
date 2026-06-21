@@ -445,14 +445,6 @@
               </div><!-- /.radar-surround-frame -->
             </div>
 
-            <div class="readout">
-              <div>
-                <div class="k">HEADING</div>
-                <div class="v" id="heading-readout" style="font-size:32px;">000&deg;</div>
-              </div>
-              <div class="spacer"></div>
-              <div class="sub" id="heading-sub">STBD 3&deg;</div>
-            </div>
           </section>
 
           <section class="ctrl-col">
@@ -573,8 +565,7 @@
       var radarBgImg = document.getElementById('radar-bg-img');
       if (radarBgImg) radarBgImg.style.transform = 'rotate(' + (-hdg) + 'deg)';
       document.getElementById('hdg-val').textContent = padHeading(hdg);
-      document.getElementById('heading-readout').textContent = Math.round(hdg) + '\u00B0';
-      document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padStart(4, '0');
+document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padStart(4, '0');
       document.getElementById('x-val').textContent   = signed(s.x || 0);
       document.getElementById('z-val').textContent   = signed(s.z || 0);
 

@@ -142,6 +142,7 @@ export class ClientSimState {
           const entity = this.world.entities.find(e => e.uuid === st.uuid);
           if (!entity) continue;
           if (st.position != null) entity.position = st.position;
+          if (st.yaw != null) entity.yaw = st.yaw;
           if (st.hull_fraction != null) entity.hull_fraction = st.hull_fraction;
           if (st.shield_fraction != null) entity.shield_fraction = st.shield_fraction;
         }

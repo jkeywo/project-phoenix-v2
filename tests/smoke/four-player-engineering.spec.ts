@@ -1,0 +1,259 @@
+// Regression: the 4-player Engineering seat ([Repair, Power]) reported as
+// "data shown but taps did nothing". This is the first smoke coverage that
+// builds a real 4-player crew so the Engineering seat goes through the
+// 3P→4P console-shrink cascade ([Repair,Power,Shields,Comms] → [Repair,Power]),
+// then verifies that seat can *act*: the server must accept its IncreasePower
+// and DispatchRepairTeam, not just stream it state.
+//
+// Power/Repair both authorize taps against `console_holder(X)` — the same
+// function that decides who receives state. So the failure mode we guard
+// against is a token/holder desync: the Engineering client believes it holds
+// [Repair, Power] (and receives PowerState/RepairState) while the server
+// rejects its actions.
+
+import { test, expect } from './fixtures';
+import { readHostPeerId, createServerPage, createTestClient } from './fixtures';
+import type { TestClient } from './fixtures';
+
+/** Send SelectStation and wait for a StationAssigned for *this* client's token. */
+async function selectAndWait(client: TestClient, station: string, timeout = 5_000) {
+  await client.send('SelectStation', { station });
+  await client.page.waitForFunction(
+    (t) => (window as any).__messages?.some(
+      (m: any) => m.type === 'StationAssigned' && m.data.token === t,
+    ),
+    client.token,
+    { timeout },
+  );
+}
+
+/** The last StationAssigned received for a token (or null). */
+async function lastAssignment(client: TestClient, token: string) {
+  return client.page.evaluate(
+    (t) => {
+      const msgs: any[] = (window as any).__messages || [];
+      const all = msgs.filter((m: any) => m.type === 'StationAssigned' && m.data.token === t);
+      return all.length > 0 ? all[all.length - 1] : null;
+    },
+    token,
+  ) as Promise<any>;
+}
+
+/** Wait until the last message of `type` satisfies `predicate` (run in-page). */
+async function waitForLastMessage(
+  client: TestClient,
+  type: string,
+  predicate: string,
+  timeout = 5_000,
+) {
+  await client.page.waitForFunction(
+    ({ type, predicate }) => {
+      const msgs: any[] = (window as any).__messages || [];
+      const last = msgs.filter((m: any) => m.type === type).pop();
+      if (!last) return false;
+      // eslint-disable-next-line no-new-func
+      return new Function('data', `return (${predicate})`)(last.data);
+    },
+    { type, predicate },
+    { timeout },
+  );
+}
+
+/**
+ * Build a 4-player crew one player at a time, so advance_on_join cascades each
+ * join. c3 lands on Engineering at 3P and is shrunk to [Repair, Power] at 4P.
+ * Returns the four clients; c3 is the Engineering seat under test.
+ */
+async function buildFourPlayerCrew(context: import('@playwright/test').BrowserContext) {
+  const serverPage = await createServerPage(context);
+  const hostId = await readHostPeerId(serverPage);
+
+  const c1 = await createTestClient(context, hostId, { name: 'P1' });
+  await selectAndWait(c1, 'Captain'); // advances to Helm as others join
+
+  const c2 = await createTestClient(context, hostId, { name: 'P2' });
+  await selectAndWait(c2, 'Tactical');
+
+  const c3 = await createTestClient(context, hostId, { name: 'Eng' });
+  await selectAndWait(c3, 'Engineering'); // 3P Engineering = [Repair,Power,Shields,Comms]
+
+  const c4 = await createTestClient(context, hostId, { name: 'Sci' });
+  await selectAndWait(c4, 'Science'); // join shrinks c3 to 4P [Repair, Power]
+
+  return { c1, c2, c3, c4, hostId };
+}
+
+test('4P Engineering seat is assigned exactly [Repair, Power]', async ({ context }) => {
+  const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
+
+  const a3 = await lastAssignment(c3, c3.token);
+  expect(a3.data.station).toBe('Engineering');
+  expect([...a3.data.consoles].sort()).toEqual(['Power', 'Repair']);
+
+  await c1.close();
+  await c2.close();
+  await c3.close();
+  await c4.close();
+});
+
+test('4P Engineering player can change power (tap is honored, not just shown)', async ({ context }) => {
+  const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
+
+  // c1 holds CaptainChair at 4P Helm; start the game.
+  await c1.send('StartGame');
+  await c3.waitForMessage('GameStarted', 5_000);
+
+  // Data delivery: the Engineering seat must receive PowerState (proves it is
+  // the recognized Power holder server-side). Default power levels are 2/2/2.
+  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
+
+  // Tap authorization: increasing Helm power must be honored. If the seat were
+  // desynced (the reported bug), PowerState would keep streaming helm === 2.
+  await c3.send('IncreasePower', { console: 'Helm' });
+  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
+
+  await c1.close();
+  await c2.close();
+  await c3.close();
+  await c4.close();
+});
+
+test('4P Engineering player can dispatch a repair team (tap is honored)', async ({ context }) => {
+  const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
+
+  await c1.send('StartGame');
+  await c3.waitForMessage('GameStarted', 5_000);
+
+  // Data delivery: the seat receives RepairState with all teams idle.
+  await waitForLastMessage(
+    c3,
+    'RepairState',
+    'data && Array.isArray(data.teams) && data.teams[0] === "Idle"',
+  );
+
+  // Tap authorization: dispatching team 0 must move it out of Idle. A desynced
+  // seat would have the action dropped and team 0 would stay "Idle".
+  await c3.send('DispatchRepairTeam', { team_idx: 0, console: 'Power' });
+  await waitForLastMessage(
+    c3,
+    'RepairState',
+    'data && data.teams[0] !== "Idle"',
+  );
+
+  await c1.close();
+  await c2.close();
+  await c3.close();
+  await c4.close();
+});
+
+// Realistic ordering #1: all four players are already connected (sitting in the
+// lobby) before anyone selects, so every SelectStation resolves at the 4P
+// player count directly — no advance/shrink cascade. The Engineering seat must
+// still be able to act.
+test('4P Engineering acts when all four connect before selecting', async ({ context }) => {
+  const serverPage = await createServerPage(context);
+  const hostId = await readHostPeerId(serverPage);
+
+  const c1 = await createTestClient(context, hostId, { name: 'P1' });
+  const c2 = await createTestClient(context, hostId, { name: 'P2' });
+  const c3 = await createTestClient(context, hostId, { name: 'Eng' });
+  const c4 = await createTestClient(context, hostId, { name: 'Sci' });
+
+  // All connected (4P layout active); now select directly.
+  await selectAndWait(c1, 'Helm');
+  await selectAndWait(c2, 'Tactical');
+  await selectAndWait(c3, 'Engineering');
+  await selectAndWait(c4, 'Science');
+
+  const a3 = await lastAssignment(c3, c3.token);
+  expect([...a3.data.consoles].sort()).toEqual(['Power', 'Repair']);
+
+  await c1.send('StartGame');
+  await c3.waitForMessage('GameStarted', 5_000);
+
+  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
+  await c3.send('IncreasePower', { console: 'Helm' });
+  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
+
+  await c1.close();
+  await c2.close();
+  await c3.close();
+  await c4.close();
+});
+
+// Realistic ordering #2: the Engineering phone drops Wi-Fi mid-game and
+// reconnects under the same token (the most likely real-world trigger for a
+// host token→connection routing desync). After reconnect the seat must still
+// be able to act, not just receive state.
+test('4P Engineering can still act after a mid-game reconnect', async ({ context }) => {
+  const { c1, c2, c3, c4, hostId } = await buildFourPlayerCrew(context);
+  const engToken = c3.token;
+
+  await c1.send('StartGame');
+  await c3.waitForMessage('GameStarted', 5_000);
+
+  // Confirm the seat works before the blip.
+  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
+  await c3.send('IncreasePower', { console: 'Helm' });
+  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
+
+  // Simulate the Wi-Fi blip: tear down the page (host sees the connection
+  // close), then reconnect a fresh page under the SAME token.
+  await c3.close();
+  const c3b = await createTestClient(context, hostId, { token: engToken, name: 'Eng' });
+
+  // Reconnect must restore [Repair, Power] and resume PowerState delivery.
+  await waitForLastMessage(c3b, 'PowerState', 'data && typeof data.helm === "number"');
+
+  // The reconnected seat must still be authorized: lower Helm power back down.
+  const before = await c3b.page.evaluate(() => {
+    const msgs: any[] = (window as any).__messages || [];
+    return (msgs.filter((m: any) => m.type === 'PowerState').pop() || {}).data?.helm;
+  });
+  await c3b.send('DecreasePower', { console: 'Helm' });
+  await waitForLastMessage(c3b, 'PowerState', `data && data.helm < ${before}`);
+
+  await c1.close();
+  await c2.close();
+  await c3b.close();
+  await c4.close();
+});
+
+// Root-cause reproduction: two devices share the same session-token. The host
+// keys connections by token, so the second Identify overwrites the routing
+// entry and ORPHANS the first connection. The first device then shows the
+// exact reported symptom — its console is frozen (it receives no further
+// state) and its taps are accepted server-side but produce no visible feedback
+// (the resulting state is routed to the other device). This documents the
+// failure mode that the new host-side DUPLICATE TOKEN warning now flags.
+test('shared session-token orphans the first Engineering device (ghost console)', async ({ context }) => {
+  const { c1, c2, c3, c4, hostId } = await buildFourPlayerCrew(context);
+  const engToken = c3.token;
+
+  await c1.send('StartGame');
+  await c3.waitForMessage('GameStarted', 5_000);
+
+  // c3 is live: it receives PowerState at the default helm level.
+  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
+
+  // A second device identifies with the SAME token — c3 becomes the ghost.
+  const ghostWinner = await createTestClient(context, hostId, { token: engToken, name: 'Eng-2' });
+  await waitForLastMessage(ghostWinner, 'PowerState', 'data && typeof data.helm === "number"');
+
+  // The orphaned device taps. The action IS accepted (same token still holds
+  // Power), so the *winner* sees helm climb to 3 — but the ghost (c3) never does.
+  await c3.send('IncreasePower', { console: 'Helm' });
+  await waitForLastMessage(ghostWinner, 'PowerState', 'data && data.helm === 3');
+
+  const ghostSawIncrease = await c3.page.evaluate(() => {
+    const msgs: any[] = (window as any).__messages || [];
+    return msgs.some((m: any) => m.type === 'PowerState' && m.data.helm === 3);
+  });
+  expect(ghostSawIncrease).toBe(false); // frozen console: taps "did nothing" here
+
+  await c1.close();
+  await c2.close();
+  await c3.close();
+  await ghostWinner.close();
+  await c4.close();
+});

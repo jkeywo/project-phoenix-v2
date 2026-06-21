@@ -1223,6 +1223,22 @@
               const msg = JSON.parse(json);
               if (msg.type === 'Identify') {
                 token = msg.data.token;
+                // Duplicate-token detection (issue: 4P Engineering "data shown,
+                // taps did nothing"). If another OPEN connection already claims
+                // this token, the two devices share a session-token: outbound
+                // state routes only to whichever wins this overwrite, while the
+                // loser's taps are still accepted server-side but produce no
+                // visible feedback — a "ghost" console. Warn loudly so this is
+                // obvious in the host log instead of silently mis-routing.
+                const prior = tokenConns.get(token);
+                if (prior && prior !== conn && prior.open) {
+                  console.warn(
+                    `[PeerJS] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +
+                    `identified with a token already held by an open connection. ` +
+                    `The earlier device will become a ghost (state routes here; its ` +
+                    `taps succeed but show no feedback).`,
+                  );
+                }
                 peerTokens.set(conn.peer, token);
                 tokenConns.set(token, conn);
                 console.log(`[PeerJS] ${shortId}… identified as token ${token.slice(0, 8)}…`);

@@ -166,6 +166,18 @@ pub fn handle_power_messages(
             {
                 power.0.decrease(console.clone());
             }
+            // Instrumentation (issue: 4P Engineering taps ignored): a Power
+            // action arrived from a token that is NOT the recognised Power
+            // holder. Logs the inbound token vs the current holder so a
+            // token/holder desync (the suspected 4-player cause) is visible
+            // in the host console without a debugger.
+            ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. } => {
+                warn!(
+                    "[power-auth] ignored power action from token={} holder={:?}",
+                    ev.token,
+                    sessions.0.console_holder(Console::Power),
+                );
+            }
             _ => {}
         }
     }

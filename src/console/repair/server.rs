@@ -88,10 +88,21 @@ pub fn handle_dispatch_repair_team(
             _ => continue,
         };
         // Only the Repair console holder may dispatch teams.
+        // Instrumentation (issue: 4P Engineering taps ignored): log when an
+        // action is dropped because the sender is not the recognised Repair
+        // holder, exposing a token/holder desync on the host console.
         let Some(repair_token) = sessions.0.console_holder(Console::Repair) else {
+            warn!(
+                "[repair-auth] ignored repair action from token={} holder=None",
+                ev.token,
+            );
             continue;
         };
         if ev.token.as_str() != repair_token {
+            warn!(
+                "[repair-auth] ignored repair action from token={} holder={}",
+                ev.token, repair_token,
+            );
             continue;
         }
         teams.0.dispatch(team_idx, target_console);

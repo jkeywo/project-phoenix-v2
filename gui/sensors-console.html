@@ -41,10 +41,10 @@
       flex: 1; min-height: 0;
       display: flex; align-items: center; justify-content: center;
     }
-    /* Radar fills the full available height in landscape (no fixed cap). */
+    /* Radar circle fills full screen height in landscape (surround-frame at 125dvh so 80% = 100dvh). */
     .radar-col .radar-surround-frame {
-      aspect-ratio: 1/1; height: 100%; width: auto;
-      max-height: none; max-width: 100%;
+      aspect-ratio: 1/1; height: calc(100dvh * 1.25); width: auto;
+      max-height: none; max-width: none;
       display: flex; align-items: center; justify-content: center;
     }
     .radar-col .radar-surround-frame .radar { width: 80%; height: 80%; max-height: none; max-width: none; }
@@ -227,7 +227,8 @@
       .side-rail { display: none; }
 
       .radar-col .radar-wrap { min-height: 0; }
-      .radar-col .radar-surround-frame { width: 100%; height: auto; max-height: none; max-width: none; }
+      /* Portrait: radar circle fills full screen width (surround-frame at 125vw so 80% = 100vw). */
+      .radar-col .radar-surround-frame { width: calc(100vw * 1.25); height: auto; max-height: none; max-width: none; }
 
       .radar-col > .readout    { padding: .4rem .55rem; }
       .radar-col > .readout .v { font-size: 1.2rem; }

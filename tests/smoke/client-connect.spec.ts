@@ -21,8 +21,8 @@ test('client receives Welcome containing its player token', async ({ context }) 
     { timeout: 10_000 },
   );
 
-  // The session token is persisted to localStorage by client.html on first load
-  const myToken = await clientPage.evaluate(() => localStorage.getItem('session-token'));
+  // The session token is persisted to sessionStorage (per-tab) by client.html on first load
+  const myToken = await clientPage.evaluate(() => sessionStorage.getItem('session-token'));
   expect(myToken).toBeTruthy();
 
   // The Welcome message populates the global `state.players` array in client.html.

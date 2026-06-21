@@ -4,6 +4,7 @@ tags = ["field", "main", "asteroid_field"]
 region_colour = [0.52, 0.32, 0.18]
 
 [asteroid_field]
+random_rotation = [30, 30, 180]
 inner_radius = 300.0
 outer_radius = 350.0
 density = 0.005

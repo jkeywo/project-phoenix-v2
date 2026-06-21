@@ -32,6 +32,7 @@ describe('ACTION_MAP', () => {
       'set_target',
       'set_view',
       'show_on_screen',
+      'set_boost',
       'start_impulse_charge',
       'toggle_boost',
       'toggle_red_alert',
@@ -185,6 +186,19 @@ describe('toggle_boost', () => {
     const send = mkSend();
     ACTION_MAP.toggle_boost({ action: 'toggle_boost' }, send);
     expect(send).toHaveBeenCalledWith('ToggleBoost');
+  });
+});
+
+describe('set_boost', () => {
+  it('sends SetBoost with active true', () => {
+    const send = mkSend();
+    ACTION_MAP.set_boost({ active: true }, send);
+    expect(send).toHaveBeenCalledWith('SetBoost', { active: true });
+  });
+  it('sends SetBoost with active false', () => {
+    const send = mkSend();
+    ACTION_MAP.set_boost({ active: false }, send);
+    expect(send).toHaveBeenCalledWith('SetBoost', { active: false });
   });
 });
 

@@ -54,6 +54,18 @@ impl BoostState {
         }
     }
 
+    /// Explicitly engage the boost drive. No-op when battery is empty.
+    pub fn activate(&mut self) {
+        if self.battery > 0.0 {
+            self.active = true;
+        }
+    }
+
+    /// Explicitly disengage the boost drive.
+    pub fn deactivate(&mut self) {
+        self.active = false;
+    }
+
     /// Advance the boost drive by `dt` seconds.
     ///
     /// While active the battery drains over `active_duration` and the drive

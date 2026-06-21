@@ -824,6 +824,8 @@ pub enum ClientMessage {
     CancelImpulse,
     /// Sent by the Helm officer to toggle the boost drive on/off.
     ToggleBoost,
+    /// Sent by the Helm officer to explicitly set boost on or off (hold-to-boost).
+    SetBoost { active: bool },
     SetView {
         mode: ViewMode,
     },
@@ -1498,6 +1500,8 @@ pub enum UiAction {
     CancelImpulse,
     /// Toggle the boost drive on/off (helm BOOST button).
     ToggleBoost,
+    /// Explicitly set boost on or off — used for hold-to-boost (pointerdown/pointerup).
+    SetBoost { active: bool },
     /// Switch the viewscreen to radar mode (helm ON SCREEN button).
     SetRadarView,
     /// Increase power for the named powered console (power console).
@@ -1597,6 +1601,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::StartImpulseCharge => ClientMessage::StartImpulseCharge,
         UiAction::CancelImpulse => ClientMessage::CancelImpulse,
         UiAction::ToggleBoost => ClientMessage::ToggleBoost,
+        UiAction::SetBoost { active } => ClientMessage::SetBoost { active: *active },
         UiAction::SetRadarView => ClientMessage::SetView {
             mode: ViewMode::Radar,
         },
@@ -1745,6 +1750,18 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&UiAction::ToggleBoost),
             ClientMessage::ToggleBoost
+        );
+    }
+
+    #[test]
+    fn set_boost_maps_to_client_message() {
+        assert_eq!(
+            ui_action_to_client_message(&UiAction::SetBoost { active: true }),
+            ClientMessage::SetBoost { active: true }
+        );
+        assert_eq!(
+            ui_action_to_client_message(&UiAction::SetBoost { active: false }),
+            ClientMessage::SetBoost { active: false }
         );
     }
 

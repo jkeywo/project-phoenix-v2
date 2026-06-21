@@ -399,6 +399,7 @@ pub fn process_message(
         | ClientMessage::StartImpulseCharge
         | ClientMessage::CancelImpulse
         | ClientMessage::ToggleBoost
+        | ClientMessage::SetBoost { .. }
         | ClientMessage::FireTorpedo { .. }
         | ClientMessage::IncreasePower { .. }
         | ClientMessage::DecreasePower { .. }

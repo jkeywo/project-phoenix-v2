@@ -2809,6 +2809,17 @@ mod tests {
     }
 
     #[test]
+    fn decode_ui_action_set_boost() {
+        let json = r#"{"action":"set_boost","console":"Helm","active":true}"#;
+        let action = decode_ui_action(json).expect("decode set_boost true");
+        assert_eq!(action, UiAction::SetBoost { active: true });
+
+        let json = r#"{"action":"set_boost","console":"Helm","active":false}"#;
+        let action = decode_ui_action(json).expect("decode set_boost false");
+        assert_eq!(action, UiAction::SetBoost { active: false });
+    }
+
+    #[test]
     fn decode_ui_action_dispatch_repair_team() {
         let json =
             r#"{"action":"dispatch_repair_team","console":"Repair","team_idx":1,"target":"Helm"}"#;

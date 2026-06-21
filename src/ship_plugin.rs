@@ -304,8 +304,12 @@ pub fn handle_boost_messages(
         return;
     }
     for msg in reader.read() {
-        if matches!(msg.msg, ClientMessage::ToggleBoost) {
-            boost.0.toggle();
+        match &msg.msg {
+            ClientMessage::ToggleBoost => boost.0.toggle(),
+            ClientMessage::SetBoost { active } => {
+                if *active { boost.0.activate(); } else { boost.0.deactivate(); }
+            }
+            _ => {}
         }
     }
 }

@@ -140,6 +140,11 @@ pub struct MeshConfig {
     /// Affects both GLB models and procedural shapes.
     #[serde(default)]
     pub rotation: [f32; 3],
+    /// When true, the GLB is not rendered but its rig sidecar is still loaded
+    /// and `ModelMarkers` is attached so weapons/effects can resolve mount
+    /// points by name. Only meaningful when `model` is set. Ignored otherwise.
+    #[serde(default)]
+    pub no_render: bool,
 }
 
 fn default_mesh_scale() -> f32 {
@@ -3461,6 +3466,12 @@ pub struct AsteroidFieldConfig {
     /// at spawn time.
     #[serde(skip)]
     pub anchor_offset: [f32; 3],
+    /// Maximum random rotation applied to each spawned asteroid, in degrees.
+    /// `[x, y, z]` → ±x° pitch, ±y° roll, ±z° yaw. When `None` (default),
+    /// asteroids spawn with no rotation. Set e.g. `[30, 30, 180]` for mild
+    /// tilt with full spin freedom.
+    #[serde(default)]
+    pub random_rotation: Option<[f32; 3]>,
 }
 
 fn default_spawn_distance() -> f32 {

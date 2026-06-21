@@ -3295,6 +3295,7 @@ mod tests {
                 shield_pierce: 0.0,
                 tags: vec![],
                 grid: None,
+                random_rotation: None,
             }),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ));

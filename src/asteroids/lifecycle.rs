@@ -311,6 +311,7 @@ pub fn update_asteroid_window(
                 field.shield_pierce,
                 field.shape,
                 field.anchor_offset,
+                field.random_rotation,
             );
             window.needs_init = false;
         } else {
@@ -363,6 +364,7 @@ pub fn update_asteroid_window(
                         field.shield_pierce,
                         field.shape,
                         field.anchor_offset,
+                        field.random_rotation,
                     );
                     try_spawn_cosmetic_cell(
                         &mut commands,
@@ -417,6 +419,7 @@ fn full_rebuild(
     shield_pierce: f32,
     shape: Option<crate::entity_config::AsteroidFieldShape>,
     anchor_offset: [f32; 3],
+    random_rotation: Option<[f32; 3]>,
 ) {
     // Despawn ONLY this field's gameplay asteroids. Collect UUIDs from the
     // current window slots, despawn the entities, and prune entries from
@@ -498,6 +501,7 @@ fn full_rebuild(
                     shield_pierce,
                     shape,
                     anchor_offset,
+                    random_rotation,
                 );
                 try_spawn_cosmetic_cell(
                     commands,
@@ -547,6 +551,7 @@ fn try_spawn_cell(
     shield_pierce: f32,
     shape: Option<crate::entity_config::AsteroidFieldShape>,
     anchor_offset: [f32; 3],
+    random_rotation: Option<[f32; 3]>,
 ) {
     if window.slots[slot_z][slot_x].is_some() {
         return;
@@ -623,6 +628,29 @@ fn try_spawn_cell(
     let world_x = spawn.x + anchor_offset[0];
     let world_z = spawn.z + anchor_offset[2];
 
+    // Deterministic random rotation seeded from field+cell coordinates.
+    let rotation = if let Some(max_deg) = random_rotation {
+        use rand::SeedableRng;
+        let rot_seed = {
+            let mut s = field_idx as u64;
+            s = s.wrapping_mul(2654435761);
+            s = s.wrapping_add(cell_gx as u64);
+            s = s.wrapping_mul(2654435761);
+            s = s.wrapping_add(cell_gz as u64);
+            s = s.wrapping_add(0xCAFE_BABE_1337_0000);
+            s
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(rot_seed);
+        use rand::Rng;
+        let to_rad = std::f32::consts::PI / 180.0;
+        let pitch = (rng.random::<f32>() * 2.0 - 1.0) * max_deg[0] * to_rad;
+        let roll  = (rng.random::<f32>() * 2.0 - 1.0) * max_deg[1] * to_rad;
+        let yaw   = (rng.random::<f32>() * 2.0 - 1.0) * max_deg[2] * to_rad;
+        bevy::math::Quat::from_euler(bevy::math::EulerRot::XYZ, pitch, yaw, roll)
+    } else {
+        bevy::math::Quat::IDENTITY
+    };
+
     let asteroid_hull = EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
         crate::messages::Console::CaptainChair,
         max_hp,
@@ -634,7 +662,7 @@ fn try_spawn_cell(
         AsteroidShieldPierce(shield_pierce),
         FieldOwner(field_entity),
         asteroid_hull,
-        Transform::from_xyz(world_x, spawn.y, world_z),
+        Transform::from_xyz(world_x, spawn.y, world_z).with_rotation(rotation),
         Visibility::default(),
         bevy_rapier3d::prelude::Collider::ball(collider_radius),
         bevy_rapier3d::prelude::RigidBody::Fixed,
@@ -932,6 +960,7 @@ mod tests {
             shape: None,
             anchor: None,
             anchor_offset: [0.0, 0.0, 0.0],
+            random_rotation: None,
         }
     }
 
@@ -1067,6 +1096,7 @@ shield_pierce = 0.4
             shape: Some(crate::entity_config::AsteroidFieldShape::Torus),
             anchor: None,
             anchor_offset: [0.0, 0.0, 0.0],
+            random_rotation: None,
         };
         // Anchor the player on the belt so the spawn window covers it.
         {
@@ -1148,6 +1178,7 @@ shield_pierce = 0.4
             shape: Some(crate::entity_config::AsteroidFieldShape::Torus),
             anchor: None,
             anchor_offset: [0.0, 0.0, 0.0],
+            random_rotation: None,
         };
         let outer = AsteroidFieldConfig {
             inner_radius: 400.0,
@@ -1163,6 +1194,7 @@ shield_pierce = 0.4
             shape: Some(crate::entity_config::AsteroidFieldShape::Torus),
             anchor: None,
             anchor_offset: [0.0, 0.0, 0.0],
+            random_rotation: None,
         };
 
         // Position the player between the two annuli so both spawn windows

@@ -5829,6 +5829,7 @@ transition = []
             shape: Some(AsteroidFieldShape::Torus),
             anchor: Some("belt_origin".into()),
             anchor_offset: [0.0, 0.0, 0.0],
+            random_rotation: None,
         });
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
         m.insert("fixture/anchored_belt.toml".into(), field_template);
@@ -5919,6 +5920,7 @@ transition = []
             shape: Some(AsteroidFieldShape::Torus),
             anchor: Some("typo_anchor".into()),
             anchor_offset: [0.0, 0.0, 0.0],
+            random_rotation: None,
         });
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
         m.insert("fixture/typo_belt.toml".into(), field_template);

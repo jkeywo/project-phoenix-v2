@@ -610,6 +610,7 @@ delegated to the streaming grid system (`src/asteroids/`).
 | `asteroid_type_paths` | array of strings | `[]` | Template TOMLs picked for gameplay asteroids. |
 | `cosmetic_type_paths` | array of strings | `[]` | Template TOMLs picked for cosmetic-only asteroids. |
 | `tags` | array of strings | `[]` | Tags inherited by spawned asteroids. |
+| `random_rotation` | `[f32, f32, f32]` | none | Max random rotation per axis in degrees: `[±pitch, ±roll, ±yaw]`. E.g. `[30, 30, 180]` gives mild tilt with full spin. Omit for no rotation. |
 | `[asteroid_field.grid]` | table | none | If present, overrides donut spawning with deterministic grid streaming. |
 
 #### `[asteroid_field.grid]`

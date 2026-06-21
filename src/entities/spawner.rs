@@ -777,6 +777,7 @@ mod tests {
                 shape: None,
                 anchor: None,
                 anchor_offset: [0.0, 0.0, 0.0],
+                random_rotation: None,
             }),
             hull: None,
             collider: None,

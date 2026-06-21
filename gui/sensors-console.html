@@ -468,8 +468,8 @@
         if (label) label.textContent = s.on_screen ? 'CLEAR SCREEN' : 'ON SCREEN';
       }
 
-      document.getElementById('cpx-badge').textContent =
-        'CPX: ' + _complexity.toUpperCase() + ' ▾';
+      var _cpxBadge = document.getElementById('cpx-badge');
+      if (_cpxBadge) _cpxBadge.textContent = 'CPX: ' + _complexity.toUpperCase() + ' ▾';
 
       var ftgt = document.getElementById('footer-target');
       if (s.target_uuid) {
@@ -644,11 +644,14 @@
       }
     });
 
-    document.getElementById('cpx-badge').addEventListener('click', function() {
-      var i = _CPXCYCLE.indexOf(_complexity);
-      _complexity = _CPXCYCLE[(i + 1) % _CPXCYCLE.length];
-      if (_state) { _state.complexity = _complexity; _render(_state); }
-    });
+    var _cpxBadgeEl = document.getElementById('cpx-badge');
+    if (_cpxBadgeEl) {
+      _cpxBadgeEl.addEventListener('click', function() {
+        var i = _CPXCYCLE.indexOf(_complexity);
+        _complexity = _CPXCYCLE[(i + 1) % _CPXCYCLE.length];
+        if (_state) { _state.complexity = _complexity; _render(_state); }
+      });
+    }
 
     _radarWidget = (function() {
       var canvas = document.getElementById('radar-canvas');

@@ -46,6 +46,10 @@ their systems, so an AI ship is the same model with no human-held stations.
 - Damage is per system and orthogonal to human/AI control.
 - Cross-system interaction is limited to state reads, authoritative sim-level
   messages, and a lagged AI coordination bus.
+- The channel-3 coordination lag applies to all channel-3 traffic, not only
+  AI-originated sends. The lag represents crew coordination/comprehension time;
+  immediate authoritative effects belong to sim-level messages or readable sim
+  state.
 
 ## Open user stories
 
@@ -57,6 +61,7 @@ composition.
 ## Cross-references
 
 - [Issue #488 - Station/System ADR](./issue-488-station-system-adr.md)
+- [Issue #493 - Coordination-lag scope](./issue-493-coordination-lag-scope.md)
 - [ADR-0002](../../docs/adr/0002-station-system-ship-config-contract.md)
 - [Console](../entities/console.md)
 - [player_ship.toml](./player_ship_toml.md)

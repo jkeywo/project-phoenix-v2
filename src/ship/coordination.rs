@@ -288,11 +288,8 @@ mod tests {
     }
 
     #[test]
-    fn suggestion_payload_serde_round_trip() {
-        let payload = CoordinationPayload::SuggestTarget {
-            uuid: "abc-123".into(),
-            reason: "High priority target".into(),
-        };
+    fn frequency_hint_payload_serde_round_trip() {
+        let payload = CoordinationPayload::FrequencyHint { frequency: 0.42 };
         let json = serde_json::to_string(&payload).unwrap();
         let decoded: CoordinationPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, payload);

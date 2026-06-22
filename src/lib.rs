@@ -82,7 +82,7 @@ pub use console::helm::server as helm_plugin;
 pub use console::navigation as navigation_plugin;
 pub use ship::power as power_plugin;
 pub use console::repair::server as repair_plugin;
-pub use console::science::server as science_plugin;
+pub use ship::sensors as sensors_plugin;
 pub use console::shields::server as shields_plugin;
 pub use console::weapons::server as weapons_plugin;
 

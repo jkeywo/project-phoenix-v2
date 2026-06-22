@@ -1,5 +1,6 @@
 pub mod boost;
 pub mod power;
+pub mod sensors;
 pub mod config;
 pub mod control_source;
 pub mod coordination;

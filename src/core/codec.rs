@@ -1166,18 +1166,9 @@ mod tests {
     }
 
     #[test]
-    fn server_science_target_suggestion_round_trips() {
-        let msg = ServerMessage::ScienceTargetSuggestion {
-            uuid: "entity-uuid-456".into(),
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
     fn server_sensors_target_suggestion_round_trips() {
         let msg = ServerMessage::SensorsTargetSuggestion {
-            uuid: "entity-uuid-sensors-456".into(),
+            uuid: "entity-uuid-456".into(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -2272,21 +2263,23 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
-    // ── FrequencyHint round-trip ──────────────────────────────────────────
+    // ── FrequencyHint CoordinationPayload round-trip ─────────────────────
 
     #[test]
-    fn server_frequency_hint_round_trips() {
-        let msg = ServerMessage::FrequencyHint { frequency: 0.33 };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    fn coordination_frequency_hint_round_trips() {
+        let payload = CoordinationPayload::FrequencyHint { frequency: 0.33 };
+        let json = serde_json::to_string(&payload).unwrap();
+        let decoded: CoordinationPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
     }
 
     #[test]
-    fn server_frequency_hint_boundary_values_round_trip() {
+    fn coordination_frequency_hint_boundary_values_round_trip() {
         for f in [0.0f32, 1.0f32] {
-            let msg = ServerMessage::FrequencyHint { frequency: f };
-            assert_server_roundtrip(&JsonCodec, msg.clone());
-            assert_server_roundtrip(&PrettyJsonCodec, msg);
+            let payload = CoordinationPayload::FrequencyHint { frequency: f };
+            let json = serde_json::to_string(&payload).unwrap();
+            let decoded: CoordinationPayload = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded, payload);
         }
     }
 

@@ -185,7 +185,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::repair_plugin::RepairPlugin)
     .add_plugins(crate::power_plugin::ShipPowerPlugin)
     .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
-    .add_plugins(crate::science_plugin::SciencePlugin)
+    .add_plugins(crate::sensors_plugin::ShipSensorsPlugin)
     .add_plugins(crate::navigation_plugin::NavigationPlugin)
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_plugins(crate::entity_star::StarRenderPlugin)
@@ -2198,7 +2198,7 @@ mod tests {
         .add_plugins(crate::repair_plugin::RepairPlugin)
         .add_plugins(crate::power_plugin::ShipPowerPlugin)
         .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
-        .add_plugins(crate::science_plugin::SciencePlugin)
+        .add_plugins(crate::sensors_plugin::ShipSensorsPlugin)
         .add_plugins(crate::comms_plugin::CommsConsolePlugin)
         .add_systems(
             OnEnter(GamePhase::InProgress),

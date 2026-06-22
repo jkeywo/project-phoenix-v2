@@ -919,6 +919,9 @@ pub enum SystemControlPayload {
         source_uuid: Option<String>,
     },
     ClearNavigationWaypoint,
+    SetScienceTarget {
+        uuid: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1088,11 +1091,6 @@ pub enum ClientMessage {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum CoordinationPayload {
-    /// Suggest a target entity to the operator.
-    SuggestTarget {
-        uuid: String,
-        reason: String,
-    },
     /// Advisory text message shown to the operator.
     Advisory {
         message: String,
@@ -1101,6 +1099,10 @@ pub enum CoordinationPayload {
     Alert {
         title: String,
         body: String,
+    },
+    /// Sensors advises Tactical of the target's shield frequency.
+    FrequencyHint {
+        frequency: f32,
     },
 }
 
@@ -1187,15 +1189,8 @@ pub enum ServerMessage {
     AsteroidDestroyed {
         uuid: String,
     },
-    /// Broadcast to all players when the Science officer taps a radar entity
-    /// to designate it as a suggested target. Advisory only — does not lock
-    /// the Tactical console.
-    ScienceTargetSuggestion {
-        uuid: String,
-    },
-    /// Broadcast to all players when the Sensors operator taps an entity on
-    /// their long-range radar to designate it as a suggested target for
-    /// Tactical. Advisory only — does not lock the Tactical console.
+    /// Sent to the Tactical console holder when the Sensors operator designates
+    /// a suggested target. Advisory only — does not lock the Tactical console.
     SensorsTargetSuggestion {
         uuid: String,
     },
@@ -1283,13 +1278,6 @@ pub enum ServerMessage {
     ComplexityChanged {
         console: Console,
         preset_name: String,
-    },
-    /// Sent to the Tactical console holder to hint the correct phaser-frequency
-    /// button to press. Emitted by the Science Low AI after `auto_hint_delay_secs`
-    /// of a shared locked target.
-    FrequencyHint {
-        /// The recommended phaser frequency (0.0–1.0).
-        frequency: f32,
     },
     /// Broadcast when a station entity is spawned. Clients use this to add
     /// the station to their local world, show it on radar, and make it

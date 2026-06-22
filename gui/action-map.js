@@ -193,7 +193,7 @@ export const ACTION_MAP = Object.freeze({
   set_sensors_target: (a, send, mutate) => {
     if (a.uuid) {
       mutate({ sensorsTarget: a.uuid });
-      send('SetScienceTarget', { uuid: a.uuid });
+      send('ControlSystem', { target: 'sensors', payload: { type: 'SetScienceTarget', data: { uuid: a.uuid } } });
     }
   },
 

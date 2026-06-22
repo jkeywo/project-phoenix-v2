@@ -82,6 +82,27 @@
       width: clamp(14px, 1.4vw, 22px);
       height: clamp(14px, 1.4vw, 22px);
     }
+    .cmd-col #red-alert-btn.readonly {
+      cursor: default;
+      filter: grayscale(0.25);
+    }
+    .cmd-col #red-alert-btn:disabled {
+      opacity: 0.82;
+    }
+    .cmd-col #red-alert-auto-badge {
+      position: absolute;
+      right: clamp(12px, 1.5vw, 22px);
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 2;
+      font-family: "JetBrains Mono", monospace;
+      font-size: clamp(10px, 1vw, 14px);
+      letter-spacing: 0.12em;
+      color: var(--cyan);
+      border: 1px solid rgba(104, 218, 255, 0.55);
+      padding: 2px 6px;
+      background: rgba(2, 12, 24, 0.68);
+    }
 
     .side-rail {
       position: absolute;
@@ -285,6 +306,7 @@
                 <span class="btn-bg"></span>
                 <span class="led" id="alert-led"></span>
                 <span class="label" id="alert-label">RED ALERT</span>
+                <span id="red-alert-auto-badge" class="auto-badge" hidden>AUTO</span>
               </button>
             </div>
           </section>
@@ -307,6 +329,7 @@
 
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
+    import { renderRedAlertFragment } from './system-registry.js';
 
     // ── State ────────────────────────────────────────────────────────────
     var _state         = null;
@@ -427,6 +450,7 @@
       }
       var raLabel = document.getElementById('alert-label');
       if (raLabel) raLabel.textContent = s.red_alert ? 'ALERT ACTIVE' : 'RED ALERT';
+      renderRedAlertFragment(document, s);
 
       // ── Footer ticker ───────────────────────────────────────────────────
       var footerEl = document.getElementById('footer-ticker');
@@ -478,6 +502,7 @@
       sendAction('set_view', { direction: 'Aft' });
     });
     document.getElementById('red-alert-btn').addEventListener('click', function() {
+      if (this.disabled) return;
       sendAction('toggle_red_alert', {});
     });
 

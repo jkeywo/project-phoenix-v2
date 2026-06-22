@@ -61,37 +61,64 @@ export const ACTION_MAP = Object.freeze({
 
   /** Toggle red alert status. */
   toggle_red_alert: (a, send) => {
-    send('ToggleRedAlert');
+    send('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'ToggleRedAlert' },
+    });
   },
 
   /** Send helm thrust / steering inputs. */
   helm_input: (a, send) => {
-    send('HelmInput', { thrust: a.thrust || 0, steering: a.steering || 0 });
+    send('ControlSystem', {
+      target: 'helm',
+      payload: {
+        type: 'HelmInput',
+        data: { thrust: a.thrust || 0, steering: a.steering || 0 },
+      },
+    });
   },
 
   /** Begin charging the impulse drive. */
   start_impulse_charge: (a, send) => {
-    send('StartImpulseCharge');
+    send('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'StartImpulseCharge' },
+    });
   },
 
   /** Cancel an active impulse charge. */
   cancel_impulse: (a, send) => {
-    send('CancelImpulse');
+    send('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'CancelImpulse' },
+    });
   },
 
   /** Toggle the boost drive on/off. */
   toggle_boost: (a, send) => {
-    send('ToggleBoost');
+    send('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'ToggleBoost' },
+    });
   },
 
   /** Explicitly set boost on or off (hold-to-boost). */
   set_boost: (a, send) => {
-    send('SetBoost', { active: !!a.active });
+    send('ControlSystem', {
+      target: 'helm',
+      payload: {
+        type: 'SetBoost',
+        data: { active: !!a.active },
+      },
+    });
   },
 
   /** Switch the view-screen to the radar mode. */
   set_radar_view: (a, send) => {
-    send('SetView', { mode: { kind: 'Radar' } });
+    send('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
+    });
   },
 
   /** Dispatch a repair team to a console. */

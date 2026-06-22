@@ -156,6 +156,39 @@
        default state actually applies. */
     #phone-bezel[aria-hidden="true"] { display: none; }
 
+    /* ── Coordination popup overlay (issue #494) ────────────────────── */
+    #coordination-popup {
+      display: none;
+      position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+      z-index: 180;
+      background: #1a2a3a;
+      border: 1px solid #4af;
+      border-radius: 8px;
+      padding: 12px 18px;
+      max-width: 320px;
+      color: #d0e4f0;
+      font-family: 'Chakra Petch', monospace;
+      font-size: 0.85rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      cursor: pointer;
+      user-select: none;
+    }
+    #coordination-popup .popup-sender {
+      font-size: 0.7rem;
+      color: #8af;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    #coordination-popup .popup-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    #coordination-popup .popup-body {
+      font-size: 0.8rem;
+      color: #a0b8c8;
+    }
+
     /* ── Asset loading overlay (shown during Loading phase) ────────── */
     #asset-loading {
       display: none;
@@ -447,20 +480,20 @@
       justify-content: space-between; padding: 6px 0 4px;
       border-top: 1px solid var(--edge); margin-top: auto; }
     #status-line { font-size: 0.65rem; color: var(--dim); }
-    #engage-btn { padding: 6px 16px; border-radius: 4px;
+    #ready-btn { padding: 6px 16px; border-radius: 4px;
       font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.75rem;
       font-weight: 700; letter-spacing: .12em; cursor: pointer;
       border: 1px solid var(--edge); background: var(--surface); color: var(--dim);
       transition: all .3s ease; display: none; width: auto; margin: 0; }
-    #engage-btn.armed { display: block; background: #0a2830;
+    #ready-btn.armed { display: block; background: #0a2830;
       border-color: var(--signal-cyan); color: var(--signal-cyan); }
-    #engage-btn.armed:hover { background: #1a3848; }
-    #engage-btn.armed.glow { animation: engage-pulse 1s ease-in-out infinite; }
-    @keyframes engage-pulse {
+    #ready-btn.armed:hover { background: #1a3848; }
+    #ready-btn.armed.glow { animation: ready-pulse 1s ease-in-out infinite; }
+    @keyframes ready-pulse {
       0%, 100% { box-shadow: 0 0 6px rgba(95,216,232,0.3); }
       50%       { box-shadow: 0 0 18px rgba(95,216,232,0.7); }
     }
-    #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
+    #ready-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
 </head>
 <body>
@@ -525,7 +558,7 @@
       <!-- Footer -->
       <div id="lobby-footer">
         <span id="status-line">Connecting to host…</span>
-        <button id="engage-btn">ENGAGE</button>
+        <button id="ready-btn">READY</button>
       </div>
     </section>
 
@@ -601,6 +634,14 @@
   <div id="asset-loading">
     <div class="spinner-ring"></div>
     <span>Preparing scenario&hellip; <span class="pct" id="asset-loading-pct">0</span>%</span>
+  </div>
+
+  <!-- Coordination popup overlay (issue #494). Shown for AI-to-human
+       coordination messages. Click-to-dismiss, auto-dismiss after 8s. -->
+  <div id="coordination-popup" onclick="dismissCoordinationPopup()">
+    <div class="popup-sender" id="popup-sender"></div>
+    <div class="popup-title" id="popup-title"></div>
+    <div class="popup-body" id="popup-body"></div>
   </div>
 
   <!-- Phone bezel frame (issue #439). Eight fixed-position pieces overlay
@@ -734,7 +775,7 @@
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
       shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, boostEnabled: false, boostBattery: 0, boostActive: false, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
-      stations: [], maxPlayers: 0, complexity: {}, allFilled: false,
+      stations: [], maxPlayers: 0, complexity: {}, allFilled: false, allReady: false,
       // Weapons console iframe state (issue #422)
       weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto',
       // Repair console iframe state (issue #425)
@@ -1056,32 +1097,29 @@
       if (crewEl) crewEl.textContent = (s.stations.filter(st => st.holder_name).length) + '/' + (s.maxPlayers || 0);
       const pill = document.getElementById('ready-pill');
       if (pill) {
-        if (s.allFilled) { pill.textContent = 'READY TO LAUNCH'; pill.className = 'go'; }
+        if (s.allReady) { pill.textContent = 'ALL CREW READY'; pill.className = 'go'; }
         else { pill.textContent = 'AWAITING CREW'; pill.className = ''; }
       }
 
-      // Engage button (captain only)
-      const engageBtn = document.getElementById('engage-btn');
-      if (engageBtn) {
-        if (isCaptain(s)) {
-          engageBtn.style.display = 'block';
-          if (s.allFilled) {
-            engageBtn.textContent = 'ENGAGE';
-            engageBtn.className = 'armed glow';
-            engageBtn.disabled = false;
-            engageBtn.onclick = () => {
-              engageBtn.disabled = true;
-              engageBtn.textContent = 'LAUNCHING…';
-              engageBtn.className = 'armed';
-              send('StartGame');
-            };
+      // Ready button (per-player, replaces captain-only Engage)
+      const readyBtn = document.getElementById('ready-btn');
+      if (readyBtn) {
+        if (myPlayer) {
+          readyBtn.style.display = 'block';
+          const isReady = !!myPlayer.ready;
+          if (isReady) {
+            readyBtn.textContent = '✔ READY';
+            readyBtn.className = 'armed glow';
+            readyBtn.disabled = false;
+            readyBtn.onclick = () => send('SetReady', { ready: false });
           } else {
-            engageBtn.textContent = 'ENGAGE';
-            engageBtn.className = 'armed';
-            engageBtn.disabled = true;
+            readyBtn.textContent = 'READY';
+            readyBtn.className = 'armed';
+            readyBtn.disabled = false;
+            readyBtn.onclick = () => send('SetReady', { ready: true });
           }
         } else {
-          engageBtn.style.display = 'none';
+          readyBtn.style.display = 'none';
         }
       }
 
@@ -1090,14 +1128,14 @@
       if (statusLine) {
         if (!myPlayer) {
           statusLine.textContent = 'Select a station to join the crew';
-        } else if (isCaptain(s) && s.allFilled) {
-          statusLine.textContent = 'All stations filled — press Engage!';
-        } else if (isCaptain(s)) {
-          statusLine.textContent = 'Waiting for crew to claim stations…';
+        } else if (s.allReady) {
+          statusLine.textContent = 'All crew ready — launching!';
+        } else if (myPlayer.ready) {
+          statusLine.textContent = 'Waiting for the rest of the crew…';
         } else {
           const myStation = s.stations.find(st => st.holder_name === myPlayerName);
           statusLine.textContent = myStation
-            ? 'Standing by at ' + myStation.name
+            ? 'Standing by at ' + myStation.name + ' — press READY when ready'
             : 'Select a station to join the crew';
         }
       }
@@ -1120,6 +1158,8 @@
         };
       });
       state.allFilled = state.stations.length > 0 && state.stations.every(st => st.holder_name);
+      state.allReady = state.players.length > 0 && state.players.every(p => p.ready)
+        || state.players.length === 0;
       scheduleRender();
     }
 
@@ -1294,6 +1334,37 @@
     }
 
     if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); injectSwipeRelay($('comms-iframe')); });
+
+    // ── Coordination popup (issue #494) ───────────────────────────────────────
+    let coordinationPopupTimer = null;
+    function showCoordinationPopup(payload, sender_label) {
+      const el = document.getElementById('coordination-popup');
+      if (!el) return;
+      const senderEl = document.getElementById('popup-sender');
+      const titleEl = document.getElementById('popup-title');
+      const bodyEl = document.getElementById('popup-body');
+      if (!senderEl || !titleEl || !bodyEl) return;
+      const label = sender_label || 'AI';
+      if (payload.target) {
+        senderEl.textContent = label + ' → ' + payload.target;
+      } else {
+        senderEl.textContent = label;
+      }
+      titleEl.textContent = payload.title || payload.type || 'Advisory';
+      bodyEl.textContent = payload.body || '';
+      el.style.display = 'block';
+      if (coordinationPopupTimer) clearTimeout(coordinationPopupTimer);
+      coordinationPopupTimer = setTimeout(dismissCoordinationPopup, 8000);
+    }
+    function dismissCoordinationPopup() {
+      const el = document.getElementById('coordination-popup');
+      if (!el) return;
+      el.style.display = 'none';
+      if (coordinationPopupTimer) {
+        clearTimeout(coordinationPopupTimer);
+        coordinationPopupTimer = null;
+      }
+    }
 
     // ── Navigation console iframe bridge (issue #458) ─────────────────────────
     // State builder extracted to gui/console-state.js.
@@ -1854,6 +1925,11 @@
             savedComplexity[consoleName] = preset_name;
           }
           rebuildStations();
+          return;
+        }
+        case 'CoordinationPopup': {
+          const { target, payload, sender_label } = msg.data;
+          showCoordinationPopup(payload, sender_label);
           return;
         }
         case 'CommsState': {

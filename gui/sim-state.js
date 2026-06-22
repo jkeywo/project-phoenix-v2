@@ -290,7 +290,13 @@ export class ClientSimState {
 // format; callers JSON.stringify before sending over PeerJS.
 
 export function redAlertToggleMessage() {
-  return { type: 'ToggleRedAlert' };
+  return {
+    type: 'ControlSystem',
+    data: {
+      target: 'red-alert',
+      payload: { type: 'ToggleRedAlert' },
+    },
+  };
 }
 
 export function firePhaserMessage(bankId) {

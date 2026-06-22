@@ -611,6 +611,7 @@ fn handle_collisions(
         With<Asteroid>,
     >,
     mut ship: ResMut<ShipState>,
+    mut impulse: ResMut<ShipImpulse>,
     mut hull: ResMut<ShipHullIntegrity>,
     mut shields: ResMut<ShipShields>,
     mut cooldown: ResMut<CollisionCooldown>,
@@ -637,12 +638,12 @@ fn handle_collisions(
     });
 
     if contact.is_some() {
-        let speed_at_impact = ship.forward_speed;
-        ship.forward_speed = -0.5 * speed_at_impact;
-
         if cooldown.remaining_secs > 0.0 {
             return;
         }
+        impulse.0.cancel_charge();
+        let speed_at_impact = ship.forward_speed;
+        ship.forward_speed = -0.5 * speed_at_impact;
         let damage = collision_damage(speed_at_impact) as f32
             * modifiers.get(&ModifierSlot::HullDamageTaken);
 

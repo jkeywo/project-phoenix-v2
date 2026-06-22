@@ -1,12 +1,15 @@
 use bevy::prelude::*;
+use std::collections::HashMap;
 
 use crate::control_source::{ControlSourceResolver, ControlTickPolicy};
 use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{ClientMessage, ModifierSlot, SystemControlPayload};
+use crate::messages::{ClientMessage, ModifierSlot, StationId, SystemControlPayload};
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
+use crate::ship::config::ShipConfig;
+use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 use crate::simulation::{Ship, ShipBoost, ShipHullIntegrity, ShipImpulse};
@@ -24,6 +27,110 @@ pub struct LastHelmInput {
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ShipSystemControlSources(pub ControlSourceResolver);
+
+/// The parsed `ShipConfig` defining stations, systems, and per-station rating
+/// tables. Populated once at startup from the embedded ship TOML.
+#[derive(Resource, Clone)]
+pub struct ShipConfigResource(pub ShipConfig);
+
+/// Tracks the currently active rating name for each station.
+/// Updated when a player sends `SetStationRating`.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct ActiveStationRatings(pub HashMap<StationId, String>);
+
+impl Default for ShipConfigResource {
+    fn default() -> Self {
+        // Default config matches the test TOML in ship/config.rs.
+        // TODO: replace with the real ship config loading once the
+        // station/system migration lands on player_ship.toml.
+        let toml = r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command the bridge."
+rank = "Cpt."
+short_code = "CPT"
+console = "captain"
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = ["red-alert"]
+
+[[station.rating]]
+name = "Manual"
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons and threat response."
+rank = "Ltn."
+short_code = "TAC"
+console = "tactical"
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = ["torpedo-magazine", "torpedo-tube-fore-port"]
+
+[power_groups.ops]
+label = "Operations"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.weapons]
+label = "Weapons"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[system.config]
+facing_deg = 0
+fire_arc_deg = 270
+
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-fore-port"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "viewscreen"
+kind = "viewscreen"
+ai_only = true
+power_group = "ops"
+"#;
+        const KINDS: &[&str] = &[
+            "red_alert",
+            "helm",
+            "phaser_bank",
+            "torpedo_magazine",
+            "torpedo_tube",
+            "viewscreen",
+        ];
+        let config = ShipConfig::from_toml(toml, KINDS)
+            .expect("default ship config must parse");
+        Self(config)
+    }
+}
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct HelmAiController {
@@ -129,6 +236,8 @@ impl Plugin for ShipPlugin {
         )))
         .init_resource::<LastHelmInput>()
         .init_resource::<ShipSystemControlSources>()
+        .init_resource::<ShipConfigResource>()
+        .init_resource::<ActiveStationRatings>()
         .init_resource::<HelmAiController>()
         .init_resource::<ImpulseConfigResource>()
         .init_resource::<BoostConfigResource>()
@@ -145,6 +254,7 @@ impl Plugin for ShipPlugin {
                     .before(crate::sim_sets::AiTickLabel),
                 handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
                 handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
+                handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
             )
                 .after(crate::lobby::process_lobby),
         );
@@ -489,6 +599,58 @@ fn is_inside_blocks_impulse(
     false
 }
 
+// ── Station Rating Handler ──────────────────────────────────────────────────
+
+/// System that processes `SetStationRating` messages from players mid-game.
+/// Resolves the sender's station from their held consoles, looks up the
+/// rating in the ship config, and updates `ShipSystemControlSources` and
+/// `ActiveStationRatings` accordingly.
+pub fn handle_station_rating_change(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    ship_config: Res<ShipConfigResource>,
+    mut control_sources: ResMut<ShipSystemControlSources>,
+    mut active_ratings: ResMut<ActiveStationRatings>,
+) {
+    for ev in reader.read() {
+        let ClientMessage::SetStationRating { rating_name } = &ev.msg else {
+            continue;
+        };
+
+        // Find the player
+        let player = match sessions.0.players().iter().find(|p| p.token == ev.token) {
+            Some(p) => p,
+            None => continue,
+        };
+
+        // Determine which station the player holds via their consoles
+        let mut station_id: Option<StationId> = None;
+        for console in &player.consoles {
+            if let Some(station) = ship_config
+                .0
+                .station_for_console(console.station_console_id())
+            {
+                station_id = Some(station.id.clone());
+                break;
+            }
+        }
+        let Some(station_id) = station_id else {
+            continue;
+        };
+
+        // Apply the rating
+        rating::apply_rating(
+            &ship_config.0,
+            &station_id,
+            rating_name,
+            &mut control_sources.0,
+        );
+
+        // Track the active rating
+        active_ratings.0.insert(station_id, rating_name.clone());
+    }
+}
+
 // Ã¢â€â‚¬Ã¢â€â‚¬ Tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 #[cfg(test)]
@@ -504,6 +666,8 @@ mod tests {
     use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
     use crate::region_shape::RegionShape;
     use crate::regions::server::RegionPlugin;
+    use crate::messages::StationId;
+    use crate::ship::rating;
     use crate::ship_state::ShipState;
 
     fn test_app() -> App {
@@ -1331,6 +1495,119 @@ mod tests {
             "post-cancel tick must not autopilot a phantom turn; \
              yaw drifted by {}",
             yaw_after - yaw_before
+        );
+    }
+
+    // ── Station Rating tests ─────────────────────────────────────────────
+
+    #[test]
+    fn set_station_rating_sets_ai_for_automated_systems() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        // Captain station config maps red-alert as assisted system.
+        // The captain player holds Console::CaptainChair which maps to
+        // the "captain" station in the default ShipConfig.
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetStationRating {
+                rating_name: "Assisted".into(),
+            },
+        );
+        tick_twice(&mut app);
+
+        let sources = app.world().resource::<ShipSystemControlSources>();
+        assert_eq!(
+            sources.0.source_for(&crate::system_registry::red_alert_system_id()),
+            ControlSource::Ai
+        );
+    }
+
+    #[test]
+    fn set_station_rating_manual_leaves_all_systems_human() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetStationRating {
+                rating_name: "Manual".into(),
+            },
+        );
+        tick_twice(&mut app);
+
+        let sources = app.world().resource::<ShipSystemControlSources>();
+        assert_eq!(
+            sources.0.source_for(&crate::system_registry::red_alert_system_id()),
+            ControlSource::Human
+        );
+    }
+
+    #[test]
+    fn set_station_rating_backfill_automates_all_station_systems() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetStationRating {
+                rating_name: rating::BACKFILL_RATING.into(),
+            },
+        );
+        tick_twice(&mut app);
+
+        let sources = app.world().resource::<ShipSystemControlSources>();
+        assert_eq!(
+            sources.0.source_for(&crate::system_registry::red_alert_system_id()),
+            ControlSource::Ai
+        );
+    }
+
+    #[test]
+    fn set_station_rating_from_non_holder_is_ignored() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        // "helm" player holds Helm console, not captain.
+        // SetStationRating for the captain station should be ignored.
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::SetStationRating {
+                rating_name: "Assisted".into(),
+            },
+        );
+        tick_twice(&mut app);
+
+        let sources = app.world().resource::<ShipSystemControlSources>();
+        // Default is Human
+        assert_eq!(
+            sources.0.source_for(&crate::system_registry::red_alert_system_id()),
+            ControlSource::Human
+        );
+    }
+
+    #[test]
+    fn set_station_rating_updates_active_ratings() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetStationRating {
+                rating_name: "Assisted".into(),
+            },
+        );
+        tick_twice(&mut app);
+
+        let active = app.world().resource::<ActiveStationRatings>();
+        assert_eq!(
+            active.0.get(&StationId("captain".into())).map(|s| s.as_str()),
+            Some("Assisted")
         );
     }
 }

@@ -278,6 +278,22 @@ impl Console {
     }
 
     /// Short abbreviation for use when the tab bar is crowded (5+ consoles).
+    /// Console identifier string used in `StationConfig.console` TOML field
+    /// to associate a station config with a console variant.
+    pub fn station_console_id(&self) -> &'static str {
+        match self {
+            Console::CaptainChair => "captain",
+            Console::Helm => "helm",
+            Console::Tactical => "tactical",
+            Console::Repair => "repair",
+            Console::Sensors => "sensors",
+            Console::Shields => "shields",
+            Console::Navigation => "navigation",
+            Console::Power => "power",
+            Console::Comms => "comms",
+        }
+    }
+
     pub fn initial(&self) -> &'static str {
         match self {
             Console::CaptainChair => "CC",
@@ -1045,6 +1061,14 @@ pub enum ClientMessage {
     ControlSystem {
         target: SystemId,
         payload: SystemControlPayload,
+    },
+    /// Change the active rating for the sender's station. The rating name
+    /// must match one of the station's defined ratings, or be "Backfill"
+    /// (which automates every system owned by the station). When the rating
+    /// is not found the message is silently ignored.
+    /// Validated server-side: sender must hold a station with that rating.
+    SetStationRating {
+        rating_name: String,
     },
 }
 

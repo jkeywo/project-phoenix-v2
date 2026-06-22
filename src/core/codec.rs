@@ -366,6 +366,15 @@ mod tests {
     }
 
     #[test]
+    fn client_set_station_rating_round_trips() {
+        let msg = ClientMessage::SetStationRating {
+            rating_name: "Assisted".into(),
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_start_impulse_charge() {
         let msg = ClientMessage::StartImpulseCharge;
         assert_client_roundtrip(&JsonCodec, msg.clone());

@@ -412,6 +412,7 @@ pub fn process_message(
         | ClientMessage::SetNavigationWaypoint { .. }
         | ClientMessage::ClearNavigationWaypoint
         | ClientMessage::ControlSystem { .. }
+        | ClientMessage::SetStationRating { .. }
         | ClientMessage::LoadTube { .. }
         | ClientMessage::UnloadTube { .. } => {}
     }

@@ -4,5 +4,6 @@ pub mod control_source;
 pub mod damage;
 pub mod impulse;
 pub mod physics;
+pub mod rating;
 pub mod state;
 pub mod system_registry;

@@ -155,6 +155,12 @@ impl ShipConfig {
             .filter(move |system| system.station.as_ref() == Some(id))
     }
 
+    /// Find the station whose `console` field matches the given string.
+    /// Used to map a `Console` variant back to the owning station config.
+    pub fn station_for_console(&self, console_id: &str) -> Option<&StationConfig> {
+        self.stations.iter().find(|s| s.console == console_id)
+    }
+
     pub fn systems_in_power_group<'a>(
         &'a self,
         id: &'a PowerGroupId,

@@ -13,9 +13,20 @@
 // tests in src/world/config.rs and src/world/server.rs cover the
 // trigger-evaluation invariants.
 
-import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady, stripHeavyEntities } from './fixtures';
+import fs from 'fs';
+import path from 'path';
+
+const COMBAT_TEST_TOML = fs.readFileSync(
+  path.join(__dirname, '../../assets/worlds/combat_test.toml'),
+  'utf-8',
+);
 
 test('combat_test scenario: starbase + objective + player + first wave appear after game start', async ({ context }) => {
+  await context.route('**/assets/worlds/combat_test.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: stripHeavyEntities(COMBAT_TEST_TOML) }),
+  );
+
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/combat_test.toml');
   await waitForWasmReady(serverPage);

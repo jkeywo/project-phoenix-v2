@@ -254,3 +254,53 @@ export function mountHelp(panel, doc) {
   host.appendChild(trigger);
   return trigger;
 }
+
+// ── Inline help panel (rendered in the parent page under the tab bar) ─────
+
+/**
+ * Render help sections for multiple consoles into an inline container.
+ * Each console gets a heading group with its help sections listed below.
+ * Used by client.html's render() to display all help text under the tab bar
+ * when a console is selected and non-selected tabs are hidden.
+ *
+ * @param {HTMLElement} root - the container element to populate
+ * @param {string[]} consoles - array of console PascalCase names
+ */
+export function renderInlineHelp(root, consoles) {
+  if (!root) return;
+  const doc = root.ownerDocument || document;
+  root.innerHTML = '';
+  for (const consoleName of consoles || []) {
+    const sections = helpSections(consoleName);
+    if (sections.length === 0) continue;
+    const group = doc.createElement('div');
+    group.className = 'help-console-group';
+    const heading = doc.createElement('div');
+    heading.className = 'help-console-heading';
+    const label = (typeof window !== 'undefined' && window.CONSOLE_LABEL && window.CONSOLE_LABEL[consoleName]) || consoleName;
+    heading.textContent = label;
+    group.appendChild(heading);
+    const body = doc.createElement('div');
+    body.className = 'help-sections';
+    for (const [sectionLabel, desc] of sections) {
+      const section = doc.createElement('div');
+      section.className = 'help-section';
+      const title = doc.createElement('div');
+      title.className = 'help-section-title';
+      title.textContent = sectionLabel;
+      section.appendChild(title);
+      const text = doc.createElement('div');
+      text.className = 'help-section-body';
+      text.textContent = desc;
+      section.appendChild(text);
+      body.appendChild(section);
+    }
+    group.appendChild(body);
+    root.appendChild(group);
+  }
+}
+
+// Expose for non-module scripts in `client.html`.
+if (typeof window !== 'undefined') {
+  window.renderInlineHelp = renderInlineHelp;
+}

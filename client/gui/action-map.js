@@ -39,12 +39,20 @@ export const ACTION_MAP = Object.freeze({
 
   /** Lock the weapon / sensor target to a specific entity UUID. */
   set_target: (a, send) => {
-    if (a.uuid) send('SetTarget', { uuid: a.uuid });
+    if (a.uuid)
+      send('ControlSystem', {
+        target: 'tactical',
+        payload: { type: 'SetTarget', data: { uuid: a.uuid } },
+      });
   },
 
   /** Switch phaser firing mode (Auto / Manual / etc.). */
   set_phaser_mode: (a, send) => {
-    if (a.mode) send('SetPhaserMode', { mode: a.mode });
+    if (a.mode)
+      send('ControlSystem', {
+        target: 'tactical',
+        payload: { type: 'SetPhaserMode', data: { mode: a.mode } },
+      });
   },
 
   /** Switch the view-screen to a named Camera direction. */
@@ -126,14 +134,22 @@ export const ACTION_MAP = Object.freeze({
     send('DispatchRepairTeam', { team_idx: a.team_idx, console: a.target });
   },
 
-  /** Increase power allocation to a console. */
-  increase_power: (a, send) => {
-    if (a.target) send('IncreasePower', { console: a.target });
-  },
-
-  /** Decrease power allocation to a console. */
-  decrease_power: (a, send) => {
-    if (a.target) send('DecreasePower', { console: a.target });
+  /**
+   * Set power allocation to an explicit level for a console.
+   *
+   * The power panel sends the pre-calculated target level (current ± 1),
+   * so the server receives a single absolute value and applies it via
+   * PowerSystem::increase / decrease.
+   *
+   * `{ action: "set_power", console: "Power", target: "Helm", level: 3 }`
+   */
+  set_power: (a, send) => {
+    if (a.target && typeof a.level === 'number') {
+      send('ControlSystem', {
+        target: 'power',
+        payload: { type: 'SetPower', data: { target: a.target, level: a.level } },
+      });
+    }
   },
 
   /** Focus shields on a specific facing. */
@@ -177,7 +193,7 @@ export const ACTION_MAP = Object.freeze({
   set_sensors_target: (a, send, mutate) => {
     if (a.uuid) {
       mutate({ sensorsTarget: a.uuid });
-      send('SetScienceTarget', { uuid: a.uuid });
+      send('ControlSystem', { target: 'sensors', payload: { type: 'SetScienceTarget', data: { uuid: a.uuid } } });
     }
   },
 

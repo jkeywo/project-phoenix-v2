@@ -203,14 +203,8 @@ export class LobbyState {
     const max = this.shipStations.max_players || 0;
     const min = this.shipStations.min_players || 0;
 
-    let displayCount;
-    if (playerCount === 0) {
-      displayCount = Math.max(min, 1);
-    } else if (max > 0) {
-      displayCount = Math.min(playerCount, max);
-    } else {
-      displayCount = playerCount;
-    }
+    // Fixed roster per #495: always show the max_players layout.
+    let displayCount = max > 0 ? max : Math.max(playerCount, min, 1);
 
     const slots = [];
     for (const def of this.stationDefsFor(displayCount)) {

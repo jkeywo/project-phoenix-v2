@@ -650,6 +650,7 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
     var _stickValue = { x: 0, y: 0 };
     var _stickPointerId = null;
     var _stickRaf;
+    var _inputRaf = null; // keyboard/gamepad loop handle
 
     function _stickFmt(v) {
       return (v >= 0 ? '+' : '-') + Math.abs(v).toFixed(2);
@@ -680,6 +681,7 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
     }
     function _stickDecay() {
       if (_stickPointerId !== null) return;
+      if (_inputRaf !== null) return; // keyboard/gamepad has control
       var k = 0.15;
       _stickValue.x *= (1 - k);
       _stickValue.y *= (1 - k);
@@ -729,6 +731,88 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
       // actually moves, leaving the last-received value stale if the connection
       // drops a packet while dragging.
       setInterval(function() { if (_stickPointerId !== null) _stickUpdateNub(); }, 100);
+    })();
+
+    (function initKeyboardGamepad() {
+      var _keys = {};
+
+      function _getGamepadInput() {
+        if (!navigator.getGamepads) return { x: 0, y: 0 };
+        var gamepads = navigator.getGamepads();
+        for (var i = 0; i < gamepads.length; i++) {
+          var gp = gamepads[i];
+          if (!gp || gp.axes.length < 2) continue;
+          var dead = 0.1;
+          return {
+            x: Math.abs(gp.axes[0]) > dead ? gp.axes[0] : 0,
+            y: Math.abs(gp.axes[1]) > dead ? gp.axes[1] : 0
+          };
+        }
+        return { x: 0, y: 0 };
+      }
+
+      function _inputLoop() {
+        _inputRaf = null;
+        if (_stickPointerId !== null) return; // pointer has priority
+
+        var kx = 0, ky = 0;
+        if (_keys['ArrowLeft']  || _keys['KeyA']) kx -= 1;
+        if (_keys['ArrowRight'] || _keys['KeyD']) kx += 1;
+        if (_keys['ArrowUp']    || _keys['KeyW']) ky -= 1; // up = forward thrust
+        if (_keys['ArrowDown']  || _keys['KeyS']) ky += 1;
+
+        var gp = _getGamepadInput();
+        var nx = kx !== 0 ? kx : gp.x;
+        var ny = ky !== 0 ? ky : gp.y;
+
+        var d = Math.hypot(nx, ny);
+        if (d > 1) { nx /= d; ny /= d; }
+
+        var hasInput = nx !== 0 || ny !== 0;
+        var hasKeys = Object.keys(_keys).length > 0;
+
+        if (hasInput) {
+          cancelAnimationFrame(_stickRaf);
+          _stickValue = { x: nx, y: ny };
+          _stickUpdateNub();
+          _inputRaf = requestAnimationFrame(_inputLoop);
+        } else if (hasKeys) {
+          // All-zero directional keys held (e.g. opposing keys cancel) — keep polling
+          _inputRaf = requestAnimationFrame(_inputLoop);
+        } else {
+          // No input — hand off to decay
+          _stickRaf = requestAnimationFrame(_stickDecay);
+        }
+      }
+
+      function _startInputLoop() {
+        if (_inputRaf) return;
+        cancelAnimationFrame(_stickRaf);
+        _inputRaf = requestAnimationFrame(_inputLoop);
+      }
+
+      document.addEventListener('keydown', function(e) {
+        if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+        var relevant = ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyW','KeyS'];
+        if (relevant.indexOf(e.code) === -1) return;
+        e.preventDefault();
+        _keys[e.code] = true;
+        _startInputLoop();
+      });
+
+      document.addEventListener('keyup', function(e) {
+        delete _keys[e.code];
+        // If loop isn't running, start it so it can trigger decay when keys empty
+        if (!_inputRaf && _stickPointerId === null) _startInputLoop();
+      });
+
+      // Gamepad: start polling on connect, and periodically check for silent connections
+      window.addEventListener('gamepadconnected', _startInputLoop);
+      setInterval(function() {
+        if (_stickPointerId !== null || _inputRaf) return;
+        var gp = _getGamepadInput();
+        if (gp.x !== 0 || gp.y !== 0) _startInputLoop();
+      }, 200);
     })();
 
     document.getElementById('on-screen-btn').addEventListener('click', function() {

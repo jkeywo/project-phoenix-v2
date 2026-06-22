@@ -151,10 +151,13 @@ describe('set_view', () => {
 });
 
 describe('toggle_red_alert', () => {
-  it('calls send ToggleRedAlert with no data', () => {
+  it('calls send ControlSystem targeting the Red Alert system', () => {
     const send = mkSend();
     ACTION_MAP.toggle_red_alert({ action: 'toggle_red_alert' }, send);
-    expect(send).toHaveBeenCalledWith('ToggleRedAlert');
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'ToggleRedAlert' },
+    });
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
@@ -418,7 +421,10 @@ describe('dispatchConsoleAction', () => {
   it('routes a known action to its handler', () => {
     const send = mkSend();
     dispatchConsoleAction({ action: 'toggle_red_alert' }, send);
-    expect(send).toHaveBeenCalledWith('ToggleRedAlert');
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'ToggleRedAlert' },
+    });
   });
 
   it('ignores unknown actions without throwing', () => {

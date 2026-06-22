@@ -2,8 +2,8 @@
 title: Captain Console
 type: entity
 tags: [console, captain, red-alert, view-mode, authority]
-sources: [src/client/captain_plugin.rs, src/server/simulation.rs, PRD-001, PRD-036]
-updated: 2026-05-08
+sources: [src/client/captain_plugin.rs, src/server/simulation.rs, PRD-001, PRD-036, Issue-490]
+updated: 2026-06-22
 ---
 
 # Captain Console
@@ -15,12 +15,17 @@ The "Captain's Chair." The authority seat: only the captain can start the game, 
 | Control | Effect | Source |
 |---|---|---|
 | Engage | `StartGame` → phase transitions Lobby → InProgress | PRD #1 |
-| Red Alert toggle | Flips `ShipState.red_alert`; renders red border on viewscreen and all consoles | PRD #1 |
+| Red Alert toggle | Flips `ShipState.red_alert`; renders red border on viewscreen and all consoles. During the station/system migration this is also addressable as `ControlSystem { target: "red-alert", payload: ToggleRedAlert }`. | PRD #1 / Issue #490 |
 | View selector (Fore/Aft/Port/Starboard) | `SetView { mode: Camera(direction) }` → repositions hull camera | PRD #36 |
 
 ## Server-side guards
 
 All captain messages are guarded in the simulation/lobby handlers by checking `sender_token == SessionManager::captain_token()`. Non-captains sending these messages get silently dropped — no error, no broadcast.
+
+The HTML captain console can render Red Alert as AI-operated by reading
+`CaptainConsoleState.red_alert_auto`; in that mode the button is read-only and
+shows an AUTO badge while the existing alert border tint still follows
+`red_alert`.
 
 ## Layout
 

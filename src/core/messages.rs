@@ -923,7 +923,9 @@ pub enum ClientMessage {
     /// Sent by the Helm officer to toggle the boost drive on/off.
     ToggleBoost,
     /// Sent by the Helm officer to explicitly set boost on or off (hold-to-boost).
-    SetBoost { active: bool },
+    SetBoost {
+        active: bool,
+    },
     SetView {
         mode: ViewMode,
     },
@@ -1429,6 +1431,13 @@ pub struct WeaponsConsoleState {
 pub struct CaptainConsoleState {
     /// Whether the ship is at red alert.
     pub red_alert: bool,
+    /// Stable system id for the Red Alert coarse system fragment.
+    #[serde(default = "default_red_alert_system_id")]
+    pub red_alert_system_id: SystemId,
+    /// True when Red Alert is AI-controlled and the human-facing fragment
+    /// should render read-only with an AUTO badge.
+    #[serde(default)]
+    pub red_alert_auto: bool,
     /// Current camera direction as a plain string: `"Fore"`, `"Port"`,
     /// `"Starboard"`, or `"Aft"`. Non-camera view modes (Radar, etc.) send an
     /// empty string so the Captain panel can clear its direction highlight.
@@ -1443,10 +1452,16 @@ pub struct CaptainConsoleState {
     pub game_status: String,
 }
 
+fn default_red_alert_system_id() -> SystemId {
+    crate::system_registry::red_alert_system_id()
+}
+
 impl Default for CaptainConsoleState {
     fn default() -> Self {
         Self {
             red_alert: false,
+            red_alert_system_id: default_red_alert_system_id(),
+            red_alert_auto: false,
             view_direction: "Fore".into(),
             objectives: Vec::new(),
             hull_integrity_pct: 100.0,
@@ -1607,7 +1622,9 @@ pub enum UiAction {
     /// Toggle the boost drive on/off (helm BOOST button).
     ToggleBoost,
     /// Explicitly set boost on or off — used for hold-to-boost (pointerdown/pointerup).
-    SetBoost { active: bool },
+    SetBoost {
+        active: bool,
+    },
     /// Switch the viewscreen to radar mode (helm ON SCREEN button).
     SetRadarView,
     /// Increase power for the named powered console (power console).
@@ -1696,7 +1713,10 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::LoadTube { tube } => ClientMessage::LoadTube { tube: tube.clone() },
         UiAction::UnloadTube { tube } => ClientMessage::UnloadTube { tube: tube.clone() },
         UiAction::FirePhaser { bank } => ClientMessage::FirePhaser { bank: bank.clone() },
-        UiAction::ToggleRedAlert => ClientMessage::ToggleRedAlert,
+        UiAction::ToggleRedAlert => ClientMessage::ControlSystem {
+            target: crate::system_registry::red_alert_system_id(),
+            payload: SystemControlPayload::ToggleRedAlert,
+        },
         UiAction::SetView { direction } => ClientMessage::SetView {
             mode: ViewMode::Camera(direction.clone()),
         },
@@ -1803,7 +1823,10 @@ mod ui_action_tests {
     fn toggle_red_alert_maps_to_client_message() {
         assert_eq!(
             ui_action_to_client_message(&UiAction::ToggleRedAlert),
-            ClientMessage::ToggleRedAlert
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            }
         );
     }
 

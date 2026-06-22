@@ -341,7 +341,13 @@ describe('radar configs', () => {
 
 describe('message builders', () => {
   it('build serde tag/content wire objects', () => {
-    expect(redAlertToggleMessage()).toEqual({ type: 'ToggleRedAlert' });
+    expect(redAlertToggleMessage()).toEqual({
+      type: 'ControlSystem',
+      data: {
+        target: 'red-alert',
+        payload: { type: 'ToggleRedAlert' },
+      },
+    });
     expect(firePhaserMessage('port')).toEqual({ type: 'FirePhaser', data: { bank: 'port' } });
     expect(fireTorpedoMessage('fore', 'tgt')).toEqual({ type: 'FireTorpedo', data: { tube: 'fore', target_uuid: 'tgt' } });
     expect(fireTorpedoMessage('fore')).toEqual({ type: 'FireTorpedo', data: { tube: 'fore', target_uuid: null } });

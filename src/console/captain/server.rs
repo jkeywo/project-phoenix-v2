@@ -3,12 +3,29 @@ use bevy::prelude::*;
 use crate::console_bridge::ConsoleStateChanged;
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{
-    CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, ViewDirection, ViewMode,
+    CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, SystemControlPayload,
+    ViewDirection, ViewMode,
 };
 use crate::ship_state::ShipState;
 use crate::world::server::ObjectiveManagerRes;
 
 pub struct CaptainPlugin;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RedAlertControlMode {
+    #[default]
+    Human,
+    Ai,
+}
+
+impl RedAlertControlMode {
+    fn is_ai(self) -> bool {
+        matches!(self, Self::Ai)
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RedAlertControl(pub RedAlertControlMode);
 
 impl Plugin for CaptainPlugin {
     fn build(&self, app: &mut App) {
@@ -45,13 +62,24 @@ fn handle_toggle_red_alert(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
+    control: Option<Res<RedAlertControl>>,
 ) {
+    let automated = control.as_deref().is_some_and(|mode| mode.0.is_ai());
     for ev in reader.read() {
-        if matches!(ev.msg, ClientMessage::ToggleRedAlert)
-            && captain_authorized(&sessions, &ev.token)
-        {
+        if !automated && is_red_alert_toggle(&ev.msg) && captain_authorized(&sessions, &ev.token) {
             ship.toggle_red_alert();
         }
+    }
+}
+
+fn is_red_alert_toggle(msg: &ClientMessage) -> bool {
+    match msg {
+        ClientMessage::ToggleRedAlert => true,
+        ClientMessage::ControlSystem { target, payload } => {
+            target.0 == crate::system_registry::RED_ALERT_SYSTEM_ID
+                && matches!(payload, SystemControlPayload::ToggleRedAlert)
+        }
+        _ => false,
     }
 }
 
@@ -100,6 +128,8 @@ pub struct CaptainConsoleStateComp(pub CaptainConsoleState);
 fn spawn_captain_console_state_entity(mut commands: Commands) {
     commands.spawn(CaptainConsoleStateComp(CaptainConsoleState {
         red_alert: false,
+        red_alert_system_id: crate::system_registry::red_alert_system_id(),
+        red_alert_auto: false,
         view_direction: "Fore".into(),
         objectives: Vec::new(),
         hull_integrity_pct: 100.0,
@@ -114,9 +144,11 @@ fn recompute_captain_console_state(
     ship: Res<ShipState>,
     hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
+    control: Option<Res<RedAlertControl>>,
     mut comp_q: Query<&mut CaptainConsoleStateComp>,
 ) {
     let red_alert = ship.red_alert();
+    let red_alert_auto = control.as_deref().is_some_and(|mode| mode.0.is_ai());
     let view_direction = match &ship.view_mode {
         ViewMode::Camera(ViewDirection::Fore) => "Fore",
         ViewMode::Camera(ViewDirection::Port) => "Port",
@@ -155,6 +187,8 @@ fn recompute_captain_console_state(
 
     let next = CaptainConsoleState {
         red_alert,
+        red_alert_system_id: crate::system_registry::red_alert_system_id(),
+        red_alert_auto,
         view_direction,
         objectives: objectives_snap,
         hull_integrity_pct,
@@ -303,6 +337,71 @@ mod tests {
         push(&mut app, "captain", ClientMessage::ToggleRedAlert);
         tick(&mut app);
         assert!(app.world().resource::<ShipState>().red_alert());
+    }
+
+    #[test]
+    fn captain_control_system_red_alert_works() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(app.world().resource::<ShipState>().red_alert());
+    }
+
+    #[test]
+    fn ai_controlled_red_alert_ignores_human_control_system_toggle() {
+        let mut app = test_app();
+        app.insert_resource(RedAlertControl(RedAlertControlMode::Ai));
+        start_game(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(!app.world().resource::<ShipState>().red_alert());
+    }
+
+    #[test]
+    fn non_captain_control_system_red_alert_is_ignored() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(!app.world().resource::<ShipState>().red_alert());
+    }
+
+    #[test]
+    fn wrong_control_system_target_does_not_toggle_red_alert() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("not-red-alert".into()),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(!app.world().resource::<ShipState>().red_alert());
     }
 
     #[test]
@@ -529,6 +628,8 @@ mod tests {
         app.world_mut()
             .spawn(CaptainConsoleStateComp(CaptainConsoleState {
                 red_alert: false,
+                red_alert_system_id: crate::system_registry::red_alert_system_id(),
+                red_alert_auto: false,
                 view_direction: "Fore".into(),
                 objectives: Vec::new(),
                 hull_integrity_pct: 100.0,
@@ -573,6 +674,21 @@ mod tests {
         assert_eq!(
             comp.0.game_status,
             "RED ALERT — All hands to battlestations."
+        );
+    }
+
+    #[test]
+    fn recompute_marks_ai_controlled_red_alert_auto() {
+        let mut app = recompute_test_app();
+        app.insert_resource(RedAlertControl(RedAlertControlMode::Ai));
+        app.update();
+
+        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
+        let comp = q.single(app.world()).unwrap();
+        assert!(comp.0.red_alert_auto);
+        assert_eq!(
+            comp.0.red_alert_system_id,
+            crate::system_registry::red_alert_system_id()
         );
     }
 
@@ -638,6 +754,8 @@ mod tests {
             let mut comp = q.single_mut(app.world_mut()).unwrap();
             comp.0 = CaptainConsoleState {
                 red_alert: true,
+                red_alert_system_id: crate::system_registry::red_alert_system_id(),
+                red_alert_auto: false,
                 view_direction: "Aft".into(),
                 objectives: Vec::new(),
                 hull_integrity_pct: 75.0,

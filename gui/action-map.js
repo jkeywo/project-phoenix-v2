@@ -61,7 +61,10 @@ export const ACTION_MAP = Object.freeze({
 
   /** Toggle red alert status. */
   toggle_red_alert: (a, send) => {
-    send('ToggleRedAlert');
+    send('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'ToggleRedAlert' },
+    });
   },
 
   /** Send helm thrust / steering inputs. */

@@ -266,6 +266,16 @@ mod tests {
     }
 
     #[test]
+    fn client_control_system_red_alert_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("red-alert".into()),
+            payload: SystemControlPayload::ToggleRedAlert,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_control_system_power_group_allocation_round_trips() {
         let msg = ClientMessage::ControlSystem {
             target: SystemId("power".into()),
@@ -2748,6 +2758,8 @@ mod tests {
         use crate::messages::{CaptainConsoleState, ObjectiveSnapshot, ObjectiveStatus};
         let state = CaptainConsoleState {
             red_alert: true,
+            red_alert_system_id: SystemId("red-alert".into()),
+            red_alert_auto: true,
             view_direction: "Starboard".into(),
             objectives: vec![ObjectiveSnapshot {
                 id: "obj-1".into(),
@@ -2766,6 +2778,11 @@ mod tests {
             "got: {json}"
         );
         assert!(json.contains("\"red_alert\":true"), "got: {json}");
+        assert!(
+            json.contains("\"red_alert_system_id\":\"red-alert\""),
+            "got: {json}"
+        );
+        assert!(json.contains("\"red_alert_auto\":true"), "got: {json}");
         assert!(json.contains("\"hull_integrity_pct\":87.5"), "got: {json}");
         let decoded: CaptainConsoleState = serde_json::from_str(&json).unwrap();
         assert_eq!(state, decoded);

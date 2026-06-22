@@ -101,3 +101,27 @@ test('captain console: dir pad buttons call __sendAction with correct envelopes'
   expect(JSON.parse(sent[3])).toEqual({ action: 'set_view', console: 'CaptainChair', direction: 'Aft' });
   expect(JSON.parse(sent[4])).toEqual({ action: 'toggle_red_alert', console: 'CaptainChair' });
 });
+
+test('captain console: AI-run Red Alert renders read-only with AUTO badge', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+
+  const state = {
+    red_alert: false,
+    red_alert_system_id: 'red-alert',
+    red_alert_auto: true,
+    view_mode: 'Camera',
+    view_direction: 'Fore',
+    objectives: [],
+    hull_integrity_pct: 100,
+    game_status: 'Standing by.',
+    blips: [],
+  };
+
+  await page.evaluate((s) => (window as any).__updateConsole('CaptainChair', JSON.stringify(s)), state);
+
+  await expect(page.locator('#red-alert-btn')).toBeDisabled();
+  await expect(page.locator('#red-alert-btn')).toHaveAttribute('data-system-id', 'red-alert');
+  await expect(page.locator('#red-alert-btn')).toHaveAttribute('data-auto', 'true');
+  await expect(page.locator('#red-alert-auto-badge')).toBeVisible();
+  await expect(page.locator('#red-alert-auto-badge')).toHaveText('AUTO');
+});

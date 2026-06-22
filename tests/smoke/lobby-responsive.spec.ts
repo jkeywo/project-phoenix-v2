@@ -75,11 +75,13 @@ test.describe('lobby responsive — portrait', () => {
     });
     expect(emptyCardVisible).toBe(false);
 
-    // (c) The rail is positioned below the grid (rail.top ≥ grid.bottom).
+    // (c) The rail is positioned below the grid column (rail.top ≥ gridColumn.bottom).
+    // We measure the .lobby-grid-column flex item (not #station-grid whose content
+    // can overflow into the gap when all 6 slots are filled).
     const layout = await serverPage.evaluate(() => {
-      const grid = document.getElementById('station-grid')!.getBoundingClientRect();
+      const gridColumn = document.querySelector('.lobby-grid-column')!.getBoundingClientRect();
       const rail = document.querySelector('.lobby-rail')!.getBoundingClientRect();
-      return { gridBottom: grid.bottom, railTop: rail.top };
+      return { gridBottom: gridColumn.bottom, railTop: rail.top };
     });
     expect(layout.railTop).toBeGreaterThanOrEqual(layout.gridBottom - 5);
 

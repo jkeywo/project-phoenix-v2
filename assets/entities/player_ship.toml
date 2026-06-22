@@ -40,7 +40,7 @@ power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
 
 [weapons_console.radar]
-range = 150
+range = 75
 shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
 selects = [ "ship", "station", "asteroid" ]
 
@@ -49,7 +49,7 @@ id = "fore"
 facing_deg = 0
 fire_arc_deg = 270
 auto_arc_deg = 180
-beam_range = 50
+beam_range = 25
 beam_damage_per_sec = 5
 beam_duration_secs = 6
 cooldown_secs = 6
@@ -61,7 +61,7 @@ id = "aft"
 facing_deg = 180
 fire_arc_deg = 270
 auto_arc_deg = 180
-beam_range = 50
+beam_range = 25
 beam_damage_per_sec = 5
 beam_duration_secs = 6
 cooldown_secs = 6
@@ -134,7 +134,7 @@ active_duration = 4.0
 recharge_duration = 20.0
 
 [helm_console.radar]
-range = 125
+range = 187.5
 shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
 
 [navigation_console]

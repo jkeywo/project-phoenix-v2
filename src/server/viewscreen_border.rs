@@ -176,9 +176,8 @@ fn push_lobby_state(
 
     let players = sessions.0.players();
     let connected_count = players.iter().filter(|p| p.connected).count() as u32;
-    let display_count = connected_count
-        .max(stations.min_players)
-        .min(stations.max_players);
+    // Fixed roster per #495: always show the max_players layout.
+    let display_count = stations.max_players;
 
     let mut station_payloads: Vec<StationPayload> = Vec::new();
     let mut spectators: Vec<String> = Vec::new();

@@ -1,9 +1,6 @@
-// Regression: the 4-player Engineering seat ([Repair, Power]) reported as
-// "data shown but taps did nothing". This is the first smoke coverage that
-// builds a real 4-player crew so the Engineering seat goes through the
-// 3P→4P console-shrink cascade ([Repair,Power,Shields,Comms] → [Repair,Power]),
-// then verifies that seat can *act*: the server must accept its IncreasePower
-// and DispatchRepairTeam, not just stream it state.
+// Regression: the Engineering seat ([Repair, Power]) must honor actions from
+// its holder. With the fixed-roster model (#495), Engineering always holds
+// exactly [Repair, Power] at the 6P layout — no cascade shrink/grow on join/leave.
 //
 // Power/Repair both authorize taps against `console_holder(X)` — the same
 // function that decides who receives state. So the failure mode we guard
@@ -60,30 +57,30 @@ async function waitForLastMessage(
 }
 
 /**
- * Build a 4-player crew one player at a time, so advance_on_join cascades each
- * join. c3 lands on Engineering at 3P and is shrunk to [Repair, Power] at 4P.
- * Returns the four clients; c3 is the Engineering seat under test.
+ * Build a 4-player crew at the fixed 6P layout. No cascade — each player
+ * selects their station directly. Returns the four clients; c3 is the
+ * Engineering seat under test.
  */
 async function buildFourPlayerCrew(context: import('@playwright/test').BrowserContext) {
   const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
 
   const c1 = await createTestClient(context, hostId, { name: 'P1' });
-  await selectAndWait(c1, 'Captain'); // advances to Helm as others join
+  await selectAndWait(c1, 'Captain');
 
   const c2 = await createTestClient(context, hostId, { name: 'P2' });
-  await selectAndWait(c2, 'Tactical');
+  await selectAndWait(c2, 'Helm');
 
   const c3 = await createTestClient(context, hostId, { name: 'Eng' });
-  await selectAndWait(c3, 'Engineering'); // 3P Engineering = [Repair,Power,Shields,Comms]
+  await selectAndWait(c3, 'Engineering');
 
   const c4 = await createTestClient(context, hostId, { name: 'Sci' });
-  await selectAndWait(c4, 'Science'); // join shrinks c3 to 4P [Repair, Power]
+  await selectAndWait(c4, 'Sensors');
 
   return { c1, c2, c3, c4, hostId };
 }
 
-test('4P Engineering seat is assigned exactly [Repair, Power]', async ({ context }) => {
+test('Engineering seat is assigned exactly [Repair, Power] at 6P layout', async ({ context }) => {
   const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
 
   const a3 = await lastAssignment(c3, c3.token);
@@ -96,10 +93,10 @@ test('4P Engineering seat is assigned exactly [Repair, Power]', async ({ context
   await c4.close();
 });
 
-test('4P Engineering player can change power (tap is honored, not just shown)', async ({ context }) => {
+test('Engineering player can change power (tap is honored, not just shown)', async ({ context }) => {
   const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
 
-  // c1 holds CaptainChair at 4P Helm; start the game.
+  // c1 holds CaptainChair; start the game.
   await c1.send('StartGame');
   await c3.waitForMessage('GameStarted', 5_000);
 
@@ -107,8 +104,7 @@ test('4P Engineering player can change power (tap is honored, not just shown)', 
   // the recognized Power holder server-side). Default power levels are 2/2/2.
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
 
-  // Tap authorization: increasing Helm power must be honored. If the seat were
-  // desynced (the reported bug), PowerState would keep streaming helm === 2.
+  // Tap authorization: increasing Helm power must be honored.
   await c3.send('IncreasePower', { console: 'Helm' });
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
 
@@ -118,7 +114,7 @@ test('4P Engineering player can change power (tap is honored, not just shown)', 
   await c4.close();
 });
 
-test('4P Engineering player can dispatch a repair team (tap is honored)', async ({ context }) => {
+test('Engineering player can dispatch a repair team (tap is honored)', async ({ context }) => {
   const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
 
   await c1.send('StartGame');
@@ -131,8 +127,7 @@ test('4P Engineering player can dispatch a repair team (tap is honored)', async 
     'data && Array.isArray(data.teams) && data.teams[0] === "Idle"',
   );
 
-  // Tap authorization: dispatching team 0 must move it out of Idle. A desynced
-  // seat would have the action dropped and team 0 would stay "Idle".
+  // Tap authorization: dispatching team 0 must move it out of Idle.
   await c3.send('DispatchRepairTeam', { team_idx: 0, console: 'Power' });
   await waitForLastMessage(
     c3,
@@ -146,11 +141,10 @@ test('4P Engineering player can dispatch a repair team (tap is honored)', async 
   await c4.close();
 });
 
-// Realistic ordering #1: all four players are already connected (sitting in the
-// lobby) before anyone selects, so every SelectStation resolves at the 4P
-// player count directly — no advance/shrink cascade. The Engineering seat must
-// still be able to act.
-test('4P Engineering acts when all four connect before selecting', async ({ context }) => {
+// Realistic ordering: all four players are already connected (sitting in the
+// lobby) before anyone selects, so every SelectStation resolves at the 6P
+// layout directly — no cascade. The Engineering seat must still be able to act.
+test('Engineering acts when all four connect before selecting', async ({ context }) => {
   const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
 
@@ -159,11 +153,11 @@ test('4P Engineering acts when all four connect before selecting', async ({ cont
   const c3 = await createTestClient(context, hostId, { name: 'Eng' });
   const c4 = await createTestClient(context, hostId, { name: 'Sci' });
 
-  // All connected (4P layout active); now select directly.
-  await selectAndWait(c1, 'Helm');
-  await selectAndWait(c2, 'Tactical');
+  // All connected (6P layout); now select directly.
+  await selectAndWait(c1, 'Captain');
+  await selectAndWait(c2, 'Helm');
   await selectAndWait(c3, 'Engineering');
-  await selectAndWait(c4, 'Science');
+  await selectAndWait(c4, 'Sensors');
 
   const a3 = await lastAssignment(c3, c3.token);
   expect([...a3.data.consoles].sort()).toEqual(['Power', 'Repair']);
@@ -181,11 +175,11 @@ test('4P Engineering acts when all four connect before selecting', async ({ cont
   await c4.close();
 });
 
-// Realistic ordering #2: the Engineering phone drops Wi-Fi mid-game and
+// Realistic ordering: the Engineering phone drops Wi-Fi mid-game and
 // reconnects under the same token (the most likely real-world trigger for a
 // host token→connection routing desync). After reconnect the seat must still
 // be able to act, not just receive state.
-test('4P Engineering can still act after a mid-game reconnect', async ({ context }) => {
+test('Engineering can still act after a mid-game reconnect', async ({ context }) => {
   const { c1, c2, c3, c4, hostId } = await buildFourPlayerCrew(context);
   const engToken = c3.token;
 
@@ -202,7 +196,7 @@ test('4P Engineering can still act after a mid-game reconnect', async ({ context
   await c3.close();
   const c3b = await createTestClient(context, hostId, { token: engToken, name: 'Eng' });
 
-  // Reconnect must restore [Repair, Power] and resume PowerState delivery.
+  // Reconnect must restore Engineering and resume PowerState delivery.
   await waitForLastMessage(c3b, 'PowerState', 'data && typeof data.helm === "number"');
 
   // The reconnected seat must still be authorized: lower Helm power back down.

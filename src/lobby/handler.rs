@@ -4,8 +4,7 @@ use crate::messages::{
     ClientMessage, Console, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
 use crate::session::SessionManager;
-use crate::stations_config::{get_station, ShipStations, StationAssignments};
-use crate::stations_policy::{advance_on_join, reassign_on_leave};
+use crate::stations_config::{get_station, ShipStations};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
@@ -60,10 +59,6 @@ pub fn process_message(
             token: id_token,
             name,
         } => {
-            // Snapshot the station map BEFORE register so reassign_on_join can
-            // diff against it once the new player is added.
-            let old_map = build_station_assignments(sessions, ship_stations);
-
             let is_reconnect = sessions.reconnect(id_token).is_some();
             let joined = if is_reconnect {
                 true
@@ -93,31 +88,9 @@ pub fn process_message(
                     ServerMessage::PlayerJoined { player },
                 ));
 
-                // Lobby-safe station advance on join: existing assigned players
-                // follow their `next` chain to the new player-count layout.
-                // The new joiner is NOT auto-assigned — they must SelectStation.
-                // Gated to the Lobby phase: a fresh connection mid-game (a new
-                // spectator, or a reconnect whose seat could not be restored)
-                // must never reshuffle the live crew's consoles.
-                if phase == GamePhase::Lobby
-                    && !ship_stations.configs.is_empty()
-                    && !is_reconnect
-                    && !sessions.spectator_queue().contains(id_token)
-                {
-                    let new_map = advance_on_join(ship_stations, &old_map);
-                    // new_count is the total connected players (including the new joiner),
-                    // which is the layout count the advanced stations now target.
-                    let new_count =
-                        sessions.players().iter().filter(|p| p.connected).count() as u32;
-                    let cascade = apply_station_assignments(
-                        sessions,
-                        &new_map,
-                        &old_map,
-                        ship_stations,
-                        new_count,
-                    );
-                    outbound.extend(cascade);
-                }
+                // Fixed roster per #495: no advance_on_join cascade.
+                // Existing players keep their stations when new players join.
+                // The new joiner selects a station manually via SelectStation.
 
                 // Spectator queue: if station config is loaded, check if stations are full.
                 // If the joining player has no consoles (they haven't selected a station,
@@ -164,7 +137,7 @@ pub fn process_message(
             ));
         }
         ClientMessage::SelectStation { station } => {
-            let player_count = sessions.players().iter().filter(|p| p.connected).count() as u32;
+            let _player_count = sessions.players().iter().filter(|p| p.connected).count() as u32;
 
             if ship_stations.configs.is_empty() {
                 // No station config loaded (e.g. in integration tests): fall back to
@@ -210,16 +183,9 @@ pub fn process_message(
                 };
             }
 
-            // Look up the station. First try the current player count; if not found
-            // (e.g. a disconnect is pending and the session count hasn't been
-            // updated yet), search all other available counts.  This avoids silently
-            // dropping SelectStation when a player tries to claim a station that is
-            // valid at the post-disconnect count but not at the pre-disconnect count.
-            let station_def = get_station(ship_stations, player_count, station).or_else(|| {
-                (ship_stations.min_players..=ship_stations.max_players)
-                    .filter(|&c| c != player_count)
-                    .find_map(|c| get_station(ship_stations, c, station))
-            });
+            // Fixed roster per #495: always use the max_players layout.
+            // Stations do not change based on how many players are connected.
+            let station_def = get_station(ship_stations, ship_stations.max_players, station);
             let Some(station_def) = station_def else {
                 // Unknown station — silently drop
                 return LobbyHandlerResult {
@@ -421,186 +387,25 @@ pub fn process_message(
     }
 }
 
-/// Build a `StationAssignments` map (token → station name) from current session state.
-/// Only connected players with consoles are included (spectators are absent).
-fn build_station_assignments(
-    sessions: &SessionManager,
-    ship_stations: &ShipStations,
-) -> StationAssignments {
-    let mut map = StationAssignments::new();
-    let player_count = sessions
-        .players()
-        .iter()
-        .filter(|p| p.connected && !p.consoles.is_empty())
-        .count() as u32;
-    for player in sessions
-        .players()
-        .iter()
-        .filter(|p| p.connected && !p.consoles.is_empty())
-    {
-        // Find which station this player is on by matching their console set
-        if let Some(defs) = ship_stations.configs.get(&player_count) {
-            if let Some(station_def) = defs
-                .iter()
-                .find(|d| d.consoles.iter().all(|c| player.consoles.contains(c)))
-            {
-                map.insert(player.token.clone(), station_def.name.clone());
-            }
-        }
-    }
-    map
-}
-
-/// Apply a `StationAssignments` diff to sessions: assign consoles from the station defs.
-/// Emits `StationAssigned` for each token whose assignment changed.
-fn apply_station_assignments(
-    sessions: &mut SessionManager,
-    new_map: &StationAssignments,
-    old_map: &StationAssignments,
-    ship_stations: &ShipStations,
-    new_count: u32,
-) -> Vec<(Target, ServerMessage)> {
-    let mut outbound = Vec::new();
-
-    // Players who are now assigned a different station OR whose station name is
-    // unchanged but whose console set differs at the new player count (e.g.
-    // Tactical at 2P holds [Tactical, Repair] but at 3P holds [Tactical]).
-    for (token, station_name) in new_map.iter() {
-        let old = old_map.get(token);
-        let name_changed = old.map(|s| s != station_name).unwrap_or(true);
-
-        // Look up the station def at the new count to know the target consoles.
-        let Some(station_def) = get_station(ship_stations, new_count, station_name) else {
-            continue;
-        };
-
-        // Detect console-set drift even when the station name is the same.
-        let current_consoles: Vec<Console> = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == *token)
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
-        let consoles_changed = current_consoles != station_def.consoles;
-
-        if name_changed || consoles_changed {
-            sessions.clear_consoles(token);
-            let mut toggle_failed = false;
-            for console in &station_def.consoles {
-                if sessions.toggle_console(token, console.clone()).is_err() {
-                    toggle_failed = true;
-                }
-            }
-            let actual_consoles: Vec<Console> = sessions
-                .players()
-                .iter()
-                .find(|p| p.token == *token)
-                .map(|p| p.consoles.clone())
-                .unwrap_or_default();
-            if toggle_failed || actual_consoles != station_def.consoles {
-                // Partial cascade assignment — wire reflects truth: empty.
-                sessions.clear_consoles(token);
-                outbound.push((
-                    Target::All,
-                    ServerMessage::StationAssigned {
-                        token: token.clone(),
-                        station: None,
-                        consoles: vec![],
-                    },
-                ));
-            } else {
-                outbound.push((
-                    Target::All,
-                    ServerMessage::StationAssigned {
-                        token: token.clone(),
-                        station: Some(station_name.clone()),
-                        consoles: actual_consoles,
-                    },
-                ));
-            }
-        }
-    }
-
-    // Players who lost their station (in old but not new)
-    for token in old_map.keys() {
-        if !new_map.contains_key(token) {
-            sessions.clear_consoles(token);
-            outbound.push((
-                Target::All,
-                ServerMessage::StationAssigned {
-                    token: token.clone(),
-                    station: None,
-                    consoles: vec![],
-                },
-            ));
-        }
-    }
-
-    outbound
-}
-
-/// Mark a peer as disconnected, run the station leave cascade (existing
-/// assigned players follow their `previous` chain; unassigned players are
-/// unchanged), and return the outbound broadcasts.
-///
-/// When the leaver held a station and there are spectators in the queue,
-/// the cascade is skipped intentionally â€” spectators manually claim the
-/// vacated station via SelectStation.  Without spectators the normal
-/// Nâ†’N-1 cascade runs so remaining players absorb the leaver's role.
+/// Mark a peer as disconnected. No station cascade — the leaver's station
+/// becomes free for others to claim manually via SelectStation (fixed roster
+/// per #495).
 pub fn process_disconnect_with_stations(
     token: &str,
     sessions: &mut SessionManager,
-    ship_stations: &ShipStations,
+    _ship_stations: &ShipStations,
 ) -> LobbyHandlerResult {
-    let old_map = build_station_assignments(sessions, ship_stations);
     sessions.disconnect(token);
-
-    // Remove the leaver from the spectator queue in case they were queued.
     sessions.remove_spectator(token);
-
-    // If the leaver held a station and spectators exist, skip the cascade
-    // so the spectator can claim the vacated station directly via SelectStation
-    // without having its consoles absorbed by another player's station.
-    let is_leaver_in_map = old_map.contains_key(token);
-    let has_spectators = !sessions.spectator_queue().is_empty();
-
-    let (new_map, _) = if is_leaver_in_map && has_spectators {
-        let mut map = old_map.clone();
-        map.remove(token);
-        (map, std::collections::VecDeque::new())
-    } else {
-        // Pass an empty spectator queue so reassign_on_leave never auto-promotes.
-        reassign_on_leave(
-            ship_stations,
-            &old_map,
-            token,
-            &std::collections::VecDeque::new(),
-        )
-    };
-
-    // Use the current connected-player count as the layout size when the
-    // cascade was skipped, so remaining players keep their current console
-    // assignments rather than being downgraded to the N-1 layout.
-    let new_count = if is_leaver_in_map && has_spectators {
-        sessions.players().iter().filter(|p| p.connected).count() as u32
-    } else {
-        new_map.len() as u32
-    };
-
-    let mut outbound =
-        apply_station_assignments(sessions, &new_map, &old_map, ship_stations, new_count);
-
-    // Always emit PlayerLeft for the disconnecting player
-    outbound.push((
-        Target::All,
-        ServerMessage::PlayerLeft {
-            token: token.to_string(),
-        },
-    ));
 
     LobbyHandlerResult {
         new_phase: None,
-        outbound,
+        outbound: vec![(
+            Target::All,
+            ServerMessage::PlayerLeft {
+                token: token.to_string(),
+            },
+        )],
     }
 }
 
@@ -865,7 +670,6 @@ mod tests {
         let (station_name, consoles) = assigned.expect("StationAssigned not found");
         assert_eq!(station_name, Some("Captain".to_string()));
         assert!(consoles.contains(&crate::messages::Console::CaptainChair));
-        assert!(consoles.contains(&crate::messages::Console::Helm));
     }
 
     #[test]
@@ -1252,36 +1056,26 @@ mod tests {
     #[test]
     fn disconnect_with_spectator_in_queue_cascade_fills_all_slots_spectator_stays() {
         // At 6P (max), all stations filled, t7 is spectator. t1 disconnects.
-        // The 6P→5P cascade fills all 5P slots from remaining 5 players.
-        // No empty slot → spectator t7 stays queued.
+        // Fixed roster per #495: no cascade on disconnect. t1's station becomes
+        // free. t7 stays queued (must manually claim via SelectStation).
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
         sessions.register("t7".into(), "Grace".into()).unwrap();
         sessions.push_spectator("t7".into());
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
-        // t7 stays in spectator queue (cascade filled all slots)
+        // t7 stays in spectator queue (fixed roster: no auto-promotion)
         assert!(
             sessions.spectator_queue().contains(&"t7".to_string()),
-            "t7 should remain in queue when cascade fills all slots"
+            "t7 should remain in queue (fixed roster)"
         );
     }
 
     #[test]
     fn disconnect_with_spectator_promotes_when_cascade_leaves_empty_slot() {
-        // Build a scenario where leaving produces an empty slot at n-1.
-        // Use a 2-player station config where one player is on the no-prev station,
-        // and the no-prev player leaves. The remaining player goes to 1P (Captain).
-        // No empty slot at 1P (1 station, 1 player) → still no pull.
-        // To get a spectator pull we need N-1 to have more stations than remaining players.
-        // In the worked example this never happens with normal cascades.
-        //
-        // However: the spectator pull code still runs — let's verify it works if triggered.
-        // We test this by using reassign_on_leave directly with a contrived state where
-        // the spectator WOULD be promoted.
-        // In the lobby_handler context, just verify the queue management is correct:
-        // if process_disconnect_with_stations runs and new_map.len() < prev_defs.len(),
-        // the spectator is promoted. We trust the stations.rs unit test for the math.
-        // This test ensures the queue is properly threaded through process_disconnect_with_stations.
+        // Fixed roster per #495: spectators are NOT auto-promoted on disconnect.
+        // The spectator queue is preserved. This test verifies the queue is
+        // correctly threaded through process_disconnect_with_stations — no
+        // spectator promotion occurs, and the queue remains intact.
 
         // Simulate using a 1P→0P scenario where a spectator exists, but that would be blocked
         // by min_players=1. Instead, let's verify the queue is passed correctly by testing
@@ -1352,14 +1146,14 @@ mod tests {
             .outbound
             .iter()
             .any(|(_, m)| { matches!(m, ServerMessage::PlayerLeft { token } if token == "t1") }));
-        // Station cascade: at least one StationAssigned should be emitted.
+        // Fixed roster: no StationAssigned cascade on disconnect.
         let any_station_assigned = result
             .outbound
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::StationAssigned { .. }));
         assert!(
-            any_station_assigned,
-            "disconnect cascade should emit StationAssigned"
+            !any_station_assigned,
+            "fixed roster: disconnect should NOT emit StationAssigned cascade"
         );
     }
 
@@ -1468,29 +1262,27 @@ mod tests {
             true,
         );
 
-        // t1 should be moved to Helm (next of Captain at 2P).
+        // Fixed roster per #495: t1 keeps their station when a new player joins.
         let t1_consoles = sessions
             .players()
             .iter()
             .find(|p| p.token == "t1")
             .map(|p| p.consoles.clone())
             .unwrap_or_default();
-        assert!(
-            t1_consoles.contains(&crate::messages::Console::CaptainChair)
-                && t1_consoles.contains(&crate::messages::Console::Helm),
-            "t1 should be on Helm station at 2P (CaptainChair+Helm)"
+        assert_eq!(
+            t1_consoles, captain_def.consoles,
+            "t1 should keep their Captain station (fixed roster)"
         );
 
-        // A StationAssigned should be emitted for t1 (their station changed).
+        // No StationAssigned should be emitted for t1 (they kept their station).
         let t1_station_assigned = result.outbound.iter().any(|(_, m)| {
             matches!(m,
-                ServerMessage::StationAssigned { token, station: Some(s), .. }
-                    if token == "t1" && s == "Helm"
+                ServerMessage::StationAssigned { token, .. } if token == "t1"
             )
         });
         assert!(
-            t1_station_assigned,
-            "StationAssigned for t1 moving to Helm should be emitted"
+            !t1_station_assigned,
+            "t1 should not receive StationAssigned (no station change)"
         );
 
         // t2 must NOT be auto-assigned.
@@ -1607,23 +1399,23 @@ tags = ["player"]
     #[test]
     fn set_complexity_when_holder_broadcasts_complexity_changed() {
         let mut sessions = sessions_with("t1", "Alice");
-        // Claim a station that includes Helm
+        // Claim a station that includes Repair (6P CaptainChair alone doesn't cover Helm)
         pm_stations(
             "t1",
             &ClientMessage::SelectStation {
-                station: "Captain".into(),
+                station: "Engineering".into(),
             },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
         let msg = ClientMessage::SetComplexity {
-            console: Console::Helm,
+            console: Console::Repair,
             preset_name: "Low".into(),
         };
         let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
         let changed = result.outbound.iter().any(|(_, m)| matches!(m,
-            ServerMessage::ComplexityChanged { console: Console::Helm, preset_name } if preset_name == "Low"
+            ServerMessage::ComplexityChanged { console: Console::Repair, preset_name } if preset_name == "Low"
         ));
         assert!(
             changed,
@@ -1652,15 +1444,15 @@ tags = ["player"]
         pm_stations(
             "t1",
             &ClientMessage::SelectStation {
-                station: "Captain".into(),
+                station: "Engineering".into(),
             },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        // t1 holds Helm (via Captain station), but "Nonexistent" is not a valid preset.
+        // t1 holds Repair (via Engineering station), but "Nonexistent" is not a valid preset.
         let msg = ClientMessage::SetComplexity {
-            console: Console::Helm,
+            console: Console::Repair,
             preset_name: "Nonexistent".into(),
         };
         let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
@@ -1676,7 +1468,7 @@ tags = ["player"]
         pm_stations(
             "t1",
             &ClientMessage::SelectStation {
-                station: "Captain".into(),
+                station: "Engineering".into(),
             },
             &mut sessions,
             GamePhase::Lobby,
@@ -1686,7 +1478,7 @@ tags = ["player"]
         let _ = pm_stations(
             "t1",
             &ClientMessage::SetComplexity {
-                console: Console::Helm,
+                console: Console::Repair,
                 preset_name: "Low".into(),
             },
             &mut sessions,
@@ -1696,7 +1488,7 @@ tags = ["player"]
         let result = pm_stations(
             "t1",
             &ClientMessage::SetComplexity {
-                console: Console::Helm,
+                console: Console::Repair,
                 preset_name: "Std".into(),
             },
             &mut sessions,
@@ -1709,7 +1501,7 @@ tags = ["player"]
             .iter()
             .filter_map(|(_, m)| match m {
                 ServerMessage::ComplexityChanged {
-                    console: Console::Helm,
+                    console: Console::Repair,
                     preset_name,
                 } => Some(preset_name.as_str()),
                 _ => None,

@@ -8,18 +8,16 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 27 expected action keys', () => {
+  it('contains exactly the 26 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'clear_comms',
       'clear_navigation_waypoint',
-      'decrease_power',
       'dispatch_repair_team',
       'fire_phaser',
       'fire_torpedo',
       'hail',
       'helm_input',
-      'increase_power',
       'load_tube',
       'respond_to_message',
       'select_comms_message',
@@ -27,6 +25,7 @@ describe('ACTION_MAP', () => {
       'set_navigation_chart',
       'set_navigation_waypoint',
       'set_phaser_mode',
+      'set_power',
       'set_radar_view',
       'set_sensors_target',
       'set_shield_focus',
@@ -253,31 +252,35 @@ describe('dispatch_repair_team', () => {
   });
 });
 
-describe('increase_power', () => {
-  it('calls send IncreasePower with console target', () => {
+describe('set_power', () => {
+  it('calls send ControlSystem SetPower with target and level', () => {
     const send = mkSend();
-    ACTION_MAP.increase_power({ action: 'increase_power', target: 'Weapons' }, send);
-    expect(send).toHaveBeenCalledWith('IncreasePower', { console: 'Weapons' });
+    ACTION_MAP.set_power({ action: 'set_power', target: 'Helm', level: 3 }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'power',
+      payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } },
+    });
   });
 
   it('does nothing when target is absent', () => {
     const send = mkSend();
-    ACTION_MAP.increase_power({ action: 'increase_power' }, send);
+    ACTION_MAP.set_power({ action: 'set_power', level: 3 }, send);
     expect(send).not.toHaveBeenCalled();
   });
-});
 
-describe('decrease_power', () => {
-  it('calls send DecreasePower with console target', () => {
+  it('does nothing when level is absent', () => {
     const send = mkSend();
-    ACTION_MAP.decrease_power({ action: 'decrease_power', target: 'Sensors' }, send);
-    expect(send).toHaveBeenCalledWith('DecreasePower', { console: 'Sensors' });
+    ACTION_MAP.set_power({ action: 'set_power', target: 'Helm' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 
-  it('does nothing when target is absent', () => {
+  it('sends level 1 to decrease power', () => {
     const send = mkSend();
-    ACTION_MAP.decrease_power({ action: 'decrease_power' }, send);
-    expect(send).not.toHaveBeenCalled();
+    ACTION_MAP.set_power({ action: 'set_power', target: 'Tactical', level: 1 }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'power',
+      payload: { type: 'SetPower', data: { target: 'Tactical', level: 1 } },
+    });
   });
 });
 

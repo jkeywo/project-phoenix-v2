@@ -134,14 +134,22 @@ export const ACTION_MAP = Object.freeze({
     send('DispatchRepairTeam', { team_idx: a.team_idx, console: a.target });
   },
 
-  /** Increase power allocation to a console. */
-  increase_power: (a, send) => {
-    if (a.target) send('IncreasePower', { console: a.target });
-  },
-
-  /** Decrease power allocation to a console. */
-  decrease_power: (a, send) => {
-    if (a.target) send('DecreasePower', { console: a.target });
+  /**
+   * Set power allocation to an explicit level for a console.
+   *
+   * The power panel sends the pre-calculated target level (current ± 1),
+   * so the server receives a single absolute value and applies it via
+   * PowerSystem::increase / decrease.
+   *
+   * `{ action: "set_power", console: "Power", target: "Helm", level: 3 }`
+   */
+  set_power: (a, send) => {
+    if (a.target && typeof a.level === 'number') {
+      send('ControlSystem', {
+        target: 'power',
+        payload: { type: 'SetPower', data: { target: a.target, level: a.level } },
+      });
+    }
   },
 
   /** Focus shields on a specific facing. */

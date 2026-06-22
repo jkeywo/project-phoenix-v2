@@ -14,7 +14,6 @@ use rand::SeedableRng as _;
 use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage};
 use crate::debug_overlay::{DamageLog, DamageLogEntry};
 use crate::shield::attacker_bearing_relative;
-use crate::ship_physics::ShipPhysicsConfig;
 use crate::ship_state::ShipState;
 use bevy_rapier3d::prelude::ReadRapierContext;
 
@@ -37,7 +36,8 @@ pub use crate::weapons_plugin::{
 pub use crate::repair_plugin::{repair_state_broadcaster, ShipRepairTeams};
 
 pub use crate::power_plugin::{
-    power_state_broadcaster, PowerConfigResource, PowerMultiplierResource, ShipPowerSystem,
+    power_state_broadcaster, PowerAiConfigResource, PowerConfigResource, PowerMultiplierResource,
+    ShipPowerSystem,
 };
 
 // â"€â"€ Marker Components â"€â"€â"€â"€â"€â"€â"€â"€
@@ -183,7 +183,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::ship_plugin::ShipPlugin)
     .add_plugins(crate::weapons_plugin::WeaponsPlugin)
     .add_plugins(crate::repair_plugin::RepairPlugin)
-    .add_plugins(crate::power_plugin::PowerPlugin)
+    .add_plugins(crate::power_plugin::ShipPowerPlugin)
     .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
     .add_plugins(crate::science_plugin::SciencePlugin)
     .add_plugins(crate::navigation_plugin::NavigationPlugin)
@@ -1564,6 +1564,14 @@ fn spawn_game_start_entities(
                     rates: pc.rates,
                     emergency_threshold: pc.emergency_threshold,
                 }));
+                if let Some(ai) = &pc.ai {
+                    commands.insert_resource(PowerAiConfigResource {
+                        weapons_battery_floor: ai.weapons_battery_floor,
+                        shields_battery_floor: ai.shields_battery_floor,
+                        helm_battery_floor: ai.helm_battery_floor,
+                        helm_throttle_threshold: ai.helm_throttle_threshold,
+                    });
+                }
             }
 
             // Power multipliers
@@ -2188,7 +2196,7 @@ mod tests {
         .add_plugins(crate::captain_plugin::CaptainPlugin)
         .add_plugins(crate::weapons_plugin::WeaponsPlugin)
         .add_plugins(crate::repair_plugin::RepairPlugin)
-        .add_plugins(crate::power_plugin::PowerPlugin)
+        .add_plugins(crate::power_plugin::ShipPowerPlugin)
         .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
         .add_plugins(crate::science_plugin::SciencePlugin)
         .add_plugins(crate::comms_plugin::CommsConsolePlugin)
@@ -4555,12 +4563,16 @@ mod tests {
         // Reset power to known state.
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 1;
 
-        // Captain (not Power holder) tries to increase Helm.
+        // Captain (not Power holder) tries to set Helm to 2.
         push(
             &mut app,
             "captain",
-            ClientMessage::IncreasePower {
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Helm,
+                    level: 2,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4577,12 +4589,16 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Captain (not Power holder) tries to decrease Sensors.
+        // Captain (not Power holder) tries to set Sensors to 1.
         push(
             &mut app,
             "captain",
-            ClientMessage::DecreasePower {
-                console: Console::Sensors,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Sensors,
+                    level: 1,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4599,12 +4615,16 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Power holder increases Helm from 2 to 3.
+        // Power holder sets Helm to 3.
         push(
             &mut app,
             "power",
-            ClientMessage::IncreasePower {
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Helm,
+                    level: 3,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4628,12 +4648,16 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Power holder decreases Weapons from 2 to 1.
+        // Power holder sets Weapons to 1.
         push(
             &mut app,
             "power",
-            ClientMessage::DecreasePower {
-                console: Console::Tactical,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Tactical,
+                    level: 1,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4693,20 +4717,28 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Increase Helm power via Power console.
+        // Set Helm to 3 via Power console.
         push(
             &mut app,
             "power",
-            ClientMessage::IncreasePower {
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Helm,
+                    level: 3,
+                },
             },
         );
-        // Increase Sensors power via Power console.
+        // Set Sensors to 3 via Power console.
         push(
             &mut app,
             "power",
-            ClientMessage::IncreasePower {
-                console: Console::Sensors,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Sensors,
+                    level: 3,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4738,8 +4770,12 @@ mod tests {
         push(
             &mut app,
             "power",
-            ClientMessage::IncreasePower {
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Helm,
+                    level: 4,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4771,12 +4807,16 @@ mod tests {
             .multipliers
             .insert(Console::Helm, [-0.5, 0.0, 1.0, 2.0]);
 
-        // Increase Helm from 2 ? 3
+        // Set Helm to 3.
         push(
             &mut app,
             "power",
-            ClientMessage::IncreasePower {
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Helm,
+                    level: 3,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4803,12 +4843,16 @@ mod tests {
             .multipliers
             .insert(Console::Tactical, [-0.5, 0.0, 0.25, 0.5]);
 
-        // Decrease Weapons from 2 ? 1
+        // Set Weapons to 1.
         push(
             &mut app,
             "power",
-            ClientMessage::DecreasePower {
-                console: Console::Tactical,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Tactical,
+                    level: 1,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4889,12 +4933,16 @@ mod tests {
         // Set total to 8: helm=4, weapons=2, sensors=2.
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
 
-        // Try to increase sensors — total is 8 (the cap), should be blocked.
+        // Try to set sensors to 3 — total would be 9 (over cap), should be blocked at 2.
         push(
             &mut app,
             "power",
-            ClientMessage::IncreasePower {
-                console: Console::Sensors,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: crate::messages::SystemControlPayload::SetPower {
+                    target: Console::Sensors,
+                    level: 3,
+                },
             },
         );
         let _ = tick(&mut app);

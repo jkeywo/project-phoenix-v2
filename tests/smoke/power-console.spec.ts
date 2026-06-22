@@ -129,13 +129,15 @@ test('power console: +/- buttons call __sendAction with correct envelopes', asyn
   expect(sent).toHaveLength(2);
 
   expect(JSON.parse(sent[0])).toEqual({
-    action: 'increase_power',
+    action: 'set_power',
     console: 'Power',
     target: 'Helm',
+    level: expect.any(Number),
   });
   expect(JSON.parse(sent[1])).toEqual({
-    action: 'decrease_power',
+    action: 'set_power',
     console: 'Power',
     target: 'Sensors',
+    level: expect.any(Number),
   });
 });

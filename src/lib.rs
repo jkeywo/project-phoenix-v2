@@ -80,7 +80,7 @@ pub use console::comms::inbox as comms_inbox;
 pub use console::comms::server as comms_plugin;
 pub use console::helm::server as helm_plugin;
 pub use console::navigation as navigation_plugin;
-pub use console::power::server as power_plugin;
+pub use ship::power as power_plugin;
 pub use console::repair::server as repair_plugin;
 pub use console::science::server as science_plugin;
 pub use console::shields::server as shields_plugin;

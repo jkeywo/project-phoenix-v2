@@ -1572,18 +1572,13 @@ mod tests {
     }
 
     #[test]
-    fn client_increase_power_round_trips() {
-        let msg = ClientMessage::IncreasePower {
-            console: Console::Helm,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_decrease_power_round_trips() {
-        let msg = ClientMessage::DecreasePower {
-            console: Console::Sensors,
+    fn client_set_power_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::system_registry::power_system_id(),
+            payload: crate::messages::SystemControlPayload::SetPower {
+                target: Console::Helm,
+                level: 3,
+            },
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
@@ -2956,30 +2951,6 @@ mod tests {
         let json = serde_json::to_string(&region).unwrap();
         let decoded: RadarRegion = serde_json::from_str(&json).unwrap();
         assert_eq!(region, decoded);
-    }
-
-    #[test]
-    fn decode_ui_action_increase_power() {
-        let json = r#"{"action":"increase_power","console":"Power","target":"Helm"}"#;
-        let action = decode_ui_action(json).expect("decode increase_power");
-        assert_eq!(
-            action,
-            UiAction::IncreasePower {
-                target: Console::Helm
-            }
-        );
-    }
-
-    #[test]
-    fn decode_ui_action_decrease_power() {
-        let json = r#"{"action":"decrease_power","console":"Power","target":"Tactical"}"#;
-        let action = decode_ui_action(json).expect("decode decrease_power");
-        assert_eq!(
-            action,
-            UiAction::DecreasePower {
-                target: Console::Tactical
-            }
-        );
     }
 
     #[test]

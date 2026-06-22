@@ -14,17 +14,14 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::console_ai::{
-    tick_auto_match_frequency, tick_frequency_hint, tick_power_movement_rule,
-    tick_power_red_alert_rule, EngageState, FrequencyHintInput, FrequencyHintState,
-    FrequencyMatchInput, FrequencyMatchState, PowerEngageOutput, PowerMovementInput,
-    PowerRedAlertInput,
+    tick_auto_match_frequency, tick_frequency_hint, FrequencyHintInput, FrequencyHintState,
+    FrequencyMatchInput, FrequencyMatchState,
 };
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{ClientMessage, Console, ServerMessage};
-use crate::ship_plugin::LastHelmInput;
 use crate::ship_state::ShipState;
 use crate::simulation::SimOutbox;
-use crate::simulation::{ShipPowerSystem, WeaponsTarget};
+use crate::simulation::WeaponsTarget;
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -33,8 +30,6 @@ use crate::simulation::{ShipPowerSystem, WeaponsTarget};
 pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
 pub const AI_RULE_FREQUENCY_MATCH: &str = "frequency_match";
 pub const AI_RULE_AUTO_HINT: &str = "auto_hint";
-pub const AI_RULE_POWER_MOVEMENT: &str = "movement_rule";
-pub const AI_RULE_POWER_RED_ALERT: &str = "red_alert_rule";
 
 // These constants are TOML-param fallbacks used by `ai_param_f32` when an
 // `[preset.ai]` rule block omits the corresponding key. The canonical values
@@ -43,11 +38,6 @@ pub const AI_RULE_POWER_RED_ALERT: &str = "red_alert_rule";
 // to specify a param. They must stay in sync with the shipped TOML values.
 const DEFAULT_AUTO_HINT_DELAY_SECS: f32 = 3.0;
 const DEFAULT_AUTO_MATCH_DELAY_SECS: f32 = 3.0;
-const DEFAULT_THRUST_THRESHOLD: f32 = 0.7;
-const DEFAULT_ENGAGE_DELAY_SECS: f32 = 3.0;
-const DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT: f32 = 50.0;
-const DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT: f32 = 10.0;
-const DEFAULT_BATTERY_RECHARGE_PCT: f32 = 100.0;
 
 // ── Resources ──────────────────────────────────────────────────────────────
 
@@ -161,14 +151,6 @@ fn build_complexity_rules(mut rules: ResMut<ComplexityRules>) {
     rules.loaded = true;
 }
 
-/// Persistent engage-state for the Power movement rule (Helm +1).
-#[derive(Resource, Default)]
-pub struct PowerMovementEngageState(pub EngageState);
-
-/// Persistent engage-state for the Power red-alert rule (Weapons +1).
-#[derive(Resource, Default)]
-pub struct PowerRedAlertEngageState(pub EngageState);
-
 /// Server-authoritative per-console complexity preset.
 ///
 /// Updated whenever a `ComplexityChanged` message is broadcast.
@@ -203,8 +185,6 @@ impl Plugin for ConsoleAiPlugin {
             .init_resource::<ComplexityRules>()
             .init_resource::<FrequencyHintTimer>()
             .init_resource::<FrequencyMatchTimer>()
-            .init_resource::<PowerMovementEngageState>()
-            .init_resource::<PowerRedAlertEngageState>()
             .add_systems(
                 Update,
                 (
@@ -214,9 +194,6 @@ impl Plugin for ConsoleAiPlugin {
                         .in_set(crate::sim_sets::SimSet::Input)
                         .after(track_complexity_changes),
                     run_auto_match_ai
-                        .in_set(crate::sim_sets::SimSet::Input)
-                        .after(track_complexity_changes),
-                    run_power_ai
                         .in_set(crate::sim_sets::SimSet::Input)
                         .after(track_complexity_changes),
                 ),
@@ -389,177 +366,6 @@ fn run_auto_match_ai(
             token: tactical_token.to_string(),
             msg: ClientMessage::SetPhaserFrequency { frequency },
         });
-    }
-}
-
-/// Run the Power-assist AI: two independent overflow rules.
-///
-/// Conditions to run:
-/// 1. Game is InProgress
-/// 2. Power console is occupied
-/// 3. Power's active preset has the corresponding `[preset.ai]` rule
-///    (`movement_rule` / `red_alert_rule`); each rule runs independently
-///
-/// **Movement rule**: sustained thrust ≥ threshold AND battery ≥ min% for
-/// `engage_delay_secs` → synthesise `IncreasePower { Helm }`.  Immediate
-/// `DecreasePower { Helm }` when battery drops.
-///
-/// **Red Alert rule**: symmetric — sustained red alert AND battery ≥ min% →
-/// `IncreasePower { Tactical }`.  Immediate `DecreasePower { Tactical }` on
-/// battery drop.
-///
-/// Both rules stack independently (both can fire → 8 total).
-/// Switching Power to a preset without the rule cancels pending engages.
-fn run_power_ai(
-    sessions: Res<Sessions>,
-    complexity: Res<ConsoleComplexityState>,
-    rules: Res<ComplexityRules>,
-    power_sys: Res<ShipPowerSystem>,
-    helm_input: Res<LastHelmInput>,
-    ship: Res<ShipState>,
-    time: Res<Time>,
-    mut movement_state: ResMut<PowerMovementEngageState>,
-    mut red_alert_state: ResMut<PowerRedAlertEngageState>,
-    mut writer: MessageWriter<InboundMessage>,
-) {
-    // AI only runs on occupied consoles.
-    let Some(holder_token) = sessions.0.console_holder(Console::Power) else {
-        return;
-    };
-
-    let movement_rule = rules.ai_rule(&Console::Power, &complexity, AI_RULE_POWER_MOVEMENT);
-    let red_alert_rule = rules.ai_rule(&Console::Power, &complexity, AI_RULE_POWER_RED_ALERT);
-    let battery_pct = power_sys.0.battery_charge; // range 0–100
-    let dt = time.delta_secs();
-
-    // ── Movement rule ─────────────────────────────────────────────────────
-
-    let movement_active = movement_rule.is_some();
-    let prev_movement = movement_state.0.clone();
-    let movement_out = tick_power_movement_rule(
-        &mut movement_state.0,
-        &PowerMovementInput {
-            thrust: helm_input.thrust,
-            thrust_threshold: movement_rule.map_or(DEFAULT_THRUST_THRESHOLD, |r| {
-                ai_param_f32(r, "thrust_threshold", DEFAULT_THRUST_THRESHOLD)
-            }),
-            engage_delay_secs: movement_rule.map_or(DEFAULT_ENGAGE_DELAY_SECS, |r| {
-                ai_param_f32(r, "engage_delay_secs", DEFAULT_ENGAGE_DELAY_SECS)
-            }),
-            battery_engage_min_pct: movement_rule.map_or(
-                DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT,
-                |r| {
-                    ai_param_f32(
-                        r,
-                        "battery_engage_min_pct",
-                        DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT,
-                    )
-                },
-            ),
-            battery_recharge_pct: movement_rule.map_or(DEFAULT_BATTERY_RECHARGE_PCT, |r| {
-                ai_param_f32(r, "battery_recharge_pct", DEFAULT_BATTERY_RECHARGE_PCT)
-            }),
-            battery_pct,
-            dt,
-            power_is_low: movement_active,
-        },
-    );
-
-    // Disengagement must also be synthesised when the rule deactivates
-    // while it was Engaged (the state machine resets to Idle but doesn't
-    // return Disengage).
-    let movement_was_engaged = matches!(prev_movement, EngageState::Engaged);
-    let movement_disengaged_implicitly = movement_was_engaged && !movement_active;
-
-    match movement_out {
-        PowerEngageOutput::Engage => {
-            writer.write(InboundMessage {
-                token: holder_token.to_string(),
-                msg: ClientMessage::IncreasePower {
-                    console: Console::Helm,
-                },
-            });
-        }
-        PowerEngageOutput::Disengage => {
-            writer.write(InboundMessage {
-                token: holder_token.to_string(),
-                msg: ClientMessage::DecreasePower {
-                    console: Console::Helm,
-                },
-            });
-        }
-        PowerEngageOutput::NoChange => {
-            if movement_disengaged_implicitly {
-                writer.write(InboundMessage {
-                    token: holder_token.to_string(),
-                    msg: ClientMessage::DecreasePower {
-                        console: Console::Helm,
-                    },
-                });
-            }
-        }
-    }
-
-    // ── Red Alert rule ────────────────────────────────────────────────────
-
-    let red_alert_active = red_alert_rule.is_some();
-    let prev_red_alert = red_alert_state.0.clone();
-    let red_alert_out = tick_power_red_alert_rule(
-        &mut red_alert_state.0,
-        &PowerRedAlertInput {
-            red_alert: ship.red_alert(),
-            engage_delay_secs: red_alert_rule.map_or(DEFAULT_ENGAGE_DELAY_SECS, |r| {
-                ai_param_f32(r, "engage_delay_secs", DEFAULT_ENGAGE_DELAY_SECS)
-            }),
-            battery_engage_min_pct: red_alert_rule.map_or(
-                DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT,
-                |r| {
-                    ai_param_f32(
-                        r,
-                        "battery_engage_min_pct",
-                        DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT,
-                    )
-                },
-            ),
-            battery_recharge_pct: red_alert_rule.map_or(DEFAULT_BATTERY_RECHARGE_PCT, |r| {
-                ai_param_f32(r, "battery_recharge_pct", DEFAULT_BATTERY_RECHARGE_PCT)
-            }),
-            battery_pct,
-            dt,
-            power_is_low: red_alert_active,
-        },
-    );
-
-    let red_alert_was_engaged = matches!(prev_red_alert, EngageState::Engaged);
-    let red_alert_disengaged_implicitly = red_alert_was_engaged && !red_alert_active;
-
-    match red_alert_out {
-        PowerEngageOutput::Engage => {
-            writer.write(InboundMessage {
-                token: holder_token.to_string(),
-                msg: ClientMessage::IncreasePower {
-                    console: Console::Tactical,
-                },
-            });
-        }
-        PowerEngageOutput::Disengage => {
-            writer.write(InboundMessage {
-                token: holder_token.to_string(),
-                msg: ClientMessage::DecreasePower {
-                    console: Console::Tactical,
-                },
-            });
-        }
-        PowerEngageOutput::NoChange => {
-            if red_alert_disengaged_implicitly {
-                writer.write(InboundMessage {
-                    token: holder_token.to_string(),
-                    msg: ClientMessage::DecreasePower {
-                        console: Console::Tactical,
-                    },
-                });
-            }
-        }
     }
 }
 
@@ -1582,347 +1388,4 @@ mod tests {
         );
     }
 
-    // ── Power AI plugin tests ─────────────────────────────────────────────
-
-    /// Set up the Power console occupied and at Low complexity with full battery.
-    fn setup_power_low(app: &mut App) {
-        push_inbound(
-            app,
-            "power",
-            ClientMessage::Identify {
-                token: "power".into(),
-                name: "Alice".into(),
-            },
-        );
-        app.update();
-        push_inbound(
-            app,
-            "power",
-            ClientMessage::SelectStation {
-                station: "Power".into(),
-            },
-        );
-        app.update();
-        app.world_mut()
-            .insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut()
-            .resource_mut::<ConsoleComplexityState>()
-            .set(Console::Power, "Low".into());
-        // Full battery
-        app.world_mut()
-            .resource_mut::<ShipPowerSystem>()
-            .0
-            .battery_charge = 100.0;
-    }
-
-    #[test]
-    fn power_ai_does_not_run_when_console_unoccupied() {
-        let mut app = test_app();
-        app.world_mut()
-            .insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut()
-            .resource_mut::<ConsoleComplexityState>()
-            .set(Console::Power, "Low".into());
-        // Thrust above threshold
-        app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
-        app.world_mut()
-            .resource_mut::<ShipPowerSystem>()
-            .0
-            .battery_charge = 100.0;
-
-        let (inbound, _) = tick(&mut app);
-        let power_msgs: Vec<_> = inbound
-            .iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::IncreasePower { .. }))
-            .collect();
-        assert!(
-            power_msgs.is_empty(),
-            "AI must not run when Power console is unoccupied"
-        );
-    }
-
-    #[test]
-    fn power_ai_does_not_run_at_full_complexity() {
-        let mut app = test_app();
-        setup_power_low(&mut app);
-        // Override to Full
-        app.world_mut()
-            .resource_mut::<ConsoleComplexityState>()
-            .set(Console::Power, "Std".into());
-        app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
-        // Pre-seed the movement state as if counting was underway
-        app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
-            EngageState::Counting { elapsed_secs: 2.9 };
-
-        let (inbound, _) = tick(&mut app);
-        let power_msgs: Vec<_> = inbound
-            .iter()
-            .filter(|m| {
-                matches!(
-                    &m.msg,
-                    ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. }
-                )
-            })
-            .collect();
-        assert!(
-            power_msgs.is_empty(),
-            "AI must not generate power messages at Full complexity"
-        );
-        // State should reset to Idle
-        assert_eq!(
-            app.world().resource::<PowerMovementEngageState>().0,
-            EngageState::Idle,
-            "engage state should reset to Idle when complexity is Full"
-        );
-    }
-
-    #[test]
-    fn power_ai_engages_helm_after_sustained_thrust() {
-        let mut app = test_app();
-        setup_power_low(&mut app);
-
-        // Use zero delay so the rule engages in a single tick with any elapsed time.
-        set_ai_param(
-            &mut app,
-            Console::Power,
-            AI_RULE_POWER_MOVEMENT,
-            "engage_delay_secs",
-            0.0,
-        );
-        // Pre-seed elapsed time past the (zero) delay.
-        app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
-            EngageState::Counting { elapsed_secs: 1.0 };
-        // Thrust above threshold
-        app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
-
-        let (inbound, _) = tick(&mut app);
-        let increase_helm: Vec<_> = inbound
-            .iter()
-            .filter(|m| {
-                matches!(
-                    &m.msg,
-                    ClientMessage::IncreasePower {
-                        console: Console::Helm
-                    }
-                )
-            })
-            .collect();
-        assert!(
-            !increase_helm.is_empty(),
-            "AI should increase Helm power after sustained thrust"
-        );
-    }
-
-    #[test]
-    fn power_ai_disengages_helm_when_battery_drops() {
-        let mut app = test_app();
-        setup_power_low(&mut app);
-        // Pre-set movement state to Engaged
-        app.world_mut().resource_mut::<PowerMovementEngageState>().0 = EngageState::Engaged;
-        // Battery drops below minimum (50%)
-        app.world_mut()
-            .resource_mut::<ShipPowerSystem>()
-            .0
-            .battery_charge = 30.0;
-        app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
-
-        let (inbound, _) = tick(&mut app);
-        let decrease_helm: Vec<_> = inbound
-            .iter()
-            .filter(|m| {
-                matches!(
-                    &m.msg,
-                    ClientMessage::DecreasePower {
-                        console: Console::Helm
-                    }
-                )
-            })
-            .collect();
-        assert!(
-            !decrease_helm.is_empty(),
-            "AI should decrease Helm power when battery drops"
-        );
-    }
-
-    #[test]
-    fn power_ai_engages_weapons_after_sustained_red_alert() {
-        let mut app = test_app();
-        setup_power_low(&mut app);
-        set_ai_param(
-            &mut app,
-            Console::Power,
-            AI_RULE_POWER_MOVEMENT,
-            "engage_delay_secs",
-            9999.0,
-        );
-        set_ai_param(
-            &mut app,
-            Console::Power,
-            AI_RULE_POWER_RED_ALERT,
-            "engage_delay_secs",
-            0.0,
-        );
-        // Pre-seed elapsed time past the (zero) delay.
-        app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 =
-            EngageState::Counting { elapsed_secs: 1.0 };
-        // Set red alert
-        app.world_mut()
-            .resource_mut::<ShipState>()
-            .toggle_red_alert();
-
-        let (inbound, _) = tick(&mut app);
-        let increase_weapons: Vec<_> = inbound
-            .iter()
-            .filter(|m| {
-                matches!(
-                    &m.msg,
-                    ClientMessage::IncreasePower {
-                        console: Console::Tactical
-                    }
-                )
-            })
-            .collect();
-        assert!(
-            !increase_weapons.is_empty(),
-            "AI should increase Weapons power under red alert"
-        );
-    }
-
-    #[test]
-    fn power_ai_disengages_weapons_when_battery_drops() {
-        let mut app = test_app();
-        setup_power_low(&mut app);
-        app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 = EngageState::Engaged;
-        // Battery drops below min for red alert (10%)
-        app.world_mut()
-            .resource_mut::<ShipPowerSystem>()
-            .0
-            .battery_charge = 5.0;
-        app.world_mut()
-            .resource_mut::<ShipState>()
-            .toggle_red_alert();
-
-        let (inbound, _) = tick(&mut app);
-        let decrease_weapons: Vec<_> = inbound
-            .iter()
-            .filter(|m| {
-                matches!(
-                    &m.msg,
-                    ClientMessage::DecreasePower {
-                        console: Console::Tactical
-                    }
-                )
-            })
-            .collect();
-        assert!(
-            !decrease_weapons.is_empty(),
-            "AI should decrease Weapons power when battery drops"
-        );
-    }
-
-    #[test]
-    fn power_ai_both_rules_can_engage_simultaneously() {
-        let mut app = test_app();
-        setup_power_low(&mut app);
-        set_ai_param(
-            &mut app,
-            Console::Power,
-            AI_RULE_POWER_MOVEMENT,
-            "engage_delay_secs",
-            0.0,
-        );
-        set_ai_param(
-            &mut app,
-            Console::Power,
-            AI_RULE_POWER_RED_ALERT,
-            "engage_delay_secs",
-            0.0,
-        );
-        // Both at Counting with elapsed past delay
-        app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
-            EngageState::Counting { elapsed_secs: 1.0 };
-        app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 =
-            EngageState::Counting { elapsed_secs: 1.0 };
-        app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
-        app.world_mut()
-            .resource_mut::<ShipState>()
-            .toggle_red_alert();
-
-        let (inbound, _) = tick(&mut app);
-        let increase_helm = inbound.iter().any(|m| {
-            matches!(
-                &m.msg,
-                ClientMessage::IncreasePower {
-                    console: Console::Helm
-                }
-            )
-        });
-        let increase_weapons = inbound.iter().any(|m| {
-            matches!(
-                &m.msg,
-                ClientMessage::IncreasePower {
-                    console: Console::Tactical
-                }
-            )
-        });
-        assert!(increase_helm, "movement rule should engage Helm");
-        assert!(increase_weapons, "red alert rule should engage Weapons");
-    }
-
-    #[test]
-    fn switching_power_to_full_cancels_pending_engage_and_disengages_if_engaged() {
-        let mut app = test_app();
-        setup_power_low(&mut app);
-        // One rule counting, one engaged
-        app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
-            EngageState::Counting { elapsed_secs: 2.9 };
-        app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 = EngageState::Engaged;
-        // Switch to Full
-        app.world_mut()
-            .resource_mut::<ConsoleComplexityState>()
-            .set(Console::Power, "Std".into());
-        app.world_mut()
-            .resource_mut::<ShipState>()
-            .toggle_red_alert();
-
-        let (inbound, _) = tick(&mut app);
-
-        // Movement rule: counting → should reset (no increase)
-        let increase_helm = inbound.iter().any(|m| {
-            matches!(
-                &m.msg,
-                ClientMessage::IncreasePower {
-                    console: Console::Helm
-                }
-            )
-        });
-        assert!(
-            !increase_helm,
-            "pending movement rule must not fire when switching to Full"
-        );
-
-        // Red alert rule was Engaged → implicit disengage expected
-        let decrease_weapons = inbound.iter().any(|m| {
-            matches!(
-                &m.msg,
-                ClientMessage::DecreasePower {
-                    console: Console::Tactical
-                }
-            )
-        });
-        assert!(
-            decrease_weapons,
-            "engaged red alert rule must disengage when switching to Full"
-        );
-
-        // Both states should be Idle now
-        assert_eq!(
-            app.world().resource::<PowerMovementEngageState>().0,
-            EngageState::Idle
-        );
-        assert_eq!(
-            app.world().resource::<PowerRedAlertEngageState>().0,
-            EngageState::Idle
-        );
-    }
 }

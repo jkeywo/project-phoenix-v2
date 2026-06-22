@@ -2,7 +2,6 @@ pub mod captain;
 pub mod comms;
 pub mod helm;
 pub mod navigation;
-pub mod power;
 pub mod repair;
 pub mod science;
 pub mod shields;

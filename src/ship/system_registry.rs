@@ -10,6 +10,9 @@ pub const HELM_AI_CONTROLLER: &str = "helm_ai";
 pub const TACTICAL_SYSTEM_ID: &str = "tactical";
 pub const TACTICAL_KIND: &str = "tactical";
 pub const TACTICAL_AI_CONTROLLER: &str = "tactical_ai";
+pub const POWER_SYSTEM_ID: &str = "power";
+pub const POWER_KIND: &str = "power";
+pub const POWER_AI_CONTROLLER: &str = "power_ai";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
@@ -77,6 +80,7 @@ impl SystemKindRegistry {
             TACTICAL_KIND,
             AiControllerRegistration::new(TACTICAL_AI_CONTROLLER)?,
         )?;
+        registry.register(POWER_KIND, AiControllerRegistration::new(POWER_AI_CONTROLLER)?)?;
         Ok(registry)
     }
 
@@ -128,6 +132,10 @@ pub fn helm_system_id() -> SystemId {
 
 pub fn tactical_system_id() -> SystemId {
     SystemId(TACTICAL_SYSTEM_ID.to_string())
+}
+
+pub fn power_system_id() -> SystemId {
+    SystemId(POWER_SYSTEM_ID.to_string())
 }
 
 #[cfg(test)]
@@ -223,6 +231,21 @@ mod tests {
                 .ai_controller
                 .name(),
             TACTICAL_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn core_registry_has_power_ai_controller() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(POWER_KIND));
+        assert_eq!(
+            registry
+                .registration(POWER_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            POWER_AI_CONTROLLER
         );
     }
 

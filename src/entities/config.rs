@@ -606,6 +606,28 @@ pub struct CaptainConsoleConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PowerAiConfigToml {
+    /// Battery fraction below which the AI won't boost weapons power.
+    #[serde(default = "default_weapons_battery_floor")]
+    pub weapons_battery_floor: f32,
+    /// Battery fraction below which the AI won't boost shields power (reserved).
+    #[serde(default = "default_shields_battery_floor")]
+    pub shields_battery_floor: f32,
+    /// Battery fraction below which the AI won't boost helm power.
+    #[serde(default = "default_helm_battery_floor")]
+    pub helm_battery_floor: f32,
+    /// Throttle fraction above which the AI considers helm "active".
+    #[serde(default = "default_helm_throttle_threshold")]
+    pub helm_throttle_threshold: f32,
+}
+
+fn default_weapons_battery_floor() -> f32 { 0.5 }
+fn default_shields_battery_floor() -> f32 { 0.25 }
+fn default_helm_battery_floor() -> f32 { 0.75 }
+fn default_helm_throttle_threshold() -> f32 { 0.5 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PowerConfigSection {
     pub capacity: f32,
     pub rates: [f32; 6],
@@ -613,6 +635,9 @@ pub struct PowerConfigSection {
     /// Path to a complexity TOML file for the Power console.
     #[serde(default)]
     pub complexity_toml: Option<String>,
+    /// AI tuning parameters loaded from `[power.ai]`.
+    #[serde(default)]
+    pub ai: Option<PowerAiConfigToml>,
 }
 
 /// Config block for the Shields console focus bonuses/penalties.

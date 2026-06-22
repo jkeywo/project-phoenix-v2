@@ -105,7 +105,7 @@ test('Engineering player can change power (tap is honored, not just shown)', asy
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
 
   // Tap authorization: increasing Helm power must be honored.
-  await c3.send('IncreasePower', { console: 'Helm' });
+  await c3.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } } });
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
 
   await c1.close();
@@ -166,7 +166,7 @@ test('Engineering acts when all four connect before selecting', async ({ context
   await c3.waitForMessage('GameStarted', 5_000);
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
-  await c3.send('IncreasePower', { console: 'Helm' });
+  await c3.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } } });
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
 
   await c1.close();
@@ -188,7 +188,7 @@ test('Engineering can still act after a mid-game reconnect', async ({ context })
 
   // Confirm the seat works before the blip.
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
-  await c3.send('IncreasePower', { console: 'Helm' });
+  await c3.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } } });
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
 
   // Simulate the Wi-Fi blip: tear down the page (host sees the connection
@@ -204,7 +204,7 @@ test('Engineering can still act after a mid-game reconnect', async ({ context })
     const msgs: any[] = (window as any).__messages || [];
     return (msgs.filter((m: any) => m.type === 'PowerState').pop() || {}).data?.helm;
   });
-  await c3b.send('DecreasePower', { console: 'Helm' });
+  await c3b.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: Math.max(1, (before ?? 3) - 1) } } });
   await waitForLastMessage(c3b, 'PowerState', `data && data.helm < ${before}`);
 
   await c1.close();
@@ -236,7 +236,7 @@ test('shared session-token orphans the first Engineering device (ghost console)'
 
   // The orphaned device taps. The action IS accepted (same token still holds
   // Power), so the *winner* sees helm climb to 3 — but the ghost (c3) never does.
-  await c3.send('IncreasePower', { console: 'Helm' });
+  await c3.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } } });
   await waitForLastMessage(ghostWinner, 'PowerState', 'data && data.helm === 3');
 
   const ghostSawIncrease = await c3.page.evaluate(() => {

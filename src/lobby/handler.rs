@@ -364,8 +364,6 @@ pub fn process_message(
         | ClientMessage::ToggleBoost
         | ClientMessage::SetBoost { .. }
         | ClientMessage::FireTorpedo { .. }
-        | ClientMessage::IncreasePower { .. }
-        | ClientMessage::DecreasePower { .. }
         | ClientMessage::Hail { .. }
         | ClientMessage::SelectCommsMessage { .. }
         | ClientMessage::RespondToMessage { .. }

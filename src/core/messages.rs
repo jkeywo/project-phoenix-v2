@@ -891,6 +891,10 @@ pub enum SystemControlPayload {
         group: PowerGroupId,
         level: u8,
     },
+    SetPower {
+        target: Console,
+        level: u8,
+    },
     Hail {
         target_uuid: String,
     },
@@ -992,16 +996,6 @@ pub enum ClientMessage {
     /// Manually unload (or cancel loading of) the specified tube.
     UnloadTube {
         tube: TorpedoTube,
-    },
-    /// Increase power allocation for a console. Validated server-side:
-    /// sender must hold `Console::Power`.
-    IncreasePower {
-        console: Console,
-    },
-    /// Decrease power allocation for a console. Validated server-side:
-    /// sender must hold `Console::Power`.
-    DecreasePower {
-        console: Console,
     },
     /// Change the complexity preset for a console the sender holds.
     /// Validated server-side: sender must hold the console and the preset
@@ -1704,19 +1698,13 @@ pub enum UiAction {
     },
     /// Switch the viewscreen to radar mode (helm ON SCREEN button).
     SetRadarView,
-    /// Increase power for the named powered console (power console).
+    /// Set power to an explicit level for the named powered console.
     ///
     /// The HTML power panel sends
-    /// `{ action: "increase_power", console: "Power", target: "Helm" }`.
-    IncreasePower {
+    /// `{ action: "set_power", console: "Power", target: "Helm", level: 3 }`.
+    SetPower {
         target: Console,
-    },
-    /// Decrease power for the named powered console (power console).
-    ///
-    /// The HTML power panel sends
-    /// `{ action: "decrease_power", console: "Power", target: "Tactical" }`.
-    DecreasePower {
-        target: Console,
+        level: u8,
     },
     /// Dispatch a repair team to a console (repair console).
     ///
@@ -1826,11 +1814,12 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
                 mode: ViewMode::Radar,
             },
         },
-        UiAction::IncreasePower { target } => ClientMessage::IncreasePower {
-            console: target.clone(),
-        },
-        UiAction::DecreasePower { target } => ClientMessage::DecreasePower {
-            console: target.clone(),
+        UiAction::SetPower { target, level } => ClientMessage::ControlSystem {
+            target: crate::system_registry::power_system_id(),
+            payload: SystemControlPayload::SetPower {
+                target: target.clone(),
+                level: *level,
+            },
         },
         UiAction::DispatchRepairTeam { team_idx, target } => ClientMessage::DispatchRepairTeam {
             team_idx: *team_idx,
@@ -2021,27 +2010,19 @@ mod ui_action_tests {
     }
 
     #[test]
-    fn increase_power_maps_to_client_message() {
-        let action = UiAction::IncreasePower {
+    fn set_power_maps_to_control_system_message() {
+        let action = UiAction::SetPower {
             target: Console::Helm,
+            level: 3,
         };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::IncreasePower {
-                console: Console::Helm
-            }
-        );
-    }
-
-    #[test]
-    fn decrease_power_maps_to_client_message() {
-        let action = UiAction::DecreasePower {
-            target: Console::Tactical,
-        };
-        assert_eq!(
-            ui_action_to_client_message(&action),
-            ClientMessage::DecreasePower {
-                console: Console::Tactical
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: SystemControlPayload::SetPower {
+                    target: Console::Helm,
+                    level: 3,
+                }
             }
         );
     }

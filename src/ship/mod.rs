@@ -1,4 +1,5 @@
 pub mod boost;
+pub mod power;
 pub mod config;
 pub mod control_source;
 pub mod coordination;

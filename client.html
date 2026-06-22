@@ -156,6 +156,39 @@
        default state actually applies. */
     #phone-bezel[aria-hidden="true"] { display: none; }
 
+    /* ── Coordination popup overlay (issue #494) ────────────────────── */
+    #coordination-popup {
+      display: none;
+      position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+      z-index: 180;
+      background: #1a2a3a;
+      border: 1px solid #4af;
+      border-radius: 8px;
+      padding: 12px 18px;
+      max-width: 320px;
+      color: #d0e4f0;
+      font-family: 'Chakra Petch', monospace;
+      font-size: 0.85rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      cursor: pointer;
+      user-select: none;
+    }
+    #coordination-popup .popup-sender {
+      font-size: 0.7rem;
+      color: #8af;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    #coordination-popup .popup-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    #coordination-popup .popup-body {
+      font-size: 0.8rem;
+      color: #a0b8c8;
+    }
+
     /* ── Asset loading overlay (shown during Loading phase) ────────── */
     #asset-loading {
       display: none;
@@ -601,6 +634,14 @@
   <div id="asset-loading">
     <div class="spinner-ring"></div>
     <span>Preparing scenario&hellip; <span class="pct" id="asset-loading-pct">0</span>%</span>
+  </div>
+
+  <!-- Coordination popup overlay (issue #494). Shown for AI-to-human
+       coordination messages. Click-to-dismiss, auto-dismiss after 8s. -->
+  <div id="coordination-popup" onclick="dismissCoordinationPopup()">
+    <div class="popup-sender" id="popup-sender"></div>
+    <div class="popup-title" id="popup-title"></div>
+    <div class="popup-body" id="popup-body"></div>
   </div>
 
   <!-- Phone bezel frame (issue #439). Eight fixed-position pieces overlay
@@ -1295,6 +1336,37 @@
 
     if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); injectSwipeRelay($('comms-iframe')); });
 
+    // ── Coordination popup (issue #494) ───────────────────────────────────────
+    let coordinationPopupTimer = null;
+    function showCoordinationPopup(payload, sender_label) {
+      const el = document.getElementById('coordination-popup');
+      if (!el) return;
+      const senderEl = document.getElementById('popup-sender');
+      const titleEl = document.getElementById('popup-title');
+      const bodyEl = document.getElementById('popup-body');
+      if (!senderEl || !titleEl || !bodyEl) return;
+      const label = sender_label || 'AI';
+      if (payload.target) {
+        senderEl.textContent = label + ' → ' + payload.target;
+      } else {
+        senderEl.textContent = label;
+      }
+      titleEl.textContent = payload.title || payload.type || 'Advisory';
+      bodyEl.textContent = payload.body || '';
+      el.style.display = 'block';
+      if (coordinationPopupTimer) clearTimeout(coordinationPopupTimer);
+      coordinationPopupTimer = setTimeout(dismissCoordinationPopup, 8000);
+    }
+    function dismissCoordinationPopup() {
+      const el = document.getElementById('coordination-popup');
+      if (!el) return;
+      el.style.display = 'none';
+      if (coordinationPopupTimer) {
+        clearTimeout(coordinationPopupTimer);
+        coordinationPopupTimer = null;
+      }
+    }
+
     // ── Navigation console iframe bridge (issue #458) ─────────────────────────
     // State builder extracted to gui/console-state.js.
     function buildNavigationConsoleState() {
@@ -1854,6 +1926,11 @@
             savedComplexity[consoleName] = preset_name;
           }
           rebuildStations();
+          return;
+        }
+        case 'CoordinationPopup': {
+          const { target, payload, sender_label } = msg.data;
+          showCoordinationPopup(payload, sender_label);
           return;
         }
         case 'CommsState': {

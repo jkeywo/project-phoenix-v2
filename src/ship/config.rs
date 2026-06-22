@@ -10,6 +10,14 @@ pub struct ShipConfig {
     pub systems: Vec<SystemInstanceConfig>,
     #[serde(default)]
     pub power_groups: HashMap<PowerGroupId, PowerGroupConfig>,
+    /// Seconds of artificial lag applied to every channel-3 coordination
+    /// message (issue #494). Defaults to 2.0 seconds when absent.
+    #[serde(default = "default_coordination_lag_secs")]
+    pub coordination_lag_secs: f32,
+}
+
+fn default_coordination_lag_secs() -> f32 {
+    2.0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -1070,6 +1070,35 @@ pub enum ClientMessage {
     SetStationRating {
         rating_name: String,
     },
+    /// Channel-3 coordination envelope. Carries a typed coordination payload
+    /// to be queued with lag and routed at delivery time (issue #494).
+    SendCoordination {
+        target: SystemId,
+        payload: CoordinationPayload,
+    },
+}
+
+/// Typed payload for a channel-3 coordination message (issue #494).
+///
+/// These are always lagged and routed through the coordination bus — they
+/// never produce immediate authoritative effects.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "data")]
+pub enum CoordinationPayload {
+    /// Suggest a target entity to the operator.
+    SuggestTarget {
+        uuid: String,
+        reason: String,
+    },
+    /// Advisory text message shown to the operator.
+    Advisory {
+        message: String,
+    },
+    /// Alert-level coordination (e.g. AI warns human of a threat).
+    Alert {
+        title: String,
+        body: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1305,6 +1334,16 @@ pub enum ServerMessage {
     DamageTaken {
         hull: f32,
         shield: f32,
+    },
+    /// Channel-3 coordination popup delivered to a specific player (issue #494).
+    /// Sent to the holder of the target system's console. Carries the typed
+    /// coordination payload and the originating sender info.
+    CoordinationPopup {
+        target: SystemId,
+        payload: CoordinationPayload,
+        /// Human-readable label for the origin (e.g. "AI Tactical", "Captain").
+        #[serde(default)]
+        sender_label: String,
     },
 }
 

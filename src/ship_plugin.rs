@@ -4,11 +4,16 @@ use std::collections::HashMap;
 use crate::control_source::{ControlSourceResolver, ControlTickPolicy};
 use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{ClientMessage, ModifierSlot, StationId, SystemControlPayload};
+use crate::messages::{
+    ClientMessage, CoordinationPayload, ModifierSlot, StationId, SystemControlPayload,
+};
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::ship::config::ShipConfig;
+use crate::ship::coordination;
+use crate::ship::coordination::{CoordinationLagQueue, QueuedCoordination};
+use crate::ship::control_source::ControlSource;
 use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
@@ -37,6 +42,22 @@ pub struct ShipConfigResource(pub ShipConfig);
 /// Updated when a player sends `SetStationRating`.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ActiveStationRatings(pub HashMap<StationId, String>);
+
+/// Channel-3 coordination lag queue. Holds pending coordination messages
+/// until their due time, at which point they are routed by the delivery-time
+/// matrix (issue #494).
+#[derive(Resource, Clone, Debug, Default)]
+pub struct CoordinationQueueResource(pub CoordinationLagQueue);
+
+/// Server-side enqueue event for channel-3 coordination messages.
+/// AI controllers fire this to send delayed advisories to human operators.
+#[derive(Message, Clone, Debug)]
+pub struct CoordinationEnqueue {
+    pub sender_origin: ControlSource,
+    pub target: crate::messages::SystemId,
+    pub payload: CoordinationPayload,
+    pub sender_label: String,
+}
 
 impl Default for ShipConfigResource {
     fn default() -> Self {
@@ -243,6 +264,8 @@ impl Plugin for ShipPlugin {
         .init_resource::<BoostConfigResource>()
         .init_resource::<ShipBoost>()
         .init_resource::<BankConfigResource>()
+        .init_resource::<CoordinationQueueResource>()
+        .add_message::<CoordinationEnqueue>()
         .add_systems(
             Update,
             (
@@ -255,6 +278,9 @@ impl Plugin for ShipPlugin {
                 handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
                 handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
                 handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
+                handle_coordination_enqueue.in_set(crate::sim_sets::SimSet::Input),
+                handle_coordination_messages.in_set(crate::sim_sets::SimSet::Input),
+                process_coordination_lag.in_set(crate::sim_sets::SimSet::Modifiers),
             )
                 .after(crate::lobby::process_lobby),
         );
@@ -651,7 +677,128 @@ pub fn handle_station_rating_change(
     }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+pub fn handle_coordination_enqueue(
+    mut queue: ResMut<CoordinationQueueResource>,
+    ship_config: Res<ShipConfigResource>,
+    mut events: MessageReader<CoordinationEnqueue>,
+    mut inbound: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    time: Res<Time>,
+) {
+    let now = time.elapsed_secs();
+    let lag = ship_config.0.coordination_lag_secs;
+
+    for ev in events.read() {
+        queue.0.enqueue(QueuedCoordination {
+            sender_origin: ev.sender_origin,
+            target: ev.target.clone(),
+            payload: ev.payload.clone(),
+            sender_label: ev.sender_label.clone(),
+            due_time: now + lag,
+        });
+    }
+
+    for msg in inbound.read() {
+        let ClientMessage::SendCoordination { target, payload } = &msg.msg else {
+            continue;
+        };
+
+        let player = match sessions.0.players().iter().find(|p| p.token == msg.token) {
+            Some(p) => p,
+            None => continue,
+        };
+        let sender_origin = if player.consoles.is_empty() {
+            ControlSource::Ai
+        } else {
+            ControlSource::Human
+        };
+
+        queue.0.enqueue(QueuedCoordination {
+            sender_origin,
+            target: target.clone(),
+            payload: payload.clone(),
+            sender_label: player.name.clone(),
+            due_time: now + lag,
+        });
+    }
+}
+
+pub fn process_coordination_lag(
+    time: Res<Time>,
+    mut queue: ResMut<CoordinationQueueResource>,
+    control_sources: Res<ShipSystemControlSources>,
+    sessions: Res<Sessions>,
+    mut outbox: ResMut<crate::lobby::LobbyOutbox>,
+    ship_config: Res<ShipConfigResource>,
+) {
+    let now = time.elapsed_secs();
+    let due = queue.0.due_messages(now);
+    if due.is_empty() {
+        return;
+    }
+
+    for msg in due {
+        let target_control = control_sources.0.source_for(&msg.target);
+        let action = coordination::route_coordination(msg.sender_origin, target_control);
+
+        match action {
+            coordination::DeliverAction::Consume => {}
+            coordination::DeliverAction::Suppress => {}
+            coordination::DeliverAction::Popup => {
+                let label = if msg.sender_label.is_empty() {
+                    "AI".to_string()
+                } else {
+                    msg.sender_label
+                };
+
+                let system = ship_config.0.system(&msg.target);
+                let station_opt = system.and_then(|s| s.station.as_ref());
+
+                if let Some(station_id) = station_opt {
+                    if let Some(station) = ship_config.0.station(station_id) {
+                        let console_id = &station.console;
+                        let token: Option<String> = [crate::messages::Console::CaptainChair, crate::messages::Console::Helm, crate::messages::Console::Tactical, crate::messages::Console::Repair, crate::messages::Console::Sensors, crate::messages::Console::Shields, crate::messages::Console::Navigation, crate::messages::Console::Power, crate::messages::Console::Comms]
+                            .iter()
+                            .find(|c| c.station_console_id() == console_id)
+                            .and_then(|console| {
+                                sessions.0.console_holder(console.clone()).map(|t| t.to_string())
+                            });
+
+                        if let Some(token) = token {
+                            outbox.0.push((
+                                crate::lobby_handler::Target::Token(token),
+                                crate::messages::ServerMessage::CoordinationPopup {
+                                    target: msg.target.clone(),
+                                    payload: msg.payload.clone(),
+                                    sender_label: label,
+                                },
+                            ));
+                        }
+                    }
+                } else {
+                    outbox.0.push((
+                        crate::lobby_handler::Target::All,
+                        crate::messages::ServerMessage::CoordinationPopup {
+                            target: msg.target.clone(),
+                            payload: msg.payload.clone(),
+                            sender_label: label,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+}
+
+pub fn handle_coordination_messages(
+    mut reader: MessageReader<InboundMessage>,
+) {
+    for msg in reader.read() {
+        let ClientMessage::SendCoordination { .. } = &msg.msg else {
+            continue;
+        };
+    }
+}
 
 #[cfg(test)]
 mod tests {

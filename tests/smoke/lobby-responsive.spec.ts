@@ -57,17 +57,18 @@ async function setupLobby(
 
 test.describe('lobby responsive — portrait', () => {
   test.setTimeout(60_000);
-  test('compact: rail below grid, aggregate chip visible, per-slot empties hidden, no body h-scroll', async ({ context }) => {
+  test('compact: rail below grid, no aggregate chip (fixed roster), no per-slot empties, no body h-scroll', async ({ context }) => {
     const { serverPage, clientA, clientB } = await setupLobby(context, { width: 480, height: 900 });
 
-    // (a) The aggregate RESERVED chip carries `.active` and is rendered.
+    // (a) Fixed-roster (#495): all 6 station slots are always defined, so reservedCount=0
+    // and the aggregate chip is never shown.
     const aggregateActive = await serverPage.evaluate(() => {
       const el = document.getElementById('reserved-aggregate');
       return !!el && el.classList.contains('active') && getComputedStyle(el).display !== 'none';
     });
-    expect(aggregateActive).toBe(true);
+    expect(aggregateActive).toBe(false);
 
-    // (b) Per-slot empty placeholders are display:none in compact mode.
+    // (b) No per-slot empty placeholders exist (all slots have station definitions).
     const emptyCardVisible = await serverPage.evaluate(() => {
       const el = document.querySelector('.lobby-grid .station-card.empty.per-slot') as HTMLElement | null;
       return !!el && getComputedStyle(el).display !== 'none';
@@ -107,16 +108,16 @@ test.describe('lobby responsive — portrait', () => {
 
 test.describe('lobby responsive — landscape', () => {
   test.setTimeout(60_000);
-  test('wide: rail right of grid, per-slot RESERVED visible, no aggregate, multi-column grid', async ({ context }) => {
+  test('wide: rail right of grid, no per-slot empties (fixed roster), no aggregate, multi-column grid', async ({ context }) => {
     const { serverPage, clientA, clientB } = await setupLobby(context, { width: 1280, height: 720 });
 
-    // (a) Per-slot empty placeholders ARE visible in wide mode.
+    // (a) Fixed-roster (#495): no per-slot empty placeholders — all slots have station definitions.
     const emptyCardVisible = await serverPage.evaluate(() => {
       const cards = document.querySelectorAll('.lobby-grid .station-card.empty.per-slot');
       if (cards.length === 0) return false;
       return getComputedStyle(cards[0] as HTMLElement).display !== 'none';
     });
-    expect(emptyCardVisible).toBe(true);
+    expect(emptyCardVisible).toBe(false);
 
     // (b) Aggregate chip is NOT visible in wide mode (default `display:none`).
     const aggregateVisible = await serverPage.evaluate(() => {

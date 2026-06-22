@@ -472,7 +472,8 @@
       dec.addEventListener('pointerdown', (function(id) {
         return function(e) {
           e.preventDefault();
-          sendAction('decrease_power', { target: id });
+          var cur = _state && _state.consoles && _state.consoles.find(function(c){return c.id===id;});
+          if (cur) sendAction('set_power', { target: id, level: Math.max(0, cur.level - 1) });
           if (_demoMode) _demoAdjust(id, -1);
         };
       })(con.id));
@@ -486,7 +487,8 @@
       inc.addEventListener('pointerdown', (function(id) {
         return function(e) {
           e.preventDefault();
-          sendAction('increase_power', { target: id });
+          var cur = _state && _state.consoles && _state.consoles.find(function(c){return c.id===id;});
+          if (cur) sendAction('set_power', { target: id, level: cur.level + 1 });
           if (_demoMode) _demoAdjust(id, +1);
         };
       })(con.id));

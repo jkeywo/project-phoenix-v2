@@ -24,11 +24,11 @@ test('comms — hail contact, respond, get ObjectiveSummary', async ({ context }
 
   const hostId = await readHostPeerId(serverPage);
 
-  // ── Two clients (2P layout: Helm = CaptainChair+Helm+Comms, Tactical) ────
+  // ── Two clients (6P fixed-roster: Comms = Comms+Navigation, Tactical) ────
   const captain = await createTestClient(context, hostId, { name: 'Captain' });
   const tactical = await createTestClient(context, hostId, { name: 'Tactical' });
 
-  await captain.send('SelectStation', { station: 'Helm' });
+  await captain.send('SelectStation', { station: 'Comms' });
   await waitForStation(captain);
 
   await tactical.send('SelectStation', { station: 'Tactical' });

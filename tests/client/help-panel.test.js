@@ -7,6 +7,7 @@ import {
   isHelpOpen,
   createHelpButton,
   mountHelp,
+  renderInlineHelp,
 } from '../../gui/help-panel.js';
 
 // ── helpSections static text (mirrors elements.rs help_sections) ─────────────
@@ -200,5 +201,78 @@ describe('mountHelp', () => {
     expect(trigger).toBe(existing);
     trigger.click();
     expect(isHelpOpen(doc)).toBe(true);
+  });
+});
+
+// ── renderInlineHelp ──────────────────────────────────────────────────────
+
+describe('renderInlineHelp', () => {
+  let doc;
+  let root;
+
+  function stubWindowLabel() {
+    // Stub CONSOLE_LABEL on global window for label lookups.
+    if (typeof globalThis !== 'undefined') {
+      globalThis.CONSOLE_LABEL = { Helm: 'Helm', Tactical: 'Tactical', Repair: 'Repair' };
+    }
+  }
+
+  beforeEach(() => {
+    doc = makeDoc();
+    root = doc.createElement('div');
+    stubWindowLabel();
+  });
+
+  it('renders help sections for a single console', () => {
+    renderInlineHelp(root, ['Helm'], doc);
+    // Root should have 1 help-console-group child
+    const groups = root.children.filter((c) => c.className === 'help-console-group');
+    expect(groups).toHaveLength(1);
+    const heading = groups[0].children.find((c) => c.className === 'help-console-heading');
+    expect(heading.textContent).toBe('Helm');
+    // Helm has 4 help sections
+    const sections = groups[0].children.find((c) => c.className === 'help-sections');
+    expect(sections.children).toHaveLength(4);
+  });
+
+  it('renders help sections for multiple consoles', () => {
+    renderInlineHelp(root, ['Helm', 'Repair'], doc);
+    const groups = root.children.filter((c) => c.className === 'help-console-group');
+    expect(groups).toHaveLength(2);
+    // Helm first, Repair second (input order preserved)
+    expect(groups[0].children.find((c) => c.className === 'help-console-heading').textContent).toBe('Helm');
+    expect(groups[1].children.find((c) => c.className === 'help-console-heading').textContent).toBe('Repair');
+  });
+
+  it('skips consoles with no help text', () => {
+    renderInlineHelp(root, ['Helm', 'Bogus'], doc);
+    const groups = root.children.filter((c) => c.className === 'help-console-group');
+    expect(groups).toHaveLength(1);
+  });
+
+  it('is a no-op when root is null', () => {
+    expect(() => renderInlineHelp(null, ['Helm'])).not.toThrow();
+  });
+
+  it('is a no-op when consoles is empty', () => {
+    renderInlineHelp(root, [], doc);
+    expect(root.children).toHaveLength(0);
+  });
+
+  it('re-builds from scratch on each call (no stale content)', () => {
+    renderInlineHelp(root, ['Helm'], doc);
+    expect(root.children).toHaveLength(1);
+    renderInlineHelp(root, ['Repair'], doc);
+    expect(root.children).toHaveLength(1);
+    // Now Repair, not Helm
+    const heading = root.children[0].children.find((c) => c.className === 'help-console-heading');
+    expect(heading.textContent).toBe('Repair');
+  });
+
+  it('renders correct section content for Tactical', () => {
+    renderInlineHelp(root, ['Tactical'], doc);
+    const sections = root.children[0].children.find((c) => c.className === 'help-sections');
+    const titles = sections.children.map((s) => s.children.find((c) => c.className === 'help-section-title').textContent);
+    expect(titles).toEqual(['Target Lock', 'Phasers', 'Torpedoes']);
   });
 });

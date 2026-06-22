@@ -224,6 +224,63 @@ describe('tabBarLayout — active highlight', () => {
   });
 });
 
+describe('tabBarLayout — compactActive mode', () => {
+  it('shows all buttons when compactActive is false (default)', () => {
+    const out = tabBarLayout(['CaptainChair', 'Helm', 'Tactical'], 'Helm', 'portrait', true, null, false);
+    expect(out.buttons).toHaveLength(3);
+    expect(out.buttons.map((b) => b.console)).toEqual(['CaptainChair', 'Helm', 'Tactical']);
+  });
+
+  it('shows all buttons when compactActive is omitted (backward compat)', () => {
+    const out = tabBarLayout(['CaptainChair', 'Helm', 'Tactical'], 'Helm', 'portrait', true);
+    expect(out.buttons).toHaveLength(3);
+  });
+
+  it('shows only the active button when compactActive is true and active is set', () => {
+    const out = tabBarLayout(['CaptainChair', 'Helm', 'Tactical'], 'Helm', 'portrait', true, null, true);
+    expect(out.buttons).toHaveLength(1);
+    expect(out.buttons[0].console).toBe('Helm');
+    expect(out.buttons[0].active).toBe(true);
+  });
+
+  it('shows only the active button with correct label in compact mode', () => {
+    const out = tabBarLayout(['CaptainChair', 'Helm', 'Tactical'], 'CaptainChair', 'portrait', true, null, true);
+    expect(out.buttons).toHaveLength(1);
+    expect(out.buttons[0].label).toBe("Captain's Chair");
+    expect(out.buttons[0].active).toBe(true);
+  });
+
+  it('shows all buttons when compactActive is true but active is null', () => {
+    const out = tabBarLayout(['CaptainChair', 'Helm', 'Tactical'], null, 'portrait', true, null, true);
+    expect(out.buttons).toHaveLength(3);
+  });
+
+  it('shows all buttons when compactActive is true but active is not in the list', () => {
+    const out = tabBarLayout(['CaptainChair', 'Helm'], 'Repair', 'portrait', true, null, true);
+    expect(out.buttons).toHaveLength(2);
+  });
+
+  it('preserves hullPct on the single compact button', () => {
+    const hull = [{ console: 'Helm', current: 40, max_hp: 100 }];
+    const out = tabBarLayout(['CaptainChair', 'Helm', 'Tactical'], 'Helm', 'portrait', true, hull, true);
+    expect(out.buttons).toHaveLength(1);
+    expect(out.buttons[0].hullPct).toBe(40);
+  });
+
+  it('keeps bar visible (not hidden) in compact mode with 2+ consoles', () => {
+    const out = tabBarLayout(['CaptainChair', 'Helm', 'Tactical'], 'Helm', 'portrait', true, null, true);
+    expect(out.hidden).toBe(false);
+  });
+
+  it('shows initials in portrait at >= 5 consoles even in compact mode', () => {
+    const all = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Sensors', 'Shields'];
+    const out = tabBarLayout(all, 'Tactical', 'portrait', true, null, true);
+    expect(out.useInitials).toBe(true);
+    expect(out.buttons).toHaveLength(1);
+    expect(out.buttons[0].label).toBe('T');
+  });
+});
+
 describe('renderTabBar — DOM mutations', () => {
   it('returns the layout untouched when root is null', () => {
     const layout = tabBarLayout(['CaptainChair', 'Tactical'], 'CaptainChair', 'portrait', true);

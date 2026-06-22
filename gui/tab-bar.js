@@ -64,6 +64,8 @@ export function useInitials(consoles, orientation) {
 //   orientation — 'portrait' | 'landscape'
 //   inGame      — boolean; tab bar is hidden in the lobby
 //   consoleHull — optional [{ console, current, max_hp }] from server state
+//   compactActive — boolean; when true and a console is active, only show
+//                   the active console's button (others are hidden)
 // Returns:
 //   {
 //     hidden: bool,
@@ -74,7 +76,7 @@ export function useInitials(consoles, orientation) {
 // hullPct is 0-100 for damageable consoles, null for non-damageable.
 // Tab is always a horizontal strip across the top; orientation only affects
 // button size and whether initials or full labels are used.
-export function tabBarLayout(consoles, active, orientation, inGame, consoleHull) {
+export function tabBarLayout(consoles, active, orientation, inGame, consoleHull, compactActive) {
   const list = Array.isArray(consoles) ? consoles : [];
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   const initials = useInitials(list, orient);
@@ -90,13 +92,21 @@ export function tabBarLayout(consoles, active, orientation, inGame, consoleHull)
       }
     }
   }
-  // Only render tab buttons when there are 2+ consoles to switch between.
-  const buttons = list.length >= 2 ? list.map((c) => ({
+  // Determine which consoles to render as tab buttons.
+  // In compact mode with an active console, show only the active button.
+  // Otherwise, only render buttons when there are 2+ consoles.
+  let namesForButtons = [];
+  if (compactActive && active && list.includes(active)) {
+    namesForButtons = [active];
+  } else if (list.length >= 2) {
+    namesForButtons = list;
+  }
+  const buttons = namesForButtons.map((c) => ({
     console: c,
     label: initials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c),
     active: c === active,
     hullPct: hullMap[c] !== undefined ? hullMap[c] : null,
-  })) : [];
+  }));
   return { hidden, orientation: orient, useInitials: initials, buttons };
 }
 

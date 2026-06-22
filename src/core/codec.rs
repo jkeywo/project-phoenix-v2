@@ -253,6 +253,76 @@ mod tests {
     }
 
     #[test]
+    fn client_control_system_helm_input_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("helm".into()),
+            payload: SystemControlPayload::HelmInput {
+                thrust: 0.75,
+                steering: -0.5,
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_control_system_power_group_allocation_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("power".into()),
+            payload: SystemControlPayload::SetPowerGroupAllocation {
+                group: PowerGroupId("weapons".into()),
+                level: 3,
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_control_system_json_shape_uses_string_ids() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("power".into()),
+            payload: SystemControlPayload::SetPowerGroupAllocation {
+                group: PowerGroupId("weapons".into()),
+                level: 3,
+            },
+        };
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"power","payload":{"type":"SetPowerGroupAllocation","data":{"group":"weapons","level":3}}}}"#
+        );
+    }
+
+    #[test]
+    fn client_control_system_repair_core_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("repair".into()),
+            payload: SystemControlPayload::DispatchRepairTeam {
+                team_idx: 1,
+                target: RepairTarget::Core,
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_control_system_repair_station_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("repair".into()),
+            payload: SystemControlPayload::DispatchRepairTeam {
+                team_idx: 0,
+                target: RepairTarget::Station(StationId("tactical".into())),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_start_impulse_charge() {
         let msg = ClientMessage::StartImpulseCharge;
         assert_client_roundtrip(&JsonCodec, msg.clone());

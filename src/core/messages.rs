@@ -94,6 +94,25 @@ pub type PhaserBank = String;
 /// and `TorpedoTubeClientConfig`.
 pub type TorpedoTube = String;
 
+/// Stable, designer-authored identifier for a claimable ship station.
+///
+/// Station ids are ship-local authoring keys, not player tokens and not world
+/// entity UUIDs. They are intended to replace console bundles as the wire
+/// addressing unit for station ownership in the station/system architecture.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StationId(pub String);
+
+/// Stable, designer-authored identifier for one capability instance on a ship.
+///
+/// System ids are ship-wide unique authoring keys such as `phaser-fore` or
+/// `torpedo-tube-aft`. They are distinct from world entity UUIDs.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SystemId(pub String);
+
+/// Stable, designer-authored identifier for an operator-facing power group.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PowerGroupId(pub String);
+
 /// Per-bank state broadcast to the Tactical operator as part of `WeaponsUpdate`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PhaserBankState {
@@ -798,6 +817,85 @@ pub struct WorldData {
     pub scenario_description: String,
 }
 
+/// Destination for repair dispatch in the station/system architecture.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "data")]
+pub enum RepairTarget {
+    Station(StationId),
+    Core,
+}
+
+/// Typed payload sent to a specific ship system through
+/// `ClientMessage::ControlSystem`.
+///
+/// This is additive scaffolding for ADR-0002. Existing runtime handlers still
+/// consume the legacy console-addressed variants until the station/system
+/// migration lands.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "data")]
+pub enum SystemControlPayload {
+    ToggleRedAlert,
+    HelmInput {
+        thrust: f32,
+        steering: f32,
+    },
+    StartImpulseCharge,
+    CancelImpulse,
+    SetBoost {
+        active: bool,
+    },
+    SetView {
+        mode: ViewMode,
+    },
+    SetTarget {
+        uuid: String,
+    },
+    FirePhaser,
+    SetPhaserMode {
+        mode: PhaserMode,
+    },
+    SetPhaserFrequency {
+        frequency: f32,
+    },
+    FireTorpedo {
+        target_uuid: Option<String>,
+    },
+    LoadTube,
+    UnloadTube,
+    DispatchRepairTeam {
+        team_idx: u8,
+        target: RepairTarget,
+    },
+    SetPowerGroupAllocation {
+        group: PowerGroupId,
+        level: u8,
+    },
+    Hail {
+        target_uuid: String,
+    },
+    SelectCommsMessage {
+        message_id: String,
+    },
+    RespondToMessage {
+        message_id: String,
+        response_index: usize,
+    },
+    ClearComms,
+    ShowOnScreen {
+        message_id: String,
+    },
+    SetShieldFocus {
+        facing: Option<ViewDirection>,
+    },
+    SetNavigationWaypoint {
+        x: f32,
+        z: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_uuid: Option<String>,
+    },
+    ClearNavigationWaypoint,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
@@ -937,6 +1035,14 @@ pub enum ClientMessage {
     /// Clear the shared custom navigation waypoint. Sender must hold
     /// `Console::Navigation`.
     ClearNavigationWaypoint,
+    /// Future station/system architecture control envelope. Targets one
+    /// ship-local system instance by stable `SystemId` and carries a typed
+    /// payload for that system kind. Existing runtime handlers ignore this
+    /// additive variant until the migration lands.
+    ControlSystem {
+        target: SystemId,
+        payload: SystemControlPayload,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

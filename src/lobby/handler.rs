@@ -411,6 +411,7 @@ pub fn process_message(
         | ClientMessage::SetShieldFocus { .. }
         | ClientMessage::SetNavigationWaypoint { .. }
         | ClientMessage::ClearNavigationWaypoint
+        | ClientMessage::ControlSystem { .. }
         | ClientMessage::LoadTube { .. }
         | ClientMessage::UnloadTube { .. } => {}
     }

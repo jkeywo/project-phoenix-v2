@@ -305,12 +305,15 @@ describe('set_shield_focus', () => {
 });
 
 describe('set_sensors_target', () => {
-  it('calls mutate with sensorsTarget and send SetScienceTarget', () => {
+  it('calls mutate with sensorsTarget and send ControlSystem SetScienceTarget', () => {
     const send = mkSend();
     const mutate = mkMutate();
     ACTION_MAP.set_sensors_target({ action: 'set_sensors_target', uuid: 'tgt-42' }, send, mutate);
     expect(mutate).toHaveBeenCalledWith({ sensorsTarget: 'tgt-42' });
-    expect(send).toHaveBeenCalledWith('SetScienceTarget', { uuid: 'tgt-42' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'SetScienceTarget', data: { uuid: 'tgt-42' } },
+    });
   });
 
   it('does nothing when uuid is absent', () => {
@@ -481,6 +484,9 @@ describe('dispatchConsoleAction', () => {
     const send = mkSend();
     // set_sensors_target needs mutate; should not throw even if not provided
     expect(() => dispatchConsoleAction({ action: 'set_sensors_target', uuid: 'x' }, send)).not.toThrow();
-    expect(send).toHaveBeenCalledWith('SetScienceTarget', { uuid: 'x' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'sensors',
+      payload: { type: 'SetScienceTarget', data: { uuid: 'x' } },
+    });
   });
 });

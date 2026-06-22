@@ -214,11 +214,9 @@ describe('apply weapons / targets / shields', () => {
     expect(s.currentTargetName).toBeNull();
   });
 
-  it('Science and Sensors target suggestions update independently', () => {
+  it('SensorsTargetSuggestion updates sensorsTargetSuggestion', () => {
     const s = new ClientSimState();
-    s.apply({ type: 'ScienceTargetSuggestion', data: { uuid: 'sci' } });
     s.apply({ type: 'SensorsTargetSuggestion', data: { uuid: 'sen' } });
-    expect(s.scienceTargetSuggestion).toBe('sci');
     expect(s.sensorsTargetSuggestion).toBe('sen');
   });
 

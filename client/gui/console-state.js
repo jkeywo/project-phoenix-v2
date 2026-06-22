@@ -302,7 +302,10 @@ export function buildWeaponsConsoleState(state) {
     torpedo_count: state.weaponsTorpedoCount || 0,
     phaser_mode:   state.weaponsPhaserMode   || 'Auto',
     blips,
-    phaser_arcs:   state.phaserArcConfigs  || [],
+    phaser_arcs:   (state.phaserArcConfigs || []).map(a => ({
+      ...a,
+      range_frac: a.beam_range != null ? a.beam_range / range : null,
+    })),
     torpedo_arcs:  state.torpedoArcConfigs || [],
     // Server complexity preset name (issue #461); drives [data-hideable]
     // element hiding via gui/hideable-elements.js in console-core.

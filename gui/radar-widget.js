@@ -339,8 +339,8 @@
     if (data) {
       if (data.mode === 'pre-projected') {
         this._drawArcSectors(octx, cx, cy, R,
-          data.torpedo_arcs, 0.70,
-          'rgba(60,160,240,0.08)', 'rgba(60,160,240,0.35)');
+          data.torpedo_arcs, 1.0,
+          'rgba(60,160,240,0.08)', 'rgba(60,160,240,0.35)', true);
         this._drawArcSectors(octx, cx, cy, R,
           data.phaser_arcs, 0.90,
           'rgba(240,132,56,0.10)', 'rgba(240,132,56,0.40)');
@@ -389,9 +389,9 @@
 
   // ── Arc rendering ─────────────────────────────────────────────────────────
 
-  RadarWidget.prototype._drawArcSectors = function (ctx, cx, cy, R, arcs, innerFrac, fillColor, strokeColor) {
-    var arcR = R * innerFrac;
+  RadarWidget.prototype._drawArcSectors = function (ctx, cx, cy, R, arcs, innerFrac, fillColor, strokeColor, fade) {
     (arcs || []).forEach(function (arc) {
+      var arcR = R * (arc.range_frac != null ? arc.range_frac : innerFrac);
       // facing_deg=0 → forward (up). canvas_angle = (facing_deg − 90) × π/180
       var facing  = (arc.facing_deg - 90) * Math.PI / 180;
       var arcDeg  = arc.fire_arc_deg != null ? arc.fire_arc_deg : (arc.arc_deg || 0);
@@ -400,11 +400,20 @@
       ctx.moveTo(cx, cy);
       ctx.arc(cx, cy, arcR, facing - halfArc, facing + halfArc);
       ctx.closePath();
-      ctx.fillStyle   = fillColor;
+      if (fade) {
+        var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, arcR);
+        grad.addColorStop(0, strokeColor);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+      } else {
+        ctx.fillStyle = fillColor;
+      }
       ctx.fill();
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth   = 1;
-      ctx.stroke();
+      if (!fade) {
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth   = 1;
+        ctx.stroke();
+      }
     });
   };
 

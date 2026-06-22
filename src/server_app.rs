@@ -184,7 +184,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::weapons_plugin::WeaponsPlugin)
     .add_plugins(crate::repair_plugin::RepairPlugin)
     .add_plugins(crate::power_plugin::ShipPowerPlugin)
-    .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
+    .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
     .add_plugins(crate::sensors_plugin::ShipSensorsPlugin)
     .add_plugins(crate::navigation_plugin::NavigationPlugin)
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
@@ -249,7 +249,6 @@ pub fn add_simulation_plugins(app: &mut App) {
         Update,
         (
             handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
-            handle_set_shield_focus.in_set(crate::sim_sets::SimSet::Input),
             tick_shields.in_set(crate::sim_sets::SimSet::Physics),
             broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
             handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
@@ -736,58 +735,6 @@ fn handle_collisions(
 /// Tick shield regen and offline timers each frame.
 fn tick_shields(time: Res<Time>, mut shields: ResMut<ShipShields>) {
     shields.0.tick(time.delta_secs());
-}
-
-/// Handle `SetShieldFocus` messages from the Shields console.
-///
-/// Validates: sender is Shields holder, game is in-progress.
-/// Maps `ViewDirection` to facing index: Fore=0, Port=1, Aft=2, Starboard=3.
-/// `None` clears the focus.
-fn handle_set_shield_focus(
-    mut reader: MessageReader<InboundMessage>,
-    mut shields: ResMut<ShipShields>,
-    sessions: Res<Sessions>,
-    mut outbox: ResMut<SimOutbox>,
-    mut last: ResMut<LastBroadcastShields>,
-) {
-    for ev in reader.read() {
-        let facing = match &ev.msg {
-            ClientMessage::SetShieldFocus { facing } => facing.clone(),
-            _ => continue,
-        };
-        // Only the Shields console holder may set focus.
-        if sessions.0.console_holder(Console::Shields) != Some(ev.token.as_str()) {
-            continue;
-        }
-        let idx = facing.map(|d| match d {
-            ViewDirection::Fore => 0,
-            ViewDirection::Port => 1,
-            ViewDirection::Aft => 2,
-            ViewDirection::Starboard => 3,
-        });
-        shields.0.set_focused_facing(idx);
-
-        // Immediately broadcast the updated shield status so the client UI
-        // sees the new max_hp / is_focused values without waiting for the
-        // 10 Hz tick.
-        let facings: Vec<ShieldFacingStatus> = shields
-            .0
-            .snapshot()
-            .into_iter()
-            .map(|s| ShieldFacingStatus {
-                label: s.label,
-                hp: s.hp,
-                max_hp: s.max_hp,
-                online: s.online,
-                offline_remaining: s.offline_remaining,
-                is_focused: s.is_focused,
-            })
-            .collect();
-        last.0 = facings.clone();
-        outbox
-            .0
-            .push((Target::All, ServerMessage::ShieldStatus { facings }));
-    }
 }
 
 /// Broadcast `ShieldStatus` at 10 Hz.
@@ -2197,7 +2144,7 @@ mod tests {
         .add_plugins(crate::weapons_plugin::WeaponsPlugin)
         .add_plugins(crate::repair_plugin::RepairPlugin)
         .add_plugins(crate::power_plugin::ShipPowerPlugin)
-        .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
+        .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
         .add_plugins(crate::sensors_plugin::ShipSensorsPlugin)
         .add_plugins(crate::comms_plugin::CommsConsolePlugin)
         .add_systems(
@@ -2209,7 +2156,6 @@ mod tests {
             (
                 handle_set_sensors_target,
                 handle_impulse_messages,
-                handle_set_shield_focus,
                 broadcast_shield_status,
                 reconcile_runtime_entities
                     .after(crate::lobby::process_lobby)
@@ -5324,8 +5270,11 @@ mod tests {
         push(
             &mut app,
             "shields",
-            ClientMessage::SetShieldFocus {
-                facing: Some(ViewDirection::Fore),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::shields_system_id(),
+                payload: SystemControlPayload::SetShieldFocus {
+                    facing: Some(ViewDirection::Fore),
+                },
             },
         );
         tick(&mut app);
@@ -5346,8 +5295,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetShieldFocus {
-                facing: Some(ViewDirection::Port),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::shields_system_id(),
+                payload: SystemControlPayload::SetShieldFocus {
+                    facing: Some(ViewDirection::Port),
+                },
             },
         );
         tick(&mut app);
@@ -5368,8 +5320,11 @@ mod tests {
         push(
             &mut app,
             "shields",
-            ClientMessage::SetShieldFocus {
-                facing: Some(ViewDirection::Fore),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::shields_system_id(),
+                payload: SystemControlPayload::SetShieldFocus {
+                    facing: Some(ViewDirection::Fore),
+                },
             },
         );
         tick(&mut app);
@@ -5381,7 +5336,10 @@ mod tests {
         push(
             &mut app,
             "shields",
-            ClientMessage::SetShieldFocus { facing: None },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::shields_system_id(),
+                payload: SystemControlPayload::SetShieldFocus { facing: None },
+            },
         );
         tick(&mut app);
         assert!(app
@@ -5417,8 +5375,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetShieldFocus {
-                facing: Some(ViewDirection::Aft),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::shields_system_id(),
+                payload: SystemControlPayload::SetShieldFocus {
+                    facing: Some(ViewDirection::Aft),
+                },
             },
         );
         tick(&mut app);
@@ -5439,8 +5400,11 @@ mod tests {
         push(
             &mut app,
             "shields",
-            ClientMessage::SetShieldFocus {
-                facing: Some(ViewDirection::Fore),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::shields_system_id(),
+                payload: SystemControlPayload::SetShieldFocus {
+                    facing: Some(ViewDirection::Fore),
+                },
             },
         );
         let _ = tick(&mut app);

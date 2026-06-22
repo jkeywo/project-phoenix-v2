@@ -1038,11 +1038,6 @@ pub enum ClientMessage {
     ShowOnScreen {
         message_id: String,
     },
-    /// Focus one shield arc (Fore/Port/Aft/Starboard), or `None` to clear focus.
-    /// Sender must hold `Console::Shields`.
-    SetShieldFocus {
-        facing: Option<ViewDirection>,
-    },
     /// Set the shared custom navigation waypoint. Sender must hold
     /// `Console::Navigation`.
     ///
@@ -1103,6 +1098,16 @@ pub enum CoordinationPayload {
     /// Sensors advises Tactical of the target's shield frequency.
     FrequencyHint {
         frequency: f32,
+    },
+    /// Sent to Helm when a shield facing goes offline; fires once per offline cycle.
+    ShieldFacingDown {
+        label: String,
+        offline_remaining: f32,
+    },
+    /// Sent to Helm when a shield facing recovers to `restored_notify_pct` of max HP;
+    /// only fires on red alert, only after the facing has been down this cycle.
+    ShieldFacingRestored {
+        label: String,
     },
 }
 

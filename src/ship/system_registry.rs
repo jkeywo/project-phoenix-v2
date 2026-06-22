@@ -16,6 +16,9 @@ pub const POWER_AI_CONTROLLER: &str = "power_ai";
 pub const SENSORS_SYSTEM_ID: &str = "sensors";
 pub const SENSORS_KIND: &str = "sensors";
 pub const SENSORS_AI_CONTROLLER: &str = "sensors_ai";
+pub const SHIELDS_SYSTEM_ID: &str = "shields";
+pub const SHIELDS_KIND: &str = "shields";
+pub const SHIELDS_AI_CONTROLLER: &str = "shields_ai";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
@@ -88,6 +91,10 @@ impl SystemKindRegistry {
             SENSORS_KIND,
             AiControllerRegistration::new(SENSORS_AI_CONTROLLER)?,
         )?;
+        registry.register(
+            SHIELDS_KIND,
+            AiControllerRegistration::new(SHIELDS_AI_CONTROLLER)?,
+        )?;
         Ok(registry)
     }
 
@@ -147,6 +154,10 @@ pub fn power_system_id() -> SystemId {
 
 pub fn sensors_system_id() -> SystemId {
     SystemId(SENSORS_SYSTEM_ID.to_string())
+}
+
+pub fn shields_system_id() -> SystemId {
+    SystemId(SHIELDS_SYSTEM_ID.to_string())
 }
 
 #[cfg(test)]

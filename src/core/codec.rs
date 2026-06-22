@@ -1226,17 +1226,23 @@ mod tests {
     }
 
     #[test]
-    fn client_set_shield_focus_some_round_trips() {
-        let msg = ClientMessage::SetShieldFocus {
-            facing: Some(ViewDirection::Fore),
+    fn control_system_set_shield_focus_some_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::system_registry::shields_system_id(),
+            payload: SystemControlPayload::SetShieldFocus {
+                facing: Some(ViewDirection::Fore),
+            },
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
-    fn client_set_shield_focus_none_round_trips() {
-        let msg = ClientMessage::SetShieldFocus { facing: None };
+    fn control_system_set_shield_focus_none_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::system_registry::shields_system_id(),
+            payload: SystemControlPayload::SetShieldFocus { facing: None },
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }

@@ -154,7 +154,10 @@ export const ACTION_MAP = Object.freeze({
 
   /** Focus shields on a specific facing. */
   set_shield_focus: (a, send) => {
-    send('SetShieldFocus', { facing: a.facing || null });
+    send('ControlSystem', {
+      target: 'shields',
+      payload: { type: 'SetShieldFocus', data: { facing: a.facing || null } },
+    });
   },
 
   /** Switch the view-screen to navigation chart mode. */

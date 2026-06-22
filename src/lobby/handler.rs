@@ -369,7 +369,6 @@ pub fn process_message(
         | ClientMessage::RespondToMessage { .. }
         | ClientMessage::ClearComms
         | ClientMessage::ShowOnScreen { .. }
-        | ClientMessage::SetShieldFocus { .. }
         | ClientMessage::SetNavigationWaypoint { .. }
         | ClientMessage::ClearNavigationWaypoint
         | ClientMessage::ControlSystem { .. }

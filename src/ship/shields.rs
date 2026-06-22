@@ -1,0 +1,814 @@
+use bevy::prelude::*;
+
+use crate::console_bridge::ConsoleStateChanged;
+use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
+use crate::messages::{
+    Console, CoordinationPayload, ShieldFacingStatus, ShieldsConsoleState, SystemControlPayload,
+    ViewDirection,
+};
+use crate::ship::control_source::ControlSource;
+use crate::simulation::{ShipShields, SimOutbox};
+
+#[derive(Component, Clone, PartialEq)]
+pub struct ShieldsConsoleStateComp(pub ShieldsConsoleState);
+
+// ── Resources ──────────────────────────────────────────────────────────────────
+
+/// TOML-loaded configuration for the shields AI controller.
+///
+/// Loaded from `[shields.ai]` in the ship entity TOML. Defaults are used
+/// when the section is absent.
+#[derive(Resource, Clone, Debug)]
+pub struct ShieldsAiConfigResource {
+    /// HP fraction (0.0–1.0) at or above which a restored facing fires the
+    /// `ShieldFacingRestored` coordination message to Helm.
+    pub restored_notify_pct: f32,
+}
+
+impl Default for ShieldsAiConfigResource {
+    fn default() -> Self {
+        Self {
+            restored_notify_pct: 0.5,
+        }
+    }
+}
+
+/// Per-facing notification state for the shields coordination emitter.
+///
+/// Indexed by facing index (usize). Both flags reset when a facing comes back
+/// online so the down/restore cycle repeats on the next offline event.
+#[derive(Resource, Default)]
+pub struct ShieldsCoordinationState {
+    pub down_notified: Vec<bool>,
+    pub restore_notified: Vec<bool>,
+}
+
+impl ShieldsCoordinationState {
+    fn ensure_len(&mut self, n: usize) {
+        if self.down_notified.len() < n {
+            self.down_notified.resize(n, false);
+            self.restore_notified.resize(n, false);
+        }
+    }
+}
+
+// ── Plugin ─────────────────────────────────────────────────────────────────────
+
+pub struct ShipShieldsPlugin;
+
+impl Plugin for ShipShieldsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ConsoleStateChanged>()
+            .init_resource::<ShieldsAiConfigResource>()
+            .init_resource::<ShieldsCoordinationState>()
+            .add_systems(Startup, spawn_shields_console_state_entity)
+            .add_systems(
+                Update,
+                (
+                    handle_shields_messages.in_set(crate::sim_sets::SimSet::Input),
+                    emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
+                    recompute_shields_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                    push_shields_console_state
+                        .in_set(crate::sim_sets::SimSet::Broadcast)
+                        .after(recompute_shields_console_state),
+                ),
+            )
+            .add_plugins(shields_state_broadcaster());
+    }
+}
+
+// ── Broadcaster ────────────────────────────────────────────────────────────────
+
+pub fn shields_state_broadcaster() -> SimBroadcaster {
+    SimBroadcaster::new().register(
+        Audience::Holding(Console::Shields),
+        Cadence::Hz(10.0),
+        |world: &mut World| {
+            let shields = world.resource::<ShipShields>();
+            let facings: Vec<ShieldFacingStatus> = shields
+                .0
+                .snapshot()
+                .into_iter()
+                .map(|s| ShieldFacingStatus {
+                    label: s.label,
+                    hp: s.hp,
+                    max_hp: s.max_hp,
+                    online: s.online,
+                    offline_remaining: s.offline_remaining,
+                    is_focused: s.is_focused,
+                })
+                .collect();
+            vec![crate::messages::ServerMessage::ShieldStatus { facings }]
+        },
+    )
+}
+
+// ── Systems ────────────────────────────────────────────────────────────────────
+
+/// Handle `SetShieldFocus` messages from the Shields console.
+///
+/// Validates: sender holds `Console::Shields`. Reads `ControlSystem` messages
+/// targeting the shields system ID with a `SetShieldFocus` payload, and calls
+/// `ShieldSystem::set_focused_facing`.
+pub fn handle_shields_messages(
+    mut reader: MessageReader<crate::lobby::InboundMessage>,
+    sessions: Res<crate::lobby::Sessions>,
+    mut shields: ResMut<ShipShields>,
+    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
+) {
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::shields_system_id()))
+        .unwrap_or(crate::control_source::ControlTickPolicy {
+            accept_human_input: true,
+            operate_ai: false,
+            coordinate: true,
+        });
+
+    if !policy.accept_human_input {
+        return;
+    }
+
+    let shields_holder = sessions.0.console_holder(Console::Shields);
+
+    for ev in reader.read() {
+        let crate::messages::ClientMessage::ControlSystem { target, payload } = &ev.msg else {
+            continue;
+        };
+        if target.0 != crate::system_registry::SHIELDS_SYSTEM_ID {
+            continue;
+        }
+        let SystemControlPayload::SetShieldFocus { facing } = payload else {
+            continue;
+        };
+
+        if shields_holder != Some(ev.token.as_str()) {
+            warn!(
+                "[shields-auth] ignored SetShieldFocus from token={} holder={:?}",
+                ev.token, shields_holder,
+            );
+            continue;
+        }
+
+        let idx = facing.as_ref().map(|d| match d {
+            ViewDirection::Fore => 0,
+            ViewDirection::Port => 1,
+            ViewDirection::Aft => 2,
+            ViewDirection::Starboard => 3,
+        });
+        shields.0.set_focused_facing(idx);
+    }
+}
+
+/// Emit `ShieldFacingDown` and `ShieldFacingRestored` coordination messages to Helm.
+pub fn emit_shields_coordination(
+    shields: Res<ShipShields>,
+    ship: Res<crate::ship_state::ShipState>,
+    mut coord_state: ResMut<ShieldsCoordinationState>,
+    ai_config: Res<ShieldsAiConfigResource>,
+    ship_plugin: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
+    mut outbox: ResMut<SimOutbox>,
+    sessions: Res<crate::lobby::Sessions>,
+) {
+    let snapshots = shields.0.snapshot();
+    coord_state.ensure_len(snapshots.len());
+
+    let red_alert = ship.red_alert();
+
+    let sender_origin = ship_plugin
+        .as_deref()
+        .map(|cs| cs.0.source_for(&crate::system_registry::shields_system_id()))
+        .unwrap_or(ControlSource::Ai);
+
+    for (i, snap) in snapshots.iter().enumerate() {
+        if !snap.online {
+            if !coord_state.down_notified[i] {
+                coord_state.down_notified[i] = true;
+                coord_state.restore_notified[i] = false;
+
+                let payload = CoordinationPayload::ShieldFacingDown {
+                    label: snap.label.clone(),
+                    offline_remaining: snap.offline_remaining,
+                };
+                enqueue_coordination(&mut outbox, &sessions, sender_origin, payload);
+            }
+        } else {
+            // Facing is online. Check for restore notification before clearing state.
+            if coord_state.down_notified[i]
+                && !coord_state.restore_notified[i]
+                && red_alert
+                && snap.max_hp > 0
+                && (snap.hp as f32 / snap.max_hp as f32) >= ai_config.restored_notify_pct
+            {
+                coord_state.restore_notified[i] = true;
+
+                let payload = CoordinationPayload::ShieldFacingRestored {
+                    label: snap.label.clone(),
+                };
+                enqueue_coordination(&mut outbox, &sessions, sender_origin, payload);
+            }
+
+            // Reset cycle state when facing returns to full online status so
+            // the next offline event starts fresh.
+            if coord_state.restore_notified[i] || !coord_state.down_notified[i] {
+                // Already clean — nothing to reset.
+            } else if snap.max_hp > 0
+                && (snap.hp as f32 / snap.max_hp as f32) >= ai_config.restored_notify_pct
+                && !red_alert
+            {
+                // Facing recovered but not on red alert; clear so next cycle works.
+                coord_state.down_notified[i] = false;
+                coord_state.restore_notified[i] = false;
+            }
+        }
+    }
+}
+
+fn enqueue_coordination(
+    outbox: &mut SimOutbox,
+    sessions: &crate::lobby::Sessions,
+    sender_origin: ControlSource,
+    payload: CoordinationPayload,
+) {
+    use crate::lobby::Target;
+    use crate::messages::ServerMessage;
+
+    let helm_token = sessions.0.console_holder(Console::Helm);
+    if let Some(token) = helm_token {
+        let sender_label = if matches!(sender_origin, ControlSource::Ai) {
+            "AI Shields".to_string()
+        } else {
+            "Shields".to_string()
+        };
+        outbox.0.push((
+            Target::Token(token.to_string()),
+            ServerMessage::CoordinationPopup {
+                target: crate::system_registry::helm_system_id(),
+                payload,
+                sender_label,
+            },
+        ));
+    }
+}
+
+// ── HTML console state push ────────────────────────────────────────────────────
+
+fn spawn_shields_console_state_entity(mut commands: Commands) {
+    commands.spawn(ShieldsConsoleStateComp(ShieldsConsoleState::default()));
+}
+
+fn recompute_shields_console_state(
+    shields: Res<ShipShields>,
+    hull: Res<crate::simulation::ShipHullIntegrity>,
+    ship: Res<crate::ship_state::ShipState>,
+    weapons_target: Option<Res<crate::weapons_plugin::WeaponsTarget>>,
+    asteroid_q: Query<
+        (&crate::simulation::AsteroidUuid, &Transform),
+        Without<crate::entity_spawner::EntityUuid>,
+    >,
+    entity_q: Query<
+        (&crate::entity_spawner::EntityUuid, &Transform),
+        Without<crate::simulation::AsteroidUuid>,
+    >,
+    mut comp_q: Query<&mut ShieldsConsoleStateComp>,
+) {
+    let facings: Vec<ShieldFacingStatus> = shields
+        .0
+        .snapshot()
+        .into_iter()
+        .map(|s| ShieldFacingStatus {
+            label: s.label,
+            hp: s.hp,
+            max_hp: s.max_hp,
+            online: s.online,
+            offline_remaining: s.offline_remaining,
+            is_focused: s.is_focused,
+        })
+        .collect();
+
+    let total_hp = hull.0.total_max();
+    let total_current = hull.0.total_current();
+    let hull_integrity_pct = if total_hp > 0.0 {
+        ((total_current / total_hp) * 100.0).clamp(0.0, 100.0)
+    } else {
+        100.0
+    };
+
+    let focused_facing = facings
+        .iter()
+        .find(|f| f.is_focused)
+        .map(|f| f.label.clone());
+
+    let any_offline = facings.iter().any(|f| !f.online);
+    let grid_status = if any_offline {
+        "EMITTER OFFLINE"
+    } else {
+        "GRID NOMINAL"
+    }
+    .to_string();
+
+    let target_bearing = weapons_target.as_ref().and_then(|wt| {
+        let uuid = wt.0.as_ref()?;
+        let live = asteroid_q
+            .iter()
+            .find(|(u, _)| u.0 == *uuid)
+            .map(|(_, t)| (t.translation.x, t.translation.z))
+            .or_else(|| {
+                entity_q
+                    .iter()
+                    .find(|(u, _)| u.0 == *uuid)
+                    .map(|(_, t)| (t.translation.x, t.translation.z))
+            })?;
+        let dx = live.0 - ship.x;
+        let dz = live.1 - ship.z;
+        let bearing_rad =
+            (dz.atan2(dx) - ship.yaw + std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
+        Some(bearing_rad.to_degrees())
+    });
+
+    let next = ShieldsConsoleState {
+        facings,
+        hull_integrity_pct,
+        focused_facing,
+        target_bearing,
+        grid_status,
+    };
+
+    for mut comp in comp_q.iter_mut() {
+        if comp.0 != next {
+            comp.0 = next.clone();
+        }
+    }
+}
+
+fn push_shields_console_state(
+    comp_q: Query<&ShieldsConsoleStateComp, Changed<ShieldsConsoleStateComp>>,
+    mut writer: MessageWriter<ConsoleStateChanged>,
+) {
+    for comp in comp_q.iter() {
+        if let Ok(json) = crate::core::codec::encode_console_state(&comp.0) {
+            writer.write(ConsoleStateChanged {
+                name: "Shields".into(),
+                json,
+            });
+        }
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::damage::ConsoleHull;
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
+    use crate::messages::{ClientMessage, Console, ServerMessage, *};
+    use crate::shield::ShieldSystem;
+    use crate::simulation::{
+        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
+        ShipImpulse, ShipShields, SimOutbox,
+    };
+
+    #[derive(Resource, Default)]
+    struct Outbox(Vec<OutboundMessage>);
+
+    fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    fn test_app() -> App {
+        let config = crate::shield::ShieldConfig {
+            num_facings: 2,
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            offline_duration: 10.0,
+        };
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(100),
+            ))
+            .insert_resource(crate::ship_state::ShipState::new())
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])))
+            .insert_resource(ShipShields(crate::shield::ShieldSystem::new(&config)))
+            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+            .init_resource::<crate::lobby::WorldResource>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<LastBroadcastHull>()
+            .init_resource::<LastBroadcastShields>()
+            .init_resource::<Outbox>()
+            .add_plugins(ShipShieldsPlugin)
+            .add_systems(PostUpdate, collect);
+        app
+    }
+
+    fn push_msg(app: &mut App, token: &str, msg: ClientMessage) {
+        app.world_mut()
+            .resource_mut::<Messages<InboundMessage>>()
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
+    }
+
+    fn tick(app: &mut App) -> Vec<OutboundMessage> {
+        app.update();
+        let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
+        let mut out = app.world().resource::<Outbox>().0.clone();
+        for (target, msg) in sim_entries {
+            out.push(OutboundMessage { target, msg });
+        }
+        app.world_mut().resource_mut::<Outbox>().0.clear();
+        out
+    }
+
+    fn start_game_with_shields(app: &mut App) {
+        push_msg(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
+        tick(app);
+        push_msg(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
+        tick(app);
+        push_msg(
+            app,
+            "shields",
+            ClientMessage::Identify {
+                token: "shields".into(),
+                name: "Scotty".into(),
+            },
+        );
+        tick(app);
+        push_msg(
+            app,
+            "shields",
+            ClientMessage::SelectStation {
+                station: "Shields".into(),
+            },
+        );
+        tick(app);
+        push_msg(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    // ── Console state tests (migrated from console/shields/server.rs) ───────
+
+    #[test]
+    fn spawns_state_entity_after_update() {
+        let mut app = test_app();
+        app.update();
+        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
+        let entities = query.iter(app.world()).count();
+        assert_eq!(entities, 1);
+    }
+
+    #[test]
+    fn recompute_produces_hull_integrity_pct() {
+        let mut app = test_app();
+        app.update();
+        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
+        let state = query.single(app.world()).unwrap();
+        assert!((state.0.hull_integrity_pct - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn recompute_produces_four_facings() {
+        let config = crate::shield::ShieldConfig {
+            num_facings: 4,
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            offline_duration: 10.0,
+        };
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(100),
+            ))
+            .insert_resource(crate::ship_state::ShipState::new())
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+            ])))
+            .insert_resource(ShipShields(crate::shield::ShieldSystem::new(&config)))
+            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+            .init_resource::<crate::lobby::WorldResource>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<LastBroadcastHull>()
+            .init_resource::<LastBroadcastShields>()
+            .add_plugins(ShipShieldsPlugin);
+        app.update();
+        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
+        let state = query.single(app.world()).unwrap();
+        assert_eq!(state.0.facings.len(), 4);
+    }
+
+    #[test]
+    fn recompute_shows_focused_facing() {
+        let mut app = test_app();
+        let mut shields = app.world_mut().resource_mut::<ShipShields>();
+        shields.0.set_focused_facing(Some(0));
+        app.update();
+        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
+        let state = query.single(app.world()).unwrap();
+        assert!(state.0.focused_facing.is_some());
+    }
+
+    #[test]
+    fn recompute_clears_focused_facing() {
+        let mut app = test_app();
+        {
+            let mut shields = app.world_mut().resource_mut::<ShipShields>();
+            shields.0.set_focused_facing(Some(0));
+        }
+        {
+            let mut shields = app.world_mut().resource_mut::<ShipShields>();
+            shields.0.set_focused_facing(None);
+        }
+        app.update();
+        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
+        let state = query.single(app.world()).unwrap();
+        assert_eq!(state.0.focused_facing, None);
+    }
+
+    #[test]
+    fn recompute_grid_status_offline_when_any_facing_down() {
+        let mut app = test_app();
+        let mut shields = app.world_mut().resource_mut::<ShipShields>();
+        shields.0.apply_damage(9999, 0.0);
+        app.update();
+        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
+        let state = query.single(app.world()).unwrap();
+        assert_eq!(state.0.grid_status, "EMITTER OFFLINE");
+    }
+
+    #[test]
+    fn recompute_without_change_does_not_panic() {
+        let mut app = test_app();
+        app.update();
+        app.update();
+        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
+        let state = query.single(app.world()).unwrap();
+        assert!((state.0.hull_integrity_pct - 100.0).abs() < f32::EPSILON);
+    }
+
+    // ── Coordination tests ──────────────────────────────────────────────────
+
+    fn test_app_with_helm() -> App {
+        let config = crate::shield::ShieldConfig {
+            num_facings: 2,
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            offline_duration: 10.0,
+        };
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(100),
+            ))
+            .insert_resource(crate::ship_state::ShipState::new())
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])))
+            .insert_resource(ShipShields(crate::shield::ShieldSystem::new(&config)))
+            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+            .init_resource::<crate::lobby::WorldResource>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<LastBroadcastHull>()
+            .init_resource::<LastBroadcastShields>()
+            .init_resource::<Outbox>()
+            .add_plugins(ShipShieldsPlugin)
+            .add_systems(PostUpdate, collect);
+        app
+    }
+
+    fn start_game_with_shields_and_helm(app: &mut App) {
+        push_msg(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
+        tick(app);
+        push_msg(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
+        tick(app);
+        push_msg(
+            app,
+            "helm",
+            ClientMessage::Identify {
+                token: "helm".into(),
+                name: "Sulu".into(),
+            },
+        );
+        tick(app);
+        push_msg(
+            app,
+            "helm",
+            ClientMessage::SelectStation {
+                station: "Helm".into(),
+            },
+        );
+        tick(app);
+        push_msg(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    #[test]
+    fn shield_facing_down_coordination_sent_to_helm_when_facing_goes_offline() {
+        let mut app = test_app_with_helm();
+        start_game_with_shields_and_helm(&mut app);
+
+        // Drain facing 0 offline.
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .apply_damage(9999, 0.0);
+
+        let out = tick(&mut app);
+
+        let coordination_msgs: Vec<_> = out
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ServerMessage::CoordinationPopup {
+                        payload: CoordinationPayload::ShieldFacingDown { .. },
+                        ..
+                    }
+                )
+            })
+            .collect();
+
+        assert!(
+            !coordination_msgs.is_empty(),
+            "expected a ShieldFacingDown coordination message to be sent"
+        );
+        assert!(
+            coordination_msgs
+                .iter()
+                .all(|m| matches!(&m.target, Target::Token(t) if t == "helm")),
+            "ShieldFacingDown should be sent only to the Helm token"
+        );
+    }
+
+    #[test]
+    fn shield_facing_down_fires_only_once_per_offline_cycle() {
+        let mut app = test_app_with_helm();
+        start_game_with_shields_and_helm(&mut app);
+
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .apply_damage(9999, 0.0);
+
+        tick(&mut app); // first tick — fires
+
+        let out = tick(&mut app); // second tick — should not re-fire
+
+        let count = out
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ServerMessage::CoordinationPopup {
+                        payload: CoordinationPayload::ShieldFacingDown { .. },
+                        ..
+                    }
+                )
+            })
+            .count();
+
+        assert_eq!(
+            count, 0,
+            "ShieldFacingDown should not fire again on the same offline cycle"
+        );
+    }
+
+    #[test]
+    fn shield_facing_restored_fires_on_red_alert_when_hp_recovers() {
+        let mut app = test_app_with_helm();
+        start_game_with_shields_and_helm(&mut app);
+
+        // Put facing offline.
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .apply_damage(9999, 0.0);
+        tick(&mut app);
+
+        // Manually restore the facing and set HP to above threshold.
+        {
+            let mut shields = app.world_mut().resource_mut::<ShipShields>();
+            let facing = &mut shields.0.facings[0];
+            facing.offline_remaining = 0.0;
+            facing.hp = 60; // 60/100 = 0.6 >= 0.5 threshold
+        }
+
+        // Activate red alert.
+        app.world_mut()
+            .resource_mut::<crate::ship_state::ShipState>()
+            .toggle_red_alert();
+
+        // Mark down_notified so restore can fire.
+        app.world_mut()
+            .resource_mut::<ShieldsCoordinationState>()
+            .down_notified[0] = true;
+
+        let out = tick(&mut app);
+
+        let restored_msgs: Vec<_> = out
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ServerMessage::CoordinationPopup {
+                        payload: CoordinationPayload::ShieldFacingRestored { .. },
+                        ..
+                    }
+                )
+            })
+            .collect();
+
+        assert!(
+            !restored_msgs.is_empty(),
+            "expected a ShieldFacingRestored coordination message on red alert after recovery"
+        );
+    }
+
+    #[test]
+    fn shield_facing_restored_does_not_fire_without_red_alert() {
+        let mut app = test_app_with_helm();
+        start_game_with_shields_and_helm(&mut app);
+
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .apply_damage(9999, 0.0);
+        tick(&mut app);
+
+        {
+            let mut shields = app.world_mut().resource_mut::<ShipShields>();
+            let facing = &mut shields.0.facings[0];
+            facing.offline_remaining = 0.0;
+            facing.hp = 60;
+        }
+
+        app.world_mut()
+            .resource_mut::<ShieldsCoordinationState>()
+            .down_notified[0] = true;
+
+        // No red alert active.
+        let out = tick(&mut app);
+
+        let count = out
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ServerMessage::CoordinationPopup {
+                        payload: CoordinationPayload::ShieldFacingRestored { .. },
+                        ..
+                    }
+                )
+            })
+            .count();
+
+        assert_eq!(
+            count, 0,
+            "ShieldFacingRestored should not fire when not on red alert"
+        );
+    }
+}

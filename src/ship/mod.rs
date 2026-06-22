@@ -8,5 +8,6 @@ pub mod damage;
 pub mod impulse;
 pub mod physics;
 pub mod rating;
+pub mod shields;
 pub mod state;
 pub mod system_registry;

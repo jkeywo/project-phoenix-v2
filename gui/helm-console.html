@@ -806,6 +806,18 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
         if (!_inputRaf && _stickPointerId === null) _startInputLoop();
       });
 
+      // Release all keys when the page loses focus
+      window.addEventListener('blur', function() {
+        _keys = {};
+        if (!_inputRaf && _stickPointerId === null) _startInputLoop();
+      });
+      document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+          _keys = {};
+          if (!_inputRaf && _stickPointerId === null) _startInputLoop();
+        }
+      });
+
       // Gamepad: start polling on connect, and periodically check for silent connections
       window.addEventListener('gamepadconnected', _startInputLoop);
       setInterval(function() {

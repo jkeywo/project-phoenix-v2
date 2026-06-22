@@ -14,17 +14,17 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::console_ai::{
-    auto_fire_torpedo, tick_auto_match_frequency, tick_frequency_hint, tick_power_movement_rule,
+    tick_auto_match_frequency, tick_frequency_hint, tick_power_movement_rule,
     tick_power_red_alert_rule, EngageState, FrequencyHintInput, FrequencyHintState,
     FrequencyMatchInput, FrequencyMatchState, PowerEngageOutput, PowerMovementInput,
-    PowerRedAlertInput, TorpedoAiInput, TubeSummary,
+    PowerRedAlertInput,
 };
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{ClientMessage, Console, ServerMessage};
 use crate::ship_plugin::LastHelmInput;
 use crate::ship_state::ShipState;
 use crate::simulation::SimOutbox;
-use crate::simulation::{ShipPowerSystem, TorpedoSystemResource, WeaponsTarget};
+use crate::simulation::{ShipPowerSystem, WeaponsTarget};
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -210,9 +210,6 @@ impl Plugin for ConsoleAiPlugin {
                 (
                     build_complexity_rules.in_set(crate::sim_sets::SimSet::Input),
                     track_complexity_changes.in_set(crate::sim_sets::SimSet::Input),
-                    run_tactical_ai
-                        .in_set(crate::sim_sets::SimSet::Input)
-                        .after(track_complexity_changes),
                     run_science_hint_ai
                         .in_set(crate::sim_sets::SimSet::Input)
                         .after(track_complexity_changes),
@@ -247,108 +244,6 @@ fn track_complexity_changes(
     }
 }
 
-/// Run the torpedo auto-fire AI for the Tactical console when:
-/// 1. Game is in-progress
-/// 2. The Tactical console is occupied (has a connected holder)
-/// 3. Tactical's active complexity preset has the `torpedo_auto_fire`
-///    `[preset.ai]` rule
-///
-/// On each qualifying tick, calls `auto_fire_torpedo` and synthesises a
-/// `FireTorpedo` `InboundMessage` for every tube that should fire.  Those
-/// messages are processed by `handle_fire_torpedo` in the same frame via the
-/// normal message pipeline.
-fn run_tactical_ai(
-    sessions: Res<Sessions>,
-    complexity: Res<ConsoleComplexityState>,
-    rules: Res<ComplexityRules>,
-    ship: Res<ShipState>,
-    torpedo_sys: Res<TorpedoSystemResource>,
-    weapons_target: Res<WeaponsTarget>,
-    asteroid_q: Query<
-        (&crate::simulation::AsteroidUuid, &Transform),
-        With<crate::simulation::Asteroid>,
-    >,
-    npc_q: Query<
-        (&crate::entity_spawner::EntityUuid, &Transform),
-        Without<crate::simulation::Asteroid>,
-    >,
-    mut writer: MessageWriter<InboundMessage>,
-) {
-    // AI only runs on occupied consoles.
-    let Some(holder_token) = sessions.0.console_holder(Console::Tactical) else {
-        return;
-    };
-
-    // AI only runs when the active preset enables torpedo auto-fire.
-    if rules
-        .ai_rule(&Console::Tactical, &complexity, AI_RULE_TORPEDO_AUTO_FIRE)
-        .is_none()
-    {
-        return;
-    }
-
-    // No target locked → nothing to do.
-    let Some(target_uuid) = &weapons_target.0 else {
-        return;
-    };
-
-    // Look up the target's live world position from the ECS (asteroids
-    // carry AsteroidUuid; NPCs/stations carry EntityUuid). The
-    // WorldResource snapshot would give the stale spawn-time position,
-    // causing AI auto-fire to miss moving targets. If the entity is gone
-    // (destroyed since the lock was set), skip this tick silently.
-    let target_xz = asteroid_q
-        .iter()
-        .find_map(|(u, t)| (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z)))
-        .or_else(|| {
-            npc_q.iter().find_map(|(u, t)| {
-                (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
-            })
-        });
-    let Some((tx, tz)) = target_xz else {
-        return;
-    };
-
-    // Compute bearing from ship to target (same convention as torpedo.is_in_arc).
-    let dx = tx - ship.x;
-    let dz = tz - ship.z;
-    // atan2(dx, -dz) gives world-bearing in yaw convention (0 = forward = -Z)
-    let world_bearing = dx.atan2(-dz);
-    let bearing = world_bearing - ship.yaw;
-
-    // Asteroids have no shields → target_shields = 0 always satisfies ≤ 0.
-    let target_shields = 0i32;
-
-    let ts = &torpedo_sys.0;
-
-    let tubes: Vec<TubeSummary> = ts
-        .tubes
-        .iter()
-        .map(|tube| TubeSummary {
-            id: tube.id.clone(),
-            loaded: tube.is_loaded(),
-            in_arc: tube.is_in_arc(bearing),
-        })
-        .collect();
-
-    let input = TorpedoAiInput {
-        target_locked: true, // we already checked above
-        target_shields,
-        tubes,
-        magazine: ts.torpedoes_remaining,
-    };
-
-    let tubes_to_fire = auto_fire_torpedo(&input);
-    for tube_id in tubes_to_fire {
-        writer.write(InboundMessage {
-            token: holder_token.to_string(),
-            msg: ClientMessage::FireTorpedo {
-                tube: tube_id,
-                target_uuid: Some(target_uuid.clone()),
-            },
-        });
-    }
-}
 
 /// Run the Sensors frequency-hint AI.
 ///
@@ -975,23 +870,6 @@ mod tests {
     }
 
     #[test]
-    fn ai_fires_torpedo_when_conditions_met_with_target_in_arc() {
-        let mut app = test_app();
-        setup_occupied_low_complexity_tactical(&mut app);
-        // Target at (0, -30) → bearing 0 from ship at origin yaw=0 → in ForePort arc
-
-        let (inbound, _) = tick(&mut app);
-        let fired: Vec<_> = inbound
-            .iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
-            .collect();
-        assert!(
-            !fired.is_empty(),
-            "AI should fire when all conditions are met"
-        );
-    }
-
-    #[test]
     fn ai_fires_with_correct_target_uuid() {
         let mut app = test_app();
         setup_occupied_low_complexity_tactical(&mut app);
@@ -1093,36 +971,6 @@ mod tests {
         assert!(
             !state.is_low(&Console::Tactical),
             "complexity state should be Full after switching back"
-        );
-    }
-
-    #[test]
-    fn ai_stops_firing_when_preset_switches_to_full() {
-        let mut app = test_app();
-        setup_occupied_low_complexity_tactical(&mut app);
-
-        // First tick — AI should fire
-        let (inbound1, _) = tick(&mut app);
-        let fired1: Vec<_> = inbound1
-            .iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
-            .collect();
-        assert!(!fired1.is_empty(), "AI should fire at Low complexity");
-
-        // Switch to Full
-        app.world_mut()
-            .resource_mut::<ConsoleComplexityState>()
-            .set(Console::Tactical, "Std".into());
-
-        // Next tick — AI should not fire
-        let (inbound2, _) = tick(&mut app);
-        let fired2: Vec<_> = inbound2
-            .iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
-            .collect();
-        assert!(
-            fired2.is_empty(),
-            "AI must not fire after switching to Full"
         );
     }
 

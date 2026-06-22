@@ -39,12 +39,20 @@ export const ACTION_MAP = Object.freeze({
 
   /** Lock the weapon / sensor target to a specific entity UUID. */
   set_target: (a, send) => {
-    if (a.uuid) send('SetTarget', { uuid: a.uuid });
+    if (a.uuid)
+      send('ControlSystem', {
+        target: 'tactical',
+        payload: { type: 'SetTarget', data: { uuid: a.uuid } },
+      });
   },
 
   /** Switch phaser firing mode (Auto / Manual / etc.). */
   set_phaser_mode: (a, send) => {
-    if (a.mode) send('SetPhaserMode', { mode: a.mode });
+    if (a.mode)
+      send('ControlSystem', {
+        target: 'tactical',
+        payload: { type: 'SetPhaserMode', data: { mode: a.mode } },
+      });
   },
 
   /** Switch the view-screen to a named Camera direction. */

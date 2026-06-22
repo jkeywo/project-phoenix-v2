@@ -307,6 +307,40 @@ mod tests {
     }
 
     #[test]
+    fn client_control_system_tactical_set_target_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "entity-abc".into(),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_control_system_tactical_set_phaser_mode_round_trips() {
+        let messages = [
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: PhaserMode::Auto,
+                },
+            },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: PhaserMode::Manual,
+                },
+            },
+        ];
+        for msg in messages {
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_client_roundtrip(&PrettyJsonCodec, msg);
+        }
+    }
+
+    #[test]
     fn client_control_system_red_alert_round_trips() {
         let msg = ClientMessage::ControlSystem {
             target: SystemId("red-alert".into()),

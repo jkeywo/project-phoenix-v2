@@ -390,8 +390,8 @@
   // ── Arc rendering ─────────────────────────────────────────────────────────
 
   RadarWidget.prototype._drawArcSectors = function (ctx, cx, cy, R, arcs, innerFrac, fillColor, strokeColor) {
-    var arcR = R * innerFrac;
     (arcs || []).forEach(function (arc) {
+      var arcR = R * (arc.range_frac != null ? arc.range_frac : innerFrac);
       // facing_deg=0 → forward (up). canvas_angle = (facing_deg − 90) × π/180
       var facing  = (arc.facing_deg - 90) * Math.PI / 180;
       var arcDeg  = arc.fire_arc_deg != null ? arc.fire_arc_deg : (arc.arc_deg || 0);

@@ -250,9 +250,6 @@ export class ClientSimState {
       case 'AsteroidDestroyed':
         this.removeEntity(d.uuid);
         break;
-      case 'FrequencyHint':
-        this.frequencyHint = d.frequency;
-        break;
       case 'CoordinationPopup':
         this.coordinationPopup = { target: d.target, payload: d.payload, senderLabel: d.sender_label, ts: Date.now() };
         break;

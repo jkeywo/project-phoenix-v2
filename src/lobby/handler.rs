@@ -4,7 +4,7 @@ use crate::messages::{
     ClientMessage, Console, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
 use crate::session::SessionManager;
-use crate::stations_config::{all_stations_filled, get_station, ShipStations, StationAssignments};
+use crate::stations_config::{get_station, ShipStations, StationAssignments};
 use crate::stations_policy::{advance_on_join, reassign_on_leave};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -328,39 +328,35 @@ pub fn process_message(
                 },
             ));
         }
-        ClientMessage::StartGame => {
-            if sessions.console_holder(Console::CaptainChair) == Some(token)
-                && phase == GamePhase::Lobby
-            {
-                // Gate on all stations filled at the current connected player count,
-                // but only when a station config is loaded. When configs is empty
-                // (e.g. in integration tests without a ship TOML), allow start unconditionally.
-                let can_start = if ship_stations.configs.is_empty() {
-                    true
+        ClientMessage::SetReady { ready } => {
+            sessions.set_ready(token, *ready);
+            outbound.push((
+                Target::All,
+                ServerMessage::ReadyChanged {
+                    token: token.to_string(),
+                    ready: *ready,
+                },
+            ));
+            // Auto-start when all connected players are ready.
+            if phase == GamePhase::Lobby && sessions.all_ready() {
+                if preload_complete || ship_stations.configs.is_empty() {
+                    new_phase = Some(GamePhase::InProgress);
+                    outbound.push((Target::All, ServerMessage::GameStarted));
                 } else {
-                    let player_count =
-                        sessions.players().iter().filter(|p| p.connected).count() as u32;
-                    let max = ship_stations.max_players;
-                    let check_count = if max > 0 && player_count > max {
-                        max
-                    } else {
-                        player_count
-                    };
-                    let current_consoles: Vec<Console> = sessions
-                        .players()
-                        .iter()
-                        .filter(|p| p.connected)
-                        .flat_map(|p| p.consoles.clone())
-                        .collect();
-                    all_stations_filled(ship_stations, check_count, &current_consoles)
-                };
-                if can_start {
-                    if preload_complete || ship_stations.configs.is_empty() {
-                        new_phase = Some(GamePhase::InProgress);
-                        outbound.push((Target::All, ServerMessage::GameStarted));
-                    } else {
-                        new_phase = Some(GamePhase::Loading);
-                    }
+                    new_phase = Some(GamePhase::Loading);
+                }
+            }
+        }
+        ClientMessage::StartGame => {
+            // Legacy compat: any player can force-start during Lobby.
+            // CaptainChair and all-stations-filled checks removed per #495.
+            // The primary start path is now SetReady + auto-start.
+            if phase == GamePhase::Lobby {
+                if preload_complete || ship_stations.configs.is_empty() {
+                    new_phase = Some(GamePhase::InProgress);
+                    outbound.push((Target::All, ServerMessage::GameStarted));
+                } else {
+                    new_phase = Some(GamePhase::Loading);
                 }
             }
         }
@@ -386,6 +382,7 @@ pub fn process_message(
                 ));
             }
         }
+        // SetReady IS handled above (not a no-op in lobby).
         ClientMessage::ToggleRedAlert
         | ClientMessage::HelmInput { .. }
         | ClientMessage::SetView { .. }
@@ -1075,69 +1072,31 @@ mod tests {
     // ── process_message: StartGame ────────────────────────────────────────
 
     #[test]
-    fn non_captain_cannot_start_game() {
+    fn any_player_can_start_game() {
+        // Legacy StartGame: any player (not just captain) can force-start.
         let mut sessions = sessions_with("t1", "Alice");
         sessions.register("t2".into(), "Bob".into()).unwrap();
-        let msg = ClientMessage::StartGame;
-        let result = pm("t2", &msg, &mut sessions, GamePhase::Lobby, None);
-        assert!(result.new_phase.is_none());
-        assert!(!result
-            .outbound
-            .iter()
-            .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
-    }
-
-    #[test]
-    fn start_game_ignored_when_stations_not_all_filled() {
-        // 1 player, captain station requires CaptainChair. Player has CaptainChair but
-        // we use ship_stations which at 1P has "Captain" covering all consoles.
-        // Since only 1 player and 1 station: if they hold CaptainChair it IS filled.
-        // Use 2 players so there's a second station (Tactical) that won't be filled.
-        let mut sessions = sessions_with("t1", "Alice");
-        sessions.register("t2".into(), "Bob".into()).unwrap();
-        // t1 takes Helm (CaptainChair station at 2P), Tactical station is empty
-        pm_stations(
-            "t1",
-            &ClientMessage::SelectStation {
-                station: "Helm".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        // t1 has CaptainChair but Tactical is unfilled → StartGame should be rejected
-        let result = pm_stations(
-            "t1",
+        // t2 (non-captain) can StartGame — captain check removed per #495
+        let result = pm(
+            "t2",
             &ClientMessage::StartGame,
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        assert!(
-            result.new_phase.is_none(),
-            "StartGame should be rejected when not all stations filled"
-        );
-        assert!(!result
+        assert!(result.new_phase.is_some(), "any player can StartGame");
+        assert!(result
             .outbound
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
     }
 
     #[test]
-    fn start_game_succeeds_when_captain_and_all_stations_filled() {
-        // 1 player at 1P: "Captain" station covers all consoles. Player takes Captain.
+    fn start_game_succeeds_even_with_empty_stations() {
+        // Legacy StartGame: succeeds regardless of stations-filled state.
+        // Empty seats are automated via AI backfill per #495.
         let mut sessions = sessions_with("t1", "Alice");
-        pm_stations(
-            "t1",
-            &ClientMessage::SelectStation {
-                station: "Captain".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        // Now t1 holds CaptainChair (via Captain station) and all 1P stations are filled
-        let result = pm_stations(
+        let result = pm(
             "t1",
             &ClientMessage::StartGame,
             &mut sessions,
@@ -1777,5 +1736,61 @@ tags = ["player"]
             result.outbound.is_empty(),
             "non-holder SetComplexity must be silent"
         );
+    }
+
+    // ── process_message: SetReady ─────────────────────────────────────
+
+    #[test]
+    fn set_ready_broadcasts_ready_changed() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let msg = ClientMessage::SetReady { ready: true };
+        let result = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+        assert!(result.outbound.iter().any(|(_, m)| matches!(m,
+            ServerMessage::ReadyChanged { token, ready } if token == "t1" && *ready
+        )));
+        assert!(sessions.players()[0].ready);
+    }
+
+    #[test]
+    fn set_ready_auto_starts_when_all_ready() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.register("t2".into(), "Bob".into()).unwrap();
+        // t1 ready, t2 not → no auto-start
+        let msg = ClientMessage::SetReady { ready: true };
+        let result = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+        assert!(result.new_phase.is_none(), "must not start when t2 not ready");
+
+        // t2 ready → auto-start
+        let msg = ClientMessage::SetReady { ready: true };
+        let result = pm("t2", &msg, &mut sessions, GamePhase::Lobby, None);
+        assert!(result.new_phase.is_some(), "must auto-start when all ready");
+        assert!(result.outbound.iter().any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
+    }
+
+    #[test]
+    fn set_ready_false_does_not_trigger_start() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let msg = ClientMessage::SetReady { ready: false };
+        let result = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+        assert!(result.new_phase.is_none(), "setting ready=false must not start");
+        assert!(result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::ReadyChanged { .. })));
+    }
+
+    #[test]
+    fn set_ready_in_progress_broadcasts_ready_changed_but_does_not_auto_start() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_ready("t1", true);
+        // Now try SetReady in InProgress — broadcasts ReadyChanged but does NOT start
+        let msg = ClientMessage::SetReady { ready: false };
+        let result = pm("t1", &msg, &mut sessions, GamePhase::InProgress, None);
+        // ReadyChanged is still broadcast (status update), but no GameStarted
+        assert!(result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::ReadyChanged { .. })));
+        assert!(result.new_phase.is_none(), "must not auto-start during InProgress");
     }
 }

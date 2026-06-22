@@ -393,6 +393,10 @@ pub struct Player {
     pub name: String,
     pub consoles: Vec<Console>,
     pub connected: bool,
+    /// True when this player has signalled they are ready to start.
+    /// Used in the per-player Ready flow replacing captain Engage.
+    #[serde(default)]
+    pub ready: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -927,6 +931,11 @@ pub enum ClientMessage {
         station: String,
     },
     ReleaseStation,
+    /// Per-player ready toggle (replaces captain-only Engage/StartGame).
+    /// When all joined players are ready the game auto-starts.
+    SetReady {
+        ready: bool,
+    },
     StartGame,
     ToggleRedAlert,
     HelmInput {
@@ -1120,6 +1129,10 @@ pub enum ServerMessage {
         token: String,
         station: Option<String>,
         consoles: Vec<Console>,
+    },
+    ReadyChanged {
+        token: String,
+        ready: bool,
     },
     NameChanged {
         token: String,
@@ -2130,6 +2143,10 @@ pub struct LobbyStatePayload {
     pub crew_count: u32,
     pub max_players: u32,
     pub all_stations_filled: bool,
+    /// True when every connected player is ready (replaces all_stations_filled
+    /// as the launch gate in the per-player Ready flow).
+    #[serde(default)]
+    pub all_ready: bool,
     pub stations: Vec<StationPayload>,
     pub spectators: Vec<String>,
 }

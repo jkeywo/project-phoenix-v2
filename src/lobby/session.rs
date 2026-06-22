@@ -87,6 +87,7 @@ impl SessionManager {
             name,
             consoles: Vec::new(),
             connected: true,
+            ready: false,
         });
         Ok(self.players.last().unwrap())
     }
@@ -259,6 +260,30 @@ impl SessionManager {
     /// Remove a token from the spectator queue (e.g. when they are promoted to a station).
     pub fn remove_spectator(&mut self, token: &str) {
         self.spectator_queue.retain(|t| t != token);
+    }
+
+    /// Set the ready flag for a player. No-op if token not found.
+    pub fn set_ready(&mut self, token: &str, ready: bool) {
+        if let Some(idx) = self.idx(token) {
+            self.players[idx].ready = ready;
+        }
+    }
+
+    /// True when every connected player (with consoles) is ready, or when
+    /// zero connected players exist (zero-human auto-start is allowed).
+    pub fn all_ready(&self) -> bool {
+        let connected: Vec<&Player> = self.players.iter().filter(|p| p.connected).collect();
+        if connected.is_empty() {
+            return true; // zero-human start
+        }
+        connected.iter().all(|p| p.ready)
+    }
+
+    /// Reset all players' ready flags to false (e.g. when a new scenario loads).
+    pub fn reset_ready(&mut self) {
+        for p in &mut self.players {
+            p.ready = false;
+        }
     }
 }
 
@@ -720,5 +745,90 @@ mod tests {
             sm.players()[0].consoles.is_empty(),
             "reconnect must not partially restore when a console was taken"
         );
+    }
+
+    // ── Ready state ──────────────────────────────────────────────────
+
+    #[test]
+    fn set_ready_marks_player_ready() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(!sm.players()[0].ready);
+        sm.set_ready("t1", true);
+        assert!(sm.players()[0].ready);
+        sm.set_ready("t1", false);
+        assert!(!sm.players()[0].ready);
+    }
+
+    #[test]
+    fn set_ready_unknown_token_is_noop() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.set_ready("nonexistent", true); // should not panic
+        assert!(!sm.players()[0].ready);
+    }
+
+    #[test]
+    fn all_ready_returns_true_when_zero_players() {
+        let sm = sm();
+        assert!(sm.all_ready(), "zero players → all_ready must be true");
+    }
+
+    #[test]
+    fn all_ready_returns_true_when_single_player_ready() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.set_ready("t1", true);
+        assert!(sm.all_ready());
+    }
+
+    #[test]
+    fn all_ready_returns_false_when_single_player_not_ready() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(!sm.all_ready());
+    }
+
+    #[test]
+    fn all_ready_requires_all_players_ready() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.set_ready("t1", true);
+        assert!(!sm.all_ready(), "t2 not ready → all_ready false");
+        sm.set_ready("t2", true);
+        assert!(sm.all_ready(), "both ready → all_ready true");
+    }
+
+    #[test]
+    fn all_ready_ignores_disconnected_players() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.set_ready("t1", true);
+        sm.disconnect("t2");
+        assert!(
+            sm.all_ready(),
+            "disconnected player should not block all_ready"
+        );
+    }
+
+    #[test]
+    fn reset_ready_clears_all() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.set_ready("t1", true);
+        sm.set_ready("t2", true);
+        sm.reset_ready();
+        assert!(!sm.players()[0].ready);
+        assert!(!sm.players()[1].ready);
+    }
+
+    #[test]
+    fn register_sets_ready_false() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(!sm.players()[0].ready, "newly registered player must have ready=false");
     }
 }

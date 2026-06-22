@@ -50,14 +50,14 @@ test('SelectStation — claims station and both clients receive StationAssigned'
   await clientB.close();
 });
 
-test('non-captain StartGame is ignored', async ({ context }) => {
+test('StartGame from any player starts the game', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 
-  // Two clients: A takes Helm (CaptainChair), B takes Tactical
+  // Two clients
   const clientA = await createTestClient(context, hostId, { name: 'Helm' });
   const clientB = await createTestClient(context, hostId, { name: 'Tactical' });
 
@@ -67,18 +67,18 @@ test('non-captain StartGame is ignored', async ({ context }) => {
   await clientB.send('SelectStation', { station: 'Tactical' });
   await waitForStation(clientB);
 
-  // Non-captain (B / Tactical station) attempts StartGame — should be ignored
+  // Non-captain (B / Tactical station) can StartGame (#495: captain check removed)
   await clientB.send('StartGame');
 
-  await clientA.page.waitForTimeout(500);
-  const earlyA = await clientA.lastMessage('GameStarted');
-  expect(earlyA).toBeNull();
+  // GameStarted should be received by both
+  await clientA.waitForMessage('GameStarted', 5_000);
+  await clientB.waitForMessage('GameStarted', 5_000);
 
   await clientA.close();
   await clientB.close();
 });
 
-test('StartGame with unfilled stations is ignored', async ({ context }) => {
+test('StartGame succeeds even with unfilled stations', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
@@ -93,12 +93,11 @@ test('StartGame with unfilled stations is ignored', async ({ context }) => {
   await clientA.send('SelectStation', { station: 'Helm' });
   await waitForStation(clientA);
 
-  // A is the captain (holds CaptainChair via Helm station) but stations are not all filled
+  // StartGame succeeds even with unfilled stations (#495: stations-filled gate removed)
   await clientA.send('StartGame');
 
-  await clientA.page.waitForTimeout(500);
-  const earlyA = await clientA.lastMessage('GameStarted');
-  expect(earlyA).toBeNull();
+  await clientA.waitForMessage('GameStarted', 5_000);
+  await clientB.waitForMessage('GameStarted', 5_000);
 
   await clientA.close();
   await clientB.close();

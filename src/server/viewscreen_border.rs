@@ -242,6 +242,8 @@ fn push_lobby_state(
         .map(|w| w.0.scenario_description.clone())
         .unwrap_or_default();
 
+    let all_ready = sessions.0.all_ready();
+
     let payload = LobbyStatePayload {
         phase: format!("{:?}", phase.get()),
         scenario_title,
@@ -252,6 +254,7 @@ fn push_lobby_state(
             .count() as u32,
         max_players: stations.max_players,
         all_stations_filled: all_filled,
+        all_ready,
         stations: station_payloads,
         spectators,
     };

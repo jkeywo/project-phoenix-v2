@@ -110,6 +110,7 @@ mod tests {
             name: "Alice".into(),
             consoles: vec![],
             connected: true,
+            ready: false,
         }
     }
 
@@ -143,6 +144,13 @@ mod tests {
         let msg = ClientMessage::SetName {
             name: "Carol".into(),
         };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_ready() {
+        let msg = ClientMessage::SetReady { ready: true };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -471,6 +479,16 @@ mod tests {
         let msg = ServerMessage::NameChanged {
             token: "tok".into(),
             name: "Dave".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_ready_changed() {
+        let msg = ServerMessage::ReadyChanged {
+            token: "tok".into(),
+            ready: true,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

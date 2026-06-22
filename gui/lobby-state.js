@@ -27,7 +27,7 @@ export function consolesOf(player) {
 }
 
 function normalisePlayer(p) {
-  return { ...p, consoles: consolesOf(p) };
+  return { ready: false, ...p, consoles: consolesOf(p) };
 }
 
 function defaultShipStations() {
@@ -98,6 +98,11 @@ export class LobbyState {
       case 'NameChanged': {
         const p = this.players.find(p => p.token === d.token);
         if (p) p.name = d.name;
+        break;
+      }
+      case 'ReadyChanged': {
+        const p = this.players.find(p => p.token === d.token);
+        if (p) p.ready = d.ready;
         break;
       }
       case 'StationAssigned': {

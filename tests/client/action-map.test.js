@@ -294,13 +294,13 @@ describe('set_shield_focus', () => {
   it('calls send SetShieldFocus with facing', () => {
     const send = mkSend();
     ACTION_MAP.set_shield_focus({ action: 'set_shield_focus', facing: 'fore' }, send);
-    expect(send).toHaveBeenCalledWith('SetShieldFocus', { facing: 'fore' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', { target: 'shields', payload: { type: 'SetShieldFocus', data: { facing: 'fore' } } });
   });
 
   it('defaults facing to null when absent', () => {
     const send = mkSend();
     ACTION_MAP.set_shield_focus({ action: 'set_shield_focus' }, send);
-    expect(send).toHaveBeenCalledWith('SetShieldFocus', { facing: null });
+    expect(send).toHaveBeenCalledWith('ControlSystem', { target: 'shields', payload: { type: 'SetShieldFocus', data: { facing: null } } });
   });
 });
 

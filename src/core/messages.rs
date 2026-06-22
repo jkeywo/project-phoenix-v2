@@ -841,6 +841,7 @@ pub enum SystemControlPayload {
     },
     StartImpulseCharge,
     CancelImpulse,
+    ToggleBoost,
     SetBoost {
         active: bool,
     },
@@ -1720,16 +1721,34 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::SetView { direction } => ClientMessage::SetView {
             mode: ViewMode::Camera(direction.clone()),
         },
-        UiAction::HelmInput { thrust, steering } => ClientMessage::HelmInput {
-            thrust: *thrust,
-            steering: *steering,
+        UiAction::HelmInput { thrust, steering } => ClientMessage::ControlSystem {
+            target: crate::system_registry::helm_system_id(),
+            payload: SystemControlPayload::HelmInput {
+                thrust: *thrust,
+                steering: *steering,
+            },
         },
-        UiAction::StartImpulseCharge => ClientMessage::StartImpulseCharge,
-        UiAction::CancelImpulse => ClientMessage::CancelImpulse,
-        UiAction::ToggleBoost => ClientMessage::ToggleBoost,
-        UiAction::SetBoost { active } => ClientMessage::SetBoost { active: *active },
-        UiAction::SetRadarView => ClientMessage::SetView {
-            mode: ViewMode::Radar,
+        UiAction::StartImpulseCharge => ClientMessage::ControlSystem {
+            target: crate::system_registry::helm_system_id(),
+            payload: SystemControlPayload::StartImpulseCharge,
+        },
+        UiAction::CancelImpulse => ClientMessage::ControlSystem {
+            target: crate::system_registry::helm_system_id(),
+            payload: SystemControlPayload::CancelImpulse,
+        },
+        UiAction::ToggleBoost => ClientMessage::ControlSystem {
+            target: crate::system_registry::helm_system_id(),
+            payload: SystemControlPayload::ToggleBoost,
+        },
+        UiAction::SetBoost { active } => ClientMessage::ControlSystem {
+            target: crate::system_registry::helm_system_id(),
+            payload: SystemControlPayload::SetBoost { active: *active },
+        },
+        UiAction::SetRadarView => ClientMessage::ControlSystem {
+            target: crate::system_registry::helm_system_id(),
+            payload: SystemControlPayload::SetView {
+                mode: ViewMode::Radar,
+            },
         },
         UiAction::IncreasePower { target } => ClientMessage::IncreasePower {
             console: target.clone(),
@@ -1851,9 +1870,12 @@ mod ui_action_tests {
         };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::HelmInput {
-                thrust: 0.75,
-                steering: -0.5
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::HelmInput {
+                    thrust: 0.75,
+                    steering: -0.5
+                }
             }
         );
     }
@@ -1862,7 +1884,10 @@ mod ui_action_tests {
     fn start_impulse_charge_maps_to_client_message() {
         assert_eq!(
             ui_action_to_client_message(&UiAction::StartImpulseCharge),
-            ClientMessage::StartImpulseCharge
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::StartImpulseCharge,
+            }
         );
     }
 
@@ -1870,7 +1895,10 @@ mod ui_action_tests {
     fn cancel_impulse_maps_to_client_message() {
         assert_eq!(
             ui_action_to_client_message(&UiAction::CancelImpulse),
-            ClientMessage::CancelImpulse
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::CancelImpulse,
+            }
         );
     }
 
@@ -1878,7 +1906,10 @@ mod ui_action_tests {
     fn toggle_boost_maps_to_client_message() {
         assert_eq!(
             ui_action_to_client_message(&UiAction::ToggleBoost),
-            ClientMessage::ToggleBoost
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::ToggleBoost,
+            }
         );
     }
 
@@ -1886,11 +1917,17 @@ mod ui_action_tests {
     fn set_boost_maps_to_client_message() {
         assert_eq!(
             ui_action_to_client_message(&UiAction::SetBoost { active: true }),
-            ClientMessage::SetBoost { active: true }
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetBoost { active: true },
+            }
         );
         assert_eq!(
             ui_action_to_client_message(&UiAction::SetBoost { active: false }),
-            ClientMessage::SetBoost { active: false }
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetBoost { active: false },
+            }
         );
     }
 
@@ -1898,8 +1935,11 @@ mod ui_action_tests {
     fn set_radar_view_maps_to_client_message() {
         assert_eq!(
             ui_action_to_client_message(&UiAction::SetRadarView),
-            ClientMessage::SetView {
-                mode: ViewMode::Radar
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar
+                }
             }
         );
     }

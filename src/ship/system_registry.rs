@@ -4,6 +4,9 @@ use std::collections::HashMap;
 pub const RED_ALERT_SYSTEM_ID: &str = "red-alert";
 pub const RED_ALERT_KIND: &str = "red_alert";
 pub const RED_ALERT_AI_CONTROLLER: &str = "red_alert_ai";
+pub const HELM_SYSTEM_ID: &str = "helm";
+pub const HELM_KIND: &str = "helm";
+pub const HELM_AI_CONTROLLER: &str = "helm_ai";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
@@ -64,6 +67,12 @@ impl SystemKindRegistry {
         Ok(registry)
     }
 
+    pub fn with_core_systems() -> Result<Self, SystemRegistryError> {
+        let mut registry = Self::with_red_alert()?;
+        registry.register(HELM_KIND, AiControllerRegistration::new(HELM_AI_CONTROLLER)?)?;
+        Ok(registry)
+    }
+
     pub fn register(
         &mut self,
         kind: impl Into<String>,
@@ -104,6 +113,10 @@ impl SystemKindRegistry {
 
 pub fn red_alert_system_id() -> SystemId {
     SystemId(RED_ALERT_SYSTEM_ID.to_string())
+}
+
+pub fn helm_system_id() -> SystemId {
+    SystemId(HELM_SYSTEM_ID.to_string())
 }
 
 #[cfg(test)]
@@ -169,6 +182,21 @@ mod tests {
                 .ai_controller
                 .name(),
             RED_ALERT_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn core_registry_has_helm_ai_controller() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(HELM_KIND));
+        assert_eq!(
+            registry
+                .registration(HELM_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            HELM_AI_CONTROLLER
         );
     }
 

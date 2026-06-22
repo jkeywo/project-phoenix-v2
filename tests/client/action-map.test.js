@@ -163,16 +163,22 @@ describe('toggle_red_alert', () => {
 });
 
 describe('helm_input', () => {
-  it('calls send HelmInput with thrust and steering', () => {
+  it('calls send ControlSystem HelmInput with thrust and steering', () => {
     const send = mkSend();
     ACTION_MAP.helm_input({ action: 'helm_input', thrust: 0.5, steering: -0.3 }, send);
-    expect(send).toHaveBeenCalledWith('HelmInput', { thrust: 0.5, steering: -0.3 });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'HelmInput', data: { thrust: 0.5, steering: -0.3 } },
+    });
   });
 
   it('defaults thrust and steering to 0', () => {
     const send = mkSend();
     ACTION_MAP.helm_input({ action: 'helm_input' }, send);
-    expect(send).toHaveBeenCalledWith('HelmInput', { thrust: 0, steering: 0 });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'HelmInput', data: { thrust: 0, steering: 0 } },
+    });
   });
 });
 
@@ -180,7 +186,10 @@ describe('start_impulse_charge', () => {
   it('calls send StartImpulseCharge', () => {
     const send = mkSend();
     ACTION_MAP.start_impulse_charge({}, send);
-    expect(send).toHaveBeenCalledWith('StartImpulseCharge');
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'StartImpulseCharge' },
+    });
   });
 });
 
@@ -188,7 +197,10 @@ describe('toggle_boost', () => {
   it('calls send ToggleBoost', () => {
     const send = mkSend();
     ACTION_MAP.toggle_boost({ action: 'toggle_boost' }, send);
-    expect(send).toHaveBeenCalledWith('ToggleBoost');
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'ToggleBoost' },
+    });
   });
 });
 
@@ -196,12 +208,18 @@ describe('set_boost', () => {
   it('sends SetBoost with active true', () => {
     const send = mkSend();
     ACTION_MAP.set_boost({ active: true }, send);
-    expect(send).toHaveBeenCalledWith('SetBoost', { active: true });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'SetBoost', data: { active: true } },
+    });
   });
   it('sends SetBoost with active false', () => {
     const send = mkSend();
     ACTION_MAP.set_boost({ active: false }, send);
-    expect(send).toHaveBeenCalledWith('SetBoost', { active: false });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'SetBoost', data: { active: false } },
+    });
   });
 });
 
@@ -209,15 +227,21 @@ describe('cancel_impulse', () => {
   it('calls send CancelImpulse', () => {
     const send = mkSend();
     ACTION_MAP.cancel_impulse({}, send);
-    expect(send).toHaveBeenCalledWith('CancelImpulse');
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'CancelImpulse' },
+    });
   });
 });
 
 describe('set_radar_view', () => {
-  it('calls send SetView with Radar kind', () => {
+  it('calls send ControlSystem SetView with Radar kind', () => {
     const send = mkSend();
     ACTION_MAP.set_radar_view({}, send);
-    expect(send).toHaveBeenCalledWith('SetView', { mode: { kind: 'Radar' } });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm',
+      payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
+    });
   });
 });
 

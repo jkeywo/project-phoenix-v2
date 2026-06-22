@@ -83,13 +83,28 @@ fn is_red_alert_toggle(msg: &ClientMessage) -> bool {
     }
 }
 
+fn view_mode_from_message(msg: &ClientMessage) -> Option<ViewMode> {
+    match msg {
+        ClientMessage::SetView { mode } => Some(mode.clone()),
+        ClientMessage::ControlSystem { target, payload }
+            if target.0 == crate::system_registry::HELM_SYSTEM_ID =>
+        {
+            match payload {
+                SystemControlPayload::SetView { mode } => Some(mode.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn handle_set_view(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
 ) {
     for ev in reader.read() {
-        if let ClientMessage::SetView { mode } = ev.msg.clone() {
+        if let Some(mode) = view_mode_from_message(&ev.msg) {
             // Authorization is per-variant: Camera views are the captain's call,
             // Radar is the helm's call. A request from the wrong console is
             // silently ignored.
@@ -566,6 +581,45 @@ mod tests {
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
             ViewMode::Camera(ViewDirection::Aft)
+        );
+    }
+
+    #[test]
+    fn helm_control_system_set_view_can_request_radar() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Radar is the helm's call, so seat a helm holder and send from it.
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::Identify {
+                token: "helm".into(),
+                name: "Hoshi".into(),
+            },
+        );
+        tick(&mut app);
+        app.world_mut()
+            .resource_mut::<Sessions>()
+            .0
+            .toggle_console("helm", Console::Helm)
+            .unwrap();
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Radar
         );
     }
 

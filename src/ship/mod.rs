@@ -1,5 +1,6 @@
 pub mod boost;
 pub mod config;
+pub mod control_source;
 pub mod damage;
 pub mod impulse;
 pub mod physics;

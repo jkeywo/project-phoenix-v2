@@ -15,6 +15,7 @@ pub mod console_ai;
 pub use console_ai::delegation;
 pub use ship::boost;
 pub use ship::config as ship_config;
+pub use ship::control_source;
 pub use ship::impulse;
 pub use weapons::shield;
 pub mod regions;

@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn client_control_system_helm_input_round_trips() {
         let msg = ClientMessage::ControlSystem {
-            target: SystemId("helm".into()),
+            target: crate::system_registry::helm_system_id(),
             payload: SystemControlPayload::HelmInput {
                 thrust: 0.75,
                 steering: -0.5,
@@ -263,6 +263,39 @@ mod tests {
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_control_system_helm_impulse_and_boost_round_trip() {
+        let messages = [
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::StartImpulseCharge,
+            },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::CancelImpulse,
+            },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::ToggleBoost,
+            },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetBoost { active: true },
+            },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
+            },
+        ];
+
+        for msg in messages {
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_client_roundtrip(&PrettyJsonCodec, msg);
+        }
     }
 
     #[test]

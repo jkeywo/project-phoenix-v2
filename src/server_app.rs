@@ -2168,6 +2168,7 @@ mod tests {
         ])))
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(ImpulseState::new()))
+        .init_resource::<crate::ship_plugin::ShipSystemControlSources>()
         .init_resource::<WorldResource>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<TrackedEntities>()

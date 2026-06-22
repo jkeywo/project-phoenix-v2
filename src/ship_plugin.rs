@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
+use crate::control_source::{ControlSourceResolver, ControlTickPolicy};
 use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{ClientMessage, ModifierSlot};
+use crate::messages::{ClientMessage, ModifierSlot, SystemControlPayload};
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
@@ -15,10 +16,37 @@ use crate::simulation::{Ship, ShipBoost, ShipHullIntegrity, ShipImpulse};
 #[derive(Resource)]
 struct HelmInputTimer(Timer);
 
-#[derive(Resource, Default)]
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub struct LastHelmInput {
     pub thrust: f32,
     pub steering: f32,
+}
+
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShipSystemControlSources(pub ControlSourceResolver);
+
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct HelmAiController {
+    pub thrust: f32,
+    pub steering: f32,
+}
+
+impl Default for HelmAiController {
+    fn default() -> Self {
+        Self {
+            thrust: 0.5,
+            steering: 0.0,
+        }
+    }
+}
+
+impl HelmAiController {
+    fn operate(self) -> LastHelmInput {
+        LastHelmInput {
+            thrust: self.thrust,
+            steering: self.steering,
+        }
+    }
 }
 
 /// Runtime ship physics config, loaded from `[helm_console]` in the entity TOML.
@@ -100,6 +128,8 @@ impl Plugin for ShipPlugin {
             TimerMode::Repeating,
         )))
         .init_resource::<LastHelmInput>()
+        .init_resource::<ShipSystemControlSources>()
+        .init_resource::<HelmAiController>()
         .init_resource::<ImpulseConfigResource>()
         .init_resource::<BoostConfigResource>()
         .init_resource::<ShipBoost>()
@@ -137,6 +167,8 @@ fn process_helm_inputs(
     boost: Res<ShipBoost>,
     boost_config: Res<BoostConfigResource>,
     bank_config: Res<BankConfigResource>,
+    control_sources: Res<ShipSystemControlSources>,
+    helm_ai: Res<HelmAiController>,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
@@ -157,23 +189,27 @@ fn process_helm_inputs(
         return;
     }
 
+    let policy = control_sources
+        .0
+        .policy_for(&crate::system_registry::helm_system_id());
     let helm_token = sessions.0.console_holder(crate::messages::Console::Helm);
-    if helm_token.is_none() {
+    if policy.accept_human_input && helm_token.is_none() {
         return;
     }
 
     for ev in reader.read() {
-        if ev.token != helm_token.unwrap() {
+        if !policy.accept_human_input {
             continue;
         }
-        if let ClientMessage::HelmInput {
-            thrust: t,
-            steering: s,
-        } = ev.msg
-        {
-            last_input.thrust = t;
-            last_input.steering = s;
+        if helm_token != Some(ev.token.as_str()) {
+            continue;
         }
+        if let Some(input) = helm_input_from_message(&ev.msg) {
+            *last_input = input;
+        }
+    }
+    if policy.operate_ai {
+        *last_input = helm_ai.operate();
     }
 
     let dt = timer.0.duration().as_secs_f32();
@@ -240,6 +276,42 @@ fn process_helm_inputs(
     ship.roll = ship.roll + (target_roll - ship.roll) * lerp_factor;
 }
 
+fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy {
+    sources.0.policy_for(&crate::system_registry::helm_system_id())
+}
+
+fn helm_input_from_message(msg: &ClientMessage) -> Option<LastHelmInput> {
+    match msg {
+        ClientMessage::HelmInput { thrust, steering } => Some(LastHelmInput {
+            thrust: *thrust,
+            steering: *steering,
+        }),
+        ClientMessage::ControlSystem { target, payload }
+            if target.0 == crate::system_registry::HELM_SYSTEM_ID =>
+        {
+            match payload {
+                SystemControlPayload::HelmInput { thrust, steering } => Some(LastHelmInput {
+                    thrust: *thrust,
+                    steering: *steering,
+                }),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn helm_payload_from_message(msg: &ClientMessage) -> Option<&SystemControlPayload> {
+    match msg {
+        ClientMessage::ControlSystem { target, payload }
+            if target.0 == crate::system_registry::HELM_SYSTEM_ID =>
+        {
+            Some(payload)
+        }
+        _ => None,
+    }
+}
+
 fn sync_ship_position(ship: Res<ShipState>, mut ship_query: Query<&mut Transform, With<Ship>>) {
     let Ok(mut transform) = ship_query.single_mut() else {
         return;
@@ -258,6 +330,7 @@ pub fn handle_impulse_messages(
     membership: Option<Res<RegionMembership>>,
     region_query: Query<&RegionEffectsSection>,
     ship_query: Query<Entity, With<Ship>>,
+    control_sources: Res<ShipSystemControlSources>,
 ) {
     if *last_hull_hp == 0.0 && (hull.0.total_current() - hull.0.total_max()).abs() < 1e-6 {
         *last_hull_hp = hull.0.total_max();
@@ -269,14 +342,35 @@ pub fn handle_impulse_messages(
     }
     *last_hull_hp = current_hp;
 
+    let policy = helm_control_policy(&control_sources);
     for msg in reader.read() {
         match &msg.msg {
             ClientMessage::StartImpulseCharge
-                if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
+                if policy.accept_human_input
+                    && !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
             {
                 impulse.0.start_charge();
             }
-            ClientMessage::CancelImpulse => {
+            ClientMessage::ControlSystem { .. }
+                if policy.accept_human_input
+                    && matches!(
+                        helm_payload_from_message(&msg.msg),
+                        Some(SystemControlPayload::StartImpulseCharge)
+                    )
+                    && !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
+            {
+                impulse.0.start_charge();
+            }
+            ClientMessage::CancelImpulse if policy.accept_human_input => {
+                impulse.0.cancel_charge();
+            }
+            ClientMessage::ControlSystem { .. }
+                if policy.accept_human_input
+                    && matches!(
+                        helm_payload_from_message(&msg.msg),
+                        Some(SystemControlPayload::CancelImpulse)
+                    ) =>
+            {
                 impulse.0.cancel_charge();
             }
             _ => {}
@@ -292,22 +386,42 @@ fn tick_impulse(
     impulse.0.tick(time.delta_secs(), config.charge_duration);
 }
 
-/// Toggle the boost drive in response to `ToggleBoost` from the helm. No-op when
-/// the feature is disabled for this ship. Mirrors `handle_impulse_messages`,
-/// which likewise does not gate on the helm token holder.
+/// Toggle the boost drive in response to Helm boost controls. No-op when the
+/// feature is disabled or Helm is currently AI-operated.
 pub fn handle_boost_messages(
     mut reader: MessageReader<InboundMessage>,
     mut boost: ResMut<ShipBoost>,
     config: Res<BoostConfigResource>,
+    control_sources: Res<ShipSystemControlSources>,
 ) {
     if !config.enabled {
+        return;
+    }
+    let policy = helm_control_policy(&control_sources);
+    if !policy.accept_human_input {
+        for _ in reader.read() {}
         return;
     }
     for msg in reader.read() {
         match &msg.msg {
             ClientMessage::ToggleBoost => boost.0.toggle(),
+            ClientMessage::ControlSystem { .. }
+                if matches!(
+                    helm_payload_from_message(&msg.msg),
+                    Some(SystemControlPayload::ToggleBoost)
+                ) =>
+            {
+                boost.0.toggle();
+            }
             ClientMessage::SetBoost { active } => {
                 if *active { boost.0.activate(); } else { boost.0.deactivate(); }
+            }
+            ClientMessage::ControlSystem { .. } => {
+                if let Some(SystemControlPayload::SetBoost { active }) =
+                    helm_payload_from_message(&msg.msg)
+                {
+                    if *active { boost.0.activate(); } else { boost.0.deactivate(); }
+                }
             }
             _ => {}
         }
@@ -325,14 +439,17 @@ fn tick_boost(
     last_input: Res<LastHelmInput>,
     sessions: Res<Sessions>,
     impulse: Res<ShipImpulse>,
+    control_sources: Res<ShipSystemControlSources>,
 ) {
     if !config.enabled {
         return;
     }
+    let policy = helm_control_policy(&control_sources);
     let has_helm = sessions
         .0
         .console_holder(crate::messages::Console::Helm)
-        .is_some();
+        .is_some()
+        || policy.operate_ai;
     let drain_factor = if !has_helm {
         0.0
     } else if impulse.0.is_active() {
@@ -382,6 +499,7 @@ mod tests {
     use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::lobby::LobbyPlugin;
     use crate::messages::ClientMessage;
+    use crate::control_source::ControlSource;
     use crate::modifiers::ShipModifiers;
     use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
     use crate::region_shape::RegionShape;
@@ -426,6 +544,11 @@ mod tests {
         app.update();
     }
 
+    fn tick_twice(app: &mut App) {
+        tick(app);
+        tick(app);
+    }
+
     fn start_game_with_helm_and_science(app: &mut App) {
         push(
             app,
@@ -463,6 +586,107 @@ mod tests {
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
+    }
+
+    fn set_helm_control_source(app: &mut App, source: ControlSource) {
+        app.world_mut()
+            .resource_mut::<ShipSystemControlSources>()
+            .0
+            .set(crate::system_registry::helm_system_id(), source);
+    }
+
+    // ── Helm system control-source tests ───────────────────────────────────
+
+    #[test]
+    fn control_system_helm_input_updates_last_input_and_moves_ship() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::HelmInput {
+                    thrust: 1.0,
+                    steering: 0.25,
+                },
+            },
+        );
+        tick_twice(&mut app);
+
+        assert_eq!(
+            *app.world().resource::<LastHelmInput>(),
+            LastHelmInput {
+                thrust: 1.0,
+                steering: 0.25
+            }
+        );
+        assert!(app.world().resource::<ShipState>().forward_speed > 0.0);
+    }
+
+    #[test]
+    fn ai_helm_operates_without_human_holder() {
+        let mut app = test_app();
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick_twice(&mut app);
+
+        assert_eq!(
+            *app.world().resource::<LastHelmInput>(),
+            LastHelmInput {
+                thrust: 0.5,
+                steering: 0.0
+            }
+        );
+        assert!(app.world().resource::<ShipState>().forward_speed > 0.0);
+    }
+
+    #[test]
+    fn ai_helm_ignores_human_input() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        app.insert_resource(HelmAiController {
+            thrust: 0.25,
+            steering: 0.0,
+        });
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::HelmInput {
+                    thrust: -1.0,
+                    steering: 1.0,
+                },
+            },
+        );
+        tick_twice(&mut app);
+
+        assert_eq!(
+            *app.world().resource::<LastHelmInput>(),
+            LastHelmInput {
+                thrust: 0.25,
+                steering: 0.0
+            }
+        );
+    }
+
+    #[test]
+    fn human_helm_suppresses_ai_operate() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+        app.insert_resource(HelmAiController {
+            thrust: 1.0,
+            steering: 0.0,
+        });
+
+        tick(&mut app);
+
+        assert_eq!(*app.world().resource::<LastHelmInput>(), LastHelmInput::default());
+        assert_eq!(app.world().resource::<ShipState>().forward_speed, 0.0);
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Impulse Drive / Damage Cancellation tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -560,6 +784,27 @@ mod tests {
     }
 
     #[test]
+    fn control_system_start_impulse_charge_begins_charge() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::StartImpulseCharge,
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            ImpulsePhase::Charging,
+        );
+    }
+
+    #[test]
     fn cancel_impulse_message_cancels_charge() {
         let mut app = test_app();
         start_game_with_helm_and_science(&mut app);
@@ -567,6 +812,29 @@ mod tests {
         push(&mut app, "helm", ClientMessage::StartImpulseCharge);
         tick(&mut app);
         push(&mut app, "helm", ClientMessage::CancelImpulse);
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            ImpulsePhase::Idle,
+        );
+    }
+
+    #[test]
+    fn control_system_cancel_impulse_cancels_charge() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
+        tick(&mut app);
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::CancelImpulse,
+            },
+        );
         tick(&mut app);
 
         assert_eq!(
@@ -943,6 +1211,53 @@ mod tests {
         assert!(app.world().resource::<ShipBoost>().0.is_active());
 
         push(&mut app, "helm", ClientMessage::ToggleBoost);
+        tick(&mut app);
+        assert!(!app.world().resource::<ShipBoost>().0.is_active());
+    }
+
+    #[test]
+    fn control_system_toggle_boost_engages_when_enabled() {
+        let mut app = test_app();
+        app.insert_resource(enabled_boost_config());
+        start_game_with_helm_and_science(&mut app);
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::ToggleBoost,
+            },
+        );
+        tick(&mut app);
+        assert!(app.world().resource::<ShipBoost>().0.is_active());
+    }
+
+    #[test]
+    fn control_system_set_boost_sets_active_state() {
+        let mut app = test_app();
+        app.insert_resource(enabled_boost_config());
+        start_game_with_helm_and_science(&mut app);
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetBoost { active: true },
+            },
+        );
+        tick(&mut app);
+        assert!(app.world().resource::<ShipBoost>().0.is_active());
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetBoost { active: false },
+            },
+        );
         tick(&mut app);
         assert!(!app.world().resource::<ShipBoost>().0.is_active());
     }

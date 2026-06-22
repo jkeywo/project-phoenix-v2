@@ -259,13 +259,13 @@ describe('stationSlots', () => {
     expect(slots[3]).toEqual({ kind: 'spectator', player_name: 'Dave' });
   });
 
-  it('uses min_players layout when no players are connected', () => {
+  it('always shows max_players layout even when no players are connected', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
     const slots = s.stationSlots('x');
-    expect(slots).toHaveLength(1);
-    expect(slots[0].station).toBe('Captain');
-    expect(slots[0].description).toBe('Solo command');
+    expect(slots).toHaveLength(2);
+    expect(slots[0].station).toBe('Helm');
+    expect(slots[1].station).toBe('Tactical');
   });
 
   it('carries preset names from the complexity map (default Std)', () => {

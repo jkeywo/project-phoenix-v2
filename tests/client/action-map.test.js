@@ -105,7 +105,10 @@ describe('set_target', () => {
   it('calls send SetTarget with uuid', () => {
     const send = mkSend();
     ACTION_MAP.set_target({ action: 'set_target', uuid: 'abc' }, send);
-    expect(send).toHaveBeenCalledWith('SetTarget', { uuid: 'abc' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'tactical',
+      payload: { type: 'SetTarget', data: { uuid: 'abc' } },
+    });
   });
 
   it('does nothing when uuid is absent', () => {
@@ -119,7 +122,10 @@ describe('set_phaser_mode', () => {
   it('calls send SetPhaserMode with mode', () => {
     const send = mkSend();
     ACTION_MAP.set_phaser_mode({ action: 'set_phaser_mode', mode: 'Manual' }, send);
-    expect(send).toHaveBeenCalledWith('SetPhaserMode', { mode: 'Manual' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'tactical',
+      payload: { type: 'SetPhaserMode', data: { mode: 'Manual' } },
+    });
   });
 
   it('does nothing when mode is absent', () => {

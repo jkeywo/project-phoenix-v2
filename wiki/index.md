@@ -133,6 +133,7 @@ Open (planned work):
 Synthesis of where the project is going.
 
 - **[Roadmap Overview](./roadmap/overview.md)** — Shipped vs in-flight vs drafted.
+- **[Polish Audit](./roadmap/polish-audit.md)** — Missing quality-of-life, presentation, audio, and juice work for the current game.
 - **[Console Expansion](./roadmap/console-expansion.md)** — Path from 2 consoles to 6.
 - **[Combat & Damage](./roadmap/combat-and-damage.md)** — Hull, shields, phasers, torpedoes.
 - **[Data-Driven Content](./roadmap/data-driven-content.md)** — Entity files, scenarios, system maps.

@@ -322,19 +322,22 @@ export function buildCaptainConsoleState(state) {
   const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
   const controlSources = state.controlSources || {};
   const redAlertAuto = controlSources['red-alert'] === 'Ai';
+  const viewscreenAuto = controlSources['viewscreen'] === 'Ai';
   return JSON.stringify({
-    red_alert:          state.redAlert    || false,
-    red_alert_system_id: 'red-alert',
-    red_alert_auto:     redAlertAuto,
-    view_direction:     viewDirection,
-    view_mode:          'Camera',
-    objectives:         state.objectives  || [],
-    hull_integrity_pct: state.hullPct     || 100,
-    game_status:        state.redAlert
-                          ? 'RED ALERT — All hands to battlestations.'
-                          : 'Standing by. All systems nominal.',
-    blips:              state.blips       || [],
-    own_hull: ownHull('CaptainChair', state),
+    red_alert:             state.redAlert    || false,
+    red_alert_system_id:   'red-alert',
+    red_alert_auto:        redAlertAuto,
+    viewscreen_system_id:  'viewscreen',
+    viewscreen_auto:       viewscreenAuto,
+    view_direction:        viewDirection,
+    view_mode:             'Camera',
+    objectives:            state.objectives  || [],
+    hull_integrity_pct:    state.hullPct     || 100,
+    game_status:           state.redAlert
+                             ? 'RED ALERT — All hands to battlestations.'
+                             : 'Standing by. All systems nominal.',
+    blips:                 state.blips       || [],
+    own_hull:              ownHull('CaptainChair', state),
   });
 }
 

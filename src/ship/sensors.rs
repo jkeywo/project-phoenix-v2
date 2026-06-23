@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{ClientMessage, Console, CoordinationPayload, ServerMessage, SystemControlPayload};
+use crate::messages::{
+    ClientMessage, Console, CoordinationPayload, ServerMessage, SystemControlPayload,
+};
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
 use crate::simulation::WeaponsTarget;
@@ -28,12 +30,12 @@ impl Plugin for ShipSensorsPlugin {
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<SensorsFrequencyState>()
             .add_systems(
-            Update,
-            (
-                handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
-                tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
-            ),
-        );
+                Update,
+                (
+                    handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
+                    tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
+                ),
+            );
     }
 }
 
@@ -51,7 +53,9 @@ pub fn handle_sensors_messages(
 ) {
     let policy = control_sources
         .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::sensors_system_id()))
+        .map(|cs| {
+            cs.0.policy_for(&crate::system_registry::sensors_system_id())
+        })
         .unwrap_or(crate::control_source::ControlTickPolicy {
             accept_human_input: true,
             operate_ai: false,
@@ -126,7 +130,9 @@ pub fn tick_sensors_frequency_hint(
 
     let sender_origin = control_sources
         .as_deref()
-        .map(|cs| cs.0.source_for(&crate::system_registry::sensors_system_id()))
+        .map(|cs| {
+            cs.0.source_for(&crate::system_registry::sensors_system_id())
+        })
         .unwrap_or(ControlSource::Human);
 
     writer.write(CoordinationEnqueue {

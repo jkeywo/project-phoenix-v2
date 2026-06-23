@@ -1017,16 +1017,15 @@ fn handle_set_phaser_frequency(
 
         // Tactical arm: gated on the control-source resolver (accept_human_input).
         // Sensors arm: no policy change — Sensors is not yet a coarse system.
-        let sender_console =
-            if tactical_policy.accept_human_input
-                && sessions.0.console_holder(Console::Tactical) == Some(ev.token.as_str())
-            {
-                Console::Tactical
-            } else if sessions.0.console_holder(Console::Sensors) == Some(ev.token.as_str()) {
-                Console::Sensors
-            } else {
-                continue;
-            };
+        let sender_console = if tactical_policy.accept_human_input
+            && sessions.0.console_holder(Console::Tactical) == Some(ev.token.as_str())
+        {
+            Console::Tactical
+        } else if sessions.0.console_holder(Console::Sensors) == Some(ev.token.as_str()) {
+            Console::Sensors
+        } else {
+            continue;
+        };
 
         if !is_sender_authorized(
             CONTROL_SET_PHASER_FREQUENCY,
@@ -1661,10 +1660,7 @@ fn tick_tactical_ai(
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
-    asteroid_q: Query<
-        (&AsteroidUuid, &Transform),
-        With<crate::simulation::Asteroid>,
-    >,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
     npc_q: Query<
         (&crate::entity_spawner::EntityUuid, &Transform),
         Without<crate::simulation::Asteroid>,
@@ -1701,13 +1697,11 @@ fn tick_tactical_ai(
             let target_xz = asteroid_q
                 .iter()
                 .find_map(|(u, t)| {
-                    (u.0 == *target_uuid)
-                        .then_some((t.translation.x, t.translation.z))
+                    (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
                 })
                 .or_else(|| {
                     npc_q.iter().find_map(|(u, t)| {
-                        (u.0 == *target_uuid)
-                            .then_some((t.translation.x, t.translation.z))
+                        (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
                     })
                 });
 
@@ -1756,7 +1750,9 @@ fn tick_tactical_ai(
                         Some(target_uuid.clone()),
                         source_uuid.clone(),
                     ) {
-                        LaunchResult::Launched { uuid: launched_uuid } => {
+                        LaunchResult::Launched {
+                            uuid: launched_uuid,
+                        } => {
                             outbox.0.push((
                                 Target::All,
                                 ServerMessage::TorpedoLaunched {
@@ -4921,10 +4917,7 @@ mod tests {
         // Unclaimed station + Ai ControlSource → tick_tactical_ai fires unconditionally.
         let mut app = test_app();
 
-        set_tactical_control_source(
-            &mut app,
-            crate::ship::control_source::ControlSource::Ai,
-        );
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
         load_tube_now(&mut app, "fore_port");
         // Asteroid at (0, -30) → bearing 0 from ship at origin yaw=0 → in ForePort arc.
@@ -4962,10 +4955,7 @@ mod tests {
         );
         tick(&mut app);
 
-        set_tactical_control_source(
-            &mut app,
-            crate::ship::control_source::ControlSource::Ai,
-        );
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
         app.world_mut()
             .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());

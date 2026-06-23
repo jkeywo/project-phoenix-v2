@@ -3638,12 +3638,10 @@ mod tests {
             let mut sources = app
                 .world_mut()
                 .get_resource_or_insert_with(crate::ship_plugin::ShipSystemControlSources::default);
-            sources
-                .0
-                .set(
-                    crate::system_registry::comms_system_id(),
-                    crate::control_source::ControlSource::Ai,
-                );
+            sources.0.set(
+                crate::system_registry::comms_system_id(),
+                crate::control_source::ControlSource::Ai,
+            );
         }
 
         push_msg(

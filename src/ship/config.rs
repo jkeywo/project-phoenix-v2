@@ -450,11 +450,15 @@ power_group = "ops"
         let config = ShipConfig::from_toml(valid_toml(), KINDS).unwrap();
 
         assert_eq!(
-            config.station(&StationId("tactical".into())).map(|s| &s.name),
+            config
+                .station(&StationId("tactical".into()))
+                .map(|s| &s.name),
             Some(&"Tactical".to_string())
         );
         assert_eq!(
-            config.system(&SystemId("phaser-fore".into())).map(|s| &s.kind),
+            config
+                .system(&SystemId("phaser-fore".into()))
+                .map(|s| &s.kind),
             Some(&"phaser_bank".to_string())
         );
         assert_eq!(
@@ -473,10 +477,7 @@ power_group = "ops"
                 .systems_in_power_group(&PowerGroupId("ops".into()))
                 .map(|s| s.id.clone())
                 .collect::<Vec<_>>(),
-            vec![
-                SystemId("red-alert".into()),
-                SystemId("viewscreen".into())
-            ]
+            vec![SystemId("red-alert".into()), SystemId("viewscreen".into())]
         );
     }
 

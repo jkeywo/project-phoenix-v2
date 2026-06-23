@@ -1,6 +1,6 @@
+pub use crate::messages::CoordinationPayload;
 use crate::messages::SystemId;
 use crate::ship::control_source::ControlSource;
-pub use crate::messages::CoordinationPayload;
 
 /// What to do with a delivered coordination message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

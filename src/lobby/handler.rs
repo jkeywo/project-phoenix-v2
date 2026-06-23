@@ -1547,13 +1547,19 @@ tags = ["player"]
         // t1 ready, t2 not → no auto-start
         let msg = ClientMessage::SetReady { ready: true };
         let result = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
-        assert!(result.new_phase.is_none(), "must not start when t2 not ready");
+        assert!(
+            result.new_phase.is_none(),
+            "must not start when t2 not ready"
+        );
 
         // t2 ready → auto-start
         let msg = ClientMessage::SetReady { ready: true };
         let result = pm("t2", &msg, &mut sessions, GamePhase::Lobby, None);
         assert!(result.new_phase.is_some(), "must auto-start when all ready");
-        assert!(result.outbound.iter().any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
+        assert!(result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
     }
 
     #[test]
@@ -1561,7 +1567,10 @@ tags = ["player"]
         let mut sessions = sessions_with("t1", "Alice");
         let msg = ClientMessage::SetReady { ready: false };
         let result = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
-        assert!(result.new_phase.is_none(), "setting ready=false must not start");
+        assert!(
+            result.new_phase.is_none(),
+            "setting ready=false must not start"
+        );
         assert!(result
             .outbound
             .iter()
@@ -1580,6 +1589,9 @@ tags = ["player"]
             .outbound
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::ReadyChanged { .. })));
-        assert!(result.new_phase.is_none(), "must not auto-start during InProgress");
+        assert!(
+            result.new_phase.is_none(),
+            "must not auto-start during InProgress"
+        );
     }
 }

@@ -29,10 +29,7 @@ pub fn resolve_automated_systems(
         );
     }
 
-    let rating = station
-        .ratings
-        .iter()
-        .find(|r| r.name == rating_name)?;
+    let rating = station.ratings.iter().find(|r| r.name == rating_name)?;
 
     Some(rating.automated_systems.clone())
 }
@@ -198,11 +195,7 @@ power_group = "ops"
     #[test]
     fn resolves_explicit_rating_systems() {
         let config = parse();
-        let result = resolve_automated_systems(
-            &config,
-            &StationId("tactical".into()),
-            "Assisted",
-        );
+        let result = resolve_automated_systems(&config, &StationId("tactical".into()), "Assisted");
         assert_eq!(
             result,
             Some(vec![
@@ -215,22 +208,15 @@ power_group = "ops"
     #[test]
     fn resolves_empty_rating_systems() {
         let config = parse();
-        let result = resolve_automated_systems(
-            &config,
-            &StationId("captain".into()),
-            "Manual",
-        );
+        let result = resolve_automated_systems(&config, &StationId("captain".into()), "Manual");
         assert_eq!(result, Some(vec![]));
     }
 
     #[test]
     fn backfill_returns_all_station_systems() {
         let config = parse();
-        let result = resolve_automated_systems(
-            &config,
-            &StationId("tactical".into()),
-            BACKFILL_RATING,
-        );
+        let result =
+            resolve_automated_systems(&config, &StationId("tactical".into()), BACKFILL_RATING);
         let expected: Vec<SystemId> = vec![
             SystemId("phaser-fore".into()),
             SystemId("torpedo-magazine".into()),
@@ -242,22 +228,14 @@ power_group = "ops"
     #[test]
     fn unknown_rating_returns_none() {
         let config = parse();
-        let result = resolve_automated_systems(
-            &config,
-            &StationId("captain".into()),
-            "Bogus",
-        );
+        let result = resolve_automated_systems(&config, &StationId("captain".into()), "Bogus");
         assert_eq!(result, None);
     }
 
     #[test]
     fn unknown_station_returns_none() {
         let config = parse();
-        let result = resolve_automated_systems(
-            &config,
-            &StationId("ghost".into()),
-            "Assisted",
-        );
+        let result = resolve_automated_systems(&config, &StationId("ghost".into()), "Assisted");
         assert_eq!(result, None);
     }
 
@@ -345,7 +323,12 @@ power_group = "ops"
         }
 
         // Apply Manual rating on captain (empty automated list)
-        apply_rating(&config, &StationId("captain".into()), "Manual", &mut resolver);
+        apply_rating(
+            &config,
+            &StationId("captain".into()),
+            "Manual",
+            &mut resolver,
+        );
 
         // Tactical systems should be unaffected
         assert_eq!(
@@ -360,7 +343,12 @@ power_group = "ops"
         let mut resolver = ControlSourceResolver::new();
         let before = resolver.clone();
 
-        apply_rating(&config, &StationId("ghost".into()), "Assisted", &mut resolver);
+        apply_rating(
+            &config,
+            &StationId("ghost".into()),
+            "Assisted",
+            &mut resolver,
+        );
         assert_eq!(resolver, before);
     }
 

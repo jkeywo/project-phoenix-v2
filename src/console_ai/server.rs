@@ -193,12 +193,12 @@ mod tests {
     use crate::repair_teams::RepairTeams;
     use crate::shield::ShieldSystem;
     use crate::ship_plugin::LastHelmInput;
+    use crate::ship_state::ShipState;
     use crate::simulation::{
         ActiveBeam, CurrentPhaserMode, PhaserCooldown, PowerConfigResource,
         PowerMultiplierResource, ShipHullIntegrity, ShipImpulse, ShipPowerSystem, ShipRepairTeams,
         ShipShields, SimOutbox, TorpedoSystemResource, TrackedEntities, WeaponsTarget,
     };
-    use crate::ship_state::ShipState;
     use crate::torpedo::{TorpedoConfig, TorpedoSystem};
 
     #[derive(Resource, Default)]

@@ -11,9 +11,9 @@ use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::ship::config::ShipConfig;
+use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
 use crate::ship::coordination::{CoordinationLagQueue, QueuedCoordination};
-use crate::ship::control_source::ControlSource;
 use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
@@ -147,8 +147,7 @@ power_group = "ops"
             "torpedo_tube",
             "viewscreen",
         ];
-        let config = ShipConfig::from_toml(toml, KINDS)
-            .expect("default ship config must parse");
+        let config = ShipConfig::from_toml(toml, KINDS).expect("default ship config must parse");
         Self(config)
     }
 }
@@ -413,7 +412,9 @@ fn process_helm_inputs(
 }
 
 fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy {
-    sources.0.policy_for(&crate::system_registry::helm_system_id())
+    sources
+        .0
+        .policy_for(&crate::system_registry::helm_system_id())
 }
 
 fn helm_input_from_message(msg: &ClientMessage) -> Option<LastHelmInput> {
@@ -550,13 +551,21 @@ pub fn handle_boost_messages(
                 boost.0.toggle();
             }
             ClientMessage::SetBoost { active } => {
-                if *active { boost.0.activate(); } else { boost.0.deactivate(); }
+                if *active {
+                    boost.0.activate();
+                } else {
+                    boost.0.deactivate();
+                }
             }
             ClientMessage::ControlSystem { .. } => {
                 if let Some(SystemControlPayload::SetBoost { active }) =
                     helm_payload_from_message(&msg.msg)
                 {
-                    if *active { boost.0.activate(); } else { boost.0.deactivate(); }
+                    if *active {
+                        boost.0.activate();
+                    } else {
+                        boost.0.deactivate();
+                    }
                 }
             }
             _ => {}
@@ -757,12 +766,25 @@ pub fn process_coordination_lag(
                 if let Some(station_id) = station_opt {
                     if let Some(station) = ship_config.0.station(station_id) {
                         let console_id = &station.console;
-                        let token: Option<String> = [crate::messages::Console::CaptainChair, crate::messages::Console::Helm, crate::messages::Console::Tactical, crate::messages::Console::Repair, crate::messages::Console::Sensors, crate::messages::Console::Shields, crate::messages::Console::Navigation, crate::messages::Console::Power, crate::messages::Console::Comms]
-                            .iter()
-                            .find(|c| c.station_console_id() == console_id)
-                            .and_then(|console| {
-                                sessions.0.console_holder(console.clone()).map(|t| t.to_string())
-                            });
+                        let token: Option<String> = [
+                            crate::messages::Console::CaptainChair,
+                            crate::messages::Console::Helm,
+                            crate::messages::Console::Tactical,
+                            crate::messages::Console::Repair,
+                            crate::messages::Console::Sensors,
+                            crate::messages::Console::Shields,
+                            crate::messages::Console::Navigation,
+                            crate::messages::Console::Power,
+                            crate::messages::Console::Comms,
+                        ]
+                        .iter()
+                        .find(|c| c.station_console_id() == console_id)
+                        .and_then(|console| {
+                            sessions
+                                .0
+                                .console_holder(console.clone())
+                                .map(|t| t.to_string())
+                        });
 
                         if let Some(token) = token {
                             outbox.0.push((
@@ -790,9 +812,7 @@ pub fn process_coordination_lag(
     }
 }
 
-pub fn handle_coordination_messages(
-    mut reader: MessageReader<InboundMessage>,
-) {
+pub fn handle_coordination_messages(mut reader: MessageReader<InboundMessage>) {
     for msg in reader.read() {
         let ClientMessage::SendCoordination { .. } = &msg.msg else {
             continue;
@@ -803,17 +823,17 @@ pub fn handle_coordination_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::control_source::ControlSource;
     use crate::entity_config::EntityConfig;
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::lobby::LobbyPlugin;
     use crate::messages::ClientMessage;
-    use crate::control_source::ControlSource;
+    use crate::messages::StationId;
     use crate::modifiers::ShipModifiers;
     use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
     use crate::region_shape::RegionShape;
     use crate::regions::server::RegionPlugin;
-    use crate::messages::StationId;
     use crate::ship::rating;
     use crate::ship_state::ShipState;
 
@@ -996,7 +1016,10 @@ mod tests {
 
         tick(&mut app);
 
-        assert_eq!(*app.world().resource::<LastHelmInput>(), LastHelmInput::default());
+        assert_eq!(
+            *app.world().resource::<LastHelmInput>(),
+            LastHelmInput::default()
+        );
         assert_eq!(app.world().resource::<ShipState>().forward_speed, 0.0);
     }
 
@@ -1666,7 +1689,9 @@ mod tests {
 
         let sources = app.world().resource::<ShipSystemControlSources>();
         assert_eq!(
-            sources.0.source_for(&crate::system_registry::red_alert_system_id()),
+            sources
+                .0
+                .source_for(&crate::system_registry::red_alert_system_id()),
             ControlSource::Ai
         );
     }
@@ -1687,7 +1712,9 @@ mod tests {
 
         let sources = app.world().resource::<ShipSystemControlSources>();
         assert_eq!(
-            sources.0.source_for(&crate::system_registry::red_alert_system_id()),
+            sources
+                .0
+                .source_for(&crate::system_registry::red_alert_system_id()),
             ControlSource::Human
         );
     }
@@ -1708,7 +1735,9 @@ mod tests {
 
         let sources = app.world().resource::<ShipSystemControlSources>();
         assert_eq!(
-            sources.0.source_for(&crate::system_registry::red_alert_system_id()),
+            sources
+                .0
+                .source_for(&crate::system_registry::red_alert_system_id()),
             ControlSource::Ai
         );
     }
@@ -1732,7 +1761,9 @@ mod tests {
         let sources = app.world().resource::<ShipSystemControlSources>();
         // Default is Human
         assert_eq!(
-            sources.0.source_for(&crate::system_registry::red_alert_system_id()),
+            sources
+                .0
+                .source_for(&crate::system_registry::red_alert_system_id()),
             ControlSource::Human
         );
     }
@@ -1753,7 +1784,10 @@ mod tests {
 
         let active = app.world().resource::<ActiveStationRatings>();
         assert_eq!(
-            active.0.get(&StationId("captain".into())).map(|s| s.as_str()),
+            active
+                .0
+                .get(&StationId("captain".into()))
+                .map(|s| s.as_str()),
             Some("Assisted")
         );
     }

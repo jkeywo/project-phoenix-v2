@@ -644,8 +644,8 @@ fn try_spawn_cell(
         use rand::Rng;
         let to_rad = std::f32::consts::PI / 180.0;
         let pitch = (rng.random::<f32>() * 2.0 - 1.0) * max_deg[0] * to_rad;
-        let roll  = (rng.random::<f32>() * 2.0 - 1.0) * max_deg[1] * to_rad;
-        let yaw   = (rng.random::<f32>() * 2.0 - 1.0) * max_deg[2] * to_rad;
+        let roll = (rng.random::<f32>() * 2.0 - 1.0) * max_deg[1] * to_rad;
+        let yaw = (rng.random::<f32>() * 2.0 - 1.0) * max_deg[2] * to_rad;
         bevy::math::Quat::from_euler(bevy::math::EulerRot::XYZ, pitch, yaw, roll)
     } else {
         bevy::math::Quat::IDENTITY

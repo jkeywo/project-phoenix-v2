@@ -118,7 +118,9 @@ pub fn handle_shields_messages(
 ) {
     let policy = control_sources
         .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::shields_system_id()))
+        .map(|cs| {
+            cs.0.policy_for(&crate::system_registry::shields_system_id())
+        })
         .unwrap_or(crate::control_source::ControlTickPolicy {
             accept_human_input: true,
             operate_ai: false,
@@ -177,7 +179,9 @@ pub fn emit_shields_coordination(
 
     let sender_origin = ship_plugin
         .as_deref()
-        .map(|cs| cs.0.source_for(&crate::system_registry::shields_system_id()))
+        .map(|cs| {
+            cs.0.source_for(&crate::system_registry::shields_system_id())
+        })
         .unwrap_or(ControlSource::Ai);
 
     for (i, snap) in snapshots.iter().enumerate() {

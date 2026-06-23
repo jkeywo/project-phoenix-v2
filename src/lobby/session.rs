@@ -829,6 +829,9 @@ mod tests {
     fn register_sets_ready_false() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        assert!(!sm.players()[0].ready, "newly registered player must have ready=false");
+        assert!(
+            !sm.players()[0].ready,
+            "newly registered player must have ready=false"
+        );
     }
 }

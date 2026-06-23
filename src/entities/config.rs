@@ -621,10 +621,18 @@ pub struct PowerAiConfigToml {
     pub helm_throttle_threshold: f32,
 }
 
-fn default_weapons_battery_floor() -> f32 { 0.5 }
-fn default_shields_battery_floor() -> f32 { 0.25 }
-fn default_helm_battery_floor() -> f32 { 0.75 }
-fn default_helm_throttle_threshold() -> f32 { 0.5 }
+fn default_weapons_battery_floor() -> f32 {
+    0.5
+}
+fn default_shields_battery_floor() -> f32 {
+    0.25
+}
+fn default_helm_battery_floor() -> f32 {
+    0.75
+}
+fn default_helm_throttle_threshold() -> f32 {
+    0.5
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

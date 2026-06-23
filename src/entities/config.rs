@@ -371,6 +371,28 @@ pub struct HelmConsoleConfig {
     /// boost feature is disabled entirely (no button on the helm).
     #[serde(default)]
     pub boost: Option<BoostConfig>,
+    /// Optional procedural engine PFX tuning, from `[helm_console.engine_pfx]`.
+    /// Rendering code supplies defaults for omitted fields.
+    #[serde(default)]
+    pub engine_pfx: Option<EnginePfxConfig>,
+}
+
+/// Procedural engine trail tuning, from `[helm_console.engine_pfx]`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct EnginePfxConfig {
+    /// RGBA trail colour in 0.0-1.0. When omitted, renderer defaults are used.
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
+    /// Optional rig-marker names used as exhaust origins.
+    #[serde(default)]
+    pub markers: Vec<String>,
+    /// Seconds each trail segment remains alive. When omitted, renderer defaults are used.
+    #[serde(default)]
+    pub trail_lifetime_secs: Option<f32>,
+    /// Seconds between spawned trail segments. When omitted, renderer defaults are used.
+    #[serde(default)]
+    pub trail_spawn_interval_secs: Option<f32>,
 }
 
 /// Boost drive tuning, from `[helm_console.boost]`. Presence of this table is
@@ -1184,10 +1206,13 @@ impl EntityConfig {
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
         let mut value: toml::Value = toml::from_str(s)?;
         if let Some(table) = value.as_table_mut() {
-            // `[stations]` is parsed from the same ship TOML by
-            // `lobby::stations_config` with its own schema; drop it so
-            // `deny_unknown_fields` doesn't reject ship templates.
+            // These sections are parsed from player_ship.toml by other owners
+            // (stations_config / ship::config); strip them so deny_unknown_fields
+            // doesn't reject ship templates.
             table.remove("stations");
+            table.remove("station");
+            table.remove("system");
+            table.remove("power_groups");
         }
         let mut config: EntityConfig = value.try_into()?;
 
@@ -1296,6 +1321,55 @@ shows = ["asteroid"]
         assert!(config.engineering_console.is_some());
 
         assert!(config.captain_console.is_some());
+    }
+
+    #[test]
+    fn helm_console_engine_pfx_deserializes_optional_block() {
+        let toml_str = r##"
+[helm_console]
+max_speed = 50.0
+
+[helm_console.engine_pfx]
+color = [0.2, 0.7, 1.0, 0.8]
+markers = ["engine_port", "engine_starboard"]
+trail_lifetime_secs = 0.45
+trail_spawn_interval_secs = 0.04
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let pfx = config
+            .helm_console
+            .as_ref()
+            .and_then(|helm| helm.engine_pfx.as_ref())
+            .expect("engine_pfx block must parse");
+
+        assert_eq!(pfx.color, Some([0.2, 0.7, 1.0, 0.8]));
+        assert_eq!(
+            pfx.markers,
+            vec!["engine_port".to_string(), "engine_starboard".to_string()]
+        );
+        assert_eq!(pfx.trail_lifetime_secs, Some(0.45));
+        assert_eq!(pfx.trail_spawn_interval_secs, Some(0.04));
+    }
+
+    #[test]
+    fn helm_console_engine_pfx_fields_default_when_block_is_sparse() {
+        let toml_str = r##"
+[helm_console]
+max_speed = 50.0
+
+[helm_console.engine_pfx]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let pfx = config
+            .helm_console
+            .as_ref()
+            .and_then(|helm| helm.engine_pfx.as_ref())
+            .expect("engine_pfx block must parse");
+
+        assert_eq!(pfx.color, None);
+        assert!(pfx.markers.is_empty());
+        assert_eq!(pfx.trail_lifetime_secs, None);
+        assert_eq!(pfx.trail_spawn_interval_secs, None);
     }
 
     #[test]

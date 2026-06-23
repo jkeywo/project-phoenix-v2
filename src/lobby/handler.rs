@@ -602,7 +602,169 @@ mod tests {
     // ── Helpers for station-aware tests ──────────────────────────────────
 
     fn ship_stations() -> ShipStations {
-        let toml_str = include_str!("../../assets/entities/player_ship.toml");
+        // Inline pre-B2 roster. player_ship.toml dropped [stations] in B2;
+        // B3 (issue 533) removes ShipStations entirely.
+        let toml_str = r#"
+[stations]
+min_players = 1
+max_players = 6
+
+[[stations.1]]
+name = "Captain"
+description = "Solo crew."
+consoles = ["CaptainChair","Helm","Tactical","Repair","Power","Sensors","Shields","Navigation","Comms"]
+rank = "Cpt."
+next = "Helm"
+
+[[stations.2]]
+name = "Helm"
+description = "Pilot and command."
+consoles = ["CaptainChair","Helm","Shields","Comms"]
+rank = "Cpt."
+next = "Helm"
+previous = "Captain"
+
+[[stations.2]]
+name = "Tactical"
+description = "Weapons and science."
+consoles = ["Tactical","Repair","Power","Sensors","Navigation"]
+rank = "Ltn."
+next = "Tactical"
+
+[[stations.3]]
+name = "Helm"
+description = "Pilot the ship."
+consoles = ["CaptainChair","Helm"]
+rank = "Cpt."
+previous = "Helm"
+next = "Helm"
+
+[[stations.3]]
+name = "Tactical"
+description = "Weapons and sensors."
+consoles = ["Tactical","Sensors","Navigation"]
+rank = "Ltn."
+previous = "Tactical"
+next = "Tactical"
+
+[[stations.3]]
+name = "Engineering"
+description = "Repair and power."
+consoles = ["Repair","Power","Shields","Comms"]
+rank = "Ltn."
+next = "Engineering"
+
+[[stations.4]]
+name = "Helm"
+description = "Pilot."
+consoles = ["CaptainChair","Helm"]
+rank = "Cpt."
+previous = "Helm"
+next = "Helm"
+
+[[stations.4]]
+name = "Tactical"
+description = "Weapons."
+consoles = ["Tactical"]
+rank = "Ltn."
+previous = "Tactical"
+next = "Tactical"
+
+[[stations.4]]
+name = "Engineering"
+description = "Repair."
+consoles = ["Repair","Power"]
+rank = "Ltn."
+previous = "Engineering"
+next = "Engineering"
+
+[[stations.4]]
+name = "Science"
+description = "Sensors."
+consoles = ["Comms","Sensors","Shields","Navigation"]
+rank = "Ens."
+next = "Science"
+
+[[stations.5]]
+name = "Captain"
+description = "Command."
+consoles = ["CaptainChair"]
+rank = "Cpt."
+next = "Captain"
+
+[[stations.5]]
+name = "Helm"
+description = "Pilot."
+consoles = ["Helm"]
+rank = "Ltn."
+previous = "Helm"
+next = "Helm"
+
+[[stations.5]]
+name = "Tactical"
+description = "Weapons."
+consoles = ["Tactical"]
+rank = "Ltn."
+previous = "Tactical"
+next = "Tactical"
+
+[[stations.5]]
+name = "Engineering"
+description = "Repair."
+consoles = ["Repair","Power"]
+rank = "Ltn."
+previous = "Engineering"
+next = "Engineering"
+
+[[stations.5]]
+name = "Science"
+description = "Sensors."
+consoles = ["Comms","Sensors","Shields","Navigation"]
+rank = "Ens."
+previous = "Science"
+next = "Sensors"
+
+[[stations.6]]
+name = "Captain"
+description = "Command."
+consoles = ["CaptainChair"]
+rank = "Cpt."
+previous = "Captain"
+
+[[stations.6]]
+name = "Helm"
+description = "Pilot."
+consoles = ["Helm"]
+rank = "Ltn."
+previous = "Helm"
+
+[[stations.6]]
+name = "Tactical"
+description = "Weapons."
+consoles = ["Tactical"]
+rank = "Ltn."
+previous = "Tactical"
+
+[[stations.6]]
+name = "Engineering"
+description = "Repair."
+consoles = ["Repair","Power"]
+rank = "Ltn."
+previous = "Engineering"
+
+[[stations.6]]
+name = "Comms"
+description = "Comms."
+consoles = ["Comms","Navigation"]
+rank = "Ens."
+
+[[stations.6]]
+name = "Sensors"
+description = "Sensors."
+consoles = ["Sensors","Shields"]
+rank = "Ens."
+previous = "Science"
+"#;
         parse_and_validate(toml_str).unwrap()
     }
 

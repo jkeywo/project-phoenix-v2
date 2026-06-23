@@ -59,11 +59,54 @@ pub struct CoordinationEnqueue {
     pub sender_label: String,
 }
 
+/// Load `ShipConfigResource` from `assets/entities/player_ship.toml`.
+///
+/// Branches on TOML shape: if the file contains `[[station]]` array-of-tables
+/// (the new schema), it is parsed via `ship::config::parse_and_validate`.
+/// Otherwise the file uses the legacy `[stations]` schema and the inline stub
+/// is used with a `warn!` so CI stays green until B2 lands.
+fn load_ship_config_from_disk() -> ShipConfigResource {
+    const PATH: &str = "assets/entities/player_ship.toml";
+    let toml_str = match std::fs::read_to_string(PATH) {
+        Ok(s) => s,
+        Err(e) => {
+            bevy::log::warn!("ship_config: could not read {PATH}: {e}; using stub");
+            return ShipConfigResource::default();
+        }
+    };
+    // Branch on TOML shape — not a feature flag.
+    if !toml_str.contains("[[station]]") {
+        bevy::log::warn!(
+            "ship_config: {PATH} uses legacy [stations] schema; using stub"
+        );
+        return ShipConfigResource::default();
+    }
+    let registry =
+        crate::ship::system_registry::SystemKindRegistry::with_core_systems()
+            .expect("core system registry must be valid");
+    let kinds: Vec<&str> = registry.kinds().collect();
+    match crate::ship::config::parse_and_validate(&toml_str, &kinds) {
+        Ok(config) => {
+            bevy::log::info!(
+                "ship_config: loaded {} stations, {} systems from {PATH}",
+                config.stations.len(),
+                config.systems.len()
+            );
+            ShipConfigResource(config)
+        }
+        Err(e) => {
+            bevy::log::error!(
+                "ship_config: {PATH} failed validation: {e}; using stub"
+            );
+            ShipConfigResource::default()
+        }
+    }
+}
+
 impl Default for ShipConfigResource {
     fn default() -> Self {
-        // Default config matches the test TOML in ship/config.rs.
-        // TODO: replace with the real ship config loading once the
-        // station/system migration lands on player_ship.toml.
+        // Stub used when player_ship.toml still carries the legacy [stations]
+        // schema. Deleted in B6 once the cutover TOML lands.
         let toml = r#"
 [[station]]
 id = "captain"
@@ -256,7 +299,7 @@ impl Plugin for ShipPlugin {
         )))
         .init_resource::<LastHelmInput>()
         .init_resource::<ShipSystemControlSources>()
-        .init_resource::<ShipConfigResource>()
+        .insert_resource(load_ship_config_from_disk())
         .init_resource::<ActiveStationRatings>()
         .init_resource::<HelmAiController>()
         .init_resource::<ImpulseConfigResource>()
@@ -1669,14 +1712,73 @@ mod tests {
 
     // ── Station Rating tests ─────────────────────────────────────────────
 
+    /// Build a ShipConfig with a captain station that has an "Assisted" rating
+    /// declaring red-alert as automated. Used by rating-mechanism tests that
+    /// need automation to be configured independently of player_ship.toml.
+    fn ship_config_with_assisted_captain() -> ShipConfigResource {
+        const TOML: &str = r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Captain"
+rank = "Cpt."
+short_code = "CPT"
+console = "captain"
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = ["red-alert"]
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Helm"
+rank = "Ltn."
+short_code = "HLM"
+console = "helm"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "captain"
+kind = "captain"
+station = "captain"
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+
+[[system]]
+id = "viewscreen"
+kind = "viewscreen"
+ai_only = true
+
+[[system]]
+id = "helm"
+kind = "helm"
+station = "helm"
+"#;
+        const KINDS: &[&str] = &["captain", "red_alert", "viewscreen", "helm"];
+        ShipConfigResource(
+            crate::ship::config::parse_and_validate(TOML, KINDS)
+                .expect("test config must be valid"),
+        )
+    }
+
     #[test]
     fn set_station_rating_sets_ai_for_automated_systems() {
         let mut app = test_app();
+        app.insert_resource(ship_config_with_assisted_captain());
         start_game_with_helm_and_science(&mut app);
 
-        // Captain station config maps red-alert as assisted system.
-        // The captain player holds Console::CaptainChair which maps to
-        // the "captain" station in the default ShipConfig.
+        // Captain "Assisted" rating has red-alert in automated_systems.
         push(
             &mut app,
             "captain",

@@ -434,6 +434,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             boost_battery,
             boost_active,
             boost_enabled,
+            source_entries,
         ) = {
             let ship = world.resource::<ShipState>();
             let hull = world.resource::<ShipHullIntegrity>();
@@ -446,6 +447,22 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 .and_then(|w| w.snapshot());
             let boost = world.get_resource::<ShipBoost>();
             let boost_config = world.get_resource::<crate::ship_plugin::BoostConfigResource>();
+            let control_sources = world.resource::<crate::ship_plugin::ShipSystemControlSources>();
+            let source_entries: std::collections::HashMap<_, _> = control_sources
+                .0
+                .entries()
+                .map(|(id, src)| {
+                    (
+                        id.clone(),
+                        match src {
+                            crate::ship::control_source::ControlSource::Ai => "Ai".to_string(),
+                            crate::ship::control_source::ControlSource::Human => {
+                                "Human".to_string()
+                            }
+                        },
+                    )
+                })
+                .collect();
 
             let power_levels = power
                 .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
@@ -485,6 +502,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 boost_battery,
                 boost_active,
                 boost_enabled,
+                source_entries,
             )
         };
 
@@ -519,6 +537,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             boost_battery,
             boost_active,
             boost_enabled,
+            control_sources: source_entries,
         };
         vec![ServerMessage::SimState { snapshot }]
     })

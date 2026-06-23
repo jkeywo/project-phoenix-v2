@@ -617,6 +617,11 @@ pub struct SimSnapshot {
     /// Drives client-side button visibility without a separate config request.
     #[serde(default)]
     pub boost_enabled: bool,
+    /// Per-system control source status ("Human" or "Ai") so clients can
+    /// render AUTO/read-only badges on any system fragment without local
+    /// rating-resolution logic. Populated from `ShipSystemControlSources`.
+    #[serde(default)]
+    pub control_sources: HashMap<SystemId, String>,
 }
 
 fn default_power_levels() -> (u8, u8, u8) {
@@ -1110,6 +1115,11 @@ pub enum ServerMessage {
         state: GameState,
         ship_stations: ShipStations,
         ship_config: ShipClientConfig,
+        /// Per-station active ratings so clients can render AUTO/read-only
+        /// badges immediately on (re)connect without waiting for the first
+        /// `RatingChanged` or `SimState`.
+        #[serde(default)]
+        station_ratings: HashMap<StationId, String>,
     },
     PlayerJoined {
         player: Player,
@@ -1313,6 +1323,13 @@ pub enum ServerMessage {
     /// Carries a human-readable reason string displayed on the game-over screen.
     GameOver {
         reason: String,
+    },
+    /// Broadcast to all when a station's active rating changes.
+    /// Clients use this to update AUTO/read-only badges for system fragments
+    /// belonging to the affected station.
+    RatingChanged {
+        station_id: StationId,
+        rating_name: String,
     },
     /// Sent once at game start and whenever per-console hull HP changes.
     /// Replaces the `console_hull` field that was previously embedded in every `SimState`.

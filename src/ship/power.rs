@@ -400,6 +400,7 @@ mod tests {
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
+            .init_resource::<crate::ship_plugin::ShipSystemControlSources>()
             .add_plugins(ShipPowerPlugin)
             .add_systems(
                 Update,

@@ -6,6 +6,7 @@ use crate::messages::{
     ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
 use crate::session::SessionManager;
+use crate::ship_plugin::ActiveStationRatings;
 use crate::stations_config::ShipStations;
 
 /// Cached `GameState` snapshot derived from `Sessions` + `GamePhase` each frame.
@@ -78,6 +79,7 @@ impl Plugin for LobbyPlugin {
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
             .insert_resource(ShipClientConfigResource::default())
+            .init_resource::<ActiveStationRatings>()
             .init_state::<GamePhase>()
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()
@@ -266,6 +268,7 @@ pub fn process_lobby(
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
     preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
+    active_ratings: Res<ActiveStationRatings>,
 ) {
     // During the Lobby phase this system owns the inbound queue and handles
     // every message type. Outside the lobby the simulation systems own it, so
@@ -312,6 +315,7 @@ pub fn process_lobby(
             stations,
             &ship_client_config.0,
             preload_complete,
+            &active_ratings.0,
         );
         apply_result(result, &mut outbox, &mut next_state);
     }

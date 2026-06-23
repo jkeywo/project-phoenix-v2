@@ -107,6 +107,7 @@ impl ShipState {
             boost_battery: 0.0,
             boost_active: false,
             boost_enabled: false,
+            control_sources: std::collections::HashMap::new(),
         }
     }
 }

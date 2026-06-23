@@ -1672,6 +1672,7 @@
             state.phaserArcConfigs  = window.simState.phaserArcConfigs;
             state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
             state.navigationWaypoint = window.simState.navigationWaypoint;
+            state.controlSources = window.simState.controlSources || {};
             // Push the pre-seeded repair teams so the Repair console renders its
             // rows immediately on (re)connect, before the first RepairState
             // broadcast (no-op unless Repair is the active console).
@@ -1782,6 +1783,7 @@
           state.boostEnabled = !!snap.boost_enabled;
           state.boostBattery = snap.boost_battery || 0;
           state.boostActive  = !!snap.boost_active;
+          state.controlSources = snap.control_sources || {};
             state.navigationWaypoint = window.simState
               ? window.simState.navigationWaypoint
               : (snap.navigation_waypoint || null);
@@ -2031,6 +2033,11 @@
         case 'GameOver':
           state.phase = 'GameOver';
           break;
+        case 'RatingChanged': {
+          if (window.simState) state.controlSources = window.simState.controlSources || {};
+          // Fall through to re-render captain console if active
+          break;
+        }
         case 'ObjectiveSummary':
           break; // fall through to scheduleRender
         default:

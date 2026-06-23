@@ -500,6 +500,7 @@ mod tests {
             state: state(),
             ship_stations: empty_ship_stations(),
             ship_config: ShipClientConfig::default(),
+            station_ratings: HashMap::new(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -599,6 +600,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -625,6 +627,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -651,6 +654,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -677,6 +681,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -703,6 +708,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -733,6 +739,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -763,6 +770,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -898,6 +906,17 @@ mod tests {
             },
             ship_stations: empty_ship_stations(),
             ship_config: ShipClientConfig::default(),
+            station_ratings: HashMap::new(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_rating_changed() {
+        let msg = ServerMessage::RatingChanged {
+            station_id: StationId("captain".into()),
+            rating_name: "Assisted".into(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -1532,6 +1551,7 @@ mod tests {
             state: state(),
             ship_stations,
             ship_config: ShipClientConfig::default(),
+            station_ratings: HashMap::new(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -1543,6 +1563,7 @@ mod tests {
             state: state(),
             ship_stations: empty_ship_stations(),
             ship_config: ShipClientConfig::default(),
+            station_ratings: HashMap::new(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
@@ -1567,6 +1588,7 @@ mod tests {
             state: state(),
             ship_stations: empty_ship_stations(),
             ship_config,
+            station_ratings: HashMap::new(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
@@ -1670,6 +1692,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1696,6 +1719,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         // Encoding then decoding should preserve (2, 2, 2) for power_levels.
@@ -2050,6 +2074,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2085,6 +2110,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2132,6 +2158,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2660,6 +2687,7 @@ mod tests {
                 boost_battery: 0.0,
                 boost_active: false,
                 boost_enabled: false,
+                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

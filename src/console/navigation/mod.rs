@@ -197,6 +197,7 @@ mod tests {
             .init_resource::<LastBroadcastEntityPositions>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
+            .init_resource::<crate::ship_plugin::ShipSystemControlSources>()
             .add_systems(PostUpdate, collect);
         app
     }

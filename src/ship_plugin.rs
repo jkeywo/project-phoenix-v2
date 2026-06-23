@@ -646,6 +646,7 @@ pub fn handle_station_rating_change(
     ship_config: Res<ShipConfigResource>,
     mut control_sources: ResMut<ShipSystemControlSources>,
     mut active_ratings: ResMut<ActiveStationRatings>,
+    mut outbox: ResMut<crate::lobby::LobbyOutbox>,
 ) {
     for ev in reader.read() {
         let ClientMessage::SetStationRating { rating_name } = &ev.msg else {
@@ -682,7 +683,16 @@ pub fn handle_station_rating_change(
         );
 
         // Track the active rating
-        active_ratings.0.insert(station_id, rating_name.clone());
+        active_ratings.0.insert(station_id.clone(), rating_name.clone());
+
+        // Broadcast the change to all clients
+        outbox.0.push((
+            crate::lobby_handler::Target::All,
+            crate::messages::ServerMessage::RatingChanged {
+                station_id,
+                rating_name: rating_name.clone(),
+            },
+        ));
     }
 }
 
@@ -1790,5 +1800,32 @@ mod tests {
                 .map(|s| s.as_str()),
             Some("Assisted")
         );
+    }
+
+    #[test]
+    fn set_station_rating_emits_rating_changed() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetStationRating {
+                rating_name: "Assisted".into(),
+            },
+        );
+        tick_twice(&mut app);
+
+        let outbox = app.world().resource::<crate::lobby::LobbyOutbox>();
+        let has_rating_changed = outbox.0.iter().any(|(_, msg)| {
+            matches!(
+                msg,
+                crate::messages::ServerMessage::RatingChanged {
+                    station_id,
+                    rating_name,
+                } if station_id.0 == "captain" && rating_name == "Assisted"
+            )
+        });
+        assert!(has_rating_changed, "expected RatingChanged in outbox");
     }
 }

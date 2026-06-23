@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::messages::{
-    ClientMessage, Console, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
+    ClientMessage, Console, GamePhase, GameState, ServerMessage, ShipClientConfig, StationId,
+    WorldData,
 };
 use crate::session::SessionManager;
 use crate::stations_config::{get_station, ShipStations};
@@ -50,6 +51,8 @@ pub fn process_message(
     ship_config: &ShipClientConfig,
     // When `false`, `StartGame` transitions to `Loading` instead of `InProgress`.
     preload_complete: bool,
+    // Per-station active ratings to embed in Welcome for (re)connecting clients.
+    station_ratings: &HashMap<StationId, String>,
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut new_phase = None;
@@ -81,6 +84,7 @@ pub fn process_message(
                         state,
                         ship_stations: ship_stations.clone(),
                         ship_config: ship_config.clone(),
+                        station_ratings: station_ratings.clone(),
                     },
                 ));
                 outbound.push((
@@ -455,6 +459,7 @@ mod tests {
             &default_stations(),
             &default_ship_config(),
             true, // preload is always complete in tests (no Bevy app)
+            &HashMap::new(),
         )
     }
 
@@ -617,6 +622,7 @@ mod tests {
             &ship_stations(),
             &default_ship_config(),
             true, // preload is always complete in tests (no Bevy app)
+            &HashMap::new(),
         )
     }
 
@@ -974,6 +980,7 @@ mod tests {
             &stations,
             &default_ship_config(),
             true,
+            &HashMap::new(),
         );
         assert!(
             sessions.spectator_queue().contains(&"t7".to_string()),
@@ -1003,6 +1010,7 @@ mod tests {
             &stations,
             &default_ship_config(),
             true,
+            &HashMap::new(),
         );
         assert!(
             sessions.spectator_queue().contains(&"t1".to_string()),
@@ -1036,6 +1044,7 @@ mod tests {
             &stations,
             &default_ship_config(),
             true,
+            &HashMap::new(),
         );
         // Reconnect restores the previously-held seat.
         let restored = sessions
@@ -1207,6 +1216,7 @@ mod tests {
             &stations,
             &default_ship_config(),
             true,
+            &HashMap::new(),
         );
         // t1 must have no consoles — no auto-assignment.
         let consoles = sessions
@@ -1257,6 +1267,7 @@ mod tests {
             &stations,
             &default_ship_config(),
             true,
+            &HashMap::new(),
         );
 
         // Fixed roster per #495: t1 keeps their station when a new player joins.
@@ -1357,6 +1368,7 @@ tags = ["player"]
             &stations,
             &default_ship_config(),
             true,
+            &HashMap::new(),
         );
 
         // Session state: t1 must have no consoles (rollback).

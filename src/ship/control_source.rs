@@ -44,6 +44,10 @@ impl ControlSourceResolver {
     pub fn policy_for(&self, system_id: &SystemId) -> ControlTickPolicy {
         control_tick_policy(self.source_for(system_id))
     }
+
+    pub fn entries(&self) -> impl Iterator<Item = (&SystemId, &ControlSource)> {
+        self.sources.iter()
+    }
 }
 
 #[cfg(test)]

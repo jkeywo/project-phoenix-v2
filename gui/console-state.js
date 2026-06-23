@@ -320,8 +320,12 @@ export function buildWeaponsConsoleState(state) {
  */
 export function buildCaptainConsoleState(state) {
   const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
+  const controlSources = state.controlSources || {};
+  const redAlertAuto = controlSources['red-alert'] === 'Ai';
   return JSON.stringify({
     red_alert:          state.redAlert    || false,
+    red_alert_system_id: 'red-alert',
+    red_alert_auto:     redAlertAuto,
     view_direction:     viewDirection,
     view_mode:          'Camera',
     objectives:         state.objectives  || [],

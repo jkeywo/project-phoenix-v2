@@ -135,19 +135,19 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /**
-   * Set power allocation to an explicit level for a console.
+   * Set power allocation to an explicit level for a power group.
    *
    * The power panel sends the pre-calculated target level (current ± 1),
    * so the server receives a single absolute value and applies it via
    * PowerSystem::increase / decrease.
    *
-   * `{ action: "set_power", console: "Power", target: "Helm", level: 3 }`
+   * `{ action: "set_power", console: "Power", target: "helm", level: 3 }`
    */
   set_power: (a, send) => {
     if (a.target && typeof a.level === 'number') {
       send('ControlSystem', {
         target: 'power',
-        payload: { type: 'SetPower', data: { target: a.target, level: a.level } },
+        payload: { type: 'SetPowerGroupAllocation', data: { group: a.target, level: a.level } },
       });
     }
   },

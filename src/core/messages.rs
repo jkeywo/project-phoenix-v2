@@ -1087,18 +1087,11 @@ pub enum ClientMessage {
 #[serde(tag = "type", content = "data")]
 pub enum CoordinationPayload {
     /// Advisory text message shown to the operator.
-    Advisory {
-        message: String,
-    },
+    Advisory { message: String },
     /// Alert-level coordination (e.g. AI warns human of a threat).
-    Alert {
-        title: String,
-        body: String,
-    },
+    Alert { title: String, body: String },
     /// Sensors advises Tactical of the target's shield frequency.
-    FrequencyHint {
-        frequency: f32,
-    },
+    FrequencyHint { frequency: f32 },
     /// Sent to Helm when a shield facing goes offline; fires once per offline cycle.
     ShieldFacingDown {
         label: String,
@@ -1106,9 +1099,7 @@ pub enum CoordinationPayload {
     },
     /// Sent to Helm when a shield facing recovers to `restored_notify_pct` of max HP;
     /// only fires on red alert, only after the facing has been down this cycle.
-    ShieldFacingRestored {
-        label: String,
-    },
+    ShieldFacingRestored { label: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1694,7 +1685,7 @@ pub enum UiAction {
     /// Set power to an explicit level for the named powered console.
     ///
     /// The HTML power panel sends
-    /// `{ action: "set_power", console: "Power", target: "Helm", level: 3 }`.
+    /// `{ action: "set_power", console: "Power", target: "helm", level: 3 }`.
     SetPower {
         target: Console,
         level: u8,
@@ -1809,8 +1800,9 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         },
         UiAction::SetPower { target, level } => ClientMessage::ControlSystem {
             target: crate::system_registry::power_system_id(),
-            payload: SystemControlPayload::SetPower {
-                target: target.clone(),
+            payload: SystemControlPayload::SetPowerGroupAllocation {
+                group: crate::power_system::power_group_for_console(target)
+                    .unwrap_or_else(|| PowerGroupId(target.station_console_id().into())),
                 level: *level,
             },
         },
@@ -2012,8 +2004,8 @@ mod ui_action_tests {
             ui_action_to_client_message(&action),
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_system_id(),
-                payload: SystemControlPayload::SetPower {
-                    target: Console::Helm,
+                payload: SystemControlPayload::SetPowerGroupAllocation {
+                    group: PowerGroupId("helm".into()),
                     level: 3,
                 }
             }

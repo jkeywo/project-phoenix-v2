@@ -259,12 +259,12 @@ describe('dispatch_repair_team', () => {
 });
 
 describe('set_power', () => {
-  it('calls send ControlSystem SetPower with target and level', () => {
+  it('calls send ControlSystem SetPowerGroupAllocation with group and level', () => {
     const send = mkSend();
-    ACTION_MAP.set_power({ action: 'set_power', target: 'Helm', level: 3 }, send);
+    ACTION_MAP.set_power({ action: 'set_power', target: 'helm', level: 3 }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'power',
-      payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } },
+      payload: { type: 'SetPowerGroupAllocation', data: { group: 'helm', level: 3 } },
     });
   });
 
@@ -282,10 +282,10 @@ describe('set_power', () => {
 
   it('sends level 1 to decrease power', () => {
     const send = mkSend();
-    ACTION_MAP.set_power({ action: 'set_power', target: 'Tactical', level: 1 }, send);
+    ACTION_MAP.set_power({ action: 'set_power', target: 'weapons', level: 1 }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'power',
-      payload: { type: 'SetPower', data: { target: 'Tactical', level: 1 } },
+      payload: { type: 'SetPowerGroupAllocation', data: { group: 'weapons', level: 1 } },
     });
   });
 });

@@ -1,4 +1,43 @@
-use crate::messages::Console;
+use crate::messages::{Console, PowerGroupId};
+
+pub const HELM_POWER_GROUP: &str = "helm";
+pub const WEAPONS_POWER_GROUP: &str = "weapons";
+pub const SENSORS_POWER_GROUP: &str = "sensors";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PowerAllocationError {
+    UnknownGroup(PowerGroupId),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PowerReadState {
+    pub allocations: Vec<(PowerGroupId, u8)>,
+    pub battery_charge: f32,
+    pub locked: bool,
+}
+
+impl PowerReadState {
+    pub fn level_for_group(&self, group: &PowerGroupId) -> Option<u8> {
+        self.allocations
+            .iter()
+            .find(|(id, _)| id == group)
+            .map(|(_, level)| *level)
+    }
+}
+
+pub struct Channel1Read<'a> {
+    state: &'a PowerReadState,
+}
+
+impl<'a> Channel1Read<'a> {
+    pub fn new(state: &'a PowerReadState) -> Self {
+        Self { state }
+    }
+
+    pub fn power_level(&self, group: &PowerGroupId) -> Option<u8> {
+        self.state.level_for_group(group)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PowerSystem {
@@ -54,6 +93,44 @@ impl PowerSystem {
         self.helm + self.weapons + self.sensors
     }
 
+    pub fn read_state(&self) -> PowerReadState {
+        PowerReadState {
+            allocations: vec![
+                (PowerGroupId(HELM_POWER_GROUP.into()), self.helm),
+                (PowerGroupId(WEAPONS_POWER_GROUP.into()), self.weapons),
+                (PowerGroupId(SENSORS_POWER_GROUP.into()), self.sensors),
+            ],
+            battery_charge: self.battery_charge,
+            locked: self.locked,
+        }
+    }
+
+    pub fn set_group_allocation(
+        &mut self,
+        group: &PowerGroupId,
+        level: u8,
+    ) -> Result<(), PowerAllocationError> {
+        let Some(console) = console_for_power_group(group) else {
+            return Err(PowerAllocationError::UnknownGroup(group.clone()));
+        };
+        self.set_console_allocation(console, level);
+        Ok(())
+    }
+
+    pub fn set_console_allocation(&mut self, console: Console, level: u8) {
+        let current = power_level_for_console(self, &console);
+        let target_level = level.clamp(1, 4);
+        if target_level > current {
+            for _ in 0..(target_level - current) {
+                self.increase(console.clone());
+            }
+        } else if target_level < current {
+            for _ in 0..(current - target_level) {
+                self.decrease(console.clone());
+            }
+        }
+    }
+
     pub fn increase(&mut self, console: Console) {
         if self.locked || self.total() >= 8 {
             return;
@@ -99,6 +176,33 @@ impl PowerSystem {
         }
 
         self.locked != prev_locked
+    }
+}
+
+pub fn power_group_for_console(console: &Console) -> Option<PowerGroupId> {
+    match console {
+        Console::Helm => Some(PowerGroupId(HELM_POWER_GROUP.into())),
+        Console::Tactical => Some(PowerGroupId(WEAPONS_POWER_GROUP.into())),
+        Console::Sensors => Some(PowerGroupId(SENSORS_POWER_GROUP.into())),
+        _ => None,
+    }
+}
+
+pub fn console_for_power_group(group: &PowerGroupId) -> Option<Console> {
+    match group.0.as_str() {
+        HELM_POWER_GROUP => Some(Console::Helm),
+        WEAPONS_POWER_GROUP => Some(Console::Tactical),
+        SENSORS_POWER_GROUP => Some(Console::Sensors),
+        _ => None,
+    }
+}
+
+pub fn power_level_for_console(ps: &PowerSystem, console: &Console) -> u8 {
+    match console {
+        Console::Helm => ps.helm,
+        Console::Tactical => ps.weapons,
+        Console::Sensors => ps.sensors,
+        _ => 0,
     }
 }
 
@@ -348,5 +452,44 @@ mod tests {
         assert_eq!(ps.helm, 2);
         assert_eq!(ps.weapons, 2);
         assert_eq!(ps.sensors, 2);
+    }
+
+    #[test]
+    fn set_group_allocation_updates_named_group() {
+        let mut ps = PowerSystem::default();
+
+        ps.set_group_allocation(&PowerGroupId(WEAPONS_POWER_GROUP.into()), 3)
+            .unwrap();
+
+        assert_eq!(ps.weapons, 3);
+        assert_eq!(ps.helm, 2);
+        assert_eq!(ps.sensors, 2);
+    }
+
+    #[test]
+    fn set_group_allocation_rejects_unknown_group() {
+        let mut ps = PowerSystem::default();
+        let group = PowerGroupId("life-support".into());
+
+        assert_eq!(
+            ps.set_group_allocation(&group, 3),
+            Err(PowerAllocationError::UnknownGroup(group))
+        );
+        assert_eq!(ps.total(), 6);
+    }
+
+    #[test]
+    fn channel_1_read_exposes_power_without_mutation_access() {
+        let mut ps = PowerSystem::default();
+        ps.helm = 4;
+        let state = ps.read_state();
+        let channel_1 = Channel1Read::new(&state);
+
+        assert_eq!(
+            channel_1.power_level(&PowerGroupId(HELM_POWER_GROUP.into())),
+            Some(4)
+        );
+        assert_eq!(channel_1.power_level(&PowerGroupId("unknown".into())), None);
+        assert_eq!(ps.helm, 4);
     }
 }

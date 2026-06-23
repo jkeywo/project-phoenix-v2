@@ -3,7 +3,9 @@ use bevy::prelude::*;
 use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{Console, PowerConsoleEntry, PowerConsoleState, ServerMessage};
-use crate::modifiers::power_system::{PowerConfig, PowerSystem};
+use crate::modifiers::power_system::{
+    power_group_for_console, power_level_for_console, PowerConfig, PowerSystem, SENSORS_POWER_GROUP,
+};
 use crate::ship_plugin::LastHelmInput;
 use crate::ship_state::ShipState;
 
@@ -113,12 +115,7 @@ pub fn power_console_label(console: &Console) -> &'static str {
 /// Only `Helm`, `Tactical`, and `Sensors` have first-class fields; any other
 /// console silently returns `0` (it should not appear in multipliers).
 pub fn power_level_for(ps: &PowerSystem, console: &Console) -> u8 {
-    match console {
-        Console::Helm => ps.helm,
-        Console::Tactical => ps.weapons,
-        Console::Sensors => ps.sensors,
-        _ => 0,
-    }
+    power_level_for_console(ps, console)
 }
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────
@@ -207,33 +204,29 @@ pub fn handle_power_messages(
         if target.0 != crate::system_registry::POWER_SYSTEM_ID {
             continue;
         }
-        let crate::messages::SystemControlPayload::SetPower { target: console, level } = payload
-        else {
-            continue;
-        };
-
         if power_holder != Some(ev.token.as_str()) {
             warn!(
-                "[power-auth] ignored SetPower from token={} holder={:?}",
-                ev.token,
-                power_holder,
+                "[power-auth] ignored power allocation from token={} holder={:?}",
+                ev.token, power_holder,
             );
             continue;
         }
 
-        let current = power_level_for(&power.0, console);
-        let target_level = (*level).clamp(1, 4);
-        if target_level > current {
-            for _ in 0..(target_level - current) {
-                power.0.increase(console.clone());
+        match payload {
+            crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
+                if let Err(err) = power.0.set_group_allocation(group, *level) {
+                    warn!("[power-auth] ignored power allocation: {err:?}");
+                }
             }
-        } else if target_level < current {
-            for _ in 0..(current - target_level) {
-                power.0.decrease(console.clone());
+            crate::messages::SystemControlPayload::SetPower {
+                target: console,
+                level,
+            } => {
+                power.0.set_console_allocation(console.clone(), *level);
             }
+            _ => continue,
         }
     }
-
 }
 
 /// Tick the power system battery charge each frame.
@@ -319,7 +312,9 @@ pub fn recompute_power_console_state(
         .map(|c| {
             let max_level = multipliers.multipliers[c].len() as u8;
             PowerConsoleEntry {
-                id: format!("{:?}", c),
+                id: power_group_for_console(c)
+                    .map(|g| g.0)
+                    .unwrap_or_else(|| format!("{:?}", c)),
                 label: power_console_label(c).into(),
                 level: power_level_for(&power.0, c),
                 max_level,
@@ -408,8 +403,7 @@ mod tests {
             .add_plugins(ShipPowerPlugin)
             .add_systems(
                 Update,
-                crate::modifier_coordination::translate_power_modifiers
-                    .after(tick_power_system),
+                crate::modifier_coordination::translate_power_modifiers.after(tick_power_system),
             )
             .add_plugins(crate::simulation::sim_state_broadcaster())
             .add_systems(PostUpdate, collect);
@@ -804,8 +798,8 @@ mod tests {
         let pushes = &app.world().resource::<PushOutbox>().0;
         let push = pushes.iter().find(|p| p.name == "Power").unwrap();
         assert!(
-            push.json.contains("\"Helm\""),
-            "id should be Helm variant name: {}",
+            push.json.contains("\"helm\""),
+            "id should be helm power group id: {}",
             push.json
         );
         assert!(
@@ -823,6 +817,27 @@ mod tests {
             "Sensors label should be SENSORS: {}",
             push.json
         );
+    }
+
+    #[test]
+    fn control_system_set_power_group_allocation_updates_group() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        push_msg(
+            &mut app,
+            "power",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_system_id(),
+                payload: SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
+                    level: 4,
+                },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(app.world().resource::<ShipPowerSystem>().0.sensors, 4);
     }
 
     // ── operate_power_ai tests ──────────────────────────────────────────────
@@ -863,7 +878,9 @@ mod tests {
     fn ai_sets_weapons_to_three_on_red_alert_with_battery() {
         let mut app = ai_test_app();
         {
-            let mut ship = app.world_mut().resource_mut::<crate::ship_state::ShipState>();
+            let mut ship = app
+                .world_mut()
+                .resource_mut::<crate::ship_state::ShipState>();
             ship.toggle_red_alert();
         }
         app.update();
@@ -874,10 +891,15 @@ mod tests {
     fn ai_does_not_boost_weapons_when_battery_low() {
         let mut app = ai_test_app();
         {
-            let mut ship = app.world_mut().resource_mut::<crate::ship_state::ShipState>();
+            let mut ship = app
+                .world_mut()
+                .resource_mut::<crate::ship_state::ShipState>();
             ship.toggle_red_alert();
         }
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.battery_charge = 30.0; // pct=0.3 < 0.5 floor
+        app.world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .battery_charge = 30.0; // pct=0.3 < 0.5 floor
         app.update();
         // weapons should not be 3 — battery below floor
         assert_ne!(

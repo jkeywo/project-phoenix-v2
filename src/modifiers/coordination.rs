@@ -5,10 +5,13 @@ use bevy::prelude::*;
 use crate::entity_spawner::{EntityUuid, RegionEffectsSection};
 use crate::flag_kind::FlagKind;
 use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
-use crate::messages::{Console, ModifierSlot, ModifierSource};
+use crate::messages::{Console, ModifierSlot, ModifierSource, PowerGroupId};
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
-use crate::power_system::PowerSystem;
+use crate::power_system::{
+    Channel1Read, PowerReadState, PowerSystem, HELM_POWER_GROUP, SENSORS_POWER_GROUP,
+    WEAPONS_POWER_GROUP,
+};
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::{RegionEntered, RegionExited, RegionMembership};
 use crate::ship_plugin::ImpulseConfigResource;
@@ -49,7 +52,11 @@ pub fn translate_power_modifiers(
     mut modifiers: ResMut<ShipModifiers>,
 ) {
     let Some(mult_cfg) = mult_cfg else { return };
-    apply_power_modifiers(&mut modifiers, &power.0, &mult_cfg.multipliers);
+    apply_power_modifiers_from_read_state(
+        &mut modifiers,
+        &power.0.read_state(),
+        &mult_cfg.multipliers,
+    );
 }
 
 /// Apply power-level modifiers to `modifiers` based on the current `PowerSystem`
@@ -63,9 +70,21 @@ pub fn apply_power_modifiers(
     power: &PowerSystem,
     multipliers: &HashMap<Console, [f32; 4]>,
 ) {
-    let default_mult = [-0.5, 0.0, 0.25, 0.5];
+    apply_power_modifiers_from_read_state(modifiers, &power.read_state(), multipliers);
+}
 
-    let helm_level = (power.helm as usize).saturating_sub(1).min(3);
+pub fn apply_power_modifiers_from_read_state(
+    modifiers: &mut ShipModifiers,
+    power: &PowerReadState,
+    multipliers: &HashMap<Console, [f32; 4]>,
+) {
+    let default_mult = [-0.5, 0.0, 0.25, 0.5];
+    let channel_1 = Channel1Read::new(power);
+
+    let helm_level = channel_1
+        .power_level(&PowerGroupId(HELM_POWER_GROUP.into()))
+        .unwrap_or(2);
+    let helm_level = (helm_level as usize).saturating_sub(1).min(3);
     let helm_bonus = multipliers.get(&Console::Helm).unwrap_or(&default_mult)[helm_level];
     modifiers.add_or_update(Modifier {
         source: ModifierSource::Console(Console::Helm),
@@ -78,7 +97,10 @@ pub fn apply_power_modifiers(
         bonus: helm_bonus,
     });
 
-    let weapons_level = (power.weapons as usize).saturating_sub(1).min(3);
+    let weapons_level = channel_1
+        .power_level(&PowerGroupId(WEAPONS_POWER_GROUP.into()))
+        .unwrap_or(2);
+    let weapons_level = (weapons_level as usize).saturating_sub(1).min(3);
     let weapons_bonus = multipliers.get(&Console::Tactical).unwrap_or(&default_mult)[weapons_level];
     modifiers.add_or_update(Modifier {
         source: ModifierSource::Console(Console::Tactical),
@@ -86,7 +108,10 @@ pub fn apply_power_modifiers(
         bonus: weapons_bonus,
     });
 
-    let sensors_level = (power.sensors as usize).saturating_sub(1).min(3);
+    let sensors_level = channel_1
+        .power_level(&PowerGroupId(SENSORS_POWER_GROUP.into()))
+        .unwrap_or(2);
+    let sensors_level = (sensors_level as usize).saturating_sub(1).min(3);
     let sensors_bonus = multipliers.get(&Console::Sensors).unwrap_or(&default_mult)[sensors_level];
     modifiers.add_or_update(Modifier {
         source: ModifierSource::Console(Console::Sensors),

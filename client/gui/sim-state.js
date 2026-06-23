@@ -99,6 +99,10 @@ export class ClientSimState {
     /** Per-tube torpedo state from the latest WeaponsUpdate. */
     this.tubeStates = [];
     this.currentTargetUuid = null;
+    /** Per-station active ratings, populated from Welcome / RatingChanged. */
+    this.stationRatings = {};
+    /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
+    this.controlSources = {};
     this.currentTargetName = null;
     /** Shared waypoint set by the Navigation console, or null when clear. */
     this.navigationWaypoint = null;
@@ -137,6 +141,7 @@ export class ClientSimState {
       case 'SimState': {
         const snap = d.snapshot || {};
         this.navigationWaypoint = snap.navigation_waypoint || null;
+        this.controlSources = snap.control_sources || {};
         // Update live positions/hull/shield of known entities IN PLACE — never append.
         for (const st of (snap.entity_states || [])) {
           const entity = this.world.entities.find(e => e.uuid === st.uuid);
@@ -169,6 +174,7 @@ export class ClientSimState {
         this.navChartSelects      = sc.nav_chart_selects      || [];
         this.phaserArcConfigs  = sc.phaser_banks        ?? [];
         this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
+        this.stationRatings = d.station_ratings || {};
         if (world) {
           // Reset to defaults but preserve the world snapshot from Welcome.
           this.world = world;
@@ -258,6 +264,11 @@ export class ClientSimState {
         break;
       case 'CommsState':
         this.objectives = d.objectives || [];
+        break;
+      case 'RatingChanged':
+        if (d.station_id != null) {
+          this.stationRatings[d.station_id] = d.rating_name || '';
+        }
         break;
       default:
         break;

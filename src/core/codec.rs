@@ -158,13 +158,6 @@ mod tests {
     }
 
     #[test]
-    fn client_start_game() {
-        let msg = ClientMessage::StartGame;
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
     fn client_control_system_helm_input_round_trips() {
         let msg = ClientMessage::ControlSystem {
             target: crate::system_registry::helm_system_id(),

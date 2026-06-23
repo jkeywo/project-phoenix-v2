@@ -365,7 +365,7 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -646,7 +646,8 @@ mod tests {
             },
         );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::StartGame);
+        push(&mut app, "captain", ClientMessage::SetReady { ready: true });
+        push(&mut app, "helm", ClientMessage::SetReady { ready: true });
         tick(&mut app);
         push(
             &mut app,

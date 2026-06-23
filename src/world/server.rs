@@ -3587,7 +3587,8 @@ mod tests {
         );
         tick(app);
         // Start game
-        push_msg(app, "captain", ClientMessage::StartGame);
+        push_msg(app, "captain", ClientMessage::SetReady { ready: true });
+        push_msg(app, "comms", ClientMessage::SetReady { ready: true });
         tick(app);
 
         // Manually install a comms template into the runtime so tests are
@@ -8704,7 +8705,8 @@ size_max = 2.0
             },
         );
         tick(&mut app);
-        push_msg(&mut app, "captain", ClientMessage::StartGame);
+        push_msg(&mut app, "captain", ClientMessage::SetReady { ready: true });
+        push_msg(&mut app, "comms", ClientMessage::SetReady { ready: true });
         tick(&mut app);
 
         {
@@ -9093,7 +9095,8 @@ size_max = 2.0
             },
         );
         tick(&mut app);
-        push_msg(&mut app, "captain", ClientMessage::StartGame);
+        push_msg(&mut app, "captain", ClientMessage::SetReady { ready: true });
+        push_msg(&mut app, "comms", ClientMessage::SetReady { ready: true });
         tick(&mut app);
 
         let station_uuid = "station-destroy-uuid";

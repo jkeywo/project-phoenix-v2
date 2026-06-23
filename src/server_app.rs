@@ -2250,7 +2250,7 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
         tick(app); // process_lobby → sets NextState::Set(InProgress)
         tick(app); // NextState takes effect: Phase switches to InProgress
     }
@@ -2290,7 +2290,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "helm", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -2329,7 +2330,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "sensors", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -2368,7 +2370,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "navigation", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -2630,7 +2633,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "comms", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -2823,7 +2827,7 @@ mod tests {
             ..Default::default()
         }));
 
-        // Bring the game up to the point of pressing StartGame
+        // Bring the game up to the point of pressing SetReady
         push(
             &mut app,
             "captain",
@@ -2843,7 +2847,7 @@ mod tests {
         tick(&mut app);
         // Simulate OnEnter(InProgress) having run by inserting ShipHullIntegrity.
         // The test explicitly advances phase to InProgress so broadcast_world_setup_on_start fires.
-        push(&mut app, "captain", ClientMessage::StartGame);
+        push(&mut app, "captain", ClientMessage::SetReady { ready: true });
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
         let start_out = tick(&mut app);
@@ -2855,7 +2859,7 @@ mod tests {
         assert_eq!(
             world_setups.len(),
             1,
-            "expected exactly one WorldSetup on the StartGame tick"
+            "expected exactly one WorldSetup on the SetReady tick"
         );
         match &world_setups[0].msg {
             ServerMessage::WorldSetup { world } => {
@@ -3050,7 +3054,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "weapons", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -3712,7 +3717,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "eng", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -3948,7 +3954,9 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "sensors", ClientMessage::SetReady { ready: true });
+        push(app, "weapons", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -4616,7 +4624,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "power", ClientMessage::SetReady { ready: true });
         let _ = tick(app);
     }
 
@@ -5354,7 +5363,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "shields", ClientMessage::SetReady { ready: true });
         let _ = tick(app);
     }
 

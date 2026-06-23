@@ -315,7 +315,7 @@ describe('EntityModeShell', () => {
 
     it('creates cards for stations section in player_ship.toml', () => {
       shell.openFile('player_ship.toml', readEntity('player_ship.toml'));
-      expect(shell.getCard('stations')).not.toBeNull();
+      expect(shell.getCard('station')).not.toBeNull();
     });
   });
 

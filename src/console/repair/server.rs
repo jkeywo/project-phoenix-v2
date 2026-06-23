@@ -330,7 +330,8 @@ mod tests {
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "eng", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 

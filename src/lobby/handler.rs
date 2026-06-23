@@ -49,7 +49,7 @@ pub fn process_message(
     world: Option<&WorldData>,
     ship_stations: &ShipStations,
     ship_config: &ShipClientConfig,
-    // When `false`, `StartGame` transitions to `Loading` instead of `InProgress`.
+    // When `false`, `SetReady` transitions to `Loading` instead of `InProgress`.
     preload_complete: bool,
     // Per-station active ratings to embed in Welcome for (re)connecting clients.
     station_ratings: &HashMap<StationId, String>,
@@ -319,19 +319,6 @@ pub fn process_message(
             ));
             // Auto-start when all connected players are ready.
             if phase == GamePhase::Lobby && sessions.all_ready() {
-                if preload_complete || ship_stations.stations.is_empty() {
-                    new_phase = Some(GamePhase::InProgress);
-                    outbound.push((Target::All, ServerMessage::GameStarted));
-                } else {
-                    new_phase = Some(GamePhase::Loading);
-                }
-            }
-        }
-        ClientMessage::StartGame => {
-            // Legacy compat: any player can force-start during Lobby.
-            // CaptainChair and all-stations-filled checks removed per #495.
-            // The primary start path is now SetReady + auto-start.
-            if phase == GamePhase::Lobby {
                 if preload_complete || ship_stations.stations.is_empty() {
                     new_phase = Some(GamePhase::InProgress);
                     outbound.push((Target::All, ServerMessage::GameStarted));
@@ -987,41 +974,47 @@ mod tests {
         );
     }
 
-    // ── process_message: StartGame ────────────────────────────────────────
+    // ── process_message: SetReady / auto-start ───────────────────────────
 
     #[test]
-    fn any_player_can_start_game() {
-        // Legacy StartGame: any player (not just captain) can force-start.
+    fn set_ready_all_players_starts_game() {
         let mut sessions = sessions_with("t1", "Alice");
         sessions.register("t2".into(), "Bob".into()).unwrap();
-        // t2 (non-captain) can StartGame — captain check removed per #495
-        let result = pm(
-            "t2",
-            &ClientMessage::StartGame,
+        // t1 sets ready — not all ready yet (t2 still unready)
+        let result_t1 = pm(
+            "t1",
+            &ClientMessage::SetReady { ready: true },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        assert!(result.new_phase.is_some(), "any player can StartGame");
-        assert!(result
+        assert!(result_t1.new_phase.is_none(), "game must not start until all players are ready");
+        // t2 sets ready — now all ready → auto-start
+        let result_t2 = pm(
+            "t2",
+            &ClientMessage::SetReady { ready: true },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert!(result_t2.new_phase.is_some(), "game should start when all players are ready");
+        assert!(result_t2
             .outbound
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
     }
 
     #[test]
-    fn start_game_succeeds_even_with_empty_stations() {
-        // Legacy StartGame: succeeds regardless of stations-filled state.
-        // Empty seats are automated via AI backfill per #495.
+    fn set_ready_single_player_starts_game() {
         let mut sessions = sessions_with("t1", "Alice");
         let result = pm(
             "t1",
-            &ClientMessage::StartGame,
+            &ClientMessage::SetReady { ready: true },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        assert!(result.new_phase.is_some(), "StartGame should succeed");
+        assert!(result.new_phase.is_some(), "SetReady should auto-start when only player is ready");
         assert!(result
             .outbound
             .iter()
@@ -1278,7 +1271,7 @@ mod tests {
     #[test]
     fn spectator_queue_persists_across_lobby_to_in_progress_phase_transition() {
         // The spectator queue on SessionManager is phase-agnostic.
-        // StartGame does not clear the queue — spectators remain spectators mid-game.
+        // Phase transition does not clear the queue — spectators remain spectators mid-game.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
         sessions.register("t10".into(), "Judy".into()).unwrap();
@@ -1288,18 +1281,17 @@ mod tests {
             1,
             "queue must have one spectator before transition"
         );
-        // Simulate a phase transition by doing StartGame (which only changes new_phase).
+        // Simulate a phase transition via SetReady (which only changes new_phase).
         // The sessions object is unaffected — queue should still be there.
         let result = pm_stations(
             "t1",
-            &ClientMessage::StartGame,
+            &ClientMessage::SetReady { ready: true },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        // t1 holds CaptainChair (Captain station at 6P has CaptainChair console)
-        // Only the captain can start, and all stations must be filled.
-        // Regardless of whether StartGame succeeds, the spectator queue must survive.
+        // t1 is the only connected player, so SetReady triggers auto-start.
+        // Regardless of whether the phase changes, the spectator queue must survive.
         let _ = result;
         assert_eq!(
             sessions.spectator_queue().len(),

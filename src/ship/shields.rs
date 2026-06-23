@@ -483,7 +483,8 @@ mod tests {
             },
         );
         tick(app);
-        push_msg(app, "captain", ClientMessage::StartGame);
+        push_msg(app, "captain", ClientMessage::SetReady { ready: true });
+        push_msg(app, "shields", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -661,7 +662,8 @@ mod tests {
             },
         );
         tick(app);
-        push_msg(app, "captain", ClientMessage::StartGame);
+        push_msg(app, "captain", ClientMessage::SetReady { ready: true });
+        push_msg(app, "helm", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 

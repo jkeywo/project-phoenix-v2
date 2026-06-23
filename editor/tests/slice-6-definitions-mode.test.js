@@ -26,7 +26,9 @@ describe('Slice 6: Definitions Mode', () => {
     const factionRows = sections[0].querySelectorAll('.definitions-file-list-row');
     const complexityRows = sections[1].querySelectorAll('.definitions-file-list-row');
     expect(factionRows.length).toBe(4);
-    expect(complexityRows.length).toBe(5);
+    // Complexity presets were retired in #534; the section renders empty
+    // until a complexity TOML file is loaded.
+    expect(complexityRows.length).toBe(0);
   });
 
   it('clicking a faction file populates the form with UUID + name + enemies (AC2)', async () => {
@@ -60,27 +62,6 @@ describe('Slice 6: Definitions Mode', () => {
       expect(opt.value).toMatch(/^[a-f0-9]{8}-/);
       expect(opt.textContent).not.toBe(opt.value);
     }
-  });
-
-  it('clicking a complexity file renders presets + hidden_elements + delegated + ai (AC4)', async () => {
-    await ctx.view._internal.loadComplexityFile('assets/complexity/tactical.toml');
-
-    const tabs = ctx.host.querySelectorAll('.def-preset-tab');
-    expect(tabs.length).toBeGreaterThanOrEqual(2);
-
-    const hiddenSelect = ctx.host.querySelector('.def-hidden-elements-select');
-    expect(hiddenSelect).toBeTruthy();
-    const hiddenOpts = hiddenSelect.querySelectorAll('OPTION');
-    // tactical.toml has 3 authored hidden_elements + the rest from KNOWN_UI_ELEMENTS.tactical.
-    expect(hiddenOpts.length).toBeGreaterThanOrEqual(3);
-
-    const delegatedRows = ctx.host.querySelectorAll('.def-delegated-row');
-    expect(delegatedRows.length).toBe(1);
-    // tactical.toml Low delegates set_phaser_frequency to Sensors.
-    expect(delegatedRows[0].dataset.consoleKey).toBe('Sensors');
-
-    const aiBlocks = ctx.host.querySelectorAll('.def-ai-block');
-    expect(aiBlocks.length).toBe(2);
   });
 
   it('mutating a faction name stages content + marks dirty + saves via TOML stringifier; fireFactionSaved fires (AC5)', async () => {

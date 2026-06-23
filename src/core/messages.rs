@@ -465,7 +465,7 @@ pub struct GameState {
     /// Current per-console complexity preset selection.
     #[serde(default)]
     pub complexity: HashMap<Console, String>,
-    /// Static world data — `Some` only after `StartGame` has populated the
+    /// Static world data — `Some` only after game start has populated the
     /// world; `None` while in Lobby or before world initialisation.
     #[serde(default)]
     pub world: Option<WorldData>,
@@ -886,7 +886,7 @@ impl Default for RadarStateSnapshot {
     }
 }
 
-/// Static world data sent once per game (after `StartGame`) and replayed
+/// Static world data sent once per game (on phase transition to InProgress) and replayed
 /// on `Welcome` to clients reconnecting mid-game.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WorldData {
@@ -1002,12 +1002,11 @@ pub enum ClientMessage {
         station: String,
     },
     ReleaseStation,
-    /// Per-player ready toggle (replaces captain-only Engage/StartGame).
+    /// Per-player ready toggle — the sole game start mechanism.
     /// When all joined players are ready the game auto-starts.
     SetReady {
         ready: bool,
     },
-    StartGame,
     FirePhaser {
         bank: PhaserBank,
     },

@@ -1,7 +1,4 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { readFileSync, readdirSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { parse } from 'smol-toml';
 
 import {
@@ -11,21 +8,49 @@ import {
   ComplexityEditor,
 } from '../complexity-editor.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(__dirname, '../..');
-const complexityDir = resolve(projectRoot, 'assets/complexity');
+// Inline TOML fixtures for the complexity editor tests.
+// The assets/complexity/ files were removed in #534 (complexity system retired)
+// but the editor still supports the complexity TOML format for development use.
+const FIXTURES = {
+  'assets/complexity/tactical.toml': `[[preset]]
+name = "Low"
+hidden_elements = ["phaser_mode_selector", "torpedo_tube_selector"]
 
-function readComplexity(name) {
-  return readFileSync(resolve(complexityDir, name), 'utf-8');
-}
+[preset.delegated]
+Sensors = { controls = ["set_phaser_frequency"] }
+
+[preset.ai]
+torpedo_auto_fire = { lead_prediction = true, min_accuracy = 0.7 }
+frequency_match = { auto_match_delay_secs = 3.0 }
+
+[[preset]]
+name = "Std"
+hidden_elements = []
+`,
+  'assets/complexity/power.toml': `[[preset]]
+name = "Low"
+hidden_elements = ["power_overflow_controls"]
+
+[[preset]]
+name = "Std"
+hidden_elements = []
+`,
+  'assets/complexity/shields.toml': `[[preset]]
+name = "Std"
+hidden_elements = []
+`,
+  'assets/complexity/sensors.toml': `[[preset]]
+name = "Std"
+hidden_elements = []
+`,
+  'assets/complexity/navigation.toml': `[[preset]]
+name = "Std"
+hidden_elements = []
+`,
+};
 
 function allComplexityFiles() {
-  return readdirSync(complexityDir)
-    .filter((f) => f.endsWith('.toml'))
-    .map((name) => ({
-      path: `assets/complexity/${name}`,
-      content: readComplexity(name),
-    }));
+  return Object.entries(FIXTURES).map(([path, content]) => ({ path, content }));
 }
 
 // ── parseComplexityToml ───────────────────────────────────────────────────────

@@ -2571,7 +2571,7 @@ station = "tactical"
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -2647,7 +2647,8 @@ station = "tactical"
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "weapons", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 
@@ -3772,7 +3773,9 @@ station = "tactical"
             },
         );
         tick(app);
-        push(app, "captain", ClientMessage::StartGame);
+        push(app, "captain", ClientMessage::SetReady { ready: true });
+        push(app, "sensors", ClientMessage::SetReady { ready: true });
+        push(app, "weapons", ClientMessage::SetReady { ready: true });
         tick(app);
     }
 

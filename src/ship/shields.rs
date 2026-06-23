@@ -7,7 +7,8 @@ use crate::messages::{
     ViewDirection,
 };
 use crate::ship::control_source::ControlSource;
-use crate::simulation::{ShipShields, SimOutbox};
+use crate::ship_plugin::CoordinationEnqueue;
+use crate::simulation::ShipShields;
 
 #[derive(Component, Clone, PartialEq)]
 pub struct ShieldsConsoleStateComp(pub ShieldsConsoleState);
@@ -59,6 +60,7 @@ pub struct ShipShieldsPlugin;
 impl Plugin for ShipShieldsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>()
+            .add_message::<CoordinationEnqueue>()
             .init_resource::<ShieldsAiConfigResource>()
             .init_resource::<ShieldsCoordinationState>()
             .add_systems(Startup, spawn_shields_console_state_entity)
@@ -162,15 +164,21 @@ pub fn handle_shields_messages(
     }
 }
 
-/// Emit `ShieldFacingDown` and `ShieldFacingRestored` coordination messages to Helm.
+/// Emit `ShieldFacingDown` and `ShieldFacingRestored` coordination messages to Helm
+/// via the centralized `CoordinationEnqueue` channel (channel 3).
+///
+/// Previously these were pushed directly to `SimOutbox` as `CoordinationPopup`
+/// messages, bypassing the lag scheduler. Now they flow through
+/// `handle_coordination_enqueue` → `process_coordination_lag`, which applies
+/// the delivery-time routing matrix (human target + AI sender → popup;
+/// AI target → consume; human → human → suppress).
 pub fn emit_shields_coordination(
     shields: Res<ShipShields>,
     ship: Res<crate::ship_state::ShipState>,
     mut coord_state: ResMut<ShieldsCoordinationState>,
     ai_config: Res<ShieldsAiConfigResource>,
     ship_plugin: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
-    mut outbox: ResMut<SimOutbox>,
-    sessions: Res<crate::lobby::Sessions>,
+    mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
     let snapshots = shields.0.snapshot();
     coord_state.ensure_len(snapshots.len());
@@ -194,7 +202,12 @@ pub fn emit_shields_coordination(
                     label: snap.label.clone(),
                     offline_remaining: snap.offline_remaining,
                 };
-                enqueue_coordination(&mut outbox, &sessions, sender_origin, payload);
+                writer.write(CoordinationEnqueue {
+                    sender_origin,
+                    target: crate::system_registry::helm_system_id(),
+                    payload,
+                    sender_label: "Shields".to_string(),
+                });
             }
         } else {
             // Facing is online. Check for restore notification before clearing state.
@@ -209,7 +222,12 @@ pub fn emit_shields_coordination(
                 let payload = CoordinationPayload::ShieldFacingRestored {
                     label: snap.label.clone(),
                 };
-                enqueue_coordination(&mut outbox, &sessions, sender_origin, payload);
+                writer.write(CoordinationEnqueue {
+                    sender_origin,
+                    target: crate::system_registry::helm_system_id(),
+                    payload,
+                    sender_label: "Shields".to_string(),
+                });
             }
 
             // Reset cycle state when facing returns to full online status so
@@ -225,33 +243,6 @@ pub fn emit_shields_coordination(
                 coord_state.restore_notified[i] = false;
             }
         }
-    }
-}
-
-fn enqueue_coordination(
-    outbox: &mut SimOutbox,
-    sessions: &crate::lobby::Sessions,
-    sender_origin: ControlSource,
-    payload: CoordinationPayload,
-) {
-    use crate::lobby::Target;
-    use crate::messages::ServerMessage;
-
-    let helm_token = sessions.0.console_holder(Console::Helm);
-    if let Some(token) = helm_token {
-        let sender_label = if matches!(sender_origin, ControlSource::Ai) {
-            "AI Shields".to_string()
-        } else {
-            "Shields".to_string()
-        };
-        outbox.0.push((
-            Target::Token(token.to_string()),
-            ServerMessage::CoordinationPopup {
-                target: crate::system_registry::helm_system_id(),
-                payload,
-                sender_label,
-            },
-        ));
     }
 }
 
@@ -365,8 +356,10 @@ fn push_shields_console_state(
 mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
-    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::{ClientMessage, Console, ServerMessage, *};
+    use crate::ship::control_source::ControlSource;
+    use crate::ship_plugin::CoordinationEnqueue;
     use crate::shield::ShieldSystem;
     use crate::simulation::{
         LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
@@ -377,6 +370,18 @@ mod tests {
     struct Outbox(Vec<OutboundMessage>);
 
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct CoordEnqueueBox(Vec<CoordinationEnqueue>);
+
+    fn collect_coord(
+        mut reader: MessageReader<CoordinationEnqueue>,
+        mut box_: ResMut<CoordEnqueueBox>,
+    ) {
         for m in reader.read() {
             box_.0.push(m.clone());
         }
@@ -410,8 +415,10 @@ mod tests {
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
+            .init_resource::<CoordEnqueueBox>()
             .add_plugins(ShipShieldsPlugin)
-            .add_systems(PostUpdate, collect);
+            .add_systems(PostUpdate, collect)
+            .add_systems(PostUpdate, collect_coord);
         app
     }
 
@@ -433,6 +440,12 @@ mod tests {
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
         out
+    }
+
+    fn drain_coord(app: &mut App) -> Vec<CoordinationEnqueue> {
+        let msgs = app.world().resource::<CoordEnqueueBox>().0.clone();
+        app.world_mut().resource_mut::<CoordEnqueueBox>().0.clear();
+        msgs
     }
 
     fn start_game_with_shields(app: &mut App) {
@@ -606,8 +619,10 @@ mod tests {
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
+            .init_resource::<CoordEnqueueBox>()
             .add_plugins(ShipShieldsPlugin)
-            .add_systems(PostUpdate, collect);
+            .add_systems(PostUpdate, collect)
+            .add_systems(PostUpdate, collect_coord);
         app
     }
 
@@ -661,30 +676,28 @@ mod tests {
             .0
             .apply_damage(9999, 0.0);
 
-        let out = tick(&mut app);
+        tick(&mut app);
+        let coord_msgs = drain_coord(&mut app);
 
-        let coordination_msgs: Vec<_> = out
+        let down_msgs: Vec<_> = coord_msgs
             .iter()
             .filter(|m| {
                 matches!(
-                    &m.msg,
-                    ServerMessage::CoordinationPopup {
-                        payload: CoordinationPayload::ShieldFacingDown { .. },
-                        ..
-                    }
+                    &m.payload,
+                    CoordinationPayload::ShieldFacingDown { .. }
                 )
             })
             .collect();
 
         assert!(
-            !coordination_msgs.is_empty(),
-            "expected a ShieldFacingDown coordination message to be sent"
+            !down_msgs.is_empty(),
+            "expected a ShieldFacingDown CoordinationEnqueue to be sent"
         );
         assert!(
-            coordination_msgs
+            down_msgs
                 .iter()
-                .all(|m| matches!(&m.target, Target::Token(t) if t == "helm")),
-            "ShieldFacingDown should be sent only to the Helm token"
+                .all(|m| m.target == crate::system_registry::helm_system_id()),
+            "ShieldFacingDown should target the helm system"
         );
     }
 
@@ -699,18 +712,17 @@ mod tests {
             .apply_damage(9999, 0.0);
 
         tick(&mut app); // first tick — fires
+        drain_coord(&mut app); // discard first tick's messages
 
-        let out = tick(&mut app); // second tick — should not re-fire
+        tick(&mut app); // second tick — should not re-fire
+        let coord_msgs = drain_coord(&mut app);
 
-        let count = out
+        let count = coord_msgs
             .iter()
             .filter(|m| {
                 matches!(
-                    &m.msg,
-                    ServerMessage::CoordinationPopup {
-                        payload: CoordinationPayload::ShieldFacingDown { .. },
-                        ..
-                    }
+                    &m.payload,
+                    CoordinationPayload::ShieldFacingDown { .. }
                 )
             })
             .count();
@@ -732,6 +744,7 @@ mod tests {
             .0
             .apply_damage(9999, 0.0);
         tick(&mut app);
+        drain_coord(&mut app); // discard down notification
 
         // Manually restore the facing and set HP to above threshold.
         {
@@ -751,24 +764,22 @@ mod tests {
             .resource_mut::<ShieldsCoordinationState>()
             .down_notified[0] = true;
 
-        let out = tick(&mut app);
+        tick(&mut app);
+        let coord_msgs = drain_coord(&mut app);
 
-        let restored_msgs: Vec<_> = out
+        let restored_msgs: Vec<_> = coord_msgs
             .iter()
             .filter(|m| {
                 matches!(
-                    &m.msg,
-                    ServerMessage::CoordinationPopup {
-                        payload: CoordinationPayload::ShieldFacingRestored { .. },
-                        ..
-                    }
+                    &m.payload,
+                    CoordinationPayload::ShieldFacingRestored { .. }
                 )
             })
             .collect();
 
         assert!(
             !restored_msgs.is_empty(),
-            "expected a ShieldFacingRestored coordination message on red alert after recovery"
+            "expected a ShieldFacingRestored CoordinationEnqueue on red alert after recovery"
         );
     }
 
@@ -782,6 +793,7 @@ mod tests {
             .0
             .apply_damage(9999, 0.0);
         tick(&mut app);
+        drain_coord(&mut app); // discard down notification
 
         {
             let mut shields = app.world_mut().resource_mut::<ShipShields>();
@@ -795,17 +807,15 @@ mod tests {
             .down_notified[0] = true;
 
         // No red alert active.
-        let out = tick(&mut app);
+        tick(&mut app);
+        let coord_msgs = drain_coord(&mut app);
 
-        let count = out
+        let count = coord_msgs
             .iter()
             .filter(|m| {
                 matches!(
-                    &m.msg,
-                    ServerMessage::CoordinationPopup {
-                        payload: CoordinationPayload::ShieldFacingRestored { .. },
-                        ..
-                    }
+                    &m.payload,
+                    CoordinationPayload::ShieldFacingRestored { .. }
                 )
             })
             .count();
@@ -813,6 +823,41 @@ mod tests {
         assert_eq!(
             count, 0,
             "ShieldFacingRestored should not fire when not on red alert"
+        );
+    }
+
+    /// Verify that the `CoordinationEnqueue` event carries `sender_origin = Ai`
+    /// by default (no explicit `ShipSystemControlSources` set), confirming the
+    /// channel-3 routing matrix will treat it as AI-originated and route
+    /// correctly (AI → Human = Popup; AI → AI = Consume) at delivery time.
+    #[test]
+    fn shield_facing_down_coordination_carries_ai_sender_origin_for_routing() {
+        let mut app = test_app_with_helm();
+        start_game_with_shields_and_helm(&mut app);
+
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .apply_damage(9999, 0.0);
+
+        tick(&mut app);
+        let coord_msgs = drain_coord(&mut app);
+
+        let down_msgs: Vec<_> = coord_msgs
+            .iter()
+            .filter(|m| matches!(&m.payload, CoordinationPayload::ShieldFacingDown { .. }))
+            .collect();
+
+        assert!(!down_msgs.is_empty(), "expected ShieldFacingDown enqueue");
+        assert!(
+            down_msgs.iter().all(|m| m.sender_origin == ControlSource::Ai),
+            "default sender_origin should be Ai (shields console has no holder)"
+        );
+        assert!(
+            down_msgs
+                .iter()
+                .all(|m| m.target == crate::system_registry::helm_system_id()),
+            "ShieldFacingDown should target the helm system"
         );
     }
 }

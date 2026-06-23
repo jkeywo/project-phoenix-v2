@@ -34,7 +34,7 @@ The registry kind key uses `"red_alert"` (snake_case, `RED_ALERT_KIND`) for lega
 | Tactical | ✅ `tactical` | ✅ | ✅ | ✅ | #491 |
 | Power | ✅ `power` | ✅ | ✅ | n/a | #500 |
 | Sensors | ✅ `sensors` | ✅ | ✅ | ✅ | #498 |
-| Shields | ✅ `shields` | ✅ | ✅ | pending #528 (CoordinationEnqueue) | #502 |
+| Shields | ✅ `shields` | ✅ | ✅ | ✅ (#528) | #502/#528 |
 | Comms | ✅ `comms` | ✅ | ✅ | ✅ | #503 |
 | Viewscreen | ✅ `viewscreen` | ✅ | ✅ | n/a | #505 |
 | Repair | ✅ `repair` | ✅ (#526) | ✅ (#526) | n/a | #525/#526 |

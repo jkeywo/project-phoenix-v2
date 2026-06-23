@@ -25,7 +25,8 @@ channel-3 routing, `serde_json` used outside the codec module, and a missing
 
 Eight independently-grabbable slices:
 
-- **A1** - Shields → CoordinationEnqueue (replace direct SimOutbox push).
+- **A1** - Shields → CoordinationEnqueue (replace direct SimOutbox push). Shipped:
+  see [Issue #528](./issue-528-shields-coordination.md).
 - **A2** - `RatingChanged` broadcast from `handle_station_rating_change`.
 - **A3** - Captain station owns viewscreen system kind.
 - **A4** - `Console::from_console_id` helper; delete hardcoded console list in
@@ -67,4 +68,5 @@ is unblocked and can start immediately.
 - [Issue #525 - SystemId naming convention (A6)](./issue-525-systemid-naming.md) — shipped
 - [Issue #526 - Repair coarse-system conversion (A7)](./issue-526-repair-control-system.md) — shipped
 - [Issue #527 - Navigation coarse-system conversion (A8)](./issue-527-navigation-control-system.md) — shipped
+- [Issue #528 - Shields advisories through CoordinationEnqueue (A1)](./issue-528-shields-coordination.md) — shipped
 - [Issue #493 - Coordination-lag scope](./issue-493-coordination-lag-scope.md)

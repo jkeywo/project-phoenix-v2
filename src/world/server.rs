@@ -187,6 +187,14 @@ pub enum WorldLayerChange {
 #[derive(Resource, Default)]
 pub struct OnScreenMessage(pub Option<CommsMessage>);
 
+/// Channel-2 (immediate sim-level) delivery of scenario content into the Comms system.
+/// Fired by the world engine instead of mutating `CommsInboxRes` directly; consumed by
+/// `handle_comms_channel2` in the Broadcast set.
+#[derive(Message, Clone, Debug)]
+pub struct CommsChannel2Event {
+    pub message: CommsMessage,
+}
+
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
@@ -198,6 +206,7 @@ impl Plugin for WorldPlugin {
             .init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>()
             .init_resource::<OnScreenMessage>()
+            .add_message::<CommsChannel2Event>()
             .add_systems(
                 Startup,
                 (
@@ -221,6 +230,7 @@ impl Plugin for WorldPlugin {
                     handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
                     handle_clear_comms.in_set(crate::sim_sets::SimSet::Input),
                     handle_show_on_screen.in_set(crate::sim_sets::SimSet::Input),
+                    handle_comms_channel2.in_set(crate::sim_sets::SimSet::Broadcast),
                     auto_clear_on_screen_message.in_set(crate::sim_sets::SimSet::Broadcast),
                     update_comms_range_flags.in_set(crate::sim_sets::SimSet::Broadcast),
                     broadcast_comms_state.in_set(crate::sim_sets::SimSet::Broadcast),
@@ -741,7 +751,7 @@ fn handle_hail(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     mut runtime: ResMut<WorldContentRuntime>,
-    mut inbox: ResMut<CommsInboxRes>,
+    mut channel2_writer: MessageWriter<CommsChannel2Event>,
     control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
     let policy = control_sources
@@ -762,8 +772,13 @@ fn handle_hail(
             continue;
         }
 
-        let ClientMessage::Hail { target_uuid } = &ev.msg else {
-            continue;
+        let target_uuid = match &ev.msg {
+            ClientMessage::Hail { target_uuid } => target_uuid,
+            ClientMessage::ControlSystem {
+                target,
+                payload: crate::messages::SystemControlPayload::Hail { target_uuid },
+            } if target.0 == crate::system_registry::COMMS_SYSTEM_ID => target_uuid,
+            _ => continue,
         };
 
         // Server-side range gate: when range tracking is active, the target
@@ -834,7 +849,7 @@ fn handle_hail(
                 thread_id: thread_id.clone(),
                 is_urgent: f.urgent,
             };
-            inbox.0.inject(msg);
+            channel2_writer.write(CommsChannel2Event { message: msg });
             runtime.active_dialogues.insert(
                 msg_id,
                 ActiveDialogue {
@@ -888,6 +903,7 @@ fn tick_pending_follow_ups(
     time: Res<bevy::time::Time>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
+    mut channel2_writer: MessageWriter<CommsChannel2Event>,
     region_membership: Option<Res<crate::regions::server::RegionMembership>>,
     ship_query: Query<Entity, With<crate::simulation::Ship>>,
     entity_uuid_q: Query<&EntityUuid>,
@@ -968,7 +984,7 @@ fn tick_pending_follow_ups(
             thread_id: pfu.thread_id.clone(),
             is_urgent: pfu.urgent,
         };
-        inbox.0.inject(new_msg);
+        channel2_writer.write(CommsChannel2Event { message: new_msg });
         runtime.active_dialogues.insert(
             new_msg_id,
             ActiveDialogue {
@@ -1086,6 +1102,7 @@ fn handle_respond_to_message(
     sessions: Res<Sessions>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
+    mut channel2_writer: MessageWriter<CommsChannel2Event>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut commands: Commands,
     mut ai_query: Query<(
@@ -1097,9 +1114,7 @@ fn handle_respond_to_message(
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
-    mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
-    mut layer_map: Option<ResMut<WorldLayerMap>>,
-    base_world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
     control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
@@ -1121,12 +1136,22 @@ fn handle_respond_to_message(
             continue;
         }
 
-        let ClientMessage::RespondToMessage {
-            message_id,
-            response_index,
-        } = &ev.msg
-        else {
-            continue;
+        let (message_id, response_index) = match &ev.msg {
+            ClientMessage::RespondToMessage {
+                message_id,
+                response_index,
+            } => (message_id, response_index),
+            ClientMessage::ControlSystem {
+                target,
+                payload:
+                    crate::messages::SystemControlPayload::RespondToMessage {
+                        message_id,
+                        response_index,
+                    },
+            } if target.0 == crate::system_registry::COMMS_SYSTEM_ID => {
+                (message_id, response_index)
+            }
+            _ => continue,
         };
 
         // Look up active dialogue for this message.
@@ -1372,7 +1397,7 @@ fn handle_respond_to_message(
                     }
                 }
                 TriggerAction::LoadWorld { path } => {
-                    if let Some(ref mut lc) = pending_layers {
+                    if let Some(ref mut lc) = world_layers.pending_layers {
                         // Comms responses load against the base world
                         // (loader_path = None) since CommsTemplate has no
                         // origin_layer concept today.
@@ -1383,14 +1408,14 @@ fn handle_respond_to_message(
                     }
                 }
                 TriggerAction::UnloadWorld { path } => {
-                    if let Some(ref mut lc) = pending_layers {
+                    if let Some(ref mut lc) = world_layers.pending_layers {
                         lc.0.push(WorldLayerChange::Unload(path.clone()));
                     }
                 }
                 TriggerAction::SetWorldFlag { name } => {
                     if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
                         &mut runtime.flags,
-                        layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                        world_layers.layer_map.as_deref_mut().map(|lm| &mut lm.0),
                         &origin_layer,
                         name,
                         FlagMutation::Set,
@@ -1407,7 +1432,7 @@ fn handle_respond_to_message(
                 TriggerAction::ClearWorldFlag { name } => {
                     if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
                         &mut runtime.flags,
-                        layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                        world_layers.layer_map.as_deref_mut().map(|lm| &mut lm.0),
                         &origin_layer,
                         name,
                         FlagMutation::Clear,
@@ -1424,7 +1449,7 @@ fn handle_respond_to_message(
                 TriggerAction::IncrementWorldFlag { name, by } => {
                     if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
                         &mut runtime.flags,
-                        layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                        world_layers.layer_map.as_deref_mut().map(|lm| &mut lm.0),
                         &origin_layer,
                         name,
                         FlagMutation::Increment(*by),
@@ -1441,7 +1466,7 @@ fn handle_respond_to_message(
                 TriggerAction::SetWorldFlagValue { name, value } => {
                     if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
                         &mut runtime.flags,
-                        layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                        world_layers.layer_map.as_deref_mut().map(|lm| &mut lm.0),
                         &origin_layer,
                         name,
                         FlagMutation::SetValue(*value),
@@ -1467,7 +1492,7 @@ fn handle_respond_to_message(
                         *pos
                     } else if let Some(anchor_name) = anchor {
                         // origin_layer = None: resolve against base world anchors only.
-                        let lookup = base_world_config
+                        let lookup = world_layers.base_world_config
                             .as_ref()
                             .and_then(|wc| wc.anchors.get(anchor_name).copied());
                         match lookup {
@@ -1705,7 +1730,7 @@ fn handle_respond_to_message(
                     thread_id: thread_id.clone(),
                     is_urgent: false,
                 };
-                inbox.0.inject(placeholder);
+                channel2_writer.write(CommsChannel2Event { message: placeholder });
                 runtime.pending_follow_ups.push(PendingFollowUp {
                     node: follow_up.clone(),
                     sender_uuid,
@@ -1734,7 +1759,7 @@ fn handle_respond_to_message(
                     thread_id: thread_id.clone(),
                     is_urgent: false,
                 };
-                inbox.0.inject(new_msg);
+                channel2_writer.write(CommsChannel2Event { message: new_msg });
                 runtime.active_dialogues.insert(
                     new_msg_id,
                     ActiveDialogue {
@@ -1771,7 +1796,15 @@ fn handle_clear_comms(
             continue;
         }
 
-        if matches!(ev.msg, ClientMessage::ClearComms) {
+        let is_clear = match &ev.msg {
+            ClientMessage::ClearComms => true,
+            ClientMessage::ControlSystem {
+                target,
+                payload: crate::messages::SystemControlPayload::ClearComms,
+            } if target.0 == crate::system_registry::COMMS_SYSTEM_ID => true,
+            _ => false,
+        };
+        if is_clear {
             inbox.0.clear();
         }
     }
@@ -1806,7 +1839,15 @@ fn handle_show_on_screen(
             continue;
         }
 
-        if let ClientMessage::ShowOnScreen { ref message_id } = ev.msg {
+        let show_message_id: Option<&String> = match &ev.msg {
+            ClientMessage::ShowOnScreen { message_id } => Some(message_id),
+            ClientMessage::ControlSystem {
+                target,
+                payload: crate::messages::SystemControlPayload::ShowOnScreen { message_id },
+            } if target.0 == crate::system_registry::COMMS_SYSTEM_ID => Some(message_id),
+            _ => None,
+        };
+        if let Some(message_id) = show_message_id {
             if let Some(msg) = inbox.0.messages().into_iter().find(|m| &m.id == message_id) {
                 let already_on_screen = matches!(ship.view_mode, ViewMode::Comms)
                     && on_screen
@@ -1821,6 +1862,33 @@ fn handle_show_on_screen(
                     ship.show_view_mode(ViewMode::Comms);
                 }
             }
+        }
+    }
+}
+
+/// Consume channel-2 deliveries addressed to the Comms system.
+///
+/// Injects each message into `CommsInboxRes`. When the comms system is
+/// AI-operated (`policy.operate_ai`), the stub controller auto-picks the
+/// first available response — full trigger-action dispatch is deferred to
+/// #520 (AI ship unification).
+fn handle_comms_channel2(
+    mut reader: MessageReader<CommsChannel2Event>,
+    mut inbox: ResMut<CommsInboxRes>,
+    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
+) {
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
+        .unwrap_or(crate::control_source::ControlTickPolicy {
+            accept_human_input: true,
+            operate_ai: false,
+            coordinate: true,
+        });
+    for ev in reader.read() {
+        inbox.0.inject(ev.message.clone());
+        if policy.operate_ai && !ev.message.responses.is_empty() {
+            inbox.0.record_response(&ev.message.id, 0);
         }
     }
 }
@@ -2057,7 +2125,7 @@ fn broadcast_objective_summary(
 fn handle_ai_events(
     mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,
-    mut inbox: ResMut<CommsInboxRes>,
+    mut channel2_writer: MessageWriter<CommsChannel2Event>,
     mut commands: Commands,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
@@ -2159,7 +2227,7 @@ fn handle_ai_events(
             thread_id: thread_id.clone(),
             is_urgent: fc.urgent,
         };
-        inbox.0.inject(msg);
+        channel2_writer.write(CommsChannel2Event { message: msg });
         runtime.active_dialogues.insert(
             msg_id,
             ActiveDialogue {
@@ -2863,6 +2931,16 @@ fn build_uuid_to_faction(
 /// `registry` is `Option<ResMut<_>>` so test apps that don't insert
 /// `FactionRegistryResource` (most of `world::server::tests`) still load
 /// the systems without a "resource does not exist" panic. Production
+/// Bundles the optional world-layer mutation resources used by
+/// `handle_respond_to_message` and `handle_ai_events` into a single
+/// `SystemParam` so both functions stay within Bevy's 16-parameter limit.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct WorldLayerParams<'w> {
+    pub pending_layers: Option<ResMut<'w, PendingWorldLayerChanges>>,
+    pub layer_map: Option<ResMut<'w, WorldLayerMap>>,
+    pub base_world_config: Option<Res<'w, crate::world::config::WorldConfig>>,
+}
+
 /// builds always insert the registry via `init_world_runtime`, so the
 /// `None` branch is a test-only safety net that logs and skips the
 /// action.
@@ -3436,12 +3514,14 @@ mod tests {
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
+            .add_message::<CommsChannel2Event>()
             .add_systems(
                 Update,
                 (
                     handle_hail,
                     handle_respond_to_message,
                     handle_clear_comms,
+                    handle_comms_channel2,
                     update_comms_range_flags,
                     broadcast_comms_state,
                     broadcast_objective_summary,
@@ -3977,7 +4057,11 @@ mod tests {
         app.add_plugins(bevy::time::TimePlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
-            .add_systems(Update, tick_pending_follow_ups);
+            .add_message::<CommsChannel2Event>()
+            .add_systems(
+                Update,
+                (tick_pending_follow_ups, handle_comms_channel2).chain(),
+            );
 
         let placeholder = CommsMessage {
             id: "placeholder-001".into(),
@@ -4406,7 +4490,8 @@ mod tests {
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<SimOutbox>()
-            .add_systems(Update, handle_ai_events);
+            .add_message::<CommsChannel2Event>()
+            .add_systems(Update, (handle_ai_events, handle_comms_channel2).chain());
         // Set phase to InProgress
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
@@ -7344,7 +7429,8 @@ condition = "on_world_loaded"
             .init_resource::<SimOutbox>()
             .add_message::<crate::ai::server::AiEntityAttacked>()
             .add_message::<crate::ai::server::AiEntityDestroyed>()
-            .add_systems(Update, handle_ai_events)
+            .add_message::<CommsChannel2Event>()
+            .add_systems(Update, (handle_ai_events, handle_comms_channel2).chain())
             .add_observer(handle_region_entered_event)
             .add_observer(handle_region_exited_event);
         // Spawn the player ship (with a Transform so RegionPlugin's
@@ -9563,7 +9649,11 @@ size_max = 2.0
         app.add_plugins(bevy::time::TimePlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
-            .add_systems(Update, tick_pending_follow_ups);
+            .add_message::<CommsChannel2Event>()
+            .add_systems(
+                Update,
+                (tick_pending_follow_ups, handle_comms_channel2).chain(),
+            );
         app
     }
 
@@ -9710,5 +9800,155 @@ size_max = 2.0
         let messages = app.world().resource::<CommsInboxRes>().0.messages();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].body, "Three seconds elapsed.");
+    }
+
+    // -- Issue #506: channel-2 routing tests ------------------------------------
+
+    /// Scenario hail arrives in CommsInboxRes via channel-2 (handle_ai_events
+    /// writes to CommsChannel2Event; handle_comms_channel2 injects into inbox).
+    #[test]
+    fn scenario_hail_arrives_in_inbox_via_channel2() {
+        let mut app = ai_trigger_test_app();
+
+        // Install a comms template that fires on WorldLoaded.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("outpost_alpha".to_string(), "outpost-uuid-ch2".to_string());
+            runtime.comms_template_states.push(CommsTemplateState {
+                template: crate::world::config::CommsTemplate {
+                    from: "outpost_alpha".to_string(),
+                    trigger: TriggerCondition::OnWorldLoaded,
+                    node: CommsDialogueNode {
+                        body: "Channel-2 test message.".to_string(),
+                        responses: vec![],
+                        speaker: Some("Outpost Alpha".to_string()),
+                        trigger: None,
+                    },
+                    thread_id: None,
+                    urgent: false,
+                    root_follow_up: None,
+                },
+                fired: false,
+            });
+            // Queue a WorldLoaded event so handle_ai_events fires the template.
+            runtime
+                .pending_world_events
+                .push(WorldEvent::WorldLoaded);
+        }
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(
+            messages.len(),
+            1,
+            "scenario hail must arrive in inbox after routing through channel-2"
+        );
+        assert_eq!(messages[0].body, "Channel-2 test message.");
+        assert_eq!(messages[0].sender_name, "Outpost Alpha");
+    }
+
+    /// When the comms system is AI-operated (`operate_ai = true`),
+    /// `handle_comms_channel2` auto-picks the first response (index 0).
+    #[test]
+    fn ai_auto_respond_on_scenario_hail_via_channel2() {
+        let mut app = ai_trigger_test_app();
+
+        // Set comms system to AI control.
+        {
+            let mut sources = app
+                .world_mut()
+                .get_resource_or_insert_with(crate::ship_plugin::ShipSystemControlSources::default);
+            sources.0.set(
+                crate::system_registry::comms_system_id(),
+                crate::control_source::ControlSource::Ai,
+            );
+        }
+
+        // Install a template with a response, fired on WorldLoaded.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("sector_hq".to_string(), "sector-hq-uuid".to_string());
+            runtime.comms_template_states.push(CommsTemplateState {
+                template: crate::world::config::CommsTemplate {
+                    from: "sector_hq".to_string(),
+                    trigger: TriggerCondition::OnWorldLoaded,
+                    node: CommsDialogueNode {
+                        body: "AI auto-respond test.".to_string(),
+                        responses: vec![CommsResponse {
+                            text: "Acknowledged.".to_string(),
+                            actions: vec![],
+                            follow_up: None,
+                        }],
+                        speaker: None,
+                        trigger: None,
+                    },
+                    thread_id: None,
+                    urgent: false,
+                    root_follow_up: None,
+                },
+                fired: false,
+            });
+            runtime
+                .pending_world_events
+                .push(WorldEvent::WorldLoaded);
+        }
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 1, "message must be injected into inbox");
+        assert_eq!(
+            messages[0].selected_response,
+            Some(0),
+            "AI-operated comms must auto-pick response index 0"
+        );
+    }
+
+    /// `ClientMessage::ControlSystem { target: comms_system_id(), payload: Hail { .. } }`
+    /// must produce the same inbox result as `ClientMessage::Hail { .. }`.
+    #[test]
+    fn control_system_hail_dispatches_same_as_client_message_hail() {
+        let station_uuid = "station-uuid-control-sys";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        // Flush the initial broadcast.
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.to_string(),
+                },
+            },
+        );
+        let out = tick(&mut app);
+
+        let comms_state = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                Some(messages.clone())
+            } else {
+                None
+            }
+        });
+
+        assert!(
+            comms_state.is_some(),
+            "ControlSystem::Hail must produce a CommsState broadcast"
+        );
+        let messages = comms_state.unwrap();
+        assert_eq!(
+            messages.len(),
+            1,
+            "ControlSystem::Hail must deliver one message"
+        );
+        assert_eq!(messages[0].body, "USS Phoenix, please identify yourself.");
     }
 }

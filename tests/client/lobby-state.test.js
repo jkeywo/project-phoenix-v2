@@ -12,23 +12,18 @@ function welcome(state, shipStations, shipConfig) {
     type: 'Welcome',
     data: {
       state,
-      ship_stations: shipStations || { configs: {}, min_players: 0, max_players: 0 },
+      ship_stations: shipStations || { stations: [] },
       ship_config: shipConfig || {},
     },
   };
 }
 
+// New B3 shape: flat stations array, no configs/min_players/max_players.
 const TWO_STATION_SHIP = {
-  min_players: 1,
-  max_players: 2,
-  configs: {
-    // Wire keys are strings (serde HashMap<u32, …> → JSON object).
-    '1': [{ name: 'Captain', description: 'Solo command', rank: '', short_code: '', consoles: ['CaptainChair', 'Helm'] }],
-    '2': [
-      { name: 'Helm', description: 'Pilot', rank: '', short_code: 'HLM', consoles: ['Helm', 'CaptainChair'] },
-      { name: 'Tactical', description: 'Weapons', rank: '', short_code: '', consoles: ['Tactical'] },
-    ],
-  },
+  stations: [
+    { name: 'Helm', description: 'Pilot', rank: '', short_code: 'HLM', consoles: ['Helm', 'CaptainChair'] },
+    { name: 'Tactical', description: 'Weapons', rank: '', short_code: 'TAC', consoles: ['Tactical'] },
+  ],
 };
 
 describe('LobbyState defaults', () => {
@@ -36,7 +31,6 @@ describe('LobbyState defaults', () => {
     const s = new LobbyState();
     expect(s.phase).toBe('Lobby');
     expect(s.players).toEqual([]);
-    expect(s.complexity).toEqual({});
     expect(s.gameOverReason).toBeNull();
   });
 
@@ -54,12 +48,10 @@ describe('apply Welcome', () => {
     s.apply(welcome({
       phase: 'Lobby',
       players: [p('a', 'Alice', ['CaptainChair'])],
-      complexity: { Helm: 'Low' },
       world: null,
     }));
     expect(s.players).toHaveLength(1);
     expect(s.players[0].name).toBe('Alice');
-    expect(s.complexity).toEqual({ Helm: 'Low' });
   });
 
   it('extracts scenario title and body from world', () => {
@@ -67,7 +59,6 @@ describe('apply Welcome', () => {
     s.apply(welcome({
       phase: 'InProgress',
       players: [],
-      complexity: {},
       world: { entities: [], scenario_title: 'Distress Call', scenario_description: 'Save them' },
     }));
     expect(s.scenarioTitle).toBe('Distress Call');
@@ -77,7 +68,7 @@ describe('apply Welcome', () => {
 
   it('stores ship stations and ship config', () => {
     const s = new LobbyState();
-    s.apply(welcome({ phase: 'Lobby', players: [], complexity: {} },
+    s.apply(welcome({ phase: 'Lobby', players: [] },
       TWO_STATION_SHIP, { repair_team_count: 3 }));
     expect(s.shipStations).toEqual(TWO_STATION_SHIP);
     expect(s.shipConfig.repair_team_count).toBe(3);
@@ -157,18 +148,12 @@ describe('apply phase transitions', () => {
   });
 });
 
-describe('apply ComplexityChanged', () => {
-  it('updates the per-console preset', () => {
+describe('ComplexityChanged is ignored (retired message)', () => {
+  it('does not crash and does not mutate state', () => {
     const s = new LobbyState();
+    const before = JSON.stringify(s);
     s.apply({ type: 'ComplexityChanged', data: { console: 'Helm', preset_name: 'Low' } });
-    expect(s.complexity.Helm).toBe('Low');
-  });
-
-  it('overwrites previous value without touching other consoles', () => {
-    const s = new LobbyState();
-    s.complexity = { Helm: 'Std' };
-    s.apply({ type: 'ComplexityChanged', data: { console: 'Tactical', preset_name: 'Low' } });
-    expect(s.complexity).toEqual({ Helm: 'Std', Tactical: 'Low' });
+    expect(JSON.stringify(s)).toBe(before);
   });
 });
 
@@ -213,14 +198,14 @@ describe('view derivations', () => {
 });
 
 describe('stationSlots', () => {
-  it('shows one row per station at the current player count', () => {
+  it('shows one row per station from shipStations.stations', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
     s.players = [
       p('a', 'Alice', ['CaptainChair', 'Helm']),
       p('b', 'Bob', ['Tactical']),
     ];
-    const names = s.stationSlots('x').map(sl => sl.station);
+    const names = s.stationSlots('x').filter(sl => sl.kind !== 'spectator').map(sl => sl.station);
     expect(names).toEqual(['Helm', 'Tactical']);
   });
 
@@ -234,17 +219,19 @@ describe('stationSlots', () => {
     expect(slots[1].holder_name).toBe('Bob');
   });
 
-  it('shows the NP layout when a new player has not yet picked a station', () => {
+  it('available slot when a player has not yet picked a station', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
     s.players = [p('a', 'Alice', ['CaptainChair', 'Helm']), p('b', 'Bob', [])];
     const slots = s.stationSlots('x');
-    expect(slots).toHaveLength(2);
+    // 2 station rows + 1 spectator (Bob has no station consoles)
+    expect(slots).toHaveLength(3);
     expect(slots[0].kind).toBe('occupied');
     expect(slots[1].kind).toBe('available');
+    expect(slots[2]).toEqual({ kind: 'spectator', player_name: 'Bob' });
   });
 
-  it('appends spectator rows only when players exceed max_players', () => {
+  it('appends spectator rows for players with no station consoles', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
     s.players = [
@@ -254,28 +241,40 @@ describe('stationSlots', () => {
       p('d', 'Dave', []),
     ];
     const slots = s.stationSlots('x');
+    // 2 station rows + 2 spectators
     expect(slots).toHaveLength(4);
     expect(slots[2]).toEqual({ kind: 'spectator', player_name: 'Carol' });
     expect(slots[3]).toEqual({ kind: 'spectator', player_name: 'Dave' });
   });
 
-  it('always shows max_players layout even when no players are connected', () => {
+  it('shows all station rows even when no players are connected', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
     const slots = s.stationSlots('x');
     expect(slots).toHaveLength(2);
     expect(slots[0].station).toBe('Helm');
     expect(slots[1].station).toBe('Tactical');
+    expect(slots[0].kind).toBe('available');
   });
 
-  it('carries preset names from the complexity map (default Std)', () => {
+  it('slot shape contains station/short_code/description/rank/consoles but no preset_names', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
-    s.players = [p('a', 'Alice', ['CaptainChair', 'Helm']), p('b', 'Bob', ['Tactical'])];
-    s.complexity = { Tactical: 'Low' };
     const slots = s.stationSlots('x');
-    expect(slots[1].preset_names).toEqual(['Low']);
-    expect(slots[0].preset_names).toEqual(['Std', 'Std']);
+    const slot = slots[0];
+    expect(slot.station).toBe('Helm');
+    expect(slot.short_code).toBe('HLM');
+    expect(slot.description).toBe('Pilot');
+    expect(slot.consoles).toEqual(['Helm', 'CaptainChair']);
+    expect(slot).not.toHaveProperty('preset_names');
+  });
+
+  it('returns empty when shipStations has no stations', () => {
+    const s = new LobbyState();
+    s.players = [p('a', 'Alice', [])];
+    const slots = s.stationSlots('x');
+    // No station defs → no station rows. Alice has no station consoles → spectator.
+    expect(slots).toEqual([{ kind: 'spectator', player_name: 'Alice' }]);
   });
 });
 
@@ -287,14 +286,20 @@ describe('allStationsFilled', () => {
     expect(s.allStationsFilled()).toBe(true);
   });
 
-  it('false when a station is empty or a player is an unfilled spectator', () => {
+  it('false when a station has no holder', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
     s.players = [p('a', 'Alice', ['CaptainChair', 'Helm']), p('b', 'Bob', [])];
     expect(s.allStationsFilled()).toBe(false);
   });
 
-  it('true when overflow spectators exist beyond max_players', () => {
+  it('false when shipStations.stations is empty', () => {
+    const s = new LobbyState();
+    s.players = [p('a', 'Alice', ['CaptainChair', 'Helm'])];
+    expect(s.allStationsFilled()).toBe(false);
+  });
+
+  it('true even when overflow spectators exist', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
     s.players = [

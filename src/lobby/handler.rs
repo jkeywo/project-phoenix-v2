@@ -5,6 +5,9 @@ use crate::messages::{
     WorldData,
 };
 use crate::session::SessionManager;
+use crate::ship::config::ShipConfig;
+use crate::ship::control_source::ControlSourceResolver;
+use crate::ship::rating;
 use crate::stations_config::{get_station, ShipStations};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -17,6 +20,11 @@ pub enum Target {
 pub struct LobbyHandlerResult {
     pub new_phase: Option<GamePhase>,
     pub outbound: Vec<(Target, ServerMessage)>,
+    /// Station rating change the Bevy runtime must apply to the control-source
+    /// resolver and active_ratings map (in addition to broadcasting it).
+    /// Set by `process_disconnect_with_stations` (backfill) and the reconnect
+    /// branch of `process_message` (restore).
+    pub station_rating_update: Option<(StationId, String)>,
 }
 
 /// Derive the canonical `GameState` snapshot from live session + phase state.
@@ -56,6 +64,7 @@ pub fn process_message(
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut new_phase = None;
+    let mut station_rating_update: Option<(StationId, String)> = None;
 
     match msg {
         ClientMessage::Identify {
@@ -70,6 +79,49 @@ pub fn process_message(
             };
 
             if joined {
+                // Reconnect-yield: if the player had a station and it is still
+                // unclaimed (no connected peer holds any of its consoles), restore
+                // their seat and broadcast the pre-disconnect rating.
+                let mut reconnect_station_update: Option<(StationId, String)> = None;
+                if is_reconnect && !ship_stations.stations.is_empty() {
+                    let station_id = sessions.station_for_token(id_token).cloned();
+                    if let Some(ref sid) = station_id {
+                        if let Some(station_def) =
+                            ship_stations.stations.iter().find(|sd| &sd.id == sid)
+                        {
+                            let occupied = station_def.consoles.iter().any(|c| {
+                                sessions
+                                    .players()
+                                    .iter()
+                                    .any(|p| p.connected && p.token != *id_token && p.consoles.contains(c))
+                            });
+                            if !occupied {
+                                let mut ok = true;
+                                for c in &station_def.consoles {
+                                    if sessions.toggle_console(id_token, c.clone()).is_err() {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                if !ok {
+                                    sessions.clear_consoles(id_token);
+                                } else {
+                                    // Capture restore info for post-Welcome broadcasts.
+                                    let last_rating = sessions
+                                        .players()
+                                        .iter()
+                                        .find(|p| p.token == *id_token)
+                                        .and_then(|p| p.last_rating.clone());
+                                    if let Some(rating) = last_rating {
+                                        reconnect_station_update =
+                                            Some((sid.clone(), rating));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Send Welcome and PlayerJoined
                 let player = sessions
                     .players()
@@ -91,6 +143,39 @@ pub fn process_message(
                     Target::AllExcept(id_token.clone()),
                     ServerMessage::PlayerJoined { player },
                 ));
+
+                // Broadcast restored station + rating (after Welcome so client is ready).
+                if let Some((ref restored_sid, ref restored_rating)) = reconnect_station_update {
+                    if let Some(station_def) =
+                        ship_stations.stations.iter().find(|sd| &sd.id == restored_sid)
+                    {
+                        let consoles = sessions
+                            .players()
+                            .iter()
+                            .find(|p| p.token == *id_token)
+                            .map(|p| p.consoles.clone())
+                            .unwrap_or_default();
+                        outbound.push((
+                            Target::All,
+                            ServerMessage::StationAssigned {
+                                token: id_token.clone(),
+                                station: Some(station_def.name.clone()),
+                                consoles,
+                                station_id: Some(restored_sid.clone()),
+                            },
+                        ));
+                        outbound.push((
+                            Target::All,
+                            ServerMessage::RatingChanged {
+                                station_id: restored_sid.clone(),
+                                rating_name: restored_rating.clone(),
+                            },
+                        ));
+                        // Clear last_rating now that it has been applied.
+                        sessions.set_last_rating(id_token, None);
+                        station_rating_update = reconnect_station_update;
+                    }
+                }
 
                 // Fixed roster per #495: no advance_on_join cascade.
                 // Existing players keep their stations when new players join.
@@ -187,6 +272,7 @@ pub fn process_message(
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
+                    station_rating_update: None,
                 };
             }
 
@@ -197,6 +283,7 @@ pub fn process_message(
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
+                    station_rating_update: None,
                 };
             };
 
@@ -212,6 +299,7 @@ pub fn process_message(
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
+                    station_rating_update: None,
                 };
             }
 
@@ -226,6 +314,7 @@ pub fn process_message(
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
+                    station_rating_update: None,
                 };
             }
 
@@ -277,6 +366,7 @@ pub fn process_message(
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
+                    station_rating_update: None,
                 };
             }
             sessions.set_station(token, Some(station_def.id.clone()));
@@ -342,32 +432,64 @@ pub fn process_message(
     LobbyHandlerResult {
         new_phase,
         outbound,
+        station_rating_update,
     }
 }
 
-/// Mark a peer as disconnected. No station cascade — the leaver's station
-/// becomes free for others to claim manually via SelectStation (fixed roster
-/// per #495).
+/// Mark a peer as disconnected. Applies `Backfill` AI rating to the leaver's
+/// station so the ship continues operating automatically. Broadcasts
+/// `PlayerLeft` + `RatingChanged { station_id, "Backfill" }`.
+///
+/// The `resolver` is mutated in place so the Bevy runtime's
+/// `ShipSystemControlSources` stays consistent; `station_ratings` is used to
+/// capture the pre-disconnect rating into `Player.last_rating` for the
+/// reconnect-yield logic.
 pub fn process_disconnect_with_stations(
     token: &str,
     sessions: &mut SessionManager,
     _ship_stations: &ShipStations,
+    ship_config: &ShipConfig,
+    resolver: &mut ControlSourceResolver,
+    station_ratings: &HashMap<StationId, String>,
 ) -> LobbyHandlerResult {
+    // Capture station + rating before disconnect mutates the player.
+    let station_id = sessions.station_for_token(token).cloned();
+    if let Some(ref sid) = station_id {
+        let current_rating = station_ratings.get(sid).cloned();
+        sessions.set_last_rating(token, current_rating);
+    }
+
     sessions.disconnect(token);
     sessions.remove_spectator(token);
 
+    let mut outbound = vec![(
+        Target::All,
+        ServerMessage::PlayerLeft {
+            token: token.to_string(),
+        },
+    )];
+    let mut station_rating_update = None;
+
+    if let Some(ref sid) = station_id {
+        rating::apply_rating(ship_config, sid, rating::BACKFILL_RATING, resolver);
+        outbound.push((
+            Target::All,
+            ServerMessage::RatingChanged {
+                station_id: sid.clone(),
+                rating_name: rating::BACKFILL_RATING.to_string(),
+            },
+        ));
+        station_rating_update = Some((sid.clone(), rating::BACKFILL_RATING.to_string()));
+    }
+
     LobbyHandlerResult {
         new_phase: None,
-        outbound: vec![(
-            Target::All,
-            ServerMessage::PlayerLeft {
-                token: token.to_string(),
-            },
-        )],
+        outbound,
+        station_rating_update,
     }
 }
 
-/// Mark a peer as disconnected and return the outbound broadcast.
+/// Mark a peer as disconnected (no station info available; Bevy-only path).
 pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHandlerResult {
     sessions.disconnect(token);
     LobbyHandlerResult {
@@ -378,6 +500,7 @@ pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHa
                 token: token.to_string(),
             },
         )],
+        station_rating_update: None,
     }
 }
 
@@ -385,6 +508,7 @@ pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHa
 mod tests {
     use super::*;
     use crate::messages::{EntitySnapshot, StationId, WorldData};
+    use crate::ship::control_source::ControlSourceResolver;
     use crate::stations_config::{ShipStations, StationDef};
 
     fn sessions_with(token: &str, name: &str) -> SessionManager {
@@ -398,6 +522,57 @@ mod tests {
     }
     fn default_ship_config() -> ShipClientConfig {
         ShipClientConfig::default()
+    }
+
+    /// Minimal `ShipConfig` for backfill unit tests: a captain station that
+    /// owns a red-alert system so `apply_rating` has something to flip.
+    fn backfill_ship_config() -> crate::ship::config::ShipConfig {
+        const TOML: &str = r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command the bridge."
+rank = "Cpt."
+short_code = "CPT"
+console = "captain"
+
+[[station.rating]]
+name = "Manual"
+automated_systems = []
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+power_group = "ops"
+
+[power_groups.ops]
+label = "Ops"
+default_level = 2
+min_level = 1
+max_level = 4
+"#;
+        const KINDS: &[&str] = &["red_alert", "captain"];
+        crate::ship::config::parse_and_validate(TOML, KINDS)
+            .expect("backfill_ship_config must parse")
+    }
+
+    /// Call `process_disconnect_with_stations` with a no-op resolver and empty
+    /// station_ratings (for tests that only care about PlayerLeft output).
+    fn pd_stations(
+        token: &str,
+        sessions: &mut SessionManager,
+        ship_stations: &ShipStations,
+    ) -> LobbyHandlerResult {
+        let mut resolver = ControlSourceResolver::new();
+        process_disconnect_with_stations(
+            token,
+            sessions,
+            ship_stations,
+            &backfill_ship_config(),
+            &mut resolver,
+            &HashMap::new(),
+        )
     }
 
     fn pm(
@@ -1069,6 +1244,7 @@ mod tests {
             for console in &station_def.consoles {
                 let _ = sessions.toggle_console(tok, console.clone());
             }
+            sessions.set_station(tok, Some(station_def.id.clone()));
         }
         sessions
     }
@@ -1133,15 +1309,15 @@ mod tests {
     fn reconnect_restores_previous_station_when_free() {
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        // t1 held the Captain station. They disconnect (seat reserved, no
-        // cascade) then reconnect via Identify — the seat is still free.
+        // t1 held the Captain station. They disconnect — Player.station remains
+        // so the Identify handler can restore the seat on reconnect.
         let captain_consoles = sessions
             .players()
             .iter()
             .find(|p| p.token == "t1")
             .map(|p| p.consoles.clone())
             .unwrap();
-        sessions.disconnect("t1");
+        sessions.disconnect("t1"); // clears consoles, keeps Player.station
         let msg = ClientMessage::Identify {
             token: "t1".into(),
             name: "Alice".into(),
@@ -1157,7 +1333,7 @@ mod tests {
             true,
             &HashMap::new(),
         );
-        // Reconnect restores the previously-held seat.
+        // Reconnect restores the previously-held seat via station-yield logic.
         let restored = sessions
             .players()
             .iter()
@@ -1179,7 +1355,7 @@ mod tests {
         let mut sessions = sessions_at_max(&stations);
         sessions.register("t10".into(), "Judy".into()).unwrap();
         sessions.push_spectator("t10".into());
-        let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
+        let _result = pd_stations("t1", &mut sessions, &stations);
         // t10 stays in spectator queue (fixed roster: no auto-promotion)
         assert!(
             sessions.spectator_queue().contains(&"t10".to_string()),
@@ -1198,7 +1374,7 @@ mod tests {
         sessions.register("t10".into(), "Judy".into()).unwrap();
         sessions.push_spectator("t10".into());
         sessions.push_spectator("nonexistent-extra".into()); // second spectator
-        let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
+        let _result = pd_stations("t1", &mut sessions, &stations);
         // Spectator queue is preserved (both spectators still queued)
         assert!(sessions.spectator_queue().contains(&"t10".to_string()));
     }
@@ -1214,7 +1390,7 @@ mod tests {
         sessions.push_spectator("t10".into());
 
         // t6 (Shields) disconnects
-        let _ = process_disconnect_with_stations("t6", &mut sessions, &stations);
+        let _ = pd_stations("t6", &mut sessions, &stations);
 
         // t10 selects "Shields"
         let result = pm_stations(
@@ -1251,7 +1427,7 @@ mod tests {
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
         // t1 disconnects mid-game
-        let result = process_disconnect_with_stations("t1", &mut sessions, &stations);
+        let result = pd_stations("t1", &mut sessions, &stations);
         // PlayerLeft must be in output
         assert!(result
             .outbound
@@ -1419,7 +1595,7 @@ mod tests {
         sessions.register("t10".into(), "Judy".into()).unwrap();
         sessions.push_spectator("t10".into());
 
-        let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
+        let _result = pd_stations("t1", &mut sessions, &stations);
 
         // t10 must still be in the spectator queue (not promoted).
         assert!(
@@ -1573,5 +1749,220 @@ tags = ["player"]
             result.new_phase.is_none(),
             "must not auto-start during InProgress"
         );
+    }
+
+    // ── C3/C4: AI backfill on disconnect + reconnect-yield ───────────────
+
+    #[test]
+    fn disconnect_with_station_emits_rating_changed_backfill() {
+        let stations = ship_stations();
+        let config = backfill_ship_config();
+        let mut sessions = SessionManager::new();
+        sessions.register("t1".into(), "Alice".into()).unwrap();
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        let mut resolver = ControlSourceResolver::new();
+        let station_ratings = HashMap::from([(StationId("captain".into()), "Manual".into())]);
+        let result = process_disconnect_with_stations(
+            "t1",
+            &mut sessions,
+            &stations,
+            &config,
+            &mut resolver,
+            &station_ratings,
+        );
+        // Must broadcast PlayerLeft
+        assert!(result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::PlayerLeft { token } if token == "t1")));
+        // Must broadcast RatingChanged { station_id: "captain", "Backfill" }
+        assert!(result.outbound.iter().any(|(_, m)| matches!(
+            m,
+            ServerMessage::RatingChanged { station_id, rating_name }
+            if station_id.0 == "captain" && rating_name == "Backfill"
+        )));
+        // station_rating_update must be set
+        assert_eq!(
+            result.station_rating_update,
+            Some((StationId("captain".into()), "Backfill".to_string()))
+        );
+    }
+
+    #[test]
+    fn disconnect_saves_pre_disconnect_rating_as_last_rating() {
+        let stations = ship_stations();
+        let config = backfill_ship_config();
+        let mut sessions = SessionManager::new();
+        sessions.register("t1".into(), "Alice".into()).unwrap();
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        let mut resolver = ControlSourceResolver::new();
+        let station_ratings =
+            HashMap::from([(StationId("captain".into()), "Assisted".into())]);
+        process_disconnect_with_stations(
+            "t1",
+            &mut sessions,
+            &stations,
+            &config,
+            &mut resolver,
+            &station_ratings,
+        );
+        let last = sessions
+            .players()
+            .iter()
+            .find(|p| p.token == "t1")
+            .and_then(|p| p.last_rating.as_deref());
+        assert_eq!(last, Some("Assisted"), "last_rating must capture pre-disconnect rating");
+    }
+
+    #[test]
+    fn disconnect_without_station_emits_no_rating_changed() {
+        let stations = ship_stations();
+        let config = backfill_ship_config();
+        let mut sessions = sessions_with("t1", "Alice");
+        // No station set → spectator disconnect, no RatingChanged
+        let mut resolver = ControlSourceResolver::new();
+        let result = process_disconnect_with_stations(
+            "t1",
+            &mut sessions,
+            &stations,
+            &config,
+            &mut resolver,
+            &HashMap::new(),
+        );
+        assert!(result.station_rating_update.is_none());
+        let has_rating_changed = result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::RatingChanged { .. }));
+        assert!(!has_rating_changed, "spectator disconnect must not emit RatingChanged");
+    }
+
+    #[test]
+    fn reconnect_after_backfill_restores_station_and_emits_rating_changed() {
+        // Full cycle: t1 connects, selects Captain, disconnects (backfill applied),
+        // then reconnects — should get Captain back and RatingChanged { "Manual" }.
+        let stations = ship_stations();
+        let config = backfill_ship_config();
+        let mut sessions = sessions_with("t1", "Alice");
+        // t1 selects Captain via pm_stations
+        pm_stations(
+            "t1",
+            &ClientMessage::SelectStation { station: "Captain".into() },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        // Simulate t1 having a pre-disconnect rating of "Manual"
+        let station_ratings =
+            HashMap::from([(StationId("captain".into()), "Manual".into())]);
+        let mut resolver = ControlSourceResolver::new();
+        process_disconnect_with_stations(
+            "t1",
+            &mut sessions,
+            &stations,
+            &config,
+            &mut resolver,
+            &station_ratings,
+        );
+        // station_ratings now reflects backfill (passed in next process_message call)
+        let station_ratings_post = HashMap::from([(
+            StationId("captain".into()),
+            "Backfill".to_string(),
+        )]);
+        // t1 reconnects via Identify
+        let reconnect_result = process_message(
+            "t1",
+            &ClientMessage::Identify { token: "t1".into(), name: "Alice".into() },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+            &stations,
+            &default_ship_config(),
+            true,
+            &station_ratings_post,
+        );
+        // Consoles must be restored
+        let consoles = sessions
+            .players()
+            .iter()
+            .find(|p| p.token == "t1")
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        assert!(
+            !consoles.is_empty(),
+            "consoles must be restored on reconnect when station was at Backfill"
+        );
+        // StationAssigned must be in outbound
+        assert!(reconnect_result.outbound.iter().any(|(_, m)| matches!(
+            m,
+            ServerMessage::StationAssigned { token, station: Some(_), .. } if token == "t1"
+        )));
+        // RatingChanged with "Manual" must be in outbound
+        assert!(reconnect_result.outbound.iter().any(|(_, m)| matches!(
+            m,
+            ServerMessage::RatingChanged { station_id, rating_name }
+            if station_id.0 == "captain" && rating_name == "Manual"
+        )));
+        // station_rating_update must carry the restore
+        assert_eq!(
+            reconnect_result.station_rating_update,
+            Some((StationId("captain".into()), "Manual".to_string()))
+        );
+    }
+
+    #[test]
+    fn reconnect_falls_back_to_spectator_when_station_claimed() {
+        // t1 disconnects, t2 claims Captain, t1 reconnects → no restore.
+        let stations = ship_stations();
+        let config = backfill_ship_config();
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.register("t2".into(), "Bob".into()).unwrap();
+        pm_stations(
+            "t1",
+            &ClientMessage::SelectStation { station: "Captain".into() },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        let mut resolver = ControlSourceResolver::new();
+        process_disconnect_with_stations(
+            "t1",
+            &mut sessions,
+            &stations,
+            &config,
+            &mut resolver,
+            &HashMap::new(),
+        );
+        // t2 claims Captain while t1 is away
+        pm_stations(
+            "t2",
+            &ClientMessage::SelectStation { station: "Captain".into() },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        // t1 reconnects
+        let reconnect_result = process_message(
+            "t1",
+            &ClientMessage::Identify { token: "t1".into(), name: "Alice".into() },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+            &stations,
+            &default_ship_config(),
+            true,
+            &HashMap::new(), // station_ratings shows nothing at Backfill since t2 claimed
+        );
+        let consoles = sessions
+            .players()
+            .iter()
+            .find(|p| p.token == "t1")
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        assert!(
+            consoles.is_empty(),
+            "t1 must NOT get Captain back when t2 has claimed it"
+        );
+        let _ = reconnect_result;
     }
 }

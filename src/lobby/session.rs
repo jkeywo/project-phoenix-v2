@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use crate::messages::{Console, Player, StationId};
 
@@ -14,8 +14,6 @@ pub enum ConflictError {
 
 pub struct SessionManager {
     players: Vec<Player>,
-    /// Last consoles assigned before disconnect — used for auto-reconnect restore.
-    last_consoles: HashMap<String, Vec<Console>>,
     /// Available consoles based on the ship's EntityConfig.
     /// If None, all consoles are available (default for backward compatibility).
     available_consoles: Option<Vec<Console>>,
@@ -33,7 +31,6 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             players: Vec::new(),
-            last_consoles: HashMap::new(),
             available_consoles: None,
             spectator_queue: VecDeque::new(),
         }
@@ -68,7 +65,6 @@ impl SessionManager {
 
         Self {
             players: Vec::new(),
-            last_consoles: HashMap::new(),
             available_consoles: Some(available),
             spectator_queue: VecDeque::new(),
         }
@@ -97,34 +93,12 @@ impl SessionManager {
     pub fn reconnect(&mut self, token: &str) -> Option<&mut Player> {
         let idx = self.idx(token)?;
         self.players[idx].connected = true;
-        // Auto-reconnect restore (e.g. a browser refresh): give the player back
-        // the seat they held before disconnecting, but only if every one of
-        // those consoles is still free — i.e. no other *connected* player has
-        // claimed it while they were away. All-or-nothing so a partial restore
-        // never leaves them holding a fragment of a station that maps to no
-        // station row. If any console was taken, they fall back to no seat
-        // (lobby / spectator queue) and must re-select.
-        if let Some(prev) = self.last_consoles.remove(token) {
-            let all_free = prev.iter().all(|console| {
-                !self
-                    .players
-                    .iter()
-                    .any(|p| p.connected && p.token != token && p.consoles.contains(console))
-            });
-            if all_free {
-                self.players[idx].consoles = prev;
-            }
-        }
         Some(&mut self.players[idx])
     }
 
     pub fn disconnect(&mut self, token: &str) {
         if let Some(idx) = self.idx(token) {
             self.players[idx].connected = false;
-            if !self.players[idx].consoles.is_empty() {
-                self.last_consoles
-                    .insert(token.to_string(), self.players[idx].consoles.clone());
-            }
             self.players[idx].consoles.clear();
         }
     }
@@ -193,6 +167,14 @@ impl SessionManager {
     pub fn set_station(&mut self, token: &str, station: Option<StationId>) {
         if let Some(idx) = self.idx(token) {
             self.players[idx].station = station;
+        }
+    }
+
+    /// C3: Record the rating the player held at a station just before disconnect.
+    /// Cleared to None once a reconnect restore has applied it.
+    pub fn set_last_rating(&mut self, token: &str, rating: Option<String>) {
+        if let Some(idx) = self.idx(token) {
+            self.players[idx].last_rating = rating;
         }
     }
 
@@ -729,39 +711,31 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_restores_previous_consoles_when_free() {
-        // Auto-reconnect restore: a refresh should land the player back on the
-        // seat they held before disconnecting, when it is still free.
+    fn reconnect_marks_connected_without_restoring_consoles() {
+        // Console restore on reconnect now happens in the lobby handler (handler.rs),
+        // not here. reconnect() only sets connected=true.
         let mut sm = SessionManager::new();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.toggle_console("t1", Console::CaptainChair).unwrap();
-        sm.toggle_console("t1", Console::Helm).unwrap();
         sm.disconnect("t1");
+        assert!(!sm.players()[0].connected);
         sm.reconnect("t1");
+        assert!(sm.players()[0].connected, "reconnect must mark player as connected");
         assert!(
-            sm.players()[0].consoles.contains(&Console::CaptainChair)
-                && sm.players()[0].consoles.contains(&Console::Helm),
-            "reconnect must restore the previously-held seat when free"
+            sm.players()[0].consoles.is_empty(),
+            "console restore is handler responsibility — reconnect() itself does not restore consoles"
         );
     }
 
     #[test]
-    fn reconnect_does_not_restore_consoles_taken_by_another_player() {
-        // If another connected player claimed any of the seat's consoles while
-        // the player was away, the restore is all-or-nothing → no restore.
+    fn set_last_rating_stores_and_clears() {
         let mut sm = SessionManager::new();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.toggle_console("t1", Console::CaptainChair).unwrap();
-        sm.toggle_console("t1", Console::Helm).unwrap();
-        sm.disconnect("t1");
-        // Bob grabs Helm while Alice is away.
-        sm.toggle_console("t2", Console::Helm).unwrap();
-        sm.reconnect("t1");
-        assert!(
-            sm.players()[0].consoles.is_empty(),
-            "reconnect must not partially restore when a console was taken"
-        );
+        assert!(sm.players()[0].last_rating.is_none());
+        sm.set_last_rating("t1", Some("Assisted".into()));
+        assert_eq!(sm.players()[0].last_rating.as_deref(), Some("Assisted"));
+        sm.set_last_rating("t1", None);
+        assert!(sm.players()[0].last_rating.is_none());
     }
 
     // ── Ready state ──────────────────────────────────────────────────

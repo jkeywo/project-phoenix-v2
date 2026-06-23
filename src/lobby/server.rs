@@ -6,7 +6,8 @@ use crate::messages::{
     ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
 use crate::session::SessionManager;
-use crate::ship_plugin::ActiveStationRatings;
+use crate::ship::rating;
+use crate::ship_plugin::{ActiveStationRatings, ShipConfigResource, ShipSystemControlSources};
 use crate::stations_config::ShipStations;
 
 /// Cached `GameState` snapshot derived from `Sessions` + `GamePhase` each frame.
@@ -268,7 +269,9 @@ pub fn process_lobby(
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
     preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
-    active_ratings: Res<ActiveStationRatings>,
+    mut active_ratings: ResMut<ActiveStationRatings>,
+    ship_config: Option<Res<ShipConfigResource>>,
+    mut control_sources: Option<ResMut<ShipSystemControlSources>>,
 ) {
     // During the Lobby phase this system owns the inbound queue and handles
     // every message type. Outside the lobby the simulation systems own it, so
@@ -306,6 +309,7 @@ pub fn process_lobby(
         if !accepts_all && !matches!(ev.msg, ClientMessage::Identify { .. }) {
             continue;
         }
+        let ratings_snapshot = active_ratings.0.clone();
         let result = lobby_handler::process_message(
             &ev.token,
             &ev.msg,
@@ -315,9 +319,16 @@ pub fn process_lobby(
             stations,
             &ship_client_config.0,
             preload_complete,
-            &active_ratings.0,
+            &ratings_snapshot,
         );
-        apply_result(result, &mut outbox, &mut next_state);
+        apply_result(
+            result,
+            &mut outbox,
+            &mut next_state,
+            ship_config.as_deref(),
+            control_sources.as_deref_mut(),
+            &mut active_ratings,
+        );
     }
 }
 
@@ -326,15 +337,41 @@ fn handle_disconnect(
     mut sessions: ResMut<Sessions>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
+    ship_config: Option<Res<ShipConfigResource>>,
+    mut control_sources: Option<ResMut<ShipSystemControlSources>>,
+    mut active_ratings: ResMut<ActiveStationRatings>,
+    stations: Option<Res<ShipStations>>,
 ) {
+    let empty_stations = ShipStations::default();
+    let ship_stations = stations.as_deref().unwrap_or(&empty_stations);
     for ev in events.read() {
-        // Reserve the seat: vacate the dropped player's consoles (saved for an
-        // auto-reconnect restore by `SessionManager::disconnect`) but do NOT run
-        // the leave-cascade that reshuffles the remaining crew. A browser
-        // refresh should not bump everyone else's stations; the seat sits empty
-        // until the same token reconnects (or another player claims it).
-        let result = lobby_handler::process_disconnect(&ev.token, &mut sessions.0);
-        apply_result(result, &mut outbox, &mut next_state);
+        // Snapshot ratings before mutable borrow.
+        let ratings_snapshot = active_ratings.0.clone();
+        // Apply Backfill rating to the disconnecting player's station so the
+        // ship keeps operating without a human at the console.
+        // ship_config and control_sources are optional — not present in lobby-only test apps.
+        let result = if let (Some(cfg), Some(cs)) =
+            (ship_config.as_deref(), control_sources.as_deref_mut())
+        {
+            lobby_handler::process_disconnect_with_stations(
+                &ev.token,
+                &mut sessions.0,
+                ship_stations,
+                &cfg.0,
+                &mut cs.0,
+                &ratings_snapshot,
+            )
+        } else {
+            lobby_handler::process_disconnect(&ev.token, &mut sessions.0)
+        };
+        apply_result(
+            result,
+            &mut outbox,
+            &mut next_state,
+            ship_config.as_deref(),
+            control_sources.as_deref_mut(),
+            &mut active_ratings,
+        );
     }
 }
 
@@ -342,9 +379,18 @@ fn apply_result(
     result: lobby_handler::LobbyHandlerResult,
     outbox: &mut ResMut<LobbyOutbox>,
     next_state: &mut ResMut<NextState<GamePhase>>,
+    ship_config: Option<&ShipConfigResource>,
+    control_sources: Option<&mut ShipSystemControlSources>,
+    active_ratings: &mut ActiveStationRatings,
 ) {
     if let Some(new_phase) = result.new_phase {
         next_state.set(new_phase);
+    }
+    if let Some((station_id, rating_name)) = result.station_rating_update {
+        if let (Some(cfg), Some(cs)) = (ship_config, control_sources) {
+            rating::apply_rating(&cfg.0, &station_id, &rating_name, &mut cs.0);
+        }
+        active_ratings.0.insert(station_id, rating_name);
     }
     outbox.0.extend(result.outbound);
 }

@@ -75,7 +75,7 @@ console = "captain"
 
 [[station.rating]]
 name = "Assisted"
-automated_systems = ["red-alert"]
+automated_systems = ["red-alert", "viewscreen"]
 
 [[station.rating]]
 name = "Manual"
@@ -136,7 +136,7 @@ power_group = "weapons"
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-ai_only = true
+station = "captain"
 power_group = "ops"
 "#;
         const KINDS: &[&str] = &[
@@ -1738,6 +1738,14 @@ mod tests {
                 .0
                 .source_for(&crate::system_registry::red_alert_system_id()),
             ControlSource::Ai
+        );
+        // viewscreen is now owned by the captain station, so backfill must automate it too.
+        assert_eq!(
+            sources
+                .0
+                .source_for(&crate::system_registry::viewscreen_system_id()),
+            ControlSource::Ai,
+            "backfill should also automate the captain-owned viewscreen system"
         );
     }
 

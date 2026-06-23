@@ -344,7 +344,7 @@ console = "captain"
 
 [[station.rating]]
 name = "Assisted"
-automated_systems = ["red-alert"]
+automated_systems = ["red-alert", "viewscreen"]
 
 [[station.rating]]
 name = "Manual"
@@ -406,7 +406,7 @@ power_group = "weapons"
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-ai_only = true
+station = "captain"
 power_group = "ops"
 "#
     }
@@ -483,12 +483,17 @@ power_group = "ops"
 
     #[test]
     fn rejects_ownerless_without_ai_only() {
-        let toml = valid_toml().replace("ai_only = true", "ai_only = false");
+        // Build a config where a system has no station and no ai_only flag.
+        // This is done by appending a new orphan system after the valid TOML.
+        let toml = format!(
+            "{}\n[[system]]\nid = \"orphan\"\nkind = \"viewscreen\"\npower_group = \"ops\"\n",
+            valid_toml()
+        );
 
         assert_eq!(
             parse_and_validate(&toml, KINDS),
             Err(ShipConfigError::OwnerlessSystemWithoutAiOnly {
-                system: SystemId("viewscreen".into())
+                system: SystemId("orphan".into())
             })
         );
     }

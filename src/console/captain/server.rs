@@ -209,6 +209,8 @@ fn spawn_captain_console_state_entity(mut commands: Commands) {
         red_alert: false,
         red_alert_system_id: crate::system_registry::red_alert_system_id(),
         red_alert_auto: false,
+        viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
+        viewscreen_auto: false,
         view_direction: "Fore".into(),
         objectives: Vec::new(),
         hull_integrity_pct: 100.0,
@@ -229,6 +231,9 @@ fn recompute_captain_console_state(
     let red_alert = ship.red_alert();
     let red_alert_auto = control_sources.as_deref().is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::captain_system_id()) == ControlSource::Ai
+    });
+    let viewscreen_auto = control_sources.as_deref().is_some_and(|cs| {
+        cs.0.source_for(&crate::system_registry::viewscreen_system_id()) == ControlSource::Ai
     });
     let view_direction = match &ship.view_mode {
         ViewMode::Camera(ViewDirection::Fore) => "Fore",
@@ -270,6 +275,8 @@ fn recompute_captain_console_state(
         red_alert,
         red_alert_system_id: crate::system_registry::red_alert_system_id(),
         red_alert_auto,
+        viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
+        viewscreen_auto,
         view_direction,
         objectives: objectives_snap,
         hull_integrity_pct,
@@ -893,6 +900,8 @@ mod tests {
                 red_alert: false,
                 red_alert_system_id: crate::system_registry::red_alert_system_id(),
                 red_alert_auto: false,
+                viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
+                viewscreen_auto: false,
                 view_direction: "Fore".into(),
                 objectives: Vec::new(),
                 hull_integrity_pct: 100.0,
@@ -964,6 +973,41 @@ mod tests {
     }
 
     #[test]
+    fn recompute_marks_ai_controlled_viewscreen_auto() {
+        let mut app = recompute_test_app();
+        app.init_resource::<ShipSystemControlSources>();
+        {
+            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
+            cs.0.set(
+                crate::system_registry::viewscreen_system_id(),
+                ControlSource::Ai,
+            );
+        }
+        app.update();
+
+        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
+        let comp = q.single(app.world()).unwrap();
+        assert!(comp.0.viewscreen_auto, "viewscreen_auto should be true when viewscreen is AI");
+        assert_eq!(
+            comp.0.viewscreen_system_id,
+            crate::system_registry::viewscreen_system_id()
+        );
+    }
+
+    #[test]
+    fn recompute_viewscreen_auto_is_false_by_default() {
+        let mut app = recompute_test_app();
+        app.update();
+
+        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
+        let comp = q.single(app.world()).unwrap();
+        assert!(
+            !comp.0.viewscreen_auto,
+            "viewscreen_auto should default to false"
+        );
+    }
+
+    #[test]
     fn recompute_reflects_hull_integrity() {
         let mut app = recompute_test_app();
         // Apply 25 damage to the 100-HP hull.
@@ -1027,6 +1071,8 @@ mod tests {
                 red_alert: true,
                 red_alert_system_id: crate::system_registry::red_alert_system_id(),
                 red_alert_auto: false,
+                viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
+                viewscreen_auto: false,
                 view_direction: "Aft".into(),
                 objectives: Vec::new(),
                 hull_integrity_pct: 75.0,

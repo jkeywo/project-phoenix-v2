@@ -1563,6 +1563,13 @@ pub struct CaptainConsoleState {
     /// should render read-only with an AUTO badge.
     #[serde(default)]
     pub red_alert_auto: bool,
+    /// Stable system id for the Viewscreen coarse system.
+    #[serde(default = "default_viewscreen_system_id")]
+    pub viewscreen_system_id: SystemId,
+    /// True when the Viewscreen system is AI-controlled and the human-facing
+    /// fragment should render read-only with an AUTO badge.
+    #[serde(default)]
+    pub viewscreen_auto: bool,
     /// Current camera direction as a plain string: `"Fore"`, `"Port"`,
     /// `"Starboard"`, or `"Aft"`. Non-camera view modes (Radar, etc.) send an
     /// empty string so the Captain panel can clear its direction highlight.
@@ -1581,12 +1588,18 @@ fn default_red_alert_system_id() -> SystemId {
     crate::system_registry::red_alert_system_id()
 }
 
+fn default_viewscreen_system_id() -> SystemId {
+    crate::system_registry::viewscreen_system_id()
+}
+
 impl Default for CaptainConsoleState {
     fn default() -> Self {
         Self {
             red_alert: false,
             red_alert_system_id: default_red_alert_system_id(),
             red_alert_auto: false,
+            viewscreen_system_id: default_viewscreen_system_id(),
+            viewscreen_auto: false,
             view_direction: "Fore".into(),
             objectives: Vec::new(),
             hull_integrity_pct: 100.0,

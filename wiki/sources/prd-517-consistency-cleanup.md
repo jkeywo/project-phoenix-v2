@@ -28,7 +28,8 @@ Eight independently-grabbable slices:
 - **A1** - Shields → CoordinationEnqueue (replace direct SimOutbox push). Shipped:
   see [Issue #528](./issue-528-shields-coordination.md).
 - **A2** - `RatingChanged` broadcast from `handle_station_rating_change`.
-- **A3** - Captain station owns viewscreen system kind.
+- **A3** - Captain station owns viewscreen system kind. Shipped:
+  see [Issue #529](./issue-529-captain-viewscreen.md).
 - **A4** - `Console::from_console_id` helper; delete hardcoded console list in
   `process_coordination_lag`. Covered by issue #523.
 - **A5** - `serde_json` outside codec cleanup in `src/ship/coordination.rs`,
@@ -69,4 +70,5 @@ is unblocked and can start immediately.
 - [Issue #526 - Repair coarse-system conversion (A7)](./issue-526-repair-control-system.md) — shipped
 - [Issue #527 - Navigation coarse-system conversion (A8)](./issue-527-navigation-control-system.md) — shipped
 - [Issue #528 - Shields advisories through CoordinationEnqueue (A1)](./issue-528-shields-coordination.md) — shipped
+- [Issue #529 - Captain exposes viewscreen-owned system (A3)](./issue-529-captain-viewscreen.md) — shipped
 - [Issue #493 - Coordination-lag scope](./issue-493-coordination-lag-scope.md)

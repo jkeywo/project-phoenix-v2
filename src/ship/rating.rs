@@ -116,7 +116,7 @@ console = "captain"
 
 [[station.rating]]
 name = "Assisted"
-automated_systems = ["red-alert"]
+automated_systems = ["red-alert", "viewscreen"]
 
 [[station.rating]]
 name = "Manual"
@@ -181,7 +181,7 @@ power_group = "weapons"
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-ai_only = true
+station = "captain"
 power_group = "ops"
 "#
     }
@@ -373,9 +373,71 @@ power_group = "ops"
     // ── ai_only_systems ─────────────────────────────────────────────────
 
     #[test]
-    fn returns_ai_only_systems() {
+    fn returns_no_ai_only_systems_after_viewscreen_moved_to_captain() {
         let config = parse();
         let systems = ai_only_systems(&config);
-        assert_eq!(systems, vec![SystemId("viewscreen".into())]);
+        assert!(
+            systems.is_empty(),
+            "viewscreen is now owned by captain — no ai_only systems remain"
+        );
+    }
+
+    // ── captain rating includes viewscreen ───────────────────────────────
+
+    #[test]
+    fn captain_assisted_rating_includes_viewscreen() {
+        let config = parse();
+        let result = resolve_automated_systems(
+            &config,
+            &StationId("captain".into()),
+            "Assisted",
+        );
+        assert_eq!(
+            result,
+            Some(vec![
+                SystemId("red-alert".into()),
+                SystemId("viewscreen".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn captain_backfill_automates_red_alert_and_viewscreen() {
+        let config = parse();
+        let mut resolver = ControlSourceResolver::new();
+        let station = StationId("captain".into());
+
+        apply_rating(&config, &station, BACKFILL_RATING, &mut resolver);
+
+        assert_eq!(
+            resolver.source_for(&SystemId("red-alert".into())),
+            ControlSource::Ai,
+        );
+        assert_eq!(
+            resolver.source_for(&SystemId("viewscreen".into())),
+            ControlSource::Ai,
+        );
+    }
+
+    #[test]
+    fn captain_manual_rating_leaves_viewscreen_human() {
+        let config = parse();
+        let mut resolver = ControlSourceResolver::new();
+
+        // Pre-set viewscreen to Ai
+        resolver.set(SystemId("viewscreen".into()), ControlSource::Ai);
+
+        apply_rating(
+            &config,
+            &StationId("captain".into()),
+            "Manual",
+            &mut resolver,
+        );
+
+        assert_eq!(
+            resolver.source_for(&SystemId("viewscreen".into())),
+            ControlSource::Human,
+            "Manual rating should restore viewscreen to Human"
+        );
     }
 }

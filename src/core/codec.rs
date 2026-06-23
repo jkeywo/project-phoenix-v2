@@ -3018,6 +3018,8 @@ mod tests {
             red_alert: true,
             red_alert_system_id: SystemId("red-alert".into()),
             red_alert_auto: true,
+            viewscreen_system_id: SystemId("viewscreen".into()),
+            viewscreen_auto: false,
             view_direction: "Starboard".into(),
             objectives: vec![ObjectiveSnapshot {
                 id: "obj-1".into(),
@@ -3041,6 +3043,11 @@ mod tests {
             "got: {json}"
         );
         assert!(json.contains("\"red_alert_auto\":true"), "got: {json}");
+        assert!(
+            json.contains("\"viewscreen_system_id\":\"viewscreen\""),
+            "got: {json}"
+        );
+        assert!(json.contains("\"viewscreen_auto\":false"), "got: {json}");
         assert!(json.contains("\"hull_integrity_pct\":87.5"), "got: {json}");
         let decoded: CaptainConsoleState = serde_json::from_str(&json).unwrap();
         assert_eq!(state, decoded);

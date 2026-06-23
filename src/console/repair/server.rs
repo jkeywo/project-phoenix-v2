@@ -5,10 +5,13 @@ use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::ModifierSlot;
 use crate::messages::{
-    ClientMessage, Console, ConsoleHullStatus, RepairConsoleState, ServerMessage, TeamSlot,
+    ClientMessage, Console, ConsoleHullStatus, RepairConsoleState, RepairTarget, ServerMessage,
+    SystemControlPayload, TeamSlot,
 };
 use crate::modifiers::ShipModifiers;
 use crate::repair_teams::RepairTeams;
+use crate::ship::system_registry::{repair_system_id, REPAIR_SYSTEM_ID};
+use crate::ship_plugin::ShipSystemControlSources;
 use crate::simulation::ShipHullIntegrity;
 
 // ── Resources ─────────────────────────────────────────────────────────────────
@@ -70,27 +73,62 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 
 // ── Systems ───────────────────────────────────────────────────────────────────
 
-/// Handle `DispatchRepairTeam { team_idx, console }` messages from the Repair console.
+/// Handle `DispatchRepairTeam` messages from the Repair console.
 ///
-/// Validates: game is in-progress, sender holds `Console::Repair`.
-/// Dispatches the named team (by index) to the target console, respecting
-/// redirect/recall rules in `RepairTeams::dispatch`.
+/// Accepts both the legacy `ClientMessage::DispatchRepairTeam` path and the
+/// new `ClientMessage::ControlSystem { target: "repair", payload:
+/// DispatchRepairTeam { .. } }` path. Both are gated on:
+///
+/// 1. `ControlSourceResolver::policy_for(&repair_system_id()).accept_human_input`
+///    (rejects when the system is under AI control)
+/// 2. Sender holds `Console::Repair`.
+///
+/// `RepairTarget::Core` is accepted by the wire but has no runtime effect yet
+/// (per-core repair targeting is tracked by PRD C slice C7).
 pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    control_sources: Res<ShipSystemControlSources>,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
+    let policy = control_sources.0.policy_for(&repair_system_id());
+
     for ev in reader.read() {
-        let (team_idx, target_console) = match &ev.msg {
+        // Extract (team_idx, target_console) from either message form.
+        let (team_idx, target_console): (usize, Console) = match &ev.msg {
+            // ── Legacy path ───────────────────────────────────────────────
             ClientMessage::DispatchRepairTeam { team_idx, console } => {
                 (*team_idx as usize, console.clone())
             }
+            // ── ControlSystem path ────────────────────────────────────────
+            ClientMessage::ControlSystem { target, payload }
+                if target.0 == REPAIR_SYSTEM_ID =>
+            {
+                match payload {
+                    SystemControlPayload::DispatchRepairTeam { team_idx, target } => {
+                        let console = match target {
+                            RepairTarget::Station(station_id) => {
+                                match Console::from_console_id(&station_id.0) {
+                                    Some(c) => c,
+                                    None => continue, // unknown station id
+                                }
+                            }
+                            RepairTarget::Core => continue, // per-core repair deferred to PRD C
+                        };
+                        (*team_idx as usize, console)
+                    }
+                    _ => continue,
+                }
+            }
             _ => continue,
         };
-        // Only the Repair console holder may dispatch teams.
-        // Instrumentation (issue: 4P Engineering taps ignored): log when an
-        // action is dropped because the sender is not the recognised Repair
-        // holder, exposing a token/holder desync on the host console.
+
+        // Gate: reject if the repair system is under AI control.
+        if !policy.accept_human_input {
+            continue;
+        }
+
+        // Gate: only the Repair console holder may dispatch teams.
         let Some(repair_token) = sessions.0.console_holder(Console::Repair) else {
             warn!(
                 "[repair-auth] ignored repair action from token={} holder=None",
@@ -105,6 +143,7 @@ pub fn handle_dispatch_repair_team(
             );
             continue;
         }
+
         teams.0.dispatch(team_idx, target_console);
     }
 }
@@ -187,6 +226,8 @@ mod tests {
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::shield::ShieldSystem;
+    use crate::ship::system_registry::REPAIR_KIND;
+    use crate::ship_plugin::ShipSystemControlSources;
     use crate::simulation::SimOutbox;
     use crate::simulation::{ShipImpulse, ShipShields};
 
@@ -227,9 +268,10 @@ mod tests {
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
         .insert_resource(crate::modifiers::ShipModifiers::new())
-        .init_resource::<crate::lobby::WorldResource>()
-        .init_resource::<SimOutbox>()
-        .init_resource::<Outbox>()
+            .init_resource::<crate::lobby::WorldResource>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<ShipSystemControlSources>()
+            .init_resource::<Outbox>()
         .add_plugins(RepairPlugin)
         .add_plugins(repair_state_broadcaster())
         .add_systems(PostUpdate, collect);
@@ -424,6 +466,144 @@ mod tests {
         assert!(
             has_repair_state,
             "RepairState should include a Travelling team after dispatch"
+        );
+    }
+
+    // ── ControlSystem dispatch tests ─────────────────────────────────────────
+
+    /// Repair holder dispatches via `ControlSystem` → team enters Travelling.
+    #[test]
+    fn control_system_dispatch_authorized_sends_team_to_travelling() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(
+            team_is_travelling(teams, 0),
+            "team 0 should be travelling after ControlSystem dispatch"
+        );
+    }
+
+    /// Non-Repair console holder sending `ControlSystem` dispatch is rejected.
+    #[test]
+    fn control_system_dispatch_unauthorized_sender_is_rejected() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(
+            team_is_idle(teams, 0),
+            "team 0 should remain idle when non-Repair sender uses ControlSystem"
+        );
+    }
+
+    /// `ControlSystem` dispatch is blocked when the repair system is AI-controlled.
+    #[test]
+    fn control_system_dispatch_rejected_when_ai_controlled() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Set repair system to AI control.
+        {
+            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
+            cs.0.set(
+                crate::ship::system_registry::repair_system_id(),
+                crate::ship::control_source::ControlSource::Ai,
+            );
+        }
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(
+            team_is_idle(teams, 0),
+            "team 0 should remain idle when repair system is AI-controlled"
+        );
+    }
+
+    /// `RepairTarget::Core` in `ControlSystem` is a no-op (deferred to PRD C).
+    #[test]
+    fn control_system_dispatch_repair_target_core_is_noop() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Core,
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(
+            team_is_idle(teams, 0),
+            "team 0 should remain idle for RepairTarget::Core (deferred)"
+        );
+    }
+
+    /// Legacy `ClientMessage::DispatchRepairTeam` still works.
+    #[test]
+    fn legacy_dispatch_still_works_after_control_system_migration() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Tactical,
+            },
+        );
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(
+            team_is_travelling(teams, 0),
+            "legacy DispatchRepairTeam should still dispatch team 0"
         );
     }
 

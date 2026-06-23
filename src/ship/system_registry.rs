@@ -84,9 +84,6 @@ pub const CAPTAIN_KIND: &str = "captain";
 pub const CAPTAIN_AI_CONTROLLER: &str = "captain_ai";
 
 /// Wire `SystemId` for the Repair coarse system.
-///
-/// Constants present; registration in `SystemKindRegistry::with_core_systems`
-/// is deferred to issue #526.
 pub const REPAIR_SYSTEM_ID: &str = "repair";
 pub const REPAIR_KIND: &str = "repair";
 pub const REPAIR_AI_CONTROLLER: &str = "repair_ai";
@@ -187,6 +184,10 @@ impl SystemKindRegistry {
         registry.register(
             VIEWSCREEN_KIND,
             AiControllerRegistration::new(VIEWSCREEN_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            REPAIR_KIND,
+            AiControllerRegistration::new(REPAIR_AI_CONTROLLER)?,
         )?;
         Ok(registry)
     }
@@ -542,6 +543,21 @@ mod tests {
                 .ai_controller
                 .name(),
             VIEWSCREEN_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn core_registry_has_repair_ai_controller() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(REPAIR_KIND));
+        assert_eq!(
+            registry
+                .registration(REPAIR_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            REPAIR_AI_CONTROLLER
         );
     }
 

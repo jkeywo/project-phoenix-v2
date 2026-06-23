@@ -1,21 +1,20 @@
 use bevy::pbr::{DistanceFog, FogFalloff};
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use rand::Rng;
 use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
 
 use crate::ai_plugin::WarpOutMarker;
-use crate::beam_render;
 use crate::entity_spawner::{RegionEffectsSection, RegionShapeSection};
 use crate::lobby::GameStateCache;
 use crate::messages::{GamePhase, ViewDirection, ViewMode};
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::region_shape::RegionShape;
+use crate::server::pfx::PfxPlugin;
 use crate::ship_state::ShipState;
-use crate::simulation::{
-    ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource,
-};
+use crate::simulation::AsteroidDestroyedVfx;
 use crate::world::server::OnScreenMessage;
 
 // ── VFX Components ────────────────────────────────────────────────
@@ -32,31 +31,6 @@ struct RippleEffect {
 
 const RIPPLE_DURATION: f32 = 1.2;
 const RIPPLE_MAX_RADIUS: f32 = 30.0;
-
-// ── Torpedo rendering ─────────────────────────────────────────────
-
-/// Marks a 3D sphere entity that represents an in-flight torpedo on the viewscreen.
-#[derive(Component)]
-pub struct TorpedoSphere;
-
-/// Maps torpedo UUID → the `Entity` of its sphere mesh, so we can update
-/// positions each frame and despawn when the torpedo is removed.
-#[derive(Resource, Default)]
-pub struct TorpedoEntityMap(pub HashMap<String, Entity>);
-
-/// Given the set of UUIDs currently in-flight and the set already tracked
-/// in the entity map, returns which UUIDs need to be spawned and which
-/// entities need to be despawned.
-///
-/// This pure function is the testable core of the sync logic.
-pub fn diff_torpedo_sets(
-    in_flight_uuids: &HashSet<String>,
-    tracked: &HashSet<String>,
-) -> (Vec<String>, Vec<String>) {
-    let to_spawn: Vec<String> = in_flight_uuids.difference(tracked).cloned().collect();
-    let to_despawn: Vec<String> = tracked.difference(in_flight_uuids).cloned().collect();
-    (to_spawn, to_despawn)
-}
 
 // ── Marker Components ─────────────────────────────────────────────
 
@@ -89,7 +63,7 @@ pub struct RendererPlugin;
 
 impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TorpedoEntityMap>()
+        app.add_plugins(PfxPlugin)
             .init_resource::<NebulaFogState>()
             .init_resource::<NebulaCloudState>()
             .add_systems(Startup, setup)
@@ -116,10 +90,8 @@ impl Plugin for RendererPlugin {
             .add_systems(
                 Update,
                 (
-                    draw_beam_vfx.run_if(in_state(GamePhase::InProgress)),
                     spawn_ripples,
                     tick_ripples.run_if(in_state(GamePhase::InProgress)),
-                    sync_torpedo_entities.run_if(in_state(GamePhase::InProgress)),
                     draw_warp_exit_markers.run_if(in_state(GamePhase::InProgress)),
                     nebula_fog_system.run_if(in_state(GamePhase::InProgress)),
                     spawn_nebula_cloud_particles,
@@ -162,6 +134,7 @@ fn setup(mut commands: Commands) {
             far: 5000.0,
             ..default()
         }),
+        Bloom::NATURAL,
         Transform::from_xyz(0.0, 2.0, -10.0),
     ));
 
@@ -535,133 +508,6 @@ fn sync_comms_overlay(
     }
 }
 
-/// Draws phaser beams from port and starboard banks to the target asteroid
-/// while `ActiveBeam` has a live target. Uses 3D gizmo lines in world space.
-///
-/// The origin of each beam is offset laterally from the ship centre to the
-/// appropriate hull side via `beam_render::bank_origin`.  The endpoint is
-/// the asteroid position, clamped to max range via `beam_render::beam_endpoint`.
-/// The beam colour is taken from `PhaserRenderConfig` (configurable via ship TOML).
-fn draw_beam_vfx(
-    ship: Res<ShipState>,
-    beam: Res<ActiveBeam>,
-    render_cfg: Res<PhaserRenderConfig>,
-    asteroid_q: Query<
-        (&crate::simulation::AsteroidUuid, &Transform),
-        With<crate::simulation::Asteroid>,
-    >,
-    npc_q: Query<
-        (&crate::entity_spawner::EntityUuid, &Transform),
-        Without<crate::simulation::Asteroid>,
-    >,
-    npc_beam_q: Query<(
-        &crate::entity_spawner::EntityUuid,
-        &Transform,
-        &crate::ai_plugin::EntityPhaserState,
-    )>,
-    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::simulation::Ship>>,
-    mut gizmos: Gizmos,
-) {
-    // ── Player phaser beams ────────────────────────────────────────────────
-    if let Some(target_uuid) = &beam.target_uuid {
-        // Resolve the target's live position from ECS Transforms (asteroids
-        // carry AsteroidUuid; NPCs/stations carry EntityUuid). The
-        // WorldResource snapshot stores stale spawn-time positions, so it
-        // would render the beam to where the NPC spawned, not where it is now.
-        let target_xz = asteroid_q
-            .iter()
-            .find_map(|(u, t)| (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z)))
-            .or_else(|| {
-                npc_q.iter().find_map(|(u, t)| {
-                    (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
-                })
-            });
-
-        if let Some((tx, tz)) = target_xz {
-            // Endpoint clamped to configured max range.
-            let (end_x, end_z) =
-                beam_render::beam_endpoint(ship.x, ship.z, tx, tz, render_cfg.beam_range);
-
-            // Resolve beam colour from config.
-            let [r, g, b, a] = render_cfg.beam_color;
-            let beam_color = Color::srgba(r, g, b, a);
-            let glow_color = Color::srgba(r, g * 1.5, b * 2.0, a * 0.35);
-
-            // Draw a beam for each bank, originating from the correct hull side.
-            for bank_side in [-1.0_f32, 1.0_f32] {
-                let (ox, oz) = beam_render::bank_origin(
-                    ship.x,
-                    ship.z,
-                    ship.yaw,
-                    bank_side,
-                    beam_render::BANK_HULL_OFFSET,
-                );
-                let origin = Vec3::new(ox, -1.5, oz);
-                let target = Vec3::new(end_x, 0.0, end_z);
-
-                gizmos.line(origin, target, beam_color);
-
-                let perp = {
-                    let dx = target.x - origin.x;
-                    let dz = target.z - origin.z;
-                    let len = (dx * dx + dz * dz).sqrt().max(0.001);
-                    Vec3::new(-dz / len * 0.5, 0.0, dx / len * 0.5)
-                };
-                gizmos.line(origin + perp, target + perp, glow_color);
-                gizmos.line(origin - perp, target - perp, glow_color);
-            }
-        }
-    }
-
-    // ── NPC phaser beams ───────────────────────────────────────────────────
-    // For each NPC with an active beam, draw a single beam from the NPC's
-    // transform to its target (the player ship, another NPC, or asteroid).
-    // Uses red colouring to distinguish hostile fire from player fire.
-    let npc_beam_color = Color::srgba(1.0, 0.25, 0.15, 0.95);
-    let npc_glow_color = Color::srgba(1.0, 0.4, 0.4, 0.35);
-    let player_ship_uuid: Option<String> = player_ship_q.single().ok().map(|u| u.0.clone());
-    for (_src_uuid, src_t, phaser) in npc_beam_q.iter() {
-        if !phaser.beam_active {
-            continue;
-        }
-        let Some(target_uuid) = phaser.beam_target else {
-            continue;
-        };
-        let target_uuid_str = target_uuid.to_string();
-
-        // Target could be the player ship, another NPC, or an asteroid.
-        let target_xz = if player_ship_uuid.as_deref() == Some(target_uuid_str.as_str()) {
-            Some((ship.x, ship.z))
-        } else {
-            npc_q
-                .iter()
-                .find_map(|(u, t)| {
-                    (u.0 == target_uuid_str).then_some((t.translation.x, t.translation.z))
-                })
-                .or_else(|| {
-                    asteroid_q.iter().find_map(|(u, t)| {
-                        (u.0 == target_uuid_str).then_some((t.translation.x, t.translation.z))
-                    })
-                })
-        };
-        let Some((tx, tz)) = target_xz else { continue };
-
-        let origin = Vec3::new(src_t.translation.x, -1.0, src_t.translation.z);
-        let target = Vec3::new(tx, 0.0, tz);
-
-        gizmos.line(origin, target, npc_beam_color);
-
-        let perp = {
-            let dx = target.x - origin.x;
-            let dz = target.z - origin.z;
-            let len = (dx * dx + dz * dz).sqrt().max(0.001);
-            Vec3::new(-dz / len * 0.5, 0.0, dx / len * 0.5)
-        };
-        gizmos.line(origin + perp, target + perp, npc_glow_color);
-        gizmos.line(origin - perp, target - perp, npc_glow_color);
-    }
-}
-
 /// Spawns a `RippleEffect` entity for each `AsteroidDestroyedVfx` event received.
 fn spawn_ripples(mut events: MessageReader<AsteroidDestroyedVfx>, mut commands: Commands) {
     for ev in events.read() {
@@ -714,74 +560,6 @@ fn tick_ripples(
                 r2,
                 c2,
             );
-        }
-    }
-}
-
-// ── Torpedo entity sync ───────────────────────────────────────────
-
-/// Synchronises the set of torpedo sphere entities with the live torpedoes in
-/// `TorpedoSystemResource`.
-///
-/// - Spawns a bright-yellow sphere for each torpedo that entered `in_flight`.
-/// - Updates the `Transform` of every existing torpedo sphere each frame.
-/// - Despawns sphere entities for torpedoes that have left `in_flight`.
-///
-/// Only runs during `InProgress` phase; despawns all remaining torpedo spheres
-/// when the game is not in progress.
-fn sync_torpedo_entities(
-    torpedo_sys: Option<Res<TorpedoSystemResource>>,
-    mut entity_map: ResMut<TorpedoEntityMap>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut transforms: Query<&mut Transform, With<TorpedoSphere>>,
-) {
-    let Some(torpedo_sys) = torpedo_sys else {
-        return;
-    };
-
-    // Entity cleanup for non-InProgress is handled by OnExit schedule
-
-    let in_flight = &torpedo_sys.0.in_flight;
-    let in_flight_uuids: HashSet<String> = in_flight.iter().map(|t| t.uuid.clone()).collect();
-    let tracked_uuids: HashSet<String> = entity_map.0.keys().cloned().collect();
-    let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight_uuids, &tracked_uuids);
-
-    for uuid in to_despawn {
-        if let Some(entity) = entity_map.0.remove(&uuid) {
-            commands.entity(entity).despawn();
-        }
-    }
-
-    let torpedo_mesh = meshes.add(Sphere { radius: 1.0 });
-    let torpedo_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 1.0, 0.0),
-        emissive: LinearRgba::new(1.0, 1.0, 0.0, 1.0),
-        ..default()
-    });
-
-    for uuid in &to_spawn {
-        if let Some(t) = in_flight.iter().find(|t| &t.uuid == uuid) {
-            let entity = commands
-                .spawn((
-                    TorpedoSphere,
-                    Mesh3d(torpedo_mesh.clone()),
-                    MeshMaterial3d(torpedo_mat.clone()),
-                    Transform::from_xyz(t.x, 0.0, t.z),
-                    Visibility::default(),
-                ))
-                .id();
-            entity_map.0.insert(uuid.clone(), entity);
-        }
-    }
-
-    for t in in_flight {
-        if let Some(&entity) = entity_map.0.get(&t.uuid) {
-            if let Ok(mut transform) = transforms.get_mut(entity) {
-                transform.translation.x = t.x;
-                transform.translation.z = t.z;
-            }
         }
     }
 }
@@ -1024,168 +802,6 @@ fn draw_warp_exit_markers(query: Query<(&WarpOutMarker, &Transform)>, mut gizmos
             Isometry3d::new(center, Quat::IDENTITY),
             radius * 0.6,
             Color::srgba(0.5, 1.0, 1.0, pulse * 0.4),
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn diff_torpedo_sets_spawns_new_uuids() {
-        let in_flight: HashSet<String> = ["a".into(), "b".into()].into();
-        let tracked: HashSet<String> = HashSet::new();
-        let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
-        let mut to_spawn_sorted = to_spawn.clone();
-        to_spawn_sorted.sort();
-        assert_eq!(to_spawn_sorted, vec!["a".to_string(), "b".to_string()]);
-        assert!(to_despawn.is_empty());
-    }
-
-    #[test]
-    fn diff_torpedo_sets_despawns_removed_uuids() {
-        let in_flight: HashSet<String> = HashSet::new();
-        let tracked: HashSet<String> = ["a".into()].into();
-        let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
-        assert!(to_spawn.is_empty());
-        assert_eq!(to_despawn, vec!["a".to_string()]);
-    }
-
-    #[test]
-    fn diff_torpedo_sets_no_change_when_same() {
-        let in_flight: HashSet<String> = ["a".into()].into();
-        let tracked: HashSet<String> = ["a".into()].into();
-        let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
-        assert!(to_spawn.is_empty());
-        assert!(to_despawn.is_empty());
-    }
-
-    #[test]
-    fn diff_torpedo_sets_mixed_spawn_and_despawn() {
-        let in_flight: HashSet<String> = ["b".into(), "c".into()].into();
-        let tracked: HashSet<String> = ["a".into(), "b".into()].into();
-        let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
-        assert_eq!(to_spawn, vec!["c".to_string()]);
-        assert_eq!(to_despawn, vec!["a".to_string()]);
-    }
-
-    // ── sync_torpedo_entities integration tests ────────────────────────────
-    //
-    // These exercise the Bevy system end-to-end against a minimal App so a
-    // regression in the renderer pipeline (the part that turns
-    // `TorpedoSystemResource.in_flight` into visible 3D sphere entities)
-    // surfaces as a test failure instead of an invisible viewscreen.
-
-    use crate::torpedo::{TorpedoConfig, TorpedoSystem};
-
-    fn sync_test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(bevy::asset::AssetPlugin::default())
-            .init_asset::<Mesh>()
-            .init_asset::<StandardMaterial>()
-            .init_resource::<TorpedoEntityMap>()
-            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
-                TorpedoConfig::default(),
-            )))
-            .add_systems(Update, sync_torpedo_entities);
-        app
-    }
-
-    fn push_inflight_torpedo(app: &mut App, uuid: &str, x: f32, z: f32) {
-        let mut sys = app.world_mut().resource_mut::<TorpedoSystemResource>();
-        sys.0.in_flight.push(crate::torpedo::Torpedo {
-            uuid: uuid.to_string(),
-            x,
-            z,
-            heading: 0.0,
-            lifespan_remaining: 5.0,
-            target_uuid: None,
-            source_uuid: None,
-            shield_pierce: 0.0,
-        });
-    }
-
-    fn count_torpedo_spheres(app: &mut App) -> usize {
-        let mut q = app.world_mut().query::<&TorpedoSphere>();
-        q.iter(app.world()).count()
-    }
-
-    #[test]
-    fn sync_torpedo_entities_spawns_sphere_for_each_in_flight_torpedo() {
-        let mut app = sync_test_app();
-        push_inflight_torpedo(&mut app, "t1", 10.0, 20.0);
-        push_inflight_torpedo(&mut app, "t2", -5.0, 0.0);
-
-        app.update();
-
-        assert_eq!(
-            count_torpedo_spheres(&mut app),
-            2,
-            "expected one TorpedoSphere entity per in-flight torpedo"
-        );
-        assert_eq!(
-            app.world().resource::<TorpedoEntityMap>().0.len(),
-            2,
-            "TorpedoEntityMap should track both spawned entities"
-        );
-    }
-
-    #[test]
-    fn sync_torpedo_entities_despawns_sphere_when_torpedo_leaves_in_flight() {
-        let mut app = sync_test_app();
-        push_inflight_torpedo(&mut app, "t1", 0.0, 0.0);
-        app.update();
-        assert_eq!(count_torpedo_spheres(&mut app), 1);
-
-        // Torpedo expires / detonates → leaves in_flight
-        app.world_mut()
-            .resource_mut::<TorpedoSystemResource>()
-            .0
-            .in_flight
-            .clear();
-        app.update();
-
-        assert_eq!(
-            count_torpedo_spheres(&mut app),
-            0,
-            "TorpedoSphere should be despawned when the torpedo leaves in_flight"
-        );
-        assert!(
-            app.world().resource::<TorpedoEntityMap>().0.is_empty(),
-            "TorpedoEntityMap should be empty after despawn"
-        );
-    }
-
-    #[test]
-    fn sync_torpedo_entities_updates_transform_to_match_torpedo_position() {
-        let mut app = sync_test_app();
-        push_inflight_torpedo(&mut app, "t1", 0.0, 0.0);
-        app.update();
-
-        // Torpedo moves forward
-        {
-            let mut sys = app.world_mut().resource_mut::<TorpedoSystemResource>();
-            let t = &mut sys.0.in_flight[0];
-            t.x = 42.0;
-            t.z = -17.0;
-        }
-        app.update();
-
-        let mut q = app.world_mut().query::<(&TorpedoSphere, &Transform)>();
-        let (_, transform) = q
-            .iter(app.world())
-            .next()
-            .expect("expected one TorpedoSphere entity");
-        assert!(
-            (transform.translation.x - 42.0).abs() < 1e-3,
-            "x should track torpedo x, got {}",
-            transform.translation.x
-        );
-        assert!(
-            (transform.translation.z - (-17.0)).abs() < 1e-3,
-            "z should track torpedo z, got {}",
-            transform.translation.z
         );
     }
 }

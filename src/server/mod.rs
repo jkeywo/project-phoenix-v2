@@ -1,5 +1,6 @@
 pub mod asset_preload;
 pub mod bridge;
+pub mod pfx;
 pub mod radar;
 pub mod renderer;
 pub mod viewscreen_border;

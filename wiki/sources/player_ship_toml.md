@@ -35,8 +35,24 @@ parsed into `EntityConfig` (`src/entities/config.rs`), and consumed by:
 | `[helm_console]` + `[helm_console.boost]` | `HelmPlugin`, `ImpulseConfigResource`, `BoostConfigResource` | Speed/accel/yaw + `impulse_*`; boost speed/accel, steering-rate multiplier, battery timings. |
 | `[navigation_console.system_chart]` | Navigation panel | Range + filter. |
 | `[comms]` | `CommsPlugin` | `range` for the ship's own hailing radius. |
-| `[stations]` | `lobby/stations_config.rs` | Per-player-count `[[stations.N]]` entries. |
+| `[[station]]` | `ship/config.rs`, `ShipConfigResource` | Fixed roster: one entry per station (9 stations). Each carries `[[station.rating]]` sub-tables. |
+| `[[system]]` | `ship/config.rs`, `ShipConfigResource` | System declarations: `id`, `kind`, `station`, `power_group`, optional `[system.config]`. |
 | `[radar_appearance]` | Renderer | Colour + radius on radar. |
+
+## Station / system schema (2026-06, B1+B2)
+
+As of issues #531–#532, the legacy `[stations]` per-player-count tables have been
+replaced with:
+
+- `[[station]]` — fixed roster (9 stations: captain, helm, tactical, repair,
+  sensors, shields, navigation, power, comms). Each carries `[[station.rating]]`
+  sub-tables listing `automated_systems` and optional `[station.rating.ai_tuning]`.
+- `[[system]]` — one entry per system instance (`id`, `kind`, `station`,
+  `power_group`). Parsed into `ShipConfig` by `src/ship/config.rs` and loaded
+  into `ShipConfigResource` at startup.
+
+See [Issue #540 - Config migration docs](./issue-540-config-migration-docs.md)
+for the full migration log.
 
 ## Per-bank phasers and per-tube torpedoes (2026-05)
 

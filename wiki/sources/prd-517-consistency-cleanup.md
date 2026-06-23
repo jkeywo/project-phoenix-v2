@@ -11,7 +11,7 @@ updated: 2026-06-23
 
 ## Status
 
-Open. Parent is PRD #487. Eight independently-grabbable slices (A1–A8 + D).
+Open — A2 remaining. Slices A1, A3–A8 shipped via issues #523–#529. A2 (`RatingChanged` client-side handler completing the AUTO badge re-render) is unblocked but not yet filed as a standalone issue.
 
 ## Problem
 

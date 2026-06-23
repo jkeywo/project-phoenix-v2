@@ -25,7 +25,7 @@ Multi-word ids always use hyphens (`-`), never underscores. The `*_SYSTEM_ID` co
 
 The registry kind key uses `"red_alert"` (snake_case, `RED_ALERT_KIND`) for legacy reasons, while the wire `SystemId` is `"red-alert"` (kebab, `RED_ALERT_SYSTEM_ID`). All other systems have identical `*_KIND` and `*_SYSTEM_ID` values. New systems must use the same lowercase-kebab string for both.
 
-## Coarse-system status (as of issue #527)
+## Coarse-system status (as of issue #529)
 
 | Console | Kind registered | `ControlSystem` dispatch | `policy_for` gating | Channel-3 via `CoordinationEnqueue` | Issue |
 |---------|----------------|--------------------------|---------------------|--------------------------------------|-------|

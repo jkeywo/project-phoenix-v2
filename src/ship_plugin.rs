@@ -61,23 +61,14 @@ pub struct CoordinationEnqueue {
 
 /// Load `ShipConfigResource` from `assets/entities/player_ship.toml`.
 ///
-/// Branches on TOML shape: if the file contains `[[station]]` array-of-tables
-/// (the new schema), it is parsed via `ship::config::parse_and_validate`.
-/// Otherwise the file uses the legacy `[stations]` schema and the inline stub
-/// is used with a `warn!` so CI stays green until B2 lands.
-fn load_ship_config_from_disk() -> ShipConfigResource {
+/// Panics if the file is missing, uses the legacy schema, or fails validation —
+/// the server cannot start without a valid ship configuration.
+pub(crate) fn load_ship_config_from_disk() -> ShipConfigResource {
     const PATH: &str = "assets/entities/player_ship.toml";
-    let toml_str = match std::fs::read_to_string(PATH) {
-        Ok(s) => s,
-        Err(e) => {
-            bevy::log::warn!("ship_config: could not read {PATH}: {e}; using stub");
-            return ShipConfigResource::default();
-        }
-    };
-    // Branch on TOML shape — not a feature flag.
+    let toml_str = std::fs::read_to_string(PATH)
+        .unwrap_or_else(|e| panic!("ship_config: could not read {PATH}: {e}"));
     if !toml_str.contains("[[station]]") {
-        bevy::log::warn!("ship_config: {PATH} uses legacy [stations] schema; using stub");
-        return ShipConfigResource::default();
+        panic!("ship_config: {PATH} uses legacy [stations] schema — migrate to [[station]] tables");
     }
     let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
         .expect("core system registry must be valid");
@@ -91,102 +82,13 @@ fn load_ship_config_from_disk() -> ShipConfigResource {
             );
             ShipConfigResource(config)
         }
-        Err(e) => {
-            bevy::log::error!("ship_config: {PATH} failed validation: {e}; using stub");
-            ShipConfigResource::default()
-        }
+        Err(e) => panic!("ship_config: {PATH} failed validation: {e}"),
     }
 }
 
 impl Default for ShipConfigResource {
     fn default() -> Self {
-        // Stub used when player_ship.toml still carries the legacy [stations]
-        // schema. Deleted in B6 once the cutover TOML lands.
-        let toml = r#"
-[[station]]
-id = "captain"
-name = "Captain"
-description = "Command the bridge."
-rank = "Cpt."
-short_code = "CPT"
-console = "captain"
-
-[[station.rating]]
-name = "Assisted"
-automated_systems = ["red-alert", "viewscreen"]
-
-[[station.rating]]
-name = "Manual"
-automated_systems = []
-
-[[station]]
-id = "tactical"
-name = "Tactical"
-description = "Weapons and threat response."
-rank = "Ltn."
-short_code = "TAC"
-console = "tactical"
-
-[[station.rating]]
-name = "Assisted"
-automated_systems = ["torpedo-magazine", "torpedo-tube-fore-port"]
-
-[power_groups.ops]
-label = "Operations"
-default_level = 2
-min_level = 1
-max_level = 4
-
-[power_groups.weapons]
-label = "Weapons"
-default_level = 2
-min_level = 1
-max_level = 4
-
-[[system]]
-id = "red-alert"
-kind = "red_alert"
-station = "captain"
-power_group = "ops"
-
-[[system]]
-id = "phaser-fore"
-kind = "phaser_bank"
-station = "tactical"
-power_group = "weapons"
-
-[system.config]
-facing_deg = 0
-fire_arc_deg = 270
-
-[[system]]
-id = "torpedo-magazine"
-kind = "torpedo_magazine"
-station = "tactical"
-power_group = "weapons"
-
-[[system]]
-id = "torpedo-tube-fore-port"
-kind = "torpedo_tube"
-station = "tactical"
-power_group = "weapons"
-
-[[system]]
-id = "viewscreen"
-kind = "viewscreen"
-station = "captain"
-power_group = "ops"
-"#;
-        const KINDS: &[&str] = &[
-            "red_alert",
-            "helm",
-            "phaser_bank",
-            "torpedo_magazine",
-            "torpedo_tube",
-            "viewscreen",
-        ];
-        let config = ShipConfig::from_toml(toml, KINDS).expect("default ship config must parse");
-        Self(config)
+        load_ship_config_from_disk()
     }
 }
 

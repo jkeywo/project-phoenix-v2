@@ -35,7 +35,6 @@ travel_duration_secs = 5
 repair_rate_hp_per_sec = 0.5
 
 [weapons_console]
-complexity_toml = "assets/complexity/tactical.toml"
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
 
@@ -66,7 +65,7 @@ beam_damage_per_sec = 5
 beam_duration_secs = 6
 cooldown_secs = 6
 beam_color = [ 1, 0.4, 0.1, 1 ]
-marker = "phasers_a"
+marker = "phasers_aft"
 
 [torpedoes]
 count = 10
@@ -100,7 +99,6 @@ load_time = 3
 marker = "torpedo_aft"
 
 [sensors_console]
-complexity_toml = "assets/complexity/sensors.toml"
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
 [sensors_console.long_range_radar]
@@ -109,7 +107,6 @@ shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
 [power]
-complexity_toml = "assets/complexity/power.toml"
 capacity = 100
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25
@@ -133,6 +130,12 @@ impulse_speed_multiplier = 10
 impulse_acceleration_multiplier = 5
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
+[helm_console.engine_pfx]
+color = [ 0.25, 0.75, 1, 0.72 ]
+markers = [ "phasers_aft" ]
+trail_lifetime_secs = 0.55
+trail_spawn_interval_secs = 0.06
+
 [helm_console.boost]
 multiplier = 3.0
 steering_multiplier = 2.0
@@ -144,7 +147,6 @@ range = 187.5
 shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
 
 [navigation_console]
-complexity_toml = "assets/complexity/navigation.toml"
 
 [navigation_console.system_chart]
 range = 800
@@ -155,7 +157,6 @@ selects = [ "station", "planet", "star", "region" ]
 range = 1200
 
 [shields_console]
-complexity_toml = "assets/complexity/shields.toml"
 focus_bonus_max_hp = 50
 focus_bonus_regen = 5
 focus_penalty_max_hp = 25
@@ -234,6 +235,14 @@ console = "tactical"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Assisted"
+automated_systems = []
+
+[station.rating.ai_tuning]
+torpedo_auto_fire = {}
+frequency_match = { auto_match_delay_secs = 3.0 }
+
 [[station]]
 id = "repair"
 name = "Repair"
@@ -257,6 +266,13 @@ console = "sensors"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = []
+
+[station.rating.ai_tuning]
+auto_hint = { auto_hint_delay_secs = 3.0 }
 
 [[station]]
 id = "shields"
@@ -293,6 +309,14 @@ console = "power"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = []
+
+[station.rating.ai_tuning]
+movement_rule = { thrust_threshold = 0.7, engage_delay_secs = 3.0, battery_engage_min_pct = 50.0, battery_recharge_pct = 100.0 }
+red_alert_rule = { engage_delay_secs = 3.0, battery_engage_min_pct = 10.0, battery_recharge_pct = 100.0 }
 
 [[station]]
 id = "comms"

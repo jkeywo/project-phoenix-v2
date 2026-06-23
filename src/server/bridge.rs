@@ -510,17 +510,6 @@ pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
     crate::config_cache::wasm_push_sidecar_toml(path, toml_str);
 }
 
-/// Load a complexity config from a TOML string into the complexity cache.
-///
-/// Called by JS when a `handleConfigRequest` detects a path under
-/// `assets/complexity/`. Returns `Ok(true)` when the last pending config is
-/// loaded (preload complete), `Ok(false)` while still pending.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_load_complexity(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    crate::config_cache::wasm_load_complexity(path, toml_str)
-}
-
 // ── Bevy bridge systems ────────────────────────────────────────────────────
 
 /// Drains the inbound queue each frame and injects messages into Bevy.

@@ -2099,19 +2099,6 @@ mod tests {
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
-    /// Return ComplexityRules populated from shipped asset files on native,
-    /// or an empty default on WASM (tests do not run on WASM).
-    fn test_complexity_rules() -> crate::console_ai_plugin::ComplexityRules {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            crate::console_ai_plugin::ComplexityRules::from_asset_files()
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            crate::console_ai_plugin::ComplexityRules::default()
-        }
-    }
-
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
         for m in reader.read() {
             box_.0.push(m.clone());
@@ -2148,6 +2135,8 @@ mod tests {
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<crate::ship_plugin::ShipSystemControlSources>()
+        .insert_resource(crate::ship_plugin::ShipConfigResource::default())
+        .init_resource::<crate::ship_plugin::ActiveStationRatings>()
         .init_resource::<WorldResource>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<TrackedEntities>()
@@ -2156,8 +2145,6 @@ mod tests {
             TimerMode::Repeating,
         )))
         .init_resource::<WorldSetupBroadcast>()
-        .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
-        .insert_resource(test_complexity_rules())
         .init_resource::<SimOutbox>()
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<LastBroadcastHull>()
@@ -5156,34 +5143,11 @@ mod tests {
         );
     }
 
-    /// Sensors holder may set phaser frequency when Tactical is Low.
+    /// Sensors holder is never authorized to set phaser frequency (delegation removed in B4).
     #[test]
-    fn sensors_holder_can_set_phaser_frequency_when_tactical_is_low() {
+    fn sensors_holder_cannot_set_phaser_frequency() {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
-        // Set Tactical to Low complexity.
-        app.world_mut()
-            .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
-            .set(Console::Tactical, "Low".into());
-        push(
-            &mut app,
-            "sensors",
-            ClientMessage::SetPhaserFrequency { frequency: 0.3 },
-        );
-        tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!(
-            (freq - 0.3).abs() < 1e-5,
-            "Sensors holder should set phaser frequency when Tactical is Low, got {freq}"
-        );
-    }
-
-    /// Sensors holder is rejected when Tactical is Full.
-    #[test]
-    fn sensors_holder_cannot_set_phaser_frequency_when_tactical_is_full() {
-        let mut app = test_app();
-        start_game_with_sensors_and_weapons(&mut app);
-        // Default complexity is Full (unset = no override ? not Low).
         push(
             &mut app,
             "sensors",
@@ -5193,7 +5157,7 @@ mod tests {
         let freq = app.world().resource::<ShipState>().phaser_frequency;
         assert!(
             (freq - 0.5).abs() < 1e-5,
-            "Sensors holder must NOT change phaser frequency when Tactical is Full, got {freq}"
+            "Sensors holder must NOT change phaser frequency, got {freq}"
         );
     }
 

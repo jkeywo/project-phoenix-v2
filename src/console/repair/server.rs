@@ -101,9 +101,7 @@ pub fn handle_dispatch_repair_team(
                 (*team_idx as usize, console.clone())
             }
             // ── ControlSystem path ────────────────────────────────────────
-            ClientMessage::ControlSystem { target, payload }
-                if target.0 == REPAIR_SYSTEM_ID =>
-            {
+            ClientMessage::ControlSystem { target, payload } if target.0 == REPAIR_SYSTEM_ID => {
                 match payload {
                     SystemControlPayload::DispatchRepairTeam { team_idx, target } => {
                         let console = match target {
@@ -267,10 +265,10 @@ mod tests {
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
         .insert_resource(crate::modifiers::ShipModifiers::new())
-            .init_resource::<crate::lobby::WorldResource>()
-            .init_resource::<SimOutbox>()
-            .init_resource::<ShipSystemControlSources>()
-            .init_resource::<Outbox>()
+        .init_resource::<crate::lobby::WorldResource>()
+        .init_resource::<SimOutbox>()
+        .init_resource::<ShipSystemControlSources>()
+        .init_resource::<Outbox>()
         .add_plugins(RepairPlugin)
         .add_plugins(repair_state_broadcaster())
         .add_systems(PostUpdate, collect);

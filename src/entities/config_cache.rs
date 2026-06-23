@@ -1,8 +1,8 @@
 // WASM/JS bridge for config preloading — all public functions are #[wasm_bindgen] exports.
 //
 // This module implements the preload sequence for the unified world TOML,
-// entity templates, complexity TOML files, and faction TOML files. It uses
-// thread-local storage to cache configs before the Bevy app is initialised.
+// entity templates, and faction TOML files. It uses thread-local storage
+// to cache configs before the Bevy app is initialised.
 //
 // Preload sequence:
 // 1. JS calls set_config_request_callback(cb)
@@ -11,10 +11,7 @@
 //    `world::config::parse_world` pass and stores the resulting `WorldConfig`
 // 4. wasm_load_world fires the callback for each referenced entity template path
 // 5. For each entity path, JS fetches the TOML and calls wasm_load_config(path, toml_str)
-// 6. wasm_load_config parses and caches the entity config; if any console config
-//    references a complexity_toml, that path is also queued for loading
-// 7. JS fetches complexity TOML files and calls wasm_load_complexity(path, toml_str)
-// 8. When all pending configs are loaded, returns Ok(true) and JS calls wasm_init()
+// 6. When all pending configs are loaded, returns Ok(true) and JS calls wasm_init()
 
 #[cfg(target_arch = "wasm32")]
 use {
@@ -68,10 +65,6 @@ thread_local! {
 
     /// Set of paths currently being fetched to prevent duplicates.
     static IN_FLIGHT: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
-
-    /// Cache of loaded complexity configs by path.
-    static COMPLEXITY_CACHE: RefCell<Option<HashMap<String, crate::complexity::ComplexityConfig>>> =
-        const { RefCell::new(None) };
 
     /// Cache of loaded faction configs by uuid.
     static FACTION_REGISTRY: RefCell<crate::faction::FactionRegistry> =
@@ -150,9 +143,6 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
             // enqueue them for fetch before recording the config.
             let nested = nested_template_paths(&config);
 
-            // Scan for complexity_toml references and queue them
-            queue_complexity_refs(&config);
-
             CONFIG_CACHE.with(|cache| {
                 cache.borrow_mut().insert(path.clone(), config);
             });
@@ -214,91 +204,6 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
             }
         }
     }
-}
-
-/// Load a complexity config TOML string and insert it into the cache.
-///
-/// Returns Ok(true) when the last pending config is loaded (preload complete).
-/// Returns Ok(false) while there are still pending configs.
-#[cfg(target_arch = "wasm32")]
-pub fn wasm_load_complexity(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    match crate::complexity::parse_complexity_config(&toml_str) {
-        Ok(config) => {
-            COMPLEXITY_CACHE.with(|cache| {
-                cache
-                    .borrow_mut()
-                    .get_or_insert_with(HashMap::new)
-                    .insert(path.clone(), config);
-            });
-
-            IN_FLIGHT.with(|in_flight| {
-                in_flight.borrow_mut().remove(&path);
-            });
-            PENDING_QUEUE.with(|q| {
-                q.borrow_mut().retain(|p| p != &path);
-            });
-
-            let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
-            let has_in_flight = IN_FLIGHT.with(|q| !q.borrow().is_empty());
-
-            if !has_pending && !has_in_flight {
-                PRELOAD_COMPLETE.with(|flag| {
-                    *flag.borrow_mut() = true;
-                });
-                Ok(JsValue::TRUE)
-            } else {
-                Ok(JsValue::FALSE)
-            }
-        }
-        Err(e) => {
-            web_sys::console::error_1(&JsValue::from_str(&format!(
-                "Failed to parse complexity config at {}: {}",
-                path, e
-            )));
-            IN_FLIGHT.with(|in_flight| {
-                in_flight.borrow_mut().remove(&path);
-            });
-            PENDING_QUEUE.with(|q| {
-                q.borrow_mut().retain(|p| p != &path);
-            });
-            let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
-            let has_in_flight = IN_FLIGHT.with(|q| !q.borrow().is_empty());
-            if !has_pending && !has_in_flight {
-                PRELOAD_COMPLETE.with(|flag| {
-                    *flag.borrow_mut() = true;
-                });
-                Ok(JsValue::TRUE)
-            } else {
-                Err(JsValue::from_str(&format!(
-                    "Complexity config parse error at {}: {}",
-                    path, e
-                )))
-            }
-        }
-    }
-}
-
-/// Scan an entity config for complexity_toml references and queue any found.
-#[cfg(target_arch = "wasm32")]
-fn queue_complexity_refs(config: &EntityConfig) {
-    let paths = config.complexity_toml_paths();
-    for p in paths {
-        COMPLEXITY_CACHE.with(|cache| {
-            if cache
-                .borrow()
-                .as_ref()
-                .map_or(true, |m| !m.contains_key(&p))
-            {
-                queue_and_fire(p);
-            }
-        });
-    }
-}
-
-/// Get complexity resources.
-#[cfg(target_arch = "wasm32")]
-pub fn get_complexity_resources() -> ComplexityResources {
-    ComplexityResources(COMPLEXITY_CACHE.with(|cache| cache.borrow().clone().unwrap_or_default()))
 }
 
 /// Check if the preload sequence is complete (all configs loaded).
@@ -562,26 +467,6 @@ impl From<HashMap<String, EntityConfig>> for ConfigCache {
 #[cfg(not(target_arch = "wasm32"))]
 pub type ConfigCache = std::collections::HashMap<String, crate::entity_config::EntityConfig>;
 
-/// Newtype wrapper so HashMap<String, ComplexityConfig> can be inserted as a Bevy Resource.
-#[cfg(target_arch = "wasm32")]
-#[derive(Resource)]
-pub struct ComplexityResources(
-    pub std::collections::HashMap<String, crate::complexity::ComplexityConfig>,
-);
-
-#[cfg(target_arch = "wasm32")]
-impl std::ops::Deref for ComplexityResources {
-    type Target = std::collections::HashMap<String, crate::complexity::ComplexityConfig>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-/// On non-wasm, ComplexityResources is just a plain HashMap.
-#[cfg(not(target_arch = "wasm32"))]
-pub type ComplexityResources =
-    std::collections::HashMap<String, crate::complexity::ComplexityConfig>;
-
 /// Newtype wrapper so `FactionRegistry` can be inserted as a Bevy Resource.
 #[derive(Resource)]
 pub struct FactionRegistryResource(pub crate::faction::FactionRegistry);
@@ -612,9 +497,6 @@ impl Plugin for ConfigCachePlugin {
     fn build(&self, app: &mut App) {
         // Insert the ConfigCache resource
         app.insert_resource(get_config_cache());
-
-        // Insert the ComplexityResources
-        app.insert_resource(get_complexity_resources());
 
         // Insert the FactionRegistry
         app.insert_resource(FactionRegistryResource(get_faction_registry()));
@@ -648,16 +530,6 @@ pub fn wasm_is_preload_complete() -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_config_cache() -> ConfigCache {
     ConfigCache::new()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn wasm_load_complexity(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
-    Ok(JsValue::from_bool(false))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn get_complexity_resources() -> ComplexityResources {
-    ComplexityResources::new()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -835,22 +707,6 @@ length = 0.0
 
         // Now no pending - preload complete
         assert!(!cache.has_pending());
-    }
-
-    #[test]
-    fn entity_config_complexity_toml_paths_discovered() {
-        let toml = r#"
-[helm_console]
-complexity_toml = "assets/complexity/helm.toml"
-
-[weapons_console]
-complexity_toml = "assets/complexity/tactical.toml"
-"#;
-        let config = EntityConfig::from_toml(toml).expect("parse must succeed");
-        let paths = config.complexity_toml_paths();
-        assert_eq!(paths.len(), 2);
-        assert!(paths.contains(&"assets/complexity/helm.toml".to_string()));
-        assert!(paths.contains(&"assets/complexity/tactical.toml".to_string()));
     }
 
     #[test]

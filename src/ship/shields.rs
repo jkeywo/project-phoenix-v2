@@ -358,8 +358,8 @@ mod tests {
     use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::{ClientMessage, Console, *};
-    use crate::ship::control_source::ControlSource;
     use crate::shield::ShieldSystem;
+    use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::CoordinationEnqueue;
     use crate::simulation::{
         LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
@@ -681,12 +681,7 @@ mod tests {
 
         let down_msgs: Vec<_> = coord_msgs
             .iter()
-            .filter(|m| {
-                matches!(
-                    &m.payload,
-                    CoordinationPayload::ShieldFacingDown { .. }
-                )
-            })
+            .filter(|m| matches!(&m.payload, CoordinationPayload::ShieldFacingDown { .. }))
             .collect();
 
         assert!(
@@ -719,12 +714,7 @@ mod tests {
 
         let count = coord_msgs
             .iter()
-            .filter(|m| {
-                matches!(
-                    &m.payload,
-                    CoordinationPayload::ShieldFacingDown { .. }
-                )
-            })
+            .filter(|m| matches!(&m.payload, CoordinationPayload::ShieldFacingDown { .. }))
             .count();
 
         assert_eq!(
@@ -769,12 +759,7 @@ mod tests {
 
         let restored_msgs: Vec<_> = coord_msgs
             .iter()
-            .filter(|m| {
-                matches!(
-                    &m.payload,
-                    CoordinationPayload::ShieldFacingRestored { .. }
-                )
-            })
+            .filter(|m| matches!(&m.payload, CoordinationPayload::ShieldFacingRestored { .. }))
             .collect();
 
         assert!(
@@ -812,12 +797,7 @@ mod tests {
 
         let count = coord_msgs
             .iter()
-            .filter(|m| {
-                matches!(
-                    &m.payload,
-                    CoordinationPayload::ShieldFacingRestored { .. }
-                )
-            })
+            .filter(|m| matches!(&m.payload, CoordinationPayload::ShieldFacingRestored { .. }))
             .count();
 
         assert_eq!(
@@ -850,7 +830,9 @@ mod tests {
 
         assert!(!down_msgs.is_empty(), "expected ShieldFacingDown enqueue");
         assert!(
-            down_msgs.iter().all(|m| m.sender_origin == ControlSource::Ai),
+            down_msgs
+                .iter()
+                .all(|m| m.sender_origin == ControlSource::Ai),
             "default sender_origin should be Ai (shields console has no holder)"
         );
         assert!(

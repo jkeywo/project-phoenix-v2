@@ -1574,7 +1574,6 @@ mod tests {
                 rank: "Cpt.".into(),
                 short_code: "CAP".into(),
             }],
-            complexity_presets: std::collections::HashMap::new(),
         };
         let msg = ServerMessage::Welcome {
             state: state(),
@@ -1679,36 +1678,6 @@ mod tests {
                 target: Console::Helm,
                 level: 3,
             },
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_sensors_console_round_trips() {
-        let msg = ClientMessage::SetComplexity {
-            console: Console::Sensors,
-            preset_name: "Low".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_shields_console_round_trips() {
-        let msg = ClientMessage::SetComplexity {
-            console: Console::Shields,
-            preset_name: "Std".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_navigation_console_round_trips() {
-        let msg = ClientMessage::SetComplexity {
-            console: Console::Navigation,
-            preset_name: "Std".into(),
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
@@ -2247,38 +2216,6 @@ mod tests {
             let decoded: EntityTag = serde_json::from_str(&json).unwrap();
             assert_eq!(*tag, decoded);
         }
-    }
-
-    // ── SetComplexity / ComplexityChanged round-trips ──────────────────
-
-    #[test]
-    fn client_set_complexity_round_trips() {
-        let msg = ClientMessage::SetComplexity {
-            console: Console::Helm,
-            preset_name: "Low".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn server_complexity_changed_round_trips() {
-        let msg = ServerMessage::ComplexityChanged {
-            console: Console::Tactical,
-            preset_name: "Std".into(),
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn set_complexity_with_captain_chair_console_round_trips() {
-        let msg = ClientMessage::SetComplexity {
-            console: Console::CaptainChair,
-            preset_name: "Std".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     // ── EntitySpawned / EntityDespawned round-trips ──────────────────────

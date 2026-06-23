@@ -286,5 +286,4 @@ mod tests {
         let due = queue.due_messages(2.0);
         assert_eq!(due[0].target, target);
     }
-
 }

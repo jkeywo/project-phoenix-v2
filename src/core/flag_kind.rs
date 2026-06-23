@@ -25,5 +25,4 @@ mod tests {
             _ => panic!("expected SensorBlind"),
         }
     }
-
 }

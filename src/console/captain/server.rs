@@ -987,7 +987,10 @@ mod tests {
 
         let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
         let comp = q.single(app.world()).unwrap();
-        assert!(comp.0.viewscreen_auto, "viewscreen_auto should be true when viewscreen is AI");
+        assert!(
+            comp.0.viewscreen_auto,
+            "viewscreen_auto should be true when viewscreen is AI"
+        );
         assert_eq!(
             comp.0.viewscreen_system_id,
             crate::system_registry::viewscreen_system_id()

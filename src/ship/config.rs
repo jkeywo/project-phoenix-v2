@@ -37,6 +37,11 @@ pub struct StationConfig {
 pub struct StationRatingConfig {
     pub name: String,
     pub automated_systems: Vec<SystemId>,
+    /// Per-rating AI tuning parameters (replaces assets/complexity/*.toml).
+    /// Keys are AI rule names (e.g. "torpedo_auto_fire", "frequency_match");
+    /// values are TOML tables with rule-specific parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_tuning: Option<toml::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -167,6 +172,44 @@ impl ShipConfig {
     /// Used to map a `Console` variant back to the owning station config.
     pub fn station_for_console(&self, console_id: &str) -> Option<&StationConfig> {
         self.stations.iter().find(|s| s.console == console_id)
+    }
+
+    /// Look up a named rating for a station.
+    pub fn rating_for_station<'a>(
+        &'a self,
+        station_id: &StationId,
+        rating_name: &str,
+    ) -> Option<&'a StationRatingConfig> {
+        self.station(station_id)?
+            .ratings
+            .iter()
+            .find(|r| r.name == rating_name)
+    }
+
+    /// Check whether a station's named rating has the given AI rule in its `ai_tuning` table.
+    pub fn has_ai_rule(&self, station_id: &StationId, rating_name: &str, rule: &str) -> bool {
+        self.rating_for_station(station_id, rating_name)
+            .and_then(|r| r.ai_tuning.as_ref())
+            .and_then(|t| t.as_table())
+            .is_some_and(|tbl| tbl.contains_key(rule))
+    }
+
+    /// Get an f32 tuning parameter from a station rating's ai_tuning table.
+    pub fn ai_tuning_f32(
+        &self,
+        station_id: &StationId,
+        rating_name: &str,
+        rule: &str,
+        key: &str,
+        default: f32,
+    ) -> f32 {
+        self.rating_for_station(station_id, rating_name)
+            .and_then(|r| r.ai_tuning.as_ref())
+            .and_then(|t| t.get(rule))
+            .and_then(|r| r.get(key))
+            .and_then(|v| v.as_float())
+            .map(|v| v as f32)
+            .unwrap_or(default)
     }
 
     pub fn systems_in_power_group<'a>(

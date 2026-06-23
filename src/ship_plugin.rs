@@ -76,14 +76,11 @@ fn load_ship_config_from_disk() -> ShipConfigResource {
     };
     // Branch on TOML shape — not a feature flag.
     if !toml_str.contains("[[station]]") {
-        bevy::log::warn!(
-            "ship_config: {PATH} uses legacy [stations] schema; using stub"
-        );
+        bevy::log::warn!("ship_config: {PATH} uses legacy [stations] schema; using stub");
         return ShipConfigResource::default();
     }
-    let registry =
-        crate::ship::system_registry::SystemKindRegistry::with_core_systems()
-            .expect("core system registry must be valid");
+    let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
+        .expect("core system registry must be valid");
     let kinds: Vec<&str> = registry.kinds().collect();
     match crate::ship::config::parse_and_validate(&toml_str, &kinds) {
         Ok(config) => {
@@ -95,9 +92,7 @@ fn load_ship_config_from_disk() -> ShipConfigResource {
             ShipConfigResource(config)
         }
         Err(e) => {
-            bevy::log::error!(
-                "ship_config: {PATH} failed validation: {e}; using stub"
-            );
+            bevy::log::error!("ship_config: {PATH} failed validation: {e}; using stub");
             ShipConfigResource::default()
         }
     }
@@ -726,7 +721,9 @@ pub fn handle_station_rating_change(
         );
 
         // Track the active rating
-        active_ratings.0.insert(station_id.clone(), rating_name.clone());
+        active_ratings
+            .0
+            .insert(station_id.clone(), rating_name.clone());
 
         // Broadcast the change to all clients
         outbox.0.push((
@@ -820,13 +817,9 @@ pub fn process_coordination_lag(
                     if let Some(station) = ship_config.0.station(station_id) {
                         let console_id = &station.console;
                         let token: Option<String> =
-                            crate::messages::Console::from_console_id(console_id)
-                                .and_then(|console| {
-                                    sessions
-                                        .0
-                                        .console_holder(console)
-                                        .map(|t| t.to_string())
-                                });
+                            crate::messages::Console::from_console_id(console_id).and_then(
+                                |console| sessions.0.console_holder(console).map(|t| t.to_string()),
+                            );
 
                         if let Some(token) = token {
                             outbox.0.push((

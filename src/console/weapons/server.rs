@@ -998,15 +998,9 @@ fn handle_set_phaser_mode(
 fn handle_set_phaser_frequency(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    complexity: Res<crate::console_ai_plugin::ConsoleComplexityState>,
-    rules: Res<crate::console_ai_plugin::ComplexityRules>,
     control_sources: Res<ShipSystemControlSources>,
     mut ship: ResMut<ShipState>,
 ) {
-    use crate::delegation::{is_sender_authorized, CONTROL_SET_PHASER_FREQUENCY};
-    // Delegation grants come from Tactical's active complexity preset
-    // (`[preset.delegated]` in its complexity TOML).
-    let tactical_preset = rules.active_preset(&Console::Tactical, &complexity);
     let tactical_policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1014,28 +1008,13 @@ fn handle_set_phaser_frequency(
         let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else {
             continue;
         };
-
-        // Tactical arm: gated on the control-source resolver (accept_human_input).
-        // Sensors arm: no policy change — Sensors is not yet a coarse system.
-        let sender_console = if tactical_policy.accept_human_input
-            && sessions.0.console_holder(Console::Tactical) == Some(ev.token.as_str())
-        {
-            Console::Tactical
-        } else if sessions.0.console_holder(Console::Sensors) == Some(ev.token.as_str()) {
-            Console::Sensors
-        } else {
-            continue;
-        };
-
-        if !is_sender_authorized(
-            CONTROL_SET_PHASER_FREQUENCY,
-            &sender_console,
-            &Console::Tactical,
-            tactical_preset,
-        ) {
+        // Only the Tactical holder may set phaser frequency (delegation removed in B4).
+        if !tactical_policy.accept_human_input {
             continue;
         }
-
+        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
+            continue;
+        }
         ship.phaser_frequency = frequency.clamp(0.0, 1.0);
     }
 }
@@ -1653,8 +1632,8 @@ fn tick_active_beam(
 fn tick_tactical_ai(
     control_sources: Res<ShipSystemControlSources>,
     sessions: Res<Sessions>,
-    complexity: Res<crate::console_ai_plugin::ConsoleComplexityState>,
-    rules: Res<crate::console_ai_plugin::ComplexityRules>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    active_ratings: Res<crate::ship_plugin::ActiveStationRatings>,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
@@ -1675,18 +1654,14 @@ fn tick_tactical_ai(
 
     // ── TORPEDO AUTO-FIRE (future: split to torpedo_tube system) ─────────────
     //
-    // When the station is claimed, respect the complexity preset so that
-    // behaviour is identical to the old run_tactical_ai (auto-fire only when
-    // the active preset grants the torpedo_auto_fire AI rule).  When the
-    // station is unclaimed (fully-automated ship), operate unconditionally.
+    // When the station is claimed, gate on whether the active rating's
+    // ai_tuning has the torpedo_auto_fire rule. Unclaimed → unconditional.
+    let tactical_station = crate::messages::StationId("tactical".into());
     let auto_fire_enabled = match sessions.0.console_holder(Console::Tactical) {
-        Some(_) => rules
-            .ai_rule(
-                &Console::Tactical,
-                &complexity,
-                crate::console_ai_plugin::AI_RULE_TORPEDO_AUTO_FIRE,
-            )
-            .is_some(),
+        Some(_) => active_ratings
+            .0
+            .get(&tactical_station)
+            .is_some_and(|r| ship_config.0.has_ai_rule(&tactical_station, r, crate::console_ai_plugin::AI_RULE_TORPEDO_AUTO_FIRE)),
         None => true,
     };
 
@@ -2425,17 +2400,38 @@ mod tests {
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
-    /// Return ComplexityRules populated from shipped asset files on native,
-    /// or an empty default on WASM (tests do not run on WASM).
-    fn test_complexity_rules() -> crate::console_ai_plugin::ComplexityRules {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            crate::console_ai_plugin::ComplexityRules::from_asset_files()
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            crate::console_ai_plugin::ComplexityRules::default()
-        }
+    /// Build a minimal `ShipConfigResource` with a tactical station that has an
+    /// "Assisted" rating containing `torpedo_auto_fire` in its ai_tuning table.
+    fn test_ship_config() -> crate::ship_plugin::ShipConfigResource {
+        const TOML: &str = r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons."
+rank = "Ltn."
+short_code = "TAC"
+console = "tactical"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = []
+
+[station.rating.ai_tuning]
+torpedo_auto_fire = {}
+
+[[system]]
+id = "tactical"
+kind = "tactical"
+station = "tactical"
+"#;
+        crate::ship_plugin::ShipConfigResource(
+            crate::ship::config::parse_and_validate(TOML, &["tactical"])
+                .expect("test ship config must be valid"),
+        )
     }
 
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
@@ -2481,8 +2477,8 @@ mod tests {
         .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
             TorpedoConfig::default(),
         )))
-        .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
-        .insert_resource(test_complexity_rules())
+        .insert_resource(test_ship_config())
+        .init_resource::<crate::ship_plugin::ActiveStationRatings>()
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
         .init_resource::<ShipSystemControlSources>()
@@ -3755,27 +3751,8 @@ mod tests {
     }
 
     #[test]
-    fn sensors_holder_can_set_phaser_frequency_when_tactical_is_low() {
-        let mut app = test_app();
-        start_game_with_sensors_and_weapons(&mut app);
-        app.world_mut()
-            .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
-            .set(Console::Tactical, "Low".into());
-        push(
-            &mut app,
-            "sensors",
-            ClientMessage::SetPhaserFrequency { frequency: 0.3 },
-        );
-        tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!(
-            (freq - 0.3).abs() < 1e-5,
-            "Sensors holder should set phaser frequency when Tactical is Low, got {freq}"
-        );
-    }
-
-    #[test]
-    fn sensors_holder_cannot_set_phaser_frequency_when_tactical_is_full() {
+    fn sensors_holder_cannot_set_phaser_frequency() {
+        // Delegation removed in B4 — only Tactical holder may set phaser frequency.
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
         push(
@@ -3787,7 +3764,7 @@ mod tests {
         let freq = app.world().resource::<ShipState>().phaser_frequency;
         assert!(
             (freq - 0.5).abs() < 1e-5,
-            "Sensors holder must NOT change phaser frequency when Tactical is Full, got {freq}"
+            "Sensors holder must NOT change phaser frequency, got {freq}"
         );
     }
 
@@ -4663,7 +4640,6 @@ mod tests {
                 WeaponsConsoleSection(crate::entity_config::WeaponsConsoleConfig {
                     torpedo_arc_color: vec![],
                     power_multipliers: None,
-                    complexity_toml: None,
                     phaser_banks: vec![crate::entity_config::PhaserBankConfig {
                         id: "fore".into(),
                         facing_deg: 0.0,
@@ -4932,11 +4908,12 @@ mod tests {
     }
 
     #[test]
-    fn ai_stops_firing_when_preset_switches_to_full() {
-        // Occupied station: AI fires at Low complexity, stops at Std.
+    fn ai_stops_firing_when_rating_switches_to_std() {
+        // Occupied station: AI fires when rating is Assisted (has torpedo_auto_fire
+        // in ai_tuning), stops when rating is Std (no ai_tuning).
         let mut app = test_app();
 
-        // Assign a human holder so the complexity gate is active.
+        // Assign a human holder so the ai_tuning gate is active.
         push(
             &mut app,
             "weapons",
@@ -4956,28 +4933,31 @@ mod tests {
         tick(&mut app);
 
         set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        // Set rating to Assisted (has torpedo_auto_fire in ai_tuning).
         app.world_mut()
-            .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
-            .set(Console::Tactical, "Low".into());
+            .resource_mut::<crate::ship_plugin::ActiveStationRatings>()
+            .0
+            .insert(crate::messages::StationId("tactical".into()), "Assisted".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
         load_tube_now(&mut app, "fore_port");
         spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
 
-        // First tick — AI should fire at Low complexity.
+        // First tick — AI should fire with Assisted rating.
         let out1 = tick(&mut app);
         assert!(
             out1.iter()
                 .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
-            "AI should fire TorpedoLaunched at Low complexity"
+            "AI should fire TorpedoLaunched when rating is Assisted"
         );
 
-        // Reload the tube (launch consumed it) so the only gate is complexity.
+        // Reload the tube (launch consumed it) so the only gate is the rating.
         load_tube_now(&mut app, "fore_port");
 
-        // Switch to Std (Full) complexity.
+        // Switch to Std rating (no torpedo_auto_fire in ai_tuning).
         app.world_mut()
-            .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
-            .set(Console::Tactical, "Std".into());
+            .resource_mut::<crate::ship_plugin::ActiveStationRatings>()
+            .0
+            .insert(crate::messages::StationId("tactical".into()), "Std".into());
 
         // Second tick — AI must not fire.
         let out2 = tick(&mut app);
@@ -4985,7 +4965,7 @@ mod tests {
             !out2
                 .iter()
                 .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
-            "AI must not fire TorpedoLaunched after switching to Std complexity"
+            "AI must not fire TorpedoLaunched when rating is Std"
         );
     }
 }

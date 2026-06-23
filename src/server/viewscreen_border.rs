@@ -25,7 +25,6 @@ use bevy::ui_render::prelude::{UiMaterial, UiMaterialPlugin};
 use rand::Rng;
 
 use crate::codec;
-use crate::console_ai_plugin::ConsoleComplexityState;
 use crate::console_bridge::{HudStateChanged, LobbyStateChanged};
 use crate::lobby::{OutboundMessage, Sessions, WorldResource};
 use crate::messages::{
@@ -164,7 +163,6 @@ fn push_lobby_state(
     sessions: Option<Res<Sessions>>,
     ship_stations: Option<Res<ShipStations>>,
     phase: Res<State<GamePhase>>,
-    complexity: Option<Res<ConsoleComplexityState>>,
     world_resource: Option<Res<WorldResource>>,
     mut writer: MessageWriter<LobbyStateChanged>,
 ) {
@@ -172,7 +170,6 @@ fn push_lobby_state(
     let Some(stations) = ship_stations else {
         return;
     };
-    let Some(complexity) = complexity else { return };
 
     let players = sessions.0.players();
     let connected_count = players.iter().filter(|p| p.connected).count() as u32;
@@ -187,18 +184,6 @@ fn push_lobby_state(
                 && !p.consoles.is_empty()
                 && def.consoles.iter().all(|c| p.consoles.contains(c))
         });
-        let preset_names: Vec<String> = def
-            .consoles
-            .iter()
-            .map(|c| {
-                complexity
-                    .presets
-                    .get(c)
-                    .map(String::as_str)
-                    .unwrap_or("Std")
-                    .to_string()
-            })
-            .collect();
         station_payloads.push(StationPayload {
             name: def.name.clone(),
             short_code: def.short_code.clone(),
@@ -206,7 +191,7 @@ fn push_lobby_state(
             consoles: def.consoles.clone(),
             holder_name: holder.map(|p| p.name.clone()),
             is_mine: false,
-            preset_names,
+            preset_names: vec![],
         });
     }
 

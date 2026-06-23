@@ -1162,7 +1162,6 @@ mod tests {
         crate::entity_config::WeaponsConsoleConfig {
             torpedo_arc_color: vec![],
             power_multipliers: None,
-            complexity_toml: None,
             phaser_banks: vec![crate::entity_config::PhaserBankConfig {
                 id: "fore".into(),
                 facing_deg: 0.0,

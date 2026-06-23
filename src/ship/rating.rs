@@ -387,11 +387,7 @@ power_group = "ops"
     #[test]
     fn captain_assisted_rating_includes_viewscreen() {
         let config = parse();
-        let result = resolve_automated_systems(
-            &config,
-            &StationId("captain".into()),
-            "Assisted",
-        );
+        let result = resolve_automated_systems(&config, &StationId("captain".into()), "Assisted");
         assert_eq!(
             result,
             Some(vec![

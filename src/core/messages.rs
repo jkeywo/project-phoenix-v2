@@ -1058,18 +1058,7 @@ pub enum ClientMessage {
     UnloadTube {
         tube: TorpedoTube,
     },
-    /// Change the complexity preset for a console the sender holds.
-    /// Validated server-side: sender must hold the console and the preset
-    /// name must exist in the ship's complexity config.
-    SetComplexity {
-        console: Console,
-        preset_name: String,
-    },
-    /// Set the phaser emitter frequency (0.0–1.0).
-    ///
-    /// Normally sent by the Tactical holder. When Tactical is at Low
-    /// complexity, the Science holder may also send this message
-    /// (delegation allowlist in `delegation.rs`).
+    /// Set the phaser emitter frequency (0.0–1.0). Sent by the Tactical holder.
     SetPhaserFrequency {
         frequency: f32,
     },
@@ -1332,11 +1321,6 @@ pub enum ServerMessage {
     /// The client removes it from its local world data idempotently.
     EntityDespawned {
         uuid: String,
-    },
-    /// Broadcast when a console's complexity preset changes.
-    ComplexityChanged {
-        console: Console,
-        preset_name: String,
     },
     /// Broadcast when a station entity is spawned. Clients use this to add
     /// the station to their local world, show it on radar, and make it

@@ -330,27 +330,6 @@ pub fn process_message(
                 }
             }
         }
-        ClientMessage::SetComplexity {
-            console,
-            preset_name,
-        } => {
-            // Validate: sender must hold this console, and the preset name
-            // must exist in the ship's complexity_presets map.
-            let holds_console = sessions.player_has_console(token, console.clone());
-            let preset_exists = crate::stations_config::default_complexity_presets()
-                .get(console)
-                .map(|presets| presets.iter().any(|p| p == preset_name))
-                .unwrap_or(false);
-            if holds_console && preset_exists {
-                outbound.push((
-                    Target::All,
-                    ServerMessage::ComplexityChanged {
-                        console: console.clone(),
-                        preset_name: preset_name.clone(),
-                    },
-                ));
-            }
-        }
         // SetReady IS handled above (not a no-op in lobby).
         ClientMessage::ToggleRedAlert
         | ClientMessage::HelmInput { .. }
@@ -427,7 +406,7 @@ pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHa
 mod tests {
     use super::*;
     use crate::messages::{EntitySnapshot, WorldData};
-    use crate::stations_config::{default_complexity_presets, ShipStations, StationDef};
+    use crate::stations_config::{ShipStations, StationDef};
 
     fn sessions_with(token: &str, name: &str) -> SessionManager {
         let mut s = SessionManager::new();
@@ -669,7 +648,6 @@ mod tests {
                     short_code: "COM".into(),
                 },
             ],
-            complexity_presets: default_complexity_presets(),
         }
     }
 
@@ -1464,142 +1442,6 @@ tags = ["player"]
         assert!(
             rolled_back,
             "handler must broadcast rollback StationAssigned with station=None"
-        );
-    }
-
-    // ── SetComplexity validation ────────────────────────────────────────
-
-    #[test]
-    fn set_complexity_when_holder_broadcasts_complexity_changed() {
-        let mut sessions = sessions_with("t1", "Alice");
-        // Claim a station that includes Repair
-        pm_stations(
-            "t1",
-            &ClientMessage::SelectStation {
-                station: "Repair".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        let msg = ClientMessage::SetComplexity {
-            console: Console::Repair,
-            preset_name: "Low".into(),
-        };
-        let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
-        let changed = result.outbound.iter().any(|(_, m)| matches!(m,
-            ServerMessage::ComplexityChanged { console: Console::Repair, preset_name } if preset_name == "Low"
-        ));
-        assert!(
-            changed,
-            "SetComplexity by holder must broadcast ComplexityChanged"
-        );
-    }
-
-    #[test]
-    fn set_complexity_when_non_holder_is_silent() {
-        let mut sessions = sessions_with("t1", "Alice");
-        // t1 holds no Helm console → message should be silently dropped
-        let msg = ClientMessage::SetComplexity {
-            console: Console::Helm,
-            preset_name: "Low".into(),
-        };
-        let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
-        assert!(
-            result.outbound.is_empty(),
-            "non-holder SetComplexity must be silent"
-        );
-    }
-
-    #[test]
-    fn set_complexity_with_unknown_preset_is_silent() {
-        let mut sessions = sessions_with("t1", "Alice");
-        pm_stations(
-            "t1",
-            &ClientMessage::SelectStation {
-                station: "Engineering".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        // t1 holds Repair (via Engineering station), but "Nonexistent" is not a valid preset.
-        let msg = ClientMessage::SetComplexity {
-            console: Console::Repair,
-            preset_name: "Nonexistent".into(),
-        };
-        let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
-        assert!(
-            result.outbound.is_empty(),
-            "unknown preset must be silently dropped"
-        );
-    }
-
-    #[test]
-    fn set_complexity_last_write_wins() {
-        let mut sessions = sessions_with("t1", "Alice");
-        pm_stations(
-            "t1",
-            &ClientMessage::SelectStation {
-                station: "Repair".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        // Send Low, then Std. The last ComplexityChanged should carry "Std".
-        let _ = pm_stations(
-            "t1",
-            &ClientMessage::SetComplexity {
-                console: Console::Repair,
-                preset_name: "Low".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        let result = pm_stations(
-            "t1",
-            &ClientMessage::SetComplexity {
-                console: Console::Repair,
-                preset_name: "Std".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        // Should have exactly one ComplexityChanged with "Std"
-        let changes: Vec<_> = result
-            .outbound
-            .iter()
-            .filter_map(|(_, m)| match m {
-                ServerMessage::ComplexityChanged {
-                    console: Console::Repair,
-                    preset_name,
-                } => Some(preset_name.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            changes,
-            vec!["Std"],
-            "last write must win — only 'Std' should be broadcast"
-        );
-    }
-
-    #[test]
-    fn set_complexity_for_console_not_in_ship_config_is_silent() {
-        // Test that even though the server has default complexity_presets for all
-        // consoles, setting complexity from a non-holder is rejected.
-        let mut sessions = sessions_with("t1", "Alice");
-        let msg = ClientMessage::SetComplexity {
-            console: Console::Power,
-            preset_name: "Low".into(),
-        };
-        let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
-        assert!(
-            result.outbound.is_empty(),
-            "non-holder SetComplexity must be silent"
         );
     }
 

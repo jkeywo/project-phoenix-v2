@@ -1906,14 +1906,18 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
                 mode: ViewMode::NavigationChart,
             },
         },
-        UiAction::SetNavigationWaypoint { x, z, source_uuid } => {
-            ClientMessage::SetNavigationWaypoint {
+        UiAction::SetNavigationWaypoint { x, z, source_uuid } => ClientMessage::ControlSystem {
+            target: crate::system_registry::navigation_system_id(),
+            payload: SystemControlPayload::SetNavigationWaypoint {
                 x: *x,
                 z: *z,
                 source_uuid: source_uuid.clone(),
-            }
-        }
-        UiAction::ClearNavigationWaypoint => ClientMessage::ClearNavigationWaypoint,
+            },
+        },
+        UiAction::ClearNavigationWaypoint => ClientMessage::ControlSystem {
+            target: crate::system_registry::navigation_system_id(),
+            payload: SystemControlPayload::ClearNavigationWaypoint,
+        },
     }
 }
 
@@ -2115,10 +2119,13 @@ mod ui_action_tests {
         };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::SetNavigationWaypoint {
-                x: 12.5,
-                z: -8.0,
-                source_uuid: None
+            ClientMessage::ControlSystem {
+                target: SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 12.5,
+                    z: -8.0,
+                    source_uuid: None,
+                },
             }
         );
     }
@@ -2132,10 +2139,13 @@ mod ui_action_tests {
         };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::SetNavigationWaypoint {
-                x: 12.5,
-                z: -8.0,
-                source_uuid: Some("abc-123".into())
+            ClientMessage::ControlSystem {
+                target: SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 12.5,
+                    z: -8.0,
+                    source_uuid: Some("abc-123".into()),
+                },
             }
         );
     }
@@ -2144,7 +2154,10 @@ mod ui_action_tests {
     fn clear_navigation_waypoint_maps_to_client_message() {
         assert_eq!(
             ui_action_to_client_message(&UiAction::ClearNavigationWaypoint),
-            ClientMessage::ClearNavigationWaypoint
+            ClientMessage::ControlSystem {
+                target: SystemId("navigation".into()),
+                payload: SystemControlPayload::ClearNavigationWaypoint,
+            }
         );
     }
 }

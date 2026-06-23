@@ -492,6 +492,44 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    #[test]
+    fn control_system_set_navigation_waypoint_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::messages::SystemId("navigation".into()),
+            payload: SystemControlPayload::SetNavigationWaypoint {
+                x: 120.0,
+                z: -45.0,
+                source_uuid: None,
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn control_system_set_navigation_waypoint_with_anchor_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::messages::SystemId("navigation".into()),
+            payload: SystemControlPayload::SetNavigationWaypoint {
+                x: 50.0,
+                z: -100.0,
+                source_uuid: Some("station-alpha".into()),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn control_system_clear_navigation_waypoint_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::messages::SystemId("navigation".into()),
+            payload: SystemControlPayload::ClearNavigationWaypoint,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
     // ServerMessage round-trips
 
     #[test]

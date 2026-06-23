@@ -37,7 +37,8 @@ Eight independently-grabbable slices:
   see [Issue #525](./issue-525-systemid-naming.md).
 - **A7** - Repair coarse-system conversion. Shipped: see
   [Issue #526](./issue-526-repair-control-system.md).
-- **A8** - Navigation coarse-system conversion (register kind + AI controller).
+- **A8** - Navigation coarse-system conversion. Shipped: see
+  [Issue #527](./issue-527-navigation-control-system.md).
 - **D** - Docs: `wiki/concepts/coarse-system-migration.md`; one source page per
   slice; update status pages and index.
 
@@ -65,4 +66,5 @@ is unblocked and can start immediately.
 - [Issue #524 - serde_json outside codec cleanup (A5)](./issue-524-serde-json-cleanup.md) — shipped
 - [Issue #525 - SystemId naming convention (A6)](./issue-525-systemid-naming.md) — shipped
 - [Issue #526 - Repair coarse-system conversion (A7)](./issue-526-repair-control-system.md) — shipped
+- [Issue #527 - Navigation coarse-system conversion (A8)](./issue-527-navigation-control-system.md) — shipped
 - [Issue #493 - Coordination-lag scope](./issue-493-coordination-lag-scope.md)

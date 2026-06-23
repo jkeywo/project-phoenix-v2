@@ -114,7 +114,7 @@ thread_local! {
 // ── Public WASM API ────────────────────────────────────────────────────────
 
 /// Called by JS with the raw player_ship.toml content to validate the
-/// `[stations]` section before starting the server.
+/// `[[station]]` schema before starting the server.
 ///
 /// On success, stores the parsed `ShipStations` internally and returns
 /// `Ok(JsValue::UNDEFINED)`. On failure, returns `Err(JsValue)` with a
@@ -123,8 +123,9 @@ thread_local! {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_validate_stations(toml_str: &str) -> Result<JsValue, JsValue> {
-    match crate::stations_config::parse_and_validate(toml_str) {
-        Ok(stations) => {
+    match crate::ship::config::parse_and_validate(toml_str, &[]) {
+        Ok(ship_config) => {
+            let stations = crate::stations_config::stations_from_ship_config(&ship_config);
             SHIP_STATIONS.with(|slot| {
                 *slot.borrow_mut() = Some(stations);
             });

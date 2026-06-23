@@ -176,46 +176,42 @@ fn push_lobby_state(
 
     let players = sessions.0.players();
     let connected_count = players.iter().filter(|p| p.connected).count() as u32;
-    // Fixed roster per #495: always show the max_players layout.
-    let display_count = stations.max_players;
+    let roster_size = stations.stations.len() as u32;
 
     let mut station_payloads: Vec<StationPayload> = Vec::new();
     let mut spectators: Vec<String> = Vec::new();
 
-    if let Some(defs) = stations.configs.get(&display_count) {
-        for def in defs {
-            let holder = players.iter().find(|p| {
-                p.connected
-                    && !p.consoles.is_empty()
-                    && def.consoles.iter().all(|c| p.consoles.contains(c))
-            });
-            let preset_names: Vec<String> = def
-                .consoles
-                .iter()
-                .map(|c| {
-                    complexity
-                        .presets
-                        .get(c)
-                        .map(String::as_str)
-                        .unwrap_or("Std")
-                        .to_string()
-                })
-                .collect();
-            station_payloads.push(StationPayload {
-                name: def.name.clone(),
-                short_code: def.short_code.clone(),
-                rank: def.rank.clone(),
-                consoles: def.consoles.clone(),
-                holder_name: holder.map(|p| p.name.clone()),
-                is_mine: false,
-                preset_names,
-            });
-        }
+    for def in &stations.stations {
+        let holder = players.iter().find(|p| {
+            p.connected
+                && !p.consoles.is_empty()
+                && def.consoles.iter().all(|c| p.consoles.contains(c))
+        });
+        let preset_names: Vec<String> = def
+            .consoles
+            .iter()
+            .map(|c| {
+                complexity
+                    .presets
+                    .get(c)
+                    .map(String::as_str)
+                    .unwrap_or("Std")
+                    .to_string()
+            })
+            .collect();
+        station_payloads.push(StationPayload {
+            name: def.name.clone(),
+            short_code: def.short_code.clone(),
+            rank: def.rank.clone(),
+            consoles: def.consoles.clone(),
+            holder_name: holder.map(|p| p.name.clone()),
+            is_mine: false,
+            preset_names,
+        });
     }
 
-    // Players with no consoles who are connected are spectators
-    // (only when connected count exceeds max_players).
-    if stations.max_players > 0 && connected_count > stations.max_players {
+    // Players with no consoles who are connected are spectators.
+    if roster_size > 0 && connected_count > roster_size {
         for p in players
             .iter()
             .filter(|p| p.connected && p.consoles.is_empty())
@@ -224,12 +220,8 @@ fn push_lobby_state(
         }
     }
 
-    let all_held: Vec<_> = players
-        .iter()
-        .flat_map(|p| p.consoles.iter().cloned())
-        .collect();
-    let all_filled =
-        crate::stations_config::all_stations_filled(&stations, display_count, &all_held);
+    let all_filled = !stations.stations.is_empty()
+        && station_payloads.iter().all(|s| s.holder_name.is_some());
 
     let scenario_title = world_resource
         .as_ref()
@@ -251,7 +243,7 @@ fn push_lobby_state(
             .iter()
             .filter(|s| s.holder_name.is_some())
             .count() as u32,
-        max_players: stations.max_players,
+        max_players: roster_size,
         all_stations_filled: all_filled,
         all_ready,
         stations: station_payloads,

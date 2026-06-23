@@ -1566,23 +1566,14 @@ mod tests {
     fn welcome_with_ship_stations_round_trips() {
         use crate::stations_config::{ShipStations, StationDef};
         use std::collections::HashMap;
-        let mut configs = HashMap::new();
-        configs.insert(
-            1u32,
-            vec![StationDef {
+        let ship_stations = ShipStations {
+            stations: vec![StationDef {
                 name: "Captain".into(),
                 description: "The big chair".into(),
                 consoles: vec![Console::CaptainChair],
                 rank: "Cpt.".into(),
                 short_code: "CAP".into(),
-                next: None,
-                previous: None,
             }],
-        );
-        let ship_stations = ShipStations {
-            configs,
-            min_players: 1,
-            max_players: 1,
             complexity_presets: std::collections::HashMap::new(),
         };
         let msg = ServerMessage::Welcome {
@@ -1660,13 +1651,19 @@ mod tests {
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
         match msg {
-            ServerMessage::Welcome { station_ratings, .. } => {
+            ServerMessage::Welcome {
+                station_ratings, ..
+            } => {
                 assert_eq!(
-                    station_ratings.get(&StationId("captain".into())).map(|s| s.as_str()),
+                    station_ratings
+                        .get(&StationId("captain".into()))
+                        .map(|s| s.as_str()),
                     Some("Assisted")
                 );
                 assert_eq!(
-                    station_ratings.get(&StationId("tactical".into())).map(|s| s.as_str()),
+                    station_ratings
+                        .get(&StationId("tactical".into()))
+                        .map(|s| s.as_str()),
                     Some("FullAuto")
                 );
             }

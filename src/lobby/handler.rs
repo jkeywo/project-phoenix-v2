@@ -100,7 +100,7 @@ pub fn process_message(
                 // If the joining player has no consoles (they haven't selected a station,
                 // or reconnect cleared their consoles), and max_players slots are all taken,
                 // push them to the spectator queue.
-                if !ship_stations.configs.is_empty() {
+                if !ship_stations.stations.is_empty() {
                     let connected_with_consoles = sessions
                         .players()
                         .iter()
@@ -114,7 +114,8 @@ pub fn process_message(
                         .unwrap_or(false);
                     let is_already_spectator = sessions.spectator_queue().contains(id_token);
                     if !player_has_consoles && !is_already_spectator {
-                        let at_capacity = connected_with_consoles >= ship_stations.max_players;
+                        let capacity = ship_stations.stations.len() as u32;
+                        let at_capacity = connected_with_consoles >= capacity;
                         if at_capacity {
                             sessions.push_spectator(id_token.clone());
                             outbound.push((
@@ -143,7 +144,7 @@ pub fn process_message(
         ClientMessage::SelectStation { station } => {
             let _player_count = sessions.players().iter().filter(|p| p.connected).count() as u32;
 
-            if ship_stations.configs.is_empty() {
+            if ship_stations.stations.is_empty() {
                 // No station config loaded (e.g. in integration tests): fall back to
                 // display-name-based console toggle for backward compatibility.
                 let console = [
@@ -187,9 +188,8 @@ pub fn process_message(
                 };
             }
 
-            // Fixed roster per #495: always use the max_players layout.
-            // Stations do not change based on how many players are connected.
-            let station_def = get_station(ship_stations, ship_stations.max_players, station);
+            // Fixed roster per #495 / B3: flat station list, no player-count dimension.
+            let station_def = get_station(ship_stations, station);
             let Some(station_def) = station_def else {
                 // Unknown station — silently drop
                 return LobbyHandlerResult {
@@ -286,7 +286,7 @@ pub fn process_message(
             // Stub: release all consoles for this player.
             sessions.clear_consoles(token);
             // Push the releaser to the back of the spectator queue.
-            if !ship_stations.configs.is_empty() {
+            if !ship_stations.stations.is_empty() {
                 sessions.push_spectator(token.to_string());
             }
             outbound.push((
@@ -309,7 +309,7 @@ pub fn process_message(
             ));
             // Auto-start when all connected players are ready.
             if phase == GamePhase::Lobby && sessions.all_ready() {
-                if preload_complete || ship_stations.configs.is_empty() {
+                if preload_complete || ship_stations.stations.is_empty() {
                     new_phase = Some(GamePhase::InProgress);
                     outbound.push((Target::All, ServerMessage::GameStarted));
                 } else {
@@ -322,7 +322,7 @@ pub fn process_message(
             // CaptainChair and all-stations-filled checks removed per #495.
             // The primary start path is now SetReady + auto-start.
             if phase == GamePhase::Lobby {
-                if preload_complete || ship_stations.configs.is_empty() {
+                if preload_complete || ship_stations.stations.is_empty() {
                     new_phase = Some(GamePhase::InProgress);
                     outbound.push((Target::All, ServerMessage::GameStarted));
                 } else {
@@ -337,8 +337,7 @@ pub fn process_message(
             // Validate: sender must hold this console, and the preset name
             // must exist in the ship's complexity_presets map.
             let holds_console = sessions.player_has_console(token, console.clone());
-            let preset_exists = ship_stations
-                .complexity_presets
+            let preset_exists = crate::stations_config::default_complexity_presets()
                 .get(console)
                 .map(|presets| presets.iter().any(|p| p == preset_name))
                 .unwrap_or(false);
@@ -428,7 +427,7 @@ pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHa
 mod tests {
     use super::*;
     use crate::messages::{EntitySnapshot, WorldData};
-    use crate::stations_config::{parse_and_validate, ShipStations};
+    use crate::stations_config::{default_complexity_presets, ShipStations, StationDef};
 
     fn sessions_with(token: &str, name: &str) -> SessionManager {
         let mut s = SessionManager::new();
@@ -602,170 +601,76 @@ mod tests {
     // ── Helpers for station-aware tests ──────────────────────────────────
 
     fn ship_stations() -> ShipStations {
-        // Inline pre-B2 roster. player_ship.toml dropped [stations] in B2;
-        // B3 (issue 533) removes ShipStations entirely.
-        let toml_str = r#"
-[stations]
-min_players = 1
-max_players = 6
-
-[[stations.1]]
-name = "Captain"
-description = "Solo crew."
-consoles = ["CaptainChair","Helm","Tactical","Repair","Power","Sensors","Shields","Navigation","Comms"]
-rank = "Cpt."
-next = "Helm"
-
-[[stations.2]]
-name = "Helm"
-description = "Pilot and command."
-consoles = ["CaptainChair","Helm","Shields","Comms"]
-rank = "Cpt."
-next = "Helm"
-previous = "Captain"
-
-[[stations.2]]
-name = "Tactical"
-description = "Weapons and science."
-consoles = ["Tactical","Repair","Power","Sensors","Navigation"]
-rank = "Ltn."
-next = "Tactical"
-
-[[stations.3]]
-name = "Helm"
-description = "Pilot the ship."
-consoles = ["CaptainChair","Helm"]
-rank = "Cpt."
-previous = "Helm"
-next = "Helm"
-
-[[stations.3]]
-name = "Tactical"
-description = "Weapons and sensors."
-consoles = ["Tactical","Sensors","Navigation"]
-rank = "Ltn."
-previous = "Tactical"
-next = "Tactical"
-
-[[stations.3]]
-name = "Engineering"
-description = "Repair and power."
-consoles = ["Repair","Power","Shields","Comms"]
-rank = "Ltn."
-next = "Engineering"
-
-[[stations.4]]
-name = "Helm"
-description = "Pilot."
-consoles = ["CaptainChair","Helm"]
-rank = "Cpt."
-previous = "Helm"
-next = "Helm"
-
-[[stations.4]]
-name = "Tactical"
-description = "Weapons."
-consoles = ["Tactical"]
-rank = "Ltn."
-previous = "Tactical"
-next = "Tactical"
-
-[[stations.4]]
-name = "Engineering"
-description = "Repair."
-consoles = ["Repair","Power"]
-rank = "Ltn."
-previous = "Engineering"
-next = "Engineering"
-
-[[stations.4]]
-name = "Science"
-description = "Sensors."
-consoles = ["Comms","Sensors","Shields","Navigation"]
-rank = "Ens."
-next = "Science"
-
-[[stations.5]]
-name = "Captain"
-description = "Command."
-consoles = ["CaptainChair"]
-rank = "Cpt."
-next = "Captain"
-
-[[stations.5]]
-name = "Helm"
-description = "Pilot."
-consoles = ["Helm"]
-rank = "Ltn."
-previous = "Helm"
-next = "Helm"
-
-[[stations.5]]
-name = "Tactical"
-description = "Weapons."
-consoles = ["Tactical"]
-rank = "Ltn."
-previous = "Tactical"
-next = "Tactical"
-
-[[stations.5]]
-name = "Engineering"
-description = "Repair."
-consoles = ["Repair","Power"]
-rank = "Ltn."
-previous = "Engineering"
-next = "Engineering"
-
-[[stations.5]]
-name = "Science"
-description = "Sensors."
-consoles = ["Comms","Sensors","Shields","Navigation"]
-rank = "Ens."
-previous = "Science"
-next = "Sensors"
-
-[[stations.6]]
-name = "Captain"
-description = "Command."
-consoles = ["CaptainChair"]
-rank = "Cpt."
-previous = "Captain"
-
-[[stations.6]]
-name = "Helm"
-description = "Pilot."
-consoles = ["Helm"]
-rank = "Ltn."
-previous = "Helm"
-
-[[stations.6]]
-name = "Tactical"
-description = "Weapons."
-consoles = ["Tactical"]
-rank = "Ltn."
-previous = "Tactical"
-
-[[stations.6]]
-name = "Engineering"
-description = "Repair."
-consoles = ["Repair","Power"]
-rank = "Ltn."
-previous = "Engineering"
-
-[[stations.6]]
-name = "Comms"
-description = "Comms."
-consoles = ["Comms","Navigation"]
-rank = "Ens."
-
-[[stations.6]]
-name = "Sensors"
-description = "Sensors."
-consoles = ["Sensors","Shields"]
-rank = "Ens."
-previous = "Science"
-"#;
-        parse_and_validate(toml_str).unwrap()
+        // Flat roster matching player_ship.toml after B3.
+        // 9 stations, one console each.
+        ShipStations {
+            stations: vec![
+                StationDef {
+                    name: "Captain".into(),
+                    description: "Command the bridge.".into(),
+                    consoles: vec![Console::CaptainChair],
+                    rank: "Cpt.".into(),
+                    short_code: "CPT".into(),
+                },
+                StationDef {
+                    name: "Helm".into(),
+                    description: "Pilot the ship.".into(),
+                    consoles: vec![Console::Helm],
+                    rank: "Ltn.".into(),
+                    short_code: "HLM".into(),
+                },
+                StationDef {
+                    name: "Tactical".into(),
+                    description: "Manage weapons.".into(),
+                    consoles: vec![Console::Tactical],
+                    rank: "Ltn.".into(),
+                    short_code: "TAC".into(),
+                },
+                StationDef {
+                    name: "Repair".into(),
+                    description: "Repair systems.".into(),
+                    consoles: vec![Console::Repair],
+                    rank: "Ltn.".into(),
+                    short_code: "ENG".into(),
+                },
+                StationDef {
+                    name: "Sensors".into(),
+                    description: "Monitor sensors.".into(),
+                    consoles: vec![Console::Sensors],
+                    rank: "Ens.".into(),
+                    short_code: "SCI".into(),
+                },
+                StationDef {
+                    name: "Shields".into(),
+                    description: "Manage shields.".into(),
+                    consoles: vec![Console::Shields],
+                    rank: "Ens.".into(),
+                    short_code: "SHD".into(),
+                },
+                StationDef {
+                    name: "Navigation".into(),
+                    description: "Plot course.".into(),
+                    consoles: vec![Console::Navigation],
+                    rank: "Ens.".into(),
+                    short_code: "NAV".into(),
+                },
+                StationDef {
+                    name: "Power".into(),
+                    description: "Manage power.".into(),
+                    consoles: vec![Console::Power],
+                    rank: "Ltn.".into(),
+                    short_code: "PWR".into(),
+                },
+                StationDef {
+                    name: "Comms".into(),
+                    description: "Hail contacts.".into(),
+                    consoles: vec![Console::Comms],
+                    rank: "Ens.".into(),
+                    short_code: "COM".into(),
+                },
+            ],
+            complexity_presets: default_complexity_presets(),
+        }
     }
 
     fn pm_stations(
@@ -1094,7 +999,7 @@ previous = "Science"
     // ── Spectator queue: push on join when max_players reached ───────────
 
     fn sessions_at_max(stations: &ShipStations) -> SessionManager {
-        // max_players = 6; fill all 6 slots via direct console assignment
+        // Fill every station slot (9 stations after B3).
         let mut sessions = SessionManager::new();
         for (tok, name) in [
             ("t1", "Alice"),
@@ -1103,20 +1008,24 @@ previous = "Science"
             ("t4", "Dave"),
             ("t5", "Eve"),
             ("t6", "Frank"),
+            ("t7", "Grace"),
+            ("t8", "Heidi"),
+            ("t9", "Ivan"),
         ] {
             sessions.register(tok.into(), name.into()).unwrap();
         }
-        let player_count = 6u32;
-        // At 6P: "Captain" (CaptainChair), "Helm" (Helm), "Tactical" (Tactical), "Engineering" (Repair+Power), "Comms" (Comms), "Sensors" (Sensors+Shields+Navigation)
         for (tok, station_name) in [
             ("t1", "Captain"),
             ("t2", "Helm"),
             ("t3", "Tactical"),
-            ("t4", "Engineering"),
-            ("t5", "Comms"),
-            ("t6", "Sensors"),
+            ("t4", "Repair"),
+            ("t5", "Sensors"),
+            ("t6", "Shields"),
+            ("t7", "Navigation"),
+            ("t8", "Power"),
+            ("t9", "Comms"),
         ] {
-            let station_def = get_station(stations, player_count, station_name).unwrap();
+            let station_def = get_station(stations, station_name).unwrap();
             for console in &station_def.consoles {
                 let _ = sessions.toggle_console(tok, console.clone());
             }
@@ -1128,13 +1037,13 @@ previous = "Science"
     fn joining_when_max_players_filled_goes_to_spectator_queue() {
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        // 7th player identifies — max_players (6) already have stations
+        // 10th player identifies — all 9 stations already have holders
         let msg = ClientMessage::Identify {
-            token: "t7".into(),
-            name: "Grace".into(),
+            token: "t10".into(),
+            name: "Judy".into(),
         };
         let result = process_message(
-            "t7",
+            "t10",
             &msg,
             &mut sessions,
             GamePhase::Lobby,
@@ -1145,13 +1054,13 @@ previous = "Science"
             &HashMap::new(),
         );
         assert!(
-            sessions.spectator_queue().contains(&"t7".to_string()),
-            "t7 should be in the spectator queue"
+            sessions.spectator_queue().contains(&"t10".to_string()),
+            "t10 should be in the spectator queue"
         );
         // Should receive StationAssigned with station=None
         let got_spectator_assigned = result.outbound.iter().any(|(target, m)| {
-            matches!(target, Target::Token(t) if t == "t7")
-                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles } if token == "t7" && consoles.is_empty())
+            matches!(target, Target::Token(t) if t == "t10")
+                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles } if token == "t10" && consoles.is_empty())
         });
         assert!(
             got_spectator_assigned,
@@ -1223,18 +1132,18 @@ previous = "Science"
 
     #[test]
     fn disconnect_with_spectator_in_queue_cascade_fills_all_slots_spectator_stays() {
-        // At 6P (max), all stations filled, t7 is spectator. t1 disconnects.
+        // All 9 stations filled, t10 is spectator. t1 disconnects.
         // Fixed roster per #495: no cascade on disconnect. t1's station becomes
-        // free. t7 stays queued (must manually claim via SelectStation).
+        // free. t10 stays queued (must manually claim via SelectStation).
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t7".into(), "Grace".into()).unwrap();
-        sessions.push_spectator("t7".into());
+        sessions.register("t10".into(), "Judy".into()).unwrap();
+        sessions.push_spectator("t10".into());
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
-        // t7 stays in spectator queue (fixed roster: no auto-promotion)
+        // t10 stays in spectator queue (fixed roster: no auto-promotion)
         assert!(
-            sessions.spectator_queue().contains(&"t7".to_string()),
-            "t7 should remain in queue (fixed roster)"
+            sessions.spectator_queue().contains(&"t10".to_string()),
+            "t10 should remain in queue (fixed roster)"
         );
     }
 
@@ -1244,62 +1153,55 @@ previous = "Science"
         // The spectator queue is preserved. This test verifies the queue is
         // correctly threaded through process_disconnect_with_stations — no
         // spectator promotion occurs, and the queue remains intact.
-
-        // Simulate using a 1P→0P scenario where a spectator exists, but that would be blocked
-        // by min_players=1. Instead, let's verify the queue is passed correctly by testing
-        // that after a disconnect from 6P, the spectator queue in sessions is updated
-        // (it may be unchanged, but the VecDeque reference was correctly threaded).
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t7".into(), "Grace".into()).unwrap();
-        sessions.push_spectator("t7".into());
+        sessions.register("t10".into(), "Judy".into()).unwrap();
+        sessions.push_spectator("t10".into());
         sessions.push_spectator("nonexistent-extra".into()); // second spectator
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
-        // Spectator queue is preserved (both spectators still queued, since no empty slot)
-        assert!(sessions.spectator_queue().contains(&"t7".to_string()));
+        // Spectator queue is preserved (both spectators still queued)
+        assert!(sessions.spectator_queue().contains(&"t10".to_string()));
     }
 
     #[test]
     fn spectator_can_claim_station_vacated_by_disconnect_at_max_players() {
-        // Mirrors the smoke test reassignment.spec.ts "leave at max_players
-        // allows spectator to claim vacated station". 6 players hold all 6P
-        // stations, a 7th joins as spectator, one station-holder disconnects,
-        // then the spectator selects the vacated station.
+        // All 9 stations filled, t10 joins as spectator, one station-holder
+        // disconnects, then the spectator selects the vacated station.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        // Add t7 as spectator
-        sessions.register("t7".into(), "Grace".into()).unwrap();
-        sessions.push_spectator("t7".into());
+        // Add t10 as spectator
+        sessions.register("t10".into(), "Judy".into()).unwrap();
+        sessions.push_spectator("t10".into());
 
-        // t6 (Sensors) disconnects
+        // t6 (Shields) disconnects
         let _ = process_disconnect_with_stations("t6", &mut sessions, &stations);
 
-        // t7 selects "Sensors"
+        // t10 selects "Shields"
         let result = pm_stations(
-            "t7",
+            "t10",
             &ClientMessage::SelectStation {
-                station: "Sensors".into(),
+                station: "Shields".into(),
             },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        // t7 must receive a StationAssigned with station = Some("Sensors")
+        // t10 must receive a StationAssigned with station = Some("Shields")
         let assigned = result.outbound.iter().find_map(|(_, m)| match m {
             ServerMessage::StationAssigned {
                 token,
                 station: Some(name),
                 consoles,
-            } if token == "t7" => Some((name.clone(), consoles.clone())),
+            } if token == "t10" => Some((name.clone(), consoles.clone())),
             _ => None,
         });
         assert!(
             assigned.is_some(),
-            "t7 should receive StationAssigned with station=Some(Sensors); got outbound: {:?}",
+            "t10 should receive StationAssigned with station=Some(Shields); got outbound: {:?}",
             result.outbound
         );
         let (name, consoles) = assigned.unwrap();
-        assert_eq!(name, "Sensors");
+        assert_eq!(name, "Shields");
         assert!(!consoles.is_empty(), "consoles should not be empty");
     }
 
@@ -1331,8 +1233,8 @@ previous = "Science"
         // StartGame does not clear the queue — spectators remain spectators mid-game.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t7".into(), "Grace".into()).unwrap();
-        sessions.push_spectator("t7".into());
+        sessions.register("t10".into(), "Judy".into()).unwrap();
+        sessions.push_spectator("t10".into());
         assert_eq!(
             sessions.spectator_queue().len(),
             1,
@@ -1409,8 +1311,8 @@ previous = "Science"
         // t1 is already in the lobby and has selected Captain (1P station).
         let mut sessions = SessionManager::new();
         sessions.register("t1".into(), "Alice".into()).unwrap();
-        // Manually assign t1 to Captain station (1P).
-        let captain_def = get_station(&stations, 1, "Captain").unwrap();
+        // Manually assign t1 to Captain station.
+        let captain_def = get_station(&stations, "Captain").unwrap();
         for c in &captain_def.consoles {
             let _ = sessions.toggle_console("t1", c.clone());
         }
@@ -1470,30 +1372,30 @@ previous = "Science"
 
     #[test]
     fn disconnect_does_not_promote_spectator_in_lobby() {
-        // At 6P (max), all stations filled, t7 is spectator. t1 disconnects.
+        // All 9 stations filled, t10 is spectator. t1 disconnects.
         // In lobby, spectators should NOT be auto-promoted.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t7".into(), "Grace".into()).unwrap();
-        sessions.push_spectator("t7".into());
+        sessions.register("t10".into(), "Judy".into()).unwrap();
+        sessions.push_spectator("t10".into());
 
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
 
-        // t7 must still be in the spectator queue (not promoted).
+        // t10 must still be in the spectator queue (not promoted).
         assert!(
-            sessions.spectator_queue().contains(&"t7".to_string()),
+            sessions.spectator_queue().contains(&"t10".to_string()),
             "spectator must NOT be auto-promoted on disconnect in lobby"
         );
-        // t7 must still have no consoles.
-        let t7_consoles = sessions
+        // t10 must still have no consoles.
+        let t10_consoles = sessions
             .players()
             .iter()
-            .find(|p| p.token == "t7")
+            .find(|p| p.token == "t10")
             .map(|p| p.consoles.clone())
             .unwrap_or_default();
         assert!(
-            t7_consoles.is_empty(),
-            "spectator t7 must not receive consoles automatically"
+            t10_consoles.is_empty(),
+            "spectator t10 must not receive consoles automatically"
         );
     }
 
@@ -1570,11 +1472,11 @@ tags = ["player"]
     #[test]
     fn set_complexity_when_holder_broadcasts_complexity_changed() {
         let mut sessions = sessions_with("t1", "Alice");
-        // Claim a station that includes Repair (6P CaptainChair alone doesn't cover Helm)
+        // Claim a station that includes Repair
         pm_stations(
             "t1",
             &ClientMessage::SelectStation {
-                station: "Engineering".into(),
+                station: "Repair".into(),
             },
             &mut sessions,
             GamePhase::Lobby,
@@ -1639,7 +1541,7 @@ tags = ["player"]
         pm_stations(
             "t1",
             &ClientMessage::SelectStation {
-                station: "Engineering".into(),
+                station: "Repair".into(),
             },
             &mut sessions,
             GamePhase::Lobby,

@@ -161,7 +161,9 @@ fn on_beam_started(
     trigger: On<BeamStartedEvent>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
+    mut weapon_fired: ResMut<crate::server_app::WeaponFiredThisTick>,
 ) {
+    weapon_fired.0 = true;
     let ev = trigger.event();
     let source_uuid = player_ship_q
         .single()
@@ -210,7 +212,8 @@ pub struct WeaponsPlugin;
 
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WeaponsTarget>()
+        app.init_resource::<crate::server_app::WeaponFiredThisTick>()
+            .init_resource::<WeaponsTarget>()
             .init_resource::<LastWeaponsUpdate>()
             .init_resource::<ActiveBeam>()
             .init_resource::<PhaserCooldown>()
@@ -1093,6 +1096,7 @@ fn handle_fire_torpedo(
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
     weapons_target: Res<WeaponsTarget>,
     control_sources: Res<ShipSystemControlSources>,
+    mut weapon_fired: ResMut<crate::server_app::WeaponFiredThisTick>,
 ) {
     let policy = control_sources
         .0
@@ -1131,6 +1135,7 @@ fn handle_fire_torpedo(
             LaunchResult::Launched {
                 uuid: launched_uuid,
             } => {
+                weapon_fired.0 = true;
                 outbox.0.push((
                     Target::All,
                     ServerMessage::TorpedoLaunched {

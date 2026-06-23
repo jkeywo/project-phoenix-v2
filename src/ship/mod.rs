@@ -1,4 +1,5 @@
 pub mod boost;
+pub mod combat_activity;
 pub mod power;
 pub mod sensors;
 pub mod config;

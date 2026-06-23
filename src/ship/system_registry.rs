@@ -22,6 +22,9 @@ pub const SHIELDS_AI_CONTROLLER: &str = "shields_ai";
 pub const COMMS_SYSTEM_ID: &str = "comms";
 pub const COMMS_KIND: &str = "comms";
 pub const COMMS_AI_CONTROLLER: &str = "comms_ai";
+pub const CAPTAIN_SYSTEM_ID: &str = "captain";
+pub const CAPTAIN_KIND: &str = "captain";
+pub const CAPTAIN_AI_CONTROLLER: &str = "captain_ai";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
@@ -102,6 +105,10 @@ impl SystemKindRegistry {
             COMMS_KIND,
             AiControllerRegistration::new(COMMS_AI_CONTROLLER)?,
         )?;
+        registry.register(
+            CAPTAIN_KIND,
+            AiControllerRegistration::new(CAPTAIN_AI_CONTROLLER)?,
+        )?;
         Ok(registry)
     }
 
@@ -169,6 +176,10 @@ pub fn shields_system_id() -> SystemId {
 
 pub fn comms_system_id() -> SystemId {
     SystemId(COMMS_SYSTEM_ID.to_string())
+}
+
+pub fn captain_system_id() -> SystemId {
+    SystemId(CAPTAIN_SYSTEM_ID.to_string())
 }
 
 #[cfg(test)]
@@ -283,7 +294,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn core_registry_has_comms_ai_controller() {
         let registry = SystemKindRegistry::with_core_systems().unwrap();
 
@@ -298,6 +308,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn core_registry_has_captain_ai_controller() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(CAPTAIN_KIND));
+        assert_eq!(
+            registry
+                .registration(CAPTAIN_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            CAPTAIN_AI_CONTROLLER
+        );
+    }
+
+    #[test]
     fn register_revalidates_ai_controller() {
         let mut registry = SystemKindRegistry::new();
 

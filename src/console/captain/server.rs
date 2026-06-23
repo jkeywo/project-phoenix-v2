@@ -6,35 +6,25 @@ use crate::messages::{
     CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, SystemControlPayload,
     ViewDirection, ViewMode,
 };
+use crate::ship::combat_activity::RecentCombatActivity;
+use crate::ship::control_source::ControlSource;
+use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipState;
 use crate::world::server::ObjectiveManagerRes;
 
 pub struct CaptainPlugin;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum RedAlertControlMode {
-    #[default]
-    Human,
-    Ai,
-}
-
-impl RedAlertControlMode {
-    fn is_ai(self) -> bool {
-        matches!(self, Self::Ai)
-    }
-}
-
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RedAlertControl(pub RedAlertControlMode);
-
 impl Plugin for CaptainPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>();
+        app.init_resource::<RecentCombatActivity>();
+        app.init_resource::<crate::server_app::WeaponFiredThisTick>();
         app.add_systems(
             Update,
             (
                 handle_toggle_red_alert.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
+                operate_captain_ai.in_set(crate::sim_sets::SimSet::Input),
             ),
         );
         // HTML console state push (mirrors the WeaponsPlugin pattern from issue #422).
@@ -42,6 +32,8 @@ impl Plugin for CaptainPlugin {
         app.add_systems(
             Update,
             (
+                crate::ship::combat_activity::update_combat_activity
+                    .in_set(crate::sim_sets::SimSet::Broadcast),
                 recompute_captain_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                 push_captain_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
             ),
@@ -51,24 +43,29 @@ impl Plugin for CaptainPlugin {
 
 // ── Input handlers ───────────────────────────────────────────────────────────
 
-/// Returns `true` when the caller is either the real Captain-chair holder or
-/// the local console bridge (HTML / native wry server).
-fn captain_authorized(sessions: &Sessions, token: &str) -> bool {
-    sessions.0.console_holder(Console::CaptainChair) == Some(token)
-        || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
-}
-
 fn handle_toggle_red_alert(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
-    control: Option<Res<RedAlertControl>>,
+    control_sources: Option<Res<ShipSystemControlSources>>,
 ) {
-    let automated = control.as_deref().is_some_and(|mode| mode.0.is_ai());
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::captain_system_id()))
+        .unwrap_or(crate::ship::control_source::control_tick_policy(
+            ControlSource::Human,
+        ));
     for ev in reader.read() {
-        if !automated && is_red_alert_toggle(&ev.msg) && captain_authorized(&sessions, &ev.token) {
-            ship.toggle_red_alert();
+        if !is_red_alert_toggle(&ev.msg) {
+            continue;
         }
+        if !policy.accept_human_input {
+            continue;
+        }
+        if sessions.0.console_holder(Console::CaptainChair) != Some(ev.token.as_str()) {
+            continue;
+        }
+        ship.toggle_red_alert();
     }
 }
 
@@ -102,7 +99,14 @@ fn handle_set_view(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
+    control_sources: Option<Res<ShipSystemControlSources>>,
 ) {
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::captain_system_id()))
+        .unwrap_or(crate::ship::control_source::control_tick_policy(
+            ControlSource::Human,
+        ));
     for ev in reader.read() {
         if let Some(mode) = view_mode_from_message(&ev.msg) {
             // Authorization is per-variant: Camera views are the captain's call,
@@ -116,13 +120,44 @@ fn handle_set_view(
                 ViewMode::Comms => Console::Comms,
             };
             let authorized = if required == Console::CaptainChair {
-                captain_authorized(&sessions, &ev.token)
+                policy.accept_human_input
+                    && sessions.0.console_holder(Console::CaptainChair)
+                        == Some(ev.token.as_str())
             } else {
                 sessions.0.console_holder(required) == Some(ev.token.as_str())
             };
             if authorized {
                 ship.request_view_mode(mode);
             }
+        }
+    }
+}
+
+/// AI system: if the captain system is AI-controlled, run `CaptainAi::operate`
+/// and toggle red alert when the result differs from the current state.
+fn operate_captain_ai(
+    mut ship: ResMut<ShipState>,
+    control_sources: Option<Res<ShipSystemControlSources>>,
+    activity: Option<Res<RecentCombatActivity>>,
+    time: Res<Time>,
+) {
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::captain_system_id()))
+        .unwrap_or(crate::ship::control_source::control_tick_policy(
+            ControlSource::Human,
+        ));
+    if !policy.operate_ai {
+        return;
+    }
+    let activity = match activity.as_deref() {
+        Some(a) => a,
+        None => return,
+    };
+    let ai = crate::ai::core::CaptainAi;
+    if let Some(should_be_red_alert) = ai.operate(activity, time.elapsed_secs()) {
+        if should_be_red_alert != ship.red_alert() {
+            ship.toggle_red_alert();
         }
     }
 }
@@ -159,11 +194,13 @@ fn recompute_captain_console_state(
     ship: Res<ShipState>,
     hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
-    control: Option<Res<RedAlertControl>>,
+    control_sources: Option<Res<ShipSystemControlSources>>,
     mut comp_q: Query<&mut CaptainConsoleStateComp>,
 ) {
     let red_alert = ship.red_alert();
-    let red_alert_auto = control.as_deref().is_some_and(|mode| mode.0.is_ai());
+    let red_alert_auto = control_sources.as_deref().is_some_and(|cs| {
+        cs.0.source_for(&crate::system_registry::captain_system_id()) == ControlSource::Ai
+    });
     let view_direction = match &ship.view_mode {
         ViewMode::Camera(ViewDirection::Fore) => "Fore",
         ViewMode::Camera(ViewDirection::Port) => "Port",
@@ -239,6 +276,8 @@ mod tests {
     use super::*;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::ViewDirection;
+    use crate::ship::control_source::ControlSource;
+    use crate::ship_plugin::ShipSystemControlSources;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -251,9 +290,11 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(LobbyPlugin)
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_plugins(LobbyPlugin)
             .add_plugins(CaptainPlugin)
             .init_resource::<Outbox>()
+            .init_resource::<ShipSystemControlSources>()
             .insert_resource(ShipState::new())
             .add_systems(PostUpdate, collect);
         app
@@ -373,7 +414,14 @@ mod tests {
     #[test]
     fn ai_controlled_red_alert_ignores_human_control_system_toggle() {
         let mut app = test_app();
-        app.insert_resource(RedAlertControl(RedAlertControlMode::Ai));
+        // Set captain system to AI control
+        {
+            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
+            cs.0.set(
+                crate::system_registry::captain_system_id(),
+                ControlSource::Ai,
+            );
+        }
         start_game(&mut app);
         push(
             &mut app,
@@ -623,6 +671,74 @@ mod tests {
         );
     }
 
+    // ── operate_captain_ai tests ─────────────────────────────────────────────
+
+    #[test]
+    fn operate_captain_ai_activates_red_alert_when_in_combat() {
+        let mut app = test_app();
+        start_game(&mut app);
+        // Set captain to AI mode
+        {
+            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
+            cs.0.set(
+                crate::system_registry::captain_system_id(),
+                ControlSource::Ai,
+            );
+        }
+        // Simulate recent damage (at t=0, now is ~0 so within 10s window)
+        {
+            let mut activity = app.world_mut().resource_mut::<RecentCombatActivity>();
+            activity.last_damage_taken = Some(0.0);
+        }
+        tick(&mut app);
+        assert!(
+            app.world().resource::<ShipState>().red_alert(),
+            "AI should activate red alert when damage was recent"
+        );
+    }
+
+    #[test]
+    fn operate_captain_ai_deactivates_red_alert_when_combat_ends() {
+        let mut app = test_app();
+        start_game(&mut app);
+        // Put ship in red alert
+        app.world_mut()
+            .resource_mut::<ShipState>()
+            .toggle_red_alert();
+        assert!(app.world().resource::<ShipState>().red_alert());
+        // Set captain to AI mode with no recent activity
+        {
+            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
+            cs.0.set(
+                crate::system_registry::captain_system_id(),
+                ControlSource::Ai,
+            );
+        }
+        // No recent damage or weapons fire — activity is default (None)
+        tick(&mut app);
+        assert!(
+            !app.world().resource::<ShipState>().red_alert(),
+            "AI should deactivate red alert when no recent combat activity"
+        );
+    }
+
+    #[test]
+    fn operate_captain_ai_does_nothing_when_human_controlled() {
+        let mut app = test_app();
+        start_game(&mut app);
+        // Simulate damage — but captain is human-controlled (default)
+        {
+            let mut activity = app.world_mut().resource_mut::<RecentCombatActivity>();
+            activity.last_damage_taken = Some(0.0);
+        }
+        tick(&mut app);
+        // Human-controlled: AI system should not fire
+        assert!(
+            !app.world().resource::<ShipState>().red_alert(),
+            "AI system must not fire when captain is human-controlled"
+        );
+    }
+
     // ── Console state push tests ─────────────────────────────────────────────
     //
     // Follows the exact pattern from `weapons/server.rs` (issue #422):
@@ -734,7 +850,15 @@ mod tests {
     #[test]
     fn recompute_marks_ai_controlled_red_alert_auto() {
         let mut app = recompute_test_app();
-        app.insert_resource(RedAlertControl(RedAlertControlMode::Ai));
+        // Set captain system to AI control via ShipSystemControlSources
+        app.init_resource::<ShipSystemControlSources>();
+        {
+            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
+            cs.0.set(
+                crate::system_registry::captain_system_id(),
+                ControlSource::Ai,
+            );
+        }
         app.update();
 
         let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();

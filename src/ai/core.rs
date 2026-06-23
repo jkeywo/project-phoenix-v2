@@ -1168,6 +1168,37 @@ pub fn should_emit(last: f32, current: f32, epsilon: f32) -> bool {
     (current - last).abs() > epsilon
 }
 
+// ── CaptainAi ────────────────────────────────────────────────────────────────
+
+/// Pure AI controller for the Captain console. Decides whether red alert
+/// should be active based on recent combat activity.
+#[derive(Debug, Clone, Default)]
+pub struct CaptainAi;
+
+/// How many seconds of recent activity count as "in combat".
+const CAPTAIN_COMBAT_WINDOW_SECS: f32 = 10.0;
+
+impl CaptainAi {
+    /// Returns `Some(true)` if the ship is in active combat (damage taken or
+    /// weapon fired within the last 10 seconds), `Some(false)` otherwise.
+    pub fn operate(
+        &self,
+        activity: &crate::ship::combat_activity::RecentCombatActivity,
+        now: f32,
+    ) -> Option<bool> {
+        let damage_recent = activity
+            .last_damage_taken
+            .is_some_and(|t| now - t < CAPTAIN_COMBAT_WINDOW_SECS);
+        let weapon_recent = activity
+            .last_weapon_fired
+            .is_some_and(|t| now - t < CAPTAIN_COMBAT_WINDOW_SECS);
+        Some(damage_recent || weapon_recent)
+    }
+
+    /// No-op stub — channel-3 coordination not yet implemented for captain.
+    pub fn coordinate(&self) {}
+}
+
 // ── Unit Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3335,5 +3366,54 @@ mod tests {
         let world = WorldView::default();
         let output = do_tick(&ctrl, &world);
         assert!(!output.despawn, "idle tick must not set despawn");
+    }
+
+    // ── CaptainAi::operate ────────────────────────────────────────────────
+
+    use crate::ship::combat_activity::RecentCombatActivity;
+
+    #[test]
+    fn captain_ai_returns_true_when_damage_within_window() {
+        let ai = CaptainAi;
+        let activity = RecentCombatActivity {
+            last_damage_taken: Some(90.0),
+            last_weapon_fired: None,
+            prev_hull: 100.0,
+        };
+        assert_eq!(ai.operate(&activity, 95.0), Some(true));
+    }
+
+    #[test]
+    fn captain_ai_returns_true_when_weapon_fired_within_window() {
+        let ai = CaptainAi;
+        let activity = RecentCombatActivity {
+            last_damage_taken: None,
+            last_weapon_fired: Some(88.0),
+            prev_hull: 100.0,
+        };
+        assert_eq!(ai.operate(&activity, 95.0), Some(true));
+    }
+
+    #[test]
+    fn captain_ai_returns_false_when_idle_no_activity() {
+        let ai = CaptainAi;
+        let activity = RecentCombatActivity {
+            last_damage_taken: None,
+            last_weapon_fired: None,
+            prev_hull: 100.0,
+        };
+        assert_eq!(ai.operate(&activity, 100.0), Some(false));
+    }
+
+    #[test]
+    fn captain_ai_returns_false_when_activity_older_than_window() {
+        let ai = CaptainAi;
+        let activity = RecentCombatActivity {
+            last_damage_taken: Some(50.0),
+            last_weapon_fired: Some(55.0),
+            prev_hull: 100.0,
+        };
+        // now = 70.0, both events are 15-20s ago (> 10s window)
+        assert_eq!(ai.operate(&activity, 70.0), Some(false));
     }
 }

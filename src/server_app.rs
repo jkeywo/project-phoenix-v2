@@ -87,6 +87,11 @@ pub struct ShipImpulse(pub ImpulseState);
 #[derive(Resource, Default)]
 pub struct ShipBoost(pub crate::boost::BoostState);
 
+/// Set to `true` by phaser/torpedo fire systems when a weapon actually fires
+/// this tick. Reset to `false` at the start of each tick by `update_combat_activity`.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WeaponFiredThisTick(pub bool);
+
 /// Carries the reason string when the game ends. Set to `Some(reason)` before
 /// transitioning to `GamePhase::GameOver`. The `OnEnter(GameOver)` system reads
 /// this resource and broadcasts the reason to all clients.
@@ -200,6 +205,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .insert_resource(ShipShields(ShieldSystem::default()))
     .insert_resource(ShipImpulse(ImpulseState::new()))
     .insert_resource(ShipBoost(crate::boost::BoostState::new()))
+    .init_resource::<WeaponFiredThisTick>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
         crate::config_cache::get_faction_registry(),
     ))

@@ -2,72 +2,86 @@
 title: Console
 type: entity
 tags: [console, role, lobby, station]
-sources: [src/messages.rs, src/stations.rs, CONTEXT.md]
-updated: 2026-05-13
+sources: [src/messages.rs, src/lobby/stations_config.rs]
+updated: 2026-06-23
 ---
 
 # Console
 
-A role on the bridge. Players no longer pick consoles directly — they pick **stations**, and a station bundles one or more consoles (see PRD #120 / [`stations.rs`](../sources/prd-120-station-based-lobby.md)). At small player counts a single station may bundle several consoles; at full crew each station typically bundles one.
+The GUI panel owned by a [Station](./station.md). Each of the 9 bridge stations
+maps 1-to-1 to a `Console` variant. The `Console` enum is the identifier used
+for station assignment, tab switching, and authority checks in the existing
+handlers; `SystemId` is the emerging replacement for authority routing (see
+[System](./system.md)).
 
-`Player.consoles` is a `Vec<Console>` derived from the player's currently-assigned station. The JS tab bar + `ActiveConsole` resource control which panel is rendered when a player holds more than one console.
+Players pick a **station** in the lobby; the station's `consoles` list is what
+ends up in `Player.consoles`. The JS tab bar and `ActiveConsole` resource
+control which panel is rendered.
 
-## Currently shipped
+## Current consoles (9)
 
-| Console | Page | Authority / Role |
+| Console | Station | Role |
 |---|---|---|
-| `CaptainChair` | [Captain Console](./captain-console.md) | Start game, toggle Red Alert, change View Mode |
-| `Helm` | [Helm Console](./helm-console.md) | Drive the ship; radar overlay; push radar to viewscreen; trigger impulse charge |
-| `Tactical` | — | Lock targets (`SetTarget`), fire phasers (`FirePhaser`), set phaser mode (`Auto`/`Manual`), fire torpedoes (`FireTorpedo`) |
-| `Repair` | — | Shape-matching repair (`Repair { shape }`); three teams; wrong shape or wrong console = penalty cooldown |
-| `Power` | — | Distribute 6 base + up to 2 battery points across `Helm` / `Tactical` / `Science` via `IncreasePower` / `DecreasePower` |
-| `Science` | — | Advisory target hand-off (`SetScienceTarget`), cancel impulse (`CancelImpulse`), push `ScienceRadar` / `SystemChart` view modes |
+| `CaptainChair` | Captain | Start game, toggle Red Alert, change View Mode |
+| `Helm` | Helm | Drive the ship; radar overlay; impulse charge |
+| `Tactical` | Tactical | Lock targets, fire phasers/torpedoes, set phaser mode |
+| `Repair` | Repair | Shape-matching repair; three teams |
+| `Sensors` | Sensors | Advisory target hand-off; long-range radar |
+| `Shields` | Shields | Manage shield facings |
+| `Navigation` | Navigation | Plot waypoints; view navigation chart |
+| `Power` | Power | Distribute power across groups |
+| `Comms` | Comms | Hail stations; relay intelligence |
 
-Defined in `src/messages.rs:142`:
+Defined in `src/messages.rs::Console`. `Console::from_console_id()` parses the
+lowercase string used in `player_ship.toml`.
 
-```rust
-pub enum Console {
-    CaptainChair,
-    Helm,
-    Tactical,
-    Repair,
-    Science,
-    Power,
-}
-```
+## Authority model
 
-`display_name()` returns the human-readable label. `ALL_CONSOLES` in `client_lobby.rs` lists all six in display order.
+Handler systems gate input on:
 
-## Planned
+1. **Console ownership** — the sender's `Player.consoles` must include the
+   required `Console` variant.
+2. **SystemId routing** — all console actions now arrive as
+   `ClientMessage::ControlSystem { target: SystemId, payload }`. The handler
+   checks `ShipSystemControlSources::accept_human_input(target)` before
+   processing.
 
-`Console::Comms` is drafted in PRD #119 (Space Stations, Scenario Engine & Comms Console). It is the only console variant not yet on the wire.
+`Console` is the legacy layer; `SystemId` is the emerging canonical address.
+Until decomposition is complete both layers coexist.
 
 ## Console invariants
 
-1. **One seat per console** within a station; one station per player. Server enforces in `SessionManager` + `stations.rs`.
-2. **Captain authority is checked server-side.** `StartGame`, `ToggleRedAlert`, and `SetView` are no-ops unless the sender's station bundles `CaptainChair`.
-3. **Helm is the only console that can move the ship.** `HelmInput` from any other token is silently dropped.
-4. **A `Player.consoles` field is a `Vec`** — derived from the assigned station. `ALL_CONSOLES` in `client_lobby.rs` defines the canonical display order.
-5. **Tactical authorization is checked server-side.** `FirePhaser` requires a locked target plus `is_fire_ready()` (range + arc); `FireTorpedo` requires a loaded tube and a target.
-6. **Repair authorization is checked server-side.** `Repair { shape }` must match the current head of `BreakdownQueue` and come from `Console::Repair`. Wrong shape, wrong console, or no free team incurs a penalty cooldown via `repair_teams.rs`.
-7. **Power authorization is checked server-side.** `IncreasePower` / `DecreasePower` only accepted from `Console::Power`; bounded by 6 base + up to 2 battery; battery exhaustion locks all consoles to level 1 until recharged past `emergency_threshold`.
-8. **Console complexity is per-console, per-player.** `SetComplexity { console, preset_name }` switches between `Low` and `Full` presets (PRD #154); hidden controls at `Low` are operated server-side by `console_ai`.
+1. **One seat per console.** Server enforces in `SessionManager`.
+2. **Captain authority is checked server-side.** `ToggleRedAlert` and
+   `SetViewMode` are no-ops unless the sender holds `CaptainChair`.
+3. **Helm is the only console that can move the ship.** `HelmInput` from any
+   other token is silently dropped (and is now also gated by `SystemId::helm`).
+4. **Tactical authorization is checked server-side.** `FirePhaser` requires a
+   locked target plus `is_fire_ready()` (range + arc); `FireTorpedo` requires a
+   loaded tube and a target.
+5. **Repair authorization is checked server-side.** Shape must match the current
+   head of `BreakdownQueue`; wrong shape, wrong console, or no free team incurs
+   a penalty cooldown.
+6. **Power authorization is checked server-side.** `IncreasePower` /
+   `DecreasePower` only accepted from `Console::Power`; bounded by capacity and
+   emergency threshold.
 
 ## How a new console is added
 
-1. Add the variant to the `Console` enum and `display_name()` arm in `messages.rs`.
-2. Add the consumer messages to `ClientMessage` / `ServerMessage` and round-trip tests in `codec.rs`.
-3. Server-side handler in `simulation.rs` (or a new pure handler module beside `lobby_handler.rs`).
-4. Add the console to `ALL_CONSOLES` in `client_lobby.rs`.
-5. Add a panel setup function and a visibility toggle system in `client_app.rs`; add button handlers that emit `OutboundClientMessage` events.
-6. Add `ClientSimState` fields for any console-specific state the client needs.
-7. Add the console to one or more station bundles in `assets/entities/player_ship.toml` `[stations]` blocks; add a complexity preset under `assets/complexity/<console>.toml` (PRD #154).
+1. Add the variant to `Console` in `messages.rs` and implement
+   `Console::from_console_id()` for it.
+2. Add a `[[station]]` block to `assets/entities/player_ship.toml` with
+   `console = "<new_id>"` and at least one `[[station.rating]]`.
+3. Add a `[[system]]` block for each system the console owns.
+4. Add the console to `ALL_CONSOLES` in `gui/lobby-state.js`.
+5. Implement the server-side handler plugin.
+6. Add the client-side panel and wire up `ControlSystem` messages.
 
 ## Related
 
+- [Station](./station.md) — the lobby seat that owns a Console
+- [System](./system.md) — fine-grained capability addressed by SystemId
 - [Player](./player.md) · [Session](./session.md)
 - [Console Plugin Pattern](../concepts/console-plugin-pattern.md)
-- [PRD #66](../sources/prd-066-weapons-and-engineering.md) — adds Tactical + (then-named) Engineering
-- [PRD #118](../sources/prd-118-repair-and-power-consoles.md) — splits Engineering into Repair + Power
-- [PRD #120](../sources/prd-120-station-based-lobby.md) — replaces console-picking with station-picking
-- [PRD #154](../sources/prd-154-console-complexity.md) — per-console Low/Full complexity presets + AI
+- [PRD #487](../sources/prd-487-station-console-system-redesign.md) — station/system redesign
+- [Issue #518](../sources/issue-540-config-migration-docs.md) — B1–B6 config migration

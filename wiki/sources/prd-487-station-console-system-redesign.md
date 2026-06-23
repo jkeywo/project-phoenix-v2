@@ -67,3 +67,4 @@ composition.
 - [player_ship.toml](./player_ship_toml.md)
 - [PRD #517 - Consistency cleanup for the 9 coarse systems](./prd-517-consistency-cleanup.md)
 - [Issue #523 - Console ID lookup](./issue-523-console-id-lookup.md)
+- [Coarse-system migration](../concepts/coarse-system-migration.md)

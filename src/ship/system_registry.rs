@@ -1,36 +1,95 @@
+//! System-kind registry and stable `SystemId` helpers.
+//!
+//! ## SystemId naming convention (pinned by issue #525)
+//!
+//! Every `SystemId` string follows one of three patterns:
+//!
+//! | Pattern | Rule | Examples |
+//! |---------|------|---------|
+//! | **Coarse system** | Lowercase kebab matching the system kind id | `"helm"`, `"tactical"`, `"red-alert"` |
+//! | **Fine system** | Kind id + `-` + instance suffix | `"phaser-fore"`, `"torpedo-tube-fore-port"` |
+//! | **Ownerless capability** | Bare capability id (lowercase kebab) | `"red-alert"`, `"viewscreen"` |
+//!
+//! Multi-word ids always use hyphens (`-`), never underscores.
+//!
+//! ### `red_alert` vs `red-alert` quirk
+//!
+//! The registry key (`*_KIND` constants) uses snake_case for `red_alert` because
+//! Rust identifiers and some legacy map keys historically used underscores, while
+//! the wire `*_SYSTEM_ID` value uses kebab (`"red-alert"`). All other systems have
+//! identical `*_KIND` and `*_SYSTEM_ID` values. New systems must use the same
+//! lowercase-kebab string for both constants to avoid this split.
+
 use crate::messages::SystemId;
 use std::collections::HashMap;
 
+// ── Ownerless capability systems ─────────────────────────────────────────────
+
+/// Wire `SystemId` for the Red Alert coarse system.
+///
+/// Ownerless capability — multi-word kebab id. Registry kind key is `"red_alert"`
+/// (snake_case legacy quirk; see module-level doc for details).
 pub const RED_ALERT_SYSTEM_ID: &str = "red-alert";
+/// Registry kind key for Red Alert (snake_case for legacy reasons; see module doc).
 pub const RED_ALERT_KIND: &str = "red_alert";
 pub const RED_ALERT_AI_CONTROLLER: &str = "red_alert_ai";
-pub const HELM_SYSTEM_ID: &str = "helm";
-pub const HELM_KIND: &str = "helm";
-pub const HELM_AI_CONTROLLER: &str = "helm_ai";
-pub const TACTICAL_SYSTEM_ID: &str = "tactical";
-pub const TACTICAL_KIND: &str = "tactical";
-pub const TACTICAL_AI_CONTROLLER: &str = "tactical_ai";
-pub const POWER_SYSTEM_ID: &str = "power";
-pub const POWER_KIND: &str = "power";
-pub const POWER_AI_CONTROLLER: &str = "power_ai";
-pub const SENSORS_SYSTEM_ID: &str = "sensors";
-pub const SENSORS_KIND: &str = "sensors";
-pub const SENSORS_AI_CONTROLLER: &str = "sensors_ai";
-pub const NAVIGATION_SYSTEM_ID: &str = "navigation";
-pub const NAVIGATION_KIND: &str = "navigation";
-pub const NAVIGATION_AI_CONTROLLER: &str = "navigation_ai";
-pub const SHIELDS_SYSTEM_ID: &str = "shields";
-pub const SHIELDS_KIND: &str = "shields";
-pub const SHIELDS_AI_CONTROLLER: &str = "shields_ai";
-pub const COMMS_SYSTEM_ID: &str = "comms";
-pub const COMMS_KIND: &str = "comms";
-pub const COMMS_AI_CONTROLLER: &str = "comms_ai";
-pub const CAPTAIN_SYSTEM_ID: &str = "captain";
-pub const CAPTAIN_KIND: &str = "captain";
-pub const CAPTAIN_AI_CONTROLLER: &str = "captain_ai";
+
+/// Wire `SystemId` for the Viewscreen coarse system.
+///
+/// Ownerless capability — single-word lowercase id.
 pub const VIEWSCREEN_SYSTEM_ID: &str = "viewscreen";
 pub const VIEWSCREEN_KIND: &str = "viewscreen";
 pub const VIEWSCREEN_AI_CONTROLLER: &str = "viewscreen_ai";
+
+// ── Station-owned coarse systems ─────────────────────────────────────────────
+
+/// Wire `SystemId` for the Helm coarse system.
+pub const HELM_SYSTEM_ID: &str = "helm";
+pub const HELM_KIND: &str = "helm";
+pub const HELM_AI_CONTROLLER: &str = "helm_ai";
+
+/// Wire `SystemId` for the Tactical coarse system.
+pub const TACTICAL_SYSTEM_ID: &str = "tactical";
+pub const TACTICAL_KIND: &str = "tactical";
+pub const TACTICAL_AI_CONTROLLER: &str = "tactical_ai";
+
+/// Wire `SystemId` for the Power coarse system.
+pub const POWER_SYSTEM_ID: &str = "power";
+pub const POWER_KIND: &str = "power";
+pub const POWER_AI_CONTROLLER: &str = "power_ai";
+
+/// Wire `SystemId` for the Sensors coarse system.
+pub const SENSORS_SYSTEM_ID: &str = "sensors";
+pub const SENSORS_KIND: &str = "sensors";
+pub const SENSORS_AI_CONTROLLER: &str = "sensors_ai";
+
+/// Wire `SystemId` for the Navigation coarse system.
+pub const NAVIGATION_SYSTEM_ID: &str = "navigation";
+pub const NAVIGATION_KIND: &str = "navigation";
+pub const NAVIGATION_AI_CONTROLLER: &str = "navigation_ai";
+
+/// Wire `SystemId` for the Shields coarse system.
+pub const SHIELDS_SYSTEM_ID: &str = "shields";
+pub const SHIELDS_KIND: &str = "shields";
+pub const SHIELDS_AI_CONTROLLER: &str = "shields_ai";
+
+/// Wire `SystemId` for the Comms coarse system.
+pub const COMMS_SYSTEM_ID: &str = "comms";
+pub const COMMS_KIND: &str = "comms";
+pub const COMMS_AI_CONTROLLER: &str = "comms_ai";
+
+/// Wire `SystemId` for the Captain coarse system.
+pub const CAPTAIN_SYSTEM_ID: &str = "captain";
+pub const CAPTAIN_KIND: &str = "captain";
+pub const CAPTAIN_AI_CONTROLLER: &str = "captain_ai";
+
+/// Wire `SystemId` for the Repair coarse system.
+///
+/// Constants present; registration in `SystemKindRegistry::with_core_systems`
+/// is deferred to issue #526.
+pub const REPAIR_SYSTEM_ID: &str = "repair";
+pub const REPAIR_KIND: &str = "repair";
+pub const REPAIR_AI_CONTROLLER: &str = "repair_ai";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
@@ -170,6 +229,12 @@ impl SystemKindRegistry {
     }
 }
 
+// ── SystemId helpers ──────────────────────────────────────────────────────────
+//
+// Each helper returns a `SystemId` backed by the corresponding `*_SYSTEM_ID`
+// constant. Always prefer these helpers over inline `SystemId("helm".into())`
+// literals — the helpers are the pinned authoritative source.
+
 pub fn red_alert_system_id() -> SystemId {
     SystemId(RED_ALERT_SYSTEM_ID.to_string())
 }
@@ -210,9 +275,78 @@ pub fn viewscreen_system_id() -> SystemId {
     SystemId(VIEWSCREEN_SYSTEM_ID.to_string())
 }
 
+pub fn repair_system_id() -> SystemId {
+    SystemId(REPAIR_SYSTEM_ID.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Stable id string values ───────────────────────────────────────────────
+    // These tests pin the naming convention so a rename of a constant breaks CI
+    // rather than silently drifting the wire format.
+
+    #[test]
+    fn coarse_system_ids_are_lowercase_kebab() {
+        let ids = [
+            RED_ALERT_SYSTEM_ID,
+            HELM_SYSTEM_ID,
+            TACTICAL_SYSTEM_ID,
+            POWER_SYSTEM_ID,
+            SENSORS_SYSTEM_ID,
+            NAVIGATION_SYSTEM_ID,
+            SHIELDS_SYSTEM_ID,
+            COMMS_SYSTEM_ID,
+            CAPTAIN_SYSTEM_ID,
+            VIEWSCREEN_SYSTEM_ID,
+            REPAIR_SYSTEM_ID,
+        ];
+        for id in ids {
+            assert_eq!(
+                id,
+                id.to_lowercase(),
+                "SystemId constant {id:?} is not lowercase"
+            );
+            assert!(
+                !id.contains('_'),
+                "SystemId constant {id:?} contains underscore (use hyphen)"
+            );
+            assert!(!id.is_empty(), "SystemId constant must not be empty");
+        }
+    }
+
+    #[test]
+    fn coarse_system_id_values_are_stable() {
+        assert_eq!(RED_ALERT_SYSTEM_ID, "red-alert");
+        assert_eq!(HELM_SYSTEM_ID, "helm");
+        assert_eq!(TACTICAL_SYSTEM_ID, "tactical");
+        assert_eq!(POWER_SYSTEM_ID, "power");
+        assert_eq!(SENSORS_SYSTEM_ID, "sensors");
+        assert_eq!(NAVIGATION_SYSTEM_ID, "navigation");
+        assert_eq!(SHIELDS_SYSTEM_ID, "shields");
+        assert_eq!(COMMS_SYSTEM_ID, "comms");
+        assert_eq!(CAPTAIN_SYSTEM_ID, "captain");
+        assert_eq!(VIEWSCREEN_SYSTEM_ID, "viewscreen");
+        assert_eq!(REPAIR_SYSTEM_ID, "repair");
+    }
+
+    #[test]
+    fn system_id_helpers_return_expected_values() {
+        assert_eq!(red_alert_system_id().0, RED_ALERT_SYSTEM_ID);
+        assert_eq!(helm_system_id().0, HELM_SYSTEM_ID);
+        assert_eq!(tactical_system_id().0, TACTICAL_SYSTEM_ID);
+        assert_eq!(power_system_id().0, POWER_SYSTEM_ID);
+        assert_eq!(sensors_system_id().0, SENSORS_SYSTEM_ID);
+        assert_eq!(navigation_system_id().0, NAVIGATION_SYSTEM_ID);
+        assert_eq!(shields_system_id().0, SHIELDS_SYSTEM_ID);
+        assert_eq!(comms_system_id().0, COMMS_SYSTEM_ID);
+        assert_eq!(captain_system_id().0, CAPTAIN_SYSTEM_ID);
+        assert_eq!(viewscreen_system_id().0, VIEWSCREEN_SYSTEM_ID);
+        assert_eq!(repair_system_id().0, REPAIR_SYSTEM_ID);
+    }
+
+    // ── Registry API ─────────────────────────────────────────────────────────
 
     #[test]
     fn registering_kind_requires_ai_controller_argument() {
@@ -322,17 +456,17 @@ mod tests {
     }
 
     #[test]
-    fn core_registry_has_comms_ai_controller() {
+    fn core_registry_has_sensors_ai_controller() {
         let registry = SystemKindRegistry::with_core_systems().unwrap();
 
-        assert!(registry.contains(COMMS_KIND));
+        assert!(registry.contains(SENSORS_KIND));
         assert_eq!(
             registry
-                .registration(COMMS_KIND)
+                .registration(SENSORS_KIND)
                 .unwrap()
                 .ai_controller
                 .name(),
-            COMMS_AI_CONTROLLER
+            SENSORS_AI_CONTROLLER
         );
     }
 
@@ -348,6 +482,36 @@ mod tests {
                 .ai_controller
                 .name(),
             NAVIGATION_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn core_registry_has_shields_ai_controller() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(SHIELDS_KIND));
+        assert_eq!(
+            registry
+                .registration(SHIELDS_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            SHIELDS_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn core_registry_has_comms_ai_controller() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(COMMS_KIND));
+        assert_eq!(
+            registry
+                .registration(COMMS_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            COMMS_AI_CONTROLLER
         );
     }
 

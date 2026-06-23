@@ -33,7 +33,8 @@ Eight independently-grabbable slices:
 - **A5** - `serde_json` outside codec cleanup in `src/ship/coordination.rs`,
   `src/core/flag_kind.rs`, and `src/regions/effects.rs`. Shipped: see
   [Issue #524](./issue-524-serde-json-cleanup.md).
-- **A6** - `SystemId` naming convention pinned in doc-block + wiki page.
+- **A6** - `SystemId` naming convention pinned in doc-block + wiki page. Shipped:
+  see [Issue #525](./issue-525-systemid-naming.md).
 - **A7** - Repair coarse-system conversion (register kind + AI controller).
 - **A8** - Navigation coarse-system conversion (register kind + AI controller).
 - **D** - Docs: `wiki/concepts/coarse-system-migration.md`; one source page per
@@ -58,6 +59,8 @@ is unblocked and can start immediately.
 ## Cross-references
 
 - [PRD #487 - Station / Console / System architecture redesign](./prd-487-station-console-system-redesign.md)
+- [Coarse-system migration concept](../concepts/coarse-system-migration.md)
 - [Issue #523 - Console ID lookup](./issue-523-console-id-lookup.md)
 - [Issue #524 - serde_json outside codec cleanup (A5)](./issue-524-serde-json-cleanup.md) — shipped
+- [Issue #525 - SystemId naming convention (A6)](./issue-525-systemid-naming.md) — shipped
 - [Issue #493 - Coordination-lag scope](./issue-493-coordination-lag-scope.md)

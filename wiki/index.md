@@ -67,6 +67,7 @@ Architecture, patterns, processes.
 - **[Modifier Coordination](./concepts/modifier-coordination.md)** — Single owner of `ShipModifiers`; complete catalogue of three modifier sources (power, regions, impulse) with translator recipe, read-interface guide, and per-UUID source identity.
 - **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.
 - **[Asset Preload](./concepts/asset-preload.md)** — Server-side discovery + pre-cache of GLBs, radar icons, model-rig sidecars, sub-world TOMLs. Sidecar inbox is a single-consumer queue (renderer takes; preload only peeks) — see the 2026-06-17 race-fix.
+- **[Coarse-system migration](./concepts/coarse-system-migration.md)** — Naming convention, migration status table for all 9 coarse systems, fine-system forward reference.
 - **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
 
 ## Sources
@@ -108,6 +109,7 @@ Open (planned work):
 - **[PRD #517 — Consistency cleanup for the 9 coarse systems](./sources/prd-517-consistency-cleanup.md)** — Open. Eight slices closing inconsistencies from the coarse-system conversion PRs; Repair + Navigation conversions; hardcoded console list fix; `serde_json` cleanup; `SystemId` naming pin.
 - **[Issue #523 — Console ID lookup](./sources/issue-523-console-id-lookup.md)** — Open. PRD #517 slice A4: `Console::from_console_id` helper symmetric with `station_console_id`; replaces hardcoded array in `process_coordination_lag`.
 - **[Issue #524 — serde_json outside codec cleanup](./sources/issue-524-serde-json-cleanup.md)** — Shipped. PRD #517 slice A5: removed direct `serde_json` calls from `coordination.rs`, `flag_kind.rs`, `effects.rs`; moved `RegionEffectKind` round-trips into `codec.rs`.
+- **[Issue #525 — SystemId naming convention](./sources/issue-525-systemid-naming.md)** — Shipped. PRD #517 slice A6: module-level doc + pinning tests in `system_registry.rs`; `REPAIR_SYSTEM_ID`/`repair_system_id()` added; `wiki/concepts/coarse-system-migration.md` created.
 - **[Issue #439 — HTML Phone Bezel Frame](./sources/issue-439-html-phone-bezel.md)** — Shipped. First slice of #438; `gui/phone-bezel.js` + DOM bezel in `client.html`; SimState reads `snap.red_alert`.
 - **[Issue #440 — Lobby Integration + Phase Toggle](./sources/issue-440-html-lobby-phase-toggle.md)** — Shipped. Lobby merged into `client.html` as `#lobby-ui`; `gui/phase-toggle.js` pure function drives section visibility (treats `GameOver` as in-game).
 - **[Issue #441 — Tab Bar + Content Switching](./sources/issue-441-html-tab-bar-content-switching.md)** — Shipped. `gui/tab-bar.js` + `gui/content-switcher.js` pure modules; `#console-tab-bar` strip in the bezel safe zone (portrait top / landscape left, initials at 5+ in portrait); `setActiveConsole()` consolidates the three call sites.

@@ -26,12 +26,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn serde_round_trip() {
-        for flag in &[FlagKind::CommsJammed, FlagKind::SensorBlind] {
-            let json = serde_json::to_string(flag).unwrap();
-            let decoded: FlagKind = serde_json::from_str(&json).unwrap();
-            assert_eq!(*flag, decoded);
-        }
-    }
 }

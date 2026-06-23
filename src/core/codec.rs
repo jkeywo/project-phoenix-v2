@@ -2329,6 +2329,97 @@ mod tests {
         }
     }
 
+    // ── RegionEffectKind serde round-trips (moved from regions/effects.rs #524) ──
+
+    fn region_effect_round_trip(effect: crate::regions::effects::RegionEffectKind) {
+        let json = serde_json::to_string(&effect).unwrap();
+        let decoded: crate::regions::effects::RegionEffectKind =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(effect, decoded);
+    }
+
+    #[test]
+    fn region_effect_damage_zone_round_trips() {
+        region_effect_round_trip(crate::regions::effects::RegionEffectKind::DamageZone {
+            dps: 15.0,
+            shield_pierce: 0.0,
+        });
+    }
+
+    #[test]
+    fn region_effect_slow_zone_round_trips() {
+        use crate::regions::effects::RegionEffectKind::SlowZone;
+        region_effect_round_trip(SlowZone {
+            thrust_modifier: Some(0.5),
+            yaw_rate_modifier: Some(-0.3),
+        });
+        region_effect_round_trip(SlowZone {
+            thrust_modifier: Some(0.5),
+            yaw_rate_modifier: None,
+        });
+        region_effect_round_trip(SlowZone {
+            thrust_modifier: None,
+            yaw_rate_modifier: Some(-0.3),
+        });
+        region_effect_round_trip(SlowZone {
+            thrust_modifier: None,
+            yaw_rate_modifier: None,
+        });
+    }
+
+    #[test]
+    fn region_effect_blocks_impulse_round_trips() {
+        region_effect_round_trip(crate::regions::effects::RegionEffectKind::BlocksImpulse);
+    }
+
+    #[test]
+    fn region_effect_radar_dampening_round_trips() {
+        region_effect_round_trip(crate::regions::effects::RegionEffectKind::RadarDampening {
+            multiplier: 0.3,
+        });
+    }
+
+    #[test]
+    fn region_effect_comms_jam_round_trips() {
+        region_effect_round_trip(crate::regions::effects::RegionEffectKind::CommsJam);
+    }
+
+    #[test]
+    fn region_effect_sensor_blind_round_trips() {
+        region_effect_round_trip(crate::regions::effects::RegionEffectKind::SensorBlind);
+    }
+
+    #[test]
+    fn region_effect_nebula_fog_round_trips() {
+        use crate::regions::effects::RegionEffectKind::NebulaFog;
+        region_effect_round_trip(NebulaFog {
+            color: [0.25, 0.08, 0.32],
+            density: 0.008,
+        });
+        region_effect_round_trip(NebulaFog {
+            color: [0.5, 0.1, 0.2],
+            density: 0.015,
+        });
+    }
+
+    #[test]
+    fn region_effect_negative_and_zero_values_round_trip() {
+        use crate::regions::effects::RegionEffectKind::{DamageZone, RadarDampening, SlowZone};
+        region_effect_round_trip(DamageZone {
+            dps: -5.0,
+            shield_pierce: 0.0,
+        });
+        region_effect_round_trip(SlowZone {
+            thrust_modifier: Some(-1.0),
+            yaw_rate_modifier: None,
+        });
+        region_effect_round_trip(DamageZone {
+            dps: 0.0,
+            shield_pierce: 0.0,
+        });
+        region_effect_round_trip(RadarDampening { multiplier: 0.0 });
+    }
+
     // ── StationSpawned / StationDestroyed round-trips ─────────────────────
 
     #[test]

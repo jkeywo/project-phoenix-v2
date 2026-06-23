@@ -30,7 +30,9 @@ Eight independently-grabbable slices:
 - **A3** - Captain station owns viewscreen system kind.
 - **A4** - `Console::from_console_id` helper; delete hardcoded console list in
   `process_coordination_lag`. Covered by issue #523.
-- **A5** - `serde_json` outside codec cleanup in `src/ship/coordination.rs`.
+- **A5** - `serde_json` outside codec cleanup in `src/ship/coordination.rs`,
+  `src/core/flag_kind.rs`, and `src/regions/effects.rs`. Shipped: see
+  [Issue #524](./issue-524-serde-json-cleanup.md).
 - **A6** - `SystemId` naming convention pinned in doc-block + wiki page.
 - **A7** - Repair coarse-system conversion (register kind + AI controller).
 - **A8** - Navigation coarse-system conversion (register kind + AI controller).
@@ -57,4 +59,5 @@ is unblocked and can start immediately.
 
 - [PRD #487 - Station / Console / System architecture redesign](./prd-487-station-console-system-redesign.md)
 - [Issue #523 - Console ID lookup](./issue-523-console-id-lookup.md)
+- [Issue #524 - serde_json outside codec cleanup (A5)](./issue-524-serde-json-cleanup.md) — shipped
 - [Issue #493 - Coordination-lag scope](./issue-493-coordination-lag-scope.md)

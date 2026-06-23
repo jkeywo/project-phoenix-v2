@@ -287,11 +287,4 @@ mod tests {
         assert_eq!(due[0].target, target);
     }
 
-    #[test]
-    fn frequency_hint_payload_serde_round_trip() {
-        let payload = CoordinationPayload::FrequencyHint { frequency: 0.42 };
-        let json = serde_json::to_string(&payload).unwrap();
-        let decoded: CoordinationPayload = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded, payload);
-    }
 }

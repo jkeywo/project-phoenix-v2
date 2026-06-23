@@ -42,6 +42,9 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
         .iter()
         .filter_map(|sc| {
             let console = Console::from_console_id(&sc.console)?;
+            if console == Console::Core {
+                return None; // Core is not a player-selectable station
+            }
             Some(StationDef {
                 id: sc.id.clone(),
                 name: sc.name.clone(),

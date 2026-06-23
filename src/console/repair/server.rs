@@ -111,7 +111,7 @@ pub fn handle_dispatch_repair_team(
                                     None => continue, // unknown station id
                                 }
                             }
-                            RepairTarget::Core => continue, // per-core repair deferred to PRD C
+                            RepairTarget::Core => Console::Core,
                         };
                         (*team_idx as usize, console)
                     }
@@ -261,6 +261,7 @@ mod tests {
             (Console::Tactical, 25.0),
             (Console::Power, 25.0),
             (Console::Shields, 25.0),
+            (Console::Core, 50.0),
         ])))
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
@@ -556,9 +557,8 @@ mod tests {
         );
     }
 
-    /// `RepairTarget::Core` in `ControlSystem` is a no-op (deferred to PRD C).
     #[test]
-    fn control_system_dispatch_repair_target_core_is_noop() {
+    fn control_system_dispatch_repair_target_core_dispatches_team() {
         let mut app = test_app();
         start_game(&mut app);
 
@@ -577,8 +577,8 @@ mod tests {
 
         let teams = app.world().resource::<ShipRepairTeams>();
         assert!(
-            team_is_idle(teams, 0),
-            "team 0 should remain idle for RepairTarget::Core (deferred)"
+            team_is_travelling(teams, 0),
+            "team 0 should be travelling to Core after RepairTarget::Core dispatch"
         );
     }
 

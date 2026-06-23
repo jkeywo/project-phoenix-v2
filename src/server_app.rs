@@ -201,6 +201,7 @@ pub fn add_simulation_plugins(app: &mut App) {
         (Console::Tactical, 25.0),
         (Console::Power, 25.0),
         (Console::Shields, 25.0),
+        (Console::Core, 50.0),
     ])))
     .insert_resource(ShipShields(ShieldSystem::default()))
     .insert_resource(ShipImpulse(ImpulseState::new()))

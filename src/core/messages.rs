@@ -261,6 +261,7 @@ mod console_id_tests {
             Console::Navigation,
             Console::Power,
             Console::Comms,
+            Console::Core,
         ];
         for console in &consoles {
             assert_eq!(
@@ -294,6 +295,9 @@ pub enum Console {
     Navigation,
     Power,
     Comms,
+    /// Ownerless AI-only systems (viewscreen etc.). Not player-selectable;
+    /// used as a repair target for ship-wide core systems.
+    Core,
 }
 
 impl Console {
@@ -309,6 +313,7 @@ impl Console {
             Console::Navigation => "Navigation",
             Console::Power => "Power",
             Console::Comms => "Comms",
+            Console::Core => "Core",
         }
     }
 
@@ -326,6 +331,7 @@ impl Console {
             Console::Navigation => "navigation",
             Console::Power => "power",
             Console::Comms => "comms",
+            Console::Core => "core",
         }
     }
 
@@ -343,6 +349,7 @@ impl Console {
             "navigation" => Some(Console::Navigation),
             "power" => Some(Console::Power),
             "comms" => Some(Console::Comms),
+            "core" => Some(Console::Core),
             _ => None,
         }
     }
@@ -358,6 +365,7 @@ impl Console {
             Console::Navigation => "N",
             Console::Power => "P",
             Console::Comms => "C",
+            Console::Core => "CO",
         }
     }
 }

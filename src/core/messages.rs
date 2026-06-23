@@ -1766,8 +1766,11 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             target: crate::system_registry::red_alert_system_id(),
             payload: SystemControlPayload::ToggleRedAlert,
         },
-        UiAction::SetView { direction } => ClientMessage::SetView {
-            mode: ViewMode::Camera(direction.clone()),
+        UiAction::SetView { direction } => ClientMessage::ControlSystem {
+            target: crate::system_registry::viewscreen_system_id(),
+            payload: SystemControlPayload::SetView {
+                mode: ViewMode::Camera(direction.clone()),
+            },
         },
         UiAction::HelmInput { thrust, steering } => ClientMessage::ControlSystem {
             target: crate::system_registry::helm_system_id(),
@@ -1793,7 +1796,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             payload: SystemControlPayload::SetBoost { active: *active },
         },
         UiAction::SetRadarView => ClientMessage::ControlSystem {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::viewscreen_system_id(),
             payload: SystemControlPayload::SetView {
                 mode: ViewMode::Radar,
             },
@@ -1827,8 +1830,11 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::ShowOnScreen { message_id } => ClientMessage::ShowOnScreen {
             message_id: message_id.clone(),
         },
-        UiAction::SetNavigationChart => ClientMessage::SetView {
-            mode: ViewMode::NavigationChart,
+        UiAction::SetNavigationChart => ClientMessage::ControlSystem {
+            target: crate::system_registry::viewscreen_system_id(),
+            payload: SystemControlPayload::SetView {
+                mode: ViewMode::NavigationChart,
+            },
         },
         UiAction::SetNavigationWaypoint { x, z, source_uuid } => {
             ClientMessage::SetNavigationWaypoint {
@@ -1906,8 +1912,11 @@ mod ui_action_tests {
         };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::SetView {
-                mode: ViewMode::Camera(ViewDirection::Aft)
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(ViewDirection::Aft)
+                }
             }
         );
     }
@@ -1986,7 +1995,7 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&UiAction::SetRadarView),
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar
                 }

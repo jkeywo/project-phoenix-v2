@@ -1,14 +1,15 @@
 pub mod boost;
 pub mod combat_activity;
-pub mod power;
-pub mod sensors;
 pub mod config;
 pub mod control_source;
 pub mod coordination;
 pub mod damage;
 pub mod impulse;
 pub mod physics;
+pub mod power;
 pub mod rating;
+pub mod sensors;
 pub mod shields;
 pub mod state;
 pub mod system_registry;
+pub mod viewscreen;

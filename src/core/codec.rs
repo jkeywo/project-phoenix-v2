@@ -307,6 +307,19 @@ mod tests {
     }
 
     #[test]
+    fn client_channel_2_viewscreen_set_view_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::system_registry::viewscreen_system_id(),
+            payload: SystemControlPayload::SetView {
+                mode: ViewMode::NavigationChart,
+            },
+        };
+
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_control_system_tactical_set_target_round_trips() {
         let msg = ClientMessage::ControlSystem {
             target: crate::system_registry::tactical_system_id(),

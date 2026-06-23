@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::console_bridge::ConsoleStateChanged;
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{
-    CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, SystemControlPayload,
+    CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, SystemControlPayload, SystemId,
     ViewDirection, ViewMode,
 };
 use crate::ship::combat_activity::RecentCombatActivity;
@@ -51,7 +51,9 @@ fn handle_toggle_red_alert(
 ) {
     let policy = control_sources
         .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::captain_system_id()))
+        .map(|cs| {
+            cs.0.policy_for(&crate::system_registry::captain_system_id())
+        })
         .unwrap_or(crate::ship::control_source::control_tick_policy(
             ControlSource::Human,
         ));
@@ -80,14 +82,30 @@ fn is_red_alert_toggle(msg: &ClientMessage) -> bool {
     }
 }
 
-fn view_mode_from_message(msg: &ClientMessage) -> Option<ViewMode> {
+fn view_request_from_message(msg: &ClientMessage) -> Option<(SystemId, ViewMode)> {
     match msg {
-        ClientMessage::SetView { mode } => Some(mode.clone()),
+        ClientMessage::SetView { mode } => Some((
+            crate::ship::viewscreen::source_system_for_view_mode(mode),
+            mode.clone(),
+        )),
+        ClientMessage::ControlSystem { target, payload }
+            if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID =>
+        {
+            match payload {
+                SystemControlPayload::SetView { mode } => Some((
+                    crate::ship::viewscreen::source_system_for_view_mode(mode),
+                    mode.clone(),
+                )),
+                _ => None,
+            }
+        }
         ClientMessage::ControlSystem { target, payload }
             if target.0 == crate::system_registry::HELM_SYSTEM_ID =>
         {
             match payload {
-                SystemControlPayload::SetView { mode } => Some(mode.clone()),
+                SystemControlPayload::SetView { mode } => {
+                    Some((crate::system_registry::helm_system_id(), mode.clone()))
+                }
                 _ => None,
             }
         }
@@ -101,35 +119,44 @@ fn handle_set_view(
     sessions: Res<Sessions>,
     control_sources: Option<Res<ShipSystemControlSources>>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::captain_system_id()))
-        .unwrap_or(crate::ship::control_source::control_tick_policy(
-            ControlSource::Human,
-        ));
     for ev in reader.read() {
-        if let Some(mode) = view_mode_from_message(&ev.msg) {
-            // Authorization is per-variant: Camera views are the captain's call,
-            // Radar is the helm's call. A request from the wrong console is
-            // silently ignored.
-            let required = match &mode {
-                ViewMode::Camera(_) => Console::CaptainChair,
-                ViewMode::Radar => Console::Helm,
-                ViewMode::ScienceRadar | ViewMode::SensorsRadar => Console::Sensors,
-                ViewMode::SystemChart | ViewMode::NavigationChart => Console::Navigation,
-                ViewMode::Comms => Console::Comms,
-            };
-            let authorized = if required == Console::CaptainChair {
-                policy.accept_human_input
-                    && sessions.0.console_holder(Console::CaptainChair)
-                        == Some(ev.token.as_str())
-            } else {
-                sessions.0.console_holder(required) == Some(ev.token.as_str())
-            };
-            if authorized {
-                ship.request_view_mode(mode);
+        if let Some((source, mode)) = view_request_from_message(&ev.msg) {
+            if source_can_request_view(&source, &ev.token, &sessions, control_sources.as_deref()) {
+                ship.request_view_mode_from(source, mode);
             }
         }
+    }
+}
+
+fn source_can_request_view(
+    source: &SystemId,
+    token: &str,
+    sessions: &Sessions,
+    control_sources: Option<&ShipSystemControlSources>,
+) -> bool {
+    let policy = control_sources.map(|cs| cs.0.policy_for(source)).unwrap_or(
+        crate::ship::control_source::control_tick_policy(ControlSource::Human),
+    );
+    if policy.operate_ai {
+        return true;
+    }
+    if !policy.accept_human_input {
+        return false;
+    }
+    let Some(console) = console_for_view_source(source) else {
+        return false;
+    };
+    sessions.0.console_holder(console) == Some(token)
+}
+
+fn console_for_view_source(source: &SystemId) -> Option<Console> {
+    match source.0.as_str() {
+        crate::system_registry::CAPTAIN_SYSTEM_ID => Some(Console::CaptainChair),
+        crate::system_registry::HELM_SYSTEM_ID => Some(Console::Helm),
+        crate::system_registry::SENSORS_SYSTEM_ID => Some(Console::Sensors),
+        crate::system_registry::NAVIGATION_SYSTEM_ID => Some(Console::Navigation),
+        crate::system_registry::COMMS_SYSTEM_ID => Some(Console::Comms),
+        _ => None,
     }
 }
 
@@ -143,7 +170,9 @@ fn operate_captain_ai(
 ) {
     let policy = control_sources
         .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::captain_system_id()))
+        .map(|cs| {
+            cs.0.policy_for(&crate::system_registry::captain_system_id())
+        })
         .unwrap_or(crate::ship::control_source::control_tick_policy(
             ControlSource::Human,
         ));
@@ -658,6 +687,70 @@ mod tests {
             "helm",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Radar
+        );
+    }
+
+    #[test]
+    fn viewscreen_channel_2_set_view_can_request_radar() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::Identify {
+                token: "helm".into(),
+                name: "Hoshi".into(),
+            },
+        );
+        tick(&mut app);
+        app.world_mut()
+            .resource_mut::<Sessions>()
+            .0
+            .toggle_console("helm", Console::Helm)
+            .unwrap();
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Radar
+        );
+    }
+
+    #[test]
+    fn ai_controlled_helm_can_drive_viewscreen_without_human_seat() {
+        let mut app = test_app();
+        {
+            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
+            cs.0.set(crate::system_registry::helm_system_id(), ControlSource::Ai);
+        }
+
+        push(
+            &mut app,
+            "ai",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },

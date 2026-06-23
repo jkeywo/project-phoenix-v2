@@ -136,10 +136,13 @@ describe('set_phaser_mode', () => {
 });
 
 describe('set_view', () => {
-  it('calls send SetView with Camera kind and direction', () => {
+  it('calls send ControlSystem viewscreen SetView with Camera kind and direction', () => {
     const send = mkSend();
     ACTION_MAP.set_view({ action: 'set_view', direction: 'Aft' }, send);
-    expect(send).toHaveBeenCalledWith('SetView', { mode: { kind: 'Camera', data: 'Aft' } });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode: { kind: 'Camera', data: 'Aft' } } },
+    });
   });
 
   it('does nothing when direction is absent', () => {
@@ -151,7 +154,10 @@ describe('set_view', () => {
   it('sends non-camera view modes by kind', () => {
     const send = mkSend();
     ACTION_MAP.set_view({ action: 'set_view', direction: 'SensorsRadar' }, send);
-    expect(send).toHaveBeenCalledWith('SetView', { mode: { kind: 'SensorsRadar' } });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode: { kind: 'SensorsRadar' } } },
+    });
   });
 });
 
@@ -244,7 +250,7 @@ describe('set_radar_view', () => {
     const send = mkSend();
     ACTION_MAP.set_radar_view({}, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'helm',
+      target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
     });
   });
@@ -391,10 +397,13 @@ describe('show_on_screen', () => {
 });
 
 describe('set_navigation_chart', () => {
-  it('calls send SetView with NavigationChart kind', () => {
+  it('calls send ControlSystem viewscreen SetView with NavigationChart kind', () => {
     const send = mkSend();
     ACTION_MAP.set_navigation_chart({ action: 'set_navigation_chart' }, send);
-    expect(send).toHaveBeenCalledWith('SetView', { mode: { kind: 'NavigationChart' } });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode: { kind: 'NavigationChart' } } },
+    });
   });
 });
 

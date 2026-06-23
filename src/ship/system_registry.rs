@@ -16,6 +16,9 @@ pub const POWER_AI_CONTROLLER: &str = "power_ai";
 pub const SENSORS_SYSTEM_ID: &str = "sensors";
 pub const SENSORS_KIND: &str = "sensors";
 pub const SENSORS_AI_CONTROLLER: &str = "sensors_ai";
+pub const NAVIGATION_SYSTEM_ID: &str = "navigation";
+pub const NAVIGATION_KIND: &str = "navigation";
+pub const NAVIGATION_AI_CONTROLLER: &str = "navigation_ai";
 pub const SHIELDS_SYSTEM_ID: &str = "shields";
 pub const SHIELDS_KIND: &str = "shields";
 pub const SHIELDS_AI_CONTROLLER: &str = "shields_ai";
@@ -25,6 +28,9 @@ pub const COMMS_AI_CONTROLLER: &str = "comms_ai";
 pub const CAPTAIN_SYSTEM_ID: &str = "captain";
 pub const CAPTAIN_KIND: &str = "captain";
 pub const CAPTAIN_AI_CONTROLLER: &str = "captain_ai";
+pub const VIEWSCREEN_SYSTEM_ID: &str = "viewscreen";
+pub const VIEWSCREEN_KIND: &str = "viewscreen";
+pub const VIEWSCREEN_AI_CONTROLLER: &str = "viewscreen_ai";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
@@ -87,15 +93,25 @@ impl SystemKindRegistry {
 
     pub fn with_core_systems() -> Result<Self, SystemRegistryError> {
         let mut registry = Self::with_red_alert()?;
-        registry.register(HELM_KIND, AiControllerRegistration::new(HELM_AI_CONTROLLER)?)?;
+        registry.register(
+            HELM_KIND,
+            AiControllerRegistration::new(HELM_AI_CONTROLLER)?,
+        )?;
         registry.register(
             TACTICAL_KIND,
             AiControllerRegistration::new(TACTICAL_AI_CONTROLLER)?,
         )?;
-        registry.register(POWER_KIND, AiControllerRegistration::new(POWER_AI_CONTROLLER)?)?;
+        registry.register(
+            POWER_KIND,
+            AiControllerRegistration::new(POWER_AI_CONTROLLER)?,
+        )?;
         registry.register(
             SENSORS_KIND,
             AiControllerRegistration::new(SENSORS_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            NAVIGATION_KIND,
+            AiControllerRegistration::new(NAVIGATION_AI_CONTROLLER)?,
         )?;
         registry.register(
             SHIELDS_KIND,
@@ -108,6 +124,10 @@ impl SystemKindRegistry {
         registry.register(
             CAPTAIN_KIND,
             AiControllerRegistration::new(CAPTAIN_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            VIEWSCREEN_KIND,
+            AiControllerRegistration::new(VIEWSCREEN_AI_CONTROLLER)?,
         )?;
         Ok(registry)
     }
@@ -170,6 +190,10 @@ pub fn sensors_system_id() -> SystemId {
     SystemId(SENSORS_SYSTEM_ID.to_string())
 }
 
+pub fn navigation_system_id() -> SystemId {
+    SystemId(NAVIGATION_SYSTEM_ID.to_string())
+}
+
 pub fn shields_system_id() -> SystemId {
     SystemId(SHIELDS_SYSTEM_ID.to_string())
 }
@@ -180,6 +204,10 @@ pub fn comms_system_id() -> SystemId {
 
 pub fn captain_system_id() -> SystemId {
     SystemId(CAPTAIN_SYSTEM_ID.to_string())
+}
+
+pub fn viewscreen_system_id() -> SystemId {
+    SystemId(VIEWSCREEN_SYSTEM_ID.to_string())
 }
 
 #[cfg(test)]
@@ -309,6 +337,21 @@ mod tests {
     }
 
     #[test]
+    fn core_registry_has_navigation_ai_controller() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(NAVIGATION_KIND));
+        assert_eq!(
+            registry
+                .registration(NAVIGATION_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            NAVIGATION_AI_CONTROLLER
+        );
+    }
+
+    #[test]
     fn core_registry_has_captain_ai_controller() {
         let registry = SystemKindRegistry::with_core_systems().unwrap();
 
@@ -320,6 +363,21 @@ mod tests {
                 .ai_controller
                 .name(),
             CAPTAIN_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn core_registry_has_viewscreen_ai_controller() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(VIEWSCREEN_KIND));
+        assert_eq!(
+            registry
+                .registration(VIEWSCREEN_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            VIEWSCREEN_AI_CONTROLLER
         );
     }
 

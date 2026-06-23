@@ -57,14 +57,17 @@ export const ACTION_MAP = Object.freeze({
 
   /** Switch the view-screen to a named Camera direction. */
   set_view: (a, send) => {
-    // ClientMessage::SetView { mode: ViewMode::Camera(direction) }
-    // serialises as {"type":"SetView","data":{"mode":{"kind":"Camera","data":"Fore"}}}
     if (!a.direction) return;
+    let mode;
     if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction)) {
-      send('SetView', { mode: { kind: 'Camera', data: a.direction } });
+      mode = { kind: 'Camera', data: a.direction };
     } else {
-      send('SetView', { mode: { kind: a.direction } });
+      mode = { kind: a.direction };
     }
+    send('ControlSystem', {
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode } },
+    });
   },
 
   /** Toggle red alert status. */
@@ -124,7 +127,7 @@ export const ACTION_MAP = Object.freeze({
   /** Switch the view-screen to the radar mode. */
   set_radar_view: (a, send) => {
     send('ControlSystem', {
-      target: 'helm',
+      target: 'viewscreen',
       payload: { type: 'SetView', data: { mode: { kind: 'Radar' } } },
     });
   },
@@ -162,7 +165,10 @@ export const ACTION_MAP = Object.freeze({
 
   /** Switch the view-screen to navigation chart mode. */
   set_navigation_chart: (a, send) => {
-    send('SetView', { mode: { kind: 'NavigationChart' } });
+    send('ControlSystem', {
+      target: 'viewscreen',
+      payload: { type: 'SetView', data: { mode: { kind: 'NavigationChart' } } },
+    });
   },
 
   /**

@@ -1,5 +1,6 @@
 use crate::flag_kind::FlagKind;
 use crate::messages::{EntityStateSnapshot, SimSnapshot, ViewDirection, ViewMode};
+use crate::ship::viewscreen::{source_system_for_view_mode, ViewscreenArbiter, ViewscreenRequest};
 use bevy::prelude::Resource;
 
 #[derive(Resource)]
@@ -7,6 +8,7 @@ pub struct ShipState {
     red_alert: bool,
     pub view_mode: ViewMode,
     captain_view_direction: ViewDirection,
+    viewscreen: ViewscreenArbiter,
     /// Ship position (x, z)
     pub x: f32,
     pub z: f32,
@@ -32,6 +34,7 @@ impl ShipState {
             red_alert: false,
             view_mode: ViewMode::Camera(ViewDirection::Fore),
             captain_view_direction: ViewDirection::Fore,
+            viewscreen: ViewscreenArbiter::new(),
             x: 0.0,
             z: 0.0,
             yaw: 0.0,
@@ -53,34 +56,31 @@ impl ShipState {
     }
 
     pub fn request_view_mode(&mut self, mode: ViewMode) {
-        match mode {
-            ViewMode::Camera(direction) => {
-                self.captain_view_direction = direction.clone();
-                self.view_mode = ViewMode::Camera(direction);
-            }
-            other if self.view_mode == other => {
-                self.restore_captain_view();
-            }
-            other => {
-                self.view_mode = other;
-            }
-        }
+        let requester = source_system_for_view_mode(&mode);
+        self.request_view_mode_from(requester, mode);
+    }
+
+    pub fn request_view_mode_from(&mut self, requester: crate::messages::SystemId, mode: ViewMode) {
+        let resolution = self
+            .viewscreen
+            .request_channel_2(ViewscreenRequest { requester, mode });
+        self.view_mode = resolution.mode;
+        self.captain_view_direction = self.viewscreen.captain_view_direction();
     }
 
     pub fn show_view_mode(&mut self, mode: ViewMode) {
-        match mode {
-            ViewMode::Camera(direction) => {
-                self.captain_view_direction = direction.clone();
-                self.view_mode = ViewMode::Camera(direction);
-            }
-            other => {
-                self.view_mode = other;
-            }
-        }
+        let requester = source_system_for_view_mode(&mode);
+        let resolution = self
+            .viewscreen
+            .show_channel_2(ViewscreenRequest { requester, mode });
+        self.view_mode = resolution.mode;
+        self.captain_view_direction = self.viewscreen.captain_view_direction();
     }
 
     pub fn restore_captain_view(&mut self) {
-        self.view_mode = ViewMode::Camera(self.captain_view_direction.clone());
+        let resolution = self.viewscreen.restore_captain_view();
+        self.view_mode = resolution.mode;
+        self.captain_view_direction = self.viewscreen.captain_view_direction();
     }
 
     pub fn snapshot(

@@ -773,7 +773,6 @@ fn handle_hail(
         }
 
         let target_uuid = match &ev.msg {
-            ClientMessage::Hail { target_uuid } => target_uuid,
             ClientMessage::ControlSystem {
                 target,
                 payload: crate::messages::SystemControlPayload::Hail { target_uuid },
@@ -1137,10 +1136,6 @@ fn handle_respond_to_message(
         }
 
         let (message_id, response_index) = match &ev.msg {
-            ClientMessage::RespondToMessage {
-                message_id,
-                response_index,
-            } => (message_id, response_index),
             ClientMessage::ControlSystem {
                 target,
                 payload:
@@ -1492,7 +1487,8 @@ fn handle_respond_to_message(
                         *pos
                     } else if let Some(anchor_name) = anchor {
                         // origin_layer = None: resolve against base world anchors only.
-                        let lookup = world_layers.base_world_config
+                        let lookup = world_layers
+                            .base_world_config
                             .as_ref()
                             .and_then(|wc| wc.anchors.get(anchor_name).copied());
                         match lookup {
@@ -1730,7 +1726,9 @@ fn handle_respond_to_message(
                     thread_id: thread_id.clone(),
                     is_urgent: false,
                 };
-                channel2_writer.write(CommsChannel2Event { message: placeholder });
+                channel2_writer.write(CommsChannel2Event {
+                    message: placeholder,
+                });
                 runtime.pending_follow_ups.push(PendingFollowUp {
                     node: follow_up.clone(),
                     sender_uuid,
@@ -1797,7 +1795,6 @@ fn handle_clear_comms(
         }
 
         let is_clear = match &ev.msg {
-            ClientMessage::ClearComms => true,
             ClientMessage::ControlSystem {
                 target,
                 payload: crate::messages::SystemControlPayload::ClearComms,
@@ -1840,7 +1837,6 @@ fn handle_show_on_screen(
         }
 
         let show_message_id: Option<&String> = match &ev.msg {
-            ClientMessage::ShowOnScreen { message_id } => Some(message_id),
             ClientMessage::ControlSystem {
                 target,
                 payload: crate::messages::SystemControlPayload::ShowOnScreen { message_id },
@@ -3650,8 +3646,11 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3686,8 +3685,11 @@ mod tests {
         push_msg(
             &mut app,
             "captain",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3727,8 +3729,11 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3759,8 +3764,11 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3779,9 +3787,12 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::RespondToMessage {
-                message_id: msg_id.clone(),
-                response_index: 0,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: msg_id.clone(),
+                    response_index: 0,
+                },
             },
         );
         let out = tick(&mut app);
@@ -3857,7 +3868,14 @@ mod tests {
             .inject(orphaned);
         let _ = tick(&mut app);
 
-        push_msg(&mut app, "comms", ClientMessage::ClearComms);
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::ClearComms,
+            },
+        );
         let out = tick(&mut app);
 
         let comms_state = out.iter().find_map(|m| {
@@ -3918,8 +3936,11 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3950,8 +3971,11 @@ mod tests {
         push_msg(
             &mut app2,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app2);
@@ -3973,9 +3997,12 @@ mod tests {
         push_msg(
             &mut app2,
             "comms",
-            ClientMessage::RespondToMessage {
-                message_id: first_msg.id.clone(),
-                response_index: 0,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: first_msg.id.clone(),
+                    response_index: 0,
+                },
             },
         );
         let out2 = tick(&mut app2);
@@ -4005,8 +4032,11 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -4027,9 +4057,12 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::RespondToMessage {
-                message_id: first_msg.id.clone(),
-                response_index: 0,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: first_msg.id.clone(),
+                    response_index: 0,
+                },
             },
         );
         let out = tick(&mut app);
@@ -4195,8 +4228,11 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4267,8 +4303,11 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let _ = tick(&mut app);
@@ -4310,8 +4349,11 @@ mod tests {
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         // First tick: handle_hail injects the root and queues the chained
@@ -6714,8 +6756,11 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let _ = tick(&mut app);
@@ -6775,8 +6820,11 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -6871,8 +6919,11 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -6916,8 +6967,11 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -6943,9 +6997,12 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::RespondToMessage {
-                message_id: msg_id.clone(),
-                response_index: 0,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: msg_id.clone(),
+                    response_index: 0,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -6990,8 +7047,11 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let _ = tick(&mut app);
@@ -8688,8 +8748,11 @@ size_max = 2.0
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -8709,9 +8772,12 @@ size_max = 2.0
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::RespondToMessage {
-                message_id: msg_id,
-                response_index: 0,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: msg_id,
+                    response_index: 0,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -9076,8 +9142,11 @@ size_max = 2.0
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail {
-                target_uuid: station_uuid.into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -9095,9 +9164,12 @@ size_max = 2.0
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::RespondToMessage {
-                message_id: msg_id,
-                response_index: 0,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: msg_id,
+                    response_index: 0,
+                },
             },
         );
         let _ = tick(&mut app);
@@ -9833,9 +9905,7 @@ size_max = 2.0
                 fired: false,
             });
             // Queue a WorldLoaded event so handle_ai_events fires the template.
-            runtime
-                .pending_world_events
-                .push(WorldEvent::WorldLoaded);
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
 
         app.update();
@@ -9893,9 +9963,7 @@ size_max = 2.0
                 },
                 fired: false,
             });
-            runtime
-                .pending_world_events
-                .push(WorldEvent::WorldLoaded);
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
 
         app.update();
@@ -9909,8 +9977,6 @@ size_max = 2.0
         );
     }
 
-    /// `ClientMessage::ControlSystem { target: comms_system_id(), payload: Hail { .. } }`
-    /// must produce the same inbox result as `ClientMessage::Hail { .. }`.
     #[test]
     fn control_system_hail_dispatches_same_as_client_message_hail() {
         let station_uuid = "station-uuid-control-sys";

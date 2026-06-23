@@ -79,10 +79,8 @@ fn navigation_authorized(sessions: &Sessions, token: &str) -> bool {
 
 /// Handle waypoint messages from the Navigation console.
 ///
-/// Accepts both the legacy `ClientMessage::SetNavigationWaypoint /
-/// ClearNavigationWaypoint` paths and the new
-/// `ClientMessage::ControlSystem { target: "navigation", payload: ... }` paths.
-/// All paths are gated on:
+/// Accepts `ClientMessage::ControlSystem { target: "navigation", payload: ... }`.
+/// All messages are gated on:
 ///
 /// 1. `ControlSourceResolver::policy_for(&navigation_system_id()).accept_human_input`
 ///    (rejects when the system is under AI control)
@@ -112,16 +110,6 @@ fn handle_navigation_waypoint(
         }
 
         match &ev.msg {
-            // ── Legacy paths ─────────────────────────────────────────────────
-            ClientMessage::SetNavigationWaypoint { x, z, source_uuid }
-                if x.is_finite() && z.is_finite() =>
-            {
-                waypoint.0 = Some(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
-            }
-            ClientMessage::ClearNavigationWaypoint => {
-                waypoint.0 = None;
-            }
-            // ── ControlSystem paths ──────────────────────────────────────────
             ClientMessage::ControlSystem { target, payload }
                 if target.0 == NAVIGATION_SYSTEM_ID =>
             {
@@ -321,10 +309,13 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetNavigationWaypoint {
-                x: 120.0,
-                z: -45.0,
-                source_uuid: None,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 120.0,
+                    z: -45.0,
+                    source_uuid: None,
+                },
             },
         );
         tick(&mut app);
@@ -336,7 +327,10 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::ClearNavigationWaypoint,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::ClearNavigationWaypoint,
+            },
         );
         tick(&mut app);
         assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
@@ -350,10 +344,13 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetNavigationWaypoint {
-                x: 5.0,
-                z: 6.0,
-                source_uuid: None,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 5.0,
+                    z: 6.0,
+                    source_uuid: None,
+                },
             },
         );
         tick(&mut app);
@@ -368,10 +365,13 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetNavigationWaypoint {
-                x: f32::NAN,
-                z: 1.0,
-                source_uuid: None,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: f32::NAN,
+                    z: 1.0,
+                    source_uuid: None,
+                },
             },
         );
         tick(&mut app);
@@ -386,10 +386,13 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetNavigationWaypoint {
-                x: 10.0,
-                z: 20.0,
-                source_uuid: None,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 10.0,
+                    z: 20.0,
+                    source_uuid: None,
+                },
             },
         );
         let out = tick(&mut app);
@@ -406,7 +409,10 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::ClearNavigationWaypoint,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::ClearNavigationWaypoint,
+            },
         );
         let out = tick(&mut app);
         let snap = latest_sim_snapshot(&out).expect("expected SimState");
@@ -434,10 +440,13 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetNavigationWaypoint {
-                x: 50.0,
-                z: -100.0,
-                source_uuid: Some(target_uuid.into()),
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 50.0,
+                    z: -100.0,
+                    source_uuid: Some(target_uuid.into()),
+                },
             },
         );
         let out = tick(&mut app);
@@ -485,10 +494,13 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetNavigationWaypoint {
-                x: 10.0,
-                z: 20.0,
-                source_uuid: Some(target_uuid.into()),
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 10.0,
+                    z: 20.0,
+                    source_uuid: Some(target_uuid.into()),
+                },
             },
         );
         tick(&mut app);
@@ -510,10 +522,13 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetNavigationWaypoint {
-                x: 1.0,
-                z: 2.0,
-                source_uuid: Some(String::new()),
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 1.0,
+                    z: 2.0,
+                    source_uuid: Some(String::new()),
+                },
             },
         );
         tick(&mut app);
@@ -673,19 +688,21 @@ mod tests {
         );
     }
 
-    /// Legacy `ClientMessage::SetNavigationWaypoint` still works.
     #[test]
-    fn legacy_set_navigation_waypoint_still_works() {
+    fn control_system_set_navigation_waypoint_works() {
         let mut app = test_app();
         start_game_with_navigation(&mut app);
 
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetNavigationWaypoint {
-                x: 15.0,
-                z: 25.0,
-                source_uuid: None,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 15.0,
+                    z: 25.0,
+                    source_uuid: None,
+                },
             },
         );
         tick(&mut app);
@@ -695,26 +712,31 @@ mod tests {
         );
     }
 
-    /// Legacy `ClientMessage::ClearNavigationWaypoint` still works.
     #[test]
-    fn legacy_clear_navigation_waypoint_still_works() {
+    fn control_system_clear_navigation_waypoint_works() {
         let mut app = test_app();
         start_game_with_navigation(&mut app);
 
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetNavigationWaypoint {
-                x: 5.0,
-                z: 5.0,
-                source_uuid: None,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 5.0,
+                    z: 5.0,
+                    source_uuid: None,
+                },
             },
         );
         tick(&mut app);
         push(
             &mut app,
             "navigation",
-            ClientMessage::ClearNavigationWaypoint,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::ClearNavigationWaypoint,
+            },
         );
         tick(&mut app);
         assert!(app.world().resource::<NavigationWaypoint>().0.is_none());

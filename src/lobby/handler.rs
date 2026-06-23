@@ -331,28 +331,10 @@ pub fn process_message(
             }
         }
         // SetReady IS handled above (not a no-op in lobby).
-        ClientMessage::ToggleRedAlert
-        | ClientMessage::HelmInput { .. }
-        | ClientMessage::SetView { .. }
-        | ClientMessage::SetTarget { .. }
-        | ClientMessage::FirePhaser { .. }
-        | ClientMessage::SetPhaserMode { .. }
+        ClientMessage::FirePhaser { .. }
         | ClientMessage::SetPhaserFrequency { .. }
         | ClientMessage::DispatchRepairTeam { .. }
-        | ClientMessage::SetScienceTarget { .. }
-        | ClientMessage::SetSensorsTarget { .. }
-        | ClientMessage::StartImpulseCharge
-        | ClientMessage::CancelImpulse
-        | ClientMessage::ToggleBoost
-        | ClientMessage::SetBoost { .. }
         | ClientMessage::FireTorpedo { .. }
-        | ClientMessage::Hail { .. }
-        | ClientMessage::SelectCommsMessage { .. }
-        | ClientMessage::RespondToMessage { .. }
-        | ClientMessage::ClearComms
-        | ClientMessage::ShowOnScreen { .. }
-        | ClientMessage::SetNavigationWaypoint { .. }
-        | ClientMessage::ClearNavigationWaypoint
         | ClientMessage::ControlSystem { .. }
         | ClientMessage::SetStationRating { .. }
         | ClientMessage::SendCoordination { .. }
@@ -963,11 +945,14 @@ mod tests {
     }
 
     #[test]
-    fn helm_input_in_lobby_produces_no_output() {
+    fn control_system_in_lobby_produces_no_output() {
         let mut sessions = sessions_with("t1", "Alice");
-        let msg = ClientMessage::HelmInput {
-            thrust: 0.5,
-            steering: 0.0,
+        let msg = ClientMessage::ControlSystem {
+            target: crate::system_registry::helm_system_id(),
+            payload: crate::messages::SystemControlPayload::HelmInput {
+                thrust: 0.5,
+                steering: 0.0,
+            },
         };
         let result = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
         assert!(result.outbound.is_empty());

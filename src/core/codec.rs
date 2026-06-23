@@ -163,104 +163,6 @@ mod tests {
     }
 
     #[test]
-    fn client_toggle_red_alert() {
-        let msg = ClientMessage::ToggleRedAlert;
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_fore() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::Camera(ViewDirection::Fore),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_aft() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::Camera(ViewDirection::Aft),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_port() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::Camera(ViewDirection::Port),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_starboard() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::Camera(ViewDirection::Starboard),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_radar() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::Radar,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_science_radar() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::ScienceRadar,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_system_chart() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::SystemChart,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_navigation_chart() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::NavigationChart,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_comms() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::Comms,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_helm_input() {
-        let msg = ClientMessage::HelmInput {
-            thrust: 0.75,
-            steering: -0.5,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
     fn client_control_system_helm_input_round_trips() {
         let msg = ClientMessage::ControlSystem {
             target: crate::system_registry::helm_system_id(),
@@ -425,69 +327,6 @@ mod tests {
         let msg = ClientMessage::SetStationRating {
             rating_name: "Assisted".into(),
         };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_start_impulse_charge() {
-        let msg = ClientMessage::StartImpulseCharge;
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_cancel_impulse() {
-        let msg = ClientMessage::CancelImpulse;
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_navigation_waypoint() {
-        let msg = ClientMessage::SetNavigationWaypoint {
-            x: 120.0,
-            z: -45.0,
-            source_uuid: None,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_navigation_waypoint_with_source_uuid() {
-        let msg = ClientMessage::SetNavigationWaypoint {
-            x: 120.0,
-            z: -45.0,
-            source_uuid: Some("anchor-target-1".into()),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_navigation_waypoint_legacy_payload_deserialises() {
-        // Older clients that don't know about `source_uuid` send a payload
-        // without it. The wire field carries `#[serde(default)]` so the
-        // decoder must accept the legacy shape and produce `None`.
-        let json = r#"{"type":"SetNavigationWaypoint","data":{"x":120.0,"z":-45.0}}"#;
-        let codec = JsonCodec;
-        let msg = codec
-            .decode_client(json)
-            .expect("legacy SetNavigationWaypoint payload should decode");
-        assert_eq!(
-            msg,
-            ClientMessage::SetNavigationWaypoint {
-                x: 120.0,
-                z: -45.0,
-                source_uuid: None,
-            }
-        );
-    }
-
-    #[test]
-    fn client_clear_navigation_waypoint() {
-        let msg = ClientMessage::ClearNavigationWaypoint;
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -961,15 +800,6 @@ mod tests {
     }
 
     #[test]
-    fn client_set_target() {
-        let msg = ClientMessage::SetTarget {
-            uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
     fn server_target_lock_confirmed() {
         let msg = ServerMessage::TargetLock {
             uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
@@ -1199,15 +1029,6 @@ mod tests {
     }
 
     #[test]
-    fn client_set_phaser_mode_round_trips() {
-        let msg = ClientMessage::SetPhaserMode {
-            mode: crate::messages::PhaserMode::Manual,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
     fn server_phaser_fired_round_trips() {
         let msg = ServerMessage::PhaserFired {
             bank: "port".to_string(),
@@ -1218,39 +1039,12 @@ mod tests {
     }
 
     #[test]
-    fn client_set_science_target_round_trips() {
-        let msg = ClientMessage::SetScienceTarget {
-            uuid: "entity-uuid-123".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_sensors_target_round_trips() {
-        let msg = ClientMessage::SetSensorsTarget {
-            uuid: "entity-uuid-sensors-123".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
     fn server_sensors_target_suggestion_round_trips() {
         let msg = ServerMessage::SensorsTargetSuggestion {
             uuid: "entity-uuid-456".into(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_set_view_sensors_radar() {
-        let msg = ClientMessage::SetView {
-            mode: ViewMode::SensorsRadar,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
@@ -2520,50 +2314,6 @@ mod tests {
     }
 
     // ── Comms wire round-trips ─────────────────────────────────────────────
-
-    #[test]
-    fn client_hail_round_trips() {
-        let msg = ClientMessage::Hail {
-            target_uuid: "station-uuid-123".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_select_comms_message_round_trips() {
-        let msg = ClientMessage::SelectCommsMessage {
-            message_id: "msg-1".into(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_respond_to_message_round_trips() {
-        let msg = ClientMessage::RespondToMessage {
-            message_id: "msg-1".into(),
-            response_index: 2,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_clear_comms_round_trips() {
-        let msg = ClientMessage::ClearComms;
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_show_on_screen_round_trips() {
-        let msg = ClientMessage::ShowOnScreen {
-            message_id: "msg-abc-123".to_string(),
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
 
     #[test]
     fn server_comms_state_empty_round_trips() {

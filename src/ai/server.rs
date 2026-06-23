@@ -505,8 +505,11 @@ fn tick_ai_controllers(
                     crate::ai::AiInput::SetTarget { uuid: target } => {
                         inbound.write(crate::lobby::InboundMessage {
                             token: token.clone(),
-                            msg: crate::messages::ClientMessage::SetTarget {
-                                uuid: target.to_string(),
+                            msg: crate::messages::ClientMessage::ControlSystem {
+                                target: crate::system_registry::tactical_system_id(),
+                                payload: crate::messages::SystemControlPayload::SetTarget {
+                                    uuid: target.to_string(),
+                                },
                             },
                         });
                     }

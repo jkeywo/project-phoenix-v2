@@ -1002,42 +1002,8 @@ pub enum ClientMessage {
         ready: bool,
     },
     StartGame,
-    ToggleRedAlert,
-    HelmInput {
-        thrust: f32,
-        steering: f32,
-    },
-    /// Sent by the Helm officer to begin charging the impulse drive.
-    StartImpulseCharge,
-    /// Sent by the Science officer to cancel an active or charging impulse drive.
-    CancelImpulse,
-    /// Sent by the Helm officer to toggle the boost drive on/off.
-    ToggleBoost,
-    /// Sent by the Helm officer to explicitly set boost on or off (hold-to-boost).
-    SetBoost {
-        active: bool,
-    },
-    SetView {
-        mode: ViewMode,
-    },
-    SetTarget {
-        uuid: String,
-    },
-    /// Science officer taps an entity on their radar to suggest it as a target
-    /// to the Weapons console. Advisory only — does not affect lock state.
-    SetScienceTarget {
-        uuid: String,
-    },
-    /// Sensors operator taps an entity on their long-range radar to suggest it
-    /// as a target to Tactical. Advisory only — does not affect lock state.
-    SetSensorsTarget {
-        uuid: String,
-    },
     FirePhaser {
         bank: PhaserBank,
-    },
-    SetPhaserMode {
-        mode: PhaserMode,
     },
     /// Dispatch a specific repair team (by index) to the named console.
     /// Supports redirect and recall (see PRD #305).
@@ -1062,46 +1028,6 @@ pub enum ClientMessage {
     SetPhaserFrequency {
         frequency: f32,
     },
-    /// Hail a target entity (e.g. a station). Server responds with a
-    /// `CommsState` update that adds the contact's message to the inbox.
-    /// Sender must hold `Console::Comms`.
-    Hail {
-        target_uuid: String,
-    },
-    /// Select a message in the Comms inbox (opens the chat view).
-    SelectCommsMessage {
-        message_id: String,
-    },
-    /// Choose a response to a received message.
-    RespondToMessage {
-        message_id: String,
-        response_index: usize,
-    },
-    /// Clear all read or orphaned messages from the inbox.
-    ClearComms,
-    /// Display the selected comms message on the viewscreen for the whole crew.
-    /// Pushes `ViewMode::Comms` and stores the message in `OnScreenMessage`.
-    /// Sender must hold `Console::Comms`.
-    ShowOnScreen {
-        message_id: String,
-    },
-    /// Set the shared custom navigation waypoint. Sender must hold
-    /// `Console::Navigation`.
-    ///
-    /// When `source_uuid` is `Some`, the waypoint is anchored to that
-    /// entity: the server treats `x`/`z` as a seed position and overwrites
-    /// them from the entity's live transform every tick. When the parent
-    /// despawns, the waypoint is auto-cleared. When `None`, the waypoint is
-    /// a free position that never moves on its own.
-    SetNavigationWaypoint {
-        x: f32,
-        z: f32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        source_uuid: Option<String>,
-    },
-    /// Clear the shared custom navigation waypoint. Sender must hold
-    /// `Console::Navigation`.
-    ClearNavigationWaypoint,
     /// Future station/system architecture control envelope. Targets one
     /// ship-local system instance by stable `SystemId` and carries a typed
     /// payload for that system kind. Existing runtime handlers ignore this
@@ -1880,22 +1806,37 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             team_idx: *team_idx,
             console: target.clone(),
         },
-        UiAction::Hail { target_uuid } => ClientMessage::Hail {
-            target_uuid: target_uuid.clone(),
+        UiAction::Hail { target_uuid } => ClientMessage::ControlSystem {
+            target: crate::system_registry::comms_system_id(),
+            payload: SystemControlPayload::Hail {
+                target_uuid: target_uuid.clone(),
+            },
         },
-        UiAction::SelectCommsMessage { message_id } => ClientMessage::SelectCommsMessage {
-            message_id: message_id.clone(),
+        UiAction::SelectCommsMessage { message_id } => ClientMessage::ControlSystem {
+            target: crate::system_registry::comms_system_id(),
+            payload: SystemControlPayload::SelectCommsMessage {
+                message_id: message_id.clone(),
+            },
         },
         UiAction::RespondToMessage {
             message_id,
             response_index,
-        } => ClientMessage::RespondToMessage {
-            message_id: message_id.clone(),
-            response_index: *response_index,
+        } => ClientMessage::ControlSystem {
+            target: crate::system_registry::comms_system_id(),
+            payload: SystemControlPayload::RespondToMessage {
+                message_id: message_id.clone(),
+                response_index: *response_index,
+            },
         },
-        UiAction::ClearComms => ClientMessage::ClearComms,
-        UiAction::ShowOnScreen { message_id } => ClientMessage::ShowOnScreen {
-            message_id: message_id.clone(),
+        UiAction::ClearComms => ClientMessage::ControlSystem {
+            target: crate::system_registry::comms_system_id(),
+            payload: SystemControlPayload::ClearComms,
+        },
+        UiAction::ShowOnScreen { message_id } => ClientMessage::ControlSystem {
+            target: crate::system_registry::comms_system_id(),
+            payload: SystemControlPayload::ShowOnScreen {
+                message_id: message_id.clone(),
+            },
         },
         UiAction::SetNavigationChart => ClientMessage::ControlSystem {
             target: crate::system_registry::viewscreen_system_id(),

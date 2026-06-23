@@ -308,7 +308,6 @@ fn handle_set_target(
         .policy_for(&crate::system_registry::tactical_system_id());
     for ev in reader.read() {
         let uuid: &str = match &ev.msg {
-            ClientMessage::SetTarget { uuid } => uuid.as_str(),
             ClientMessage::ControlSystem { target, payload }
                 if target.0 == crate::system_registry::TACTICAL_SYSTEM_ID =>
             {
@@ -974,7 +973,6 @@ fn handle_set_phaser_mode(
         .policy_for(&crate::system_registry::tactical_system_id());
     for ev in reader.read() {
         let mode: PhaserMode = match &ev.msg {
-            ClientMessage::SetPhaserMode { mode } => *mode,
             ClientMessage::ControlSystem { target, payload }
                 if target.0 == crate::system_registry::TACTICAL_SYSTEM_ID =>
             {
@@ -2659,8 +2657,11 @@ station = "tactical"
         push(
             app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         let _ = tick(app);
@@ -2685,8 +2686,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -2716,8 +2720,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -2742,8 +2749,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "no-such-asteroid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "no-such-asteroid".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -2770,8 +2780,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         // Target changes → WeaponsUpdate fires this tick.
@@ -2802,8 +2815,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         // Target changes → WeaponsUpdate fires this tick.
@@ -2914,8 +2930,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         let _ = tick(&mut app);
@@ -3150,7 +3169,10 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget { uuid: "t1".into() },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget { uuid: "t1".into() },
+            },
         );
         let _ = tick(&mut app);
         push(
@@ -3184,7 +3206,10 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget { uuid: "t2".into() },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget { uuid: "t2".into() },
+            },
         );
         let _ = tick(&mut app);
         push(
@@ -3216,8 +3241,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Manual,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: crate::messages::PhaserMode::Manual,
+                },
             },
         );
         tick(&mut app);
@@ -3236,8 +3264,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Auto,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: crate::messages::PhaserMode::Auto,
+                },
             },
         );
         tick(&mut app);
@@ -3245,8 +3276,11 @@ station = "tactical"
         push(
             &mut app,
             "captain",
-            ClientMessage::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Manual,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: crate::messages::PhaserMode::Manual,
+                },
             },
         );
         tick(&mut app);
@@ -3563,8 +3597,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         tick(&mut app);
@@ -3608,8 +3645,11 @@ station = "tactical"
         push(
             &mut app_fast,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         tick(&mut app_fast);
@@ -3646,8 +3686,11 @@ station = "tactical"
         push(
             &mut app_base,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         tick(&mut app_base);
@@ -3860,8 +3903,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "npc-1".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "npc-1".into(),
+                },
             },
         );
         tick(&mut app);
@@ -3906,8 +3952,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "npc-1".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "npc-1".into(),
+                },
             },
         );
         tick(&mut app);
@@ -3998,8 +4047,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "npc-1".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "npc-1".into(),
+                },
             },
         );
         tick(&mut app);
@@ -4051,8 +4103,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "npc-1".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "npc-1".into(),
+                },
             },
         );
         tick(&mut app);
@@ -4120,8 +4175,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "npc-1".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "npc-1".into(),
+                },
             },
         );
         tick(&mut app);
@@ -4233,8 +4291,11 @@ station = "tactical"
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "npc-1".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "npc-1".into(),
+                },
             },
         );
         tick(&mut app);

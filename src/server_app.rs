@@ -6,7 +6,7 @@ use crate::damage::ConsoleHull;
 use crate::lobby::{InboundMessage, LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
-    ViewDirection,
+    SystemControlPayload,
 };
 use crate::shield::ShieldSystem;
 use rand::SeedableRng as _;
@@ -604,7 +604,13 @@ fn handle_set_sensors_target(
     mut outbox: ResMut<SimOutbox>,
 ) {
     for ev in reader.read() {
-        let ClientMessage::SetSensorsTarget { uuid } = &ev.msg else {
+        let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
+            continue;
+        };
+        if target.0 != crate::system_registry::SENSORS_SYSTEM_ID {
+            continue;
+        }
+        let SystemControlPayload::SetScienceTarget { uuid } = payload else {
             continue;
         };
 
@@ -2429,8 +2435,11 @@ mod tests {
         push(
             &mut app,
             "sensors",
-            ClientMessage::SetView {
-                mode: ViewMode::ScienceRadar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::ScienceRadar,
+                },
             },
         );
         tick(&mut app);
@@ -2446,8 +2455,11 @@ mod tests {
         push(
             &mut app,
             "sensors",
-            ClientMessage::SetView {
-                mode: ViewMode::SensorsRadar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::SensorsRadar,
+                },
             },
         );
         tick(&mut app);
@@ -2464,8 +2476,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::SensorsRadar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::SensorsRadar,
+                },
             },
         );
         tick(&mut app);
@@ -2482,8 +2497,11 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetView {
-                mode: ViewMode::SystemChart,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::SystemChart,
+                },
             },
         );
         tick(&mut app);
@@ -2500,8 +2518,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::ScienceRadar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::ScienceRadar,
+                },
             },
         );
         tick(&mut app);
@@ -2518,8 +2539,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::SystemChart,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::SystemChart,
+                },
             },
         );
         tick(&mut app);
@@ -2536,8 +2560,11 @@ mod tests {
         push(
             &mut app,
             "navigation",
-            ClientMessage::SetView {
-                mode: ViewMode::NavigationChart,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::NavigationChart,
+                },
             },
         );
         tick(&mut app);
@@ -2554,8 +2581,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::NavigationChart,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::NavigationChart,
+                },
             },
         );
         tick(&mut app);
@@ -2611,8 +2641,11 @@ mod tests {
         push(
             &mut app,
             "comms",
-            ClientMessage::SetView {
-                mode: ViewMode::Comms,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Comms,
+                },
             },
         );
         tick(&mut app);
@@ -2629,8 +2662,11 @@ mod tests {
         push(
             &mut app,
             "comms",
-            ClientMessage::SetView {
-                mode: ViewMode::Comms,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Comms,
+                },
             },
         );
         tick(&mut app);
@@ -2638,8 +2674,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::Camera(ViewDirection::Aft),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(ViewDirection::Aft),
+                },
             },
         );
         tick(&mut app);
@@ -2656,8 +2695,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::Comms,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Comms,
+                },
             },
         );
         tick(&mut app);
@@ -2674,8 +2716,11 @@ mod tests {
         push(
             &mut app,
             "helm",
-            ClientMessage::SetView {
-                mode: ViewMode::Radar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
             },
         );
         tick(&mut app);
@@ -2693,8 +2738,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::Radar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
             },
         );
         tick(&mut app);
@@ -2711,8 +2759,11 @@ mod tests {
         push(
             &mut app,
             "helm",
-            ClientMessage::SetView {
-                mode: ViewMode::Camera(ViewDirection::Aft),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(ViewDirection::Aft),
+                },
             },
         );
         tick(&mut app);
@@ -2736,8 +2787,11 @@ mod tests {
         push(
             &mut app,
             "helm",
-            ClientMessage::SetView {
-                mode: ViewMode::Radar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
             },
         );
         tick(&mut app);
@@ -3010,8 +3064,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3043,8 +3100,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3069,8 +3129,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "no-such-asteroid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "no-such-asteroid".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3099,8 +3162,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         // Target changes → WeaponsUpdate fires this tick.
@@ -3134,8 +3200,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         // Target changes → WeaponsUpdate fires this tick.
@@ -3167,8 +3236,11 @@ mod tests {
         push(
             app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         let _ = tick(app);
@@ -3277,8 +3349,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         let _ = tick(&mut app);
@@ -3531,7 +3606,10 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget { uuid: "t1".into() },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget { uuid: "t1".into() },
+            },
         );
         let _ = tick(&mut app);
         push(
@@ -3570,7 +3648,10 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget { uuid: "t2".into() },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget { uuid: "t2".into() },
+            },
         );
         let _ = tick(&mut app);
         push(
@@ -3762,8 +3843,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Manual,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: crate::messages::PhaserMode::Manual,
+                },
             },
         );
         tick(&mut app);
@@ -3783,8 +3867,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Auto,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: crate::messages::PhaserMode::Auto,
+                },
             },
         );
         tick(&mut app);
@@ -3792,8 +3879,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Manual,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: crate::messages::PhaserMode::Manual,
+                },
             },
         );
         tick(&mut app);
@@ -3870,8 +3960,11 @@ mod tests {
         push(
             &mut app,
             "sensors",
-            ClientMessage::SetSensorsTarget {
-                uuid: "asteroid-99".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::sensors_system_id(),
+                payload: SystemControlPayload::SetScienceTarget {
+                    uuid: "asteroid-99".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3904,8 +3997,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetSensorsTarget {
-                uuid: "asteroid-99".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::sensors_system_id(),
+                payload: SystemControlPayload::SetScienceTarget {
+                    uuid: "asteroid-99".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -3941,8 +4037,11 @@ mod tests {
         push(
             &mut app,
             "sensors",
-            ClientMessage::SetSensorsTarget {
-                uuid: "asteroid-99".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::sensors_system_id(),
+                payload: SystemControlPayload::SetScienceTarget {
+                    uuid: "asteroid-99".into(),
+                },
             },
         );
         let out = tick(&mut app);
@@ -4087,8 +4186,11 @@ mod tests {
         push(
             &mut app,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         tick(&mut app);
@@ -4149,8 +4251,11 @@ mod tests {
         push(
             &mut app_fast,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         tick(&mut app_fast);
@@ -4189,8 +4294,11 @@ mod tests {
         push(
             &mut app_base,
             "weapons",
-            ClientMessage::SetTarget {
-                uuid: "target-uuid".into(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
             },
         );
         tick(&mut app_base);

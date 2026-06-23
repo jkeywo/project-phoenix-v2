@@ -73,7 +73,6 @@ fn handle_toggle_red_alert(
 
 fn is_red_alert_toggle(msg: &ClientMessage) -> bool {
     match msg {
-        ClientMessage::ToggleRedAlert => true,
         ClientMessage::ControlSystem { target, payload } => {
             target.0 == crate::system_registry::RED_ALERT_SYSTEM_ID
                 && matches!(payload, SystemControlPayload::ToggleRedAlert)
@@ -84,10 +83,6 @@ fn is_red_alert_toggle(msg: &ClientMessage) -> bool {
 
 fn view_request_from_message(msg: &ClientMessage) -> Option<(SystemId, ViewMode)> {
     match msg {
-        ClientMessage::SetView { mode } => Some((
-            crate::ship::viewscreen::source_system_for_view_mode(mode),
-            mode.clone(),
-        )),
         ClientMessage::ControlSystem { target, payload }
             if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID =>
         {
@@ -399,7 +394,10 @@ mod tests {
             },
         );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::ToggleRedAlert);
+        push(&mut app, "captain", ClientMessage::ControlSystem {
+            target: crate::system_registry::red_alert_system_id(),
+            payload: SystemControlPayload::ToggleRedAlert,
+        });
         tick(&mut app);
         assert!(app.world().resource::<ShipState>().red_alert());
     }
@@ -417,7 +415,10 @@ mod tests {
             },
         );
         tick(&mut app);
-        push(&mut app, "crew", ClientMessage::ToggleRedAlert);
+        push(&mut app, "crew", ClientMessage::ControlSystem {
+            target: crate::system_registry::red_alert_system_id(),
+            payload: SystemControlPayload::ToggleRedAlert,
+        });
         tick(&mut app);
         assert!(!app.world().resource::<ShipState>().red_alert());
     }
@@ -426,7 +427,10 @@ mod tests {
     fn captain_toggle_red_alert_works() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::ToggleRedAlert);
+        push(&mut app, "captain", ClientMessage::ControlSystem {
+            target: crate::system_registry::red_alert_system_id(),
+            payload: SystemControlPayload::ToggleRedAlert,
+        });
         tick(&mut app);
         assert!(app.world().resource::<ShipState>().red_alert());
     }
@@ -507,10 +511,16 @@ mod tests {
     fn captain_toggle_red_alert_twice_returns_to_off() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::ToggleRedAlert);
+        push(&mut app, "captain", ClientMessage::ControlSystem {
+            target: crate::system_registry::red_alert_system_id(),
+            payload: SystemControlPayload::ToggleRedAlert,
+        });
         tick(&mut app);
         assert!(app.world().resource::<ShipState>().red_alert());
-        push(&mut app, "captain", ClientMessage::ToggleRedAlert);
+        push(&mut app, "captain", ClientMessage::ControlSystem {
+            target: crate::system_registry::red_alert_system_id(),
+            payload: SystemControlPayload::ToggleRedAlert,
+        });
         tick(&mut app);
         assert!(!app.world().resource::<ShipState>().red_alert());
     }
@@ -542,8 +552,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::Camera(ViewDirection::Starboard),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(ViewDirection::Starboard),
+                },
             },
         );
         tick(&mut app);
@@ -569,8 +582,11 @@ mod tests {
         push(
             &mut app,
             "crew",
-            ClientMessage::SetView {
-                mode: ViewMode::Camera(ViewDirection::Port),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(ViewDirection::Port),
+                },
             },
         );
         tick(&mut app);
@@ -587,8 +603,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::Camera(ViewDirection::Aft),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(ViewDirection::Aft),
+                },
             },
         );
         tick(&mut app);
@@ -632,8 +651,11 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::SetView {
-                mode: ViewMode::Camera(ViewDirection::Aft),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(ViewDirection::Aft),
+                },
             },
         );
         tick(&mut app);
@@ -645,8 +667,11 @@ mod tests {
         push(
             &mut app,
             "helm",
-            ClientMessage::SetView {
-                mode: ViewMode::Radar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
             },
         );
         tick(&mut app);
@@ -657,8 +682,11 @@ mod tests {
         push(
             &mut app,
             "helm",
-            ClientMessage::SetView {
-                mode: ViewMode::Radar,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
             },
         );
         tick(&mut app);

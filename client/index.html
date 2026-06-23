@@ -819,8 +819,12 @@
     // one desktop without colliding on a single shared token.
     let myToken = null;
 
-    let myName = localStorage.getItem('player-name') || randomName();
-    localStorage.setItem('player-name', myName);
+    // Display name is per-tab (sessionStorage), not per-origin (localStorage):
+    // several clients on one desktop must not all default to the same name, or
+    // they look like one another in the lobby. Falls back to a fresh random
+    // name per tab. (Identity is the token, not the name — see myToken.)
+    let myName = sessionStorage.getItem('player-name') || randomName();
+    sessionStorage.setItem('player-name', myName);
 
     // ── Complexity preset persistence ──────────────────────────
     // JSON map of console name → preset name, persisted from previous sessions.
@@ -1057,11 +1061,11 @@
         if (inGame) tabRoot.appendChild(titleEl);
       }
 
-      // Inline help area: when in-game, render help sections for all owned
-      // consoles under the tab bar. Hidden in lobby.
+      // Inline help area: shown in lobby when the player has a station
+      // selected; hidden in-game (the "?" modal takes over there).
       const helpArea = $('console-help-area');
       if (helpArea) {
-        if (inGame && mine.length > 0) {
+        if (!inGame && mine.length > 0) {
           if (typeof window.renderInlineHelp === 'function') {
             window.renderInlineHelp(helpArea, mine);
           }
@@ -1080,9 +1084,8 @@
       if (!list) return;
       list.innerHTML = '';
       const myPlayer = me(s);
-      const myPlayerName = myPlayer ? myPlayer.name : myName;
       for (const st of (s.stations || [])) {
-        const isMine = st.holder_name && myPlayer && st.holder_name === myPlayerName;
+        const isMine = !!st.holder_token && st.holder_token === myToken;
         const row = document.createElement('div');
         row.className = 'station-row'
           + (isMine ? ' mine' : '')
@@ -1146,7 +1149,7 @@
       const detail = document.getElementById('detail-panel');
       if (detail) {
         const myStation = myPlayer && myPlayer.consoles && myPlayer.consoles.length > 0
-          ? s.stations.find(st => st.holder_name === myPlayerName) : null;
+          ? s.stations.find(st => st.holder_token === myToken) : null;
         if (myStation) {
           detail.className = 'active';
           detail.querySelector('.detail-station-name').textContent = myStation.name;
@@ -1207,7 +1210,7 @@
         } else if (myPlayer.ready) {
           statusLine.textContent = 'Waiting for the rest of the crew…';
         } else {
-          const myStation = s.stations.find(st => st.holder_name === myPlayerName);
+          const myStation = s.stations.find(st => st.holder_token === myToken);
           statusLine.textContent = myStation
             ? 'Standing by at ' + myStation.name + ' — press READY when ready'
             : 'Select a station to join the crew';
@@ -1230,6 +1233,10 @@
           rank: def.rank || '',
           consoles: def.consoles || [],
           holder_name: holder ? holder.name : null,
+          // Ownership is by token, not name — two clients on one desktop may
+          // share a display name, so "is this station mine?" must compare the
+          // (unique) session token. holder_name is display-only.
+          holder_token: holder ? holder.token : null,
         };
       });
       state.allFilled = state.stations.length > 0 && state.stations.every(st => st.holder_name);
@@ -1493,7 +1500,7 @@
       myName = val;
       clearTimeout(nameTimer);
       nameTimer = setTimeout(() => {
-        localStorage.setItem('player-name', myName);
+        sessionStorage.setItem('player-name', myName);
         send('SetName', { name: myName });
       }, 500);
     });
@@ -2062,11 +2069,17 @@
           return base;
         }
 
-        // Resolve this tab's session token now that gui/session-token.js has
-        // loaded (it is deferred, so it was not available at parse time). Each
-        // tab gets its own token — this is what allows several console tabs on
-        // one desktop to connect as distinct players. The inline branch is a
-        // last-ditch fallback for the rare case the module failed to load.
+        console.log('[PeerJS] fetching ICE servers…');
+        const iceServers = await getIceServers();
+
+        // Resolve this tab's session token. Done HERE — after the first await —
+        // not in this IIFE's synchronous prefix, because gui/session-token.js is
+        // a deferred module: at parse time window.installSessionToken does not
+        // exist yet, so resolving earlier would always hit the fallback. After
+        // the await, parsing is complete and the module has run. Each tab gets
+        // its own token, which is what lets several clients on one desktop
+        // connect as distinct players. The inline branch is a last-ditch
+        // fallback for the rare case the module genuinely failed to load.
         myToken = (typeof window.installSessionToken === 'function')
           ? window.installSessionToken()
           : (() => {
@@ -2078,9 +2091,7 @@
               }
               return t;
             })();
-
-        console.log('[PeerJS] fetching ICE servers…');
-        const iceServers = await getIceServers();
+        console.log(`[client] session token ${myToken.slice(0, 8)}…`);
         console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
         console.log(`[PeerJS] connecting to host peer ID: ${hostPeerId}`);
         const clientPeer = new Peer({ config: { iceServers } });

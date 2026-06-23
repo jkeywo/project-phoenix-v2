@@ -742,8 +742,21 @@ fn handle_hail(
     sessions: Res<Sessions>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
+    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
+        .unwrap_or(crate::control_source::ControlTickPolicy {
+            accept_human_input: true,
+            operate_ai: false,
+            coordinate: true,
+        });
+
     for ev in reader.read() {
+        if !policy.accept_human_input {
+            continue;
+        }
         // Gate: sender must hold Console::Comms.
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
             continue;
@@ -1089,8 +1102,21 @@ fn handle_respond_to_message(
     base_world_config: Option<Res<crate::world::config::WorldConfig>>,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
+    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
+        .unwrap_or(crate::control_source::ControlTickPolicy {
+            accept_human_input: true,
+            operate_ai: false,
+            coordinate: true,
+        });
+
     for ev in reader.read() {
+        if !policy.accept_human_input {
+            continue;
+        }
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
             continue;
         }
@@ -1726,8 +1752,21 @@ fn handle_clear_comms(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     mut inbox: ResMut<CommsInboxRes>,
+    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
+        .unwrap_or(crate::control_source::ControlTickPolicy {
+            accept_human_input: true,
+            operate_ai: false,
+            coordinate: true,
+        });
+
     for ev in reader.read() {
+        if !policy.accept_human_input {
+            continue;
+        }
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
             continue;
         }
@@ -1748,8 +1787,21 @@ fn handle_show_on_screen(
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
     mut ship: ResMut<ShipState>,
+    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
+    let policy = control_sources
+        .as_deref()
+        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
+        .unwrap_or(crate::control_source::ControlTickPolicy {
+            accept_human_input: true,
+            operate_ai: false,
+            coordinate: true,
+        });
+
     for ev in reader.read() {
+        if !policy.accept_human_input {
+            continue;
+        }
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
             continue;
         }
@@ -3571,6 +3623,48 @@ mod tests {
         assert!(
             !comms_state_with_messages,
             "non-Comms player hail must be ignored"
+        );
+    }
+
+    #[test]
+    fn hail_blocked_when_comms_system_ai_controlled() {
+        let station_uuid = "station-uuid-ai-block";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        let _ = tick(&mut app);
+
+        // Set comms system to AI control (blocks human input).
+        {
+            let mut sources = app
+                .world_mut()
+                .get_resource_or_insert_with(crate::ship_plugin::ShipSystemControlSources::default);
+            sources
+                .0
+                .set(
+                    crate::system_registry::comms_system_id(),
+                    crate::control_source::ControlSource::Ai,
+                );
+        }
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
+        let out = tick(&mut app);
+
+        let comms_state_with_messages = out.iter().any(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                !messages.is_empty()
+            } else {
+                false
+            }
+        });
+        assert!(
+            !comms_state_with_messages,
+            "hail must be blocked when comms system is AI-controlled"
         );
     }
 

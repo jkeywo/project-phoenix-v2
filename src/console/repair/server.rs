@@ -226,7 +226,6 @@ mod tests {
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::shield::ShieldSystem;
-    use crate::ship::system_registry::REPAIR_KIND;
     use crate::ship_plugin::ShipSystemControlSources;
     use crate::simulation::SimOutbox;
     use crate::simulation::{ShipImpulse, ShipShields};

@@ -1673,6 +1673,7 @@
             state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
             state.navigationWaypoint = window.simState.navigationWaypoint;
             state.controlSources = window.simState.controlSources || {};
+            state.stationRatings = window.simState.stationRatings || {};
             // Push the pre-seeded repair teams so the Repair console renders its
             // rows immediately on (re)connect, before the first RepairState
             // broadcast (no-op unless Repair is the active console).
@@ -2034,8 +2035,14 @@
           state.phase = 'GameOver';
           break;
         case 'RatingChanged': {
-          if (window.simState) state.controlSources = window.simState.controlSources || {};
-          // Fall through to re-render captain console if active
+          // sim-state.js already updated window.simState.stationRatings with the
+          // new rating before this handler fires. Mirror it immediately so the
+          // badge re-renders from the fresh data rather than stale controlSources
+          // that will only update on the next SimState tick (up to 100 ms later).
+          if (window.simState) state.stationRatings = window.simState.stationRatings || {};
+          // Always push the captain console state immediately; the captain badge
+          // reads controlSources which lags, but stationRatings is already fresh.
+          pushCaptainConsoleState();
           break;
         }
         case 'ObjectiveSummary':

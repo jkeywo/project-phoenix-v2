@@ -1642,6 +1642,39 @@ mod tests {
     }
 
     #[test]
+    fn welcome_with_station_ratings_round_trips() {
+        // Verify that a Welcome message with a populated station_ratings map
+        // survives a codec round-trip — the field was always wired in the server
+        // (populated from ActiveStationRatings on Welcome send), but no test
+        // previously exercised a non-empty map (PRD #517 A2 gap, issue #522).
+        use crate::messages::StationId;
+        let mut ratings = HashMap::new();
+        ratings.insert(StationId("captain".into()), "Assisted".into());
+        ratings.insert(StationId("tactical".into()), "FullAuto".into());
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config: ShipClientConfig::default(),
+            station_ratings: ratings,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+        match msg {
+            ServerMessage::Welcome { station_ratings, .. } => {
+                assert_eq!(
+                    station_ratings.get(&StationId("captain".into())).map(|s| s.as_str()),
+                    Some("Assisted")
+                );
+                assert_eq!(
+                    station_ratings.get(&StationId("tactical".into())).map(|s| s.as_str()),
+                    Some("FullAuto")
+                );
+            }
+            _ => panic!("expected Welcome"),
+        }
+    }
+
+    #[test]
     fn client_set_power_round_trips() {
         let msg = ClientMessage::ControlSystem {
             target: crate::system_registry::power_system_id(),

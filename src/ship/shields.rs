@@ -357,10 +357,10 @@ mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::{ClientMessage, Console, ServerMessage, *};
+    use crate::messages::{ClientMessage, Console, *};
     use crate::ship::control_source::ControlSource;
-    use crate::ship_plugin::CoordinationEnqueue;
     use crate::shield::ShieldSystem;
+    use crate::ship_plugin::CoordinationEnqueue;
     use crate::simulation::{
         LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
         ShipImpulse, ShipShields, SimOutbox,

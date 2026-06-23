@@ -320,6 +320,7 @@
           <span class="sep">·</span>
           <span id="footer-alert" style="color:var(--ink-faint);">STANDARD</span>
           <span style="flex:1"></span>
+          <span id="viewscreen-auto-badge" class="auto-badge" hidden data-system-id="viewscreen" data-auto="false" style="margin-right:6px;">AUTO</span>
           <span id="footer-right" style="color:var(--ink-faint);">—</span>
         </footer>
 
@@ -329,7 +330,7 @@
 
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
-    import { renderRedAlertFragment } from './system-registry.js';
+    import { renderRedAlertFragment, renderViewscreenFragment } from './system-registry.js';
 
     // ── State ────────────────────────────────────────────────────────────
     var _state         = null;
@@ -451,6 +452,7 @@
       var raLabel = document.getElementById('alert-label');
       if (raLabel) raLabel.textContent = s.red_alert ? 'ALERT ACTIVE' : 'RED ALERT';
       renderRedAlertFragment(document, s);
+      renderViewscreenFragment(document, s);
 
       // ── Footer ticker ───────────────────────────────────────────────────
       var footerEl = document.getElementById('footer-ticker');

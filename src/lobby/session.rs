@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use crate::messages::{Console, Player};
+use crate::messages::{Console, Player, StationId};
 
 #[derive(Debug)]
 pub enum RegisterError {
@@ -88,6 +88,8 @@ impl SessionManager {
             consoles: Vec::new(),
             connected: true,
             ready: false,
+            station: None,
+            last_rating: None,
         });
         Ok(self.players.last().unwrap())
     }
@@ -176,6 +178,21 @@ impl SessionManager {
     pub fn clear_consoles(&mut self, token: &str) {
         if let Some(idx) = self.idx(token) {
             self.players[idx].consoles.clear();
+        }
+    }
+
+    /// C1: Return the stable station ID currently held by this player.
+    pub fn station_for_token(&self, token: &str) -> Option<&StationId> {
+        self.players
+            .iter()
+            .find(|p| p.token == token)
+            .and_then(|p| p.station.as_ref())
+    }
+
+    /// C1: Set (or clear) the stable station ID for a player.
+    pub fn set_station(&mut self, token: &str, station: Option<StationId>) {
+        if let Some(idx) = self.idx(token) {
+            self.players[idx].station = station;
         }
     }
 

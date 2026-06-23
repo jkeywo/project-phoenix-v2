@@ -124,6 +124,7 @@ pub fn process_message(
                                     token: id_token.clone(),
                                     station: None,
                                     consoles: vec![],
+                                    station_id: None,
                                 },
                             ));
                         }
@@ -180,6 +181,7 @@ pub fn process_message(
                         token: token.to_string(),
                         station: station_name,
                         consoles,
+                        station_id: None,
                     },
                 ));
                 return LobbyHandlerResult {
@@ -231,12 +233,14 @@ pub fn process_message(
             let had_station = !sender_consoles.is_empty();
             if had_station {
                 sessions.clear_consoles(token);
+                sessions.set_station(token, None);
                 outbound.push((
                     Target::All,
                     ServerMessage::StationAssigned {
                         token: token.to_string(),
                         station: None,
                         consoles: vec![],
+                        station_id: None,
                     },
                 ));
             }
@@ -260,12 +264,14 @@ pub fn process_message(
             if toggle_failed || actual_consoles != station_def.consoles {
                 // Partial assignment — roll back so wire == truth.
                 sessions.clear_consoles(token);
+                sessions.set_station(token, None);
                 outbound.push((
                     Target::All,
                     ServerMessage::StationAssigned {
                         token: token.to_string(),
                         station: None,
                         consoles: vec![],
+                        station_id: None,
                     },
                 ));
                 return LobbyHandlerResult {
@@ -273,18 +279,21 @@ pub fn process_message(
                     outbound,
                 };
             }
+            sessions.set_station(token, Some(station_def.id.clone()));
             outbound.push((
                 Target::All,
                 ServerMessage::StationAssigned {
                     token: token.to_string(),
                     station: Some(station.clone()),
                     consoles: actual_consoles,
+                    station_id: Some(station_def.id.clone()),
                 },
             ));
         }
         ClientMessage::ReleaseStation => {
             // Stub: release all consoles for this player.
             sessions.clear_consoles(token);
+            sessions.set_station(token, None);
             // Push the releaser to the back of the spectator queue.
             if !ship_stations.stations.is_empty() {
                 sessions.push_spectator(token.to_string());
@@ -295,6 +304,7 @@ pub fn process_message(
                     token: token.to_string(),
                     station: None,
                     consoles: vec![],
+                    station_id: None,
                 },
             ));
         }
@@ -387,7 +397,7 @@ pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{EntitySnapshot, WorldData};
+    use crate::messages::{EntitySnapshot, StationId, WorldData};
     use crate::stations_config::{ShipStations, StationDef};
 
     fn sessions_with(token: &str, name: &str) -> SessionManager {
@@ -567,6 +577,7 @@ mod tests {
         ShipStations {
             stations: vec![
                 StationDef {
+                    id: StationId("captain".into()),
                     name: "Captain".into(),
                     description: "Command the bridge.".into(),
                     consoles: vec![Console::CaptainChair],
@@ -574,6 +585,7 @@ mod tests {
                     short_code: "CPT".into(),
                 },
                 StationDef {
+                    id: StationId("helm".into()),
                     name: "Helm".into(),
                     description: "Pilot the ship.".into(),
                     consoles: vec![Console::Helm],
@@ -581,6 +593,7 @@ mod tests {
                     short_code: "HLM".into(),
                 },
                 StationDef {
+                    id: StationId("tactical".into()),
                     name: "Tactical".into(),
                     description: "Manage weapons.".into(),
                     consoles: vec![Console::Tactical],
@@ -588,6 +601,7 @@ mod tests {
                     short_code: "TAC".into(),
                 },
                 StationDef {
+                    id: StationId("repair".into()),
                     name: "Repair".into(),
                     description: "Repair systems.".into(),
                     consoles: vec![Console::Repair],
@@ -595,6 +609,7 @@ mod tests {
                     short_code: "ENG".into(),
                 },
                 StationDef {
+                    id: StationId("sensors".into()),
                     name: "Sensors".into(),
                     description: "Monitor sensors.".into(),
                     consoles: vec![Console::Sensors],
@@ -602,6 +617,7 @@ mod tests {
                     short_code: "SCI".into(),
                 },
                 StationDef {
+                    id: StationId("shields".into()),
                     name: "Shields".into(),
                     description: "Manage shields.".into(),
                     consoles: vec![Console::Shields],
@@ -609,6 +625,7 @@ mod tests {
                     short_code: "SHD".into(),
                 },
                 StationDef {
+                    id: StationId("navigation".into()),
                     name: "Navigation".into(),
                     description: "Plot course.".into(),
                     consoles: vec![Console::Navigation],
@@ -616,6 +633,7 @@ mod tests {
                     short_code: "NAV".into(),
                 },
                 StationDef {
+                    id: StationId("power".into()),
                     name: "Power".into(),
                     description: "Manage power.".into(),
                     consoles: vec![Console::Power],
@@ -623,6 +641,7 @@ mod tests {
                     short_code: "PWR".into(),
                 },
                 StationDef {
+                    id: StationId("comms".into()),
                     name: "Comms".into(),
                     description: "Hail contacts.".into(),
                     consoles: vec![Console::Comms],
@@ -694,6 +713,7 @@ mod tests {
                 token,
                 station,
                 consoles,
+                ..
             } if token == "t1" => Some((station.clone(), consoles.clone())),
             _ => None,
         });
@@ -712,6 +732,69 @@ mod tests {
         assert!(result.outbound.iter().any(|(t, m)| {
             matches!(t, Target::All) && matches!(m, ServerMessage::StationAssigned { .. })
         }));
+    }
+
+    #[test]
+    fn select_station_sets_player_station_field() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let msg = ClientMessage::SelectStation {
+            station: "Captain".into(),
+        };
+        pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+        let station_id = sessions.station_for_token("t1");
+        assert_eq!(
+            station_id,
+            Some(&StationId("captain".into())),
+            "Player.station must be set to the StationId after SelectStation"
+        );
+    }
+
+    #[test]
+    fn release_station_clears_player_station_field() {
+        let mut sessions = sessions_with("t1", "Alice");
+        pm_stations(
+            "t1",
+            &ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        pm_stations(
+            "t1",
+            &ClientMessage::ReleaseStation,
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            None,
+            "Player.station must be cleared after ReleaseStation"
+        );
+    }
+
+    #[test]
+    fn select_station_includes_station_id_in_broadcast() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let msg = ClientMessage::SelectStation {
+            station: "Helm".into(),
+        };
+        let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+        let station_id = result.outbound.iter().find_map(|(_, m)| match m {
+            ServerMessage::StationAssigned {
+                token,
+                station_id,
+                ..
+            } if token == "t1" => station_id.as_ref(),
+            _ => None,
+        });
+        assert_eq!(
+            station_id,
+            Some(&StationId("helm".into())),
+            "StationAssigned must carry station_id after SelectStation"
+        );
     }
 
     // ── SelectStation: own station → no-op ────────────────────────────────
@@ -853,6 +936,7 @@ mod tests {
                     token,
                     station,
                     consoles,
+                    ..
                 } if token == "t1" => Some((station.clone(), consoles.clone())),
                 _ => None,
             })
@@ -895,7 +979,7 @@ mod tests {
             None,
         );
         let found = result.outbound.iter().any(|(_, m)| matches!(m,
-            ServerMessage::StationAssigned { token, station: None, consoles } if token == "t1" && consoles.is_empty()
+            ServerMessage::StationAssigned { token, station: None, consoles, .. } if token == "t1" && consoles.is_empty()
         ));
         assert!(
             found,
@@ -1023,7 +1107,7 @@ mod tests {
         // Should receive StationAssigned with station=None
         let got_spectator_assigned = result.outbound.iter().any(|(target, m)| {
             matches!(target, Target::Token(t) if t == "t10")
-                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles } if token == "t10" && consoles.is_empty())
+                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles, .. } if token == "t10" && consoles.is_empty())
         });
         assert!(
             got_spectator_assigned,
@@ -1155,6 +1239,7 @@ mod tests {
                 token,
                 station: Some(name),
                 consoles,
+                ..
             } if token == "t10" => Some((name.clone(), consoles.clone())),
             _ => None,
         });
@@ -1422,7 +1507,7 @@ tags = ["player"]
             "handler must not broadcast a station the session does not hold"
         );
         let rolled_back = result.outbound.iter().any(|(_, m)| matches!(m,
-            ServerMessage::StationAssigned { token, station: None, consoles } if token == "t1" && consoles.is_empty()
+            ServerMessage::StationAssigned { token, station: None, consoles, .. } if token == "t1" && consoles.is_empty()
         ));
         assert!(
             rolled_back,

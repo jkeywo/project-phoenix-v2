@@ -111,6 +111,8 @@ mod tests {
             consoles: vec![],
             connected: true,
             ready: false,
+            station: None,
+            last_rating: None,
         }
     }
 
@@ -1336,10 +1338,12 @@ mod tests {
 
     #[test]
     fn server_station_assigned_with_station_round_trips() {
+        use crate::messages::StationId;
         let msg = ServerMessage::StationAssigned {
             token: "tok".into(),
             station: Some("Captain".into()),
             consoles: vec![Console::CaptainChair],
+            station_id: Some(StationId("captain".into())),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -1351,6 +1355,7 @@ mod tests {
             token: "tok".into(),
             station: None,
             consoles: vec![],
+            station_id: None,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -1358,10 +1363,12 @@ mod tests {
 
     #[test]
     fn welcome_with_ship_stations_round_trips() {
+        use crate::messages::StationId;
         use crate::stations_config::{ShipStations, StationDef};
         use std::collections::HashMap;
         let ship_stations = ShipStations {
             stations: vec![StationDef {
+                id: StationId("captain".into()),
                 name: "Captain".into(),
                 description: "The big chair".into(),
                 consoles: vec![Console::CaptainChair],

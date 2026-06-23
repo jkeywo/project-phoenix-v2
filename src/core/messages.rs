@@ -99,7 +99,7 @@ pub type TorpedoTube = String;
 /// Station ids are ship-local authoring keys, not player tokens and not world
 /// entity UUIDs. They are intended to replace console bundles as the wire
 /// addressing unit for station ownership in the station/system architecture.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct StationId(pub String);
 
 /// Stable, designer-authored identifier for one capability instance on a ship.
@@ -450,6 +450,12 @@ pub struct Player {
     /// Used in the per-player Ready flow replacing captain Engage.
     #[serde(default)]
     pub ready: bool,
+    /// C1: stable station ID — primary addressing unit, replaces consoles over time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station: Option<StationId>,
+    /// Last rating active for this player's station (persists across disconnect for backfill).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rating: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1099,6 +1105,9 @@ pub enum ServerMessage {
         token: String,
         station: Option<String>,
         consoles: Vec<Console>,
+        /// C1: stable station ID carried alongside the legacy name string.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        station_id: Option<StationId>,
     },
     ReadyChanged {
         token: String,

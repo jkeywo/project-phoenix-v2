@@ -578,17 +578,22 @@ pub fn handle_station_rating_change(
             None => continue,
         };
 
-        // Determine which station the player holds via their consoles
-        let mut station_id: Option<StationId> = None;
-        for console in &player.consoles {
-            if let Some(station) = ship_config
-                .0
-                .station_for_console(console.station_console_id())
-            {
-                station_id = Some(station.id.clone());
-                break;
+        // C1 shim: prefer Player.station; fall back to console-based lookup.
+        let station_id: Option<StationId> = if let Some(sid) = &player.station {
+            Some(sid.clone())
+        } else {
+            let mut found = None;
+            for console in &player.consoles {
+                if let Some(station) = ship_config
+                    .0
+                    .station_for_console(console.station_console_id())
+                {
+                    found = Some(station.id.clone());
+                    break;
+                }
             }
-        }
+            found
+        };
         let Some(station_id) = station_id else {
             continue;
         };

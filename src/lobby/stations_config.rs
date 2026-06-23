@@ -1,4 +1,4 @@
-use crate::messages::Console;
+use crate::messages::{Console, StationId};
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 /// A single station in the fixed roster.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StationDef {
+    /// Stable designer-authored id (mirrors `StationConfig.id`).
+    #[serde(default)]
+    pub id: StationId,
     pub name: String,
     pub description: String,
     pub consoles: Vec<Console>,
@@ -40,6 +43,7 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
         .filter_map(|sc| {
             let console = Console::from_console_id(&sc.console)?;
             Some(StationDef {
+                id: sc.id.clone(),
                 name: sc.name.clone(),
                 description: sc.description.clone(),
                 consoles: vec![console],

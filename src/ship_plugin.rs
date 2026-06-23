@@ -776,25 +776,14 @@ pub fn process_coordination_lag(
                 if let Some(station_id) = station_opt {
                     if let Some(station) = ship_config.0.station(station_id) {
                         let console_id = &station.console;
-                        let token: Option<String> = [
-                            crate::messages::Console::CaptainChair,
-                            crate::messages::Console::Helm,
-                            crate::messages::Console::Tactical,
-                            crate::messages::Console::Repair,
-                            crate::messages::Console::Sensors,
-                            crate::messages::Console::Shields,
-                            crate::messages::Console::Navigation,
-                            crate::messages::Console::Power,
-                            crate::messages::Console::Comms,
-                        ]
-                        .iter()
-                        .find(|c| c.station_console_id() == console_id)
-                        .and_then(|console| {
-                            sessions
-                                .0
-                                .console_holder(console.clone())
-                                .map(|t| t.to_string())
-                        });
+                        let token: Option<String> =
+                            crate::messages::Console::from_console_id(console_id)
+                                .and_then(|console| {
+                                    sessions
+                                        .0
+                                        .console_holder(console)
+                                        .map(|t| t.to_string())
+                                });
 
                         if let Some(token) = token {
                             outbox.0.push((

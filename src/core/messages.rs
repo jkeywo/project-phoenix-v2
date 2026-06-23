@@ -245,6 +245,41 @@ mod view_mode_tests {
     }
 }
 
+#[cfg(test)]
+mod console_id_tests {
+    use super::*;
+
+    #[test]
+    fn station_console_id_round_trips() {
+        let consoles = [
+            Console::CaptainChair,
+            Console::Helm,
+            Console::Tactical,
+            Console::Repair,
+            Console::Sensors,
+            Console::Shields,
+            Console::Navigation,
+            Console::Power,
+            Console::Comms,
+        ];
+        for console in &consoles {
+            assert_eq!(
+                Console::from_console_id(console.station_console_id()),
+                Some(console.clone()),
+                "round-trip failed for {:?}",
+                console
+            );
+        }
+    }
+
+    #[test]
+    fn from_console_id_rejects_unknown() {
+        assert_eq!(Console::from_console_id("unknown"), None);
+        assert_eq!(Console::from_console_id(""), None);
+        assert_eq!(Console::from_console_id("HELM"), None);
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Console {
     CaptainChair,
@@ -291,6 +326,24 @@ impl Console {
             Console::Navigation => "navigation",
             Console::Power => "power",
             Console::Comms => "comms",
+        }
+    }
+
+    /// Resolves a station console id string back to the matching [`Console`] variant.
+    /// Returns `None` if `id` does not match any known console.
+    /// Symmetric with [`Console::station_console_id`].
+    pub fn from_console_id(id: &str) -> Option<Console> {
+        match id {
+            "captain" => Some(Console::CaptainChair),
+            "helm" => Some(Console::Helm),
+            "tactical" => Some(Console::Tactical),
+            "repair" => Some(Console::Repair),
+            "sensors" => Some(Console::Sensors),
+            "shields" => Some(Console::Shields),
+            "navigation" => Some(Console::Navigation),
+            "power" => Some(Console::Power),
+            "comms" => Some(Console::Comms),
+            _ => None,
         }
     }
 

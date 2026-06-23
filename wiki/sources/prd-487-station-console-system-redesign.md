@@ -4,7 +4,7 @@ type: source
 tags: [prd, stations, systems, consoles, ai, damage, power, wire]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/487
 status: open
-updated: 2026-06-22
+updated: 2026-06-23
 ---
 
 # PRD #487 - Station / Console / System architecture redesign
@@ -65,3 +65,5 @@ composition.
 - [ADR-0002](../../docs/adr/0002-station-system-ship-config-contract.md)
 - [Console](../entities/console.md)
 - [player_ship.toml](./player_ship_toml.md)
+- [PRD #517 - Consistency cleanup for the 9 coarse systems](./prd-517-consistency-cleanup.md)
+- [Issue #523 - Console ID lookup](./issue-523-console-id-lookup.md)

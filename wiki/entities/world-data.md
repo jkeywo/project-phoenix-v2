@@ -3,7 +3,7 @@ title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot]
 sources: [src/world/config.rs, src/world/server.rs, src/server/renderer.rs, src/entities/config.rs, assets/worlds/default.toml]
-updated: 2026-05-22
+updated: 2026-06-24
 ---
 
 # World Data
@@ -65,9 +65,10 @@ Optional top-level `[ambient_light]` block on the world TOML. Applied by the `sp
 
 1. **Startup:** Trunk fires `wasm_load_world`; `parse_world` populates the `WORLD_CONFIG` thread-local.
 2. **`WorldPlugin` startup chain:** `insert_world_config_resource` → `spawn_world_entities` → `init_world_runtime`. Fallback `setup_fallback_world` runs only if no `WorldConfig` resource exists.
-3. **`spawn_world_ambient_light` (`PostStartup`)** reads `WorldConfig.ambient_light` and inserts the `AmbientLight` resource.
-4. **`WorldSetup` broadcast** carries the per-instance entity snapshots to clients on `GameStart` and re-broadcasts via `Welcome` to late joiners.
-5. **For the rest of the session:** anchors and ambient light are immutable. Entities can be destroyed (asteroids, hull-zero stations); triggers and objectives mutate via the wire.
+3. **Renderer backdrop:** `RendererPlugin` attaches the shared `assets/skybox/phoenix_space_cubemap.png` cubemap to `GameCamera`; it is independent of world TOML content.
+4. **`spawn_world_ambient_light` (`PostStartup`)** reads `WorldConfig.ambient_light` and inserts the `AmbientLight` resource.
+5. **`WorldSetup` broadcast** carries the per-instance entity snapshots to clients on `GameStart` and re-broadcasts via `Welcome` to late joiners.
+6. **For the rest of the session:** anchors and ambient light are immutable. Entities can be destroyed (asteroids, hull-zero stations); triggers and objectives mutate via the wire.
 
 ## Migration notes (2026-05 entity-schema refactor)
 

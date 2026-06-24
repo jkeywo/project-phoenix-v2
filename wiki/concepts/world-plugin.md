@@ -3,7 +3,7 @@ title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
 sources: [src/world/server.rs, src/world/config.rs, src/world/content.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
-updated: 2026-06-19
+updated: 2026-06-24
 ---
 
 # WorldPlugin
@@ -43,7 +43,9 @@ Run-once startup systems in `WorldPlugin`, chained in order (see `src/world/serv
 1. `insert_world_config_resource` (`src/world/server.rs:152`) — copies `WORLD_CONFIG` thread-local → `Res<WorldConfig>`
 2. `spawn_world_entities` — spawns all `[[entity]]` instances (asteroid-field and non-asteroid-field routed via `partition_immediate_entities`). Per-instance placement is resolved by `resolve_entity_position_with` (`src/world/config.rs:752`), which delegates to `TransformConfig::resolve` (`src/world/config.rs:48`) with precedence `relative_to+offset` > `anchor` > `position` > origin; `rotation` (XYZ Euler radians) and `scale` (default `[1, 1, 1]`) are applied from the same `transform = { ... }` table
 3. `init_world_runtime` — initialises `WorldContentRuntime`, `CommsInboxRes`, `ObjectiveManagerRes` from the loaded `WorldConfig`
-4. `setup_fallback_world` — gated by `run_if(not(resource_exists::<WorldConfig>))`; spawns a procedural starfield + player ship for native dev when no world TOML is loaded
+4. `setup_fallback_world` — gated by `run_if(not(resource_exists::<WorldConfig>))`; spawns the fallback player ship for native dev when no world TOML is loaded
+
+The viewscreen space backdrop is no longer spawned by `WorldPlugin`: `RendererPlugin` attaches a Bevy `Skybox` to `GameCamera` and loads `assets/skybox/phoenix_space_cubemap.png` via `prepare_space_skybox_cubemap` (`src/server/renderer.rs:231`), replacing the old runtime star-sphere field.
 
 A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/renderer.rs:209`, registered at `src/server/renderer.rs:91`), reads the optional `[ambient_light]` block (`AmbientLightConfig` at `src/world/config.rs:115`) and inserts the `AmbientLight` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`. Running it in `PostStartup` guarantees `insert_world_config_resource` has already executed.
 

@@ -527,41 +527,7 @@ fn resolve_position(
 /// Fallback world setup with hardcoded values for development/testing.
 /// Runs only when no `WorldConfig` resource was loaded (gated by the
 /// `WorldPlugin` `run_if` clause).
-fn setup_fallback_world(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    _world: ResMut<WorldResource>,
-) {
-    // -- Starfield skybox ---------------------------------------------------
-    // Procedural points: many small unlit white spheres at radius ~2000
-    // around the origin. Cheap and works on WebGL2.
-    let star_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 1.0, 1.0),
-        unlit: true,
-        ..default()
-    });
-    let star_mesh = meshes.add(Sphere { radius: 1.0 });
-    let star_count = 400u32;
-    let radius = 2000.0_f32;
-    for i in 0..star_count {
-        // Deterministic pseudo-random unit vector via golden-spiral on a sphere.
-        let frac = (i as f32 + 0.5) / star_count as f32;
-        let phi = (1.0 - 2.0 * frac).acos();
-        let theta = std::f32::consts::PI * (1.0 + 5_f32.sqrt()) * i as f32;
-        let x = phi.sin() * theta.cos() * radius;
-        let y = phi.sin() * theta.sin() * radius;
-        let z = phi.cos() * radius;
-        // Hash for size variation
-        let h = ((i.wrapping_mul(2654435761)) ^ 0xDEADBEEF) % 100;
-        let scale = 1.5 + (h as f32) / 25.0; // 1.5..5.5
-        commands.spawn((
-            Mesh3d(star_mesh.clone()),
-            MeshMaterial3d(star_mat.clone()),
-            Transform::from_xyz(x, y, z).with_scale(Vec3::splat(scale)),
-        ));
-    }
-
+fn setup_fallback_world(mut commands: Commands, _world: ResMut<WorldResource>) {
     // Spawn ship via the generic entity spawner using a hardcoded EntityConfig
     // (mirrors assets/entities/player_ship.toml's collider). This is the
     // no-WorldConfig fallback path; the [[entity]]/spawn_game_start path is

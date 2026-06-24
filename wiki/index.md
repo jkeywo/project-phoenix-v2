@@ -45,7 +45,7 @@ Architecture, patterns, processes.
 - **[UiMaterial Shader Pattern](./concepts/ui-materials.md)** — Custom WGSL fragment shaders behind UI nodes (Red Alert vignette as worked example).
 - **[View-Model Pattern](./concepts/view-model-pattern.md)** — Pure derived snapshots for renderers.
 - **[Console Plugin Pattern](./concepts/console-plugin-pattern.md)** — One Bevy plugin per console.
-- **[WorldPlugin](./concepts/world-plugin.md)** — Owns world bootstrap (starfield + player ship). Landing zone for the World/Scenario merger (#218).
+- **[WorldPlugin](./concepts/world-plugin.md)** — Owns world bootstrap and runtime content lifecycle. Landing zone for the World/Scenario merger (#218).
 - **[CaptainPlugin](./concepts/captain-plugin.md)** — First extracted console plugin: red alert toggle + view selector. Validates the simulation-split pattern (#227).
 - **[ShipPlugin](./concepts/ship-plugin.md)** — Second simulation split: helm physics, impulse drive. Extracted from `simulation.rs` (#239).
 - **[WeaponsPlugin](./concepts/weapons-plugin.md)** — Third simulation split: phasers, torpedoes, beam handling. Extracted from `simulation.rs` (#245).

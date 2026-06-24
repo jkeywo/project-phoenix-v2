@@ -1251,14 +1251,11 @@ fn reconcile_runtime_entities(
 // covers only:
 //   * spawning *anonymous* immediate `[[entity]]` instances (e.g. stars,
 //     planets) that aren't asteroid fields and don't carry a `name`.
-//   * the procedural starfield skybox.
 //
 // When no `WorldConfig` is loaded (native unit tests, hardcoded fallback)
 // this is a no-op; `world::server::setup_fallback_world` covers that case.
 fn setup_world(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut world: ResMut<WorldResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
@@ -1325,40 +1322,6 @@ fn setup_world(
             &mut world,
             snapshot_from_entity_config(uuid, entity_inst.id.clone(), &config, pos),
         );
-    }
-
-    // -- Starfield skybox ------------------------------------------
-    spawn_starfield(&mut commands, &mut meshes, &mut materials);
-}
-
-/// Spawn the procedural starfield skybox.
-fn spawn_starfield(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-) {
-    let star_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 1.0, 1.0),
-        unlit: true,
-        ..default()
-    });
-    let star_mesh = meshes.add(Sphere { radius: 1.0 });
-    let star_count = 400u32;
-    let radius = 2000.0_f32;
-    for i in 0..star_count {
-        let frac = (i as f32 + 0.5) / star_count as f32;
-        let phi = (1.0 - 2.0 * frac).acos();
-        let theta = std::f32::consts::PI * (1.0 + 5_f32.sqrt()) * i as f32;
-        let x = phi.sin() * theta.cos() * radius;
-        let y = phi.sin() * theta.sin() * radius;
-        let z = phi.cos() * radius;
-        let h = ((i.wrapping_mul(2654435761)) ^ 0xDEADBEEF) % 100;
-        let scale = 1.5 + (h as f32) / 25.0;
-        commands.spawn((
-            Mesh3d(star_mesh.clone()),
-            MeshMaterial3d(star_mat.clone()),
-            Transform::from_xyz(x, y, z).with_scale(Vec3::splat(scale)),
-        ));
     }
 }
 

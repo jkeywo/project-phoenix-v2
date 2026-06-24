@@ -25,9 +25,6 @@ export default defineConfig({
         launchOptions: {
           args: [
             '--autoplay-policy=no-user-gesture-required',
-            '--use-gl=angle',
-            '--use-angle=swiftshader-webgl',
-            '--enable-unsafe-swiftshader',
           ],
         },
       },

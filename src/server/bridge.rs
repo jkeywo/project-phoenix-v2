@@ -167,16 +167,81 @@ pub fn wasm_init() {
     // messages continuously). `set_once` is idempotent.
     console_error_panic_hook::set_once();
 
+    // Detect WebDriver/Playwright automation (navigator.webdriver). In
+    // headless CI the Bevy RenderPlugin panics trying to initialise wgpu
+    // (no GPU available), so we skip render/audio/gltf/gizmo plugins.
+    let is_automation = web_sys::window()
+        .and_then(|w| {
+            let nav = w.navigator();
+            js_sys::Reflect::get(&nav, &"webdriver".into())
+                .ok()
+                .and_then(|v| v.as_bool())
+        })
+        .unwrap_or(false);
+
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
-        primary_window: Some(bevy::window::Window {
-            canvas: Some("#canvas".into()),
-            fit_canvas_to_parent: true,
+    if is_automation {
+        use bevy::{
+            a11y::AccessibilityPlugin,
+            app::{PanicHandlerPlugin, TaskPoolPlugin},
+            asset::AssetPlugin,
+            diagnostic::{DiagnosticsPlugin, FrameCountPlugin},
+            input::InputPlugin,
+            log::LogPlugin,
+            scene::ScenePlugin,
+            state::app::StatesPlugin,
+            time::TimePlugin,
+            transform::TransformPlugin,
+            winit::WinitPlugin,
+        };
+        app.add_plugins((
+            PanicHandlerPlugin,
+            LogPlugin::default(),
+            TaskPoolPlugin::default(),
+            FrameCountPlugin,
+            TimePlugin::default(),
+            TransformPlugin::default(),
+            DiagnosticsPlugin,
+            InputPlugin::default(),
+            bevy::window::WindowPlugin {
+                primary_window: Some(bevy::window::Window {
+                    canvas: Some("#canvas".into()),
+                    fit_canvas_to_parent: true,
+                    ..default()
+                }),
+                ..default()
+            },
+            AccessibilityPlugin,
+            AssetPlugin::default(),
+            ScenePlugin::default(),
+            WinitPlugin::default(),
+            StatesPlugin,
+        ));
+        // Register asset types that simulation plugins (StarRenderPlugin,
+        // render_spawned_entities, asset_preload etc.) depend on. Without
+        // RenderPlugin these aren't auto-registered.
+        use bevy::{
+            asset::AssetApp,
+            image::Image,
+            mesh::Mesh,
+            pbr::StandardMaterial,
+        };
+        app.init_asset::<bevy::shader::Shader>()
+            .init_asset_loader::<bevy::shader::ShaderLoader>()
+            .init_asset::<Image>()
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>();
+    } else {
+        app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
+            primary_window: Some(bevy::window::Window {
+                canvas: Some("#canvas".into()),
+                fit_canvas_to_parent: true,
+                ..default()
+            }),
             ..default()
-        }),
-        ..default()
-    }))
-    .add_plugins(ConfigCachePlugin)
+        }));
+    }
+    app.add_plugins(ConfigCachePlugin)
     .add_plugins(AsteroidLifecyclePlugin)
     .add_plugins(ModifierCoordinationPlugin);
     // Insert ShipConfigResource before LobbyPlugin so its
@@ -190,9 +255,11 @@ pub fn wasm_init() {
     app.add_plugins(LobbyPlugin)
     .add_plugins(crate::lobby::lobby_outbox_broadcaster());
     add_simulation_plugins(&mut app);
-    app.add_plugins(WorldPlugin)
-        .add_plugins(RendererPlugin)
-        .add_plugins(ViewscreenBorderPlugin);
+    app.add_plugins(WorldPlugin);
+    if !is_automation {
+        app.add_plugins(RendererPlugin)
+            .add_plugins(ViewscreenBorderPlugin);
+    }
 
     // Always add the debug overlay plugin; ?debug_regions=1 sets initial state.
     // Runtime toggling via F4 is handled by drain_debug_toggles.

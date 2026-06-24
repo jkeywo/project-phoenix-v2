@@ -60,30 +60,25 @@ pub struct CoordinationEnqueue {
     pub sender_label: String,
 }
 
-/// Load `ShipConfigResource` from `assets/entities/player_ship.toml`.
+/// Load `ShipConfigResource` from `assets/entities/player_ship.toml` (embedded at compile time).
 ///
-/// Panics if the file is missing, uses the legacy schema, or fails validation —
-/// the server cannot start without a valid ship configuration.
+/// Panics if the file fails validation — the server cannot start without a valid ship
+/// configuration.
 pub(crate) fn load_ship_config_from_disk() -> ShipConfigResource {
-    const PATH: &str = "assets/entities/player_ship.toml";
-    let toml_str = std::fs::read_to_string(PATH)
-        .unwrap_or_else(|e| panic!("ship_config: could not read {PATH}: {e}"));
-    if !toml_str.contains("[[station]]") {
-        panic!("ship_config: {PATH} uses legacy [stations] schema — migrate to [[station]] tables");
-    }
+    let toml_str = include_str!("../assets/entities/player_ship.toml");
     let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
         .expect("core system registry must be valid");
     let kinds: Vec<&str> = registry.kinds().collect();
     match crate::ship::config::parse_and_validate(&toml_str, &kinds) {
         Ok(config) => {
             bevy::log::info!(
-                "ship_config: loaded {} stations, {} systems from {PATH}",
+                "ship_config: loaded {} stations, {} systems",
                 config.stations.len(),
                 config.systems.len()
             );
             ShipConfigResource(config)
         }
-        Err(e) => panic!("ship_config: {PATH} failed validation: {e}"),
+        Err(e) => panic!("ship_config: failed validation: {e}"),
     }
 }
 

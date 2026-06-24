@@ -37,7 +37,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [target.wasm32-unknown-unknown.dependencies]
 js-sys = "0.3"
-web-sys = { version = "0.3.97", features = ["Window", "Navigator", "console"] }
+web-sys = { version = "0.3.97", features = ["Window", "Navigator", "NavigatorAutomationInformation", "console"] }
 # Routes Rust panics through console.error with a real message + location.
 # Without this, a panic anywhere in the Bevy app (e.g. inside a system) traps
 # the wasm instance and every subsequent JS→WASM call surfaces as a bare

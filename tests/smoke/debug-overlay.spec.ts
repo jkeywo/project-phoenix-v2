@@ -2,12 +2,11 @@
 //   - Without ?debug_regions=1: resource is false, no behavioural change
 //   - With ?debug_regions=1: resource is true
 
-import { test, expect, waitForWasmReady } from './fixtures';
+import { test, expect, captureServerPageErrors, waitForWasmReady } from './fixtures';
 
 test('without URL param: debug regions disabled', async ({ context }) => {
-  const errors: string[] = [];
   const serverPage = await context.newPage();
-  serverPage.on('pageerror', (err) => errors.push(err.message));
+  const errors = captureServerPageErrors(serverPage);
 
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
@@ -27,9 +26,8 @@ test('without URL param: debug regions disabled', async ({ context }) => {
 });
 
 test('with ?debug_regions=1: debug regions enabled', async ({ context }) => {
-  const errors: string[] = [];
   const serverPage = await context.newPage();
-  serverPage.on('pageerror', (err) => errors.push(err.message));
+  const errors = captureServerPageErrors(serverPage);
 
   await serverPage.goto('/?debug_regions=1&scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);

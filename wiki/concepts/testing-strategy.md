@@ -3,7 +3,7 @@ title: Testing Strategy
 type: concept
 tags: [tests, cargo, playwright, smoke, pyramid]
 sources: [tests/smoke/, src/server/, AGENTS.md, PRD-051]
-updated: 2026-05-08
+updated: 2026-06-24
 ---
 
 # Testing Strategy
@@ -18,7 +18,7 @@ Inline `#[cfg(test)] mod tests` in each module. The Rust side is the test-heavy 
 |---|---|
 | `session.rs` | Registration, duplicates, console assignment, vacancy, reconnect, conflict resolution, `helm_token()`/`captain_token()` |
 | `codec.rs` | Round-trip for **every** `ClientMessage` and `ServerMessage` variant |
-| `lobby.rs` / `lobby_handler.rs` | Bevy App harness: Identify→Welcome, console select, captain-only StartGame, HelmInput phase-gating, disconnect |
+| `lobby.rs` / `lobby_handler.rs` | Bevy App harness: Identify→Welcome, station selection, SetReady auto-start, HelmInput phase-gating, disconnect |
 | `ship_physics.rs` | Zero input, accel curve, decel curve, steering yaw, dt scaling, speed cap |
 | `ship_state.rs` | Red Alert toggle, snapshot generation |
 | `asteroid_spawner.rs` | Count, bounds, clear zone, no duplicates |
@@ -35,13 +35,17 @@ Live in `tests/smoke/`. Boot the **real** WASM server in a headless browser; moc
 
 `peerjs-shim.js` replaces `window.Peer` with a `BroadcastChannel`-backed fake before any page script runs (Playwright's `addInitScript`). Same surface as PeerJS — `open`, `connection`, `data`, `close` events. Production HTML is **never modified** for tests.
 
-### Wasm-ready signal
+### WASM readiness and host ticking
 
-The shim sets `window.__wasmReady` (and fires `wasm-ready`) only after **both** the fake peer opens **and** Trunk's `TrunkApplicationStarted` event fires, with a `setTimeout(0)` so `startPhoenix()` runs first. Tests `await page.waitForFunction('window.__wasmReady')` before sending anything.
+The shim sets `window.__wasmReady` (and fires `wasm-ready`) only after **both** the fake peer opens **and** `server.html` dispatches `PhoenixReady`. `PhoenixReady` fires after async config preload, station validation, callback registration, and `wasm_receive_message` exposure, just before `wasm_init()`.
+
+The server WASM uses continuous Bevy updates while focused and unfocused. This matters because Playwright often brings a client page to the front immediately after reading the host peer ID; if the backgrounded host stalls, `Identify` remains queued and the client times out waiting for `Welcome`.
+
+Chromium reports Bevy's WASM app-runner handoff as a bare `unreachable` page error. `captureServerPageErrors()` ignores that exact message, but still records Rust panic messages and other runtime errors.
 
 ### Default scenario stub
 
-`fixtures.ts` installs a context-wide route that fulfils every `**/assets/worlds/default.toml` request with `MINIMAL_DEFAULT_WORLD` — an inline TOML with the player ship, "Starbase Alpha", and a single `[[comms]] on_hailed` block. The production `default.toml` references a planet (~36 MB GLB), an asteroid field (12 asteroid templates, ~150 MB of GLBs), a sun, and a nebula region; the [asset-preload](./asset-preload.md) gate waits for every GLB to reach a terminal `LoadState` before allowing `StartGame`, and headless Chromium can't realistically fetch + parse all of that within the 5 s `GameStarted` timeout used by most specs.
+`fixtures.ts` installs a context-wide route that fulfils every `**/assets/worlds/default.toml` request with `MINIMAL_DEFAULT_WORLD` — an inline TOML with the player ship, "Starbase Alpha", and a single `[[comms]] on_hailed` block. The production `default.toml` references a planet (~36 MB GLB), an asteroid field (12 asteroid templates, ~150 MB of GLBs), a sun, and a nebula region; the [asset-preload](./asset-preload.md) gate waits for every GLB to reach a terminal `LoadState` before allowing game start, and headless Chromium can't realistically fetch + parse all of that within the smoke-test timeouts.
 
 The minimal world keeps only what the smoke suite actually inspects:
 
@@ -60,7 +64,7 @@ For tests that route a real production TOML but don't need its heavy entities, `
 | `shim.spec.ts` | #52 | The shim itself (BroadcastChannel routing) |
 | `server-load.spec.ts` | #54 | WASM boots, no JS console errors |
 | `client-connect.spec.ts` | #55 | Real `client.html` connects, `#status` = "Connected" after Welcome |
-| `lobby.spec.ts` | #56/#57 | `ConsoleSelected` broadcasts; non-captain `StartGame` ignored |
+| `lobby.spec.ts` | #56/#57 | Station assignment and lobby phase transitions |
 | `sim-state.spec.ts` | #58/#59 | `SimState` shape valid; `HelmInput` changes ship position |
 
 CI runs the suite on every push and pull request via `.github/workflows/ci.yml`.

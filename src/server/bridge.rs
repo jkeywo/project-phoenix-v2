@@ -274,19 +274,11 @@ pub fn wasm_init() {
     });
 
     app.insert_resource(bevy::winit::WinitSettings {
-        // Continuous mode ensures the event loop drives requestAnimationFrame
-        // updates on every frame. Reactive mode (used previously) can stall in
-        // headless Chromium when the page has no UI events, causing the inbound
-        // message pipeline (wasm_receive_message → drain_inbound → process_lobby)
-        // to never run — all smoke tests that use createTestClient timeout waiting
-        // for Welcome.
+        // Keep the host simulation ticking even after Playwright opens a client
+        // page in front of it; otherwise Identify stays queued and Welcome never
+        // leaves the server.
         focused_mode: bevy::winit::UpdateMode::Continuous,
-        unfocused_mode: bevy::winit::UpdateMode::Reactive {
-            wait: std::time::Duration::from_secs_f64(1.0 / 20.0),
-            react_to_device_events: false,
-            react_to_user_events: false,
-            react_to_window_events: true,
-        },
+        unfocused_mode: bevy::winit::UpdateMode::Continuous,
     })
     .add_systems(
         PreUpdate,

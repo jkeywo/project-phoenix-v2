@@ -135,6 +135,29 @@ export async function waitForWasmReady(page: Page, timeout = WASM_READY_TIMEOUT)
   await page.waitForFunction(() => !!(window as any).__wasmReady, { timeout });
 }
 
+/** Capture real server-page crashes while ignoring Bevy WASM's expected
+ * run-loop handoff trap, which Chromium reports as a bare "unreachable".
+ */
+export function captureServerPageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (err) => {
+    if (err.message === 'unreachable') return;
+    errors.push(err.message);
+  });
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const text = msg.text();
+    if (
+      text.includes('panicked at') ||
+      text.includes('RuntimeError') ||
+      text.includes('memory access out of bounds')
+    ) {
+      errors.push(text);
+    }
+  });
+  return errors;
+}
+
 // ── Test client helper ────────────────────────────────────────────────────────
 // Creates a blank page at localhost:3000 (same BroadcastChannel origin),
 // connects to the host peer, sends Identify, and waits for Welcome.

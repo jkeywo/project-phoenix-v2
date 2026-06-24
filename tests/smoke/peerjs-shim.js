@@ -4,8 +4,7 @@
 // (same-origin only, which is fine since all test pages share localhost:3000).
 //
 // Dispatches 'wasm-ready' on window (and sets window.__wasmReady = true) once
-// BOTH the host peer has opened AND TrunkApplicationStarted has fired — the
-// setTimeout guarantees startPhoenix() has run before the signal goes out.
+// BOTH the host peer has opened AND server.html has fired PhoenixReady.
 
 (function () {
   'use strict';

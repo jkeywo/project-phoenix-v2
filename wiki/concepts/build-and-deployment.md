@@ -2,40 +2,42 @@
 title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, ci]
-sources: [Trunk.toml, client-trunk.toml, .github/workflows/, README.md]
-updated: 2026-05-08
+sources: [Trunk.toml, scripts/build-client.mjs, .github/workflows/, README.md]
+updated: 2026-06-24
 ---
 
 # Build & Deployment
 
-## Two Trunk configs, one crate
+## Server Trunk build plus JS client
 
-| Config | Output | Bevy crate features |
+| Build step | Output | Notes |
 |---|---|---|
-| `Trunk.toml` | `dist/index.html` (server.html → view screen) | `["server"]` |
-| `client-trunk.toml` | `dist/client/index.html` (client.html → phones) | `["client"]` |
+| `trunk build --release` | `dist/index.html` (server.html → view screen) | Builds the Rust/Bevy WASM host with the default `server` feature. |
+| `node scripts/build-client.mjs` | `dist/client/index.html` plus GUI assets | Copies the pure HTML/JS phone client; there is no client-side WASM feature. |
 
-Both compile the same crate (`src/lib.rs`) to WebAssembly via Trunk. Feature flags select which bridge module is included.
+The server is authoritative and runs the simulation. The client is a pure JS shell that connects to the host via PeerJS/WebRTC and renders HTML console panels.
 
 ## Local dev
 
 ```
 trunk serve                                          # http://localhost:8080  (view screen)
-trunk serve --config client-trunk.toml --port 8081   # http://localhost:8081  (phone)
+node scripts/build-client.mjs                        # copies client into dist/client/
 ```
 
 ## Production build
 
 ```
 trunk build --release
-trunk build --release --config client-trunk.toml
+node scripts/build-client.mjs
 ```
 
 Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<peerId>` so phones land on the right page.
 
 ## CI workflows
 
-- **`.github/workflows/ci.yml`** — on push and pull_request: unit tests, WASM build, Playwright smoke suite; on push to `main`: also deploy to `gh-pages`.
+- **`.github/workflows/ci.yml`** — on push and pull_request: native unit tests, WASM server build, pure JS client copy, editor Vitest suite, Playwright smoke suite; on push to `main`: also deploy to `gh-pages`.
+
+The smoke suite runs the host page in headless Chromium with render-heavy plugins skipped. The host stays on continuous Bevy updates even when unfocused so backgrounded server pages still drain `wasm_receive_message` and send `Welcome` to test clients.
 
 ## Cargo notes
 

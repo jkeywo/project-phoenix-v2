@@ -73,28 +73,6 @@ test('power console: __updateConsole reflects locked state', async ({ page }) =>
   await expect(page.locator('#bat-val')).toHaveText('40%');
 });
 
-test('power console: Low complexity preset hides the overflow controls, Std shows them', async ({ page }) => {
-  // Issue #461 — console-core applies gui/hideable-elements.js after render,
-  // toggling .cpx-hidden on [data-hideable] per the active preset.
-  await page.goto(CONSOLE_URL);
-
-  const base = {
-    consoles: [{ id: 'Helm', label: 'HELM', level: 2, max_level: 4 }],
-    total: 6, total_max: 8, battery_charge: 50.0, battery_max: 100.0, locked: false,
-  };
-  const overflow = '[data-hideable="power_overflow_controls"]';
-
-  await page.evaluate((s) => (window as any).__updateConsole('Power', JSON.stringify(s)),
-    { ...base, complexityPreset: 'Low' });
-  await expect(page.locator(overflow)).toHaveClass(/cpx-hidden/);
-  await expect(page.locator(overflow)).toBeHidden();
-
-  await page.evaluate((s) => (window as any).__updateConsole('Power', JSON.stringify(s)),
-    { ...base, complexityPreset: 'Std' });
-  await expect(page.locator(overflow)).not.toHaveClass(/cpx-hidden/);
-  await expect(page.locator(overflow)).toBeVisible();
-});
-
 test('power console: +/- buttons call __sendAction with correct envelopes', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 

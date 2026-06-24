@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::messages::{
-    ClientMessage, Console, GamePhase, GameState, ServerMessage, ShipClientConfig, StationId,
-    WorldData,
+    ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, StationId, WorldData,
 };
 use crate::session::SessionManager;
 use crate::ship::config::ShipConfig;

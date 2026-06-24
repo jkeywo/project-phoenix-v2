@@ -4,7 +4,7 @@ use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{Console, PowerConsoleEntry, PowerConsoleState, ServerMessage};
 use crate::modifiers::power_system::{
-    power_group_for_console, power_level_for_console, PowerConfig, PowerSystem, SENSORS_POWER_GROUP,
+    power_group_for_console, power_level_for_console, PowerConfig, PowerSystem,
 };
 use crate::ship_plugin::LastHelmInput;
 use crate::ship_state::ShipState;

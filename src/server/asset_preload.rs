@@ -309,6 +309,7 @@ pub struct AssetPreloadResource {
     /// Tracks all worlds ever processed (including "(base)"). Length minus one
     /// gives the total sub-world count used in progress fraction computation.
     seen_worlds: HashSet<String>,
+    #[cfg(target_arch = "wasm32")]
     seen_entities: HashSet<String>,
 
     // Timer for throttling progress broadcasts
@@ -337,6 +338,7 @@ impl Default for AssetPreloadResource {
             registered_sidecars: HashSet::new(),
             pending_sub_worlds: Vec::new(),
             seen_worlds: HashSet::new(),
+            #[cfg(target_arch = "wasm32")]
             seen_entities: HashSet::new(),
             progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
             progress_sent: false,
@@ -398,8 +400,10 @@ pub fn begin_asset_preload(
     }
 
     // Initial discovery from base world
-    let (mut manifest, pending_worlds, base_seen_entities) =
+    let (manifest, pending_worlds, base_seen_entities) =
         discover_base_assets(&world_config, &config_cache);
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut manifest = manifest;
 
     // Start loading GLB models
     let mut glb_handles = Vec::new();
@@ -494,6 +498,7 @@ pub fn begin_asset_preload(
         registered_sidecars,
         pending_sub_worlds: pending_worlds,
         seen_worlds,
+        #[cfg(target_arch = "wasm32")]
         seen_entities: base_seen_entities,
         progress_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
         progress_sent: false,

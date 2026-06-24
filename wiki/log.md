@@ -180,7 +180,7 @@ with #184.
 
 ## [2026-05-12] ingest | Issue #183 � red-alert visual: border swap + UiMaterial vignette + remove CSS overlay
 
-Landed the final slice of PRD #180 inside iewscreen_border. Added ten alert-variant
+Landed the final slice of PRD #180 inside viewscreen_border. Added ten alert-variant
 image handles, a BorderSlot marker on every border ImageNode, and a per-frame
 swap_border_textures system that flips each handle on ShipState.red_alert change.
 Introduced RedAlertVignetteMaterial (single intensity uniform) registered via
@@ -190,12 +190,9 @@ look). Replaced the placeholder WGSL with the real two-stop inset radial-gradien
 shader. Added pure helper pulse_intensity(time, alert, prev, dt) -> f32 that combines
 a quarter-second on/off ease with a 1.3s sine pulse between 0.55 and 1.0; driven each
 frame by drive_vignette_intensity. 7 unit tests cover idle, ease in/out monotonicity,
-steady-state band, and sine phase points; an 8th test confirms BorderSlot::handle`nswitches variants. Removed the #red-alert-overlay div, its CSS (ox-shadow,
-
-adial-gradient, 
-edalert-pulse keyframes), and the SimState red-alert handler
-in server.html's 
-outeOutbound � Bevy now owns the alert visual end-to-end.
+steady-state band, and sine phase points; an 8th test confirms BorderSlot::handle switches variants. Removed the #red-alert-overlay div, its CSS (box-shadow,
+radial-gradient, redalert-pulse keyframes), and the SimState red-alert handler in
+server.html's routeOutbound - Bevy now owns the alert visual end-to-end.
 Added pub fn ShipState::red_alert(&self) -> bool accessor so the plugin can read
 the flag without exposing the field. All 659 lib tests pass; cargo check passes
 for both native and wasm32 with --features server.
@@ -409,9 +406,7 @@ g "^\[\[(star|planet|asteroid_field)\]\]" assets/ returns zero hits. Also as par
 ## [2026-05-19] ingest | PRD #343 slice 6: world-merger final validation | Full build/test matrix green on PRD #337 completion. cargo test 1592 passed; cargo check --features server clean; cargo check --features client --no-default-features clean; cargo build --target wasm32-unknown-unknown both features succeeds; trunk build --release server + client succeeds. Smoke tests: world-bootstrap, patrol, comms, tactical-fire-flow all green (3 tactical tests required updating tests/smoke/tactical-fire-flow.spec.ts to use [[entity]] with name= instead of legacy [[spawn]] block — overlooked test asset under PRD #341 cleanup). Pre-existing failures (2 station/reassignment specs) remain unrelated to the merger. PRD #337 closed; slices #338-#343 merged into the trunk.
 
 
-## [2026-05-19] ingest | PRD #337 post-close gap sweep | Post-close review identified one critical and four doc gaps. Fixed: (C1) src/console/repair/client.rs test module was missing use ClientMessage import — client feature test build was broken since slice 4; surfaced 135 additional client-only tests. (I2) Implemented [[entity]] relative_to + offset schema per PRD spec: added fields to WorldEntity, added 
-esolve_entity_position_with taking a 
-ame -> resolved_position map, added uild_named_entity_positions helper, wired into both spawn paths (spawn_immediate_entities_internal and setup_world). Precedence is relative_to > anchor > position > origin. relative_to-to-relative_to chains are not supported (single-pass, no cycle detection). 5 new pure tests. (I4) Rewrote docs/REQUIREMENTS.md World TOML, Spawn entries (renamed to Entity entries), Configuration & Authoring sections to remove references to deleted MapConfig/ScenarioConfig/[[spawn]]/wasm_load_map/wasm_load_world_content. (I5) Rewrote docs/toml-authoring-guide.md §1 World TOML section: deleted the entire [[spawn]] reference subsection, updated parser-overview paragraph, added relative_to/offset row + example to [[entity]] table. (I6) Updated CONTEXT.md WorldPlugin entry to drop ScenarioConfig/parse_scenario qualifier. (M7) AGENTS.md line 252: '[[spawn]]s' -> 'named + anonymous [[entity]] instances'. (M8) Updated assets/worlds/default.toml: 'Starbase Alpha' entity now uses nchor = "starbase_alpha" instead of inlining its position; stale comments updated. Final test counts: server 1597, client 1732. Both cargo checks 0 warnings; both wasm builds clean; trunk release builds succeed. Smoke tests world-bootstrap, comms, patrol, tactical-fire-flow (3) all green.
+## [2026-05-19] ingest | PRD #337 post-close gap sweep | Post-close review identified one critical and four doc gaps. Fixed: (C1) src/console/repair/client.rs test module was missing use ClientMessage import — client feature test build was broken since slice 4; surfaced 135 additional client-only tests. (I2) Implemented [[entity]] relative_to + offset schema per PRD spec: added fields to WorldEntity, added resolve_entity_position_with taking a name -> resolved_position map, added build_named_entity_positions helper, wired into both spawn paths (spawn_immediate_entities_internal and setup_world). Precedence is relative_to > anchor > position > origin. relative_to-to-relative_to chains are not supported (single-pass, no cycle detection). 5 new pure tests. (I4) Rewrote docs/REQUIREMENTS.md World TOML, Spawn entries (renamed to Entity entries), Configuration & Authoring sections to remove references to deleted MapConfig/ScenarioConfig/[[spawn]]/wasm_load_map/wasm_load_world_content. (I5) Rewrote docs/toml-authoring-guide.md §1 World TOML section: deleted the entire [[spawn]] reference subsection, updated parser-overview paragraph, added relative_to/offset row + example to [[entity]] table. (I6) Updated CONTEXT.md WorldPlugin entry to drop ScenarioConfig/parse_scenario qualifier. (M7) AGENTS.md line 252: '[[spawn]]s' -> 'named + anonymous [[entity]] instances'. (M8) Updated assets/worlds/default.toml: 'Starbase Alpha' entity now uses anchor = "starbase_alpha" instead of inlining its position; stale comments updated. Final test counts: server 1597, client 1732. Both cargo checks 0 warnings; both wasm builds clean; trunk release builds succeed. Smoke tests world-bootstrap, comms, patrol, tactical-fire-flow (3) all green.
 
 ## [2026-05-20] ingest | Slice 1: [torpedoes] TOML block for player_ship.toml | touched: concepts/weapons-plugin.md; player_ship.toml [torpedoes] block; entities/config.rs TorpedoesConfig + drift test; weapons_plugin TorpedoSystemResource overridden in server_app.rs
 

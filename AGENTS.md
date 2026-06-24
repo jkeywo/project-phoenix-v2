@@ -7,7 +7,7 @@ A browser-based spaceship bridge simulator. One browser tab shows a shared 3D vi
 **Open PRDs (planned work):**
 - **PRD #116:** [Save/Load Game Sessions](https://github.com/jkeywo/project-phoenix-v2/issues/116) — `localStorage`-backed save slots, periodic + lifecycle saves, version-gated load. Introduces `save.rs` (the *second* sanctioned `serde_json` surface).
 
-**Current state:** Nine consoles (`CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms`). Players join *stations* (bundles of one or more consoles defined per player count in `player_ship.toml`). Full simulation: ship physics loaded from TOML, grid-based streaming asteroid field, phaser banks, torpedoes, four-quadrant shields, impulse drive, per-console hull damage, three-team dispatch repair, 6+2 power allocation, region effects, per-console complexity presets with server-side AI, TOML-driven world engine with objectives and NPC AI patrols. See **[wiki/](./wiki/)** for the deeper map of the codebase.
+**Current state:** Nine player-facing consoles (`CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms`) plus `Core` as an ownerless repair target. Players claim fixed *stations* from `player_ship.toml`; `Player.station: Option<StationId>` is the authoritative ownership field, and held consoles are derived from the station + `ShipConfig`. Full simulation: ship physics loaded from TOML, grid-based streaming asteroid field, phaser banks, torpedoes, four-quadrant shields, impulse drive, per-console hull damage, three-team dispatch repair, 6+2 power allocation, region effects, station ratings with Backfill AI, TOML-driven world engine with objectives and NPC AI patrols. See **[wiki/](./wiki/)** for the deeper map of the codebase.
 
 ---
 
@@ -99,7 +99,7 @@ client.html JavaScript
 
 ```
 src/
-  core/         — Wire types, codec, flag_kind, broadcaster
+  core/         - Wire types, codec, flag_kind, broadcaster; `Player` carries `station` / `last_rating`
   lobby/        — Session management, station assignment, lobby handler (pure + Bevy)
   ship/         — Physics, state, damage, impulse (mostly pure)
   weapons/      — Phaser, torpedo, shield state machines + beam renderer
@@ -162,9 +162,9 @@ docs/             — Draft design notes (numbered).
 
 ## Game Flow
 
-1. **Lobby:** Players scan QR → join via `client.html#<peerId>` → pick a station → captain presses "Engage" → `StartGame` → `InProgress`.
-2. **In-Progress:** Each console sends inputs; server simulation ticks at 10Hz (helm, weapons, repair, power, sensors, shields, navigation, comms). Server broadcasts `SimState` every 100ms with hull, power, flags, entity states. Region containment, asteroid streaming, NPC patrols, and world triggers all run server-side.
-3. **Disconnect/Reconnect:** The dropped player's consoles are vacated immediately, but the **seat is reserved** — the remaining crew is *not* reshuffled (no leave-cascade). The session token (in `localStorage`) is the identity; on browser refresh the client re-sends `Identify` and the server restores the previously-held station if every one of its consoles is still free (all-or-nothing), else the player lands back in the lobby / spectator queue. Reconnect is handled in every phase, so a refresh mid-game rejoins straight onto the same console.
+1. **Lobby:** Players scan QR -> join via `client.html#<peerId>` -> pick a station -> toggle `SetReady`. When all connected players are ready, the server enters `Loading` while assets preload or goes straight to `InProgress`; the legacy start message is gone.
+2. **In-Progress:** Each station-owned console sends inputs; server simulation ticks at 10Hz (helm, weapons, repair, power, sensors, shields, navigation, comms). Server broadcasts `SimState` every 100ms with hull, power, flags, entity states. Region containment, asteroid streaming, NPC patrols, and world triggers all run server-side.
+3. **Disconnect/Reconnect:** The dropped player's `Player.station` remains on their session record and the station rating flips to `Backfill` so AI runs its systems. The session token (in `localStorage`) is the identity; on browser refresh the client re-sends `Identify`. If no connected player claimed the old station, the server restores the station and `last_rating`; otherwise the player reconnects without a station / as a spectator. Reconnect is handled in every phase.
 
 See `wiki/concepts/game-loop.md` and `wiki/entities/console.md` for per-console details.
 
@@ -188,14 +188,14 @@ See `wiki/concepts/testing-strategy.md` for the full file-by-file breakdown.
 
 1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules.
 2. **Feature gates for bridges.** `server/bridge.rs` is compiled under the `server` feature; `client/bridge.rs` under the `client` feature. Neither is gated by `cfg(target_arch)` alone.
-3. **Captain authority.** Only the player at `CaptainChair` can `StartGame` and `ToggleRedAlert`. The server enforces this.
-4. **Console vacancy on disconnect.** Immediately — in all game phases.
+3. **Captain authority.** Only the player at `CaptainChair` can `ToggleRedAlert`. Game start is collective `SetReady` auto-start, not a captain-only command.
+4. **Backfill on disconnect.** A disconnected station holder stays associated with their `StationId`; the station flips to the `Backfill` rating until reconnect or a new claim.
 5. **Helm sends at 10Hz.** Simulation reads helm inputs at 10Hz tick intervals.
 6. **Deterministic asteroids.** Per-cell density is seeded from `(field_idx, gx, gz) + Perlin noise`. Destroyed asteroids respawn fresh when the player leaves the cell and returns (no persistent destroyed-set).
 7. **WebGL2 rendering.** For broad browser support.
 8. **PeerJS cloud broker.** Not self-hosted (deferred post-PoC).
 9. **Pure modules are Bevy-free.** `lobby/handler`, `radar`, `ship/damage`, `modifiers/breakdown`, `lobby/client_panel`, `client_sim`, `client_comms`, `console/helm/joystick` have no Bevy imports — fully unit-testable on native, shared between server and client.
-10. **A player may hold multiple consoles.** `Player.consoles` is `Vec<Console>`. The JS tab bar controls which panel is visible via `wasm_client_set_active_console`.
+10. **Station ownership is authoritative.** `Player.station: Option<StationId>` is the ownership field; console tabs and authorization derive held consoles from the station and `ShipConfig`.
 
 ---
 

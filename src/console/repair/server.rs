@@ -83,8 +83,8 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 ///    (rejects when the system is under AI control)
 /// 2. Sender holds `Console::Repair`.
 ///
-/// `RepairTarget::Core` is accepted by the wire but has no runtime effect yet
-/// (per-core repair targeting is tracked by PRD C slice C7).
+/// `RepairTarget::Core` dispatches to `Console::Core`, the repair bucket for
+/// ownerless ship-wide systems.
 pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,

@@ -29,7 +29,7 @@ Shipped. Parent: PRD #517 (slice A7).
   - Resolves `policy = control_sources.0.policy_for(&repair_system_id())` before the event loop.
   - Added `ClientMessage::ControlSystem { target, payload } if target.0 == REPAIR_SYSTEM_ID` arm.
   - Maps `RepairTarget::Station(StationId(s))` → `Console::from_console_id(&s)` (drops if unknown).
-  - `RepairTarget::Core` → no-op (per PRD C note, out of scope for this slice).
+  - `RepairTarget::Core` was deferred in this slice; it is now live via issue #543.
   - Added `if !policy.accept_human_input { continue; }` guard before the holder check.
 - Initialized `ShipSystemControlSources` in `test_app()`.
 - Added 5 new tests:
@@ -41,7 +41,7 @@ Shipped. Parent: PRD #517 (slice A7).
 
 ## Notes
 
-`RepairTarget::Core` is wire-legal (accepted by the `ControlSystem` match arm) but produces no runtime effect. Per-core repair targeting is tracked by PRD C slice C7. This is documented in both the handler doc-comment and the test.
+Superseded by [Issue #543 C7](./issue-543-c7-repair-target-core.md): `RepairTarget::Core` now dispatches to `Console::Core` and can produce a normal repair-team action. This page records the earlier A7 migration point where Core was still deferred.
 
 ## Post-change state
 

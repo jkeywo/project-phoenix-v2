@@ -6,19 +6,19 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 ## Game Domain
 
-**Console** — a role a player occupies on the ship. Currently shipped: `CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms` (nine). Each console has exactly one seat; vacancy is immediate on disconnect. A player may hold more than one console simultaneously (the `Player.consoles` field is a `Vec<Console>`); the JS tab bar uses the `ActiveConsole` resource to switch which console panel is displayed. When 5+ consoles are held the tab bar shows one- or two-character initials (`CC`, `H`, `T`, `R`, `S`, `SH`, `N`, `P`, `C`) and swipe-anywhere gesture switching is active. The old `Science` console was split into `Sensors`, `Shields`, and `Navigation` (see individual entries below).
+**Console** - a ship operator surface. Currently shipped: `CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms` (nine), plus `Core` for ownerless repair targets. Players do not own a per-player console vector; the server derives console access from `Player.station: Option<StationId>` and the loaded `ShipConfig` station roster. The JS tab bar displays the consoles derived from the player's station. The old `Science` console was split into `Sensors`, `Shields`, and `Navigation` (see individual entries below).
 
-**Station** — a player's role bundle of one or more consoles, defined per player count in `player_ship.toml` and parsed by `stations.rs`. Joining/leaving auto-shuffles players between stations via `reassign_on_join` / `reassign_on_leave`. Spectators wait in a FIFO queue. Lobby selection is per-station (`SelectStation` / `ReleaseStation` / `StationAssigned`), not per-console. Shipped with PRD #120.
+**Station** - the authoritative player role/seat on the ship, identified by stable `StationId` and defined in `assets/entities/player_ship.toml` as `[[station]]`. Lobby selection is per-station (`SelectStation` / `ReleaseStation` / `StationAssigned`), and each `Player` stores `station: Option<StationId>`. Spectators wait in a FIFO queue. Disconnect does not reshuffle stations; it applies the station `Backfill` rating so AI operates that station's systems until reconnect or a new claim.
 
-**Session** — the server-side record of a connected (or recently-disconnected) player. Keyed by session token, not peer ID. Survives reconnects.
+**Session** - the server-side record of a connected or recently-disconnected player. Keyed by session token, not peer ID. Survives reconnects and stores `connected`, `ready`, `station`, and `last_rating`.
 
 **Session Token** — a UUIDv4 stored in `localStorage`. The persistent identity of a player across page refreshes and reconnects. Distinct from PeerJS peer IDs, which are ephemeral.
 
-**Lobby Phase** — the game state before `StartGame`. Players join, pick consoles, set names. Only the captain can advance the phase.
+**Lobby Phase** - the game state before play. Players join, pick stations, set names, and toggle `SetReady`. When every connected player is ready, the server auto-starts by entering `Loading` or `InProgress`; the legacy start message is gone.
 
-**In-Progress Phase** — the game state after `StartGame`. Helm sends inputs; captain toggles Red Alert; simulation runs.
+**In-Progress Phase** - the game state after `GameStarted`. Console handlers process station-authorized inputs; helm sends inputs; captain toggles Red Alert; simulation runs. Disconnect applies Backfill AI and reconnect restores the old station/rating only if no connected player claimed it.
 
-**Captain** — the player holding `CaptainChair`. Authority to start the game and toggle Red Alert. Server enforces this.
+**Captain** - the player whose station owns `CaptainChair`. Authority to toggle Red Alert. Start-of-game authority is collective `SetReady` auto-start rather than a captain-only command.
 
 **Helm Input** — `{ thrust: f32, steering: f32 }` sent at 10 Hz by the Helm console. Drives `compute_physics()`.
 
@@ -44,7 +44,7 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 **Power Allocation** — 6 base + up to 2 battery points distributed across `Helm`, `Tactical`, and `Science` by the Power console (`power_system.rs`, PRD #118). Each level registers modifiers on the relevant slots. Battery exhaustion locks all consoles to level 1 until recharged to an emergency threshold. Wire: `IncreasePower { console }` / `DecreasePower { console }`; broadcast every 100 ms as `PowerState` to the Power holder and as `power_levels` on `SimSnapshot` to all.
 
-**Save Slot** *(planned, PRD #116)* — a `localStorage`-keyed snapshot (`phoenix_save_<uuid>`) holding `SaveMeta` (version, timestamps, player names) plus full `SaveState` (ship pose, hull, breakdowns, weapons, surviving asteroids). Saved on `Engage`, every 30 s, and on best-effort tab close.
+**Save Slot** *(planned, PRD #116)* - a `localStorage`-keyed snapshot (`phoenix_save_<uuid>`) holding `SaveMeta` (version, timestamps, player names) plus full `SaveState` (ship pose, hull, breakdowns, weapons, surviving asteroids). Planned save triggers should follow the current ready/auto-start flow rather than the removed captain-engage path.
 
 **Scenario (legacy term)** — historically a separate TOML under `assets/scenarios/` that paired with a map TOML under `assets/maps/`. Both have been replaced by a single unified TOML under `assets/worlds/` (see *World File* below). The old `Scenario*` Rust types and multi-world layering runtime were deleted in PRD #342.
 
@@ -60,11 +60,11 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 **Console Complexity** — a per-console preset (`Low` / `Full`, defined in `assets/complexity/<console>.toml`) selected by the console holder via `SetComplexity { console, preset_name }` and broadcast as `ComplexityChanged`. Low complexity hides UI elements (`Display::None`) and runs server-side AI in `console_ai` to operate the hidden controls (auto-fire torpedoes, auto-match phaser frequency, auto-manage power battery overflow). Game mechanics are unchanged; the cost of Low is reaction-time and coordination latency. Three-tier delegation: native → delegated to partner console → AI fallback. Shipped with PRD #154.
 
-**Sensors Console** — split from the old `Science` console. Handles long-range radar overlay, advisory target suggestion (`SetScienceTarget`), and pushes `SensorsRadar` to the viewscreen. Console holder check uses `Console::Sensors`.
+**Sensors Console** - split from the old `Science` console. Handles long-range radar overlay, advisory target suggestion (`SetScienceTarget`), and pushes `SensorsRadar` to the viewscreen. Holder checks are station-derived via `Console::Sensors`.
 
-**Shields Console** — split from the old `Science` console. Handles four-quadrant shield status and the focus mechanic (directing shield strength to one facing). Console holder check uses `Console::Shields`.
+**Shields Console** - split from the old `Science` console. Handles four-quadrant shield status and the focus mechanic (directing shield strength to one facing). Holder checks are station-derived via `Console::Shields`.
 
-**Navigation Console** — split from the old `Science` console. Handles system chart on the viewscreen (`NavigationChart`), and cancelling an active impulse charge (`CancelImpulse`). Console holder check uses `Console::Navigation`.
+**Navigation Console** - split from the old `Science` console. Handles system chart on the viewscreen (`NavigationChart`), and cancelling an active impulse charge (`CancelImpulse`). Holder checks are station-derived via `Console::Navigation`.
 
 **Comms Console** — manages contacts, the message inbox, and active mission objectives. Receives `CommsState { messages, contacts }` per broadcast. Sends `SelectCommsMessage { message_id }`. Client state in `client_comms.rs` (`ClientCommsState`); server inbox in `console/comms/inbox.rs`; client panel in `console/comms/client.rs`. Comms is re-marked dirty via `mark_comms_dirty_on_game_start` (an `OnEnter(InProgress)` system) so the initial contact list is delivered on the first InProgress tick.
 
@@ -96,7 +96,7 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 **LobbyBroadcaster / SimBroadcaster** — two `Broadcaster` instances, each phase-gated. `LobbyBroadcaster` runs only in `GamePhase::Lobby`; `SimBroadcaster` runs only in `GamePhase::InProgress`. The pure `lobby/handler.rs` keeps returning `Vec<(Target, ServerMessage)>`; the `lobby/server.rs` plugin funnels those outputs into `LobbyBroadcaster` as `Cadence::Once` registrations so all writes go through one path.
 
-**Audience** — a predicate over the live session set, resolved by the `Broadcaster` to a set of session tokens. Built-ins: `Audience::all()`, `Audience::holding(Console)`, `Audience::all_except(Token)`, `Audience::token(Token)`. Because each console has exactly one seat, `holding(_)` resolves to 0 or 1 tokens.
+**Audience** - a predicate over the live session set, resolved by the `Broadcaster` to a set of session tokens. Built-ins: `Audience::all()`, `Audience::holding(Console)`, `Audience::all_except(Token)`, `Audience::token(Token)`. `holding(_)` resolves by mapping the console id through `ShipConfig` to the station held by a connected player.
 
 **Cadence** — when a registered broadcast fires. `Cadence::hz(f32)` / `Cadence::period(Duration)` for periodic; `Cadence::on_event::<E>()` for event-driven; `Cadence::once()` for single-shot. The broadcaster owns timers internally; callers do not manage `Timer` resources.
 

@@ -16,6 +16,8 @@ use {
     crate::modifier_coordination::ModifierCoordinationPlugin,
     crate::renderer::RendererPlugin,
     crate::server_app::add_simulation_plugins,
+    crate::ship::config::ShipConfig,
+    crate::ship_plugin::ShipConfigResource,
     crate::stations_config::ShipStations,
     crate::viewscreen_border::ViewscreenBorderPlugin,
     crate::world::WorldPlugin,
@@ -45,6 +47,11 @@ thread_local! {
     /// Validated ShipStations config, stored by wasm_validate_stations() so
     /// wasm_init() can insert it as a Bevy resource.
     static SHIP_STATIONS: RefCell<Option<ShipStations>> = const { RefCell::new(None) };
+
+    /// Validated ShipConfig, stored by wasm_validate_stations() so
+    /// wasm_init() can insert it as a ShipConfigResource before LobbyPlugin
+    /// tries to init_resource it (panicking in WASM via std::fs::read_to_string).
+    static SHIP_CONFIG: RefCell<Option<ShipConfig>> = const { RefCell::new(None) };
 
     /// Whether `?debug_regions=1` was specified in the URL. Set by JS via
     /// `wasm_set_debug_regions()` before `wasm_init()`.
@@ -133,6 +140,9 @@ pub fn wasm_validate_stations(toml_str: &str) -> Result<JsValue, JsValue> {
             SHIP_STATIONS.with(|slot| {
                 *slot.borrow_mut() = Some(stations);
             });
+            SHIP_CONFIG.with(|slot| {
+                *slot.borrow_mut() = Some(ship_config);
+            });
             Ok(JsValue::UNDEFINED)
         }
         Err(e) => Err(JsValue::from_str(&format!(
@@ -168,8 +178,16 @@ pub fn wasm_init() {
     }))
     .add_plugins(ConfigCachePlugin)
     .add_plugins(AsteroidLifecyclePlugin)
-    .add_plugins(ModifierCoordinationPlugin)
-    .add_plugins(LobbyPlugin)
+    .add_plugins(ModifierCoordinationPlugin);
+    // Insert ShipConfigResource before LobbyPlugin so its
+    // .init_resource::<ShipConfigResource>() is a no-op (the default
+    // calls load_ship_config_from_disk which uses std::fs — panics in WASM).
+    SHIP_CONFIG.with(|slot| {
+        if let Some(config) = slot.borrow_mut().take() {
+            app.insert_resource(ShipConfigResource(config));
+        }
+    });
+    app.add_plugins(LobbyPlugin)
     .add_plugins(crate::lobby::lobby_outbox_broadcaster());
     add_simulation_plugins(&mut app);
     app.add_plugins(WorldPlugin)
@@ -184,12 +202,13 @@ pub fn wasm_init() {
     });
 
     app.insert_resource(bevy::winit::WinitSettings {
-        focused_mode: bevy::winit::UpdateMode::Reactive {
-            wait: std::time::Duration::ZERO,
-            react_to_device_events: false,
-            react_to_user_events: false,
-            react_to_window_events: true,
-        },
+        // Continuous mode ensures the event loop drives requestAnimationFrame
+        // updates on every frame. Reactive mode (used previously) can stall in
+        // headless Chromium when the page has no UI events, causing the inbound
+        // message pipeline (wasm_receive_message → drain_inbound → process_lobby)
+        // to never run — all smoke tests that use createTestClient timeout waiting
+        // for Welcome.
+        focused_mode: bevy::winit::UpdateMode::Continuous,
         unfocused_mode: bevy::winit::UpdateMode::Reactive {
             wait: std::time::Duration::from_secs_f64(1.0 / 20.0),
             react_to_device_events: false,

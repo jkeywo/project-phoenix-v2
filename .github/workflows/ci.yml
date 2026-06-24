@@ -161,7 +161,56 @@ jobs:
         working-directory: tests/smoke
         run: |
           echo "## Smoke Test Results" >> $GITHUB_STEP_SUMMARY
-          npx playwright test --reporter=list 2>&1 | tail -20 >> $GITHUB_STEP_SUMMARY || true
+          node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('fs');
+          const path = '../../target/playwright-results.json';
+
+          if (!fs.existsSync(path)) {
+            console.log('No Playwright JSON result file was produced.');
+            process.exit(0);
+          }
+
+          const report = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const stats = report.stats || {};
+          console.log(`- Expected: ${stats.expected ?? 0}`);
+          console.log(`- Failed: ${stats.unexpected ?? 0}`);
+          console.log(`- Flaky: ${stats.flaky ?? 0}`);
+          console.log(`- Skipped: ${stats.skipped ?? 0}`);
+
+          const failed = [];
+          function walkSuite(suite, parents = []) {
+            for (const spec of suite.specs || []) {
+              const title = [...parents, spec.title].join(' > ');
+              for (const test of spec.tests || []) {
+                const bad = (test.results || []).find((r) => r.status === 'failed' || r.status === 'timedOut');
+                if (bad) {
+                  failed.push({
+                    title,
+                    project: test.projectName,
+                    status: bad.status,
+                    error: bad.error?.message || '',
+                  });
+                }
+              }
+            }
+            for (const child of suite.suites || []) {
+              walkSuite(child, [...parents, child.title].filter(Boolean));
+            }
+          }
+          for (const suite of report.suites || []) walkSuite(suite);
+
+          if (failed.length) {
+            console.log('');
+            console.log('### First failures');
+            for (const item of failed.slice(0, 20)) {
+              const project = item.project ? ` [${item.project}]` : '';
+              console.log(`- ${item.status}${project}: ${item.title}`);
+              if (item.error) {
+                console.log(`  ${item.error.split('\n')[0]}`);
+              }
+            }
+          }
+          NODE
 
   # ── Deploy (main branch only, requires both test + smoke to pass) ─────────────
   deploy:

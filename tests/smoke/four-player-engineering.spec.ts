@@ -56,6 +56,16 @@ async function waitForLastMessage(
   );
 }
 
+async function setHelmPower(client: TestClient, level: number) {
+  await client.send('ControlSystem', {
+    target: 'power',
+    payload: {
+      type: 'SetPowerGroupAllocation',
+      data: { group: 'helm', level },
+    },
+  });
+}
+
 /**
  * Build a 4-player crew at the fixed 6P layout. No cascade — each player
  * selects their station directly. Returns the four clients; c3 is the
@@ -105,7 +115,7 @@ test('Engineering player can change power (tap is honored, not just shown)', asy
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
 
   // Tap authorization: increasing Helm power must be honored.
-  await c3.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } } });
+  await setHelmPower(c3, 3);
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
 
   await c1.close();
@@ -166,7 +176,7 @@ test('Engineering acts when all four connect before selecting', async ({ context
   await c3.waitForMessage('GameStarted', 5_000);
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
-  await c3.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } } });
+  await setHelmPower(c3, 3);
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
 
   await c1.close();
@@ -188,7 +198,7 @@ test('Engineering can still act after a mid-game reconnect', async ({ context })
 
   // Confirm the seat works before the blip.
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
-  await c3.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } } });
+  await setHelmPower(c3, 3);
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
 
   // Simulate the Wi-Fi blip: tear down the page (host sees the connection
@@ -204,7 +214,7 @@ test('Engineering can still act after a mid-game reconnect', async ({ context })
     const msgs: any[] = (window as any).__messages || [];
     return (msgs.filter((m: any) => m.type === 'PowerState').pop() || {}).data?.helm;
   });
-  await c3b.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: Math.max(1, (before ?? 3) - 1) } } });
+  await setHelmPower(c3b, Math.max(1, (before ?? 3) - 1));
   await waitForLastMessage(c3b, 'PowerState', `data && data.helm < ${before}`);
 
   await c1.close();
@@ -236,7 +246,7 @@ test('shared session-token orphans the first Engineering device (ghost console)'
 
   // The orphaned device taps. The action IS accepted (same token still holds
   // Power), so the *winner* sees helm climb to 3 — but the ghost (c3) never does.
-  await c3.send('ControlSystem', { target: 'power', payload: { type: 'SetPower', data: { target: 'Helm', level: 3 } } });
+  await setHelmPower(c3, 3);
   await waitForLastMessage(ghostWinner, 'PowerState', 'data && data.helm === 3');
 
   const ghostSawIncrease = await c3.page.evaluate(() => {

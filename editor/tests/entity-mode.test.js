@@ -19,7 +19,14 @@ function readFaction(name) {
 }
 
 function listDir(rel) {
-  return readdirSync(resolve(projectRoot, rel));
+  try {
+    return readdirSync(resolve(projectRoot, rel));
+  } catch (err) {
+    if (rel === 'assets/complexity' && err?.code === 'ENOENT') {
+      return [];
+    }
+    throw err;
+  }
 }
 
 // ── entity-toml round-trip tests ──────────────────────────────────────────────

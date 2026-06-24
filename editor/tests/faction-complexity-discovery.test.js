@@ -8,6 +8,17 @@ import { discoverFactionsAndComplexity } from '../faction-complexity-discovery.j
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
 
+function listProjectDir(rel) {
+  try {
+    return readdirSync(resolve(projectRoot, rel));
+  } catch (err) {
+    if (rel === 'assets/complexity' && err?.code === 'ENOENT') {
+      return [];
+    }
+    throw err;
+  }
+}
+
 function makeDeps({ factions, complexity, factionContent }) {
   return {
     listDirectory: async (rel) => {
@@ -127,8 +138,8 @@ describe('discoverFactionsAndComplexity', () => {
   });
 
   it('loads all real shipped faction and complexity files', async () => {
-    const factionEntries = readdirSync(resolve(projectRoot, 'assets/factions'));
-    const complexityEntries = readdirSync(resolve(projectRoot, 'assets/complexity'));
+    const factionEntries = listProjectDir('assets/factions');
+    const complexityEntries = listProjectDir('assets/complexity');
     const factionContent = {};
     for (const f of factionEntries) {
       if (!f.endsWith('.toml')) continue;

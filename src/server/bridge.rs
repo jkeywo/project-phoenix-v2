@@ -231,6 +231,11 @@ pub fn wasm_init() {
             .init_asset::<Image>()
             .init_asset::<Mesh>()
             .init_asset::<StandardMaterial>();
+        // Register messages that non-rendering systems need. These are
+        // normally registered by ViewscreenBorderPlugin / RendererPlugin
+        // which we skip in automation mode.
+        app.add_message::<crate::console_bridge::HudStateChanged>()
+            .add_message::<crate::console_bridge::LobbyStateChanged>();
     } else {
         app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
             primary_window: Some(bevy::window::Window {

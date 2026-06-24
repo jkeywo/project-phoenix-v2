@@ -23,7 +23,12 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: {
-          args: ['--autoplay-policy=no-user-gesture-required'],
+          args: [
+            '--autoplay-policy=no-user-gesture-required',
+            '--use-gl=angle',
+            '--use-angle=swiftshader-webgl',
+            '--enable-unsafe-swiftshader',
+          ],
         },
       },
     },

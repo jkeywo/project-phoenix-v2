@@ -54,7 +54,7 @@ async function main() {
   await helmPage.evaluate(({ station }) => (window as any).__conn.send(JSON.stringify({ type: 'SelectStation', data: { station } })), { station: 'Helm' });
   await helmPage.waitForFunction((t: any) => (window as any).__messages?.some((m: any) => m.type === 'StationAssigned' && m.data.token === t), helmToken, { timeout: 5_000 });
 
-  await helmPage.evaluate(() => (window as any).__conn.send(JSON.stringify({ type: 'StartGame' })));
+  await helmPage.evaluate(() => (window as any).__conn.send(JSON.stringify({ type: 'SetReady', data: { ready: true } })));
   await helmPage.waitForFunction(() => (window as any).__messages?.some((m: any) => m.type === 'GameStarted'), { timeout: 10_000 });
 
   // Wait for several sim ticks so render_spawned_entities and sim_state run

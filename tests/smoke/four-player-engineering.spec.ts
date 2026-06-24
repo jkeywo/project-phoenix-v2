@@ -106,8 +106,11 @@ test('Engineering seat is assigned exactly [Repair, Power] at 6P layout', async 
 test('Engineering player can change power (tap is honored, not just shown)', async ({ context }) => {
   const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
 
-  // c1 holds CaptainChair; start the game.
-  await c1.send('StartGame');
+  // All players ready -> auto-start
+  await c1.send('SetReady', { ready: true });
+  await c2.send('SetReady', { ready: true });
+  await c3.send('SetReady', { ready: true });
+  await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 5_000);
 
   // Data delivery: the Engineering seat must receive PowerState (proves it is
@@ -127,7 +130,10 @@ test('Engineering player can change power (tap is honored, not just shown)', asy
 test('Engineering player can dispatch a repair team (tap is honored)', async ({ context }) => {
   const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
 
-  await c1.send('StartGame');
+  await c1.send('SetReady', { ready: true });
+  await c2.send('SetReady', { ready: true });
+  await c3.send('SetReady', { ready: true });
+  await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 5_000);
 
   // Data delivery: the seat receives RepairState with all teams idle.
@@ -172,7 +178,10 @@ test('Engineering acts when all four connect before selecting', async ({ context
   const a3 = await lastAssignment(c3, c3.token);
   expect([...a3.data.consoles].sort()).toEqual(['Power', 'Repair']);
 
-  await c1.send('StartGame');
+  await c1.send('SetReady', { ready: true });
+  await c2.send('SetReady', { ready: true });
+  await c3.send('SetReady', { ready: true });
+  await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 5_000);
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
@@ -193,7 +202,10 @@ test('Engineering can still act after a mid-game reconnect', async ({ context })
   const { c1, c2, c3, c4, hostId } = await buildFourPlayerCrew(context);
   const engToken = c3.token;
 
-  await c1.send('StartGame');
+  await c1.send('SetReady', { ready: true });
+  await c2.send('SetReady', { ready: true });
+  await c3.send('SetReady', { ready: true });
+  await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 5_000);
 
   // Confirm the seat works before the blip.
@@ -234,7 +246,10 @@ test('shared session-token orphans the first Engineering device (ghost console)'
   const { c1, c2, c3, c4, hostId } = await buildFourPlayerCrew(context);
   const engToken = c3.token;
 
-  await c1.send('StartGame');
+  await c1.send('SetReady', { ready: true });
+  await c2.send('SetReady', { ready: true });
+  await c3.send('SetReady', { ready: true });
+  await c4.send('SetReady', { ready: true });
   await c3.waitForMessage('GameStarted', 5_000);
 
   // c3 is live: it receives PowerState at the default helm level.

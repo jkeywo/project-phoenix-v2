@@ -50,14 +50,13 @@ test('SelectStation — claims station and both clients receive StationAssigned'
   await clientB.close();
 });
 
-test('StartGame from any player starts the game', async ({ context }) => {
+test('all players SetReady starts the game', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 
-  // Two clients
   const clientA = await createTestClient(context, hostId, { name: 'Helm' });
   const clientB = await createTestClient(context, hostId, { name: 'Tactical' });
 
@@ -67,10 +66,10 @@ test('StartGame from any player starts the game', async ({ context }) => {
   await clientB.send('SelectStation', { station: 'Tactical' });
   await waitForStation(clientB);
 
-  // Non-captain (B / Tactical station) can StartGame (#495: captain check removed)
-  await clientB.send('StartGame');
+  // Game starts when ALL connected players are ready (auto-start).
+  await clientA.send('SetReady', { ready: true });
+  await clientB.send('SetReady', { ready: true });
 
-  // GameStarted should be received by both
   await clientA.waitForMessage('GameStarted', 5_000);
   await clientB.waitForMessage('GameStarted', 5_000);
 
@@ -78,14 +77,13 @@ test('StartGame from any player starts the game', async ({ context }) => {
   await clientB.close();
 });
 
-test('StartGame succeeds even with unfilled stations', async ({ context }) => {
+test('SetReady starts game even with unfilled stations', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 
-  // Two clients join; only one claims a station
   const clientA = await createTestClient(context, hostId, { name: 'Helm' });
   const clientB = await createTestClient(context, hostId, { name: 'Spectator' });
 
@@ -93,8 +91,9 @@ test('StartGame succeeds even with unfilled stations', async ({ context }) => {
   await clientA.send('SelectStation', { station: 'Helm' });
   await waitForStation(clientA);
 
-  // StartGame succeeds even with unfilled stations (#495: stations-filled gate removed)
-  await clientA.send('StartGame');
+  // Both connected players must be ready (auto-start). Unfilled stations are OK.
+  await clientA.send('SetReady', { ready: true });
+  await clientB.send('SetReady', { ready: true });
 
   await clientA.waitForMessage('GameStarted', 5_000);
   await clientB.waitForMessage('GameStarted', 5_000);
@@ -103,7 +102,7 @@ test('StartGame succeeds even with unfilled stations', async ({ context }) => {
   await clientB.close();
 });
 
-test('captain starts game — both clients receive GameStarted', async ({ context }) => {
+test('SetReady from all players starts game and Welcome has Lobby phase', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
@@ -113,15 +112,15 @@ test('captain starts game — both clients receive GameStarted', async ({ contex
   const clientA = await createTestClient(context, hostId, { name: 'Helm' });
   const clientB = await createTestClient(context, hostId, { name: 'Tactical' });
 
-  // 2P layout: Helm (CaptainChair+Helm) + Tactical (Tactical+Repair)
   await clientA.send('SelectStation', { station: 'Helm' });
   await waitForStation(clientA);
 
   await clientB.send('SelectStation', { station: 'Tactical' });
   await waitForStation(clientB);
 
-  // Captain (A, holds CaptainChair via Helm station) sends StartGame
-  await clientA.send('StartGame');
+  // Both players ready -> auto-start
+  await clientA.send('SetReady', { ready: true });
+  await clientB.send('SetReady', { ready: true });
 
   await clientA.waitForMessage('GameStarted', 5_000);
   await clientB.waitForMessage('GameStarted', 5_000);

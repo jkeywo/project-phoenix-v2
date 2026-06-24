@@ -50,7 +50,8 @@ async function startGame(context: BrowserContext): Promise<{ captain: TestClient
   await captain.send('SelectStation', { station: 'Tactical' });
   await waitForStation(captain);
 
-  await helm.send('StartGame');
+  await helm.send('SetReady', { ready: true });
+  await captain.send('SetReady', { ready: true });
   await helm.waitForMessage('GameStarted', 5_000);
   await captain.waitForMessage('GameStarted', 5_000);
 

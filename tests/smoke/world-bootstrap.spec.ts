@@ -35,7 +35,8 @@ test('default scenario: Starbase Alpha appears in WorldSetup after game start', 
     { timeout: 5_000 },
   );
 
-  await helm.send('StartGame');
+  await helm.send('SetReady', { ready: true });
+  await tactical.send('SetReady', { ready: true });
   await helm.waitForMessage('GameStarted', 5_000);
 
   const worldSetupMsg = await helm.waitForMessage('WorldSetup', 5_000) as any;

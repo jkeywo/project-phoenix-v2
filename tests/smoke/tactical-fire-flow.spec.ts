@@ -112,7 +112,8 @@ async function startGameWithTactical(context: BrowserContext) {
   await tactical.send('SelectStation', { station: 'Tactical' });
   await waitForStation(tactical);
 
-  await helm.send('StartGame');
+  await helm.send('SetReady', { ready: true });
+  await tactical.send('SetReady', { ready: true });
   await helm.waitForMessage('GameStarted', 5_000);
   await tactical.waitForMessage('GameStarted', 5_000);
 

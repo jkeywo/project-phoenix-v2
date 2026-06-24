@@ -34,8 +34,9 @@ test('comms — hail contact, respond, get ObjectiveSummary', async ({ context }
   await tactical.send('SelectStation', { station: 'Tactical' });
   await waitForStation(tactical);
 
-  // ── Start game ─────────────────────────────────────────────────────────────
-  await captain.send('StartGame');
+  // ── Start game (all players ready -> auto-start) ──────────────────────────
+  await captain.send('SetReady', { ready: true });
+  await tactical.send('SetReady', { ready: true });
   await captain.waitForMessage('GameStarted', 8_000);
 
   // ── Wait for initial CommsState (contacts list, sent on first InProgress tick)

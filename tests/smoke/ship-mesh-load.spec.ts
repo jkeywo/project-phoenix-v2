@@ -51,7 +51,8 @@ test('NPC ship GLB model loads (200) after game start', async ({ context }) => {
       (m: any) => m.type === 'StationAssigned' && m.data.token === t),
     tactical.token, { timeout: 5_000 });
 
-  await helm.send('StartGame');
+  await helm.send('SetReady', { ready: true });
+  await tactical.send('SetReady', { ready: true });
   await helm.waitForMessage('GameStarted', 5_000);
   await helm.waitForMessage('WorldSetup', 5_000);
 

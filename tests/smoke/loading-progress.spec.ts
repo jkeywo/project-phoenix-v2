@@ -66,7 +66,7 @@ test('loading bar updates during slow load', async ({ context }) => {
     } catch (_) { /* ignore */ }
   }, 50);
 
-  await helm.send('StartGame');
+  await helm.send('SetReady', { ready: true });
   try { await helm.waitForMessage('GameStarted', 60_000); } catch (_) { /* swallow */ }
   clearInterval(poll);
 

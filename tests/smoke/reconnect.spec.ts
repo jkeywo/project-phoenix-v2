@@ -59,7 +59,7 @@ test('refresh mid-game rejoins straight onto the same console', async ({ context
   // fills all stations and can Engage.
   const c1 = await createTestClient(context, hostId, { token: TOKEN, name: 'P1' });
   await selectAndWait(c1, 'Captain');
-  await c1.send('StartGame');
+  await c1.send('SetReady', { ready: true });
   await c1.waitForMessage('GameStarted');
 
   // Refresh mid-game.

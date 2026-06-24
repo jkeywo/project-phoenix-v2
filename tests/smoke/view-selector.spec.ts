@@ -57,7 +57,10 @@ async function startGame(context: BrowserContext) {
   await sensorsPlayer.send('SelectStation', { station: 'Sensors' });
   await waitForStation(sensorsPlayer);
 
-  await captainPlayer.send('StartGame');
+  await captainPlayer.send('SetReady', { ready: true });
+  await helmPlayer.send('SetReady', { ready: true });
+  await commsPlayer.send('SetReady', { ready: true });
+  await sensorsPlayer.send('SetReady', { ready: true });
   await captainPlayer.waitForMessage('GameStarted', 15_000);
   await helmPlayer.waitForMessage('GameStarted', 15_000);
   await commsPlayer.waitForMessage('GameStarted', 15_000);

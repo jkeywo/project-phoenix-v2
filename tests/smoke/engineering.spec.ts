@@ -33,7 +33,8 @@ async function startGameWithEngineering(context: BrowserContext) {
   await engineer.send('SelectStation', { station: 'Tactical' });
   await waitForStation(engineer);
 
-  await captain.send('StartGame');
+  await captain.send('SetReady', { ready: true });
+  await engineer.send('SetReady', { ready: true });
   await captain.waitForMessage('GameStarted', 5_000);
   await engineer.waitForMessage('GameStarted', 5_000);
 

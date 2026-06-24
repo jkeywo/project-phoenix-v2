@@ -53,7 +53,8 @@ test('patrol scenario: raider entity appears in WorldSetup after game start', as
     { timeout: 5_000 },
   );
 
-  await helm.send('StartGame');
+  await helm.send('SetReady', { ready: true });
+  await tactical.send('SetReady', { ready: true });
   await helm.waitForMessage('GameStarted', 5_000);
 
   // WorldSetup is broadcast once after GameStarted.

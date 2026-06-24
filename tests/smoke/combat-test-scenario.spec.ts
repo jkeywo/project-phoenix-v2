@@ -44,7 +44,7 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
     { timeout: 5_000 },
   );
 
-  await captain.send('StartGame');
+  await captain.send('SetReady', { ready: true });
   await captain.waitForMessage('GameStarted', 5_000);
 
   // After game start the WorldSetup contains the static entities:

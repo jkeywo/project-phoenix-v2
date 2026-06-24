@@ -46,7 +46,7 @@ test('refresh in the lobby rejoins the same station', async ({ context }) => {
 
   const welcome = await c1b.waitForMessage('Welcome');
   const station = stationInWelcome(welcome, TOKEN);
-  expect(station).toBe('Captain');
+  expect(station).toBe('captain');
 
   await c1b.close();
 });
@@ -69,7 +69,7 @@ test('refresh mid-game rejoins straight onto the same console', async ({ context
   const welcome = await c1b.waitForMessage('Welcome');
   expect(welcome?.data?.state?.phase).toBe('InProgress');
   const station = stationInWelcome(welcome, TOKEN);
-  expect(station).toBe('Captain');
+  expect(station).toBe('captain');
 
   await c1b.close();
 });

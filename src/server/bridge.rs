@@ -220,12 +220,7 @@ pub fn wasm_init() {
         // Register asset types that simulation plugins (StarRenderPlugin,
         // render_spawned_entities, asset_preload etc.) depend on. Without
         // RenderPlugin these aren't auto-registered.
-        use bevy::{
-            asset::AssetApp,
-            image::Image,
-            mesh::Mesh,
-            pbr::StandardMaterial,
-        };
+        use bevy::{asset::AssetApp, image::Image, mesh::Mesh, pbr::StandardMaterial};
         app.init_asset::<bevy::shader::Shader>()
             .init_asset_loader::<bevy::shader::ShaderLoader>()
             .init_asset::<Image>()
@@ -247,8 +242,8 @@ pub fn wasm_init() {
         }));
     }
     app.add_plugins(ConfigCachePlugin)
-    .add_plugins(AsteroidLifecyclePlugin)
-    .add_plugins(ModifierCoordinationPlugin);
+        .add_plugins(AsteroidLifecyclePlugin)
+        .add_plugins(ModifierCoordinationPlugin);
     // Insert ShipConfigResource before LobbyPlugin so its
     // .init_resource::<ShipConfigResource>() is a no-op (the default
     // calls load_ship_config_from_disk which uses std::fs — panics in WASM).
@@ -258,7 +253,7 @@ pub fn wasm_init() {
         }
     });
     app.add_plugins(LobbyPlugin)
-    .add_plugins(crate::lobby::lobby_outbox_broadcaster());
+        .add_plugins(crate::lobby::lobby_outbox_broadcaster());
     add_simulation_plugins(&mut app);
     app.add_plugins(WorldPlugin);
     if !is_automation {
@@ -605,7 +600,7 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
     let pending: Vec<(String, String)> = INBOUND_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
 
     for (token, json) in pending {
-        if let Ok(msg) = JsonCodec.decode_client(&json) {
+        if let Ok(msg) = codec::decode_bridge_client_message(&json) {
             writer.write(InboundMessage { token, msg });
         }
     }

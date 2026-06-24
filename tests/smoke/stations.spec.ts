@@ -130,50 +130,41 @@ test('ReleaseStation returns player to spectator', async ({ context }) => {
   await client.close();
 });
 
-test('first connector when full becomes spectator', async ({ context }) => {
-  const serverPage = await createServerPage(context, { maxPlayers: 3 });
+test('10th connector when all 9 stations are filled becomes spectator', async ({ context }) => {
+  const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
 
-  // At 3P max, fill all 3 stations
-  const c1 = await createTestClient(context, hostId, { name: 'P1' });
-  const c2 = await createTestClient(context, hostId, { name: 'P2' });
-  const c3 = await createTestClient(context, hostId, { name: 'P3' });
+  const stations = ['Captain', 'Helm', 'Tactical', 'Repair', 'Sensors', 'Shields', 'Navigation', 'Power', 'Comms'];
+  const clients = [];
+  for (let i = 0; i < stations.length; i++) {
+    const c = await createTestClient(context, hostId, { name: `P${i + 1}` });
+    await c.send('SelectStation', { station: stations[i] });
+    await c.waitForMessage('StationAssigned', 5_000);
+    clients.push(c);
+  }
 
-  await c1.send('SelectStation', { station: 'Helm' });
-  await c1.waitForMessage('StationAssigned', 5_000);
+  // 10th player joins — all 9 stations filled, should be spectator
+  const c10 = await createTestClient(context, hostId, { name: 'Spectator' });
 
-  await c2.send('SelectStation', { station: 'Tactical' });
-  await c2.waitForMessage('StationAssigned', 5_000);
-
-  await c3.send('SelectStation', { station: 'Engineering' });
-  await c3.waitForMessage('StationAssigned', 5_000);
-
-  // 4th player joins — at max_players (3), should be spectator
-  const c4 = await createTestClient(context, hostId, { name: 'Spectator' });
-
-  // The Welcome or auto-assignment should mark c4 as spectator (station=null)
-  const spectatorMsg = await c4.page.evaluate(
+  const spectatorMsg = await c10.page.evaluate(
     () => {
       const msgs: any[] = (window as any).__messages || [];
       return msgs.find((m: any) => m.type === 'StationAssigned' && m.data.token === (window as any).__myToken);
     }
   ) as any;
 
-  // If not found by evaluating __myToken trick, check the StationAssigned for c4's token
-  const spectatorMsg2 = await c4.page.evaluate(
+  const spectatorMsg2 = await c10.page.evaluate(
     (token) => {
       const msgs: any[] = (window as any).__messages || [];
       return msgs.find((m: any) => m.type === 'StationAssigned' && m.data.token === token);
     },
-    c4.token,
+    c10.token,
   ) as any;
 
   expect(spectatorMsg2).not.toBeNull();
   expect(spectatorMsg2.data.station).toBeNull();
   expect(spectatorMsg2.data.consoles).toHaveLength(0);
 
-  await c1.close();
-  await c2.close();
-  await c3.close();
-  await c4.close();
+  for (const c of clients) { await c.close(); }
+  await c10.close();
 });

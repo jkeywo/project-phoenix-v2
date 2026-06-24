@@ -258,15 +258,6 @@ export async function createTestClient(
   return client;
 }
 
-// Patches a player_ship.toml string so that max_players equals the given value
-// and any station-count sections beyond that limit are stripped (they would
-// otherwise fail the out-of-range validation check in Rust).
-function patchMaxPlayers(toml: string, maxPlayers: number): string {
-  let patched = toml.replace(/^max_players\s*=\s*\d+/m, `max_players = ${maxPlayers}`);
-  const pattern = new RegExp(`\r?\n\\[\\[stations\\.${maxPlayers + 1}\\]\\][\\s\\S]*$`);
-  return patched.replace(pattern, '');
-}
-
 /**
  * Strips heavy `[[entity]]` blocks from a world TOML so the lobby preload
  * gate clears in CI. Specifically removes any block whose `template_path`
@@ -307,21 +298,11 @@ export function stripHeavyEntities(toml: string): string {
   return toml.replace(blockRegex, '').replace(/\n{3,}/g, '\n\n');
 }
 
-// Boots a fresh server page, optionally patching the player_ship.toml fetch to
-// override max_players before the WASM validates and loads it.
+// Boots a fresh server page.
 export async function createServerPage(
   ctx: BrowserContext,
-  opts: { maxPlayers?: number } = {},
 ): Promise<Page> {
   const page = await ctx.newPage();
-  if (opts.maxPlayers !== undefined) {
-    const mp = opts.maxPlayers;
-    await page.route('**/assets/entities/player_ship.toml', async route => {
-      const response = await route.fetch();
-      const text = await response.text();
-      await route.fulfill({ contentType: 'text/plain', body: patchMaxPlayers(text, mp) });
-    });
-  }
   await page.goto('/?scenario=assets/worlds/default.toml');
   await page.bringToFront();
   await page.waitForFunction(() => !!(window as any).__wasmReady, { timeout: WASM_READY_TIMEOUT });

@@ -1,4 +1,4 @@
-use crate::messages::{ClientMessage, ServerMessage};
+use crate::messages::{ClientMessage, ServerMessage, SystemControlPayload, SystemId};
 
 pub trait MessageCodec {
     type Error;
@@ -55,11 +55,74 @@ pub fn decode_ui_action(s: &str) -> Result<crate::messages::UiAction, serde_json
     serde_json::from_str(s)
 }
 
+/// Decode inbound JSON from the HTML/PeerJS bridge.
+///
+/// The preferred wire shape is a full `ClientMessage`. Some smoke-test and
+/// legacy browser paths still send short-form system payloads such as
+/// `{"type":"HelmInput","data":{"thrust":0.5,"steering":0.0}}`; this helper
+/// wraps those as `ClientMessage::ControlSystem` while keeping raw JSON handling
+/// inside the codec module.
+pub fn decode_bridge_client_message(s: &str) -> Result<ClientMessage, serde_json::Error> {
+    match serde_json::from_str(s) {
+        Ok(msg) => Ok(msg),
+        Err(original_err) => decode_short_form_system_control(s).ok_or(original_err),
+    }
+}
+
 /// Encode a `LobbyStatePayload` to JSON for the HTML lobby overlay.
 pub fn encode_lobby_state(
     s: &crate::messages::LobbyStatePayload,
 ) -> Result<String, serde_json::Error> {
     serde_json::to_string(s)
+}
+
+fn decode_short_form_system_control(s: &str) -> Option<ClientMessage> {
+    let v: serde_json::Value = serde_json::from_str(s).ok()?;
+    let type_name = v.get("type")?.as_str()?;
+    let target = system_target_for_payload_type(type_name)?;
+    let payload_type = system_payload_type_name(type_name);
+    let rekeyed = match v.get("data") {
+        Some(data) => serde_json::json!({
+            "type": payload_type,
+            "data": data,
+        }),
+        None => serde_json::json!({ "type": payload_type }),
+    };
+    let payload: SystemControlPayload = serde_json::from_value(rekeyed).ok()?;
+    Some(ClientMessage::ControlSystem {
+        target: SystemId(target.to_string()),
+        payload,
+    })
+}
+
+fn system_payload_type_name(type_name: &str) -> &str {
+    match type_name {
+        "SetSensorsTarget" => "SetScienceTarget",
+        other => other,
+    }
+}
+
+fn system_target_for_payload_type(type_name: &str) -> Option<&'static str> {
+    match type_name {
+        "HelmInput" | "StartImpulseCharge" | "CancelImpulse" | "ToggleBoost" | "SetBoost" => {
+            Some(crate::system_registry::HELM_SYSTEM_ID)
+        }
+        "ToggleRedAlert" => Some(crate::system_registry::RED_ALERT_SYSTEM_ID),
+        "SetView" => Some(crate::system_registry::VIEWSCREEN_SYSTEM_ID),
+        "SetTarget" | "SetPhaserMode" | "SetPhaserFrequency" => {
+            Some(crate::system_registry::TACTICAL_SYSTEM_ID)
+        }
+        "Hail" | "SelectCommsMessage" | "RespondToMessage" | "ClearComms" | "ShowOnScreen" => {
+            Some(crate::system_registry::COMMS_SYSTEM_ID)
+        }
+        "SetNavigationWaypoint" | "ClearNavigationWaypoint" => {
+            Some(crate::system_registry::NAVIGATION_SYSTEM_ID)
+        }
+        "SetScienceTarget" | "SetSensorsTarget" => Some(crate::system_registry::SENSORS_SYSTEM_ID),
+        "SetShieldFocus" => Some(crate::system_registry::SHIELDS_SYSTEM_ID),
+        "SetPowerGroupAllocation" | "SetPower" => Some(crate::system_registry::POWER_SYSTEM_ID),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -287,6 +350,100 @@ mod tests {
         assert_eq!(
             encoded,
             r#"{"type":"ControlSystem","data":{"target":"power","payload":{"type":"SetPowerGroupAllocation","data":{"group":"weapons","level":3}}}}"#
+        );
+    }
+
+    #[test]
+    fn decode_bridge_client_message_accepts_full_client_message() {
+        let msg =
+            decode_bridge_client_message(r#"{"type":"SetReady","data":{"ready":true}}"#).unwrap();
+
+        assert_eq!(msg, ClientMessage::SetReady { ready: true });
+    }
+
+    #[test]
+    fn decode_bridge_client_message_wraps_short_form_helm_input() {
+        let msg = decode_bridge_client_message(
+            r#"{"type":"HelmInput","data":{"thrust":0.5,"steering":-0.25}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::HelmInput {
+                    thrust: 0.5,
+                    steering: -0.25,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn decode_bridge_client_message_wraps_short_form_unit_payload() {
+        let msg = decode_bridge_client_message(r#"{"type":"StartImpulseCharge"}"#).unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_system_id(),
+                payload: SystemControlPayload::StartImpulseCharge,
+            }
+        );
+    }
+
+    #[test]
+    fn decode_bridge_client_message_wraps_short_form_set_view() {
+        let msg = decode_bridge_client_message(
+            r#"{"type":"SetView","data":{"mode":{"kind":"Camera","data":"Aft"}}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(ViewDirection::Aft),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn decode_bridge_client_message_wraps_short_form_comms_response() {
+        let msg = decode_bridge_client_message(
+            r#"{"type":"RespondToMessage","data":{"message_id":"m1","response_index":0}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: SystemControlPayload::RespondToMessage {
+                    message_id: "m1".into(),
+                    response_index: 0,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn decode_bridge_client_message_wraps_short_form_tactical_target() {
+        let msg =
+            decode_bridge_client_message(r#"{"type":"SetTarget","data":{"uuid":"raider-1"}}"#)
+                .unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "raider-1".into(),
+                },
+            }
         );
     }
 

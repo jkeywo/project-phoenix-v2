@@ -359,7 +359,6 @@ mod tests {
     use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::{ClientMessage, Console, *};
-    use crate::shield::ShieldSystem;
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::CoordinationEnqueue;
     use crate::simulation::{

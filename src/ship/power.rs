@@ -363,6 +363,7 @@ mod tests {
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
     use crate::messages::{ModifierSlot, ServerMessage, *};
     use crate::modifiers::ShipModifiers;
+    use crate::power_system::SENSORS_POWER_GROUP;
     use crate::shield::ShieldSystem;
     use crate::simulation::{
         LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,

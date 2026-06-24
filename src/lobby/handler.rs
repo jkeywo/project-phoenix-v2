@@ -396,7 +396,7 @@ pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{EntitySnapshot, StationId, WorldData};
+    use crate::messages::{Console, EntitySnapshot, StationId, WorldData};
     use crate::ship::control_source::ControlSourceResolver;
     use crate::stations_config::{ShipStations, StationDef};
 

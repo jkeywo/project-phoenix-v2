@@ -303,13 +303,21 @@ pub fn process_lobby(
     //   lobby state yet on the first frame. This avoids a deadlock where
     //   `process_lobby` would refuse Engage forever waiting for a system
     //   that never runs.
+    // - In Playwright automation mode the renderer plugins are skipped
+    //   (MinimalPlugins), and asset preloading can never complete because
+    //   the renderer asset pipeline isn't available. Treat preload as
+    //   complete unconditionally in this environment.
     // - Otherwise gate on `preload.complete`, which is set by
     //   `poll_asset_preload` once all icons, sidecars, sub-worlds, and GLBs
     //   reach a terminal LoadState (Loaded or Failed).
-    let preload_complete = preload
-        .as_ref()
-        .map(|p| !p.started || p.complete)
-        .unwrap_or(true);
+    let preload_complete = if crate::debug_overlay::is_playwright_automation() {
+        true
+    } else {
+        preload
+            .as_ref()
+            .map(|p| !p.started || p.complete)
+            .unwrap_or(true)
+    };
     for ev in inbound.read() {
         if !accepts_all && !matches!(ev.msg, ClientMessage::Identify { .. }) {
             continue;

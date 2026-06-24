@@ -99,10 +99,12 @@ impl Plugin for DebugOverlayPlugin {
         app.init_resource::<DamageLog>();
         app.init_resource::<DebugEntitiesEnabled>();
         app.init_resource::<DebugEntityInspectorEnabled>();
-        app.add_systems(
-            Update,
-            draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),
-        );
+        if should_install_region_wireframes() {
+            app.add_systems(
+                Update,
+                draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),
+            );
+        }
         app.add_systems(
             PostUpdate,
             write_debug_state.run_if(|r: Res<DebugOverlayEnabled>| r.0),
@@ -120,6 +122,39 @@ impl Plugin for DebugOverlayPlugin {
             update_entity_inspector.run_if(|r: Res<DebugEntityInspectorEnabled>| r.0),
         );
     }
+}
+
+/// Returns `true` when running under Playwright/WebDriver automation (WASM only).
+///
+/// On native and non-server builds this always returns `false`, so non-WASM
+/// tests and native simulation apps keep full gizmo rendering without any
+/// special setup.
+///
+/// Uses `navigator.webdriver` (set by Playwright / Selenium) to detect
+/// automation. When the property is absent or the detection fails, the safe
+/// default (`false` — not automation) is returned. Callers in automation
+/// mode should skip any functionality that depends on renderer resources
+/// (e.g. `Gizmos`) which are not available under `MinimalPlugins`.
+#[cfg(target_arch = "wasm32")]
+pub fn is_playwright_automation() -> bool {
+    web_sys::window()
+        .and_then(|w| {
+            let nav = w.navigator();
+            js_sys::Reflect::get(&nav, &"webdriver".into())
+                .ok()
+                .and_then(|v| v.as_bool())
+        })
+        .unwrap_or(false)
+}
+
+/// Native / non-server fallback — no automation possible.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn is_playwright_automation() -> bool {
+    false
+}
+
+fn should_install_region_wireframes() -> bool {
+    !is_playwright_automation()
 }
 
 /// Reads `ShipModifiers` (as a Bevy resource) and writes the formatted debug

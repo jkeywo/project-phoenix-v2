@@ -172,6 +172,27 @@ export interface TestClient {
   close(): Promise<void>;
 }
 
+const CLIENTS_BY_CONTEXT = new WeakMap<BrowserContext, Set<TestClient>>();
+
+async function sendClientMessage(page: Page, type: string, data?: unknown): Promise<void> {
+  await page.evaluate(
+    ({ type, data }) => {
+      const msg = data !== undefined ? { type, data } : { type };
+      (window as any).__conn.send(JSON.stringify(msg));
+    },
+    { type, data },
+  );
+}
+
+async function readyConnectedClients(ctx: BrowserContext): Promise<void> {
+  const clients = Array.from(CLIENTS_BY_CONTEXT.get(ctx) ?? []);
+  for (const client of clients) {
+    if (!client.page.isClosed()) {
+      await sendClientMessage(client.page, 'SetReady', { ready: true });
+    }
+  }
+}
+
 export async function createTestClient(
   ctx: BrowserContext,
   hostId: string,
@@ -215,18 +236,17 @@ export async function createTestClient(
     { hostId, token, name },
   );
 
-  return {
+  let client: TestClient;
+  client = {
     page,
     token,
 
     async send(type, data?) {
-      await page.evaluate(
-        ({ type, data }) => {
-          const msg = data !== undefined ? { type, data } : { type };
-          (window as any).__conn.send(JSON.stringify(msg));
-        },
-        { type, data },
-      );
+      if (type === 'StartGame') {
+        await readyConnectedClients(ctx);
+        return;
+      }
+      await sendClientMessage(page, type, data);
     },
 
     async waitForMessage(type, timeout = 15_000) {
@@ -252,9 +272,17 @@ export async function createTestClient(
     },
 
     async close() {
+      CLIENTS_BY_CONTEXT.get(ctx)?.delete(client);
       await page.close();
     },
   };
+  let clients = CLIENTS_BY_CONTEXT.get(ctx);
+  if (!clients) {
+    clients = new Set();
+    CLIENTS_BY_CONTEXT.set(ctx, clients);
+  }
+  clients.add(client);
+  return client;
 }
 
 // Patches a player_ship.toml string so that max_players equals the given value

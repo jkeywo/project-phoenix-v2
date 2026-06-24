@@ -13,11 +13,11 @@ async function bootServer(context: BrowserContext): Promise<string> {
   return readHostPeerId(serverPage);
 }
 
-/** Pull the consoles the given token holds out of a Welcome message payload. */
-function consolesInWelcome(welcome: any, token: string): string[] {
+/** Pull the station name the given token holds out of a Welcome message payload. */
+function stationInWelcome(welcome: any, token: string): string | null {
   const players = welcome?.data?.state?.players ?? [];
   const me = players.find((p: any) => p.token === token);
-  return (me && (me.consoles ?? (me.console ? [me.console] : []))) || [];
+  return me?.station ?? null;
 }
 
 /** Send SelectStation and wait for this token's StationAssigned to land. */
@@ -45,8 +45,8 @@ test('refresh in the lobby rejoins the same station', async ({ context }) => {
   const c1b = await createTestClient(context, hostId, { token: TOKEN, name: 'P1' });
 
   const welcome = await c1b.waitForMessage('Welcome');
-  const consoles = consolesInWelcome(welcome, TOKEN);
-  expect(consoles).toContain('CaptainChair');
+  const station = stationInWelcome(welcome, TOKEN);
+  expect(station).toBe('Captain');
 
   await c1b.close();
 });
@@ -68,8 +68,8 @@ test('refresh mid-game rejoins straight onto the same console', async ({ context
 
   const welcome = await c1b.waitForMessage('Welcome');
   expect(welcome?.data?.state?.phase).toBe('InProgress');
-  const consoles = consolesInWelcome(welcome, TOKEN);
-  expect(consoles).toContain('CaptainChair');
+  const station = stationInWelcome(welcome, TOKEN);
+  expect(station).toBe('Captain');
 
   await c1b.close();
 });

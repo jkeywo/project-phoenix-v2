@@ -18,11 +18,15 @@ test('Welcome includes ship_stations', async ({ context }) => {
   expect(welcome).not.toBeNull();
   expect(welcome.data).toHaveProperty('ship_stations');
   const ss = welcome.data.ship_stations;
-  // Should have configs for multiple player counts
+  // Flat station roster — should be an object with a `stations` array
   expect(typeof ss).toBe('object');
-  // min_players and max_players are present
-  expect(typeof ss.min_players).toBe('number');
-  expect(typeof ss.max_players).toBe('number');
+  expect(Array.isArray(ss.stations)).toBe(true);
+  expect(ss.stations.length).toBeGreaterThan(0);
+  // Each station has an id, name, and consoles
+  const first = ss.stations[0];
+  expect(typeof first.id).toBe('string');
+  expect(typeof first.name).toBe('string');
+  expect(Array.isArray(first.consoles)).toBe(true);
 
   await client.close();
 });

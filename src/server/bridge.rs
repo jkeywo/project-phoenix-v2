@@ -123,7 +123,11 @@ thread_local! {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_validate_stations(toml_str: &str) -> Result<JsValue, JsValue> {
-    match crate::ship::config::parse_and_validate(toml_str, &[]) {
+    use crate::ship::system_registry::SystemKindRegistry;
+    let registry = SystemKindRegistry::with_core_systems()
+        .map_err(|e| JsValue::from_str(&format!("System registry init failed: {}", e)))?;
+    let kinds: Vec<&str> = registry.kinds().collect();
+    match crate::ship::config::parse_and_validate(toml_str, &kinds) {
         Ok(ship_config) => {
             let stations = crate::stations_config::stations_from_ship_config(&ship_config);
             SHIP_STATIONS.with(|slot| {

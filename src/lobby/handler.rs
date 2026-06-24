@@ -80,44 +80,27 @@ pub fn process_message(
 
             if joined {
                 // Reconnect-yield: if the player had a station and it is still
-                // unclaimed (no connected peer holds any of its consoles), restore
+                // unclaimed (no connected peer holds that station), restore
                 // their seat and broadcast the pre-disconnect rating.
                 let mut reconnect_station_update: Option<(StationId, String)> = None;
                 if is_reconnect && !ship_stations.stations.is_empty() {
                     let station_id = sessions.station_for_token(id_token).cloned();
                     if let Some(ref sid) = station_id {
-                        if let Some(station_def) =
-                            ship_stations.stations.iter().find(|sd| &sd.id == sid)
-                        {
-                            let occupied = station_def.consoles.iter().any(|c| {
-                                sessions
-                                    .players()
-                                    .iter()
-                                    .any(|p| p.connected && p.token != *id_token && p.consoles.contains(c))
-                            });
-                            if !occupied {
-                                let mut ok = true;
-                                for c in &station_def.consoles {
-                                    if sessions.toggle_console(id_token, c.clone()).is_err() {
-                                        ok = false;
-                                        break;
-                                    }
-                                }
-                                if !ok {
-                                    sessions.clear_consoles(id_token);
-                                } else {
-                                    // Capture restore info for post-Welcome broadcasts.
-                                    let last_rating = sessions
-                                        .players()
-                                        .iter()
-                                        .find(|p| p.token == *id_token)
-                                        .and_then(|p| p.last_rating.clone());
-                                    if let Some(rating) = last_rating {
-                                        reconnect_station_update =
-                                            Some((sid.clone(), rating));
-                                    }
-                                }
+                        let occupied = sessions.players().iter().any(|p| {
+                            p.connected && p.token != *id_token && p.station.as_ref() == Some(sid)
+                        });
+                        if !occupied {
+                            // Capture restore info for post-Welcome broadcasts.
+                            let last_rating = sessions
+                                .players()
+                                .iter()
+                                .find(|p| p.token == *id_token)
+                                .and_then(|p| p.last_rating.clone());
+                            if let Some(rating) = last_rating {
+                                reconnect_station_update = Some((sid.clone(), rating));
                             }
+                        } else {
+                            sessions.set_station(id_token, None);
                         }
                     }
                 }
@@ -146,21 +129,17 @@ pub fn process_message(
 
                 // Broadcast restored station + rating (after Welcome so client is ready).
                 if let Some((ref restored_sid, ref restored_rating)) = reconnect_station_update {
-                    if let Some(station_def) =
-                        ship_stations.stations.iter().find(|sd| &sd.id == restored_sid)
+                    if let Some(station_def) = ship_stations
+                        .stations
+                        .iter()
+                        .find(|sd| &sd.id == restored_sid)
                     {
-                        let consoles = sessions
-                            .players()
-                            .iter()
-                            .find(|p| p.token == *id_token)
-                            .map(|p| p.consoles.clone())
-                            .unwrap_or_default();
                         outbound.push((
                             Target::All,
                             ServerMessage::StationAssigned {
                                 token: id_token.clone(),
                                 station: Some(station_def.name.clone()),
-                                consoles,
+                                consoles: station_def.consoles.clone(),
                                 station_id: Some(restored_sid.clone()),
                             },
                         ));
@@ -182,25 +161,25 @@ pub fn process_message(
                 // The new joiner selects a station manually via SelectStation.
 
                 // Spectator queue: if station config is loaded, check if stations are full.
-                // If the joining player has no consoles (they haven't selected a station,
-                // or reconnect cleared their consoles), and max_players slots are all taken,
+                // If the joining player has no station (they haven't selected one,
+                // or reconnect didn't restore one), and max_players slots are all taken,
                 // push them to the spectator queue.
                 if !ship_stations.stations.is_empty() {
-                    let connected_with_consoles = sessions
+                    let connected_with_stations = sessions
                         .players()
                         .iter()
-                        .filter(|p| p.connected && !p.consoles.is_empty())
+                        .filter(|p| p.connected && p.station.is_some())
                         .count() as u32;
-                    let player_has_consoles = sessions
+                    let player_has_station = sessions
                         .players()
                         .iter()
                         .find(|p| p.token == *id_token)
-                        .map(|p| !p.consoles.is_empty())
+                        .map(|p| p.station.is_some())
                         .unwrap_or(false);
                     let is_already_spectator = sessions.spectator_queue().contains(id_token);
-                    if !player_has_consoles && !is_already_spectator {
+                    if !player_has_station && !is_already_spectator {
                         let capacity = ship_stations.stations.len() as u32;
-                        let at_capacity = connected_with_consoles >= capacity;
+                        let at_capacity = connected_with_stations >= capacity;
                         if at_capacity {
                             sessions.push_spectator(id_token.clone());
                             outbound.push((
@@ -228,47 +207,8 @@ pub fn process_message(
             ));
         }
         ClientMessage::SelectStation { station } => {
-            let _player_count = sessions.players().iter().filter(|p| p.connected).count() as u32;
-
             if ship_stations.stations.is_empty() {
-                // No station config loaded (e.g. in integration tests): fall back to
-                // display-name-based console toggle for backward compatibility.
-                let console = [
-                    Console::CaptainChair,
-                    Console::Helm,
-                    Console::Tactical,
-                    Console::Repair,
-                    Console::Sensors,
-                    Console::Shields,
-                    Console::Navigation,
-                    Console::Power,
-                    Console::Comms,
-                ]
-                .into_iter()
-                .find(|c| c.display_name() == station.as_str());
-                if let Some(c) = console {
-                    let _ = sessions.toggle_console(token, c);
-                }
-                let consoles = sessions
-                    .players()
-                    .iter()
-                    .find(|p| p.token == token)
-                    .map(|p| p.consoles.clone())
-                    .unwrap_or_default();
-                let station_name = if consoles.is_empty() {
-                    None
-                } else {
-                    Some(station.clone())
-                };
-                outbound.push((
-                    Target::All,
-                    ServerMessage::StationAssigned {
-                        token: token.to_string(),
-                        station: station_name,
-                        consoles,
-                        station_id: None,
-                    },
-                ));
+                // No station config loaded — silently ignore (no backward-compat toggle).
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
@@ -276,10 +216,8 @@ pub fn process_message(
                 };
             }
 
-            // Fixed roster per #495 / B3: flat station list, no player-count dimension.
             let station_def = get_station(ship_stations, station);
             let Some(station_def) = station_def else {
-                // Unknown station — silently drop
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
@@ -287,15 +225,9 @@ pub fn process_message(
                 };
             };
 
-            // Check if sender already holds this exact station (own station → no-op)
-            let sender_consoles: Vec<Console> = sessions
-                .players()
-                .iter()
-                .find(|p| p.token == token)
-                .map(|p| p.consoles.clone())
-                .unwrap_or_default();
-            let sender_is_on_station = sender_consoles == station_def.consoles;
-            if sender_is_on_station {
+            // Check if sender already holds this station (own station → no-op)
+            let sender_station = sessions.station_for_token(token);
+            if sender_station == Some(&station_def.id) {
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
@@ -304,11 +236,8 @@ pub fn process_message(
             }
 
             // Check if occupied by another connected player
-            let occupied = station_def.consoles.iter().any(|c| {
-                sessions
-                    .players()
-                    .iter()
-                    .any(|p| p.connected && p.token != token && p.consoles.contains(c))
+            let occupied = sessions.players().iter().any(|p| {
+                p.connected && p.token != token && p.station.as_ref() == Some(&station_def.id)
             });
             if occupied {
                 return LobbyHandlerResult {
@@ -318,10 +247,8 @@ pub fn process_message(
                 };
             }
 
-            // Perform the assignment. If sender already has a station, release it first.
-            let had_station = !sender_consoles.is_empty();
-            if had_station {
-                sessions.clear_consoles(token);
+            // Release current station if held.
+            if sender_station.is_some() {
                 sessions.set_station(token, None);
                 outbound.push((
                     Target::All,
@@ -334,57 +261,20 @@ pub fn process_message(
                 ));
             }
 
-            // Claim new station — assign the station's consoles.
-            // Track toggle results so the broadcast reflects real session state
-            // (defends against silent divergence when a console is unavailable
-            // because the ship config does not declare it).
-            let mut toggle_failed = false;
-            for console in &station_def.consoles {
-                if sessions.toggle_console(token, console.clone()).is_err() {
-                    toggle_failed = true;
-                }
-            }
-            let actual_consoles: Vec<Console> = sessions
-                .players()
-                .iter()
-                .find(|p| p.token == token)
-                .map(|p| p.consoles.clone())
-                .unwrap_or_default();
-            if toggle_failed || actual_consoles != station_def.consoles {
-                // Partial assignment — roll back so wire == truth.
-                sessions.clear_consoles(token);
-                sessions.set_station(token, None);
-                outbound.push((
-                    Target::All,
-                    ServerMessage::StationAssigned {
-                        token: token.to_string(),
-                        station: None,
-                        consoles: vec![],
-                        station_id: None,
-                    },
-                ));
-                return LobbyHandlerResult {
-                    new_phase,
-                    outbound,
-                    station_rating_update: None,
-                };
-            }
+            // Assign the station.
             sessions.set_station(token, Some(station_def.id.clone()));
             outbound.push((
                 Target::All,
                 ServerMessage::StationAssigned {
                     token: token.to_string(),
                     station: Some(station.clone()),
-                    consoles: actual_consoles,
+                    consoles: station_def.consoles.clone(),
                     station_id: Some(station_def.id.clone()),
                 },
             ));
         }
         ClientMessage::ReleaseStation => {
-            // Stub: release all consoles for this player.
-            sessions.clear_consoles(token);
             sessions.set_station(token, None);
-            // Push the releaser to the back of the spectator queue.
             if !ship_stations.stations.is_empty() {
                 sessions.push_spectator(token.to_string());
             }
@@ -946,9 +836,7 @@ max_level = 4
         let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
         let station_id = result.outbound.iter().find_map(|(_, m)| match m {
             ServerMessage::StationAssigned {
-                token,
-                station_id,
-                ..
+                token, station_id, ..
             } if token == "t1" => station_id.as_ref(),
             _ => None,
         });
@@ -1163,7 +1051,10 @@ max_level = 4
             GamePhase::Lobby,
             None,
         );
-        assert!(result_t1.new_phase.is_none(), "game must not start until all players are ready");
+        assert!(
+            result_t1.new_phase.is_none(),
+            "game must not start until all players are ready"
+        );
         // t2 sets ready — now all ready → auto-start
         let result_t2 = pm(
             "t2",
@@ -1172,7 +1063,10 @@ max_level = 4
             GamePhase::Lobby,
             None,
         );
-        assert!(result_t2.new_phase.is_some(), "game should start when all players are ready");
+        assert!(
+            result_t2.new_phase.is_some(),
+            "game should start when all players are ready"
+        );
         assert!(result_t2
             .outbound
             .iter()
@@ -1189,7 +1083,10 @@ max_level = 4
             GamePhase::Lobby,
             None,
         );
-        assert!(result.new_phase.is_some(), "SetReady should auto-start when only player is ready");
+        assert!(
+            result.new_phase.is_some(),
+            "SetReady should auto-start when only player is ready"
+        );
         assert!(result
             .outbound
             .iter()
@@ -1241,9 +1138,6 @@ max_level = 4
             ("t9", "Comms"),
         ] {
             let station_def = get_station(stations, station_name).unwrap();
-            for console in &station_def.consoles {
-                let _ = sessions.toggle_console(tok, console.clone());
-            }
             sessions.set_station(tok, Some(station_def.id.clone()));
         }
         sessions
@@ -1311,13 +1205,8 @@ max_level = 4
         let mut sessions = sessions_at_max(&stations);
         // t1 held the Captain station. They disconnect — Player.station remains
         // so the Identify handler can restore the seat on reconnect.
-        let captain_consoles = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t1")
-            .map(|p| p.consoles.clone())
-            .unwrap();
-        sessions.disconnect("t1"); // clears consoles, keeps Player.station
+        let captain_station = sessions.station_for_token("t1").cloned();
+        sessions.disconnect("t1"); // clears connected flag, keeps Player.station
         let msg = ClientMessage::Identify {
             token: "t1".into(),
             name: "Alice".into(),
@@ -1334,15 +1223,10 @@ max_level = 4
             &HashMap::new(),
         );
         // Reconnect restores the previously-held seat via station-yield logic.
-        let restored = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t1")
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
+        let restored = sessions.station_for_token("t1").cloned();
         assert_eq!(
-            restored, captain_consoles,
-            "reconnecting player should have their previous seat restored when free"
+            restored, captain_station,
+            "reconnecting player should have their previous station restored when free"
         );
     }
 
@@ -1498,15 +1382,10 @@ max_level = 4
             true,
             &HashMap::new(),
         );
-        // t1 must have no consoles — no auto-assignment.
-        let consoles = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t1")
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
+        // t1 must have no station — no auto-assignment.
+        let station = sessions.station_for_token("t1");
         assert!(
-            consoles.is_empty(),
+            station.is_none(),
             "new joiner should not be auto-assigned a station"
         );
         // No StationAssigned broadcast targeted at t1 with a real station.
@@ -1524,14 +1403,11 @@ max_level = 4
     #[test]
     fn existing_assigned_player_follows_next_when_second_player_joins() {
         let stations = ship_stations();
-        // t1 is already in the lobby and has selected Captain (1P station).
+        // t1 is already in the lobby and has selected Captain.
         let mut sessions = SessionManager::new();
         sessions.register("t1".into(), "Alice".into()).unwrap();
-        // Manually assign t1 to Captain station.
         let captain_def = get_station(&stations, "Captain").unwrap();
-        for c in &captain_def.consoles {
-            let _ = sessions.toggle_console("t1", c.clone());
-        }
+        sessions.set_station("t1", Some(captain_def.id.clone()));
 
         // t2 joins.
         let msg = ClientMessage::Identify {
@@ -1551,14 +1427,10 @@ max_level = 4
         );
 
         // Fixed roster per #495: t1 keeps their station when a new player joins.
-        let t1_consoles = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t1")
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
+        let t1_station = sessions.station_for_token("t1");
         assert_eq!(
-            t1_consoles, captain_def.consoles,
+            t1_station,
+            Some(&captain_def.id),
             "t1 should keep their Captain station (fixed roster)"
         );
 
@@ -1574,14 +1446,9 @@ max_level = 4
         );
 
         // t2 must NOT be auto-assigned.
-        let t2_consoles = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t2")
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
+        let t2_station = sessions.station_for_token("t2");
         assert!(
-            t2_consoles.is_empty(),
+            t2_station.is_none(),
             "t2 should not be auto-assigned a station on join"
         );
     }
@@ -1602,86 +1469,15 @@ max_level = 4
             sessions.spectator_queue().contains(&"t10".to_string()),
             "spectator must NOT be auto-promoted on disconnect in lobby"
         );
-        // t10 must still have no consoles.
-        let t10_consoles = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t10")
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
+        // t10 must still have no station.
+        let t10_station = sessions.station_for_token("t10");
         assert!(
-            t10_consoles.is_empty(),
-            "spectator t10 must not receive consoles automatically"
+            t10_station.is_none(),
+            "spectator t10 must not receive a station automatically"
         );
     }
 
     // ── SelectStation broadcast hardening (Option C) ─────────────────────
-
-    #[test]
-    fn select_station_rolls_back_when_console_unavailable() {
-        // If the ship config does not declare one of the station's consoles as
-        // available, toggle_console will fail. The handler must roll back the
-        // partial assignment and broadcast station=None — never lie on the wire
-        // by claiming consoles the session does not actually hold.
-        use crate::entity_config::EntityConfig;
-        // Build an EntityConfig that omits CaptainChair (no [captain_console]).
-        let toml_str = r#"
-tags = ["player"]
-[helm_console]
-[weapons_console]
-[engineering_console]
-"#;
-        let cfg = EntityConfig::from_toml(toml_str).unwrap();
-        let mut sessions = SessionManager::new_with_config(&cfg);
-        sessions.register("t1".into(), "Alice".into()).unwrap();
-
-        let stations = ship_stations();
-        // 1P "Captain" station requires CaptainChair, which is not available.
-        let result = process_message(
-            "t1",
-            &ClientMessage::SelectStation {
-                station: "Captain".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-            &stations,
-            &default_ship_config(),
-            true,
-            &HashMap::new(),
-        );
-
-        // Session state: t1 must have no consoles (rollback).
-        let consoles = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t1")
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
-        assert!(
-            consoles.is_empty(),
-            "session must roll back partial assignment, got {:?}",
-            consoles
-        );
-
-        // Wire: must broadcast StationAssigned { station: None, consoles: [] }.
-        let lied = result.outbound.iter().any(|(_, m)| {
-            matches!(m,
-                ServerMessage::StationAssigned { token, station: Some(_), .. } if token == "t1"
-            )
-        });
-        assert!(
-            !lied,
-            "handler must not broadcast a station the session does not hold"
-        );
-        let rolled_back = result.outbound.iter().any(|(_, m)| matches!(m,
-            ServerMessage::StationAssigned { token, station: None, consoles, .. } if token == "t1" && consoles.is_empty()
-        ));
-        assert!(
-            rolled_back,
-            "handler must broadcast rollback StationAssigned with station=None"
-        );
-    }
 
     // ── process_message: SetReady ─────────────────────────────────────
 
@@ -1796,8 +1592,7 @@ tags = ["player"]
         sessions.register("t1".into(), "Alice".into()).unwrap();
         sessions.set_station("t1", Some(StationId("captain".into())));
         let mut resolver = ControlSourceResolver::new();
-        let station_ratings =
-            HashMap::from([(StationId("captain".into()), "Assisted".into())]);
+        let station_ratings = HashMap::from([(StationId("captain".into()), "Assisted".into())]);
         process_disconnect_with_stations(
             "t1",
             &mut sessions,
@@ -1811,7 +1606,11 @@ tags = ["player"]
             .iter()
             .find(|p| p.token == "t1")
             .and_then(|p| p.last_rating.as_deref());
-        assert_eq!(last, Some("Assisted"), "last_rating must capture pre-disconnect rating");
+        assert_eq!(
+            last,
+            Some("Assisted"),
+            "last_rating must capture pre-disconnect rating"
+        );
     }
 
     #[test]
@@ -1834,7 +1633,10 @@ tags = ["player"]
             .outbound
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::RatingChanged { .. }));
-        assert!(!has_rating_changed, "spectator disconnect must not emit RatingChanged");
+        assert!(
+            !has_rating_changed,
+            "spectator disconnect must not emit RatingChanged"
+        );
     }
 
     #[test]
@@ -1847,14 +1649,15 @@ tags = ["player"]
         // t1 selects Captain via pm_stations
         pm_stations(
             "t1",
-            &ClientMessage::SelectStation { station: "Captain".into() },
+            &ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
         // Simulate t1 having a pre-disconnect rating of "Manual"
-        let station_ratings =
-            HashMap::from([(StationId("captain".into()), "Manual".into())]);
+        let station_ratings = HashMap::from([(StationId("captain".into()), "Manual".into())]);
         let mut resolver = ControlSourceResolver::new();
         process_disconnect_with_stations(
             "t1",
@@ -1865,14 +1668,15 @@ tags = ["player"]
             &station_ratings,
         );
         // station_ratings now reflects backfill (passed in next process_message call)
-        let station_ratings_post = HashMap::from([(
-            StationId("captain".into()),
-            "Backfill".to_string(),
-        )]);
+        let station_ratings_post =
+            HashMap::from([(StationId("captain".into()), "Backfill".to_string())]);
         // t1 reconnects via Identify
         let reconnect_result = process_message(
             "t1",
-            &ClientMessage::Identify { token: "t1".into(), name: "Alice".into() },
+            &ClientMessage::Identify {
+                token: "t1".into(),
+                name: "Alice".into(),
+            },
             &mut sessions,
             GamePhase::Lobby,
             None,
@@ -1881,16 +1685,11 @@ tags = ["player"]
             true,
             &station_ratings_post,
         );
-        // Consoles must be restored
-        let consoles = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t1")
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
+        // Station must be restored
+        let restored_station = sessions.station_for_token("t1");
         assert!(
-            !consoles.is_empty(),
-            "consoles must be restored on reconnect when station was at Backfill"
+            restored_station.is_some(),
+            "station must be restored on reconnect when rating was at Backfill"
         );
         // StationAssigned must be in outbound
         assert!(reconnect_result.outbound.iter().any(|(_, m)| matches!(
@@ -1919,7 +1718,9 @@ tags = ["player"]
         sessions.register("t2".into(), "Bob".into()).unwrap();
         pm_stations(
             "t1",
-            &ClientMessage::SelectStation { station: "Captain".into() },
+            &ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
             &mut sessions,
             GamePhase::Lobby,
             None,
@@ -1936,7 +1737,9 @@ tags = ["player"]
         // t2 claims Captain while t1 is away
         pm_stations(
             "t2",
-            &ClientMessage::SelectStation { station: "Captain".into() },
+            &ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
             &mut sessions,
             GamePhase::Lobby,
             None,
@@ -1944,7 +1747,10 @@ tags = ["player"]
         // t1 reconnects
         let reconnect_result = process_message(
             "t1",
-            &ClientMessage::Identify { token: "t1".into(), name: "Alice".into() },
+            &ClientMessage::Identify {
+                token: "t1".into(),
+                name: "Alice".into(),
+            },
             &mut sessions,
             GamePhase::Lobby,
             None,
@@ -1953,14 +1759,9 @@ tags = ["player"]
             true,
             &HashMap::new(), // station_ratings shows nothing at Backfill since t2 claimed
         );
-        let consoles = sessions
-            .players()
-            .iter()
-            .find(|p| p.token == "t1")
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
+        let t1_station = sessions.station_for_token("t1");
         assert!(
-            consoles.is_empty(),
+            t1_station.is_none(),
             "t1 must NOT get Captain back when t2 has claimed it"
         );
         let _ = reconnect_result;

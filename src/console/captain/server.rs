@@ -47,6 +47,7 @@ fn handle_toggle_red_alert(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     control_sources: Option<Res<ShipSystemControlSources>>,
 ) {
     let policy = control_sources
@@ -64,7 +65,11 @@ fn handle_toggle_red_alert(
         if !policy.accept_human_input {
             continue;
         }
-        if sessions.0.console_holder(Console::CaptainChair) != Some(ev.token.as_str()) {
+        if sessions
+            .0
+            .console_holder(&Console::CaptainChair, &ship_config.0)
+            != Some(ev.token.as_str())
+        {
             continue;
         }
         ship.toggle_red_alert();
@@ -112,11 +117,18 @@ fn handle_set_view(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     control_sources: Option<Res<ShipSystemControlSources>>,
 ) {
     for ev in reader.read() {
         if let Some((source, mode)) = view_request_from_message(&ev.msg) {
-            if source_can_request_view(&source, &ev.token, &sessions, control_sources.as_deref()) {
+            if source_can_request_view(
+                &source,
+                &ev.token,
+                &sessions,
+                &ship_config,
+                control_sources.as_deref(),
+            ) {
                 ship.request_view_mode_from(source, mode);
             }
         }
@@ -127,6 +139,7 @@ fn source_can_request_view(
     source: &SystemId,
     token: &str,
     sessions: &Sessions,
+    ship_config: &crate::ship_plugin::ShipConfigResource,
     control_sources: Option<&ShipSystemControlSources>,
 ) -> bool {
     let policy = control_sources.map(|cs| cs.0.policy_for(source)).unwrap_or(
@@ -141,7 +154,7 @@ fn source_can_request_view(
     let Some(console) = console_for_view_source(source) else {
         return false;
     };
-    sessions.0.console_holder(console) == Some(token)
+    sessions.0.console_holder(&console, &ship_config.0) == Some(token)
 }
 
 fn console_for_view_source(source: &SystemId) -> Option<Console> {
@@ -394,10 +407,14 @@ mod tests {
             },
         );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::ControlSystem {
-            target: crate::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::ToggleRedAlert,
-        });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
         tick(&mut app);
         assert!(app.world().resource::<ShipState>().red_alert());
     }
@@ -415,10 +432,14 @@ mod tests {
             },
         );
         tick(&mut app);
-        push(&mut app, "crew", ClientMessage::ControlSystem {
-            target: crate::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::ToggleRedAlert,
-        });
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
         tick(&mut app);
         assert!(!app.world().resource::<ShipState>().red_alert());
     }
@@ -427,10 +448,14 @@ mod tests {
     fn captain_toggle_red_alert_works() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::ControlSystem {
-            target: crate::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::ToggleRedAlert,
-        });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
         tick(&mut app);
         assert!(app.world().resource::<ShipState>().red_alert());
     }
@@ -511,16 +536,24 @@ mod tests {
     fn captain_toggle_red_alert_twice_returns_to_off() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::ControlSystem {
-            target: crate::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::ToggleRedAlert,
-        });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
         tick(&mut app);
         assert!(app.world().resource::<ShipState>().red_alert());
-        push(&mut app, "captain", ClientMessage::ControlSystem {
-            target: crate::system_registry::red_alert_system_id(),
-            payload: SystemControlPayload::ToggleRedAlert,
-        });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
         tick(&mut app);
         assert!(!app.world().resource::<ShipState>().red_alert());
     }
@@ -663,8 +696,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Sessions>()
             .0
-            .toggle_console("helm", Console::Helm)
-            .unwrap();
+            .set_station("helm", Some(crate::messages::StationId("helm".into())));
         push(
             &mut app,
             "helm",
@@ -715,8 +747,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Sessions>()
             .0
-            .toggle_console("helm", Console::Helm)
-            .unwrap();
+            .set_station("helm", Some(crate::messages::StationId("helm".into())));
 
         push(
             &mut app,
@@ -753,8 +784,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Sessions>()
             .0
-            .toggle_console("helm", Console::Helm)
-            .unwrap();
+            .set_station("helm", Some(crate::messages::StationId("helm".into())));
 
         push(
             &mut app,

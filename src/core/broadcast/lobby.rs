@@ -155,6 +155,7 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
     let ready: Vec<(crate::lobby_handler::Target, LobbyProducer)> = {
         let registry = world.resource::<LobbyBroadcastRegistry>();
         let sessions = world.resource::<Sessions>();
+        let ship_config = world.resource::<crate::ship_plugin::ShipConfigResource>();
         registry
             .registrations
             .iter()
@@ -167,7 +168,7 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
                 if !should_fire {
                     return None;
                 }
-                let target = reg.audience.resolve(&sessions.0)?;
+                let target = reg.audience.resolve(&sessions.0, &ship_config.0)?;
                 Some((target, reg.producer.clone()))
             })
             .collect()

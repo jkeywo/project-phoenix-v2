@@ -8,7 +8,7 @@ use crate::messages::{
 use crate::session::SessionManager;
 use crate::ship::rating;
 use crate::ship_plugin::{ActiveStationRatings, ShipConfigResource, ShipSystemControlSources};
-use crate::stations_config::ShipStations;
+use crate::stations_config::{stations_from_ship_config, ShipStations};
 
 /// Cached `GameState` snapshot derived from `Sessions` + `GamePhase` each frame.
 /// Renderer systems read this instead of accessing `Sessions` directly.
@@ -80,6 +80,8 @@ impl Plugin for LobbyPlugin {
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
             .insert_resource(ShipClientConfigResource::default())
+            .init_resource::<ShipConfigResource>()
+            .init_resource::<ShipStations>()
             .init_resource::<ActiveStationRatings>()
             .init_state::<GamePhase>()
             .add_message::<InboundMessage>()
@@ -100,15 +102,18 @@ impl Plugin for LobbyPlugin {
 
 /// Update the Sessions resource with available consoles from the ship's EntityConfig.
 fn update_session_with_config(
-    mut sessions: ResMut<Sessions>,
+    ship_config_resource: Res<ShipConfigResource>,
+    mut ship_stations: ResMut<ShipStations>,
     mut ship_client_config: ResMut<ShipClientConfigResource>,
 ) {
+    if ship_stations.stations.is_empty() {
+        *ship_stations = stations_from_ship_config(&ship_config_resource.0);
+    }
+
     // Get the config cache from thread-local storage
     if let Some(ship_config) =
         crate::config_cache::get_config_cache().get("assets/entities/player_ship.toml")
     {
-        sessions.0 = SessionManager::new_with_config(ship_config);
-
         // Build the client-facing ship config from the same source-of-truth.
         // `HelmConsoleConfig::effective_radar_range()` prefers the structured
         // [helm_console.radar] range when present, falling back to the legacy

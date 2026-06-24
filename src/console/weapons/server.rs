@@ -294,6 +294,7 @@ fn live_entity_xz(
 fn handle_set_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_authoring_config: Res<crate::ship_plugin::ShipConfigResource>,
     ship: Res<ShipState>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
@@ -323,7 +324,9 @@ fn handle_set_target(
             continue;
         }
 
-        let holder = sessions.0.console_holder(Console::Tactical);
+        let holder = sessions
+            .0
+            .console_holder(&Console::Tactical, &ship_authoring_config.0);
         if holder != Some(ev.token.as_str()) {
             continue;
         }
@@ -363,8 +366,15 @@ fn handle_set_target(
 /// ([`crate::console_bridge::LOCAL_CONSOLE_TOKEN`]) — the browser server
 /// viewscreen / native wry server case, where the operator drives the console
 /// directly with no remote PeerJS session (issue #422 / PRD #419).
-fn tactical_authorized(sessions: &Sessions, token: &str) -> bool {
-    sessions.0.console_holder(Console::Tactical) == Some(token)
+fn tactical_authorized(
+    sessions: &Sessions,
+    ship_config: &crate::ship_plugin::ShipConfigResource,
+    token: &str,
+) -> bool {
+    sessions
+        .0
+        .console_holder(&Console::Tactical, &ship_config.0)
+        == Some(token)
         || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
 }
 
@@ -372,6 +382,7 @@ fn handle_fire_phaser(
     mut commands: Commands,
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,
     mut beam: ResMut<ActiveBeam>,
@@ -393,7 +404,7 @@ fn handle_fire_phaser(
         if !policy.accept_human_input {
             continue;
         }
-        if !tactical_authorized(&sessions, &ev.token) {
+        if !tactical_authorized(&sessions, &ship_config, &ev.token) {
             continue;
         }
         if cooldown.is_bank_active(bank) || beam.target_uuid.is_some() {
@@ -965,6 +976,7 @@ fn handle_fire_phaser_npc(
 fn handle_set_phaser_mode(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     control_sources: Res<ShipSystemControlSources>,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
@@ -986,7 +998,11 @@ fn handle_set_phaser_mode(
         if !policy.accept_human_input {
             continue;
         }
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
+        if sessions
+            .0
+            .console_holder(&Console::Tactical, &ship_config.0)
+            != Some(ev.token.as_str())
+        {
             continue;
         }
         phaser_mode.0 = mode;
@@ -996,6 +1012,7 @@ fn handle_set_phaser_mode(
 fn handle_set_phaser_frequency(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     control_sources: Res<ShipSystemControlSources>,
     mut ship: ResMut<ShipState>,
 ) {
@@ -1010,7 +1027,11 @@ fn handle_set_phaser_frequency(
         if !tactical_policy.accept_human_input {
             continue;
         }
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
+        if sessions
+            .0
+            .console_holder(&Console::Tactical, &ship_config.0)
+            != Some(ev.token.as_str())
+        {
             continue;
         }
         ship.phaser_frequency = frequency.clamp(0.0, 1.0);
@@ -1020,6 +1041,7 @@ fn handle_set_phaser_frequency(
 fn handle_load_tube(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     control_sources: Res<ShipSystemControlSources>,
 ) {
@@ -1033,7 +1055,7 @@ fn handle_load_tube(
         if !policy.accept_human_input {
             continue;
         }
-        if !tactical_authorized(&sessions, &ev.token) {
+        if !tactical_authorized(&sessions, &ship_config, &ev.token) {
             continue;
         }
         torpedo_sys.0.start_load(tube.as_str());
@@ -1043,6 +1065,7 @@ fn handle_load_tube(
 fn handle_unload_tube(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     control_sources: Res<ShipSystemControlSources>,
 ) {
@@ -1056,7 +1079,7 @@ fn handle_unload_tube(
         if !policy.accept_human_input {
             continue;
         }
-        if !tactical_authorized(&sessions, &ev.token) {
+        if !tactical_authorized(&sessions, &ship_config, &ev.token) {
             continue;
         }
         torpedo_sys.0.start_unload(tube.as_str());
@@ -1066,6 +1089,7 @@ fn handle_unload_tube(
 fn handle_fire_torpedo(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     ship: Res<ShipState>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
@@ -1084,7 +1108,7 @@ fn handle_fire_torpedo(
         if !policy.accept_human_input {
             continue;
         }
-        if !tactical_authorized(&sessions, &ev.token) {
+        if !tactical_authorized(&sessions, &ship_config, &ev.token) {
             continue;
         }
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1655,11 +1679,17 @@ fn tick_tactical_ai(
     // When the station is claimed, gate on whether the active rating's
     // ai_tuning has the torpedo_auto_fire rule. Unclaimed → unconditional.
     let tactical_station = crate::messages::StationId("tactical".into());
-    let auto_fire_enabled = match sessions.0.console_holder(Console::Tactical) {
-        Some(_) => active_ratings
-            .0
-            .get(&tactical_station)
-            .is_some_and(|r| ship_config.0.has_ai_rule(&tactical_station, r, crate::console_ai_plugin::AI_RULE_TORPEDO_AUTO_FIRE)),
+    let auto_fire_enabled = match sessions
+        .0
+        .console_holder(&Console::Tactical, &ship_config.0)
+    {
+        Some(_) => active_ratings.0.get(&tactical_station).is_some_and(|r| {
+            ship_config.0.has_ai_rule(
+                &tactical_station,
+                r,
+                crate::console_ai_plugin::AI_RULE_TORPEDO_AUTO_FIRE,
+            )
+        }),
         None => true,
     };
 
@@ -5001,7 +5031,10 @@ station = "tactical"
         app.world_mut()
             .resource_mut::<crate::ship_plugin::ActiveStationRatings>()
             .0
-            .insert(crate::messages::StationId("tactical".into()), "Assisted".into());
+            .insert(
+                crate::messages::StationId("tactical".into()),
+                "Assisted".into(),
+            );
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
         load_tube_now(&mut app, "fore_port");
         spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);

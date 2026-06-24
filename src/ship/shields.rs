@@ -115,6 +115,7 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 pub fn handle_shields_messages(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
     sessions: Res<crate::lobby::Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut shields: ResMut<ShipShields>,
     control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
@@ -133,7 +134,7 @@ pub fn handle_shields_messages(
         return;
     }
 
-    let shields_holder = sessions.0.console_holder(Console::Shields);
+    let shields_holder = sessions.0.console_holder(&Console::Shields, &ship_config.0);
 
     for ev in reader.read() {
         let crate::messages::ClientMessage::ControlSystem { target, payload } = &ev.msg else {

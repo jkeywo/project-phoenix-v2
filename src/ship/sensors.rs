@@ -48,6 +48,7 @@ impl Plugin for ShipSensorsPlugin {
 pub fn handle_sensors_messages(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
 ) {
@@ -66,7 +67,7 @@ pub fn handle_sensors_messages(
         return;
     }
 
-    let sensors_holder = sessions.0.console_holder(Console::Sensors);
+    let sensors_holder = sessions.0.console_holder(&Console::Sensors, &ship_config.0);
 
     for ev in reader.read() {
         let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
@@ -83,7 +84,10 @@ pub fn handle_sensors_messages(
             continue;
         }
 
-        let Some(tactical_token) = sessions.0.console_holder(Console::Tactical) else {
+        let Some(tactical_token) = sessions
+            .0
+            .console_holder(&Console::Tactical, &ship_config.0)
+        else {
             continue;
         };
 

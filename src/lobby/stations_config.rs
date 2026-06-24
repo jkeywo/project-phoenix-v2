@@ -60,7 +60,13 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
 
 /// Look up a station by name. Returns `None` if not found.
 pub fn get_station<'a>(stations: &'a ShipStations, name: &str) -> Option<&'a StationDef> {
-    stations.stations.iter().find(|d| d.name == name)
+    stations.stations.iter().find(|d| {
+        d.name == name
+            || d.id.0 == name
+            || d.consoles
+                .iter()
+                .any(|console| console.display_name() == name)
+    })
 }
 
 /// Maps session token → station name.  A token absent from this map is a spectator.

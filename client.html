@@ -882,10 +882,18 @@
     function isCaptain(s)     { return hasConsole(s, 'CaptainChair'); }
     function isHelm(s)        { return hasConsole(s, 'Helm'); }
 
-    /// Returns the consoles list for any player, normalising old single-console field.
-    function consolesOf(p) {
+    /// Returns the consoles list for any player, normalising old single-console
+    /// fields and deriving current wire payloads from Player.station.
+    function consolesOf(p, shipStations) {
       if (Array.isArray(p.consoles)) return p.consoles;
-      return p.console ? [p.console] : [];
+      if (p.console) return [p.console];
+      const stationId = typeof p.station === 'string'
+        ? p.station
+        : (p.station && p.station.id) || null;
+      if (!stationId) return [];
+      const station = (((shipStations || state.shipStations) || {}).stations || [])
+        .find(s => s.id === stationId || s.name === stationId);
+      return station && Array.isArray(station.consoles) ? station.consoles : [];
     }
 
     function send(type, data) {
@@ -1638,12 +1646,14 @@
           if (window.lobbyState) {
             state.phase      = window.lobbyState.phase;
             state.players    = window.lobbyState.players;
+            state.shipStations = window.lobbyState.shipStations;
             state.complexity = window.lobbyState.complexity;
           } else {
             state.phase   = msg.data.state.phase;
+            state.shipStations = msg.data.ship_stations || { stations: [] };
             state.players = msg.data.state.players.map(p => ({
               ...p,
-              consoles: consolesOf(p),
+              consoles: consolesOf(p, state.shipStations),
             }));
             state.complexity = msg.data.state.complexity || {};
           }
@@ -1711,8 +1721,8 @@
           } else {
             const p = msg.data.player;
             const existing = state.players.findIndex(x => x.token === p.token);
-            if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p) };
-            else state.players.push({ ...p, consoles: consolesOf(p) });
+            if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p, state.shipStations) };
+            else state.players.push({ ...p, consoles: consolesOf(p, state.shipStations) });
           }
           rebuildStations();
           break;
@@ -1729,7 +1739,7 @@
           if (window.lobbyState) {
             state.players = window.lobbyState.players;
           } else {
-            const { token, consoles } = msg.data;
+            const { token, station, station_id, consoles } = msg.data;
             // Clear these consoles from any other player who held them.
             for (const c of (consoles || [])) {
               for (const p of state.players) {
@@ -1739,7 +1749,10 @@
               }
             }
             const target = state.players.find(p => p.token === token);
-            if (target) target.consoles = consoles || [];
+            if (target) {
+              target.consoles = consoles || [];
+              target.station = station_id || station || null;
+            }
           }
           rebuildStations();
           break;

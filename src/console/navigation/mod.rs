@@ -73,8 +73,15 @@ impl NavigationWaypoint {
     }
 }
 
-fn navigation_authorized(sessions: &Sessions, token: &str) -> bool {
-    sessions.0.console_holder(Console::Navigation) == Some(token)
+fn navigation_authorized(
+    sessions: &Sessions,
+    ship_config: &crate::ship_plugin::ShipConfigResource,
+    token: &str,
+) -> bool {
+    sessions
+        .0
+        .console_holder(&Console::Navigation, &ship_config.0)
+        == Some(token)
 }
 
 /// Handle waypoint messages from the Navigation console.
@@ -88,6 +95,7 @@ fn navigation_authorized(sessions: &Sessions, token: &str) -> bool {
 fn handle_navigation_waypoint(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
     mut waypoint: ResMut<NavigationWaypoint>,
 ) {
@@ -105,7 +113,7 @@ fn handle_navigation_waypoint(
     }
 
     for ev in reader.read() {
-        if !navigation_authorized(&sessions, &ev.token) {
+        if !navigation_authorized(&sessions, &ship_config, &ev.token) {
             continue;
         }
 

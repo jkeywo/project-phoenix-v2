@@ -452,7 +452,6 @@ pub enum GamePhase {
 pub struct Player {
     pub token: String,
     pub name: String,
-    pub consoles: Vec<Console>,
     pub connected: bool,
     /// True when this player has signalled they are ready to start.
     /// Used in the per-player Ready flow replacing captain Engage.

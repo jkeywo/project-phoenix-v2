@@ -179,11 +179,9 @@ fn push_lobby_state(
     let mut spectators: Vec<String> = Vec::new();
 
     for def in &stations.stations {
-        let holder = players.iter().find(|p| {
-            p.connected
-                && !p.consoles.is_empty()
-                && def.consoles.iter().all(|c| p.consoles.contains(c))
-        });
+        let holder = players
+            .iter()
+            .find(|p| p.connected && p.station.as_ref() == Some(&def.id));
         station_payloads.push(StationPayload {
             name: def.name.clone(),
             short_code: def.short_code.clone(),
@@ -195,18 +193,18 @@ fn push_lobby_state(
         });
     }
 
-    // Players with no consoles who are connected are spectators.
+    // Players with no station who are connected are spectators.
     if roster_size > 0 && connected_count > roster_size {
         for p in players
             .iter()
-            .filter(|p| p.connected && p.consoles.is_empty())
+            .filter(|p| p.connected && p.station.is_none())
         {
             spectators.push(p.name.clone());
         }
     }
 
-    let all_filled = !stations.stations.is_empty()
-        && station_payloads.iter().all(|s| s.holder_name.is_some());
+    let all_filled =
+        !stations.stations.is_empty() && station_payloads.iter().all(|s| s.holder_name.is_some());
 
     let scenario_title = world_resource
         .as_ref()

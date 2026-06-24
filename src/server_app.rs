@@ -602,6 +602,7 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
 fn handle_set_sensors_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut outbox: ResMut<SimOutbox>,
 ) {
     for ev in reader.read() {
@@ -616,12 +617,15 @@ fn handle_set_sensors_target(
         };
 
         // Only the Sensors console holder may broadcast a target suggestion.
-        if sessions.0.console_holder(Console::Sensors) != Some(ev.token.as_str()) {
+        if sessions.0.console_holder(&Console::Sensors, &ship_config.0) != Some(ev.token.as_str()) {
             continue;
         }
 
         // Only broadcast if there is a Tactical console player to receive it.
-        let Some(tactical_token) = sessions.0.console_holder(Console::Tactical) else {
+        let Some(tactical_token) = sessions
+            .0
+            .console_holder(&Console::Tactical, &ship_config.0)
+        else {
             continue;
         };
 
@@ -777,6 +781,7 @@ fn broadcast_shield_status(
     shields: Res<ShipShields>,
     mut outbox: ResMut<SimOutbox>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut last: ResMut<LastBroadcastShields>,
 ) {
     if !timer.0.tick(time.delta()).just_finished() {
@@ -802,7 +807,7 @@ fn broadcast_shield_status(
         outbox
             .0
             .push((Target::All, ServerMessage::ShieldStatus { facings }));
-    } else if let Some(token) = sessions.0.console_holder(Console::Shields) {
+    } else if let Some(token) = sessions.0.console_holder(&Console::Shields, &ship_config.0) {
         // Nothing changed but the Shields holder still gets a periodic refresh
         // so regenerating HP stays smooth on their panel.
         outbox.0.push((

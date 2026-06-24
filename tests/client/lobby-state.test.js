@@ -7,6 +7,10 @@ function p(token, name, consoles) {
   return { token, name, consoles, connected: true };
 }
 
+function ps(token, name, station) {
+  return { token, name, station, connected: true };
+}
+
 function welcome(state, shipStations, shipConfig) {
   return {
     type: 'Welcome',
@@ -21,8 +25,8 @@ function welcome(state, shipStations, shipConfig) {
 // New B3 shape: flat stations array, no configs/min_players/max_players.
 const TWO_STATION_SHIP = {
   stations: [
-    { name: 'Helm', description: 'Pilot', rank: '', short_code: 'HLM', consoles: ['Helm', 'CaptainChair'] },
-    { name: 'Tactical', description: 'Weapons', rank: '', short_code: 'TAC', consoles: ['Tactical'] },
+    { id: 'helm', name: 'Helm', description: 'Pilot', rank: '', short_code: 'HLM', consoles: ['Helm', 'CaptainChair'] },
+    { id: 'tactical', name: 'Tactical', description: 'Weapons', rank: '', short_code: 'TAC', consoles: ['Tactical'] },
   ],
 };
 
@@ -73,6 +77,16 @@ describe('apply Welcome', () => {
     expect(s.shipStations).toEqual(TWO_STATION_SHIP);
     expect(s.shipConfig.repair_team_count).toBe(3);
   });
+
+  it('derives player consoles from Player.station plus ship_stations', () => {
+    const s = new LobbyState();
+    s.apply(welcome({
+      phase: 'Lobby',
+      players: [ps('a', 'Alice', 'helm')],
+      world: null,
+    }, TWO_STATION_SHIP));
+    expect(s.players[0].consoles).toEqual(['Helm', 'CaptainChair']);
+  });
 });
 
 describe('apply player lifecycle', () => {
@@ -90,6 +104,13 @@ describe('apply player lifecycle', () => {
     expect(s.players).toHaveLength(1);
     expect(s.players[0].name).toBe('Alice2');
     expect(s.players[0].consoles).toEqual([]);
+  });
+
+  it('PlayerJoined derives consoles from station when ship stations are known', () => {
+    const s = new LobbyState();
+    s.shipStations = TWO_STATION_SHIP;
+    s.apply({ type: 'PlayerJoined', data: { player: ps('a', 'Alice', 'tactical') } });
+    expect(s.players[0].consoles).toEqual(['Tactical']);
   });
 
   it('PlayerLeft removes by token', () => {
@@ -331,5 +352,9 @@ describe('consolesOf', () => {
     expect(consolesOf({ consoles: ['Helm'] })).toEqual(['Helm']);
     expect(consolesOf({ console: 'Helm' })).toEqual(['Helm']);
     expect(consolesOf({})).toEqual([]);
+  });
+
+  it('derives consoles from station and ship stations', () => {
+    expect(consolesOf({ station: 'helm' }, TWO_STATION_SHIP)).toEqual(['Helm', 'CaptainChair']);
   });
 });

@@ -88,6 +88,7 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     control_sources: Res<ShipSystemControlSources>,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
@@ -127,7 +128,7 @@ pub fn handle_dispatch_repair_team(
         }
 
         // Gate: only the Repair console holder may dispatch teams.
-        let Some(repair_token) = sessions.0.console_holder(Console::Repair) else {
+        let Some(repair_token) = sessions.0.console_holder(&Console::Repair, &ship_config.0) else {
             warn!(
                 "[repair-auth] ignored repair action from token={} holder=None",
                 ev.token,

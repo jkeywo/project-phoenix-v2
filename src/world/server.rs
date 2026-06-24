@@ -750,6 +750,7 @@ fn mark_comms_dirty_on_game_start(
 fn handle_hail(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
     control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
@@ -768,7 +769,10 @@ fn handle_hail(
             continue;
         }
         // Gate: sender must hold Console::Comms.
-        if !sessions.0.player_has_console(&ev.token, Console::Comms) {
+        if !sessions
+            .0
+            .player_has_console(&ev.token, &Console::Comms, &ship_config.0)
+        {
             continue;
         }
 
@@ -1099,6 +1103,7 @@ fn strip_parent_prefix(name: &str) -> &str {
 fn handle_respond_to_message(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
@@ -1131,7 +1136,10 @@ fn handle_respond_to_message(
         if !policy.accept_human_input {
             continue;
         }
-        if !sessions.0.player_has_console(&ev.token, Console::Comms) {
+        if !sessions
+            .0
+            .player_has_console(&ev.token, &Console::Comms, &ship_config.0)
+        {
             continue;
         }
 
@@ -1774,6 +1782,7 @@ fn handle_respond_to_message(
 fn handle_clear_comms(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut inbox: ResMut<CommsInboxRes>,
     control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
@@ -1790,7 +1799,10 @@ fn handle_clear_comms(
         if !policy.accept_human_input {
             continue;
         }
-        if !sessions.0.player_has_console(&ev.token, Console::Comms) {
+        if !sessions
+            .0
+            .player_has_console(&ev.token, &Console::Comms, &ship_config.0)
+        {
             continue;
         }
 
@@ -1814,6 +1826,7 @@ fn handle_clear_comms(
 fn handle_show_on_screen(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
     mut ship: ResMut<ShipState>,
@@ -1832,7 +1845,10 @@ fn handle_show_on_screen(
         if !policy.accept_human_input {
             continue;
         }
-        if !sessions.0.player_has_console(&ev.token, Console::Comms) {
+        if !sessions
+            .0
+            .player_has_console(&ev.token, &Console::Comms, &ship_config.0)
+        {
             continue;
         }
 
@@ -2039,6 +2055,7 @@ fn update_comms_range_flags(
 /// or `WorldContentRuntime::needs_broadcast` is set.
 fn broadcast_comms_state(
     sessions: Res<Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
@@ -2049,7 +2066,7 @@ fn broadcast_comms_state(
         return;
     }
 
-    let Some(comms_token) = sessions.0.console_holder(Console::Comms) else {
+    let Some(comms_token) = sessions.0.console_holder(&Console::Comms, &ship_config.0) else {
         inbox.0.mark_clean();
         runtime.needs_broadcast = false;
         return;

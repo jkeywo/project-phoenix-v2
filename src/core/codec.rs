@@ -108,7 +108,6 @@ mod tests {
         Player {
             token: "tok".into(),
             name: "Alice".into(),
-            consoles: vec![],
             connected: true,
             ready: false,
             station: None,

@@ -18,16 +18,24 @@ export const ALL_CONSOLES = Object.freeze([
 ]);
 
 /**
- * Normalise a player's console list. Old wire payloads carried a single
- * `console` field; new ones carry a `consoles` array.
+ * Normalise a player's console list.
+ * Legacy wire payloads carried `consoles` or `console`; current payloads carry
+ * `station`, and consoles are derived from shipStations.stations.
  */
-export function consolesOf(player) {
+export function consolesOf(player, shipStations) {
   if (Array.isArray(player.consoles)) return player.consoles;
-  return player.console ? [player.console] : [];
+  if (player.console) return [player.console];
+  const stationId = typeof player.station === 'string'
+    ? player.station
+    : (player.station && player.station.id) || null;
+  if (!stationId) return [];
+  const station = ((shipStations && shipStations.stations) || [])
+    .find(s => s.id === stationId || s.name === stationId);
+  return station && Array.isArray(station.consoles) ? station.consoles : [];
 }
 
-function normalisePlayer(p) {
-  return { ready: false, ...p, consoles: consolesOf(p) };
+function normalisePlayer(p, shipStations) {
+  return { ready: false, ...p, consoles: consolesOf(p, shipStations) };
 }
 
 function defaultShipStations() {
@@ -64,8 +72,8 @@ export class LobbyState {
    */
   replaceFrom(state, shipStations, shipConfig) {
     this.phase = state.phase || 'Lobby';
-    this.players = (state.players || []).map(normalisePlayer);
     this.shipStations = shipStations || defaultShipStations();
+    this.players = (state.players || []).map(p => normalisePlayer(p, this.shipStations));
     this.shipConfig = shipConfig || {};
     this.scenarioTitle = (state.world && state.world.scenario_title) || '';
     this.scenarioBody = (state.world && state.world.scenario_description) || '';
@@ -83,7 +91,7 @@ export class LobbyState {
         this.replaceFrom(d.state || {}, d.ship_stations, d.ship_config);
         break;
       case 'PlayerJoined': {
-        const player = normalisePlayer(d.player || {});
+        const player = normalisePlayer(d.player || {}, this.shipStations);
         const idx = this.players.findIndex(p => p.token === player.token);
         if (idx >= 0) this.players[idx] = player;
         else this.players.push(player);
@@ -115,7 +123,10 @@ export class LobbyState {
           }
         }
         const target = this.players.find(p => p.token === d.token);
-        if (target) target.consoles = consoles.slice();
+        if (target) {
+          target.consoles = consoles.slice();
+          target.station = d.station_id || d.station || null;
+        }
         break;
       }
       case 'GameStarted':

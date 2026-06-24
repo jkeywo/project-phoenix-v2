@@ -179,6 +179,7 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 pub fn handle_power_messages(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
     sessions: Res<crate::lobby::Sessions>,
+    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
     mut power: ResMut<ShipPowerSystem>,
     control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
@@ -195,7 +196,7 @@ pub fn handle_power_messages(
         return;
     }
 
-    let power_holder = sessions.0.console_holder(Console::Power);
+    let power_holder = sessions.0.console_holder(&Console::Power, &ship_config.0);
 
     for ev in reader.read() {
         let crate::messages::ClientMessage::ControlSystem { target, payload } = &ev.msg else {

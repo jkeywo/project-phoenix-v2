@@ -8,6 +8,8 @@
 //! the wasm bridge to forward to the HTML panel.
 
 use bevy::prelude::*;
+use crate::ship_plugin::ShipSystemControlSources;
+use crate::simulation::Ship;
 
 use crate::console_bridge::ConsoleStateChanged;
 use crate::messages::{CommsConsoleState, ObjectiveSnapshot};
@@ -25,6 +27,7 @@ impl Plugin for CommsConsolePlugin {
             (
                 recompute_comms_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                 push_comms_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                operate_comms_ai.in_set(crate::sim_sets::SimSet::Physics),
             ),
         );
     }
@@ -233,5 +236,26 @@ mod tests {
         app.world_mut().resource_mut::<ConsolePushes>().0.clear();
         app.update();
         assert!(app.world().resource::<ConsolePushes>().0.is_empty());
+    }
+}
+
+// ── AI controller stub ─────────────────────────────────────────────────────────
+
+/// Per-kind AI plugin for comms.
+///
+/// Gated on policy.operate_ai for the Comms system. No behaviour is
+/// implemented yet — this is a compile-verified stub that will be filled in
+/// when the Comms AI controller is designed.
+fn operate_comms_ai(
+    ships: Query<&ShipSystemControlSources, With<Ship>>,
+) {
+    for sources in &ships {
+        let policy = sources
+            .0
+            .policy_for(&crate::system_registry::comms_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        // TODO: implement comms AI logic
     }
 }

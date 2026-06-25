@@ -43,6 +43,7 @@ impl Plugin for RepairPlugin {
                 (
                     handle_dispatch_repair_team.in_set(crate::sim_sets::SimSet::Input),
                     tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
+                    operate_repair_ai.in_set(crate::sim_sets::SimSet::Physics),
                     recompute_repair_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     push_repair_console_state
                         .in_set(crate::sim_sets::SimSet::Broadcast)
@@ -88,10 +89,13 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
-    control_sources: Res<ShipSystemControlSources>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
+
     let policy = control_sources.0.policy_for(&repair_system_id());
 
     for ev in reader.read() {
@@ -218,6 +222,28 @@ pub fn push_repair_console_state(
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+
+// ── AI controller stub ─────────────────────────────────────────────────────────
+
+/// Per-kind AI plugin for repair.
+///
+/// Gated on policy.operate_ai for the Repair system. No behaviour is
+/// implemented yet — this is a compile-verified stub that will be filled in
+/// when the Repair AI controller is designed.
+fn operate_repair_ai(
+    ships: Query<&ShipSystemControlSources, With<crate::simulation::Ship>>,
+) {
+    for sources in &ships {
+        let policy = sources
+            .0
+            .policy_for(&repair_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        // TODO: implement repair AI logic
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,7 +295,6 @@ mod tests {
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<crate::lobby::WorldResource>()
         .init_resource::<SimOutbox>()
-        .init_resource::<ShipSystemControlSources>()
         .init_resource::<Outbox>()
         .add_plugins(RepairPlugin)
         .add_plugins(repair_state_broadcaster())
@@ -531,11 +556,13 @@ mod tests {
 
         // Set repair system to AI control.
         {
-            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
-            cs.0.set(
-                crate::ship::system_registry::repair_system_id(),
-                crate::ship::control_source::ControlSource::Ai,
-            );
+            let mut q = app.world_mut().query_filtered::<&mut ShipSystemControlSources, With<crate::simulation::Ship>>();
+            for mut cs in q.iter_mut(app.world_mut()) {
+                cs.0.set(
+                    crate::ship::system_registry::repair_system_id(),
+                    crate::ship::control_source::ControlSource::Ai,
+                );
+            }
         }
 
         push(

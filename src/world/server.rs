@@ -716,19 +716,15 @@ fn mark_comms_dirty_on_game_start(
 fn handle_hail(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
-        .unwrap_or(crate::control_source::ControlTickPolicy {
-            accept_human_input: true,
-            operate_ai: false,
-            coordinate: true,
-        });
+    let (ship_config, control_sources) = match ship_query.single() {
+        Ok(pair) => pair,
+        Err(_) => return,
+    };
+    let policy = control_sources.0.policy_for(&crate::system_registry::comms_system_id());
 
     for ev in reader.read() {
         if !policy.accept_human_input {
@@ -1069,7 +1065,7 @@ fn strip_parent_prefix(name: &str) -> &str {
 fn handle_respond_to_message(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
@@ -1087,16 +1083,12 @@ fn handle_respond_to_message(
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
-        .unwrap_or(crate::control_source::ControlTickPolicy {
-            accept_human_input: true,
-            operate_ai: false,
-            coordinate: true,
-        });
+    let (ship_config, control_sources) = match ship_query.single() {
+        Ok(pair) => pair,
+        Err(_) => return,
+    };
+    let policy = control_sources.0.policy_for(&crate::system_registry::comms_system_id());
 
     for ev in reader.read() {
         if !policy.accept_human_input {
@@ -1748,18 +1740,14 @@ fn handle_respond_to_message(
 fn handle_clear_comms(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut inbox: ResMut<CommsInboxRes>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
-        .unwrap_or(crate::control_source::ControlTickPolicy {
-            accept_human_input: true,
-            operate_ai: false,
-            coordinate: true,
-        });
+    let (ship_config, control_sources) = match ship_query.single() {
+        Ok(pair) => pair,
+        Err(_) => return,
+    };
+    let policy = control_sources.0.policy_for(&crate::system_registry::comms_system_id());
 
     for ev in reader.read() {
         if !policy.accept_human_input {
@@ -1792,20 +1780,16 @@ fn handle_clear_comms(
 fn handle_show_on_screen(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
     mut ship: ResMut<ShipState>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
-        .unwrap_or(crate::control_source::ControlTickPolicy {
-            accept_human_input: true,
-            operate_ai: false,
-            coordinate: true,
-        });
+    let (ship_config, control_sources) = match ship_query.single() {
+        Ok(pair) => pair,
+        Err(_) => return,
+    };
+    let policy = control_sources.0.policy_for(&crate::system_registry::comms_system_id());
 
     for ev in reader.read() {
         if !policy.accept_human_input {
@@ -1853,16 +1837,17 @@ fn handle_show_on_screen(
 fn handle_comms_channel2(
     mut reader: MessageReader<CommsChannel2Event>,
     mut inbox: ResMut<CommsInboxRes>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
+    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::comms_system_id()))
-        .unwrap_or(crate::control_source::ControlTickPolicy {
+    let policy = if let Ok(control_sources) = ship_query.single() {
+        control_sources.0.policy_for(&crate::system_registry::comms_system_id())
+    } else {
+        crate::control_source::ControlTickPolicy {
             accept_human_input: true,
             operate_ai: false,
             coordinate: true,
-        });
+        }
+    };
     for ev in reader.read() {
         inbox.0.inject(ev.message.clone());
         if policy.operate_ai && !ev.message.responses.is_empty() {
@@ -2021,7 +2006,7 @@ fn update_comms_range_flags(
 /// or `WorldContentRuntime::needs_broadcast` is set.
 fn broadcast_comms_state(
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
@@ -2032,6 +2017,7 @@ fn broadcast_comms_state(
         return;
     }
 
+    let Ok(ship_config) = ship_query.single() else { return; };
     let Some(comms_token) = sessions.0.console_holder(&Console::Comms, &ship_config.0) else {
         inbox.0.mark_clean();
         runtime.needs_broadcast = false;
@@ -3701,13 +3687,13 @@ mod tests {
 
         // Set comms system to AI control (blocks human input).
         {
-            let mut sources = app
-                .world_mut()
-                .get_resource_or_insert_with(crate::ship_plugin::ShipSystemControlSources::default);
-            sources.0.set(
-                crate::system_registry::comms_system_id(),
-                crate::control_source::ControlSource::Ai,
-            );
+            let mut q = app.world_mut().query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>();
+            for mut sources in q.iter_mut(app.world_mut()) {
+                sources.0.set(
+                    crate::system_registry::comms_system_id(),
+                    crate::control_source::ControlSource::Ai,
+                );
+            }
         }
 
         push_msg(
@@ -9912,15 +9898,14 @@ size_max = 2.0
     fn ai_auto_respond_on_scenario_hail_via_channel2() {
         let mut app = ai_trigger_test_app();
 
-        // Set comms system to AI control.
+        // Spawn a Ship entity with comms system set to AI control.
         {
-            let mut sources = app
-                .world_mut()
-                .get_resource_or_insert_with(crate::ship_plugin::ShipSystemControlSources::default);
+            let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
             sources.0.set(
                 crate::system_registry::comms_system_id(),
                 crate::control_source::ControlSource::Ai,
             );
+            app.world_mut().spawn((crate::simulation::Ship, sources));
         }
 
         // Install a template with a response, fired on WorldLoaded.

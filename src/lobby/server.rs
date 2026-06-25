@@ -7,7 +7,8 @@ use crate::messages::{
 };
 use crate::session::SessionManager;
 use crate::ship::rating;
-use crate::ship_plugin::{ActiveStationRatings, ShipConfigResource, ShipSystemControlSources};
+use crate::ship_plugin::{ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources};
+use crate::simulation::Ship;
 use crate::stations_config::{stations_from_ship_config, ShipStations};
 
 /// Cached `GameState` snapshot derived from `Sessions` + `GamePhase` each frame.
@@ -80,9 +81,7 @@ impl Plugin for LobbyPlugin {
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
             .insert_resource(ShipClientConfigResource::default())
-            .init_resource::<ShipConfigResource>()
             .init_resource::<ShipStations>()
-            .init_resource::<ActiveStationRatings>()
             .init_state::<GamePhase>()
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()
@@ -102,10 +101,10 @@ impl Plugin for LobbyPlugin {
 
 /// Update the Sessions resource with available consoles from the ship's EntityConfig.
 fn update_session_with_config(
-    ship_config_resource: Res<ShipConfigResource>,
     mut ship_stations: ResMut<ShipStations>,
     mut ship_client_config: ResMut<ShipClientConfigResource>,
 ) {
+    let ship_config_resource = crate::ship_plugin::load_ship_config_from_disk();
     if ship_stations.stations.is_empty() {
         *ship_stations = stations_from_ship_config(&ship_config_resource.0);
     }
@@ -274,9 +273,7 @@ pub fn process_lobby(
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
     preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
-    mut active_ratings: ResMut<ActiveStationRatings>,
-    ship_config: Option<Res<ShipConfigResource>>,
-    mut control_sources: Option<ResMut<ShipSystemControlSources>>,
+    mut ship_query: Query<(&ShipConfigComponent, &mut ShipSystemControlSources, &mut ActiveStationRatings), With<Ship>>,
 ) {
     // During the Lobby phase this system owns the inbound queue and handles
     // every message type. Outside the lobby the simulation systems own it, so
@@ -318,30 +315,56 @@ pub fn process_lobby(
             .map(|p| !p.started || p.complete)
             .unwrap_or(true)
     };
-    for ev in inbound.read() {
-        if !accepts_all && !matches!(ev.msg, ClientMessage::Identify { .. }) {
-            continue;
+    // Collect all messages first to avoid borrow conflicts with ship_query.
+    let events: Vec<_> = inbound.read()
+        .filter(|ev| accepts_all || matches!(ev.msg, ClientMessage::Identify { .. }))
+        .cloned()
+        .collect();
+    for ev in events {
+        if let Some((ship_config, mut control_sources, mut active_ratings)) = ship_query.iter_mut().next() {
+            let ratings_snapshot = active_ratings.0.clone();
+            let result = lobby_handler::process_message(
+                &ev.token,
+                &ev.msg,
+                &mut sessions.0,
+                state.get().clone(),
+                world_data,
+                stations,
+                &ship_client_config.0,
+                preload_complete,
+                &ratings_snapshot,
+            );
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(ship_config),
+                Some(&mut control_sources),
+                &mut *active_ratings,
+            );
+        } else {
+            let empty_ratings = std::collections::HashMap::new();
+            let result = lobby_handler::process_message(
+                &ev.token,
+                &ev.msg,
+                &mut sessions.0,
+                state.get().clone(),
+                world_data,
+                stations,
+                &ship_client_config.0,
+                preload_complete,
+                &empty_ratings,
+            );
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+            );
         }
-        let ratings_snapshot = active_ratings.0.clone();
-        let result = lobby_handler::process_message(
-            &ev.token,
-            &ev.msg,
-            &mut sessions.0,
-            state.get().clone(),
-            world_data,
-            stations,
-            &ship_client_config.0,
-            preload_complete,
-            &ratings_snapshot,
-        );
-        apply_result(
-            result,
-            &mut outbox,
-            &mut next_state,
-            ship_config.as_deref(),
-            control_sources.as_deref_mut(),
-            &mut active_ratings,
-        );
     }
 }
 
@@ -350,41 +373,45 @@ fn handle_disconnect(
     mut sessions: ResMut<Sessions>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
-    ship_config: Option<Res<ShipConfigResource>>,
-    mut control_sources: Option<ResMut<ShipSystemControlSources>>,
-    mut active_ratings: ResMut<ActiveStationRatings>,
+    mut ship_query: Query<(&ShipConfigComponent, &mut ShipSystemControlSources, &mut ActiveStationRatings), With<Ship>>,
     stations: Option<Res<ShipStations>>,
 ) {
     let empty_stations = ShipStations::default();
     let ship_stations = stations.as_deref().unwrap_or(&empty_stations);
     for ev in events.read() {
-        // Snapshot ratings before mutable borrow.
-        let ratings_snapshot = active_ratings.0.clone();
         // Apply Backfill rating to the disconnecting player's station so the
         // ship keeps operating without a human at the console.
-        // ship_config and control_sources are optional — not present in lobby-only test apps.
-        let result = if let (Some(cfg), Some(cs)) =
-            (ship_config.as_deref(), control_sources.as_deref_mut())
-        {
-            lobby_handler::process_disconnect_with_stations(
+        // ship_query may return Err if the Ship entity hasn't spawned yet.
+        if let Some((cfg, mut cs, mut active_ratings)) = ship_query.iter_mut().next() {
+            let ratings_snapshot = active_ratings.0.clone();
+            let result = lobby_handler::process_disconnect_with_stations(
                 &ev.token,
                 &mut sessions.0,
                 ship_stations,
                 &cfg.0,
                 &mut cs.0,
                 &ratings_snapshot,
-            )
+            );
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+            );
         } else {
-            lobby_handler::process_disconnect(&ev.token, &mut sessions.0)
-        };
-        apply_result(
-            result,
-            &mut outbox,
-            &mut next_state,
-            ship_config.as_deref(),
-            control_sources.as_deref_mut(),
-            &mut active_ratings,
-        );
+            let result = lobby_handler::process_disconnect(&ev.token, &mut sessions.0);
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+            );
+        }
     }
 }
 
@@ -392,7 +419,7 @@ fn apply_result(
     result: lobby_handler::LobbyHandlerResult,
     outbox: &mut ResMut<LobbyOutbox>,
     next_state: &mut ResMut<NextState<GamePhase>>,
-    ship_config: Option<&ShipConfigResource>,
+    ship_config: Option<&ShipConfigComponent>,
     control_sources: Option<&mut ShipSystemControlSources>,
     active_ratings: &mut ActiveStationRatings,
 ) {

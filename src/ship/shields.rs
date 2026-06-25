@@ -69,6 +69,7 @@ impl Plugin for ShipShieldsPlugin {
                 (
                     handle_shields_messages.in_set(crate::sim_sets::SimSet::Input),
                     emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
+                    operate_shields_ai.in_set(crate::sim_sets::SimSet::Physics),
                     recompute_shields_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     push_shields_console_state
                         .in_set(crate::sim_sets::SimSet::Broadcast)
@@ -115,20 +116,14 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 pub fn handle_shields_messages(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
     sessions: Res<crate::lobby::Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut shields: ResMut<ShipShields>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| {
-            cs.0.policy_for(&crate::system_registry::shields_system_id())
-        })
-        .unwrap_or(crate::control_source::ControlTickPolicy {
-            accept_human_input: true,
-            operate_ai: false,
-            coordinate: true,
-        });
+    let (ship_config, control_sources) = match ship_query.single() {
+        Ok(pair) => pair,
+        Err(_) => return,
+    };
+    let policy = control_sources.0.policy_for(&crate::system_registry::shields_system_id());
 
     if !policy.accept_human_input {
         return;
@@ -178,7 +173,7 @@ pub fn emit_shields_coordination(
     ship: Res<crate::ship_state::ShipState>,
     mut coord_state: ResMut<ShieldsCoordinationState>,
     ai_config: Res<ShieldsAiConfigResource>,
-    ship_plugin: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
+    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
     let snapshots = shields.0.snapshot();
@@ -186,12 +181,11 @@ pub fn emit_shields_coordination(
 
     let red_alert = ship.red_alert();
 
-    let sender_origin = ship_plugin
-        .as_deref()
-        .map(|cs| {
-            cs.0.source_for(&crate::system_registry::shields_system_id())
-        })
-        .unwrap_or(ControlSource::Ai);
+    let sender_origin = if let Ok(control_sources) = ship_query.single() {
+        control_sources.0.source_for(&crate::system_registry::shields_system_id())
+    } else {
+        ControlSource::Ai
+    };
 
     for (i, snap) in snapshots.iter().enumerate() {
         if !snap.online {
@@ -352,6 +346,28 @@ fn push_shields_console_state(
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
+
+
+// ── AI controller stub ─────────────────────────────────────────────────────────
+
+/// Per-kind AI plugin for shields.
+///
+/// Gated on policy.operate_ai for the Shields system. No behaviour is
+/// implemented yet — this is a compile-verified stub that will be filled in
+/// when the Shields AI controller is designed.
+fn operate_shields_ai(
+    ships: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
+) {
+    for sources in &ships {
+        let policy = sources
+            .0
+            .policy_for(&crate::system_registry::shields_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        // TODO: implement shields AI logic
+    }
+}
 
 #[cfg(test)]
 mod tests {

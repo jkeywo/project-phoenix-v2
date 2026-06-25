@@ -418,6 +418,30 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 
         let entity_states: Vec<_> = asteroid_states.into_iter().chain(npc_states).collect();
 
+        // Extract control sources from Ship entity before the immutable-borrow block below.
+        let source_entries: std::collections::HashMap<_, _> = world
+            .query_filtered::<&crate::ship_plugin::ShipSystemControlSources, With<Ship>>()
+            .single(world)
+            .ok()
+            .map(|control_sources| {
+                control_sources
+                    .0
+                    .entries()
+                    .map(|(id, src)| {
+                        (
+                            id.clone(),
+                            match src {
+                                crate::ship::control_source::ControlSource::Ai => "Ai".to_string(),
+                                crate::ship::control_source::ControlSource::Human => {
+                                    "Human".to_string()
+                                }
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         // ── Extract ship state and hull (borrows confined to this block).
         let (
             power_levels,
@@ -435,7 +459,6 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             boost_battery,
             boost_active,
             boost_enabled,
-            source_entries,
         ) = {
             let ship = world.resource::<ShipState>();
             let hull = world.resource::<ShipHullIntegrity>();
@@ -448,22 +471,6 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 .and_then(|w| w.snapshot());
             let boost = world.get_resource::<ShipBoost>();
             let boost_config = world.get_resource::<crate::ship_plugin::BoostConfigResource>();
-            let control_sources = world.resource::<crate::ship_plugin::ShipSystemControlSources>();
-            let source_entries: std::collections::HashMap<_, _> = control_sources
-                .0
-                .entries()
-                .map(|(id, src)| {
-                    (
-                        id.clone(),
-                        match src {
-                            crate::ship::control_source::ControlSource::Ai => "Ai".to_string(),
-                            crate::ship::control_source::ControlSource::Human => {
-                                "Human".to_string()
-                            }
-                        },
-                    )
-                })
-                .collect();
 
             let power_levels = power
                 .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
@@ -503,7 +510,6 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 boost_battery,
                 boost_active,
                 boost_enabled,
-                source_entries,
             )
         };
 
@@ -602,9 +608,10 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
 fn handle_set_sensors_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<Ship>>,
     mut outbox: ResMut<SimOutbox>,
 ) {
+    let Ok(ship_config) = ship_query.single() else { return; };
     for ev in reader.read() {
         let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
             continue;
@@ -781,9 +788,10 @@ fn broadcast_shield_status(
     shields: Res<ShipShields>,
     mut outbox: ResMut<SimOutbox>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<Ship>>,
     mut last: ResMut<LastBroadcastShields>,
 ) {
+    let Ok(ship_config) = ship_query.single() else { return; };
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
@@ -1331,6 +1339,7 @@ fn spawn_game_start_entities(
     mut commands: Commands,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut ship_state: ResMut<crate::ship_state::ShipState>,
+    mut pending_ship_config: Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
     mut has_spawned: Local<bool>,
 ) {
     if *has_spawned {
@@ -1389,7 +1398,20 @@ fn spawn_game_start_entities(
 
         // The first GameStart entity with tags containing "ship" gets the Ship marker
         if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
-            commands.entity(spawned).insert(Ship);
+            let ship_config = if let Some(pending) = pending_ship_config.as_mut() {
+                let cfg = crate::ship_plugin::ShipConfigComponent(pending.0.clone());
+                commands.remove_resource::<crate::ship_plugin::PendingShipConfig>();
+                pending_ship_config = None;
+                cfg
+            } else {
+                crate::ship_plugin::load_ship_config_from_disk()
+            };
+            commands.entity(spawned)
+                .insert(Ship)
+                .insert(ship_config)
+                .insert(crate::ship_plugin::ShipSystemControlSources::default())
+                .insert(crate::ship_plugin::ActiveStationRatings::default())
+                .insert(crate::ship_plugin::CoordinationQueue::default());
             ship_spawned = true;
 
             // Seed authoritative ship position from the world TOML so that
@@ -2109,9 +2131,6 @@ mod tests {
         ])))
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(ImpulseState::new()))
-        .init_resource::<crate::ship_plugin::ShipSystemControlSources>()
-        .insert_resource(crate::ship_plugin::ShipConfigResource::default())
-        .init_resource::<crate::ship_plugin::ActiveStationRatings>()
         .init_resource::<WorldResource>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<TrackedEntities>()

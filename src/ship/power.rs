@@ -135,6 +135,7 @@ impl Plugin for ShipPowerPlugin {
                 (
                     handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
+                    operate_power_ai.in_set(crate::sim_sets::SimSet::Physics),
                     recompute_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     push_power_console_state
                         .in_set(crate::sim_sets::SimSet::Broadcast)
@@ -179,18 +180,14 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 pub fn handle_power_messages(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
     sessions: Res<crate::lobby::Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut power: ResMut<ShipPowerSystem>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| cs.0.policy_for(&crate::system_registry::power_system_id()))
-        .unwrap_or(crate::control_source::ControlTickPolicy {
-            accept_human_input: true,
-            operate_ai: false,
-            coordinate: true,
-        });
+    let (ship_config, control_sources) = match ship_query.single() {
+        Ok(pair) => pair,
+        Err(_) => return,
+    };
+    let policy = control_sources.0.policy_for(&crate::system_registry::power_system_id());
 
     if !policy.accept_human_input {
         warn!("[power-auth] policy rejects human input — power system is AI-controlled");
@@ -408,7 +405,6 @@ mod tests {
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
-            .init_resource::<crate::ship_plugin::ShipSystemControlSources>()
             .add_plugins(ShipPowerPlugin)
             .add_systems(
                 Update,

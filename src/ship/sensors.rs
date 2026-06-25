@@ -48,20 +48,14 @@ impl Plugin for ShipSensorsPlugin {
 pub fn handle_sensors_messages(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
 ) {
-    let policy = control_sources
-        .as_deref()
-        .map(|cs| {
-            cs.0.policy_for(&crate::system_registry::sensors_system_id())
-        })
-        .unwrap_or(crate::control_source::ControlTickPolicy {
-            accept_human_input: true,
-            operate_ai: false,
-            coordinate: true,
-        });
+    let (ship_config, control_sources) = match ship_query.single() {
+        Ok(pair) => pair,
+        Err(_) => return,
+    };
+    let policy = control_sources.0.policy_for(&crate::system_registry::sensors_system_id());
 
     if !policy.accept_human_input {
         return;
@@ -107,7 +101,7 @@ pub fn handle_sensors_messages(
 pub fn tick_sensors_frequency_hint(
     weapons_target: Res<WeaponsTarget>,
     mut state: ResMut<SensorsFrequencyState>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
+    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
     let current_target = match &weapons_target.0 {
@@ -132,12 +126,11 @@ pub fn tick_sensors_frequency_hint(
     state.last_sent_target = Some(current_target);
     state.last_sent_frequency = Some(frequency);
 
-    let sender_origin = control_sources
-        .as_deref()
-        .map(|cs| {
-            cs.0.source_for(&crate::system_registry::sensors_system_id())
-        })
-        .unwrap_or(ControlSource::Human);
+    let sender_origin = if let Ok(control_sources) = ship_query.single() {
+        control_sources.0.source_for(&crate::system_registry::sensors_system_id())
+    } else {
+        ControlSource::Human
+    };
 
     writer.write(CoordinationEnqueue {
         sender_origin,

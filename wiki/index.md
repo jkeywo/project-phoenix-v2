@@ -68,6 +68,7 @@ Architecture, patterns, processes.
 - **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.
 - **[Asset Preload](./concepts/asset-preload.md)** — Server-side discovery + pre-cache of GLBs, radar icons, model-rig sidecars, sub-world TOMLs. Sidecar inbox is a single-consumer queue (renderer takes; preload only peeks) — see the 2026-06-17 race-fix.
 - **[Coarse-system migration](./concepts/coarse-system-migration.md)** — Naming convention, migration status table for all 9 coarse systems, fine-system forward reference.
+- **[AI Ship Unification](./concepts/ai-ship-unification.md)** — Unified Ship ECS model; per-kind AI plugins; NPC ships via same Components as player ship; `server.rs` intent-only for helm.
 - **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
 
 ## Sources
@@ -116,6 +117,12 @@ Open (planned work):
 - **[Issue #542 C6 - Delete StartGame](./sources/issue-542-c6-delete-startgame.md)** - Shipped. `SetReady` auto-start is the only start path.
 - **[Issue #543 C7 - RepairTarget::Core](./sources/issue-543-c7-repair-target-core.md)** - Shipped. `RepairTarget::Core` dispatches to `Console::Core`.
 - **[Issue #546 D - Player.station docs](./sources/issue-546-d-player-station-docs.md)** - Shipped. Updates wiki, AGENTS, and CONTEXT for the station-holder model.
+- **[PRD #520 — AI Ship Unification](./sources/prd-520-ai-ship-unification.md)** — Shipped. Unified player+NPC ships; per-kind AI plugins; `server.rs` intent-only.
+- **[Issue #547 — A1 ControlSourceResolver utilities](./sources/issue-547-ai-e1-control-source-resolver.md)** — Shipped. #520 slice A1.
+- **[Issue #548 — E2 Ship Components](./sources/issue-548-ai-e2-ship-components.md)** — Shipped. #520 slice E2: singleton Resources → per-entity Components.
+- **[Issue #549 — E3 Helm AI plugin](./sources/issue-549-ai-e3-helm-ai-plugin.md)** — Shipped. #520 slice E3: `operate_helm_ai` + `last_helm_intent`.
+- **[Issue #552 — B NPC Ship Components](./sources/issue-552-ai-b-npc-ship-components.md)** — Shipped. #520 slice B: NPC spawner inserts Ship + Components.
+- **[Issue #553 — E5 Cutover](./sources/issue-553-ai-e5-cutover.md)** — Shipped. #520 slice E5: `server.rs` intent-only; NPC helm via `operate_helm_ai`.
 - **[Issue #523 — Console ID lookup](./sources/issue-523-console-id-lookup.md)** — Open. PRD #517 slice A4: `Console::from_console_id` helper symmetric with `station_console_id`; replaces hardcoded array in `process_coordination_lag`.
 - **[Issue #524 — serde_json outside codec cleanup](./sources/issue-524-serde-json-cleanup.md)** — Shipped. PRD #517 slice A5: removed direct `serde_json` calls from `coordination.rs`, `flag_kind.rs`, `effects.rs`; moved `RegionEffectKind` round-trips into `codec.rs`.
 - **[Issue #525 — SystemId naming convention](./sources/issue-525-systemid-naming.md)** — Shipped. PRD #517 slice A6: module-level doc + pinning tests in `system_registry.rs`; `REPAIR_SYSTEM_ID`/`repair_system_id()` added; `wiki/concepts/coarse-system-migration.md` created.

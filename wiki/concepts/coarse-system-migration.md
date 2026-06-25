@@ -50,8 +50,18 @@ Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) is 
 - `src/ship/control_source.rs` — `ControlSourceResolver` and `policy_for`.
 - `src/ship_plugin.rs` — `process_coordination_lag` delivers channel-3 messages.
 
+## AI ship unification and per-kind AI plugins (PRD #520)
+
+After `ControlSourceResolver` was established as the control-gating authority (PRD #517), PRD #520 extended it to NPC ships. Each coarse system now has (or will have) a dedicated `operate_<kind>_ai` Bevy system that runs after `AiTickLabel` and is gated on `policy_for(system_id).operate_ai`. This makes the AI/human split uniform: the same gate that prevents a human from driving a Backfill console also enables the per-kind plugin to operate it.
+
+NPC ships carry `ShipSystemControlSources` seeded with `ControlSource::Ai` for all systems; player ships default to `ControlSource::Human` (modified by rating changes).
+
+See [AI Ship Unification](./ai-ship-unification.md) for the full architecture.
+
 ## Cross-references
 
 - [PRD #487 - Station / Console / System architecture redesign](../sources/prd-487-station-console-system-redesign.md)
 - [PRD #517 - Consistency cleanup for the 9 coarse systems](../sources/prd-517-consistency-cleanup.md)
 - [Issue #525 - SystemId naming convention](../sources/issue-525-systemid-naming.md)
+- [PRD #520 - AI ship unification](../sources/prd-520-ai-ship-unification.md)
+- [AI Ship Unification](./ai-ship-unification.md)

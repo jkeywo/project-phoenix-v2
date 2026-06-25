@@ -1,0 +1,105 @@
+---
+title: AI Ship Unification
+type: concept
+tags: [ai, npc, ship, ecs, components, per-kind-plugin, control-source, prd-520]
+updated: 2026-06-25
+---
+
+# AI Ship Unification
+
+Both the player ship and NPC ships are represented as ECS entities with the same `Ship` marker and the same four per-entity Components. AI control for each system kind (helm, tactical, etc.) is routed through a per-kind plugin (`operate_<kind>_ai`) gated by `ControlSourceResolver`. `src/ai/server.rs` writes intent only; the per-kind plugin applies physics.
+
+## The unified Ship entity model
+
+Every ship — player or NPC — carries these four Components:
+
+| Component | Role |
+|-----------|------|
+| `ShipConfigComponent` | Parsed `ShipConfig`; defines stations, systems, and AI rules |
+| `ShipSystemControlSources(ControlSourceResolver)` | Maps `SystemId → ControlSource` (Human or Ai) |
+| `ActiveStationRatings` | Live complexity ratings from connected station holders |
+| `CoordinationQueue` | Channel-3 lag queue for advisories |
+
+Before PRD #520 these were singleton `Resource`s for the player ship only. After the unification, the player ship and NPC ships all carry them as Components on their ECS entity.
+
+## Control flow
+
+```
+Lobby/Spawn
+  └─ ShipSystemControlSources seeded
+       ├─ Player ship: Human for all systems (toggled by rating changes)
+       └─ NPC ship:    Ai for all systems (fixed at spawn)
+
+Per-tick (SimSet::Physics)
+  tick_ai_controllers (AiTickLabel)
+    ├─ runs behaviour tree → outputs AiInput list
+    ├─ writes last_helm_intent to AiControllerComponent (intent only)
+    └─ dispatches SetTarget / FirePhaser as synthetic InboundMessages
+
+  operate_helm_ai (after AiTickLabel)
+    ├─ Player ship path (Without<AiControllerComponent>)
+    │    policy.operate_ai? → write LastHelmInput { thrust: 0, steering: 0 }
+    └─ NPC ship path (With<AiControllerComponent>)
+         policy.operate_ai? → apply physics to Transform using last_helm_intent
+
+  operate_tactical_ai (Without<AiControllerComponent>)
+    └─ player ship Backfill only; NPC tactical fires via synthetic tokens
+
+  operate_shields_ai, operate_power_ai, operate_comms_ai, …  (stubs, #551)
+    └─ one system per kind; gated on policy.operate_ai
+```
+
+## ControlSourceResolver
+
+Lives in `src/ship/control_source.rs`. Maps a `SystemId` string to a `ControlSource` (Human or Ai). The derived `ControlTickPolicy` has three flags:
+
+| Flag | Human | Ai |
+|------|-------|----|
+| `accept_human_input` | ✅ | ❌ |
+| `operate_ai` | ❌ | ✅ |
+| `coordinate` | ✅ | ✅ |
+
+Every per-kind plugin and message handler checks `policy_for(system_id)` before acting.
+
+## Per-kind AI plugins
+
+Each system kind has (or will have) a dedicated Bevy system that runs after `AiTickLabel`:
+
+| System | File | Status |
+|--------|------|--------|
+| `operate_helm_ai` | `src/ship_plugin.rs` | ✅ Full (applies NPC Transform physics) |
+| `operate_tactical_ai` | `src/console/weapons/server.rs` | ✅ Player-ship path; NPC via tokens |
+| `operate_captain_ai` | `src/console/captain/server.rs` | ✅ |
+| `operate_power_ai` | `src/ship/power.rs` | Stub |
+| `operate_shields_ai` | `src/ship/shields.rs` | Stub |
+| `operate_sensors_ai` | `src/ship/sensors.rs` | Stub (via `tick_sensors_frequency_hint`) |
+| `operate_comms_ai` | `src/console/comms/server.rs` | Stub |
+| `operate_repair_ai` | `src/console/repair/server.rs` | Stub |
+| `operate_navigation_ai` | `src/console/navigation/mod.rs` | Stub |
+
+## NPC ship spawn
+
+When `spawn_entity` in `src/entities/spawner.rs` detects a TOML `[behaviour]` section, it inserts:
+
+```rust
+entity_commands.insert((
+    Ship,
+    ShipConfigComponent::default(),
+    ShipSystemControlSources(resolver_seeded_all_ai),
+    ActiveStationRatings::default(),
+    CoordinationQueue::default(),
+));
+```
+
+The `AiControllerComponent` is attached separately by `attach_controllers_on_spawn` in `src/ai/server.rs`.
+
+## Multi-ship readiness
+
+Queries use `With<Ship>` + `.iter()` (never `single()`). The lobby handlers use `iter_mut().next()` as "first ship found," which is safe for the current single-player-ship scenario and won't panic when multiple ships exist.
+
+## Cross-references
+
+- [PRD #520 — AI Ship Unification](../sources/prd-520-ai-ship-unification.md)
+- [PRD #142 — AI and Behaviour System](../sources/prd-142-ai-and-behaviour.md)
+- [Coarse-system migration](./coarse-system-migration.md) — `ControlSourceResolver` context
+- [Ship entity](../entities/ship.md)

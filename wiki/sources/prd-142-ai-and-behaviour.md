@@ -13,7 +13,9 @@ A data-driven state-machine framework for NPC ships and stations. Behaviour tree
 
 ## Status
 
-In flight. The pure AI engine and Bevy plugin are landed and wired into `SimulationPlugin`:
+In flight — significantly advanced by PRD #520 (AI Ship Unification, 2026-06-25). NPC ships now carry the same ECS Ship Components as the player ship; helm intent flows through `operate_helm_ai`; `server.rs` is intent-only. Per-kind stubs exist for all 9 system kinds.
+
+The pure AI engine and Bevy plugin are landed and wired into `SimulationPlugin`:
 
 - `src/ai.rs` (1222 LoC) — pure (no Bevy) `AiController`, fixed five-slot `Blackboard`, `AiState` (`Idle` / `Patrolling` / `Pursuing`), `AiInput`, `AiTickOutput`, the pure `tick` function, and the `should_emit` edge-emission filter.
 - `src/ai_plugin.rs` (428 LoC) — Bevy orchestrator. `AiTokenRegistry` resource; per-entity controllers ticked each frame; emits synthetic `InboundMessage`s on the same channel as remote players.
@@ -60,4 +62,6 @@ This means: any console hidden by complexity (PRD #154) and operated by `console
 - [Draft 9 — AI and Behaviour](./design-09-ai-and-behaviour.md) (informs this PRD)
 - Depends on [PRD #119 — Stations + Scenarios + Comms](./prd-119-stations-scenarios-comms.md)
 - Shares action vocabulary with [PRD #154 — Console Complexity](./prd-154-console-complexity.md) (`console_ai` operates hidden controls)
+- [PRD #520 — AI Ship Unification](./prd-520-ai-ship-unification.md) (significantly advances this PRD)
+- [AI Ship Unification](../concepts/ai-ship-unification.md)
 - [Roadmap Overview](../roadmap/overview.md)

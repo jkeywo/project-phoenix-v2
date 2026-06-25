@@ -114,7 +114,7 @@ fn sync_phaser_beams(
     render_cfg: Res<PhaserRenderConfig>,
     combat_cfg: Res<PhaserCombatConfigResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), With<Asteroid>>,
-    entity_q: Query<(&EntityUuid, &Transform), Without<Asteroid>>,
+    entity_q: Query<(&EntityUuid, &Transform), (Without<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
     player_ship_q: Query<(&Transform, Option<&ModelMarkers>, Option<&EntityUuid>), With<Ship>>,
     npc_beam_q: Query<(
         &EntityUuid,
@@ -127,8 +127,8 @@ fn sync_phaser_beams(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut body_q: Query<&mut Transform, With<BeamBody>>,
-    mut glow_q: Query<&mut Transform, With<BeamContactGlow>>,
+    mut body_q: Query<&mut Transform, (With<BeamBody>, Without<BeamContactGlow>)>,
+    mut glow_q: Query<&mut Transform, (With<BeamContactGlow>, Without<BeamBody>)>,
 ) {
     let mut live_keys = HashSet::new();
 
@@ -237,7 +237,7 @@ fn resolve_player_beam(
     render_cfg: &PhaserRenderConfig,
     combat_cfg: &PhaserCombatConfig,
     asteroid_q: &Query<(&AsteroidUuid, &Transform), With<Asteroid>>,
-    entity_q: &Query<(&EntityUuid, &Transform), Without<Asteroid>>,
+    entity_q: &Query<(&EntityUuid, &Transform), (Without<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
     player_ship_q: &Query<(&Transform, Option<&ModelMarkers>, Option<&EntityUuid>), With<Ship>>,
 ) -> Option<(Vec3, Vec3, [f32; 4])> {
     let target_pos = target_position(target_uuid, ship, None, asteroid_q, entity_q)?;
@@ -274,8 +274,8 @@ fn upsert_beam(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    body_q: &mut Query<&mut Transform, With<BeamBody>>,
-    glow_q: &mut Query<&mut Transform, With<BeamContactGlow>>,
+    body_q: &mut Query<&mut Transform, (With<BeamBody>, Without<BeamContactGlow>)>,
+    glow_q: &mut Query<&mut Transform, (With<BeamContactGlow>, Without<BeamBody>)>,
 ) {
     if let Some(existing) = state.active.get(&key) {
         if let Ok(mut body_transform) = body_q.get_mut(existing.body) {
@@ -585,7 +585,7 @@ fn target_position(
     ship: &ShipState,
     player_ship_uuid: Option<&str>,
     asteroid_q: &Query<(&AsteroidUuid, &Transform), With<Asteroid>>,
-    entity_q: &Query<(&EntityUuid, &Transform), Without<Asteroid>>,
+    entity_q: &Query<(&EntityUuid, &Transform), (Without<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
 ) -> Option<Vec3> {
     if player_ship_uuid == Some(uuid) {
         return Some(Vec3::new(ship.x, 0.0, ship.z));

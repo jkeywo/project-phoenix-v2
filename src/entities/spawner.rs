@@ -266,6 +266,19 @@ pub fn spawn_entity(
     // Behaviour section â€” signals to ai_plugin to attach an AiController
     if let Some(behaviour) = &config.behaviour {
         entity_commands.insert(BehaviourSection(behaviour.clone()));
+
+        let ship_config = crate::ship_plugin::ShipConfigComponent::default();
+        let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
+        for system in &ship_config.0.systems {
+            resolver.set(system.id.clone(), crate::ship::control_source::ControlSource::Ai);
+        }
+        entity_commands.insert((
+            crate::server_app::Ship,
+            ship_config,
+            crate::ship_plugin::ShipSystemControlSources(resolver),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
+        ));
     }
 
     // Tags â€” mirror TOML tags onto the entity for snapshot builders.
@@ -1237,5 +1250,19 @@ max_hp = 50.0
         assert!((hull_comp.0.total_max() - 200.0).abs() < 1e-6);
         let entries = hull_comp.0.entries();
         assert_eq!(entries[0].0, crate::messages::Console::CaptainChair);
+    }
+
+    // -- Channel-3 NPC routing smoke test (#552) --------------------------------
+
+    #[test]
+    fn npc_channel3_coordination_is_consumed() {
+        // Pure routing logic: when both sender and target are Ai-controlled,
+        // route_coordination must return Consume (not Popup).
+        use crate::ship::control_source::ControlSource;
+        use crate::ship::coordination::{route_coordination, DeliverAction};
+        assert_eq!(
+            route_coordination(ControlSource::Ai, ControlSource::Ai),
+            DeliverAction::Consume,
+        );
     }
 }

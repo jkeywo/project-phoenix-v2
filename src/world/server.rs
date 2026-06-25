@@ -3496,9 +3496,10 @@ mod tests {
             .add_systems(PostUpdate, collect);
         app.world_mut().spawn((
             crate::simulation::Ship,
-            Transform::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
         ));
         app
     }

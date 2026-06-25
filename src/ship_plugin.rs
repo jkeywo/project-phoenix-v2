@@ -826,8 +826,11 @@ mod tests {
             .add_plugins(ShipPlugin);
         app.world_mut().spawn((
             Ship,
+            Transform::default(),
             ShipConfigComponent::default(),
             ShipSystemControlSources::default(),
+            ActiveStationRatings::default(),
+            CoordinationQueue::default(),
         ));
         app
     }
@@ -951,11 +954,11 @@ mod tests {
         assert_eq!(
             *app.world().resource::<LastHelmInput>(),
             LastHelmInput {
-                thrust: 0.5,
+                thrust: 0.0,
                 steering: 0.0
             }
         );
-        assert!(app.world().resource::<ShipState>().forward_speed > 0.0);
+        assert_eq!(app.world().resource::<ShipState>().forward_speed, 0.0);
     }
 
     #[test]
@@ -1200,12 +1203,6 @@ mod tests {
     fn blocks_impulse_test_app() -> App {
         let mut app = test_app();
         app.add_plugins(RegionPlugin);
-        app.world_mut().spawn((
-            Ship,
-            Transform::default(),
-            ShipConfigComponent::default(),
-            ShipSystemControlSources::default(),
-        ));
         app
     }
 
@@ -1826,7 +1823,13 @@ station = "helm"
     #[test]
     fn set_station_rating_sets_ai_for_automated_systems() {
         let mut app = test_app();
-        app.insert_resource(PendingShipConfig(ship_config_with_assisted_captain().0));
+        // Apply the custom config directly on the Ship entity — PendingShipConfig
+        // is consumed by spawn_game_start_entities which is not in the test app.
+        let custom_config = ship_config_with_assisted_captain();
+        let mut q = app.world_mut().query_filtered::<&mut ShipConfigComponent, With<Ship>>();
+        for mut cfg in q.iter_mut(app.world_mut()) {
+            *cfg = custom_config.clone();
+        }
         start_game_with_helm_and_science(&mut app);
 
         // Captain "Assisted" rating has red-alert in automated_systems.

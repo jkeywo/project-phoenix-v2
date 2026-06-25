@@ -259,7 +259,16 @@ pub fn operate_power_ai(
     ship: Res<ShipState>,
     last_helm: Option<Res<LastHelmInput>>,
     ai_config: Res<PowerAiConfigResource>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
 ) {
+    // Yield to any human Power console holder.
+    if let (Some(sessions), Ok(ship_config)) = (sessions, ship_query.single()) {
+        if sessions.0.console_holder(&Console::Power, &ship_config.0).is_some() {
+            return;
+        }
+    }
+
     let battery_pct = power.0.battery_charge / config.0.capacity;
     let red_alert = ship.red_alert();
     let throttle = last_helm.map_or(0.0, |l| l.thrust);
@@ -417,6 +426,7 @@ mod tests {
             crate::simulation::Ship,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
         ));
         app
     }

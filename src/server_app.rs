@@ -2154,7 +2154,7 @@ mod tests {
         .add_plugins(crate::comms_plugin::CommsConsolePlugin)
         .add_systems(
             OnEnter(GamePhase::InProgress),
-            (reset_broadcast_caches_on_start, spawn_test_ship).chain(),
+            reset_broadcast_caches_on_start,
         )
         .add_systems(
             Update,
@@ -2185,15 +2185,17 @@ mod tests {
         .add_plugins(sim_state_broadcaster())
         .add_plugins(modifier_events_broadcaster())
         .add_systems(PostUpdate, collect);
-        app
-    }
-
-    fn spawn_test_ship(mut commands: Commands) {
-        commands.spawn((
+        // Spawn the Ship entity immediately so systems that query it (including
+        // auth checks in handle_fire_torpedo, handle_power_messages, etc.) work
+        // during Lobby as well as InProgress.
+        app.world_mut().spawn((
             crate::simulation::Ship,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
         ));
+        app
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {

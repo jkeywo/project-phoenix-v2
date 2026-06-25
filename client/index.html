@@ -29,17 +29,13 @@
   <script type="module" src="gui/console-state.js"></script>
   <script type="module" src="gui/action-map.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
-       (window.lobbyState / simState / commsState / complexityStore) with an
-       apply(serverMessage) method; handleMessage() feeds every inbound
-       message through them, replacing the deleted Bevy message drain. -->
+       (window.lobbyState / simState / commsState) with an apply(serverMessage)
+       method; handleMessage() feeds every inbound message through them,
+       replacing the deleted Bevy message drain. -->
   <script type="module" src="gui/lobby-state.js"></script>
   <script type="module" src="gui/sim-state.js"></script>
   <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
-  <script type="module" src="gui/complexity-store.js"></script>
-  <!-- Complexity preset shell UI logic (issue #461): first-use pop-up plan,
-       segmented-selector state, SetComplexity message builders. -->
-  <script type="module" src="gui/complexity-ui.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -517,9 +513,6 @@
     #detail-panel .detail-consoles { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
     #detail-panel .detail-consoles .chip { padding: 2px 8px; border-radius: 3px;
       font-size: 0.6rem; background: var(--surface2); color: #7aa; border: 1px solid var(--edge); }
-    #detail-panel .complexity-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-    #detail-panel .complexity-row label { font-size: 0.6rem; color: var(--dim);
-      display: inline; width: auto; margin: 0; }
     #detail-panel .segmented { display: flex; gap: 2px; }
     #detail-panel .segmented button { padding: 2px 10px; border-radius: 3px;
       font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
@@ -604,11 +597,7 @@
         </div>
         <div id="detail-console-area">
           <div class="detail-consoles"></div>
-          <!-- Per-console complexity selectors, built dynamically by
-               renderComplexitySelectors() from window.complexityStore /
-               window.complexityUi (issue #461). Only consoles with more than
-               one preset (Tactical, Power) get a row. -->
-          <div id="complexity-selectors"></div>
+          <!-- Complexity selectors removed in #534 -->
         </div>
       </div>
 
@@ -826,17 +815,12 @@
     let myName = sessionStorage.getItem('player-name') || randomName();
     sessionStorage.setItem('player-name', myName);
 
-    // ── Complexity preset persistence ──────────────────────────
-    // JSON map of console name → preset name, persisted from previous sessions.
-    let savedComplexity = {};
-    try { savedComplexity = JSON.parse(localStorage.getItem('complexity-presets')) || {}; } catch (_) {}
-
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
       shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, boostEnabled: false, boostBattery: 0, boostActive: false, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
-      stations: [], maxPlayers: 0, complexity: {}, allFilled: false, allReady: false,
+      stations: [], maxPlayers: 0, allFilled: false, allReady: false,
       // Weapons console iframe state (issue #422)
       weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto',
       // Repair console iframe state (issue #425)
@@ -882,10 +866,18 @@
     function isCaptain(s)     { return hasConsole(s, 'CaptainChair'); }
     function isHelm(s)        { return hasConsole(s, 'Helm'); }
 
-    /// Returns the consoles list for any player, normalising old single-console field.
-    function consolesOf(p) {
+    /// Returns the consoles list for any player, normalising old single-console
+    /// fields and deriving current wire payloads from Player.station.
+    function consolesOf(p, shipStations) {
       if (Array.isArray(p.consoles)) return p.consoles;
-      return p.console ? [p.console] : [];
+      if (p.console) return [p.console];
+      const stationId = typeof p.station === 'string'
+        ? p.station
+        : (p.station && p.station.id) || null;
+      if (!stationId) return [];
+      const station = (((shipStations || state.shipStations) || {}).stations || [])
+        .find(s => s.id === stationId || s.name === stationId);
+      return station && Array.isArray(station.consoles) ? station.consoles : [];
     }
 
     function send(type, data) {
@@ -908,53 +900,6 @@
     // uses for sectionVisibility / consoleSections / tabBarLayout.
     function consoleLabel(name) {
       return (window.CONSOLE_LABEL && window.CONSOLE_LABEL[name]) || name;
-    }
-
-    // ── Complexity preset selectors (issue #461) ───────────────────────────
-    // Renders one segmented Low/Std control per held console that actually has
-    // more than one preset (Tactical, Power). Backed by window.complexityStore
-    // and window.complexityUi (gui/complexity-store.js + gui/complexity-ui.js,
-    // ported from the deleted Bevy complexity systems). Selecting a preset
-    // persists via the store and sends SetComplexity to the host.
-    const PRESET_LABEL = { Low: 'Low', Std: 'Normal' };
-    function renderComplexitySelectors(detail, consoles) {
-      const host = detail.querySelector('#complexity-selectors');
-      if (!host) return;
-      host.innerHTML = '';
-      const store = window.complexityStore;
-      const ui = window.complexityUi;
-      if (!store || !ui) return;
-      // Materialise choices so own-console ComplexityChanged broadcasts apply.
-      ui.materialiseConsoles(store, consoles);
-      for (const c of consoles) {
-        const ds = ui.dropdownState(store, c);
-        if (!ds.showDropdown) continue;     // single-preset consoles: no selector
-        const row = document.createElement('div');
-        row.className = 'complexity-row';
-        const label = document.createElement('label');
-        label.textContent = consoles.length > 1 ? consoleLabel(c) : 'Complexity';
-        row.appendChild(label);
-        const seg = document.createElement('div');
-        seg.className = 'segmented';
-        for (const preset of ds.presets) {
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.dataset.complexity = preset;
-          btn.textContent = PRESET_LABEL[preset] || preset;
-          if (preset === ds.active) btn.classList.add('active');
-          btn.onclick = () => {
-            const msg = ui.selectPreset(store, c, preset);  // persists via store
-            if (!msg) return;
-            savedComplexity[c] = preset;                    // keep legacy sync map in step
-            seg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            send(msg.type, msg.data);
-          };
-          seg.appendChild(btn);
-        }
-        row.appendChild(seg);
-        host.appendChild(row);
-      }
     }
 
     // Persistent reference to the console title label — moved into the tab
@@ -1161,7 +1106,6 @@
             chip.textContent = consoleLabel(c);
             consolesArea.appendChild(chip);
           }
-          renderComplexitySelectors(detail, myStation.consoles || []);
         } else {
           detail.className = 'idle';
           detail.querySelector('.detail-station-name').textContent = 'No station assigned';
@@ -1630,7 +1574,6 @@
       if (window.lobbyState)      window.lobbyState.apply(msg);
       if (window.simState)        window.simState.apply(msg);
       if (window.commsState)      window.commsState.apply(msg);
-      if (window.complexityStore) window.complexityStore.apply(msg);
       // Mirror objectives from simState (handles ObjectiveSummary / CommsState internally).
       if (window.simState) state.objectives = window.simState.objectives || [];
       switch (msg.type) {
@@ -1638,14 +1581,14 @@
           if (window.lobbyState) {
             state.phase      = window.lobbyState.phase;
             state.players    = window.lobbyState.players;
-            state.complexity = window.lobbyState.complexity;
+            state.shipStations = window.lobbyState.shipStations;
           } else {
             state.phase   = msg.data.state.phase;
+            state.shipStations = msg.data.ship_stations || { stations: [] };
             state.players = msg.data.state.players.map(p => ({
               ...p,
-              consoles: consolesOf(p),
+              consoles: consolesOf(p, state.shipStations),
             }));
-            state.complexity = msg.data.state.complexity || {};
           }
           if (window.simState) {
             // Share the module's entity array so in-place SimState position
@@ -1690,19 +1633,6 @@
             if (missionEl) missionEl.textContent = msg.data.state.world.scenario_description || '';
           }
           setStatus('Connected');
-          // Sync complexity presets: send SetComplexity for any console the
-          // local player holds whose stored preference differs from the server.
-          if (msg.data.state.complexity) {
-            const serverComplexity = msg.data.state.complexity;
-            const mine = myConsoles(state);
-            for (const c of mine) {
-              const stored = savedComplexity[c];
-              const current = serverComplexity[c];
-              if (stored && stored !== current) {
-                send('SetComplexity', { console: c, preset_name: stored });
-              }
-            }
-          }
           rebuildStations();
           break;
         case 'PlayerJoined': {
@@ -1711,8 +1641,8 @@
           } else {
             const p = msg.data.player;
             const existing = state.players.findIndex(x => x.token === p.token);
-            if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p) };
-            else state.players.push({ ...p, consoles: consolesOf(p) });
+            if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p, state.shipStations) };
+            else state.players.push({ ...p, consoles: consolesOf(p, state.shipStations) });
           }
           rebuildStations();
           break;
@@ -1729,7 +1659,7 @@
           if (window.lobbyState) {
             state.players = window.lobbyState.players;
           } else {
-            const { token, consoles } = msg.data;
+            const { token, station, station_id, consoles } = msg.data;
             // Clear these consoles from any other player who held them.
             for (const c of (consoles || [])) {
               for (const p of state.players) {
@@ -1739,7 +1669,10 @@
               }
             }
             const target = state.players.find(p => p.token === token);
-            if (target) target.consoles = consoles || [];
+            if (target) {
+              target.consoles = consoles || [];
+              target.station = station_id || station || null;
+            }
           }
           rebuildStations();
           break;
@@ -1990,26 +1923,6 @@
             const duration = Math.round(50 + (clamped / 30) * 250); // 50–300 ms
             if (navigator.vibrate) navigator.vibrate(duration);
           }
-          return;
-        }
-        case 'ComplexityChanged': {
-          // window.complexityStore (gui/complexity-store.js) was already
-          // updated + persisted by the apply() pass above (own consoles
-          // only); mirror server truth for the lobby segmented buttons.
-          // Persist only consoles the local player holds — recording another
-          // player's broadcast as a local preference would suppress that
-          // console's first-use popup on this device.
-          const { console: consoleName, preset_name } = msg.data;
-          state.complexity[consoleName] = preset_name;
-          if (myConsoles(state).includes(consoleName)) {
-            // window.complexityStore is the sole writer of the
-            // 'complexity-presets' localStorage key; select() materialises the
-            // choice, validates the preset and persists. savedComplexity stays
-            // an in-memory mirror for the lobby segmented buttons.
-            window.complexityStore?.select(consoleName, preset_name);
-            savedComplexity[consoleName] = preset_name;
-          }
-          rebuildStations();
           return;
         }
         case 'CoordinationPopup': {

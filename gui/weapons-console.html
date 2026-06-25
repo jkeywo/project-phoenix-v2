@@ -1043,13 +1043,6 @@
       var banks   = s.banks || [];
       var anyReady = banks.some(function(b) { return b.fire_ready; });
 
-      // ── Complexity preset display (issue #461) ──────────────────────────
-      // Element hiding itself is handled by console-core + hideable-elements.
-      var cpxEl = document.getElementById('cpx-display');
-      if (cpxEl && typeof s.complexityPreset === 'string') {
-        cpxEl.textContent = 'CPX: ' + s.complexityPreset.toUpperCase() + ' ▾';
-      }
-
       var modeStr        = String(s.phaser_mode || 'Auto');
       var modeMEl        = document.getElementById('mode-man');
       var modeAEl        = document.getElementById('mode-auto');

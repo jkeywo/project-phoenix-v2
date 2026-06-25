@@ -689,9 +689,7 @@ html, body {
 .hull .val.warn { color: var(--reloading); }
 .hull .val.crit { color: var(--fire-bright); }
 
-/* ── Complexity-preset hiding (issue #461) ──────────── */
-/* Applied by gui/hideable-elements.js to [data-hideable] elements
-   the active complexity preset wants hidden. */
+/* Legacy hidden utility; station ratings replaced complexity-preset hiding. */
 .cpx-hidden { display: none !important; }
 
 /* ── Help system (issue #462) ─────────────────────────

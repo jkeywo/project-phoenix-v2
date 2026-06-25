@@ -18,20 +18,28 @@ export const ALL_CONSOLES = Object.freeze([
 ]);
 
 /**
- * Normalise a player's console list. Old wire payloads carried a single
- * `console` field; new ones carry a `consoles` array.
+ * Normalise a player's console list.
+ * Legacy wire payloads carried `consoles` or `console`; current payloads carry
+ * `station`, and consoles are derived from shipStations.stations.
  */
-export function consolesOf(player) {
+export function consolesOf(player, shipStations) {
   if (Array.isArray(player.consoles)) return player.consoles;
-  return player.console ? [player.console] : [];
+  if (player.console) return [player.console];
+  const stationId = typeof player.station === 'string'
+    ? player.station
+    : (player.station && player.station.id) || null;
+  if (!stationId) return [];
+  const station = ((shipStations && shipStations.stations) || [])
+    .find(s => s.id === stationId || s.name === stationId);
+  return station && Array.isArray(station.consoles) ? station.consoles : [];
 }
 
-function normalisePlayer(p) {
-  return { ready: false, ...p, consoles: consolesOf(p) };
+function normalisePlayer(p, shipStations) {
+  return { ready: false, ...p, consoles: consolesOf(p, shipStations) };
 }
 
 function defaultShipStations() {
-  return { configs: {}, min_players: 0, max_players: 0, complexity_presets: {} };
+  return { stations: [] };
 }
 
 /**
@@ -48,12 +56,10 @@ export class LobbyState {
     this.phase = 'Lobby';
     /** Array of { token, name, consoles: [...], connected } */
     this.players = [];
-    /** ShipStations: { configs: {count: [StationDef]}, min_players, max_players, complexity_presets } */
+    /** ShipStations: { stations: [StationDef] } */
     this.shipStations = defaultShipStations();
     /** ShipClientConfig — per-ship static config from Welcome. */
     this.shipConfig = {};
-    /** Map of console name → current complexity preset name. */
-    this.complexity = {};
     /** Reason string for game over, if the game has ended. */
     this.gameOverReason = null;
     this.scenarioTitle = '';
@@ -66,10 +72,9 @@ export class LobbyState {
    */
   replaceFrom(state, shipStations, shipConfig) {
     this.phase = state.phase || 'Lobby';
-    this.players = (state.players || []).map(normalisePlayer);
     this.shipStations = shipStations || defaultShipStations();
+    this.players = (state.players || []).map(p => normalisePlayer(p, this.shipStations));
     this.shipConfig = shipConfig || {};
-    this.complexity = state.complexity || {};
     this.scenarioTitle = (state.world && state.world.scenario_title) || '';
     this.scenarioBody = (state.world && state.world.scenario_description) || '';
   }
@@ -86,7 +91,7 @@ export class LobbyState {
         this.replaceFrom(d.state || {}, d.ship_stations, d.ship_config);
         break;
       case 'PlayerJoined': {
-        const player = normalisePlayer(d.player || {});
+        const player = normalisePlayer(d.player || {}, this.shipStations);
         const idx = this.players.findIndex(p => p.token === player.token);
         if (idx >= 0) this.players[idx] = player;
         else this.players.push(player);
@@ -118,14 +123,14 @@ export class LobbyState {
           }
         }
         const target = this.players.find(p => p.token === d.token);
-        if (target) target.consoles = consoles.slice();
+        if (target) {
+          target.consoles = consoles.slice();
+          target.station = d.station_id || d.station || null;
+        }
         break;
       }
       case 'GameStarted':
         this.phase = 'InProgress';
-        break;
-      case 'ComplexityChanged':
-        this.complexity[d.console] = d.preset_name;
         break;
       case 'GameOver':
         this.phase = 'GameOver';
@@ -176,49 +181,32 @@ export class LobbyState {
     return this.phase === 'Loading';
   }
 
-  /** Current complexity preset for a console, or null. */
-  complexityPresetFor(console) {
-    return Object.prototype.hasOwnProperty.call(this.complexity, console)
-      ? this.complexity[console]
-      : null;
-  }
-
-  /** Station defs for a given player count (configs keys are strings on the wire). */
-  stationDefsFor(count) {
-    const cfgs = this.shipStations.configs || {};
-    return cfgs[count] || cfgs[String(count)] || [];
-  }
-
   /**
-   * One slot per station at the current display player count, classified by
-   * holder, followed by spectator rows. Mirrors `LobbyView::station_slots`.
+   * One slot per station from shipStations.stations, classified by holder,
+   * followed by spectator rows. Mirrors `LobbyView::station_slots`.
    *
    * Returns: array of
    *   { kind: 'available'|'occupied'|'mine', station, short_code, description,
-   *     rank, consoles, preset_names, holder_name? }
+   *     rank, consoles, holder_name? }
    *   | { kind: 'spectator', player_name }
    */
   stationSlots(myToken) {
-    const playerCount = this.players.length;
-    const max = this.shipStations.max_players || 0;
-    const min = this.shipStations.min_players || 0;
+    const defs = this.shipStations.stations || [];
 
-    // Fixed roster per #495: always show the max_players layout.
-    let displayCount = max > 0 ? max : Math.max(playerCount, min, 1);
+    // Build the set of all consoles that appear in any station definition.
+    const stationConsoles = new Set(defs.flatMap(d => d.consoles || []));
 
     const slots = [];
-    for (const def of this.stationDefsFor(displayCount)) {
+    for (const def of defs) {
       const defConsoles = def.consoles || [];
       const holder = this.players.find(p =>
         consolesOf(p).some(c => defConsoles.includes(c)));
-      const presetNames = defConsoles.map(c => this.complexityPresetFor(c) || 'Std');
       const base = {
         station: def.name || '',
         short_code: def.short_code || '',
         description: def.description || '',
         rank: def.rank || '',
         consoles: defConsoles,
-        preset_names: presetNames,
       };
       if (holder && holder.token === myToken) {
         slots.push({ kind: 'mine', ...base });
@@ -229,12 +217,11 @@ export class LobbyState {
       }
     }
 
-    // Spectator rows only when connected players exceed max_players.
-    if (max > 0 && playerCount > max) {
-      for (const p of this.players) {
-        if (consolesOf(p).length === 0) {
-          slots.push({ kind: 'spectator', player_name: p.name });
-        }
+    // Spectator rows: players whose consoles are not in any station definition.
+    for (const p of this.players) {
+      const hasStation = consolesOf(p).some(c => stationConsoles.has(c));
+      if (!hasStation) {
+        slots.push({ kind: 'spectator', player_name: p.name });
       }
     }
 
@@ -242,17 +229,13 @@ export class LobbyState {
   }
 
   /**
-   * True if every station slot at the display player count is filled.
-   * Mirrors `LobbyView::all_stations_filled` + `stations_config::all_stations_filled`.
+   * True if every station in shipStations.stations is filled by a connected player.
+   * Mirrors `LobbyView::all_stations_filled`.
    */
   allStationsFilled() {
-    const playerCount = this.players.length;
-    const max = this.shipStations.max_players || 0;
-    const checkCount = (max > 0 && playerCount > max) ? max : playerCount;
-
-    const allHeld = this.players.flatMap(p => consolesOf(p));
-    const defs = this.stationDefsFor(checkCount);
+    const defs = this.shipStations.stations || [];
     if (!defs.length) return false;
+    const allHeld = this.players.flatMap(p => consolesOf(p));
     return defs.every(def => (def.consoles || []).some(c => allHeld.includes(c)));
   }
 }

@@ -41,7 +41,6 @@
  *     3. wasmBindings.wasm_ui_action  (browser WASM)
  *     4. BroadcastChannel    (separate-tab mode)
  */
-import { applyHiddenElements } from './hideable-elements.js';
 import { mountHelp } from './help-panel.js';
 
 export function initConsole({ name, render }) {
@@ -86,13 +85,6 @@ export function initConsole({ name, render }) {
       return;
     }
     render(s);
-    // ── Complexity-preset hiding (issue #461) ──────────────────────────
-    // When the state push carries a preset name, toggle `.cpx-hidden` on
-    // every [data-hideable] element after render (the render above may
-    // have rebuilt DOM inside hideable containers).
-    if (s && typeof s.complexityPreset === 'string' && typeof document !== 'undefined') {
-      applyHiddenElements(document, name, s.complexityPreset);
-    }
   };
 
   // ── BroadcastChannel receive path (ADR-0001 §3 target 4) ───────────────

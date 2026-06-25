@@ -276,7 +276,7 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
 /**
  * Tactical / Weapons console.
  * @param {{ weaponsTarget, weaponsBanks, weaponsTubes, weaponsTorpedoCount,
- *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw, complexity }} state
+ *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw }} state
  */
 export function buildWeaponsConsoleState(state) {
   const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
@@ -307,9 +307,6 @@ export function buildWeaponsConsoleState(state) {
       range_frac: a.beam_range != null ? a.beam_range / range : null,
     })),
     torpedo_arcs:  state.torpedoArcConfigs || [],
-    // Server complexity preset name (issue #461); drives [data-hideable]
-    // element hiding via gui/hideable-elements.js in console-core.
-    complexityPreset: state.complexity?.Tactical || 'Std',
     own_hull: ownHull('Tactical', state),
   });
 }
@@ -399,8 +396,7 @@ export function buildRepairConsoleState(state) {
 
 /**
  * Power console.
- * @param {{ powerHelm, powerWeapons, powerSensors, powerBattery, powerLocked,
- *           complexity }} state
+ * @param {{ powerHelm, powerWeapons, powerSensors, powerBattery, powerLocked }} state
  */
 export function buildPowerConsoleState(state) {
   return JSON.stringify({
@@ -409,9 +405,6 @@ export function buildPowerConsoleState(state) {
     sensors:        state.powerSensors || 0,
     battery_charge: state.powerBattery || 0,
     locked:         state.powerLocked  || false,
-    // Server complexity preset name (issue #461); drives [data-hideable]
-    // element hiding via gui/hideable-elements.js in console-core.
-    complexityPreset: state.complexity?.Power || 'Std',
     own_hull: ownHull('Power', state),
   });
 }

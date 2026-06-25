@@ -35,7 +35,6 @@ travel_duration_secs = 5
 repair_rate_hp_per_sec = 0.5
 
 [weapons_console]
-complexity_toml = "assets/complexity/tactical.toml"
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
 
@@ -66,7 +65,7 @@ beam_damage_per_sec = 5
 beam_duration_secs = 6
 cooldown_secs = 6
 beam_color = [ 1, 0.4, 0.1, 1 ]
-marker = "phasers_a"
+marker = "phasers_aft"
 
 [torpedoes]
 count = 10
@@ -100,7 +99,6 @@ load_time = 3
 marker = "torpedo_aft"
 
 [sensors_console]
-complexity_toml = "assets/complexity/sensors.toml"
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
 [sensors_console.long_range_radar]
@@ -109,7 +107,6 @@ shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
 [power]
-complexity_toml = "assets/complexity/power.toml"
 capacity = 100
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25
@@ -133,6 +130,12 @@ impulse_speed_multiplier = 10
 impulse_acceleration_multiplier = 5
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
+[helm_console.engine_pfx]
+color = [ 0.25, 0.75, 1, 0.72 ]
+markers = [ "phasers_aft" ]
+trail_lifetime_secs = 0.55
+trail_spawn_interval_secs = 0.06
+
 [helm_console.boost]
 multiplier = 3.0
 steering_multiplier = 2.0
@@ -144,7 +147,6 @@ range = 187.5
 shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
 
 [navigation_console]
-complexity_toml = "assets/complexity/navigation.toml"
 
 [navigation_console.system_chart]
 range = 800
@@ -155,7 +157,6 @@ selects = [ "station", "planet", "star", "region" ]
 range = 1200
 
 [shields_console]
-complexity_toml = "assets/complexity/shields.toml"
 focus_bonus_max_hp = 50
 focus_bonus_regen = 5
 focus_penalty_max_hp = 25
@@ -174,162 +175,223 @@ colour = [ 0, 1, 0.2 ]
 size = 6
 icon = "playerShip"
 
-[stations]
-min_players = 1
-max_players = 6
+[power_groups.ops]
+label = "Operations"
+default_level = 2
+min_level = 1
+max_level = 4
 
-[[stations.1]]
-name = "Captain"
-description = "Solo crew: pilot, fight, command, and hail contacts."
-consoles = [ "CaptainChair", "Helm", "Tactical", "Repair", "Power", "Sensors", "Shields", "Navigation", "Comms" ]
-rank = "Cpt."
-next = "Helm"
+[power_groups.helm]
+label = "Propulsion"
+default_level = 2
+min_level = 1
+max_level = 4
 
-[[stations.2]]
-name = "Helm"
-description = "Pilot the ship, command the bridge, shields and manage comms."
-consoles = [ "CaptainChair", "Helm", "Shields", "Comms" ]
-rank = "Cpt."
-next = "Helm"
-previous = "Captain"
+[power_groups.weapons]
+label = "Weapons"
+default_level = 2
+min_level = 1
+max_level = 4
 
-[[stations.2]]
-name = "Tactical"
-description = "Weapons, damage control, power, and science operations."
-consoles = [ "Tactical", "Repair", "Power", "Sensors", "Navigation" ]
-rank = "Ltn."
-next = "Tactical"
+[power_groups.sensors]
+label = "Sensors"
+default_level = 2
+min_level = 1
+max_level = 4
 
-[[stations.3]]
-name = "Helm"
-description = "Pilot the ship, command the bridge."
-consoles = [ "CaptainChair", "Helm" ]
-rank = "Cpt."
-previous = "Helm"
-next = "Helm"
-
-[[stations.3]]
-name = "Tactical"
-description = "Manage weapons, sensors, shields, and navigation."
-consoles = [ "Tactical", "Sensors", "Navigation" ]
-rank = "Ltn."
-previous = "Tactical"
-next = "Tactical"
-
-[[stations.3]]
-name = "Engineering"
-description = "Maintain and repair ship systems, manage power, shields, and manage comms."
-consoles = [ "Repair", "Power", "Shields", "Comms" ]
-rank = "Ltn."
-next = "Engineering"
-
-[[stations.4]]
-name = "Helm"
-description = "Pilot the ship and command the bridge."
-consoles = [ "CaptainChair", "Helm" ]
-rank = "Cpt."
-previous = "Helm"
-next = "Helm"
-
-[[stations.4]]
-name = "Tactical"
-description = "Manage weapons systems."
-consoles = [ "Tactical" ]
-rank = "Ltn."
-previous = "Tactical"
-next = "Tactical"
-
-[[stations.4]]
-name = "Engineering"
-description = "Maintain and repair ship systems, manage power."
-consoles = [ "Repair", "Power" ]
-rank = "Ltn."
-previous = "Engineering"
-next = "Engineering"
-
-[[stations.4]]
-name = "Science"
-description = "Hail stations, monitor sensors, shields, and navigation."
-consoles = [ "Comms", "Sensors", "Shields", "Navigation" ]
-rank = "Ens."
-next = "Science"
-
-[[stations.5]]
+[[station]]
+id = "captain"
 name = "Captain"
 description = "Command the bridge."
-consoles = [ "CaptainChair" ]
 rank = "Cpt."
-next = "Captain"
+short_code = "CPT"
+console = "captain"
 
-[[stations.5]]
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "helm"
 name = "Helm"
 description = "Pilot the ship."
-consoles = [ "Helm" ]
 rank = "Ltn."
-previous = "Helm"
-next = "Helm"
+short_code = "HLM"
+console = "helm"
 
-[[stations.5]]
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "tactical"
 name = "Tactical"
 description = "Manage weapons systems."
-consoles = [ "Tactical" ]
 rank = "Ltn."
-previous = "Tactical"
-next = "Tactical"
+short_code = "TAC"
+console = "tactical"
 
-[[stations.5]]
-name = "Engineering"
-description = "Maintain and repair ship systems, manage power."
-consoles = [ "Repair", "Power" ]
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = []
+
+[station.rating.ai_tuning]
+torpedo_auto_fire = {}
+frequency_match = { auto_match_delay_secs = 3.0 }
+
+[[station]]
+id = "repair"
+name = "Repair"
+description = "Maintain and repair ship systems."
 rank = "Ltn."
-previous = "Engineering"
-next = "Engineering"
+short_code = "ENG"
+console = "repair"
 
-[[stations.5]]
-name = "Science"
-description = "Hail stations, monitor sensors, shields, and navigation."
-consoles = [ "Comms", "Sensors", "Shields", "Navigation" ]
-rank = "Ens."
-previous = "Science"
-next = "Sensors"
+[[station.rating]]
+name = "Std"
+automated_systems = []
 
-[[stations.6]]
-name = "Captain"
-description = "Command the bridge."
-consoles = [ "CaptainChair" ]
-rank = "Cpt."
-previous = "Captain"
-
-[[stations.6]]
-name = "Helm"
-description = "Pilot the ship."
-consoles = [ "Helm" ]
-rank = "Ltn."
-previous = "Helm"
-
-[[stations.6]]
-name = "Tactical"
-description = "Manage weapons systems."
-consoles = [ "Tactical" ]
-rank = "Ltn."
-previous = "Tactical"
-
-[[stations.6]]
-name = "Engineering"
-description = "Maintain and repair ship systems, manage power."
-consoles = [ "Repair", "Power" ]
-rank = "Ltn."
-previous = "Engineering"
-
-[[stations.6]]
-name = "Comms"
-description = "Hail stations, navigate, and relay intelligence."
-consoles = [ "Comms", "Navigation" ]
-rank = "Ens."
-
-[[stations.6]]
+[[station]]
+id = "sensors"
 name = "Sensors"
-description = "Monitor long-range sensors and shields."
-consoles = [ "Sensors", "Shields" ]
+description = "Monitor long-range sensors."
 rank = "Ens."
-previous = "Science"
+short_code = "SCI"
+console = "sensors"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = []
+
+[station.rating.ai_tuning]
+auto_hint = { auto_hint_delay_secs = 3.0 }
+
+[[station]]
+id = "shields"
+name = "Shields"
+description = "Manage shield systems."
+rank = "Ens."
+short_code = "SHD"
+console = "shields"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = "Plot course and navigate."
+rank = "Ens."
+short_code = "NAV"
+console = "navigation"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "power"
+name = "Power"
+description = "Manage ship power systems."
+rank = "Ltn."
+short_code = "PWR"
+console = "power"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = []
+
+[station.rating.ai_tuning]
+movement_rule = { thrust_threshold = 0.7, engage_delay_secs = 3.0, battery_engage_min_pct = 50.0, battery_recharge_pct = 100.0 }
+red_alert_rule = { engage_delay_secs = 3.0, battery_engage_min_pct = 10.0, battery_recharge_pct = 100.0 }
+
+[[station]]
+id = "comms"
+name = "Comms"
+description = "Hail stations and relay intelligence."
+rank = "Ens."
+short_code = "COM"
+console = "comms"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "captain"
+kind = "captain"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "helm"
+kind = "helm"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "tactical"
+kind = "tactical"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "repair"
+kind = "repair"
+station = "repair"
+power_group = "ops"
+
+[[system]]
+id = "sensors"
+kind = "sensors"
+station = "sensors"
+power_group = "sensors"
+
+[[system]]
+id = "shields"
+kind = "shields"
+station = "shields"
+power_group = "ops"
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "navigation"
+power_group = "ops"
+
+[[system]]
+id = "power"
+kind = "power"
+station = "power"
+power_group = "ops"
+
+[[system]]
+id = "comms"
+kind = "comms"
+station = "comms"
+power_group = "ops"
+
+[[system]]
+id = "viewscreen"
+kind = "viewscreen"
+station = "captain"
+power_group = "ops"

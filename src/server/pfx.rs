@@ -113,16 +113,16 @@ fn sync_phaser_beams(
     beam: Res<ActiveBeam>,
     render_cfg: Res<PhaserRenderConfig>,
     combat_cfg: Res<PhaserCombatConfigResource>,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), With<Asteroid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
     entity_q: Query<(&EntityUuid, &Transform), (Without<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
-    player_ship_q: Query<(&Transform, Option<&ModelMarkers>, Option<&EntityUuid>), With<Ship>>,
+    player_ship_q: Query<(&Transform, Option<&ModelMarkers>, Option<&EntityUuid>), (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>)>,
     npc_beam_q: Query<(
         &EntityUuid,
         &Transform,
         Option<&ModelMarkers>,
         &EntityPhaserState,
         Option<&WeaponsConsoleSection>,
-    )>,
+    ), (Without<BeamBody>, Without<BeamContactGlow>)>,
     mut state: ResMut<BeamPfxState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -236,9 +236,9 @@ fn resolve_player_beam(
     beam: &ActiveBeam,
     render_cfg: &PhaserRenderConfig,
     combat_cfg: &PhaserCombatConfig,
-    asteroid_q: &Query<(&AsteroidUuid, &Transform), With<Asteroid>>,
+    asteroid_q: &Query<(&AsteroidUuid, &Transform), (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
     entity_q: &Query<(&EntityUuid, &Transform), (Without<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
-    player_ship_q: &Query<(&Transform, Option<&ModelMarkers>, Option<&EntityUuid>), With<Ship>>,
+    player_ship_q: &Query<(&Transform, Option<&ModelMarkers>, Option<&EntityUuid>), (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>)>,
 ) -> Option<(Vec3, Vec3, [f32; 4])> {
     let target_pos = target_position(target_uuid, ship, None, asteroid_q, entity_q)?;
     let bank_id = beam.bank.as_deref();
@@ -584,7 +584,7 @@ fn target_position(
     uuid: &str,
     ship: &ShipState,
     player_ship_uuid: Option<&str>,
-    asteroid_q: &Query<(&AsteroidUuid, &Transform), With<Asteroid>>,
+    asteroid_q: &Query<(&AsteroidUuid, &Transform), (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
     entity_q: &Query<(&EntityUuid, &Transform), (Without<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>)>,
 ) -> Option<Vec3> {
     if player_ship_uuid == Some(uuid) {

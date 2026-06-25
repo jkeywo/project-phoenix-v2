@@ -294,16 +294,16 @@ fn live_entity_xz(
 fn handle_set_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_authoring_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     ship: Res<ShipState>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    control_sources: Res<ShipSystemControlSources>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
+    let Ok((ship_authoring_config, control_sources)) = ship_query.single() else { return; };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -368,7 +368,7 @@ fn handle_set_target(
 /// directly with no remote PeerJS session (issue #422 / PRD #419).
 fn tactical_authorized(
     sessions: &Sessions,
-    ship_config: &crate::ship_plugin::ShipConfigResource,
+    ship_config: &crate::ship_plugin::ShipConfigComponent,
     token: &str,
 ) -> bool {
     sessions
@@ -382,18 +382,18 @@ fn handle_fire_phaser(
     mut commands: Commands,
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     combat_config: Res<PhaserCombatConfigResource>,
-    control_sources: Res<ShipSystemControlSources>,
     _outbox: ResMut<SimOutbox>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -404,7 +404,7 @@ fn handle_fire_phaser(
         if !policy.accept_human_input {
             continue;
         }
-        if !tactical_authorized(&sessions, &ship_config, &ev.token) {
+        if !tactical_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
         if cooldown.is_bank_active(bank) || beam.target_uuid.is_some() {
@@ -976,10 +976,10 @@ fn handle_fire_phaser_npc(
 fn handle_set_phaser_mode(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
-    control_sources: Res<ShipSystemControlSources>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1012,10 +1012,10 @@ fn handle_set_phaser_mode(
 fn handle_set_phaser_frequency(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
-    control_sources: Res<ShipSystemControlSources>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut ship: ResMut<ShipState>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
     let tactical_policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1041,10 +1041,10 @@ fn handle_set_phaser_frequency(
 fn handle_load_tube(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
-    control_sources: Res<ShipSystemControlSources>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1055,7 +1055,7 @@ fn handle_load_tube(
         if !policy.accept_human_input {
             continue;
         }
-        if !tactical_authorized(&sessions, &ship_config, &ev.token) {
+        if !tactical_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
         torpedo_sys.0.start_load(tube.as_str());
@@ -1065,10 +1065,10 @@ fn handle_load_tube(
 fn handle_unload_tube(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
-    control_sources: Res<ShipSystemControlSources>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1079,7 +1079,7 @@ fn handle_unload_tube(
         if !policy.accept_human_input {
             continue;
         }
-        if !tactical_authorized(&sessions, &ship_config, &ev.token) {
+        if !tactical_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
         torpedo_sys.0.start_unload(tube.as_str());
@@ -1089,15 +1089,15 @@ fn handle_unload_tube(
 fn handle_fire_torpedo(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     ship: Res<ShipState>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
     weapons_target: Res<WeaponsTarget>,
-    control_sources: Res<ShipSystemControlSources>,
     mut weapon_fired: ResMut<crate::server_app::WeaponFiredThisTick>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1108,7 +1108,7 @@ fn handle_fire_torpedo(
         if !policy.accept_human_input {
             continue;
         }
-        if !tactical_authorized(&sessions, &ship_config, &ev.token) {
+        if !tactical_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1652,10 +1652,8 @@ fn tick_active_beam(
 // when the coarse Tactical system is decomposed into fine-grained systems.
 
 fn tick_tactical_ai(
-    control_sources: Res<ShipSystemControlSources>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources, &crate::ship_plugin::ActiveStationRatings), With<crate::simulation::Ship>>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
-    active_ratings: Res<crate::ship_plugin::ActiveStationRatings>,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
@@ -1667,6 +1665,7 @@ fn tick_tactical_ai(
         Without<crate::simulation::Asteroid>,
     >,
 ) {
+    let Ok((ship_config, control_sources, active_ratings)) = ship_query.single() else { return; };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -2428,9 +2427,9 @@ mod tests {
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
-    /// Build a minimal `ShipConfigResource` with a tactical station that has an
+    /// Build a minimal `ShipConfigComponent` with a tactical station that has an
     /// "Assisted" rating containing `torpedo_auto_fire` in its ai_tuning table.
-    fn test_ship_config() -> crate::ship_plugin::ShipConfigResource {
+    fn test_ship_config() -> crate::ship_plugin::ShipConfigComponent {
         const TOML: &str = r#"
 [[station]]
 id = "tactical"
@@ -2456,7 +2455,7 @@ id = "tactical"
 kind = "tactical"
 station = "tactical"
 "#;
-        crate::ship_plugin::ShipConfigResource(
+        crate::ship_plugin::ShipConfigComponent(
             crate::ship::config::parse_and_validate(TOML, &["tactical"])
                 .expect("test ship config must be valid"),
         )
@@ -2505,11 +2504,8 @@ station = "tactical"
         .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
             TorpedoConfig::default(),
         )))
-        .insert_resource(test_ship_config())
-        .init_resource::<crate::ship_plugin::ActiveStationRatings>()
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
-        .init_resource::<ShipSystemControlSources>()
         .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
         .add_plugins(WeaponsPlugin)
         // Override with two banks so per-bank arc checks work.
@@ -2551,6 +2547,16 @@ station = "tactical"
         .add_systems(Update, (tick_active_beam, tick_torpedo_system))
         .add_plugins(weapons_update_broadcaster())
         .add_systems(PostUpdate, collect);
+        // Spawn the Ship entity with config/control-source components so all
+        // weapons systems that use `Query<..., With<Ship>>.single()` have a
+        // valid entity to operate on, matching what `spawn_game_start_entities`
+        // would do in a full server build.
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            test_ship_config(),
+            ShipSystemControlSources::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+        ));
         app
     }
 
@@ -4964,10 +4970,12 @@ station = "tactical"
         app: &mut App,
         source: crate::ship::control_source::ControlSource,
     ) {
-        app.world_mut()
-            .resource_mut::<ShipSystemControlSources>()
-            .0
-            .set(crate::system_registry::tactical_system_id(), source);
+        let world = app.world_mut();
+        let mut q = world
+            .query_filtered::<&mut ShipSystemControlSources, With<crate::simulation::Ship>>();
+        for mut cs in q.iter_mut(world) {
+            cs.0.set(crate::system_registry::tactical_system_id(), source);
+        }
     }
 
     fn spawn_asteroid_target(app: &mut App, uuid: &str, x: f32, z: f32) {
@@ -5001,6 +5009,19 @@ station = "tactical"
         );
     }
 
+    fn set_tactical_station_rating(app: &mut App, rating: &str) {
+        let rating = rating.to_string();
+        let world = app.world_mut();
+        let mut q = world
+            .query_filtered::<&mut crate::ship_plugin::ActiveStationRatings, With<crate::simulation::Ship>>();
+        for mut ratings in q.iter_mut(world) {
+            ratings.0.insert(
+                crate::messages::StationId("tactical".into()),
+                rating.clone(),
+            );
+        }
+    }
+
     #[test]
     fn ai_stops_firing_when_rating_switches_to_std() {
         // Occupied station: AI fires when rating is Assisted (has torpedo_auto_fire
@@ -5028,13 +5049,7 @@ station = "tactical"
 
         set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
         // Set rating to Assisted (has torpedo_auto_fire in ai_tuning).
-        app.world_mut()
-            .resource_mut::<crate::ship_plugin::ActiveStationRatings>()
-            .0
-            .insert(
-                crate::messages::StationId("tactical".into()),
-                "Assisted".into(),
-            );
+        set_tactical_station_rating(&mut app, "Assisted");
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
         load_tube_now(&mut app, "fore_port");
         spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
@@ -5051,10 +5066,7 @@ station = "tactical"
         load_tube_now(&mut app, "fore_port");
 
         // Switch to Std rating (no torpedo_auto_fire in ai_tuning).
-        app.world_mut()
-            .resource_mut::<crate::ship_plugin::ActiveStationRatings>()
-            .0
-            .insert(crate::messages::StationId("tactical".into()), "Std".into());
+        set_tactical_station_rating(&mut app, "Std");
 
         // Second tick — AI must not fire.
         let out2 = tick(&mut app);

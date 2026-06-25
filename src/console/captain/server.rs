@@ -8,8 +8,9 @@ use crate::messages::{
 };
 use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
-use crate::ship_plugin::ShipSystemControlSources;
+use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 use crate::ship_state::ShipState;
+use crate::simulation::Ship;
 use crate::world::server::ObjectiveManagerRes;
 
 pub struct CaptainPlugin;
@@ -47,17 +48,14 @@ fn handle_toggle_red_alert(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
-    control_sources: Option<Res<ShipSystemControlSources>>,
+    ship_query: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
     let policy = control_sources
-        .as_deref()
-        .map(|cs| {
-            cs.0.policy_for(&crate::system_registry::captain_system_id())
-        })
-        .unwrap_or(crate::ship::control_source::control_tick_policy(
-            ControlSource::Human,
-        ));
+        .0
+        .policy_for(&crate::system_registry::captain_system_id());
     for ev in reader.read() {
         if !is_red_alert_toggle(&ev.msg) {
             continue;
@@ -117,17 +115,19 @@ fn handle_set_view(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
-    control_sources: Option<Res<ShipSystemControlSources>>,
+    ship_query: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
     for ev in reader.read() {
         if let Some((source, mode)) = view_request_from_message(&ev.msg) {
             if source_can_request_view(
                 &source,
                 &ev.token,
                 &sessions,
-                &ship_config,
-                control_sources.as_deref(),
+                ship_config,
+                control_sources,
             ) {
                 ship.request_view_mode_from(source, mode);
             }
@@ -139,12 +139,10 @@ fn source_can_request_view(
     source: &SystemId,
     token: &str,
     sessions: &Sessions,
-    ship_config: &crate::ship_plugin::ShipConfigResource,
-    control_sources: Option<&ShipSystemControlSources>,
+    ship_config: &ShipConfigComponent,
+    control_sources: &ShipSystemControlSources,
 ) -> bool {
-    let policy = control_sources.map(|cs| cs.0.policy_for(source)).unwrap_or(
-        crate::ship::control_source::control_tick_policy(ControlSource::Human),
-    );
+    let policy = control_sources.0.policy_for(source);
     if policy.operate_ai {
         return true;
     }
@@ -172,18 +170,16 @@ fn console_for_view_source(source: &SystemId) -> Option<Console> {
 /// and toggle red alert when the result differs from the current state.
 fn operate_captain_ai(
     mut ship: ResMut<ShipState>,
-    control_sources: Option<Res<ShipSystemControlSources>>,
+    ship_query: Query<&ShipSystemControlSources, With<Ship>>,
     activity: Option<Res<RecentCombatActivity>>,
     time: Res<Time>,
 ) {
+    let Ok(control_sources) = ship_query.single() else {
+        return;
+    };
     let policy = control_sources
-        .as_deref()
-        .map(|cs| {
-            cs.0.policy_for(&crate::system_registry::captain_system_id())
-        })
-        .unwrap_or(crate::ship::control_source::control_tick_policy(
-            ControlSource::Human,
-        ));
+        .0
+        .policy_for(&crate::system_registry::captain_system_id());
     if !policy.operate_ai {
         return;
     }
@@ -233,14 +229,15 @@ fn recompute_captain_console_state(
     ship: Res<ShipState>,
     hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
-    control_sources: Option<Res<ShipSystemControlSources>>,
+    ship_query: Query<&ShipSystemControlSources, With<Ship>>,
     mut comp_q: Query<&mut CaptainConsoleStateComp>,
 ) {
     let red_alert = ship.red_alert();
-    let red_alert_auto = control_sources.as_deref().is_some_and(|cs| {
+    let control_sources = ship_query.single().ok();
+    let red_alert_auto = control_sources.is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::captain_system_id()) == ControlSource::Ai
     });
-    let viewscreen_auto = control_sources.as_deref().is_some_and(|cs| {
+    let viewscreen_auto = control_sources.is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::viewscreen_system_id()) == ControlSource::Ai
     });
     let view_direction = match &ship.view_mode {
@@ -321,7 +318,8 @@ mod tests {
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::ViewDirection;
     use crate::ship::control_source::ControlSource;
-    use crate::ship_plugin::ShipSystemControlSources;
+    use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
+    use crate::simulation::Ship;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -338,9 +336,13 @@ mod tests {
             .add_plugins(LobbyPlugin)
             .add_plugins(CaptainPlugin)
             .init_resource::<Outbox>()
-            .init_resource::<ShipSystemControlSources>()
             .insert_resource(ShipState::new())
             .add_systems(PostUpdate, collect);
+        app.world_mut().spawn((
+            Ship,
+            ShipConfigComponent::default(),
+            ShipSystemControlSources::default(),
+        ));
         app
     }
 
@@ -358,6 +360,18 @@ mod tests {
         let out = app.world().resource::<Outbox>().0.clone();
         app.world_mut().resource_mut::<Outbox>().0.clear();
         out
+    }
+
+    fn set_control_source(
+        app: &mut App,
+        system_id: crate::messages::SystemId,
+        source: ControlSource,
+    ) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+        let mut cs = q.single_mut(app.world_mut()).unwrap();
+        cs.0.set(system_id, source);
     }
 
     fn start_game(app: &mut App) {
@@ -480,13 +494,11 @@ mod tests {
     fn ai_controlled_red_alert_ignores_human_control_system_toggle() {
         let mut app = test_app();
         // Set captain system to AI control
-        {
-            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
-            cs.0.set(
-                crate::system_registry::captain_system_id(),
-                ControlSource::Ai,
-            );
-        }
+        set_control_source(
+            &mut app,
+            crate::system_registry::captain_system_id(),
+            ControlSource::Ai,
+        );
         start_game(&mut app);
         push(
             &mut app,
@@ -807,10 +819,11 @@ mod tests {
     #[test]
     fn ai_controlled_helm_can_drive_viewscreen_without_human_seat() {
         let mut app = test_app();
-        {
-            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
-            cs.0.set(crate::system_registry::helm_system_id(), ControlSource::Ai);
-        }
+        set_control_source(
+            &mut app,
+            crate::system_registry::helm_system_id(),
+            ControlSource::Ai,
+        );
 
         push(
             &mut app,
@@ -837,13 +850,11 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
         // Set captain to AI mode
-        {
-            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
-            cs.0.set(
-                crate::system_registry::captain_system_id(),
-                ControlSource::Ai,
-            );
-        }
+        set_control_source(
+            &mut app,
+            crate::system_registry::captain_system_id(),
+            ControlSource::Ai,
+        );
         // Simulate recent damage (at t=0, now is ~0 so within 10s window)
         {
             let mut activity = app.world_mut().resource_mut::<RecentCombatActivity>();
@@ -866,13 +877,11 @@ mod tests {
             .toggle_red_alert();
         assert!(app.world().resource::<ShipState>().red_alert());
         // Set captain to AI mode with no recent activity
-        {
-            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
-            cs.0.set(
-                crate::system_registry::captain_system_id(),
-                ControlSource::Ai,
-            );
-        }
+        set_control_source(
+            &mut app,
+            crate::system_registry::captain_system_id(),
+            ControlSource::Ai,
+        );
         // No recent damage or weapons fire — activity is default (None)
         tick(&mut app);
         assert!(
@@ -1012,14 +1021,12 @@ mod tests {
     fn recompute_marks_ai_controlled_red_alert_auto() {
         let mut app = recompute_test_app();
         // Set captain system to AI control via ShipSystemControlSources
-        app.init_resource::<ShipSystemControlSources>();
-        {
-            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
-            cs.0.set(
-                crate::system_registry::captain_system_id(),
-                ControlSource::Ai,
-            );
-        }
+        let mut cs = ShipSystemControlSources::default();
+        cs.0.set(
+            crate::system_registry::captain_system_id(),
+            ControlSource::Ai,
+        );
+        app.world_mut().spawn((Ship, ShipConfigComponent::default(), cs));
         app.update();
 
         let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
@@ -1034,14 +1041,12 @@ mod tests {
     #[test]
     fn recompute_marks_ai_controlled_viewscreen_auto() {
         let mut app = recompute_test_app();
-        app.init_resource::<ShipSystemControlSources>();
-        {
-            let mut cs = app.world_mut().resource_mut::<ShipSystemControlSources>();
-            cs.0.set(
-                crate::system_registry::viewscreen_system_id(),
-                ControlSource::Ai,
-            );
-        }
+        let mut cs = ShipSystemControlSources::default();
+        cs.0.set(
+            crate::system_registry::viewscreen_system_id(),
+            ControlSource::Ai,
+        );
+        app.world_mut().spawn((Ship, ShipConfigComponent::default(), cs));
         app.update();
 
         let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();

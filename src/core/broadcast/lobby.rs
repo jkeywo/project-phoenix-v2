@@ -151,11 +151,17 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
         }
     }
 
+    // Collect ship config before borrowing registry/sessions to avoid borrow conflicts.
+    let ship_config_opt: Option<crate::ship_plugin::ShipConfigComponent> = world
+        .query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>()
+        .single(world)
+        .ok()
+        .cloned();
+
     // Collect (target, producer) for entries ready to fire this tick.
     let ready: Vec<(crate::lobby_handler::Target, LobbyProducer)> = {
         let registry = world.resource::<LobbyBroadcastRegistry>();
         let sessions = world.resource::<Sessions>();
-        let ship_config = world.resource::<crate::ship_plugin::ShipConfigResource>();
         registry
             .registrations
             .iter()
@@ -168,6 +174,7 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
                 if !should_fire {
                     return None;
                 }
+                let ship_config = ship_config_opt.as_ref()?;
                 let target = reg.audience.resolve(&sessions.0, &ship_config.0)?;
                 Some((target, reg.producer.clone()))
             })

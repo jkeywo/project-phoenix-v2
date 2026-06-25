@@ -75,7 +75,7 @@ impl NavigationWaypoint {
 
 fn navigation_authorized(
     sessions: &Sessions,
-    ship_config: &crate::ship_plugin::ShipConfigResource,
+    ship_config: &crate::ship_plugin::ShipConfigComponent,
     token: &str,
 ) -> bool {
     sessions
@@ -95,25 +95,21 @@ fn navigation_authorized(
 fn handle_navigation_waypoint(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<crate::ship_plugin::ShipConfigResource>,
-    control_sources: Option<Res<crate::ship_plugin::ShipSystemControlSources>>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut waypoint: ResMut<NavigationWaypoint>,
 ) {
-    let policy: ControlTickPolicy = control_sources
-        .as_deref()
-        .map(|cs| cs.0.policy_for(&navigation_system_id()))
-        .unwrap_or(ControlTickPolicy {
-            accept_human_input: true,
-            operate_ai: false,
-            coordinate: true,
-        });
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
+
+    let policy: ControlTickPolicy = control_sources.0.policy_for(&navigation_system_id());
 
     if !policy.accept_human_input {
         return;
     }
 
     for ev in reader.read() {
-        if !navigation_authorized(&sessions, &ship_config, &ev.token) {
+        if !navigation_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
 
@@ -242,7 +238,6 @@ mod tests {
             .init_resource::<LastBroadcastEntityPositions>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
-            .init_resource::<crate::ship_plugin::ShipSystemControlSources>()
             .add_systems(PostUpdate, collect);
         app
     }
@@ -617,13 +612,13 @@ mod tests {
         start_game_with_navigation(&mut app);
 
         {
-            let mut cs = app
-                .world_mut()
-                .resource_mut::<crate::ship_plugin::ShipSystemControlSources>();
-            cs.0.set(
-                crate::ship::system_registry::navigation_system_id(),
-                crate::ship::control_source::ControlSource::Ai,
-            );
+            let mut q = app.world_mut().query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>();
+            for mut cs in q.iter_mut(app.world_mut()) {
+                cs.0.set(
+                    crate::ship::system_registry::navigation_system_id(),
+                    crate::ship::control_source::ControlSource::Ai,
+                );
+            }
         }
 
         push(

@@ -31,24 +31,30 @@ pub struct LastHelmInput {
     pub steering: f32,
 }
 
-#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ShipSystemControlSources(pub ControlSourceResolver);
 
 /// The parsed `ShipConfig` defining stations, systems, and per-station rating
 /// tables. Populated once at startup from the embedded ship TOML.
-#[derive(Resource, Clone)]
-pub struct ShipConfigResource(pub ShipConfig);
+#[derive(Component, Clone)]
+pub struct ShipConfigComponent(pub ShipConfig);
 
 /// Tracks the currently active rating name for each station.
 /// Updated when a player sends `SetStationRating`.
-#[derive(Resource, Clone, Debug, Default)]
+#[derive(Component, Clone, Debug, Default)]
 pub struct ActiveStationRatings(pub HashMap<StationId, String>);
 
 /// Channel-3 coordination lag queue. Holds pending coordination messages
 /// until their due time, at which point they are routed by the delivery-time
 /// matrix (issue #494).
-#[derive(Resource, Clone, Debug, Default)]
-pub struct CoordinationQueueResource(pub CoordinationLagQueue);
+#[derive(Component, Clone, Debug, Default)]
+pub struct CoordinationQueue(pub CoordinationLagQueue);
+
+/// Newtype resource used by the WASM bridge to pass a custom `ShipConfig`
+/// before the ship entity is spawned.  Consumed during ship spawn and then
+/// removed from the world.
+#[derive(Resource)]
+pub struct PendingShipConfig(pub ShipConfig);
 
 /// Server-side enqueue event for channel-3 coordination messages.
 /// AI controllers fire this to send delayed advisories to human operators.
@@ -60,11 +66,11 @@ pub struct CoordinationEnqueue {
     pub sender_label: String,
 }
 
-/// Load `ShipConfigResource` from `assets/entities/player_ship.toml` (embedded at compile time).
+/// Load `ShipConfigComponent` from `assets/entities/player_ship.toml` (embedded at compile time).
 ///
 /// Panics if the file fails validation — the server cannot start without a valid ship
 /// configuration.
-pub(crate) fn load_ship_config_from_disk() -> ShipConfigResource {
+pub(crate) fn load_ship_config_from_disk() -> ShipConfigComponent {
     let toml_str = include_str!("../assets/entities/player_ship.toml");
     let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
         .expect("core system registry must be valid");
@@ -76,13 +82,13 @@ pub(crate) fn load_ship_config_from_disk() -> ShipConfigResource {
                 config.stations.len(),
                 config.systems.len()
             );
-            ShipConfigResource(config)
+            ShipConfigComponent(config)
         }
         Err(e) => panic!("ship_config: failed validation: {e}"),
     }
 }
 
-impl Default for ShipConfigResource {
+impl Default for ShipConfigComponent {
     fn default() -> Self {
         load_ship_config_from_disk()
     }
@@ -184,17 +190,16 @@ pub const BANK_LERP_RATE: f32 = 5.0;
 
 pub struct ShipPlugin;
 
+/// Physics and drive config resources bundled so `process_helm_inputs` stays
+/// under Bevy's 16-parameter system-function limit.
 #[derive(SystemParam)]
-struct HelmInputResources<'w> {
-    ship_config: Res<'w, ShipConfigResource>,
+struct HelmDriveParams<'w> {
     ship_physics_config: Option<Res<'w, ShipPhysicsConfigResource>>,
     impulse: Res<'w, ShipImpulse>,
     impulse_config: Res<'w, ImpulseConfigResource>,
     boost: Res<'w, ShipBoost>,
     boost_config: Res<'w, BoostConfigResource>,
     bank_config: Res<'w, BankConfigResource>,
-    control_sources: Res<'w, ShipSystemControlSources>,
-    helm_ai: Res<'w, HelmAiController>,
 }
 
 impl Plugin for ShipPlugin {
@@ -204,15 +209,11 @@ impl Plugin for ShipPlugin {
             TimerMode::Repeating,
         )))
         .init_resource::<LastHelmInput>()
-        .init_resource::<ShipSystemControlSources>()
-        .insert_resource(load_ship_config_from_disk())
-        .init_resource::<ActiveStationRatings>()
         .init_resource::<HelmAiController>()
         .init_resource::<ImpulseConfigResource>()
         .init_resource::<BoostConfigResource>()
         .init_resource::<ShipBoost>()
         .init_resource::<BankConfigResource>()
-        .init_resource::<CoordinationQueueResource>()
         .add_message::<CoordinationEnqueue>()
         .add_systems(
             Update,
@@ -245,15 +246,20 @@ fn process_helm_inputs(
     mut ship: ResMut<ShipState>,
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
-    helm: HelmInputResources,
+    ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
+    helm_ai: Res<HelmAiController>,
+    drive: HelmDriveParams,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_components.single() else {
+        return;
+    };
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
     // last cached helm input so a stale steering/thrust value can't
     // resurface the moment impulse cancels or the autopilot disengages.
     // Mirrors the `prev_phase` Local pattern in
     // `modifiers/coordination.rs::translate_impulse_modifiers`.
-    let current_phase = helm.impulse.0.phase;
+    let current_phase = drive.impulse.0.phase;
     if Some(current_phase) != *prev_phase {
         if current_phase == crate::impulse::ImpulsePhase::Charging {
             last_input.thrust = 0.0;
@@ -266,13 +272,12 @@ fn process_helm_inputs(
         return;
     }
 
-    let policy = helm
-        .control_sources
+    let policy = control_sources
         .0
         .policy_for(&crate::system_registry::helm_system_id());
     let helm_token = sessions
         .0
-        .console_holder(&crate::messages::Console::Helm, &helm.ship_config.0);
+        .console_holder(&crate::messages::Console::Helm, &ship_config.0);
     if policy.accept_human_input && helm_token.is_none() {
         return;
     }
@@ -289,7 +294,7 @@ fn process_helm_inputs(
         }
     }
     if policy.operate_ai {
-        *last_input = helm.helm_ai.operate();
+        *last_input = helm_ai.operate();
     }
 
     let dt = timer.0.duration().as_secs_f32();
@@ -299,7 +304,7 @@ fn process_helm_inputs(
         yaw: ship.yaw,
         forward_speed: ship.forward_speed,
     };
-    let impulse_active = helm.impulse.0.is_active();
+    let impulse_active = drive.impulse.0.is_active();
     let input = if impulse_active {
         // Autopilot: full forward thrust, zero steering. Player input is ignored.
         ShipPhysicsInput {
@@ -312,7 +317,7 @@ fn process_helm_inputs(
             steering: last_input.steering,
         }
     };
-    let mut config = match helm.ship_physics_config.as_deref() {
+    let mut config = match drive.ship_physics_config.as_deref() {
         Some(cfg) => cfg.0,
         None => ShipPhysicsConfig::new(),
     };
@@ -323,8 +328,8 @@ fn process_helm_inputs(
         // Mirror `ship/impulse.rs::apply_to_physics`: a non-positive
         // multiplier (e.g. an unset TOML field defaulting to 0) falls
         // back to the const instead of nuking acceleration entirely.
-        let mult = if helm.impulse_config.acceleration_multiplier > 0.0 {
-            helm.impulse_config.acceleration_multiplier
+        let mult = if drive.impulse_config.acceleration_multiplier > 0.0 {
+            drive.impulse_config.acceleration_multiplier
         } else {
             crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
         };
@@ -332,11 +337,11 @@ fn process_helm_inputs(
     }
     // Boost drive: while engaged, multiply max speed and acceleration. Only
     // applies when the ship's TOML enabled the feature.
-    if helm.boost_config.enabled && helm.boost.0.is_active() {
-        config.max_speed *= helm.boost_config.multiplier;
-        config.max_reverse_speed *= helm.boost_config.multiplier;
-        config.acceleration *= helm.boost_config.multiplier;
-        config.max_yaw_rate *= helm.boost_config.steering_multiplier;
+    if drive.boost_config.enabled && drive.boost.0.is_active() {
+        config.max_speed *= drive.boost_config.multiplier;
+        config.max_reverse_speed *= drive.boost_config.multiplier;
+        config.acceleration *= drive.boost_config.multiplier;
+        config.max_yaw_rate *= drive.boost_config.steering_multiplier;
     }
     let result = compute_physics(state, input, dt, &config);
 
@@ -346,13 +351,13 @@ fn process_helm_inputs(
     ship.forward_speed = result.forward_speed;
 
     // Visual banking: lerp roll toward target based on steering
-    let max_bank_rad = helm.bank_config.max_bank_deg.to_radians();
+    let max_bank_rad = drive.bank_config.max_bank_deg.to_radians();
     let target_roll = if impulse_active {
         0.0
     } else {
         -input.steering * max_bank_rad
     };
-    let lerp_factor = (helm.bank_config.bank_lerp_rate * dt).min(1.0);
+    let lerp_factor = (drive.bank_config.bank_lerp_rate * dt).min(1.0);
     ship.roll = ship.roll + (target_roll - ship.roll) * lerp_factor;
 }
 
@@ -408,8 +413,11 @@ pub fn handle_impulse_messages(
     membership: Option<Res<RegionMembership>>,
     region_query: Query<&RegionEffectsSection>,
     ship_query: Query<Entity, With<Ship>>,
-    control_sources: Res<ShipSystemControlSources>,
+    ship_components: Query<&ShipSystemControlSources, With<Ship>>,
 ) {
+    let Ok(control_sources) = ship_components.single() else {
+        return;
+    };
     if *last_hull_hp == 0.0 && (hull.0.total_current() - hull.0.total_max()).abs() < 1e-6 {
         *last_hull_hp = hull.0.total_max();
     }
@@ -461,8 +469,11 @@ pub fn handle_boost_messages(
     mut reader: MessageReader<InboundMessage>,
     mut boost: ResMut<ShipBoost>,
     config: Res<BoostConfigResource>,
-    control_sources: Res<ShipSystemControlSources>,
+    ship_components: Query<&ShipSystemControlSources, With<Ship>>,
 ) {
+    let Ok(control_sources) = ship_components.single() else {
+        return;
+    };
     if !config.enabled {
         return;
     }
@@ -507,10 +518,12 @@ fn tick_boost(
     config: Res<BoostConfigResource>,
     last_input: Res<LastHelmInput>,
     sessions: Res<Sessions>,
-    ship_config: Res<ShipConfigResource>,
     impulse: Res<ShipImpulse>,
-    control_sources: Res<ShipSystemControlSources>,
+    ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
 ) {
+    let Ok((ship_config, control_sources)) = ship_components.single() else {
+        return;
+    };
     if !config.enabled {
         return;
     }
@@ -568,155 +581,148 @@ fn is_inside_blocks_impulse(
 pub fn handle_station_rating_change(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_config: Res<ShipConfigResource>,
-    mut control_sources: ResMut<ShipSystemControlSources>,
-    mut active_ratings: ResMut<ActiveStationRatings>,
+    mut ship_components: Query<(&ShipConfigComponent, &mut ShipSystemControlSources, &mut ActiveStationRatings), With<Ship>>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
 ) {
-    for ev in reader.read() {
-        let ClientMessage::SetStationRating { rating_name } = &ev.msg else {
-            continue;
-        };
+    let messages: Vec<_> = reader.read().collect();
+    for (ship_config, mut control_sources, mut active_ratings) in ship_components.iter_mut() {
+        for ev in messages.iter() {
+            let ClientMessage::SetStationRating { rating_name } = &ev.msg else {
+                continue;
+            };
 
-        let station_id = sessions.0.station_for_token(&ev.token).cloned();
-        let Some(station_id) = station_id else {
-            continue;
-        };
+            let station_id = sessions.0.station_for_token(&ev.token).cloned();
+            let Some(station_id) = station_id else {
+                continue;
+            };
 
-        // Apply the rating
-        rating::apply_rating(
-            &ship_config.0,
-            &station_id,
-            rating_name,
-            &mut control_sources.0,
-        );
+            rating::apply_rating(
+                &ship_config.0,
+                &station_id,
+                rating_name,
+                &mut control_sources.0,
+            );
 
-        // Track the active rating
-        active_ratings
-            .0
-            .insert(station_id.clone(), rating_name.clone());
+            active_ratings
+                .0
+                .insert(station_id.clone(), rating_name.clone());
 
-        // Broadcast the change to all clients
-        outbox.0.push((
-            crate::lobby_handler::Target::All,
-            crate::messages::ServerMessage::RatingChanged {
-                station_id,
-                rating_name: rating_name.clone(),
-            },
-        ));
+            outbox.0.push((
+                crate::lobby_handler::Target::All,
+                crate::messages::ServerMessage::RatingChanged {
+                    station_id,
+                    rating_name: rating_name.clone(),
+                },
+            ));
+        }
     }
 }
 
 pub fn handle_coordination_enqueue(
-    mut queue: ResMut<CoordinationQueueResource>,
-    ship_config: Res<ShipConfigResource>,
+    mut ship_components: Query<(&ShipConfigComponent, &mut CoordinationQueue), With<Ship>>,
     mut events: MessageReader<CoordinationEnqueue>,
     mut inbound: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     time: Res<Time>,
 ) {
     let now = time.elapsed_secs();
-    let lag = ship_config.0.coordination_lag_secs;
-
-    for ev in events.read() {
-        queue.0.enqueue(QueuedCoordination {
-            sender_origin: ev.sender_origin,
-            target: ev.target.clone(),
-            payload: ev.payload.clone(),
-            sender_label: ev.sender_label.clone(),
-            due_time: now + lag,
-        });
-    }
-
-    for msg in inbound.read() {
-        let ClientMessage::SendCoordination { target, payload } = &msg.msg else {
-            continue;
-        };
-
-        let player = match sessions.0.players().iter().find(|p| p.token == msg.token) {
-            Some(p) => p,
-            None => continue,
-        };
-        let sender_origin = if player.station.is_none() {
-            ControlSource::Ai
-        } else {
-            ControlSource::Human
-        };
-
-        queue.0.enqueue(QueuedCoordination {
-            sender_origin,
-            target: target.clone(),
-            payload: payload.clone(),
-            sender_label: player.name.clone(),
-            due_time: now + lag,
-        });
+    let coord_events: Vec<_> = events.read().collect();
+    let inbound_msgs: Vec<_> = inbound.read().collect();
+    for (ship_config, mut queue) in ship_components.iter_mut() {
+        let lag = ship_config.0.coordination_lag_secs;
+        for ev in coord_events.iter() {
+            queue.0.enqueue(QueuedCoordination {
+                sender_origin: ev.sender_origin,
+                target: ev.target.clone(),
+                payload: ev.payload.clone(),
+                sender_label: ev.sender_label.clone(),
+                due_time: now + lag,
+            });
+        }
+        for msg in inbound_msgs.iter() {
+            let ClientMessage::SendCoordination { target, payload } = &msg.msg else {
+                continue;
+            };
+            let player = match sessions.0.players().iter().find(|p| p.token == msg.token) {
+                Some(p) => p,
+                None => continue,
+            };
+            let sender_origin = if player.station.is_none() {
+                ControlSource::Ai
+            } else {
+                ControlSource::Human
+            };
+            queue.0.enqueue(QueuedCoordination {
+                sender_origin,
+                target: target.clone(),
+                payload: payload.clone(),
+                sender_label: player.name.clone(),
+                due_time: now + lag,
+            });
+        }
     }
 }
 
 pub fn process_coordination_lag(
     time: Res<Time>,
-    mut queue: ResMut<CoordinationQueueResource>,
-    control_sources: Res<ShipSystemControlSources>,
+    mut ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources, &mut CoordinationQueue), With<Ship>>,
     sessions: Res<Sessions>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
-    ship_config: Res<ShipConfigResource>,
 ) {
     let now = time.elapsed_secs();
-    let due = queue.0.due_messages(now);
-    if due.is_empty() {
-        return;
-    }
+    for (ship_config, control_sources, mut queue) in ship_components.iter_mut() {
+        let due = queue.0.due_messages(now);
+        for msg in due {
+            let target_control = control_sources.0.source_for(&msg.target);
+            let action = coordination::route_coordination(msg.sender_origin, target_control);
 
-    for msg in due {
-        let target_control = control_sources.0.source_for(&msg.target);
-        let action = coordination::route_coordination(msg.sender_origin, target_control);
+            match action {
+                coordination::DeliverAction::Consume => {}
+                coordination::DeliverAction::Suppress => {}
+                coordination::DeliverAction::Popup => {
+                    let label = if msg.sender_label.is_empty() {
+                        "AI".to_string()
+                    } else {
+                        msg.sender_label
+                    };
 
-        match action {
-            coordination::DeliverAction::Consume => {}
-            coordination::DeliverAction::Suppress => {}
-            coordination::DeliverAction::Popup => {
-                let label = if msg.sender_label.is_empty() {
-                    "AI".to_string()
-                } else {
-                    msg.sender_label
-                };
+                    let system = ship_config.0.system(&msg.target);
+                    let station_opt = system.and_then(|s| s.station.as_ref());
 
-                let system = ship_config.0.system(&msg.target);
-                let station_opt = system.and_then(|s| s.station.as_ref());
+                    if let Some(station_id) = station_opt {
+                        if let Some(station) = ship_config.0.station(station_id) {
+                            let console_id = &station.console;
+                            let token: Option<String> = crate::messages::Console::from_console_id(
+                                console_id,
+                            )
+                            .and_then(|console| {
+                                sessions
+                                    .0
+                                    .console_holder(&console, &ship_config.0)
+                                    .map(|t| t.to_string())
+                            });
 
-                if let Some(station_id) = station_opt {
-                    if let Some(station) = ship_config.0.station(station_id) {
-                        let console_id = &station.console;
-                        let token: Option<String> = crate::messages::Console::from_console_id(
-                            console_id,
-                        )
-                        .and_then(|console| {
-                            sessions
-                                .0
-                                .console_holder(&console, &ship_config.0)
-                                .map(|t| t.to_string())
-                        });
-
-                        if let Some(token) = token {
-                            outbox.0.push((
-                                crate::lobby_handler::Target::Token(token),
-                                crate::messages::ServerMessage::CoordinationPopup {
-                                    target: msg.target.clone(),
-                                    payload: msg.payload.clone(),
-                                    sender_label: label,
-                                },
-                            ));
+                            if let Some(token) = token {
+                                outbox.0.push((
+                                    crate::lobby_handler::Target::Token(token),
+                                    crate::messages::ServerMessage::CoordinationPopup {
+                                        target: msg.target.clone(),
+                                        payload: msg.payload.clone(),
+                                        sender_label: label,
+                                    },
+                                ));
+                            }
                         }
+                    } else {
+                        outbox.0.push((
+                            crate::lobby_handler::Target::All,
+                            crate::messages::ServerMessage::CoordinationPopup {
+                                target: msg.target.clone(),
+                                payload: msg.payload.clone(),
+                                sender_label: label,
+                            },
+                        ));
                     }
-                } else {
-                    outbox.0.push((
-                        crate::lobby_handler::Target::All,
-                        crate::messages::ServerMessage::CoordinationPopup {
-                            target: msg.target.clone(),
-                            payload: msg.payload.clone(),
-                            sender_label: label,
-                        },
-                    ));
                 }
             }
         }
@@ -832,10 +838,24 @@ mod tests {
     }
 
     fn set_helm_control_source(app: &mut App, source: ControlSource) {
-        app.world_mut()
-            .resource_mut::<ShipSystemControlSources>()
-            .0
-            .set(crate::system_registry::helm_system_id(), source);
+        let mut q = app.world_mut().query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+        for mut cs in q.iter_mut(app.world_mut()) {
+            cs.0.set(crate::system_registry::helm_system_id(), source);
+        }
+    }
+
+    fn get_ship_control_sources(app: &mut App) -> ShipSystemControlSources {
+        let mut q = app.world_mut().query_filtered::<&ShipSystemControlSources, With<Ship>>();
+        q.single(app.world())
+            .expect("expected Ship entity with ShipSystemControlSources")
+            .clone()
+    }
+
+    fn get_ship_active_ratings(app: &mut App) -> ActiveStationRatings {
+        let mut q = app.world_mut().query_filtered::<&ActiveStationRatings, With<Ship>>();
+        q.single(app.world())
+            .expect("expected Ship entity with ActiveStationRatings")
+            .clone()
     }
 
     // ── Helm system control-source tests ───────────────────────────────────
@@ -1697,7 +1717,7 @@ mod tests {
     /// Build a ShipConfig with a captain station that has an "Assisted" rating
     /// declaring red-alert as automated. Used by rating-mechanism tests that
     /// need automation to be configured independently of player_ship.toml.
-    fn ship_config_with_assisted_captain() -> ShipConfigResource {
+    fn ship_config_with_assisted_captain() -> ShipConfigComponent {
         const TOML: &str = r#"
 [[station]]
 id = "captain"
@@ -1748,7 +1768,7 @@ kind = "helm"
 station = "helm"
 "#;
         const KINDS: &[&str] = &["captain", "red_alert", "viewscreen", "helm"];
-        ShipConfigResource(
+        ShipConfigComponent(
             crate::ship::config::parse_and_validate(TOML, KINDS)
                 .expect("test config must be valid"),
         )
@@ -1757,7 +1777,7 @@ station = "helm"
     #[test]
     fn set_station_rating_sets_ai_for_automated_systems() {
         let mut app = test_app();
-        app.insert_resource(ship_config_with_assisted_captain());
+        app.insert_resource(PendingShipConfig(ship_config_with_assisted_captain().0));
         start_game_with_helm_and_science(&mut app);
 
         // Captain "Assisted" rating has red-alert in automated_systems.
@@ -1770,7 +1790,7 @@ station = "helm"
         );
         tick_twice(&mut app);
 
-        let sources = app.world().resource::<ShipSystemControlSources>();
+        let sources = get_ship_control_sources(&mut app);
         assert_eq!(
             sources
                 .0
@@ -1793,7 +1813,7 @@ station = "helm"
         );
         tick_twice(&mut app);
 
-        let sources = app.world().resource::<ShipSystemControlSources>();
+        let sources = get_ship_control_sources(&mut app);
         assert_eq!(
             sources
                 .0
@@ -1816,7 +1836,7 @@ station = "helm"
         );
         tick_twice(&mut app);
 
-        let sources = app.world().resource::<ShipSystemControlSources>();
+        let sources = get_ship_control_sources(&mut app);
         assert_eq!(
             sources
                 .0
@@ -1849,7 +1869,7 @@ station = "helm"
         );
         tick_twice(&mut app);
 
-        let sources = app.world().resource::<ShipSystemControlSources>();
+        let sources = get_ship_control_sources(&mut app);
         // Default is Human
         assert_eq!(
             sources
@@ -1873,7 +1893,7 @@ station = "helm"
         );
         tick_twice(&mut app);
 
-        let active = app.world().resource::<ActiveStationRatings>();
+        let active = get_ship_active_ratings(&mut app);
         assert_eq!(
             active
                 .0

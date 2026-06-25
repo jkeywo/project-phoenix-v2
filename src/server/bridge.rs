@@ -17,7 +17,7 @@ use {
     crate::renderer::RendererPlugin,
     crate::server_app::add_simulation_plugins,
     crate::ship::config::ShipConfig,
-    crate::ship_plugin::ShipConfigResource,
+    crate::ship_plugin::PendingShipConfig,
     crate::stations_config::ShipStations,
     crate::viewscreen_border::ViewscreenBorderPlugin,
     crate::world::WorldPlugin,
@@ -249,7 +249,7 @@ pub fn wasm_init() {
     // calls load_ship_config_from_disk which uses std::fs — panics in WASM).
     SHIP_CONFIG.with(|slot| {
         if let Some(config) = slot.borrow_mut().take() {
-            app.insert_resource(ShipConfigResource(config));
+            app.insert_resource(PendingShipConfig(config));
         }
     });
     app.add_plugins(LobbyPlugin)

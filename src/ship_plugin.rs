@@ -94,29 +94,6 @@ impl Default for ShipConfigComponent {
     }
 }
 
-#[derive(Resource, Clone, Copy, Debug, PartialEq)]
-pub struct HelmAiController {
-    pub thrust: f32,
-    pub steering: f32,
-}
-
-impl Default for HelmAiController {
-    fn default() -> Self {
-        Self {
-            thrust: 0.5,
-            steering: 0.0,
-        }
-    }
-}
-
-impl HelmAiController {
-    fn operate(self) -> LastHelmInput {
-        LastHelmInput {
-            thrust: self.thrust,
-            steering: self.steering,
-        }
-    }
-}
 
 /// Runtime ship physics config, loaded from `[helm_console]` in the entity TOML.
 /// When absent, `ShipPhysicsConfig::new()` defaults are used.
@@ -209,7 +186,6 @@ impl Plugin for ShipPlugin {
             TimerMode::Repeating,
         )))
         .init_resource::<LastHelmInput>()
-        .init_resource::<HelmAiController>()
         .init_resource::<ImpulseConfigResource>()
         .init_resource::<BoostConfigResource>()
         .init_resource::<ShipBoost>()
@@ -218,7 +194,12 @@ impl Plugin for ShipPlugin {
         .add_systems(
             Update,
             (
-                process_helm_inputs.in_set(crate::sim_sets::SimSet::Physics),
+                operate_helm_ai
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(crate::sim_sets::AiTickLabel),
+                process_helm_inputs
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(operate_helm_ai),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
                 sync_ship_position
@@ -247,11 +228,10 @@ fn process_helm_inputs(
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
     ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
-    helm_ai: Res<HelmAiController>,
     drive: HelmDriveParams,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_components.single() else {
+    let Some((ship_config, control_sources)) = ship_components.iter().next() else {
         return;
     };
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
@@ -293,10 +273,6 @@ fn process_helm_inputs(
             *last_input = input;
         }
     }
-    if policy.operate_ai {
-        *last_input = helm_ai.operate();
-    }
-
     let dt = timer.0.duration().as_secs_f32();
     let state = ShipPhysicsState {
         x: ship.x,
@@ -365,6 +341,30 @@ fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy 
     sources
         .0
         .policy_for(&crate::system_registry::helm_system_id())
+}
+
+/// Per-kind AI plugin for helm. Runs after the AI tick so `last_helm_intent`
+/// is fresh. Writes `LastHelmInput` for any ship whose helm policy is `operate_ai`.
+fn operate_helm_ai(
+    mut last_input: ResMut<LastHelmInput>,
+    ships: Query<(
+        &ShipSystemControlSources,
+        Option<&crate::ai::server::AiControllerComponent>,
+    ), With<Ship>>,
+) {
+    for (sources, maybe_ai) in &ships {
+        let policy = helm_control_policy(sources);
+        if !policy.operate_ai {
+            continue;
+        }
+        if let Some(ai) = maybe_ai {
+            if let Some((thrust, steering)) = ai.last_helm_intent {
+                *last_input = LastHelmInput { thrust, steering };
+            } else {
+                *last_input = LastHelmInput { thrust: 0.0, steering: 0.0 };
+            }
+        }
+    }
 }
 
 fn helm_input_from_message(msg: &ClientMessage) -> Option<LastHelmInput> {
@@ -910,10 +910,6 @@ mod tests {
         let mut app = test_app();
         start_game_with_helm_and_science(&mut app);
         set_helm_control_source(&mut app, ControlSource::Ai);
-        app.insert_resource(HelmAiController {
-            thrust: 0.25,
-            steering: 0.0,
-        });
 
         push(
             &mut app,
@@ -928,12 +924,11 @@ mod tests {
         );
         tick_twice(&mut app);
 
+        // Human input must be ignored when policy is AI; no AiControllerComponent
+        // on the player ship yet, so LastHelmInput stays at default.
         assert_eq!(
             *app.world().resource::<LastHelmInput>(),
-            LastHelmInput {
-                thrust: 0.25,
-                steering: 0.0
-            }
+            LastHelmInput::default()
         );
     }
 
@@ -941,10 +936,6 @@ mod tests {
     fn human_helm_suppresses_ai_operate() {
         let mut app = test_app();
         start_game_with_helm_and_science(&mut app);
-        app.insert_resource(HelmAiController {
-            thrust: 1.0,
-            steering: 0.0,
-        });
 
         tick(&mut app);
 

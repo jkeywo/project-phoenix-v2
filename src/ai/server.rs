@@ -112,6 +112,9 @@ pub struct AiControllerComponent {
     /// Current forward speed in world-units/sec, carried across ticks so the
     /// ship can accelerate over multiple frames (like the player helm does).
     pub forward_speed: f32,
+    /// Last helm intent from the AI tick: (thrust, steering). Reset each tick;
+    /// read by `operate_helm_ai` to drive ships when helm is on Backfill.
+    pub last_helm_intent: Option<(f32, f32)>,
 }
 
 /// Per-NPC phaser state. Mirrors the player-ship `PhaserCooldown` / `ActiveBeam`
@@ -273,6 +276,7 @@ fn attach_controllers_on_spawn(
             controller,
             entity_uuid: uuid.0.clone(),
             forward_speed: 0.0,
+            last_helm_intent: None,
         });
         // Pre-attach phaser state so the first attack tick can fire immediately,
         // but only when one isn't already present (tests may set an explicit cooldown).
@@ -544,8 +548,10 @@ fn tick_ai_controllers(
             })
             .unwrap_or_else(crate::ship_physics::ShipPhysicsConfig::new);
 
+        ctrl.last_helm_intent = None;
         for input in &output.inputs {
             if let crate::ai::AiInput::Helm { thrust, steering } = *input {
+                ctrl.last_helm_intent = Some((thrust, steering));
                 let physics_state = crate::ship_physics::ShipPhysicsState {
                     x: pos.x,
                     z: pos.z,

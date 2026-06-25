@@ -257,12 +257,12 @@ pub fn operate_power_ai(
     mut power: ResMut<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
     ship: Res<ShipState>,
-    last_helm: Res<LastHelmInput>,
+    last_helm: Option<Res<LastHelmInput>>,
     ai_config: Res<PowerAiConfigResource>,
 ) {
     let battery_pct = power.0.battery_charge / config.0.capacity;
     let red_alert = ship.red_alert();
-    let throttle = last_helm.thrust;
+    let throttle = last_helm.map_or(0.0, |l| l.thrust);
 
     // Weapons: boost on red alert when battery allows.
     if red_alert && battery_pct >= ai_config.weapons_battery_floor {
@@ -412,6 +412,12 @@ mod tests {
             )
             .add_plugins(crate::simulation::sim_state_broadcaster())
             .add_systems(PostUpdate, collect);
+        // Spawn the player ship entity so handle_power_messages can query it.
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
         app
     }
 

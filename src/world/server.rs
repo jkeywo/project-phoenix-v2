@@ -3494,6 +3494,12 @@ mod tests {
                     .chain(),
             )
             .add_systems(PostUpdate, collect);
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            Transform::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
         app
     }
 
@@ -7465,7 +7471,12 @@ condition = "on_world_loaded"
             .add_observer(handle_region_exited_event);
         // Spawn the player ship (with a Transform so RegionPlugin's
         // membership query succeeds).
-        app.world_mut().spawn((Ship, Transform::default()));
+        app.world_mut().spawn((
+            Ship,
+            Transform::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
         app
     }
 

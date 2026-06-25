@@ -265,6 +265,12 @@ mod tests {
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .add_systems(PostUpdate, collect);
+        // Spawn the player ship entity so handle_navigation_waypoint can query it.
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
         app
     }
 

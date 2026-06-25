@@ -824,6 +824,11 @@ mod tests {
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
+        app.world_mut().spawn((
+            Ship,
+            ShipConfigComponent::default(),
+            ShipSystemControlSources::default(),
+        ));
         app
     }
 
@@ -1195,7 +1200,12 @@ mod tests {
     fn blocks_impulse_test_app() -> App {
         let mut app = test_app();
         app.add_plugins(RegionPlugin);
-        app.world_mut().spawn((Ship, Transform::default()));
+        app.world_mut().spawn((
+            Ship,
+            Transform::default(),
+            ShipConfigComponent::default(),
+            ShipSystemControlSources::default(),
+        ));
         app
     }
 

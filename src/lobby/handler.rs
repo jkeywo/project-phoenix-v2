@@ -95,9 +95,8 @@ pub fn process_message(
                                 .iter()
                                 .find(|p| p.token == *id_token)
                                 .and_then(|p| p.last_rating.clone());
-                            if let Some(rating) = last_rating {
-                                reconnect_station_update = Some((sid.clone(), rating));
-                            }
+                            let rating = last_rating.unwrap_or_else(|| "Std".to_string());
+                            reconnect_station_update = Some((sid.clone(), rating));
                         } else {
                             sessions.set_station(id_token, None);
                         }

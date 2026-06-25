@@ -41,7 +41,7 @@ async function setupLobby(
 
   // Wait for the lobby panel to be visible AND populated. The Bevy → JS push
   // happens after the StationAssigned wire message; allow a short window.
-  await serverPage.bringToFront();
+  console.log('Waiting for lobby panel with claimed card…');
   await serverPage.waitForFunction(
     () => {
       const panel = document.getElementById('lobby-panel') as HTMLElement | null;

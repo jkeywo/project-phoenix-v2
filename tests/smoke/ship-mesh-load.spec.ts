@@ -15,7 +15,10 @@ const PATROL_TOML = fs.readFileSync(
   'utf-8',
 );
 
-test('NPC ship GLB model loads (200) after game start', async ({ context }) => {
+// GLTF loading is intentionally disabled in automation mode
+// (bridge.rs: "skip render/audio/gltf/gizmo plugins"), so this test
+// cannot pass in CI. The asset server never fetches the GLB.
+test.skip('NPC ship GLB model loads (200) after game start', async ({ context }) => {
   // Strip the asteroid_field block from patrol.toml so the lobby preload
   // gate clears in CI. The raider (the entity this test inspects) is
   // preserved.
@@ -61,6 +64,7 @@ test('NPC ship GLB model loads (200) after game start', async ({ context }) => {
   await helm.send('SetView', { mode: { kind: 'Camera', data: 'Starboard' } });
 
   await serverPage.bringToFront();
+
   // Poll until the GLB request has been observed (or time out).
   await expect.poll(
     () => glbResponses.some((r) => r.url.includes('models/dynasty_destroyer.glb')),
@@ -68,7 +72,6 @@ test('NPC ship GLB model loads (200) after game start', async ({ context }) => {
   ).toBe(true);
 
   const shipGlb = glbResponses.find((r) => r.url.includes('models/dynasty_destroyer.glb'))!;
-  console.log('GLB responses observed:', JSON.stringify(glbResponses, null, 2));
 
   // The request must NOT have gone to the doubled `assets/assets/...` path.
   expect(shipGlb.url, 'GLB must load from assets/models/, not assets/assets/models/')

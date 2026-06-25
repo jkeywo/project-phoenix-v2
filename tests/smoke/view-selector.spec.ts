@@ -1,17 +1,18 @@
 // Issue #306 — Smoke test: SetView produces correct SimSnapshot view_mode.
 //
-// 6P fixed-roster layout (max_players=6):
+// 9P fixed-roster layout (max_players=9, but we use 5 where only 4 are needed):
 //   Captain station  → CaptainChair
 //   Helm station     → Helm
-//   Comms station    → Comms, Navigation
-//   Sensors station  → Sensors, Shields
+//   Comms station    → Comms
+//   Sensors station  → Sensors
+//   Navigation station → Navigation
 //
 // Authorisation rules under test:
 //   Captain (CaptainChair) → Camera(Fore/Aft/Port/Starboard)
 //   Helm                   → Radar
 //   Comms station          → Comms
 //   Sensors station        → SensorsRadar
-//   Comms station          → NavigationChart
+//   Navigation station     → NavigationChart
 //   Unauthorized attempt   → view_mode unchanged
 
 import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
@@ -38,15 +39,12 @@ async function startGame(context: BrowserContext) {
 
   const hostId = await readHostPeerId(serverPage);
 
-  // 6P fixed-roster layout (max_players=6):
-  //   Captain  → [CaptainChair]
-  //   Helm     → [Helm]
-  //   Comms    → [Comms, Navigation]
-  //   Sensors  → [Sensors, Shields]
+  // 9P fixed-roster layout; create enough players for each test:
   const captainPlayer = await createTestClient(context, hostId, { name: 'Captain' });
   const helmPlayer    = await createTestClient(context, hostId, { name: 'Helm' });
   const commsPlayer   = await createTestClient(context, hostId, { name: 'Comms' });
   const sensorsPlayer = await createTestClient(context, hostId, { name: 'Sensors' });
+  const navPlayer     = await createTestClient(context, hostId, { name: 'Nav' });
 
   await captainPlayer.send('SelectStation', { station: 'Captain' });
   await waitForStation(captainPlayer);
@@ -56,17 +54,21 @@ async function startGame(context: BrowserContext) {
   await waitForStation(commsPlayer);
   await sensorsPlayer.send('SelectStation', { station: 'Sensors' });
   await waitForStation(sensorsPlayer);
+  await navPlayer.send('SelectStation', { station: 'Navigation' });
+  await waitForStation(navPlayer);
 
   await captainPlayer.send('SetReady', { ready: true });
   await helmPlayer.send('SetReady', { ready: true });
   await commsPlayer.send('SetReady', { ready: true });
   await sensorsPlayer.send('SetReady', { ready: true });
+  await navPlayer.send('SetReady', { ready: true });
   await captainPlayer.waitForMessage('GameStarted', 15_000);
   await helmPlayer.waitForMessage('GameStarted', 15_000);
   await commsPlayer.waitForMessage('GameStarted', 15_000);
   await sensorsPlayer.waitForMessage('GameStarted', 15_000);
+  await navPlayer.waitForMessage('GameStarted', 15_000);
 
-  return { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer };
+  return { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer };
 }
 
 // Helper: wait for a SimState whose view_mode matches the expected value.
@@ -90,7 +92,7 @@ async function waitForViewMode(
 }
 
 test('captain can set view to Camera(Fore)', async ({ context }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
   // Ensure we are starting from a known non-Fore view by first switching to Aft,
   // then back to Fore via the captain.
@@ -104,10 +106,11 @@ test('captain can set view to Camera(Fore)', async ({ context }) => {
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });
 
 test('captain can set view to Camera(Aft)', async ({ context }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
   await captainPlayer.send('SetView', { mode: { kind: 'Camera', data: 'Aft' } });
   await waitForViewMode(captainPlayer, { kind: 'Camera', data: 'Aft' });
@@ -116,10 +119,11 @@ test('captain can set view to Camera(Aft)', async ({ context }) => {
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });
 
 test('captain can set view to Camera(Port)', async ({ context }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
   await captainPlayer.send('SetView', { mode: { kind: 'Camera', data: 'Port' } });
   await waitForViewMode(captainPlayer, { kind: 'Camera', data: 'Port' });
@@ -128,10 +132,11 @@ test('captain can set view to Camera(Port)', async ({ context }) => {
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });
 
 test('captain can set view to Camera(Starboard)', async ({ context }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
   await captainPlayer.send('SetView', { mode: { kind: 'Camera', data: 'Starboard' } });
   await waitForViewMode(captainPlayer, { kind: 'Camera', data: 'Starboard' });
@@ -140,10 +145,11 @@ test('captain can set view to Camera(Starboard)', async ({ context }) => {
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });
 
 test('helm can set view to Radar', async ({ context }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
   await helmPlayer.send('SetView', { mode: { kind: 'Radar' } });
   await waitForViewMode(helmPlayer, { kind: 'Radar' });
@@ -152,10 +158,11 @@ test('helm can set view to Radar', async ({ context }) => {
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });
 
 test('comms can set view to Comms', async ({ context }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
   await commsPlayer.send('SetView', { mode: { kind: 'Comms' } });
   await waitForViewMode(commsPlayer, { kind: 'Comms' });
@@ -164,10 +171,11 @@ test('comms can set view to Comms', async ({ context }) => {
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });
 
-test('sensors (tactical station) can set view to SensorsRadar', async ({ context }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+test('sensors can set view to SensorsRadar', async ({ context }) => {
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
   await sensorsPlayer.send('SetView', { mode: { kind: 'SensorsRadar' } });
   await waitForViewMode(sensorsPlayer, { kind: 'SensorsRadar' });
@@ -176,24 +184,26 @@ test('sensors (tactical station) can set view to SensorsRadar', async ({ context
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });
 
-test('navigation (tactical station) can set view to NavigationChart', async ({ context }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+test('navigation can set view to NavigationChart', async ({ context }) => {
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
-  await commsPlayer.send('SetView', { mode: { kind: 'NavigationChart' } });
-  await waitForViewMode(commsPlayer, { kind: 'NavigationChart' });
+  await navPlayer.send('SetView', { mode: { kind: 'NavigationChart' } });
+  await waitForViewMode(navPlayer, { kind: 'NavigationChart' });
 
   await captainPlayer.close();
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });
 
 test('helm cannot set view to SensorsRadar — unauthorised request is ignored', async ({
   context,
 }) => {
-  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer } = await startGame(context);
+  const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
   // Wait for initial SimState to confirm view_mode is default Camera(Fore)
   await helmPlayer.waitForMessage('SimState', 2_000);
@@ -219,4 +229,5 @@ test('helm cannot set view to SensorsRadar — unauthorised request is ignored',
   await helmPlayer.close();
   await commsPlayer.close();
   await sensorsPlayer.close();
+  await navPlayer.close();
 });

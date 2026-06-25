@@ -159,7 +159,7 @@ impl Plugin for ViewscreenBorderPlugin {
 /// Reads server lobby resources and emits `LobbyStateChanged` for the HTML
 /// lobby overlay whenever the state changes. Runs in `Update` so the bridge's
 /// `flush_lobby_state` (in `PostUpdate`) forwards it to JS.
-fn push_lobby_state(
+pub(crate) fn push_lobby_state(
     sessions: Option<Res<Sessions>>,
     ship_stations: Option<Res<ShipStations>>,
     phase: Res<State<GamePhase>>,

@@ -256,7 +256,12 @@ pub fn wasm_init() {
         .add_plugins(crate::lobby::lobby_outbox_broadcaster());
     add_simulation_plugins(&mut app);
     app.add_plugins(WorldPlugin);
-    if !is_automation {
+    if is_automation {
+        // push_lobby_state is normally registered by ViewscreenBorderPlugin,
+        // which we skip in automation mode. Register it directly so the HTML
+        // lobby panel stays updated during smoke tests.
+        app.add_systems(Update, crate::server::viewscreen_border::push_lobby_state);
+    } else {
         app.add_plugins(RendererPlugin)
             .add_plugins(ViewscreenBorderPlugin);
     }

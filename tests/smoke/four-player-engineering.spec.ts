@@ -186,6 +186,7 @@ test('Power acts when all four connect before selecting', async ({ context }) =>
   await c3.waitForMessage('GameStarted', 5_000);
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
+
   await setHelmPower(c3, 3);
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
 
@@ -212,14 +213,10 @@ test('Power can still act after a mid-game reconnect', async ({ context }) => {
   await c3.close();
   const c3b = await createTestClient(context, hostId, { token: powToken, name: 'Eng' });
 
-  await waitForLastMessage(c3b, 'PowerState', 'data && typeof data.helm === "number"');
+  await waitForLastMessage(c3b, 'PowerState', 'data && data.helm === 3');
 
-  const before = await c3b.page.evaluate(() => {
-    const msgs: any[] = (window as any).__messages || [];
-    return (msgs.filter((m: any) => m.type === 'PowerState').pop() || {}).data?.helm;
-  });
-  await setHelmPower(c3b, Math.max(1, (before ?? 3) - 1));
-  await waitForLastMessage(c3b, 'PowerState', `data && data.helm < ${before}`);
+  await setHelmPower(c3b, 2);
+  await waitForLastMessage(c3b, 'PowerState', 'data && data.helm === 2');
 
   await c1.close();
   await c2.close();
@@ -239,17 +236,29 @@ test('shared session-token orphans the first Power device (ghost console)', asyn
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
 
+  await setHelmPower(c3, 3);
+  await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 3');
+
+  // Record c3's message count before ghost connects
+  const preCount = await c3.page.evaluate(() => (window as any).__messages?.length ?? 0);
+
   const ghostWinner = await createTestClient(context, hostId, { token: powToken, name: 'Eng-2' });
   await waitForLastMessage(ghostWinner, 'PowerState', 'data && typeof data.helm === "number"');
 
-  await setHelmPower(c3, 3);
-  await waitForLastMessage(ghostWinner, 'PowerState', 'data && data.helm === 3');
+  // ghostWinner sends a change so we can verify c3 (ghost) does NOT receive updates
+  await setHelmPower(ghostWinner, 2);
+  await waitForLastMessage(ghostWinner, 'PowerState', 'data && data.helm === 2');
 
-  const ghostSawIncrease = await c3.page.evaluate(() => {
+  // Small settling window to drain any in-flight SimState (the server tick
+  // that might have fired between tokenConns overwrite and this check).
+  await c3.page.waitForTimeout(500);
+
+  const sawNewPower = await c3.page.evaluate((count) => {
     const msgs: any[] = (window as any).__messages || [];
-    return msgs.some((m: any) => m.type === 'PowerState' && m.data.helm === 3);
-  });
-  expect(ghostSawIncrease).toBe(false);
+    const newMsgs = msgs.slice(count);
+    return newMsgs.some((m: any) => m.type === 'PowerState');
+  }, preCount);
+  expect(sawNewPower).toBe(false);
 
   await c1.close();
   await c2.close();

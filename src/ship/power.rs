@@ -193,10 +193,14 @@ pub fn handle_power_messages(
         });
 
     if !policy.accept_human_input {
+        warn!("[power-auth] policy rejects human input — power system is AI-controlled");
         return;
     }
 
     let power_holder = sessions.0.console_holder(&Console::Power, &ship_config.0);
+    if power_holder.is_none() {
+        warn!("[power-auth] no holder for Power console — skipping all power messages");
+    }
 
     for ev in reader.read() {
         let crate::messages::ClientMessage::ControlSystem { target, payload } = &ev.msg else {
@@ -207,10 +211,12 @@ pub fn handle_power_messages(
         }
         if power_holder != Some(ev.token.as_str()) {
             warn!(
-                "[power-auth] ignored power allocation from token={} holder={:?}",
-                ev.token, power_holder,
+                "[power-auth] ignored power allocation from token={} holder={:?} target={:?} group={:?} level={:?}",
+                ev.token, power_holder, target, payload, None::<u8>,
             );
             continue;
+        } else {
+            warn!("[power-auth] ACCEPTED power allocation from token={}", ev.token);
         }
 
         match payload {

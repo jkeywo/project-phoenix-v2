@@ -34,3 +34,4 @@ tests/smoke/playwright-report
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 /.codegraph/daemon.pid
+tests/smoke/test-results-full.json

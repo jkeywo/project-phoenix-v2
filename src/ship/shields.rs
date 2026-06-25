@@ -69,6 +69,7 @@ impl Plugin for ShipShieldsPlugin {
                 (
                     handle_shields_messages.in_set(crate::sim_sets::SimSet::Input),
                     emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
+                    operate_shields_ai.in_set(crate::sim_sets::SimSet::Physics),
                     recompute_shields_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     push_shields_console_state
                         .in_set(crate::sim_sets::SimSet::Broadcast)
@@ -345,6 +346,28 @@ fn push_shields_console_state(
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
+
+
+// ── AI controller stub ─────────────────────────────────────────────────────────
+
+/// Per-kind AI plugin for shields.
+///
+/// Gated on policy.operate_ai for the Shields system. No behaviour is
+/// implemented yet — this is a compile-verified stub that will be filled in
+/// when the Shields AI controller is designed.
+fn operate_shields_ai(
+    ships: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
+) {
+    for sources in &ships {
+        let policy = sources
+            .0
+            .policy_for(&crate::system_registry::shields_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        // TODO: implement shields AI logic
+    }
+}
 
 #[cfg(test)]
 mod tests {

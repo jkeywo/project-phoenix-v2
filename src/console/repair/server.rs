@@ -43,6 +43,7 @@ impl Plugin for RepairPlugin {
                 (
                     handle_dispatch_repair_team.in_set(crate::sim_sets::SimSet::Input),
                     tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
+                    operate_repair_ai.in_set(crate::sim_sets::SimSet::Physics),
                     recompute_repair_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     push_repair_console_state
                         .in_set(crate::sim_sets::SimSet::Broadcast)
@@ -220,6 +221,28 @@ pub fn push_repair_console_state(
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+
+// ── AI controller stub ─────────────────────────────────────────────────────────
+
+/// Per-kind AI plugin for repair.
+///
+/// Gated on policy.operate_ai for the Repair system. No behaviour is
+/// implemented yet — this is a compile-verified stub that will be filled in
+/// when the Repair AI controller is designed.
+fn operate_repair_ai(
+    ships: Query<&ShipSystemControlSources, With<crate::simulation::Ship>>,
+) {
+    for sources in &ships {
+        let policy = sources
+            .0
+            .policy_for(&repair_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        // TODO: implement repair AI logic
+    }
+}
 
 #[cfg(test)]
 mod tests {

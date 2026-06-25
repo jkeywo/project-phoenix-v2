@@ -21,6 +21,10 @@ impl Plugin for NavigationPlugin {
             .add_systems(
                 Update,
                 refresh_anchored_waypoint.in_set(crate::sim_sets::SimSet::Modifiers),
+            )
+            .add_systems(
+                Update,
+                operate_navigation_ai.in_set(crate::sim_sets::SimSet::Physics),
             );
     }
 }
@@ -177,6 +181,28 @@ fn refresh_anchored_waypoint(
     if !found {
         // Parent entity has despawned (or never existed). Auto-clear.
         waypoint.0 = None;
+    }
+}
+
+
+// ── AI controller stub ─────────────────────────────────────────────────────────
+
+/// Per-kind AI plugin for navigation.
+///
+/// Gated on policy.operate_ai for the Navigation system. No behaviour is
+/// implemented yet — this is a compile-verified stub that will be filled in
+/// when the Navigation AI controller is designed.
+fn operate_navigation_ai(
+    ships: Query<(&crate::ship_plugin::ShipSystemControlSources,), With<crate::simulation::Ship>>,
+) {
+    for (sources,) in &ships {
+        let policy = sources
+            .0
+            .policy_for(&crate::system_registry::navigation_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        // TODO: implement navigation AI logic
     }
 }
 

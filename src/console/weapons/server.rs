@@ -202,7 +202,7 @@ fn on_beam_ended(
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 /// Marker resource for the coarse Tactical system AI controller.
-/// The `tick_tactical_ai` system reads this to confirm the AI path is
+/// The `operate_tactical_ai` system reads this to confirm the AI path is
 /// initialised; internal state lives in ECS resources the operate step reads
 /// directly.
 #[derive(Resource, Default)]
@@ -241,7 +241,7 @@ impl Plugin for WeaponsPlugin {
                     handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Input),
                     handle_load_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
-                    tick_tactical_ai.in_set(crate::sim_sets::SimSet::Input),
+                    operate_tactical_ai.in_set(crate::sim_sets::SimSet::Input),
                 ),
             )
             .add_systems(
@@ -1651,7 +1651,7 @@ fn tick_active_beam(
 // are separated by comment banners — each banner marks a future split point
 // when the coarse Tactical system is decomposed into fine-grained systems.
 
-fn tick_tactical_ai(
+fn operate_tactical_ai(
     ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources, &crate::ship_plugin::ActiveStationRatings), With<crate::simulation::Ship>>,
     sessions: Res<Sessions>,
     ship: Res<ShipState>,
@@ -4992,7 +4992,7 @@ station = "tactical"
 
     #[test]
     fn ai_fires_torpedo_when_ai_controls_unclaimed_station() {
-        // Unclaimed station + Ai ControlSource → tick_tactical_ai fires unconditionally.
+        // Unclaimed station + Ai ControlSource → operate_tactical_ai fires unconditionally.
         let mut app = test_app();
 
         set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);

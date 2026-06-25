@@ -135,6 +135,7 @@ impl Plugin for ShipPowerPlugin {
                 (
                     handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
+                    operate_power_ai.in_set(crate::sim_sets::SimSet::Physics),
                     recompute_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     push_power_console_state
                         .in_set(crate::sim_sets::SimSet::Broadcast)

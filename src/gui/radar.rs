@@ -897,7 +897,7 @@ fn sync_radar_blip_nodes(
             &mut Transform,
             &RadarBlipNode,
         ),
-        (Without<RadarRegionNode>, Without<RadarLabelNode>),
+        (With<RadarBlipNode>, Without<RadarRegionNode>, Without<RadarLabelNode>),
     >,
     mut existing_region_nodes: Query<
         (
@@ -906,11 +906,11 @@ fn sync_radar_blip_nodes(
             &mut BorderColor,
             &RadarRegionNode,
         ),
-        (Without<RadarBlipNode>, Without<RadarLabelNode>),
+        (With<RadarRegionNode>, Without<RadarBlipNode>, Without<RadarLabelNode>),
     >,
     mut existing_label_nodes: Query<
         (&mut Node, &RadarLabelNode),
-        (Without<RadarBlipNode>, Without<RadarRegionNode>),
+        (With<RadarLabelNode>, Without<RadarBlipNode>, Without<RadarRegionNode>),
     >,
     mut icons: ResMut<RadarIconLookup>,
     asset_server: Res<AssetServer>,

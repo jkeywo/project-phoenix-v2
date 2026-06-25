@@ -2,6 +2,7 @@ use bevy::core_pipeline::Skybox;
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
+use bevy::camera::ClearColorConfig;
 use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
 use rand::Rng;
 use rand::SeedableRng;
@@ -130,6 +131,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         Camera2d,
         Camera {
             order: 0,
+            clear_color: ClearColorConfig::None,
             ..default()
         },
         IsDefaultUiCamera,

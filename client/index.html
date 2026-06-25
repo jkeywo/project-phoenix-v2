@@ -835,8 +835,7 @@
       navigationWaypoint: null,
       objectives: [] };
     let conn = null;
-    // Station configs from server Welcome message (keyed by player count).
-    let stationConfigs = {};
+
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
 
@@ -1163,23 +1162,20 @@
     }
 
     function rebuildStations() {
-      // Fixed roster per #495: always use the max_players layout.
-      const count = state.maxPlayers || 1;
-      const defs = stationConfigs[count] || stationConfigs[String(count)] || [];
+      const defs = (state.shipStations && state.shipStations.stations) || [];
+      state.maxPlayers = defs.length;
       state.stations = defs.map(def => {
+        const defConsoles = def.consoles || [];
         const holder = state.players.find(p =>
           p.consoles && p.consoles.length > 0
-          && def.consoles && def.consoles.every(c => p.consoles.includes(c))
+          && defConsoles.some(c => p.consoles.includes(c))
         );
         return {
           name: def.name || '',
           short_code: def.short_code || '',
           rank: def.rank || '',
-          consoles: def.consoles || [],
+          consoles: defConsoles,
           holder_name: holder ? holder.name : null,
-          // Ownership is by token, not name — two clients on one desktop may
-          // share a display name, so "is this station mine?" must compare the
-          // (unique) session token. holder_name is display-only.
           holder_token: holder ? holder.token : null,
         };
       });
@@ -1622,10 +1618,7 @@
             // broadcast (no-op unless Repair is the active console).
             pushRepairConsoleState();
           }
-          if (msg.data.ship_stations) {
-            state.maxPlayers = msg.data.ship_stations.max_players || 0;
-            stationConfigs = msg.data.ship_stations.configs || {};
-          }
+
           if (msg.data.state.world) {
             const nameEl2 = document.getElementById('ship-name');
             const missionEl = document.getElementById('ship-mission');

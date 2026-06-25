@@ -957,8 +957,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     const stations = s.stations || [];
 
-    // Fill grid: always show exactly 6 cells (3×2)
-    const MAX_SLOTS = 6;
+    // Fill grid: always show exactly 9 cells (3×3)
+    const MAX_SLOTS = 9;
     for (let i = 0; i < MAX_SLOTS; i++) {
       const st = i < stations.length ? stations[i] : null;
       const card = document.createElement('div');

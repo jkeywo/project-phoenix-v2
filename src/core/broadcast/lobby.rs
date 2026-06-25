@@ -174,8 +174,7 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
                 if !should_fire {
                     return None;
                 }
-                let ship_config = ship_config_opt.as_ref()?;
-                let target = reg.audience.resolve(&sessions.0, &ship_config.0)?;
+                let target = reg.audience.resolve(&sessions.0, ship_config_opt.as_ref().map(|c| &c.0))?;
                 Some((target, reg.producer.clone()))
             })
             .collect()

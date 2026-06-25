@@ -2154,7 +2154,7 @@ mod tests {
         .add_plugins(crate::comms_plugin::CommsConsolePlugin)
         .add_systems(
             OnEnter(GamePhase::InProgress),
-            reset_broadcast_caches_on_start,
+            (reset_broadcast_caches_on_start, spawn_test_ship).chain(),
         )
         .add_systems(
             Update,
@@ -2186,6 +2186,14 @@ mod tests {
         .add_plugins(modifier_events_broadcaster())
         .add_systems(PostUpdate, collect);
         app
+    }
+
+    fn spawn_test_ship(mut commands: Commands) {
+        commands.spawn((
+            crate::simulation::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {

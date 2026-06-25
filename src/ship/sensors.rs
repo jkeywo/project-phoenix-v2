@@ -179,6 +179,11 @@ mod tests {
             .init_resource::<Outbox>()
             .add_plugins(ShipSensorsPlugin)
             .add_systems(PostUpdate, collect);
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
         app
     }
 

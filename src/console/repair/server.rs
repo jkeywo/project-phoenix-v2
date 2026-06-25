@@ -299,6 +299,12 @@ mod tests {
         .add_plugins(RepairPlugin)
         .add_plugins(repair_state_broadcaster())
         .add_systems(PostUpdate, collect);
+        // Spawn the player ship entity so handle_dispatch_repair_team can query it.
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
         app
     }
 

@@ -14,14 +14,17 @@ pub enum Audience {
 
 impl Audience {
     /// Resolve this audience to a `Target` given current session state.
-    /// Returns `None` when `Holding` names a console with no current holder,
-    /// signalling the caller to skip this broadcast.
-    pub fn resolve(&self, sessions: &SessionManager, ship_config: &ShipConfig) -> Option<Target> {
+    /// Returns `None` when `Holding` names a console with no current holder or
+    /// when `ship_config` is `None`, signalling the caller to skip this broadcast.
+    pub fn resolve(&self, sessions: &SessionManager, ship_config: Option<&ShipConfig>) -> Option<Target> {
         match self {
             Audience::All => Some(Target::All),
-            Audience::Holding(console) => sessions
-                .console_holder(console, ship_config)
-                .map(|t| Target::Token(t.to_string())),
+            Audience::Holding(console) => {
+                let cfg = ship_config?;
+                sessions
+                    .console_holder(console, cfg)
+                    .map(|t| Target::Token(t.to_string()))
+            }
             Audience::Token(t) => Some(Target::Token(t.clone())),
             Audience::AllExcept(t) => Some(Target::AllExcept(t.clone())),
         }
@@ -94,7 +97,7 @@ mod tests {
     fn audience_all_always_resolves() {
         let sm = SessionManager::new();
         assert_eq!(
-            Audience::All.resolve(&sm, &ship_config()),
+            Audience::All.resolve(&sm, Some(&ship_config())),
             Some(Target::All)
         );
     }
@@ -103,7 +106,7 @@ mod tests {
     fn audience_holding_returns_none_when_no_holder() {
         let sm = SessionManager::new();
         assert_eq!(
-            Audience::Holding(Console::Power).resolve(&sm, &ship_config()),
+            Audience::Holding(Console::Power).resolve(&sm, Some(&ship_config())),
             None
         );
     }
@@ -112,7 +115,7 @@ mod tests {
     fn audience_holding_returns_token_when_console_held() {
         let sm = sm_with_holder("tok1", Console::Power);
         assert_eq!(
-            Audience::Holding(Console::Power).resolve(&sm, &ship_config()),
+            Audience::Holding(Console::Power).resolve(&sm, Some(&ship_config())),
             Some(Target::Token("tok1".to_string()))
         );
     }
@@ -121,7 +124,7 @@ mod tests {
     fn audience_holding_returns_none_for_different_console() {
         let sm = sm_with_holder("tok1", Console::Power);
         assert_eq!(
-            Audience::Holding(Console::Helm).resolve(&sm, &ship_config()),
+            Audience::Holding(Console::Helm).resolve(&sm, Some(&ship_config())),
             None
         );
     }
@@ -130,7 +133,7 @@ mod tests {
     fn audience_token_always_resolves() {
         let sm = SessionManager::new();
         assert_eq!(
-            Audience::Token("abc".to_string()).resolve(&sm, &ship_config()),
+            Audience::Token("abc".to_string()).resolve(&sm, Some(&ship_config())),
             Some(Target::Token("abc".to_string()))
         );
     }
@@ -139,7 +142,7 @@ mod tests {
     fn audience_all_except_always_resolves() {
         let sm = SessionManager::new();
         assert_eq!(
-            Audience::AllExcept("abc".to_string()).resolve(&sm, &ship_config()),
+            Audience::AllExcept("abc".to_string()).resolve(&sm, Some(&ship_config())),
             Some(Target::AllExcept("abc".to_string()))
         );
     }

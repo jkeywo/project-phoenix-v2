@@ -292,7 +292,7 @@ fn tick_ai_controllers(
     mut query: Query<(
         Entity,
         &mut AiControllerComponent,
-        &mut Transform,
+        &Transform,
         &BehaviourSection,
         Option<&AttackerThisTick>,
         Option<&crate::entities::spawner::FactionComponent>,
@@ -372,13 +372,12 @@ fn tick_ai_controllers(
         .collect();
     world_entities.extend(ai_snapshots);
 
-    let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
 
     for (
         entity,
         mut ctrl,
-        mut transform,
+        transform,
         behaviour,
         attacker_comp,
         self_faction_comp,
@@ -386,7 +385,7 @@ fn tick_ai_controllers(
         hull_comp,
         weapons_section,
         phaser_state,
-        helm_section,
+        _helm_section,
         collider_section,
     ) in &mut query
     {
@@ -535,48 +534,13 @@ fn tick_ai_controllers(
             }
         }
 
-        // Apply the first Helm input to the entity's Transform.
-        // Physics config comes from the entity's [helm_console] section when present,
-        // falling back to defaults for entities without one.
-        let physics_config = helm_section
-            .map(|hc| crate::ship_physics::ShipPhysicsConfig {
-                max_speed: hc.0.max_speed,
-                max_reverse_speed: hc.0.max_reverse_speed,
-                acceleration: hc.0.acceleration,
-                deceleration: hc.0.deceleration,
-                max_yaw_rate: hc.0.max_yaw_rate,
-            })
-            .unwrap_or_else(crate::ship_physics::ShipPhysicsConfig::new);
-
+        // Record helm intent for operate_helm_ai (helm_ai_plugin) to consume.
+        // Physics application has moved to the per-kind plugin; server.rs is
+        // intent-only for helm.
         ctrl.last_helm_intent = None;
         for input in &output.inputs {
             if let crate::ai::AiInput::Helm { thrust, steering } = *input {
                 ctrl.last_helm_intent = Some((thrust, steering));
-                let physics_state = crate::ship_physics::ShipPhysicsState {
-                    x: pos.x,
-                    z: pos.z,
-                    yaw,
-                    forward_speed: ctrl.forward_speed,
-                };
-                let physics_input = crate::ship_physics::ShipPhysicsInput { thrust, steering };
-                let result = crate::ship_physics::compute_physics(
-                    physics_state,
-                    physics_input,
-                    dt,
-                    &physics_config,
-                );
-                transform.translation.x = result.x;
-                transform.translation.z = result.z;
-                // Visual banking: lerp roll toward target based on steering
-                let max_bank_rad = helm_section
-                    .map(|h| h.0.max_bank_deg.to_radians())
-                    .unwrap_or(0.0);
-                let current_roll = transform.rotation.to_euler(EulerRot::YXZ).2;
-                let target_roll = -steering * max_bank_rad;
-                let lerp_factor = (5.0_f32 * dt).min(1.0);
-                let new_roll = current_roll + (target_roll - current_roll) * lerp_factor;
-                transform.rotation = Quat::from_euler(EulerRot::YXZ, result.yaw, 0.0, new_roll);
-                ctrl.forward_speed = result.forward_speed;
                 break;
             }
         }

@@ -344,26 +344,74 @@ fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy 
 }
 
 /// Per-kind AI plugin for helm. Runs after the AI tick so `last_helm_intent`
-/// is fresh. Writes `LastHelmInput` for any ship whose helm policy is `operate_ai`.
+/// is fresh.
+///
+/// Two paths:
+/// - Player ship (no `AiControllerComponent`): writes `LastHelmInput` when Backfill.
+/// - NPC ships (`AiControllerComponent` present): applies physics directly to their
+///   `Transform`, keeping NPC motion fully per-entity and out of `server.rs`.
 fn operate_helm_ai(
+    time: Res<Time>,
     mut last_input: ResMut<LastHelmInput>,
-    ships: Query<(
+    player_ships: Query<
         &ShipSystemControlSources,
-        Option<&crate::ai::server::AiControllerComponent>,
-    ), With<Ship>>,
+        (With<Ship>, Without<crate::ai::server::AiControllerComponent>),
+    >,
+    mut npc_ships: Query<(
+        &mut Transform,
+        &mut crate::ai::server::AiControllerComponent,
+        &ShipSystemControlSources,
+        Option<&crate::entities::spawner::HelmConsoleSection>,
+    ), (With<Ship>, With<crate::ai::server::AiControllerComponent>)>,
 ) {
-    for (sources, maybe_ai) in &ships {
+    // Player ship Backfill path: when helm is AI-controlled but there is no
+    // behaviour tree to generate intent, hold the ship at zero thrust/steering
+    // so it decelerates to a stop rather than keeping the last human input.
+    for sources in &player_ships {
         let policy = helm_control_policy(sources);
         if !policy.operate_ai {
             continue;
         }
-        if let Some(ai) = maybe_ai {
-            if let Some((thrust, steering)) = ai.last_helm_intent {
-                *last_input = LastHelmInput { thrust, steering };
-            } else {
-                *last_input = LastHelmInput { thrust: 0.0, steering: 0.0 };
-            }
+        *last_input = LastHelmInput { thrust: 0.0, steering: 0.0 };
+    }
+
+    // NPC ship path: translate `last_helm_intent` into physics on the entity's
+    // own Transform. `server.rs` only writes intent; no physics lives there.
+    let dt = time.delta_secs();
+    for (mut transform, mut ctrl, sources, helm_section) in &mut npc_ships {
+        let policy = helm_control_policy(sources);
+        if !policy.operate_ai {
+            continue;
         }
+        let (thrust, steering) = ctrl.last_helm_intent.unwrap_or((0.0, 0.0));
+        let physics_config = helm_section
+            .map(|hc| ShipPhysicsConfig {
+                max_speed: hc.0.max_speed,
+                max_reverse_speed: hc.0.max_reverse_speed,
+                acceleration: hc.0.acceleration,
+                deceleration: hc.0.deceleration,
+                max_yaw_rate: hc.0.max_yaw_rate,
+            })
+            .unwrap_or_else(ShipPhysicsConfig::new);
+        let pos = transform.translation;
+        let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+        let result = compute_physics(
+            ShipPhysicsState { x: pos.x, z: pos.z, yaw, forward_speed: ctrl.forward_speed },
+            ShipPhysicsInput { thrust, steering },
+            dt,
+            &physics_config,
+        );
+        transform.translation.x = result.x;
+        transform.translation.z = result.z;
+        let max_bank_rad = helm_section
+            .map(|h| h.0.max_bank_deg.to_radians())
+            .unwrap_or(0.0);
+        let current_roll = transform.rotation.to_euler(EulerRot::YXZ).2;
+        let target_roll = -steering * max_bank_rad;
+        let lerp_factor = (5.0_f32 * dt).min(1.0);
+        let new_roll = current_roll + (target_roll - current_roll) * lerp_factor;
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, result.yaw, 0.0, new_roll);
+        ctrl.forward_speed = result.forward_speed;
     }
 }
 
@@ -1919,5 +1967,52 @@ station = "helm"
             )
         });
         assert!(has_rating_changed, "expected RatingChanged in outbox");
+    }
+
+    // ── E5 smoke tests (#553) ─────────────────────────────────────────────────
+
+    // (a) Pirate raider — verifies that an NPC ship with full Ai control has
+    // `operate_ai = true` for helm, which is the gate that makes `operate_helm_ai`
+    // apply Transform physics for that ship instead of the player ship path.
+    #[test]
+    fn pirate_raider_ai_helm_policy_routes_through_npc_path() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+        let mut resolver = ControlSourceResolver::new();
+        for system_id in [
+            crate::system_registry::helm_system_id(),
+            crate::system_registry::tactical_system_id(),
+        ] {
+            resolver.set(system_id, ControlSource::Ai);
+        }
+        let sources = ShipSystemControlSources(resolver);
+        let policy = helm_control_policy(&sources);
+        assert!(policy.operate_ai, "NPC raider helm must route through operate_helm_ai");
+        assert!(
+            !policy.accept_human_input,
+            "NPC raider must not accept human helm input"
+        );
+    }
+
+    // (b) All-Backfill player ship — verifies that when the player ship has all
+    // systems on Ai control but no AiControllerComponent (no behaviour tree),
+    // `helm_control_policy` still returns `operate_ai = true` so the player-ship
+    // path in `operate_helm_ai` writes zero thrust/steering (safe deceleration).
+    #[test]
+    fn all_backfill_player_ship_helm_policy_gates_operate_ai() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(crate::system_registry::helm_system_id(), ControlSource::Ai);
+        let sources = ShipSystemControlSources(resolver);
+        let policy = helm_control_policy(&sources);
+        assert!(
+            policy.operate_ai,
+            "Backfill player helm must satisfy the operate_ai gate"
+        );
+        assert!(
+            !policy.accept_human_input,
+            "Backfill player helm must not accept human input"
+        );
     }
 }

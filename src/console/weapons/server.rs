@@ -1652,7 +1652,7 @@ fn tick_active_beam(
 // when the coarse Tactical system is decomposed into fine-grained systems.
 
 fn operate_tactical_ai(
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources, &crate::ship_plugin::ActiveStationRatings), With<crate::simulation::Ship>>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources, &crate::ship_plugin::ActiveStationRatings), (With<crate::simulation::Ship>, Without<crate::ai::server::AiControllerComponent>)>,
     sessions: Res<Sessions>,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,

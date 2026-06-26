@@ -1593,6 +1593,43 @@ impl AdmittedCommands {
     }
 }
 
+// ── Inter-system command channel (issue #559) ─────────────────────────────────
+
+/// Payloads that one system may send to another within the same Simulate tick.
+///
+/// Inter-system commands originate inside Simulate and are applied immediately
+/// (same-tick) by the target system. They are invariant-gated: valid by
+/// construction, not by control-state check. The sender mutates only its own
+/// state; the target mutates only its own.
+#[derive(Clone, Debug)]
+pub enum InterSystemPayload {
+    /// The Weapons system is drawing energy from the Power battery while a
+    /// phaser beam is active. Applied once per tick during `SimSet::Physics`;
+    /// consumed by the Power system during `SimSet::Modifiers`.
+    DrainWeaponsBattery { amount: f32 },
+}
+
+/// An inter-system command: one system commanding another to mutate its own
+/// state this tick. See [`InterSystemPayload`] for invariants.
+#[derive(Clone, Debug)]
+pub struct InterSystemMsg {
+    pub target: SystemId,
+    pub payload: InterSystemPayload,
+}
+
+/// Cleared at the start of each Simulate phase (before `SimSet::Input`) and
+/// filled during Simulate by systems that need to mutate a peer system's state.
+/// Handlers read from this without authority checks — valid by construction.
+#[derive(bevy::prelude::Resource, Default)]
+pub struct InterSystemQueue(pub Vec<InterSystemMsg>);
+
+impl InterSystemQueue {
+    /// Iterate messages targeting the given system ID string.
+    pub fn for_target<'a>(&'a self, target: &'a str) -> impl Iterator<Item = &'a InterSystemMsg> {
+        self.0.iter().filter(move |m| m.target.0.as_str() == target)
+    }
+}
+
 /// Serialised Shields console state pushed to the HTML shields panel (issue #423).
 ///
 /// Broadcast at 10 Hz only to the player holding `Console::Shields`.

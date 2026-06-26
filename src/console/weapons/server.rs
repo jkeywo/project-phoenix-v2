@@ -6,9 +6,10 @@ use crate::console_bridge::ConsoleStateChanged;
 use crate::entity_spawner::EntityConsoleHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    AdmittedCommands, ClientMessage, Console, GamePhase, ModifierSlot, PhaserBank,
-    PhaserBankClientConfig, PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage,
-    SystemControlPayload, TorpedoTubeClientConfig, TorpedoTubeState, WeaponsConsoleState,
+    AdmittedCommands, ClientMessage, Console, GamePhase, InterSystemMsg, InterSystemPayload,
+    InterSystemQueue, ModifierSlot, PhaserBank, PhaserBankClientConfig, PhaserBankState,
+    PhaserMode, RadarBlip, RadarRegion, ServerMessage, SystemControlPayload,
+    TorpedoTubeClientConfig, TorpedoTubeState, WeaponsConsoleState,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipState;
@@ -26,6 +27,10 @@ use crate::torpedo::{TorpedoConfig, TorpedoSystem};
 // must read the resource.
 pub const BEAM_DAMAGE_PER_SEC: f32 =
     crate::entity_config::PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC;
+
+/// Battery energy drained from the Power system each second while a phaser
+/// beam is active. Sent via the inter-system command channel (issue #559).
+pub const PHASER_BATTERY_DRAIN_PER_SEC: f32 = 5.0;
 
 // ── Resources ─────────────────────────────────────────────────────────────
 
@@ -225,6 +230,7 @@ pub struct WeaponsPlugin;
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::messages::AdmittedCommands>();
+        app.init_resource::<crate::messages::InterSystemQueue>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>()
             .init_resource::<WeaponsTarget>()
             .init_resource::<LastWeaponsUpdate>()
@@ -262,6 +268,7 @@ impl Plugin for WeaponsPlugin {
                 Update,
                 (
                     tick_active_beam.in_set(crate::sim_sets::SimSet::Physics),
+                    drain_power_for_active_beam.in_set(crate::sim_sets::SimSet::Physics),
                     tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
                     tick_npc_shield_regen.in_set(crate::sim_sets::SimSet::Physics),
                 ),
@@ -1116,6 +1123,24 @@ fn handle_fire_torpedo(
             LaunchResult::TubeNotLoaded | LaunchResult::NoTorpedoes | LaunchResult::UnknownTube => {
             }
         }
+    }
+}
+
+/// Drains the Power battery via the inter-system command channel while a
+/// phaser beam is active. Runs alongside `tick_active_beam` in `SimSet::Physics`;
+/// the Power system consumes the drain in `SimSet::Modifiers`.
+pub fn drain_power_for_active_beam(
+    beam: Res<ActiveBeam>,
+    time: Res<Time>,
+    mut inter_system: ResMut<InterSystemQueue>,
+) {
+    if beam.target_uuid.is_some() {
+        inter_system.0.push(InterSystemMsg {
+            target: crate::system_registry::power_system_id(),
+            payload: InterSystemPayload::DrainWeaponsBattery {
+                amount: PHASER_BATTERY_DRAIN_PER_SEC * time.delta_secs(),
+            },
+        });
     }
 }
 

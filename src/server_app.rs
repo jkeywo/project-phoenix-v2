@@ -249,6 +249,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .init_resource::<FrozenBlackboards>()
     .init_resource::<LastBroadcastBlackboards>()
     .init_resource::<crate::messages::AdmittedCommands>()
+    .init_resource::<crate::messages::InterSystemQueue>()
     .insert_resource(SimBroadcastTimer(Timer::from_seconds(
         0.1,
         TimerMode::Repeating,
@@ -286,7 +287,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
-        admit_system_commands
+        (admit_system_commands, clear_inter_system_queue)
             .after(crate::lobby::process_lobby)
             .before(crate::sim_sets::SimSet::Input)
             .run_if(in_state(GamePhase::InProgress)),
@@ -970,14 +971,22 @@ pub struct AdmissionPlugin;
 impl Plugin for AdmissionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::messages::AdmittedCommands>()
+            .init_resource::<crate::messages::InterSystemQueue>()
             .configure_sets(
                 Update,
                 AdmissionSet
                     .after(crate::lobby::process_lobby)
                     .before(crate::sim_sets::SimSet::Input),
             )
-            .add_systems(Update, admit_system_commands.in_set(AdmissionSet));
+            .add_systems(
+                Update,
+                (admit_system_commands, clear_inter_system_queue).in_set(AdmissionSet),
+            );
     }
+}
+
+fn clear_inter_system_queue(mut queue: ResMut<crate::messages::InterSystemQueue>) {
+    queue.0.clear();
 }
 
 /// Authority gate for intra-system commands. Runs once per tick before
@@ -2370,6 +2379,7 @@ mod tests {
         .init_resource::<FrozenBlackboards>()
         .init_resource::<LastBroadcastBlackboards>()
         .init_resource::<crate::messages::AdmittedCommands>()
+        .init_resource::<crate::messages::InterSystemQueue>()
         .init_resource::<Outbox>()
         .add_message::<crate::ai_plugin::AiEntityDestroyed>()
         .add_plugins(crate::captain_plugin::CaptainPlugin)
@@ -2385,7 +2395,7 @@ mod tests {
         )
         .add_systems(
             Update,
-            admit_system_commands
+            (admit_system_commands, clear_inter_system_queue)
                 .after(crate::lobby::process_lobby)
                 .before(crate::sim_sets::SimSet::Input),
         )

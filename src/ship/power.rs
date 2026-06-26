@@ -2,7 +2,10 @@ use bevy::prelude::*;
 
 use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::messages::{Console, PowerConsoleEntry, PowerConsoleState, ServerMessage};
+use crate::messages::{
+    Console, InterSystemPayload, InterSystemQueue, PowerConsoleEntry, PowerConsoleState,
+    ServerMessage,
+};
 use crate::modifiers::power_system::{
     power_group_for_console, power_level_for_console, PowerConfig, PowerSystem,
 };
@@ -126,6 +129,7 @@ impl Plugin for ShipPowerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>();
         app.init_resource::<crate::messages::AdmittedCommands>();
+        app.init_resource::<crate::messages::InterSystemQueue>();
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
@@ -137,6 +141,7 @@ impl Plugin for ShipPowerPlugin {
                     handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
                     operate_power_ai.in_set(crate::sim_sets::SimSet::Physics),
+                    handle_power_inter_system.in_set(crate::sim_sets::SimSet::Modifiers),
                     recompute_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     push_power_console_state
                         .in_set(crate::sim_sets::SimSet::Broadcast)
@@ -196,6 +201,25 @@ pub fn handle_power_messages(
                 power.0.set_console_allocation(console.clone(), *level);
             }
             _ => {}
+        }
+    }
+}
+
+/// Apply inter-system commands (e.g. `DrainWeaponsBattery` from Weapons).
+///
+/// Invariant-gated: no control-state check. Runs in `SimSet::Modifiers`,
+/// after physics ticks have emitted their inter-system messages.
+pub fn handle_power_inter_system(
+    queue: Res<InterSystemQueue>,
+    mut power: ResMut<ShipPowerSystem>,
+    config: Res<PowerConfigResource>,
+) {
+    for msg in queue.for_target(crate::system_registry::POWER_SYSTEM_ID) {
+        match &msg.payload {
+            InterSystemPayload::DrainWeaponsBattery { amount } => {
+                power.0.battery_charge =
+                    (power.0.battery_charge - amount).clamp(0.0, config.0.capacity);
+            }
         }
     }
 }
@@ -896,6 +920,98 @@ mod tests {
             app.world().resource::<ShipPowerSystem>().0.weapons,
             3,
             "weapons should not be boosted when battery is below floor"
+        );
+    }
+
+    // ── Inter-system command channel tests (issue #559) ───────────────────────
+    //
+    // These tests exercise the full weapons→power inter-system drain flow.
+    // A minimal combined app registers both `drain_power_for_active_beam`
+    // (Weapons, Physics) and `handle_power_inter_system` (Power, Modifiers)
+    // with SimSets chained, so we can set an active beam and verify the
+    // Power battery decreases in the same tick.
+
+    fn inter_system_test_app() -> App {
+        use crate::console::weapons::server::{drain_power_for_active_beam, ActiveBeam};
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(100),
+            ))
+            // Power resources and handler.
+            .insert_resource(ShipPowerSystem(PowerSystem::default()))
+            .init_resource::<PowerConfigResource>()
+            // Weapons resources and emitter.
+            .init_resource::<ActiveBeam>()
+            .init_resource::<crate::messages::InterSystemQueue>()
+            // Chain emitter before consumer so the queue is populated before it's read.
+            .add_systems(
+                Update,
+                (drain_power_for_active_beam, handle_power_inter_system).chain(),
+            );
+        // Warm up the time plugin so delta_secs is non-zero on the first real tick.
+        app.update();
+        app
+    }
+
+    #[test]
+    fn active_beam_drains_power_battery_via_inter_system_channel() {
+        use crate::console::weapons::server::{ActiveBeam, PHASER_BATTERY_DRAIN_PER_SEC};
+        let mut app = inter_system_test_app();
+
+        // Simulate an active phaser beam.
+        app.world_mut().resource_mut::<ActiveBeam>().target_uuid =
+            Some("target-asteroid".into());
+
+        let charge_before = app.world().resource::<ShipPowerSystem>().0.battery_charge;
+        app.update();
+        let charge_after = app.world().resource::<ShipPowerSystem>().0.battery_charge;
+
+        // dt = 100ms → expected drain ≈ PHASER_BATTERY_DRAIN_PER_SEC * 0.1
+        let expected_drain = PHASER_BATTERY_DRAIN_PER_SEC * 0.1;
+        assert!(
+            charge_after < charge_before,
+            "active beam must drain battery (before={charge_before}, after={charge_after})"
+        );
+        assert!(
+            (charge_before - charge_after - expected_drain).abs() < 0.1,
+            "drain should be ~{expected_drain} (before={charge_before}, after={charge_after})"
+        );
+    }
+
+    #[test]
+    fn no_beam_does_not_drain_power_battery() {
+        let mut app = inter_system_test_app();
+        // ActiveBeam defaults to target_uuid = None.
+        let charge_before = app.world().resource::<ShipPowerSystem>().0.battery_charge;
+        app.update();
+        let charge_after = app.world().resource::<ShipPowerSystem>().0.battery_charge;
+
+        assert_eq!(
+            charge_before, charge_after,
+            "no active beam must not drain battery (before={charge_before}, after={charge_after})"
+        );
+    }
+
+    #[test]
+    fn inter_system_drain_clamps_battery_to_zero() {
+        use crate::console::weapons::server::ActiveBeam;
+        let mut app = inter_system_test_app();
+
+        // Set battery nearly empty (less than one tick of drain).
+        app.world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .battery_charge = 0.1;
+        app.world_mut().resource_mut::<ActiveBeam>().target_uuid =
+            Some("target-asteroid".into());
+
+        app.update();
+
+        let charge = app.world().resource::<ShipPowerSystem>().0.battery_charge;
+        assert_eq!(
+            charge, 0.0,
+            "battery must clamp at zero, not go negative (got {charge})"
         );
     }
 }

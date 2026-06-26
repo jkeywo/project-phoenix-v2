@@ -317,13 +317,31 @@ export function buildWeaponsConsoleState(state) {
 
 /**
  * CaptainChair console.
- * @param {{ redAlert, currentView, objectives, hullPct, blips }} state
+ * @param {{ blackboards, redAlert, currentView, objectives, hullPct, blips }} state
  */
 export function buildCaptainConsoleState(state) {
-  const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
+  const bb = state.blackboards && state.blackboards['captain'];
+  if (bb) {
+    return JSON.stringify({
+      red_alert:             bb.red_alert             ?? false,
+      red_alert_system_id:   bb.red_alert_system_id   ?? 'red-alert',
+      red_alert_auto:        bb.red_alert_auto         ?? false,
+      viewscreen_system_id:  bb.viewscreen_system_id  ?? 'viewscreen',
+      viewscreen_auto:       bb.viewscreen_auto        ?? false,
+      view_direction:        bb.view_direction         ?? '',
+      view_mode:             'Camera',
+      objectives:            bb.objectives             ?? [],
+      hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
+      game_status:           bb.game_status            ?? '',
+      blips:                 state.blips               || [],
+      own_hull:              ownHull('CaptainChair', state),
+    });
+  }
+  // Legacy fallback.
   const controlSources = state.controlSources || {};
   const redAlertAuto = controlSources['red-alert'] === 'Ai';
   const viewscreenAuto = controlSources['viewscreen'] === 'Ai';
+  const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
   return JSON.stringify({
     red_alert:             state.redAlert    || false,
     red_alert_system_id:   'red-alert',

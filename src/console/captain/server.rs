@@ -1,9 +1,8 @@
 use bevy::prelude::*;
 
-use crate::console_bridge::ConsoleStateChanged;
 use crate::messages::{
-    AdmittedCommands, CaptainConsoleState, ObjectiveSnapshot, SystemControlPayload, SystemId,
-    ViewDirection, ViewMode,
+    AdmittedCommands, CaptainBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemControlPayload,
+    SystemId, ViewDirection, ViewMode,
 };
 use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
@@ -16,7 +15,6 @@ pub struct CaptainPlugin;
 
 impl Plugin for CaptainPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ConsoleStateChanged>();
         app.init_resource::<RecentCombatActivity>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>();
         app.init_resource::<crate::messages::AdmittedCommands>();
@@ -26,17 +24,9 @@ impl Plugin for CaptainPlugin {
                 handle_toggle_red_alert.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
                 operate_captain_ai.in_set(crate::sim_sets::SimSet::Input),
-            ),
-        );
-        // HTML console state push (mirrors the WeaponsPlugin pattern from issue #422).
-        app.add_systems(Startup, spawn_captain_console_state_entity);
-        app.add_systems(
-            Update,
-            (
                 crate::ship::combat_activity::update_combat_activity
                     .in_set(crate::sim_sets::SimSet::Broadcast),
-                recompute_captain_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-                push_captain_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                publish_captain_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
     }
@@ -111,42 +101,14 @@ fn operate_captain_ai(
     }
 }
 
-// ── HTML console state push ──────────────────────────────────────────────────
-//
-// Mirrors the WeaponsPlugin pattern from issue #422: writes Captain console
-// state into a single entity component so a Changed<...> system can encode and
-// emit a ConsoleStateChanged message. The wasm forwarding to the JS callback
-// lives in bridge::flush_console_state.
+// ── Blackboard publish ───────────────────────────────────────────────────────
 
-/// Single-entity component carrying the latest serialised Captain console state.
-/// Bevy change-detection drives the JS push.
-#[derive(Component, Clone, PartialEq)]
-pub struct CaptainConsoleStateComp(pub CaptainConsoleState);
-
-/// Startup system: spawn the single entity carrying the Captain console state.
-fn spawn_captain_console_state_entity(mut commands: Commands) {
-    commands.spawn(CaptainConsoleStateComp(CaptainConsoleState {
-        red_alert: false,
-        red_alert_system_id: crate::system_registry::red_alert_system_id(),
-        red_alert_auto: false,
-        viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
-        viewscreen_auto: false,
-        view_direction: "Fore".into(),
-        objectives: Vec::new(),
-        hull_integrity_pct: 100.0,
-        game_status: String::new(),
-    }));
-}
-
-/// Recompute the Captain console state from live resources, writing into
-/// `CaptainConsoleStateComp` only on change so `Changed<...>` fires on actual
-/// state change.
-fn recompute_captain_console_state(
+fn publish_captain_blackboard(
     ship: Res<ShipState>,
     hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     ship_query: Query<&ShipSystemControlSources, With<Ship>>,
-    mut comp_q: Query<&mut CaptainConsoleStateComp>,
+    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     let red_alert = ship.red_alert();
     let control_sources = ship_query.single().ok();
@@ -182,9 +144,6 @@ fn recompute_captain_console_state(
         })
         .unwrap_or(100.0);
 
-    // Compute a game-status string (matches what renderGame(s) in client.html
-    // would show for the captain — but computed server-side so the HTML panel
-    // receives it even before the client-side state arrives).
     let game_status = if red_alert {
         "RED ALERT — All hands to battlestations."
     } else {
@@ -192,7 +151,7 @@ fn recompute_captain_console_state(
     }
     .to_string();
 
-    let next = CaptainConsoleState {
+    let bb = CaptainBlackboard {
         red_alert,
         red_alert_system_id: crate::system_registry::red_alert_system_id(),
         red_alert_auto,
@@ -204,28 +163,10 @@ fn recompute_captain_console_state(
         game_status,
     };
 
-    for mut comp in comp_q.iter_mut() {
-        if comp.0 != next {
-            comp.0 = next.clone();
-        }
-    }
-}
-
-/// `Changed<CaptainConsoleStateComp>` system: encode the state and emit a
-/// `ConsoleStateChanged { name: "CaptainChair", json }` message for the wasm bridge
-/// to forward to the JS `__updateConsole` callback.
-fn push_captain_console_state(
-    comp_q: Query<&CaptainConsoleStateComp, Changed<CaptainConsoleStateComp>>,
-    mut writer: MessageWriter<ConsoleStateChanged>,
-) {
-    for comp in comp_q.iter() {
-        if let Ok(json) = crate::core::codec::encode_console_state(&comp.0) {
-            writer.write(ConsoleStateChanged {
-                name: "CaptainChair".into(),
-                json,
-            });
-        }
-    }
+    blackboards.0.insert(
+        SystemId(crate::system_registry::CAPTAIN_SYSTEM_ID.to_string()),
+        SystemBlackboard::Captain(bb),
+    );
 }
 
 #[cfg(test)]
@@ -233,9 +174,11 @@ mod tests {
     use super::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions};
     use crate::messages::{ClientMessage, ViewDirection};
+    use crate::server_app::SystemBlackboards;
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
     use crate::simulation::Ship;
+    use crate::system_registry::CAPTAIN_SYSTEM_ID;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -253,6 +196,7 @@ mod tests {
             .add_plugins(CaptainPlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
             .init_resource::<Outbox>()
+            .init_resource::<SystemBlackboards>()
             .insert_resource(ShipState::new())
             .add_systems(PostUpdate, collect);
         app.world_mut().spawn((
@@ -261,6 +205,15 @@ mod tests {
             ShipSystemControlSources::default(),
         ));
         app
+    }
+
+    fn captain_bb(app: &App) -> CaptainBlackboard {
+        let bbs = app.world().resource::<SystemBlackboards>();
+        let key = SystemId(CAPTAIN_SYSTEM_ID.to_string());
+        let SystemBlackboard::Captain(bb) = bbs.0.get(&key).unwrap() else {
+            panic!("expected Captain blackboard");
+        };
+        bb.clone()
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
@@ -853,12 +806,7 @@ mod tests {
         );
     }
 
-    // ── Console state push tests ─────────────────────────────────────────────
-    //
-    // Follows the exact pattern from `weapons/server.rs` (issue #422):
-    //   • Recompute tests add only `recompute_captain_console_state` (no push).
-    //   • Push tests add recompute + push + collector, wiring them directly
-    //     (no SimSet — the test app does not call `add_simulation_plugins`).
+    // ── Blackboard publish tests ─────────────────────────────────────────────
 
     use crate::damage::ConsoleHull;
     use crate::messages::Console;
@@ -866,107 +814,35 @@ mod tests {
     use crate::server_app::ShipHullIntegrity;
     use crate::world::server::ObjectiveManagerRes;
 
-    /// Helper app that adds only the recompute system (no push, no message bus).
-    /// Used for recompute-assertion tests that inspect the component directly.
-    fn recompute_test_app() -> App {
+    /// Minimal app: just publish_captain_blackboard + ShipState + SystemBlackboards.
+    fn bb_test_app() -> App {
         let mut app = App::new();
-        app.add_systems(Startup, spawn_captain_console_state_entity);
-        app.add_systems(Update, recompute_captain_console_state);
+        app.add_systems(Update, publish_captain_blackboard);
         app.insert_resource(ShipState::new());
         app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
             Console::CaptainChair,
             100.0,
         )])));
+        app.init_resource::<SystemBlackboards>();
         app
     }
 
-    /// Collect `ConsoleStateChanged` messages into a resource for assertions.
-    #[derive(Resource, Default)]
-    struct ConsolePushes(Vec<ConsoleStateChanged>);
-
-    fn collect_console_pushes(
-        mut reader: MessageReader<ConsoleStateChanged>,
-        mut sink: ResMut<ConsolePushes>,
-    ) {
-        for m in reader.read() {
-            sink.0.push(m.clone());
-        }
-    }
-
-    /// Helper app that exercises the push pipeline (no recompute —
-    /// callers mutate the component directly, matching the weapons push test
-    /// pattern from issue #422).
-    fn push_test_app() -> App {
-        let mut app = App::new();
-        app.add_message::<ConsoleStateChanged>()
-            .init_resource::<ConsolePushes>()
-            .add_systems(
-                Update,
-                (
-                    push_captain_console_state,
-                    collect_console_pushes.after(push_captain_console_state),
-                ),
-            );
-        // Spawn the component in the world directly (not via Startup system)
-        // so that the first update sees it as Changed (spawn → new).
-        app.world_mut()
-            .spawn(CaptainConsoleStateComp(CaptainConsoleState {
-                red_alert: false,
-                red_alert_system_id: crate::system_registry::red_alert_system_id(),
-                red_alert_auto: false,
-                viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
-                viewscreen_auto: false,
-                view_direction: "Fore".into(),
-                objectives: Vec::new(),
-                hull_integrity_pct: 100.0,
-                game_status: String::new(),
-            }));
-        app.insert_resource(ShipState::new());
-        app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
-            Console::CaptainChair,
-            100.0,
-        )])));
-        app
-    }
-
-    // ── Spawn tests ───────────────────────────────────────────────────────────
-
     #[test]
-    fn spawn_entity_exists_with_defaults() {
-        let mut app = App::new();
-        app.add_systems(Startup, spawn_captain_console_state_entity);
-        app.update();
-
-        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
-        let state = q.single(app.world()).unwrap();
-        assert!(!state.0.red_alert);
-        assert_eq!(state.0.hull_integrity_pct, 100.0);
-        assert!(state.0.objectives.is_empty());
-    }
-
-    // ── Recompute tests (no push bus) ─────────────────────────────────────────
-
-    #[test]
-    fn recompute_reflects_red_alert() {
-        let mut app = recompute_test_app();
+    fn publish_captain_blackboard_reflects_red_alert() {
+        let mut app = bb_test_app();
         app.world_mut()
             .resource_mut::<ShipState>()
             .toggle_red_alert();
         app.update();
 
-        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
-        assert!(comp.0.red_alert);
-        assert_eq!(
-            comp.0.game_status,
-            "RED ALERT — All hands to battlestations."
-        );
+        let bb = captain_bb(&app);
+        assert!(bb.red_alert);
+        assert_eq!(bb.game_status, "RED ALERT — All hands to battlestations.");
     }
 
     #[test]
-    fn recompute_marks_ai_controlled_red_alert_auto() {
-        let mut app = recompute_test_app();
-        // Set captain system to AI control via ShipSystemControlSources
+    fn publish_captain_blackboard_marks_ai_red_alert_auto() {
+        let mut app = bb_test_app();
         let mut cs = ShipSystemControlSources::default();
         cs.0.set(
             crate::system_registry::captain_system_id(),
@@ -975,18 +851,14 @@ mod tests {
         app.world_mut().spawn((Ship, ShipConfigComponent::default(), cs));
         app.update();
 
-        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
-        assert!(comp.0.red_alert_auto);
-        assert_eq!(
-            comp.0.red_alert_system_id,
-            crate::system_registry::red_alert_system_id()
-        );
+        let bb = captain_bb(&app);
+        assert!(bb.red_alert_auto);
+        assert_eq!(bb.red_alert_system_id, crate::system_registry::red_alert_system_id());
     }
 
     #[test]
-    fn recompute_marks_ai_controlled_viewscreen_auto() {
-        let mut app = recompute_test_app();
+    fn publish_captain_blackboard_marks_ai_viewscreen_auto() {
+        let mut app = bb_test_app();
         let mut cs = ShipSystemControlSources::default();
         cs.0.set(
             crate::system_registry::viewscreen_system_id(),
@@ -995,35 +867,21 @@ mod tests {
         app.world_mut().spawn((Ship, ShipConfigComponent::default(), cs));
         app.update();
 
-        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
-        assert!(
-            comp.0.viewscreen_auto,
-            "viewscreen_auto should be true when viewscreen is AI"
-        );
-        assert_eq!(
-            comp.0.viewscreen_system_id,
-            crate::system_registry::viewscreen_system_id()
-        );
+        let bb = captain_bb(&app);
+        assert!(bb.viewscreen_auto, "viewscreen_auto should be true when viewscreen is AI");
+        assert_eq!(bb.viewscreen_system_id, crate::system_registry::viewscreen_system_id());
     }
 
     #[test]
-    fn recompute_viewscreen_auto_is_false_by_default() {
-        let mut app = recompute_test_app();
+    fn publish_captain_blackboard_viewscreen_auto_false_by_default() {
+        let mut app = bb_test_app();
         app.update();
-
-        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
-        assert!(
-            !comp.0.viewscreen_auto,
-            "viewscreen_auto should default to false"
-        );
+        assert!(!captain_bb(&app).viewscreen_auto, "viewscreen_auto should default to false");
     }
 
     #[test]
-    fn recompute_reflects_hull_integrity() {
-        let mut app = recompute_test_app();
-        // Apply 25 damage to the 100-HP hull.
+    fn publish_captain_blackboard_reflects_hull_integrity() {
+        let mut app = bb_test_app();
         {
             let mut hull = app.world_mut().resource_mut::<ShipHullIntegrity>();
             let mut rng = rand::rng();
@@ -1031,97 +889,33 @@ mod tests {
         }
         app.update();
 
-        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
+        let bb = captain_bb(&app);
         assert!(
-            (comp.0.hull_integrity_pct - 75.0).abs() < 1.0,
+            (bb.hull_integrity_pct - 75.0).abs() < 1.0,
             "expected ~75% hull integrity, got {}",
-            comp.0.hull_integrity_pct
+            bb.hull_integrity_pct
         );
     }
 
     #[test]
-    fn recompute_reflects_objectives() {
-        let mut app = recompute_test_app();
+    fn publish_captain_blackboard_reflects_objectives() {
+        let mut app = bb_test_app();
         let mut mgr = ObjectiveManager::new();
         mgr.add("obj-1", "Test objective", true, vec![]);
         app.world_mut().insert_resource(ObjectiveManagerRes(mgr));
         app.update();
 
-        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
-        assert_eq!(comp.0.objectives.len(), 1);
-        assert_eq!(comp.0.objectives[0].id, "obj-1");
-        assert_eq!(comp.0.objectives[0].text, "Test objective");
+        let bb = captain_bb(&app);
+        assert_eq!(bb.objectives.len(), 1);
+        assert_eq!(bb.objectives[0].id, "obj-1");
+        assert_eq!(bb.objectives[0].text, "Test objective");
     }
 
-    // ── Push tests (full pipeline) ────────────────────────────────────────────
-
     #[test]
-    fn recompute_clears_direction_for_non_camera_view() {
-        let mut app = recompute_test_app();
+    fn publish_captain_blackboard_clears_direction_for_non_camera_view() {
+        let mut app = bb_test_app();
         app.world_mut().resource_mut::<ShipState>().view_mode = ViewMode::Radar;
         app.update();
-
-        let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
-        assert_eq!(comp.0.view_direction, "");
-    }
-
-    #[test]
-    fn push_emits_one_message_with_expected_values() {
-        let mut app = push_test_app();
-
-        // First update: freshly spawned component is Changed → push fires.
-        app.update();
-        app.world_mut().resource_mut::<ConsolePushes>().0.clear();
-
-        // Mutate the component → next update should push exactly one message.
-        {
-            let mut q = app.world_mut().query::<&mut CaptainConsoleStateComp>();
-            let mut comp = q.single_mut(app.world_mut()).unwrap();
-            comp.0 = CaptainConsoleState {
-                red_alert: true,
-                red_alert_system_id: crate::system_registry::red_alert_system_id(),
-                red_alert_auto: false,
-                viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
-                viewscreen_auto: false,
-                view_direction: "Aft".into(),
-                objectives: Vec::new(),
-                hull_integrity_pct: 75.0,
-                game_status: "RED ALERT".into(),
-            };
-        }
-        app.update();
-
-        let pushes = &app.world().resource::<ConsolePushes>().0;
-        assert_eq!(pushes.len(), 1, "expected exactly one push after a change");
-        let push = &pushes[0];
-        assert_eq!(push.name, "CaptainChair");
-        assert!(
-            push.json.contains("\"red_alert\":true"),
-            "json: {}",
-            push.json
-        );
-        assert!(
-            push.json.contains("\"hull_integrity_pct\":75.0"),
-            "json: {}",
-            push.json
-        );
-        assert!(push.json.contains("\"RED ALERT\""), "json: {}", push.json);
-        assert!(
-            push.json.contains("\"view_direction\":\"Aft\""),
-            "json: {}",
-            push.json
-        );
-
-        // No further change → no further pushes.
-        app.world_mut().resource_mut::<ConsolePushes>().0.clear();
-        app.update();
-
-        assert!(
-            app.world().resource::<ConsolePushes>().0.is_empty(),
-            "no push expected without a change"
-        );
+        assert_eq!(captain_bb(&app).view_direction, "");
     }
 }

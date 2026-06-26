@@ -2917,48 +2917,6 @@ mod tests {
     }
 
     #[test]
-    fn encode_console_state_round_trips_captain() {
-        use crate::messages::{CaptainConsoleState, ObjectiveSnapshot, ObjectiveStatus};
-        let state = CaptainConsoleState {
-            red_alert: true,
-            red_alert_system_id: SystemId("red-alert".into()),
-            red_alert_auto: true,
-            viewscreen_system_id: SystemId("viewscreen".into()),
-            viewscreen_auto: false,
-            view_direction: "Starboard".into(),
-            objectives: vec![ObjectiveSnapshot {
-                id: "obj-1".into(),
-                text: "Destroy the pirate base".into(),
-                mandatory: true,
-                status: ObjectiveStatus::Active,
-                targets: vec![],
-            }],
-            hull_integrity_pct: 87.5,
-            game_status: "RED ALERT — All hands to battlestations.".into(),
-        };
-        let json = encode_console_state(&state).expect("encode captain console");
-        // Verify field names match what the HTML JS reads.
-        assert!(
-            json.contains("\"view_direction\":\"Starboard\""),
-            "got: {json}"
-        );
-        assert!(json.contains("\"red_alert\":true"), "got: {json}");
-        assert!(
-            json.contains("\"red_alert_system_id\":\"red-alert\""),
-            "got: {json}"
-        );
-        assert!(json.contains("\"red_alert_auto\":true"), "got: {json}");
-        assert!(
-            json.contains("\"viewscreen_system_id\":\"viewscreen\""),
-            "got: {json}"
-        );
-        assert!(json.contains("\"viewscreen_auto\":false"), "got: {json}");
-        assert!(json.contains("\"hull_integrity_pct\":87.5"), "got: {json}");
-        let decoded: CaptainConsoleState = serde_json::from_str(&json).unwrap();
-        assert_eq!(state, decoded);
-    }
-
-    #[test]
     fn radar_blip_with_new_fields_round_trips() {
         let blip = RadarBlip {
             uuid: "abc-123".into(),

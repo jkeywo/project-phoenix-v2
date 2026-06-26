@@ -1449,32 +1449,26 @@ pub struct RadarRegion {
     pub name: Option<String>,
 }
 
-/// Serialised Captain console state pushed to the HTML captain panel.
-///
-/// Written into a single
-/// `CaptainConsoleStateComp` component and pushed on change via
-/// `ConsoleStateChanged { name: "CaptainChair", json }`.
+/// Raw sim truth for the Captain system, published each tick into the ship
+/// blackboard (issue #563).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct CaptainConsoleState {
+pub struct CaptainBlackboard {
     /// Whether the ship is at red alert.
     pub red_alert: bool,
     /// Stable system id for the Red Alert coarse system fragment.
     #[serde(default = "default_red_alert_system_id")]
     pub red_alert_system_id: SystemId,
-    /// True when Red Alert is AI-controlled and the human-facing fragment
-    /// should render read-only with an AUTO badge.
+    /// True when Red Alert is AI-controlled.
     #[serde(default)]
     pub red_alert_auto: bool,
     /// Stable system id for the Viewscreen coarse system.
     #[serde(default = "default_viewscreen_system_id")]
     pub viewscreen_system_id: SystemId,
-    /// True when the Viewscreen system is AI-controlled and the human-facing
-    /// fragment should render read-only with an AUTO badge.
+    /// True when the Viewscreen system is AI-controlled.
     #[serde(default)]
     pub viewscreen_auto: bool,
-    /// Current camera direction as a plain string: `"Fore"`, `"Port"`,
-    /// `"Starboard"`, or `"Aft"`. Non-camera view modes (Radar, etc.) send an
-    /// empty string so the Captain panel can clear its direction highlight.
+    /// Current camera direction: `"Fore"`, `"Port"`, `"Starboard"`, `"Aft"`,
+    /// or `""` for non-camera views.
     pub view_direction: String,
     /// Mission objectives. Updated when `ObjectiveManager` is dirty.
     #[serde(default)]
@@ -1494,7 +1488,7 @@ fn default_viewscreen_system_id() -> SystemId {
     crate::system_registry::viewscreen_system_id()
 }
 
-impl Default for CaptainConsoleState {
+impl Default for CaptainBlackboard {
     fn default() -> Self {
         Self {
             red_alert: false,
@@ -1563,6 +1557,7 @@ pub enum SystemBlackboard {
     Weapons(WeaponsBlackboard),
     Power(PowerBlackboard),
     Shields(ShieldsBlackboard),
+    Captain(CaptainBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship

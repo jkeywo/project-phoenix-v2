@@ -1562,6 +1562,7 @@ pub enum SystemBlackboard {
     Helm(HelmBlackboard),
     Weapons(WeaponsBlackboard),
     Power(PowerBlackboard),
+    Shields(ShieldsBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -1645,12 +1646,10 @@ impl InterSystemQueue {
     }
 }
 
-/// Serialised Shields console state pushed to the HTML shields panel (issue #423).
-///
-/// Broadcast at 10 Hz only to the player holding `Console::Shields`.
-/// Focus and target-bearing are computed server-side from live resources.
+/// Raw sim truth for the Shields system, published each tick into the ship
+/// blackboard (issue #562).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct ShieldsConsoleState {
+pub struct ShieldsBlackboard {
     /// Current shield quadrant snapshots (Fore, Port, Aft, Starboard).
     pub facings: Vec<ShieldFacingStatus>,
     /// Overall ship hull integrity as a percentage (0–100).

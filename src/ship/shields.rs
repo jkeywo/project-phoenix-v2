@@ -1,17 +1,13 @@
 use bevy::prelude::*;
 
-use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    AdmittedCommands, Console, CoordinationPayload, ShieldFacingStatus, ShieldsConsoleState,
-    SystemControlPayload, ViewDirection,
+    AdmittedCommands, Console, CoordinationPayload, ShieldFacingStatus, ShieldsBlackboard,
+    SystemBlackboard, SystemControlPayload, SystemId, ViewDirection,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
 use crate::simulation::ShipShields;
-
-#[derive(Component, Clone, PartialEq)]
-pub struct ShieldsConsoleStateComp(pub ShieldsConsoleState);
 
 // ── Resources ──────────────────────────────────────────────────────────────────
 
@@ -60,21 +56,16 @@ pub struct ShipShieldsPlugin;
 impl Plugin for ShipShieldsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::messages::AdmittedCommands>();
-        app.add_message::<ConsoleStateChanged>()
-            .add_message::<CoordinationEnqueue>()
+        app.add_message::<CoordinationEnqueue>()
             .init_resource::<ShieldsAiConfigResource>()
             .init_resource::<ShieldsCoordinationState>()
-            .add_systems(Startup, spawn_shields_console_state_entity)
             .add_systems(
                 Update,
                 (
                     handle_shields_messages.in_set(crate::sim_sets::SimSet::Input),
                     emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
                     operate_shields_ai.in_set(crate::sim_sets::SimSet::Physics),
-                    recompute_shields_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-                    push_shields_console_state
-                        .in_set(crate::sim_sets::SimSet::Broadcast)
-                        .after(recompute_shields_console_state),
+                    publish_shields_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             )
             .add_plugins(shields_state_broadcaster());
@@ -213,13 +204,9 @@ pub fn emit_shields_coordination(
     }
 }
 
-// ── HTML console state push ────────────────────────────────────────────────────
+// ── Blackboard publish ─────────────────────────────────────────────────────────
 
-fn spawn_shields_console_state_entity(mut commands: Commands) {
-    commands.spawn(ShieldsConsoleStateComp(ShieldsConsoleState::default()));
-}
-
-fn recompute_shields_console_state(
+fn publish_shields_blackboard(
     shields: Res<ShipShields>,
     hull: Res<crate::simulation::ShipHullIntegrity>,
     ship: Res<crate::ship_state::ShipState>,
@@ -232,7 +219,7 @@ fn recompute_shields_console_state(
         (&crate::entity_spawner::EntityUuid, &Transform),
         Without<crate::simulation::AsteroidUuid>,
     >,
-    mut comp_q: Query<&mut ShieldsConsoleStateComp>,
+    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     let facings: Vec<ShieldFacingStatus> = shields
         .0
@@ -288,7 +275,7 @@ fn recompute_shields_console_state(
         Some(bearing_rad.to_degrees())
     });
 
-    let next = ShieldsConsoleState {
+    let bb = ShieldsBlackboard {
         facings,
         hull_integrity_pct,
         focused_facing,
@@ -296,25 +283,10 @@ fn recompute_shields_console_state(
         grid_status,
     };
 
-    for mut comp in comp_q.iter_mut() {
-        if comp.0 != next {
-            comp.0 = next.clone();
-        }
-    }
-}
-
-fn push_shields_console_state(
-    comp_q: Query<&ShieldsConsoleStateComp, Changed<ShieldsConsoleStateComp>>,
-    mut writer: MessageWriter<ConsoleStateChanged>,
-) {
-    for comp in comp_q.iter() {
-        if let Ok(json) = crate::core::codec::encode_console_state(&comp.0) {
-            writer.write(ConsoleStateChanged {
-                name: "Shields".into(),
-                json,
-            });
-        }
-    }
+    blackboards.0.insert(
+        SystemId(crate::system_registry::SHIELDS_SYSTEM_ID.to_string()),
+        SystemBlackboard::Shields(bb),
+    );
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -347,12 +319,14 @@ mod tests {
     use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::{ClientMessage, Console, *};
+    use crate::server_app::SystemBlackboards;
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::CoordinationEnqueue;
     use crate::simulation::{
         LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
         ShipImpulse, ShipShields, SimOutbox,
     };
+    use crate::system_registry::SHIELDS_SYSTEM_ID;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -404,6 +378,7 @@ mod tests {
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
             .init_resource::<CoordEnqueueBox>()
+            .init_resource::<SystemBlackboards>()
             .add_plugins(ShipShieldsPlugin)
             .add_systems(PostUpdate, collect)
             .add_systems(PostUpdate, collect_coord);
@@ -476,28 +451,26 @@ mod tests {
         tick(app);
     }
 
-    // ── Console state tests (migrated from console/shields/server.rs) ───────
+    // ── Blackboard publish tests ─────────────────────────────────────────────
 
-    #[test]
-    fn spawns_state_entity_after_update() {
-        let mut app = test_app();
-        app.update();
-        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
-        let entities = query.iter(app.world()).count();
-        assert_eq!(entities, 1);
+    fn shields_bb(app: &App) -> ShieldsBlackboard {
+        let bbs = app.world().resource::<SystemBlackboards>();
+        let key = SystemId(SHIELDS_SYSTEM_ID.to_string());
+        let SystemBlackboard::Shields(bb) = bbs.0.get(&key).unwrap() else {
+            panic!("expected Shields blackboard");
+        };
+        bb.clone()
     }
 
     #[test]
-    fn recompute_produces_hull_integrity_pct() {
+    fn publish_shields_blackboard_contains_hull_integrity() {
         let mut app = test_app();
         app.update();
-        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
-        let state = query.single(app.world()).unwrap();
-        assert!((state.0.hull_integrity_pct - 100.0).abs() < f32::EPSILON);
+        assert!((shields_bb(&app).hull_integrity_pct - 100.0).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn recompute_produces_four_facings() {
+    fn publish_shields_blackboard_four_facings() {
         let config = crate::shield::ShieldConfig {
             num_facings: 4,
             max_hp: 100,
@@ -522,60 +495,55 @@ mod tests {
             .init_resource::<LastBroadcastEntityPositions>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
+            .init_resource::<SystemBlackboards>()
             .add_plugins(ShipShieldsPlugin);
         app.update();
-        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
-        let state = query.single(app.world()).unwrap();
-        assert_eq!(state.0.facings.len(), 4);
+        assert_eq!(shields_bb(&app).facings.len(), 4);
     }
 
     #[test]
-    fn recompute_shows_focused_facing() {
+    fn publish_shields_blackboard_shows_focused_facing() {
         let mut app = test_app();
-        let mut shields = app.world_mut().resource_mut::<ShipShields>();
-        shields.0.set_focused_facing(Some(0));
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .set_focused_facing(Some(0));
         app.update();
-        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
-        let state = query.single(app.world()).unwrap();
-        assert!(state.0.focused_facing.is_some());
+        assert!(shields_bb(&app).focused_facing.is_some());
     }
 
     #[test]
-    fn recompute_clears_focused_facing() {
+    fn publish_shields_blackboard_clears_focused_facing() {
         let mut app = test_app();
-        {
-            let mut shields = app.world_mut().resource_mut::<ShipShields>();
-            shields.0.set_focused_facing(Some(0));
-        }
-        {
-            let mut shields = app.world_mut().resource_mut::<ShipShields>();
-            shields.0.set_focused_facing(None);
-        }
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .set_focused_facing(Some(0));
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .set_focused_facing(None);
         app.update();
-        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
-        let state = query.single(app.world()).unwrap();
-        assert_eq!(state.0.focused_facing, None);
+        assert_eq!(shields_bb(&app).focused_facing, None);
     }
 
     #[test]
-    fn recompute_grid_status_offline_when_any_facing_down() {
+    fn publish_shields_blackboard_grid_offline_when_facing_down() {
         let mut app = test_app();
-        let mut shields = app.world_mut().resource_mut::<ShipShields>();
-        shields.0.apply_damage(9999, 0.0);
+        app.world_mut()
+            .resource_mut::<ShipShields>()
+            .0
+            .apply_damage(9999, 0.0);
         app.update();
-        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
-        let state = query.single(app.world()).unwrap();
-        assert_eq!(state.0.grid_status, "EMITTER OFFLINE");
+        assert_eq!(shields_bb(&app).grid_status, "EMITTER OFFLINE");
     }
 
     #[test]
-    fn recompute_without_change_does_not_panic() {
+    fn publish_shields_blackboard_stable_on_double_update() {
         let mut app = test_app();
         app.update();
         app.update();
-        let mut query = app.world_mut().query::<&ShieldsConsoleStateComp>();
-        let state = query.single(app.world()).unwrap();
-        assert!((state.0.hull_integrity_pct - 100.0).abs() < f32::EPSILON);
+        assert!((shields_bb(&app).hull_integrity_pct - 100.0).abs() < f32::EPSILON);
     }
 
     // ── Coordination tests ──────────────────────────────────────────────────
@@ -609,6 +577,7 @@ mod tests {
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
             .init_resource::<CoordEnqueueBox>()
+            .init_resource::<SystemBlackboards>()
             .add_plugins(ShipShieldsPlugin)
             .add_systems(PostUpdate, collect)
             .add_systems(PostUpdate, collect_coord);

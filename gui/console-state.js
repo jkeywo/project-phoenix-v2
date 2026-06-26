@@ -440,10 +440,21 @@ export function buildPowerConsoleState(state) {
 
 /**
  * Shields console.
- * @param {{ weaponsTarget, asteroids, shipX, shipZ,
- *           shieldFacings, hullIntegrity, shieldFocusedFacing }} state
+ * @param {{ blackboards, shieldFacings, hullIntegrity, shieldFocusedFacing }} state
  */
 export function buildShieldsConsoleState(state) {
+  const bb = state.blackboards && state.blackboards['shields'];
+  if (bb) {
+    return JSON.stringify({
+      facings:            bb.facings            ?? [],
+      hull_integrity_pct: bb.hull_integrity_pct ?? 100,
+      focused_facing:     bb.focused_facing     ?? null,
+      target_bearing:     bb.target_bearing     ?? null,
+      grid_status:        bb.grid_status        ?? 'GRID NOMINAL',
+      own_hull: ownHull('Shields', state),
+    });
+  }
+  // Legacy fallback: read from ShieldStatus broadcast fields.
   let targetBearing = null;
   if (state.weaponsTarget && state.asteroids) {
     const target = state.asteroids.find(a => a.uuid === state.weaponsTarget);

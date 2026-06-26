@@ -773,7 +773,8 @@ fn flush_hud_state(mut reader: MessageReader<HudStateChanged>) {
 /// Reads `ConsoleStateChanged` messages each frame and forwards `(name, json)`
 /// to the registered console-state callback via `cb.call2(NULL, name, json)`.
 #[cfg(target_arch = "wasm32")]
-fn flush_console_state(mut reader: MessageReader<ConsoleStateChanged>) {
+fn flush_console_state(mut reader: Option<MessageReader<ConsoleStateChanged>>) {
+    let Some(mut reader) = reader else { return };
     let payloads: Vec<(String, String)> = reader
         .read()
         .map(|m| (m.name.clone(), m.json.clone()))

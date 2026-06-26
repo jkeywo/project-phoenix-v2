@@ -100,10 +100,10 @@ async function startGameWithTactical(context: BrowserContext) {
   // Log server page crashes to diagnose CI failures.
   const serverCrashes: string[] = [];
   serverPage.on('crash', () => { serverCrashes.push('server page crashed'); });
-  serverPage.on('pageerror', (err) => {
-    if (err.message !== 'unreachable') serverCrashes.push(err.message);
+  serverPage.on('pageerror', (err) => { serverCrashes.push(err.message); });
+  serverPage.on('console', (msg) => {
+    if (msg.type() === 'error') serverCrashes.push(`[console.error] ${msg.text()}`);
   });
-  (serverPage as any).__crashes = serverCrashes;
 
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
@@ -143,6 +143,12 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
 
   // Lock the raider as the tactical target.
   await tactical.send('SetTarget', { uuid: raiderUuid });
+
+  // First verify the server is alive by waiting for SimState.
+  await tactical.page.waitForFunction(
+    () => (window as any).__messages?.some((m: any) => m.type === 'SimState'),
+    { timeout: 15_000 },
+  );
 
   // Wait for WeaponsUpdate confirming a bank is fire_ready (target locked + in range).
   await tactical.page.bringToFront();

@@ -41,6 +41,18 @@ pub struct LastWeaponsUpdate {
     pub phaser_mode: PhaserMode,
 }
 
+/// True on the first tick of the weapons broadcaster, then cleared.
+/// Used to force-send the first `WeaponsUpdate` even when the computed
+/// state happens to match the default `LastWeaponsUpdate`.
+#[derive(Resource)]
+pub struct WeaponsUpdateFirstTick(pub bool);
+
+impl Default for WeaponsUpdateFirstTick {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
 /// The currently locked target UUID on the Weapons console. `None` means no
 /// lock is active.
 #[derive(Resource, Default)]
@@ -220,6 +232,7 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<CurrentPhaserMode>()
             .init_resource::<PhaserRenderConfig>()
             .init_resource::<PhaserCombatConfigResource>()
+            .init_resource::<WeaponsUpdateFirstTick>()
             .init_resource::<TacticalAiController>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
                 TorpedoConfig::default(),
@@ -1969,11 +1982,15 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 torpedo_count,
                 phaser_mode,
             };
-            {
+            let is_first_tick = world.resource::<WeaponsUpdateFirstTick>().0;
+            if !is_first_tick {
                 let last = world.resource::<LastWeaponsUpdate>();
                 if *last == current {
                     return vec![];
                 }
+            }
+            if is_first_tick {
+                *world.resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick(false);
             }
             *world.resource_mut::<LastWeaponsUpdate>() = current;
 

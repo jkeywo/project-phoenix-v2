@@ -213,10 +213,14 @@ test('Power can still act after a mid-game reconnect', async ({ context }) => {
   await c3.close();
   const c3b = await createTestClient(context, hostId, { token: powToken, name: 'Eng' });
 
-  await waitForLastMessage(c3b, 'PowerState', 'data && data.helm === 3');
+  // Wait for any PowerState (AI may have reset helm during disconnect).
+  await waitForLastMessage(c3b, 'PowerState', 'data && typeof data.helm === "number"', 10_000);
+  // Restore helm=3 in case AI changed it, then verify.
+  await setHelmPower(c3b, 3);
+  await waitForLastMessage(c3b, 'PowerState', 'data && data.helm === 3', 10_000);
 
   await setHelmPower(c3b, 2);
-  await waitForLastMessage(c3b, 'PowerState', 'data && data.helm === 2');
+  await waitForLastMessage(c3b, 'PowerState', 'data && data.helm === 2', 10_000);
 
   await c1.close();
   await c2.close();

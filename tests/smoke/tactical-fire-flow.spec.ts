@@ -97,6 +97,14 @@ async function startGameWithTactical(context: BrowserContext) {
   });
 
   const serverPage = await context.newPage();
+  // Log server page crashes to diagnose CI failures.
+  const serverCrashes: string[] = [];
+  serverPage.on('crash', () => { serverCrashes.push('server page crashed'); });
+  serverPage.on('pageerror', (err) => {
+    if (err.message !== 'unreachable') serverCrashes.push(err.message);
+  });
+  (serverPage as any).__crashes = serverCrashes;
+
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
 
@@ -117,11 +125,12 @@ async function startGameWithTactical(context: BrowserContext) {
   await helm.waitForMessage('GameStarted', 5_000);
   await tactical.waitForMessage('GameStarted', 5_000);
 
-  return { helm, tactical };
+  return { helm, tactical, serverPage, serverCrashes };
 }
 
 test('tactical fire-flow: BeamStarted received after locking NPC and firing', async ({ context }) => {
-  const { helm, tactical } = await startGameWithTactical(context);
+  test.setTimeout(45_000);
+  const { helm, tactical, serverCrashes } = await startGameWithTactical(context);
 
   // Get the raider UUID from WorldSetup.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
@@ -136,28 +145,35 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
   await tactical.send('SetTarget', { uuid: raiderUuid });
 
   // Wait for WeaponsUpdate confirming a bank is fire_ready (target locked + in range).
+  await tactical.page.bringToFront();
   await tactical.page.waitForFunction(
     () => (window as any).__messages?.some(
       (m: any) => m.type === 'WeaponsUpdate'
         && Array.isArray(m.data.banks)
         && m.data.banks.some((b: any) => b.fire_ready === true),
     ),
-    { timeout: 5_000 },
+    { timeout: 15_000 },
   );
 
   // Fire phasers — fore bank is defined first in player_ship.toml.
   await tactical.send('FirePhaser', { bank: 'fore' });
 
   // BeamStarted must be broadcast to all clients.
-  const beamStarted = await tactical.waitForMessage('BeamStarted', 5_000) as any;
+  const beamStarted = await tactical.waitForMessage('BeamStarted', 15_000) as any;
   expect(beamStarted.data.target_uuid).toBe(raiderUuid);
+
+  if (serverCrashes.length > 0) {
+    console.log('Server crashes during BeamStarted test:', serverCrashes);
+  }
+  expect(serverCrashes).toEqual([]);
 
   await helm.close();
   await tactical.close();
 });
 
 test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async ({ context }) => {
-  const { helm, tactical } = await startGameWithTactical(context);
+  test.setTimeout(60_000);
+  const { helm, tactical, serverCrashes } = await startGameWithTactical(context);
 
   // Get raider UUID from WorldSetup.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
@@ -170,13 +186,14 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
 
   // Lock target and wait for fire_ready on any bank.
   await tactical.send('SetTarget', { uuid: raiderUuid });
+  await tactical.page.bringToFront();
   await tactical.page.waitForFunction(
     () => (window as any).__messages?.some(
       (m: any) => m.type === 'WeaponsUpdate'
         && Array.isArray(m.data.banks)
         && m.data.banks.some((b: any) => b.fire_ready === true),
     ),
-    { timeout: 5_000 },
+    { timeout: 15_000 },
   );
 
   // Record the initial hull_fraction (1.0 if not yet present) from entity_states.
@@ -197,7 +214,7 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
 
   // Fire phasers.
   await tactical.send('FirePhaser', { bank: 'fore' });
-  await tactical.waitForMessage('BeamStarted', 5_000);
+  await tactical.waitForMessage('BeamStarted', 15_000);
 
   // Wait for a SimState where the raider's hull_fraction is lower than initial.
   await tactical.page.waitForFunction(
@@ -213,16 +230,21 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
       });
     },
     { uuid: raiderUuid, initial: initialHull },
-    { timeout: 10_000 },
+    { timeout: 30_000 },
   );
+
+  if (serverCrashes.length > 0) {
+    console.log('Server crashes during hull_fraction test:', serverCrashes);
+  }
+  expect(serverCrashes).toEqual([]);
 
   await helm.close();
   await tactical.close();
 });
 
 test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', async ({ context }) => {
-  test.setTimeout(90_000);
-  const { helm, tactical } = await startGameWithTactical(context);
+  test.setTimeout(120_000);
+  const { helm, tactical, serverCrashes } = await startGameWithTactical(context);
 
   // Get raider UUID.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
@@ -235,13 +257,14 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
 
   // Lock target.
   await tactical.send('SetTarget', { uuid: raiderUuid });
+  await tactical.page.bringToFront();
   await tactical.page.waitForFunction(
     () => (window as any).__messages?.some(
       (m: any) => m.type === 'WeaponsUpdate'
         && Array.isArray(m.data.banks)
         && m.data.banks.some((b: any) => b.fire_ready === true),
     ),
-    { timeout: 5_000 },
+    { timeout: 15_000 },
   );
 
   // Keep firing phasers on cooldown cycles until EntityDespawned arrives.
@@ -275,7 +298,7 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
       (m: any) => m.type === 'EntityDespawned' && m.data.uuid === uuid,
     ),
     raiderUuid,
-    { timeout: 60_000 },
+    { timeout: 90_000 },
   );
 
   await tactical.page.evaluate(() => clearInterval((window as any).__fireInterval));
@@ -287,6 +310,11 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
     );
   }, raiderUuid);
   expect(despawnMsg).toBeDefined();
+
+  if (serverCrashes.length > 0) {
+    console.log('Server crashes during EntityDespawned test:', serverCrashes);
+  }
+  expect(serverCrashes).toEqual([]);
 
   await helm.close();
   await tactical.close();

@@ -289,7 +289,6 @@ export function buildWeaponsConsoleState(state) {
   const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
   const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
   const phaserMode   = bb.phaser_mode   ?? state.weaponsPhaserMode   ?? 'Auto';
-  const blips        = bb.blips         ?? [];
   const regions      = bb.regions       ?? [];
   const phaserArcs   = bb.phaser_arcs   ?? state.phaserArcConfigs   ?? [];
   const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
@@ -300,9 +299,28 @@ export function buildWeaponsConsoleState(state) {
     range_frac: a.beam_range != null ? a.beam_range / range : null,
   }));
 
+  // Blips: authoritative server blips if provided, otherwise build from asteroids.
+  let blips = bb.blips;
+  if (!blips || blips.length === 0) {
+    blips = state.weaponsBlips || [];
+  }
+  if (!blips || blips.length === 0) {
+    blips = buildBlips(
+      state.asteroids || [],
+      state.shipX || 0,
+      state.shipZ || 0,
+      state.shipYaw || 0,
+      range,
+      { rotate: true }
+    );
+  }
+
+  // Derive target_name from the locked server blip when no explicit name is stored.
+  const resolvedTargetName = targetName || (targetUuid && blips.find(b => b.uuid === targetUuid)?.name) || null;
+
   return JSON.stringify({
     target_uuid:   targetUuid,
-    target_name:   targetName,
+    target_name:   resolvedTargetName,
     banks,
     tubes,
     torpedo_count: torpedoCount,

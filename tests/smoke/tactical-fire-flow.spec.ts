@@ -141,8 +141,13 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
   expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
   const raiderUuid: string = raider.uuid;
 
-  // Lock the raider as the tactical target.
-  await tactical.send('SetTarget', { uuid: raiderUuid });
+  // Lock the raider as the tactical target. Mirrors the real client
+  // (gui/action-map.js `set_target`): SetTarget is a ControlSystem payload
+  // addressed to the tactical system, not a legacy top-level message.
+  await tactical.send('ControlSystem', {
+    target: 'tactical',
+    payload: { type: 'SetTarget', data: { uuid: raiderUuid } },
+  });
 
   // First verify the server is alive by waiting for SimState.
   await tactical.page.waitForFunction(
@@ -192,8 +197,12 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
   expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
   const raiderUuid: string = raider.uuid;
 
-  // Lock target and wait for fire_ready on any bank.
-  await tactical.send('SetTarget', { uuid: raiderUuid });
+  // Lock target and wait for fire_ready on any bank. SetTarget routes
+  // through the ControlSystem envelope (see gui/action-map.js `set_target`).
+  await tactical.send('ControlSystem', {
+    target: 'tactical',
+    payload: { type: 'SetTarget', data: { uuid: raiderUuid } },
+  });
   await tactical.page.bringToFront();
   await tactical.page.waitForFunction(
     () => (window as any).__messages?.some(
@@ -264,8 +273,12 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
   expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
   const raiderUuid: string = raider.uuid;
 
-  // Lock target.
-  await tactical.send('SetTarget', { uuid: raiderUuid });
+  // Lock target. SetTarget routes through the ControlSystem envelope
+  // (see gui/action-map.js `set_target`).
+  await tactical.send('ControlSystem', {
+    target: 'tactical',
+    payload: { type: 'SetTarget', data: { uuid: raiderUuid } },
+  });
   await tactical.page.bringToFront();
   await tactical.page.waitForFunction(
     () => (window as any).__messages?.some(

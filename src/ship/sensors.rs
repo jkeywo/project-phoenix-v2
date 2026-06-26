@@ -2,7 +2,8 @@ use bevy::prelude::*;
 
 use crate::lobby::Sessions;
 use crate::messages::{
-    AdmittedCommands, Console, CoordinationPayload, ServerMessage, SystemControlPayload,
+    AdmittedCommands, Console, CoordinationPayload, SensorsBlackboard, ServerMessage,
+    SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
@@ -35,6 +36,7 @@ impl Plugin for ShipSensorsPlugin {
                 (
                     handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
                     tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
+                    publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             );
     }
@@ -124,6 +126,25 @@ pub fn tick_sensors_frequency_hint(
     });
 }
 
+// ── Blackboard publish ────────────────────────────────────────────────────────
+
+pub fn publish_sensors_blackboard(
+    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+) {
+    let cfg = &ship_config.0;
+    let bb = SensorsBlackboard {
+        radar_range:   cfg.sensors_radar_range,
+        radar_shows:   cfg.sensors_radar_shows.clone(),
+        radar_selects: cfg.sensors_radar_selects.clone(),
+    };
+
+    blackboards.0.insert(
+        SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string()),
+        SystemBlackboard::Sensors(bb),
+    );
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -162,6 +183,8 @@ mod tests {
             .init_resource::<SimOutbox>()
             .init_resource::<WeaponsTarget>()
             .init_resource::<Outbox>()
+            .init_resource::<crate::server_app::SystemBlackboards>()
+            .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(ShipSensorsPlugin)
             .add_systems(PostUpdate, collect);
         app.world_mut().spawn((

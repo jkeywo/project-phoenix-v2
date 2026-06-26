@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
-use crate::messages::{AdmittedCommands, SystemControlPayload, WaypointSnapshot};
+use crate::messages::{
+    AdmittedCommands, NavigationBlackboard, SystemBlackboard, SystemControlPayload,
+    SystemId, WaypointSnapshot,
+};
 use crate::ship::system_registry::NAVIGATION_SYSTEM_ID;
 
 pub struct NavigationPlugin;
@@ -24,6 +27,10 @@ impl Plugin for NavigationPlugin {
             .add_systems(
                 Update,
                 operate_navigation_ai.in_set(crate::sim_sets::SimSet::Physics),
+            )
+            .add_systems(
+                Update,
+                publish_navigation_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             );
     }
 }
@@ -142,6 +149,25 @@ fn refresh_anchored_waypoint(
 }
 
 
+// ── Blackboard publish ────────────────────────────────────────────────────────
+
+fn publish_navigation_blackboard(
+    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+) {
+    let cfg = &ship_config.0;
+    let bb = NavigationBlackboard {
+        nav_chart_range:   cfg.nav_chart_range,
+        nav_chart_shows:   cfg.nav_chart_shows.clone(),
+        nav_chart_selects: cfg.nav_chart_selects.clone(),
+    };
+
+    blackboards.0.insert(
+        SystemId(NAVIGATION_SYSTEM_ID.to_string()),
+        SystemBlackboard::Navigation(bb),
+    );
+}
+
 // ── AI controller stub ─────────────────────────────────────────────────────────
 
 /// Per-kind AI plugin for navigation.
@@ -204,10 +230,13 @@ mod tests {
                     crate::sim_sets::SimSet::Physics,
                     crate::sim_sets::SimSet::Damage,
                     crate::sim_sets::SimSet::Modifiers,
+                    crate::sim_sets::SimSet::Publish,
                     crate::sim_sets::SimSet::Broadcast,
                 )
                     .chain(),
             )
+            .init_resource::<crate::server_app::SystemBlackboards>()
+            .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(NavigationPlugin)
             .add_plugins(sim_state_broadcaster())
             .init_resource::<crate::simulation::SimOutbox>()

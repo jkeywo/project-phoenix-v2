@@ -1560,6 +1560,8 @@ pub enum SystemBlackboard {
     Captain(CaptainBlackboard),
     Repair(RepairBlackboard),
     Comms(CommsBlackboard),
+    Sensors(SensorsBlackboard),
+    Navigation(NavigationBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -1698,6 +1700,56 @@ pub struct CommsBlackboard {
     pub objectives: Vec<ObjectiveSnapshot>,
     /// Hailable contacts derived from the active world content.
     pub contacts: Vec<CommsContact>,
+}
+
+/// Raw sim truth for the Sensors system, published each tick into the ship
+/// blackboard (issue #566).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SensorsBlackboard {
+    /// Detection range for the long-range radar widget, in world units.
+    #[serde(default = "default_sensors_radar_range")]
+    pub radar_range: f32,
+    /// Tag filter: only entities whose tags overlap this list are displayed.
+    #[serde(default)]
+    pub radar_shows: Vec<String>,
+    /// Targetability filter: only these entities are selectable on the radar.
+    #[serde(default)]
+    pub radar_selects: Vec<String>,
+}
+
+impl Default for SensorsBlackboard {
+    fn default() -> Self {
+        Self {
+            radar_range: default_sensors_radar_range(),
+            radar_shows: Vec::new(),
+            radar_selects: Vec::new(),
+        }
+    }
+}
+
+/// Raw sim truth for the Navigation system, published each tick into the ship
+/// blackboard (issue #567).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct NavigationBlackboard {
+    /// Detection range for the navigation system chart, in world units.
+    #[serde(default = "default_nav_chart_range")]
+    pub nav_chart_range: f32,
+    /// Entity-type filter for the navigation chart.
+    #[serde(default)]
+    pub nav_chart_shows: Vec<String>,
+    /// Targetability filter for the navigation chart.
+    #[serde(default)]
+    pub nav_chart_selects: Vec<String>,
+}
+
+impl Default for NavigationBlackboard {
+    fn default() -> Self {
+        Self {
+            nav_chart_range: default_nav_chart_range(),
+            nav_chart_shows: Vec::new(),
+            nav_chart_selects: Vec::new(),
+        }
+    }
 }
 
 /// A console action decoded from the `window.__sendAction` envelope

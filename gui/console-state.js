@@ -505,19 +505,25 @@ export function buildShieldsConsoleState(state) {
 
 /**
  * Sensors console.
- * @param {{ asteroids, shipX, shipZ, shipYaw, sensorsTarget, regions,
- *           complexity, impulseChargeProgress }} state
+ * @param {{ blackboards, asteroids, shipX, shipZ, shipYaw, sensorsTarget,
+ *           regions, complexity, impulseChargeProgress }} state
  */
 export function buildSensorsConsoleState(state) {
-  const range = state.sensorsRadarRange ?? SENSORS_RADAR_RANGE;
+  const bb = state.blackboards && state.blackboards['sensors'];
+  const range = bb ? (bb.radar_range ?? SENSORS_RADAR_RANGE)
+                   : (state.sensorsRadarRange ?? SENSORS_RADAR_RANGE);
+  const radarShows   = bb ? (bb.radar_shows   ?? state.sensorsRadarShows)
+                          : state.sensorsRadarShows;
+  const radarSelects = bb ? (bb.radar_selects ?? state.sensorsRadarSelects)
+                          : state.sensorsRadarSelects;
   const entities = state.asteroids;
   const blips = buildBlips(
     entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range,
     {
       rotate: true,
-      shows: state.sensorsRadarShows,
-      selects: state.sensorsRadarSelects,
+      shows: radarShows,
+      selects: radarSelects,
       extra: (a) => ({
         color:   null,
         name:    a.name    || null,
@@ -633,13 +639,18 @@ export const NAVIGATION_RADAR_RANGE = 5000.0;
  * `nav_chart_selects` lists. No JS-side default — an unauthored ship_config
  * shows nothing on the nav chart until the TOML specifies these lists.
  *
- * @param {{ asteroids, shipX, shipZ, impulseChargeProgress, currentView }} state
+ * @param {{ blackboards, asteroids, shipX, shipZ, impulseChargeProgress,
+ *           currentView }} state
  */
 export function buildNavigationConsoleState(state) {
-  const range = state.navChartRange ?? NAVIGATION_RADAR_RANGE;
-  const navShows = state.navChartShows || [];
+  const bb = state.blackboards && state.blackboards['navigation'];
+  const range = bb ? (bb.nav_chart_range ?? NAVIGATION_RADAR_RANGE)
+                   : (state.navChartRange ?? NAVIGATION_RADAR_RANGE);
+  const navShows = bb ? (bb.nav_chart_shows ?? state.navChartShows ?? [])
+                      : (state.navChartShows || []);
   const navShowsLower = navShows.map(s => String(s).toLowerCase());
-  const navSelects = (state.navChartSelects || []).map(t => String(t).toLowerCase());
+  const navSelects = (bb ? (bb.nav_chart_selects ?? state.navChartSelects ?? [])
+                         : (state.navChartSelects || [])).map(t => String(t).toLowerCase());
   const entities = withObjectiveTargets(state.asteroids, state.objectives);
   // Filter to navigational entities only.
   const navEntities = entities.filter(e => {

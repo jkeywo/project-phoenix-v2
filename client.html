@@ -1803,13 +1803,15 @@
           // state.blackboards is the same object reference, so it's already current.
           // Fire iframe pushes for any system whose blackboard was updated.
           const updatedSystems = new Set((msg.data.updates || []).map(([id]) => id));
-          if (updatedSystems.has('tactical')) pushWeaponsConsoleState();
-          if (updatedSystems.has('helm'))     pushHelmConsoleState();
-          if (updatedSystems.has('power'))    pushPowerConsoleState();
-          if (updatedSystems.has('shields'))  pushShieldsConsoleState();
-          if (updatedSystems.has('captain'))  pushCaptainConsoleState();
-          if (updatedSystems.has('repair'))   pushRepairConsoleState();
-          if (updatedSystems.has('comms'))    pushCommsConsoleState();
+          if (updatedSystems.has('tactical'))   pushWeaponsConsoleState();
+          if (updatedSystems.has('helm'))       pushHelmConsoleState();
+          if (updatedSystems.has('power'))      pushPowerConsoleState();
+          if (updatedSystems.has('shields'))    pushShieldsConsoleState();
+          if (updatedSystems.has('captain'))    pushCaptainConsoleState();
+          if (updatedSystems.has('repair'))     pushRepairConsoleState();
+          if (updatedSystems.has('comms'))      pushCommsConsoleState();
+          if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
+          if (updatedSystems.has('navigation')) pushNavigationConsoleState();
           return;
         }
         case 'WeaponsUpdate': {

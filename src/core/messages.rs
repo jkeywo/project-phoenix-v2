@@ -1331,6 +1331,13 @@ pub enum ServerMessage {
         #[serde(default)]
         sender_label: String,
     },
+    /// Dirty-tracked per-system blackboard sync (issue #557, Channel 1).
+    ///
+    /// Emitted only for systems whose blackboard changed since the last send.
+    /// `updates` is a list of `(SystemId, SystemBlackboard)` pairs.
+    BlackboardUpdate {
+        updates: Vec<(SystemId, SystemBlackboard)>,
+    },
 }
 
 // ── HTML console bridge wire types (ADR-0001 / PRD #419) ───────────────────
@@ -1533,30 +1540,31 @@ impl Default for CaptainConsoleState {
     }
 }
 
-/// Serialised Helm console state pushed to the HTML helm panel (issue #423).
-///
-/// Mirrors `WeaponsConsoleState` — written into a single `HelmConsoleStateComp`
-/// component and pushed on change via `ConsoleStateChanged { name: "Helm", json }`.
+/// Raw sim truth for the Helm system, published each tick into the ship
+/// blackboard (issue #557). GUI derivation (heading strings, radar blips)
+/// happens client-side in `gui/console-state.js`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct HelmConsoleState {
-    pub heading: f32,
-    pub speed: f32,
+pub struct HelmBlackboard {
+    pub yaw: f32,
+    pub forward_speed: f32,
     pub x: f32,
     pub z: f32,
-    pub yaw: f32,
-    #[serde(default)]
-    pub impulse_charge_progress: f32,
-    #[serde(default)]
-    pub on_screen: bool,
-    /// Boost battery charge fraction, 0.0 (empty) to 1.0 (full).
-    #[serde(default)]
+    /// Impulse drive charge progress (0.0 = idle, 1.0 = fully engaged).
+    pub impulse_charge: f32,
+    /// Boost battery charge fraction (0.0 empty → 1.0 full).
     pub boost_battery: f32,
-    /// Whether the boost drive is currently engaged.
-    #[serde(default)]
     pub boost_active: bool,
-    /// Whether this ship has the boost feature at all (drives button visibility).
-    #[serde(default)]
+    /// True when this ship's TOML includes a boost drive config.
     pub boost_enabled: bool,
+}
+
+/// Per-system blackboard published each tick. One typed variant per system
+/// kind, mirroring the `SystemControlPayload` design. Wire-serialised as a
+/// tagged enum so the JS mirror can switch on `kind`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", content = "data")]
+pub enum SystemBlackboard {
+    Helm(HelmBlackboard),
 }
 
 /// Serialised Shields console state pushed to the HTML shields panel (issue #423).

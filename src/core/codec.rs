@@ -2835,22 +2835,51 @@ mod tests {
     }
 
     #[test]
-    fn encode_console_state_round_trips_helm() {
-        let state = HelmConsoleState {
-            heading: 045.0,
-            speed: 75.0,
+    fn system_blackboard_helm_round_trips_json_codec() {
+        use crate::messages::{HelmBlackboard, SystemBlackboard, SystemId};
+        let bb = SystemBlackboard::Helm(HelmBlackboard {
+            yaw: 0.785,
+            forward_speed: 75.0,
             x: 1200.5,
             z: -800.3,
-            yaw: 0.785,
-            impulse_charge_progress: 0.0,
-            on_screen: false,
+            impulse_charge: 0.0,
             boost_battery: 0.5,
             boost_active: true,
             boost_enabled: true,
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("helm".into()), bb)],
         };
-        let json = encode_console_state(&state).expect("encode helm console");
-        let decoded: HelmConsoleState = serde_json::from_str(&json).unwrap();
-        assert_eq!(state, decoded);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn system_blackboard_helm_serde_fields() {
+        use crate::messages::{HelmBlackboard, SystemBlackboard, SystemId};
+        let bb = SystemBlackboard::Helm(HelmBlackboard {
+            yaw: 1.5,
+            forward_speed: 42.0,
+            x: 10.0,
+            z: -20.0,
+            impulse_charge: 0.3,
+            boost_battery: 0.8,
+            boost_active: false,
+            boost_enabled: true,
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"kind\":\"Helm\""), "got: {json}");
+        assert!(json.contains("\"yaw\":1.5"), "got: {json}");
+        assert!(json.contains("\"forward_speed\":42.0"), "got: {json}");
+        assert!(json.contains("\"impulse_charge\":0.3"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("helm".into()), decoded)],
+        };
+        let encoded = JsonCodec.encode_server(&msg).unwrap();
+        let redecoded = JsonCodec.decode_server(&encoded).unwrap();
+        assert_eq!(msg, redecoded);
     }
 
     #[test]

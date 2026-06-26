@@ -128,6 +128,58 @@ describe('apply WorldSetup / SimState', () => {
   });
 });
 
+describe('BlackboardUpdate mirror', () => {
+  it('starts with empty blackboards', () => {
+    const s = new ClientSimState();
+    expect(s.blackboards).toEqual({});
+  });
+
+  it('stores blackboard data keyed by systemId', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+      ['helm', { kind: 'Helm', data: { yaw: 1.5, forward_speed: 42.0, x: 10, z: -20,
+                                       impulse_charge: 0.3, boost_battery: 0.8,
+                                       boost_active: false, boost_enabled: true } }],
+    ] } });
+    expect(s.blackboards['helm']).toBeDefined();
+    expect(s.blackboards['helm'].yaw).toBeCloseTo(1.5);
+    expect(s.blackboards['helm'].forward_speed).toBeCloseTo(42.0);
+    expect(s.blackboards['helm'].boost_enabled).toBe(true);
+  });
+
+  it('merges updates without clearing other systems', () => {
+    const s = new ClientSimState();
+    s.blackboards['other'] = { value: 99 };
+    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+      ['helm', { kind: 'Helm', data: { yaw: 0, forward_speed: 0, x: 0, z: 0,
+                                       impulse_charge: 0, boost_battery: 0,
+                                       boost_active: false, boost_enabled: false } }],
+    ] } });
+    expect(s.blackboards['other']).toEqual({ value: 99 });
+    expect(s.blackboards['helm']).toBeDefined();
+  });
+
+  it('ignores updates with malformed entries', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+      ['helm', null],
+      ['helm', { kind: 'Helm' }],  // missing data
+    ] } });
+    expect(s.blackboards['helm']).toBeUndefined();
+  });
+
+  it('resets blackboards on Welcome', () => {
+    const s = new ClientSimState();
+    s.blackboards['helm'] = { yaw: 1.0 };
+    s.apply({ type: 'Welcome', data: {
+      state: { phase: 'Lobby', players: [], complexity: {}, world: null },
+      ship_stations: {},
+      ship_config: {},
+    } });
+    expect(s.blackboards).toEqual({});
+  });
+});
+
 describe('apply Welcome', () => {
   it('resets to defaults but preserves the world when present', () => {
     const s = new ClientSimState();

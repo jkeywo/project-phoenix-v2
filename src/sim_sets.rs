@@ -6,6 +6,11 @@ pub enum SimSet {
     Physics,
     Damage,
     Modifiers,
+    /// Phase 1a: every system writes its own blackboard from current ECS state.
+    /// Runs after Modifiers so blackboards reflect the fully-updated sim state.
+    /// Cross-system reads during Physics/Damage/Modifiers use `FrozenBlackboards`
+    /// (last tick's snapshot) for determinism.
+    Publish,
     Broadcast,
 }
 

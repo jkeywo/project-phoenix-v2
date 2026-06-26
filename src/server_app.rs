@@ -154,6 +154,32 @@ pub struct TrackedEntities {
     pub seeded: bool,
 }
 
+/// Current-tick per-system blackboards. Each system writes its own entry
+/// during `SimSet::Publish`. Snapshotted into `FrozenBlackboards` before
+/// the next tick's `SimSet::Input` so cross-system reads in Physics/Damage/
+/// Modifiers always see last tick's values (deterministic, one-tick lag).
+#[derive(Resource, Default, Clone)]
+pub struct SystemBlackboards(
+    pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
+);
+
+/// Frozen snapshot of the previous tick's `SystemBlackboards`. Updated by
+/// `snapshot_blackboards` which runs before `SimSet::Input`. Cross-system
+/// readers in Physics/Damage/Modifiers should read this, never the live
+/// `SystemBlackboards`, to guarantee determinism.
+#[derive(Resource, Default, Clone)]
+pub struct FrozenBlackboards(
+    pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
+);
+
+/// Last-broadcast blackboard state per system. The `broadcast_blackboard_updates`
+/// system compares `SystemBlackboards` against this and only emits a
+/// `BlackboardUpdate` for systems whose blackboard has changed.
+#[derive(Resource, Default)]
+pub struct LastBroadcastBlackboards(
+    pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
+);
+
 // â"€â"€ Plugin â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 /// Empty system used as an ordering anchor for the sim broadcast dispatch.
 /// All sim-phase systems (message handlers, tick systems, broadcasters) should
@@ -173,6 +199,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             crate::sim_sets::SimSet::Physics,
             crate::sim_sets::SimSet::Damage,
             crate::sim_sets::SimSet::Modifiers,
+            crate::sim_sets::SimSet::Publish,
             crate::sim_sets::SimSet::Broadcast,
         )
             .chain()
@@ -218,6 +245,9 @@ pub fn add_simulation_plugins(app: &mut App) {
     .init_resource::<LastBroadcastEntityPositions>()
     .init_resource::<LastBroadcastHull>()
     .init_resource::<LastBroadcastShields>()
+    .init_resource::<SystemBlackboards>()
+    .init_resource::<FrozenBlackboards>()
+    .init_resource::<LastBroadcastBlackboards>()
     .insert_resource(SimBroadcastTimer(Timer::from_seconds(
         0.1,
         TimerMode::Repeating,
@@ -245,6 +275,17 @@ pub fn add_simulation_plugins(app: &mut App) {
             .chain()
             .after(crate::lobby::process_lobby)
             .before(crate::sim_sets::SimSet::Input),
+    )
+    .add_systems(
+        Update,
+        snapshot_blackboards
+            .after(crate::lobby::process_lobby)
+            .before(crate::sim_sets::SimSet::Input)
+            .run_if(in_state(GamePhase::InProgress)),
+    )
+    .add_systems(
+        Update,
+        broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::Broadcast),
     )
     .add_systems(
         Update,
@@ -851,11 +892,60 @@ fn reset_broadcast_caches_on_start(
     mut shields: ResMut<LastBroadcastShields>,
     mut positions: ResMut<LastBroadcastEntityPositions>,
     mut weapons: ResMut<LastWeaponsUpdate>,
+    mut last_bb: ResMut<LastBroadcastBlackboards>,
 ) {
     *hull = LastBroadcastHull::default();
     *shields = LastBroadcastShields::default();
     *positions = LastBroadcastEntityPositions::default();
     *weapons = LastWeaponsUpdate::default();
+    *last_bb = LastBroadcastBlackboards::default();
+}
+
+/// Snapshot `SystemBlackboards` into `FrozenBlackboards` before each tick's
+/// `SimSet::Input`. Cross-system reads during Physics/Damage/Modifiers must
+/// read `FrozenBlackboards`; they will see last tick's published values
+/// (uniform one-tick lag, guaranteed determinism).
+fn snapshot_blackboards(
+    blackboards: Res<SystemBlackboards>,
+    mut frozen: ResMut<FrozenBlackboards>,
+) {
+    if blackboards.is_changed() {
+        frozen.0 = blackboards.0.clone();
+    }
+}
+
+/// Public alias of `snapshot_blackboards` for unit tests that need to
+/// verify the one-tick-lag determinism invariant in isolation.
+pub fn snapshot_blackboards_for_test(
+    blackboards: Res<SystemBlackboards>,
+    frozen: ResMut<FrozenBlackboards>,
+) {
+    snapshot_blackboards(blackboards, frozen);
+}
+
+/// Emit `BlackboardUpdate` for any system whose blackboard has changed since
+/// the last broadcast. Runs in `SimSet::Broadcast` so it sees the current
+/// tick's fully-published blackboards.
+fn broadcast_blackboard_updates(
+    blackboards: Res<SystemBlackboards>,
+    mut last: ResMut<LastBroadcastBlackboards>,
+    mut outbox: ResMut<SimOutbox>,
+) {
+    let updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = blackboards
+        .0
+        .iter()
+        .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
+        .map(|(id, bb)| (id.clone(), bb.clone()))
+        .collect();
+
+    if !updates.is_empty() {
+        for (id, bb) in &updates {
+            last.0.insert(id.clone(), bb.clone());
+        }
+        outbox
+            .0
+            .push((Target::All, ServerMessage::BlackboardUpdate { updates }));
+    }
 }
 
 /// When a player reconnects mid-game (Identify during InProgress), `process_lobby`
@@ -2111,6 +2201,7 @@ mod tests {
                 crate::sim_sets::SimSet::Physics,
                 crate::sim_sets::SimSet::Damage,
                 crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
                 crate::sim_sets::SimSet::Broadcast,
             )
                 .chain(),
@@ -2143,6 +2234,9 @@ mod tests {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<LastBroadcastHull>()
         .init_resource::<LastBroadcastShields>()
+        .init_resource::<SystemBlackboards>()
+        .init_resource::<FrozenBlackboards>()
+        .init_resource::<LastBroadcastBlackboards>()
         .init_resource::<Outbox>()
         .add_message::<crate::ai_plugin::AiEntityDestroyed>()
         .add_plugins(crate::captain_plugin::CaptainPlugin)

@@ -340,44 +340,51 @@ export function buildCaptainConsoleState(state) {
 
 /**
  * Helm console.
- * @param {{ shipYaw, forwardSpeed, shipX, shipZ, impulseChargeProgress,
- *           currentView, weaponsTarget, asteroids,
- *           boostEnabled, boostBattery, boostActive }} state
+ *
+ * Reads raw sim truth from the blackboard mirror (`state.blackboards['helm']`)
+ * when available, falling back to legacy camelCase properties for compatibility.
+ *
+ * @param {{ blackboards?, shipYaw?, forwardSpeed?, shipX?, shipZ?,
+ *           impulseChargeProgress?, currentView?, asteroids?,
+ *           boostEnabled?, boostBattery?, boostActive? }} state
  */
 export function buildHelmConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['helm']) || {};
+  const shipYaw    = bb.yaw            ?? state.shipYaw            ?? 0;
+  const shipX      = bb.x              ?? state.shipX              ?? 0;
+  const shipZ      = bb.z              ?? state.shipZ              ?? 0;
+  const forwardSpeed         = bb.forward_speed  ?? state.forwardSpeed         ?? 0;
+  const impulseChargeProgress = bb.impulse_charge ?? state.impulseChargeProgress ?? 0;
+  const boostEnabled = bb.boost_enabled ?? state.boostEnabled ?? false;
+  const boostBattery = bb.boost_battery ?? state.boostBattery ?? 0;
+  const boostActive  = bb.boost_active  ?? state.boostActive  ?? false;
+
   const range = state.helmRadarRange ?? HELM_RADAR_RANGE;
   // Exclude objective_marker entities — objectives only show on the nav chart.
   const helmEntities = (state.asteroids || []).filter(e => {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
     return !tags.includes('objective_marker');
   });
-  const blips = buildBlips(
-    helmEntities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
-    range, { rotate: true }
-  );
+  const blips = buildBlips(helmEntities, shipX, shipZ, shipYaw, range, { rotate: true });
   const waypoint = buildWaypointBlip(
-    state.navigationWaypoint || null,
-    state.shipX || 0,
-    state.shipZ || 0,
-    state.shipYaw || 0,
-    range,
+    state.navigationWaypoint || null, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true }
   );
   if (waypoint) blips.push(waypoint);
   return JSON.stringify({
-    heading:                 (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
-    speed:                   state.forwardSpeed          || 0,
-    x:                       state.shipX                 || 0,
-    z:                       state.shipZ                 || 0,
-    yaw:                     state.shipYaw               || 0,
-    impulse_charge_progress: state.impulseChargeProgress || 0,
+    heading:                 (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
+    speed:                   forwardSpeed,
+    x:                       shipX,
+    z:                       shipZ,
+    yaw:                     shipYaw,
+    impulse_charge_progress: impulseChargeProgress,
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
     own_hull:                ownHull('Helm', state),
-    boost_enabled:           !!state.boostEnabled,
-    boost_battery:           state.boostBattery        || 0,
-    boost_active:            !!state.boostActive,
+    boost_enabled:           !!boostEnabled,
+    boost_battery:           boostBattery,
+    boost_active:            !!boostActive,
   });
 }
 

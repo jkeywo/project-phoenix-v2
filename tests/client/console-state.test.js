@@ -393,6 +393,40 @@ describe('buildHelmConsoleState', () => {
     expect(waypoint.edge).toBe(true);
     expect(Math.hypot(waypoint.radar_x, waypoint.radar_y)).toBeCloseTo(0.96);
   });
+
+  it('reads yaw and speed from blackboard mirror when present', () => {
+    const state = {
+      blackboards: {
+        helm: { yaw: Math.PI, forward_speed: 99.0, x: 0, z: 0,
+                impulse_charge: 0, boost_battery: 0, boost_active: false, boost_enabled: false },
+      },
+      // legacy props should be ignored when blackboard is present
+      shipYaw: 0, forwardSpeed: 0,
+    };
+    const s = parse(buildHelmConsoleState(state));
+    expect(s.heading).toBeCloseTo(180, 2);
+    expect(s.speed).toBeCloseTo(99.0, 3);
+  });
+
+  it('reads boost state from blackboard mirror', () => {
+    const state = {
+      blackboards: {
+        helm: { yaw: 0, forward_speed: 0, x: 0, z: 0,
+                impulse_charge: 0.5, boost_battery: 0.75, boost_active: true, boost_enabled: true },
+      },
+    };
+    const s = parse(buildHelmConsoleState(state));
+    expect(s.impulse_charge_progress).toBeCloseTo(0.5, 3);
+    expect(s.boost_battery).toBeCloseTo(0.75, 3);
+    expect(s.boost_active).toBe(true);
+    expect(s.boost_enabled).toBe(true);
+  });
+
+  it('falls back to legacy props when blackboard absent', () => {
+    const s = parse(buildHelmConsoleState({ shipYaw: Math.PI / 2, forwardSpeed: 33 }));
+    expect(s.heading).toBeCloseTo(90, 2);
+    expect(s.speed).toBeCloseTo(33, 3);
+  });
 });
 
 describe('buildRepairConsoleState', () => {

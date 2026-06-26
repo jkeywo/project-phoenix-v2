@@ -125,6 +125,7 @@ pub struct ShipPowerPlugin;
 impl Plugin for ShipPowerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>();
+        app.init_resource::<crate::messages::AdmittedCommands>();
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
@@ -178,48 +179,14 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 /// targeting the power system ID with a `SetPower` payload, and calls
 /// `PowerSystem::increase` / `decrease` to reach the requested level.
 pub fn handle_power_messages(
-    mut reader: MessageReader<crate::lobby::InboundMessage>,
-    sessions: Res<crate::lobby::Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<crate::messages::AdmittedCommands>,
     mut power: ResMut<ShipPowerSystem>,
 ) {
-    let (ship_config, control_sources) = match ship_query.single() {
-        Ok(pair) => pair,
-        Err(_) => return,
-    };
-    let policy = control_sources.0.policy_for(&crate::system_registry::power_system_id());
-
-    if !policy.accept_human_input {
-        warn!("[power-auth] policy rejects human input — power system is AI-controlled");
-        return;
-    }
-
-    let power_holder = sessions.0.console_holder(&Console::Power, &ship_config.0);
-    if power_holder.is_none() {
-        warn!("[power-auth] no holder for Power console — skipping all power messages");
-    }
-
-    for ev in reader.read() {
-        let crate::messages::ClientMessage::ControlSystem { target, payload } = &ev.msg else {
-            continue;
-        };
-        if target.0 != crate::system_registry::POWER_SYSTEM_ID {
-            continue;
-        }
-        if power_holder != Some(ev.token.as_str()) {
-            warn!(
-                "[power-auth] ignored power allocation from token={} holder={:?} target={:?} group={:?} level={:?}",
-                ev.token, power_holder, target, payload, None::<u8>,
-            );
-            continue;
-        } else {
-            warn!("[power-auth] ACCEPTED power allocation from token={}", ev.token);
-        }
-
-        match payload {
+    for cmd in admitted.for_target(crate::system_registry::POWER_SYSTEM_ID) {
+        match &cmd.payload {
             crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
                 if let Err(err) = power.0.set_group_allocation(group, *level) {
-                    warn!("[power-auth] ignored power allocation: {err:?}");
+                    warn!("[power] ignored power allocation: {err:?}");
                 }
             }
             crate::messages::SystemControlPayload::SetPower {
@@ -228,7 +195,7 @@ pub fn handle_power_messages(
             } => {
                 power.0.set_console_allocation(console.clone(), *level);
             }
-            _ => continue,
+            _ => {}
         }
     }
 }
@@ -395,6 +362,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))

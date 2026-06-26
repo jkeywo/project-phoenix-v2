@@ -3,8 +3,8 @@ use bevy::prelude::*;
 use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    Console, CoordinationPayload, ShieldFacingStatus, ShieldsConsoleState, SystemControlPayload,
-    ViewDirection,
+    AdmittedCommands, Console, CoordinationPayload, ShieldFacingStatus, ShieldsConsoleState,
+    SystemControlPayload, ViewDirection,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
@@ -59,6 +59,7 @@ pub struct ShipShieldsPlugin;
 
 impl Plugin for ShipShieldsPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<crate::messages::AdmittedCommands>();
         app.add_message::<ConsoleStateChanged>()
             .add_message::<CoordinationEnqueue>()
             .init_resource::<ShieldsAiConfigResource>()
@@ -114,42 +115,13 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 /// targeting the shields system ID with a `SetShieldFocus` payload, and calls
 /// `ShieldSystem::set_focused_facing`.
 pub fn handle_shields_messages(
-    mut reader: MessageReader<crate::lobby::InboundMessage>,
-    sessions: Res<crate::lobby::Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<AdmittedCommands>,
     mut shields: ResMut<ShipShields>,
 ) {
-    let (ship_config, control_sources) = match ship_query.single() {
-        Ok(pair) => pair,
-        Err(_) => return,
-    };
-    let policy = control_sources.0.policy_for(&crate::system_registry::shields_system_id());
-
-    if !policy.accept_human_input {
-        return;
-    }
-
-    let shields_holder = sessions.0.console_holder(&Console::Shields, &ship_config.0);
-
-    for ev in reader.read() {
-        let crate::messages::ClientMessage::ControlSystem { target, payload } = &ev.msg else {
+    for cmd in admitted.for_target(crate::system_registry::SHIELDS_SYSTEM_ID) {
+        let SystemControlPayload::SetShieldFocus { facing } = &cmd.payload else {
             continue;
         };
-        if target.0 != crate::system_registry::SHIELDS_SYSTEM_ID {
-            continue;
-        }
-        let SystemControlPayload::SetShieldFocus { facing } = payload else {
-            continue;
-        };
-
-        if shields_holder != Some(ev.token.as_str()) {
-            warn!(
-                "[shields-auth] ignored SetShieldFocus from token={} holder={:?}",
-                ev.token, shields_holder,
-            );
-            continue;
-        }
-
         let idx = facing.as_ref().map(|d| match d {
             ViewDirection::Fore => 0,
             ViewDirection::Port => 1,

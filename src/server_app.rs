@@ -248,6 +248,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .init_resource::<SystemBlackboards>()
     .init_resource::<FrozenBlackboards>()
     .init_resource::<LastBroadcastBlackboards>()
+    .init_resource::<crate::messages::AdmittedCommands>()
     .insert_resource(SimBroadcastTimer(Timer::from_seconds(
         0.1,
         TimerMode::Repeating,
@@ -279,6 +280,13 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_systems(
         Update,
         snapshot_blackboards
+            .after(crate::lobby::process_lobby)
+            .before(crate::sim_sets::SimSet::Input)
+            .run_if(in_state(GamePhase::InProgress)),
+    )
+    .add_systems(
+        Update,
+        admit_system_commands
             .after(crate::lobby::process_lobby)
             .before(crate::sim_sets::SimSet::Input)
             .run_if(in_state(GamePhase::InProgress)),
@@ -945,6 +953,130 @@ fn broadcast_blackboard_updates(
         outbox
             .0
             .push((Target::All, ServerMessage::BlackboardUpdate { updates }));
+    }
+}
+
+/// System set that `admit_system_commands` belongs to. Handlers that run in
+/// `Update` but outside `SimSet::Input` can use `.after(AdmissionSet)` to
+/// guarantee they see a fully-populated `AdmittedCommands`.
+#[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AdmissionSet;
+
+/// Plugin that registers the admission gate and `AdmittedCommands` resource.
+/// Include this in plugin-level test apps so handlers have a populated
+/// `AdmittedCommands` to read from.
+pub struct AdmissionPlugin;
+
+impl Plugin for AdmissionPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<crate::messages::AdmittedCommands>()
+            .configure_sets(
+                Update,
+                AdmissionSet
+                    .after(crate::lobby::process_lobby)
+                    .before(crate::sim_sets::SimSet::Input),
+            )
+            .add_systems(Update, admit_system_commands.in_set(AdmissionSet));
+    }
+}
+
+/// Authority gate for intra-system commands. Runs once per tick before
+/// `SimSet::Input`, clearing and refilling `AdmittedCommands`.
+///
+/// A network `ControlSystem` message is admitted iff its token is the live
+/// controller of the target system: AI tokens require `operate_ai`; human
+/// tokens require `accept_human_input` AND holding the console for that system.
+/// Once admitted the command carries no source identity — handlers must not
+/// branch on the origin.
+fn admit_system_commands(
+    mut reader: MessageReader<InboundMessage>,
+    mut admitted: ResMut<crate::messages::AdmittedCommands>,
+    sessions: Res<Sessions>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &crate::ship_plugin::ShipSystemControlSources,
+        ),
+        With<Ship>,
+    >,
+) {
+    admitted.0.clear();
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
+    for ev in reader.read() {
+        let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
+            continue;
+        };
+        if is_command_authorized(&ev.token, target, payload, control_sources, &sessions, ship_config) {
+            admitted.0.push(crate::messages::AdmittedCommand {
+                target: target.clone(),
+                payload: payload.clone(),
+                response_token: Some(ev.token.clone()),
+            });
+        } else {
+            warn!(
+                "[admit] rejected {:?} → {:?} from token={}",
+                target.0,
+                std::mem::discriminant(payload),
+                &ev.token[..ev.token.len().min(8)],
+            );
+        }
+    }
+}
+
+/// Returns the `Console` that controls `target`, used for seat-holder checks.
+fn console_for_system(target: &crate::messages::SystemId) -> Option<Console> {
+    use crate::system_registry::*;
+    match target.0.as_str() {
+        CAPTAIN_SYSTEM_ID | RED_ALERT_SYSTEM_ID => Some(Console::CaptainChair),
+        HELM_SYSTEM_ID => Some(Console::Helm),
+        TACTICAL_SYSTEM_ID => Some(Console::Tactical),
+        POWER_SYSTEM_ID => Some(Console::Power),
+        SENSORS_SYSTEM_ID => Some(Console::Sensors),
+        NAVIGATION_SYSTEM_ID => Some(Console::Navigation),
+        SHIELDS_SYSTEM_ID => Some(Console::Shields),
+        COMMS_SYSTEM_ID => Some(Console::Comms),
+        REPAIR_SYSTEM_ID => Some(Console::Repair),
+        _ => None,
+    }
+}
+
+fn is_command_authorized(
+    token: &str,
+    target: &crate::messages::SystemId,
+    payload: &SystemControlPayload,
+    control_sources: &crate::ship_plugin::ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    ship_config: &crate::ship_plugin::ShipConfigComponent,
+) -> bool {
+    // Viewscreen SetView: authority derives from the view mode's source system.
+    let effective_target = if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID {
+        if let SystemControlPayload::SetView { mode } = payload {
+            crate::ship::viewscreen::source_system_for_view_mode(mode)
+        } else {
+            target.clone()
+        }
+    } else {
+        target.clone()
+    };
+
+    let policy = control_sources.0.policy_for(&effective_target);
+
+    if token.starts_with("ai:") {
+        return policy.operate_ai;
+    }
+    if token == crate::console_bridge::LOCAL_CONSOLE_TOKEN {
+        return policy.accept_human_input;
+    }
+    if !policy.accept_human_input {
+        return false;
+    }
+
+    // Human network token: must hold the console for the target system.
+    match console_for_system(&effective_target) {
+        Some(console) => sessions.0.console_holder(&console, &ship_config.0) == Some(token),
+        None => true, // Unknown system: conservative allow.
     }
 }
 
@@ -2237,6 +2369,7 @@ mod tests {
         .init_resource::<SystemBlackboards>()
         .init_resource::<FrozenBlackboards>()
         .init_resource::<LastBroadcastBlackboards>()
+        .init_resource::<crate::messages::AdmittedCommands>()
         .init_resource::<Outbox>()
         .add_message::<crate::ai_plugin::AiEntityDestroyed>()
         .add_plugins(crate::captain_plugin::CaptainPlugin)
@@ -2249,6 +2382,12 @@ mod tests {
         .add_systems(
             OnEnter(GamePhase::InProgress),
             reset_broadcast_caches_on_start,
+        )
+        .add_systems(
+            Update,
+            admit_system_commands
+                .after(crate::lobby::process_lobby)
+                .before(crate::sim_sets::SimSet::Input),
         )
         .add_systems(
             Update,

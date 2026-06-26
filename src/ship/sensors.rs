@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
-use crate::lobby::{InboundMessage, Sessions};
+use crate::lobby::Sessions;
 use crate::messages::{
-    ClientMessage, Console, CoordinationPayload, ServerMessage, SystemControlPayload,
+    AdmittedCommands, Console, CoordinationPayload, ServerMessage, SystemControlPayload,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
@@ -27,6 +27,7 @@ pub struct ShipSensorsPlugin;
 
 impl Plugin for ShipSensorsPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<crate::messages::AdmittedCommands>();
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<SensorsFrequencyState>()
             .add_systems(
@@ -46,38 +47,21 @@ impl Plugin for ShipSensorsPlugin {
 /// Validates: sender holds `Console::Sensors` and `accept_human_input` is true.
 /// Emits `SensorsTargetSuggestion` directly to the Tactical console holder.
 pub fn handle_sensors_messages(
-    mut reader: MessageReader<InboundMessage>,
+    admitted: Res<AdmittedCommands>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
+    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent,), With<crate::simulation::Ship>>,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
 ) {
-    let (ship_config, control_sources) = match ship_query.single() {
-        Ok(pair) => pair,
-        Err(_) => return,
-    };
-    let policy = control_sources.0.policy_for(&crate::system_registry::sensors_system_id());
-
-    if !policy.accept_human_input {
+    let Ok((ship_config,)) = ship_query.single() else {
         return;
-    }
+    };
 
-    let sensors_holder = sessions.0.console_holder(&Console::Sensors, &ship_config.0);
-
-    for ev in reader.read() {
-        let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
-            continue;
-        };
-        if target.0 != crate::system_registry::SENSORS_SYSTEM_ID {
-            continue;
-        }
-        let SystemControlPayload::SetScienceTarget { uuid } = payload else {
+    for cmd in admitted.for_target(crate::system_registry::SENSORS_SYSTEM_ID) {
+        let SystemControlPayload::SetScienceTarget { uuid } = &cmd.payload else {
             continue;
         };
 
-        if sensors_holder != Some(ev.token.as_str()) {
-            continue;
-        }
-
+        // Route the suggestion to whoever currently holds the Tactical console.
         let Some(tactical_token) = sessions
             .0
             .console_holder(&Console::Tactical, &ship_config.0)
@@ -146,7 +130,7 @@ pub fn tick_sensors_frequency_hint(
 mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
-    use crate::lobby::{LobbyPlugin, OutboundMessage, Target};
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
     use crate::messages::*;
     use crate::simulation::{ShipHullIntegrity, ShipImpulse, SimOutbox};
 
@@ -163,6 +147,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))

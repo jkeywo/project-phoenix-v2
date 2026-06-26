@@ -1,15 +1,14 @@
 use bevy::prelude::*;
 
-use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{ClientMessage, Console, SystemControlPayload, WaypointSnapshot};
-use crate::ship::control_source::ControlTickPolicy;
-use crate::ship::system_registry::{navigation_system_id, NAVIGATION_SYSTEM_ID};
+use crate::messages::{AdmittedCommands, SystemControlPayload, WaypointSnapshot};
+use crate::ship::system_registry::NAVIGATION_SYSTEM_ID;
 
 pub struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NavigationWaypoint>()
+        app.init_resource::<crate::messages::AdmittedCommands>()
+            .init_resource::<NavigationWaypoint>()
             .add_systems(
                 Update,
                 handle_navigation_waypoint.in_set(crate::sim_sets::SimSet::Input),
@@ -77,61 +76,19 @@ impl NavigationWaypoint {
     }
 }
 
-fn navigation_authorized(
-    sessions: &Sessions,
-    ship_config: &crate::ship_plugin::ShipConfigComponent,
-    token: &str,
-) -> bool {
-    sessions
-        .0
-        .console_holder(&Console::Navigation, &ship_config.0)
-        == Some(token)
-}
-
-/// Handle waypoint messages from the Navigation console.
-///
-/// Accepts `ClientMessage::ControlSystem { target: "navigation", payload: ... }`.
-/// All messages are gated on:
-///
-/// 1. `ControlSourceResolver::policy_for(&navigation_system_id()).accept_human_input`
-///    (rejects when the system is under AI control)
-/// 2. Sender holds `Console::Navigation`.
 fn handle_navigation_waypoint(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<AdmittedCommands>,
     mut waypoint: ResMut<NavigationWaypoint>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
-        return;
-    };
-
-    let policy: ControlTickPolicy = control_sources.0.policy_for(&navigation_system_id());
-
-    if !policy.accept_human_input {
-        return;
-    }
-
-    for ev in reader.read() {
-        if !navigation_authorized(&sessions, ship_config, &ev.token) {
-            continue;
-        }
-
-        match &ev.msg {
-            ClientMessage::ControlSystem { target, payload }
-                if target.0 == NAVIGATION_SYSTEM_ID =>
+    for cmd in admitted.for_target(NAVIGATION_SYSTEM_ID) {
+        match &cmd.payload {
+            SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
+                if x.is_finite() && z.is_finite() =>
             {
-                match payload {
-                    SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
-                        if x.is_finite() && z.is_finite() =>
-                    {
-                        waypoint.0 = Some(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
-                    }
-                    SystemControlPayload::ClearNavigationWaypoint => {
-                        waypoint.0 = None;
-                    }
-                    _ => {}
-                }
+                waypoint.0 = Some(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
+            }
+            SystemControlPayload::ClearNavigationWaypoint => {
+                waypoint.0 = None;
             }
             _ => {}
         }
@@ -210,8 +167,8 @@ fn operate_navigation_ai(
 mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
-    use crate::lobby::{LobbyPlugin, OutboundMessage};
-    use crate::messages::ServerMessage;
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
+    use crate::messages::{ClientMessage, Console, ServerMessage};
     use crate::server_app::{
         sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull,
         LastBroadcastShields, ShipHullIntegrity, ShipImpulse,
@@ -231,6 +188,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))

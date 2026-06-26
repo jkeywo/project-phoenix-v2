@@ -1,14 +1,13 @@
 use bevy::prelude::*;
 
 use crate::console_bridge::ConsoleStateChanged;
-use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{
-    CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, SystemControlPayload, SystemId,
+    AdmittedCommands, CaptainConsoleState, ObjectiveSnapshot, SystemControlPayload, SystemId,
     ViewDirection, ViewMode,
 };
 use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
-use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
+use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipState;
 use crate::simulation::Ship;
 use crate::world::server::ObjectiveManagerRes;
@@ -20,6 +19,7 @@ impl Plugin for CaptainPlugin {
         app.add_message::<ConsoleStateChanged>();
         app.init_resource::<RecentCombatActivity>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>();
+        app.init_resource::<crate::messages::AdmittedCommands>();
         app.add_systems(
             Update,
             (
@@ -45,124 +45,40 @@ impl Plugin for CaptainPlugin {
 // ── Input handlers ───────────────────────────────────────────────────────────
 
 fn handle_toggle_red_alert(
-    mut reader: MessageReader<InboundMessage>,
+    admitted: Res<AdmittedCommands>,
     mut ship: ResMut<ShipState>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
-        return;
-    };
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::captain_system_id());
-    for ev in reader.read() {
-        if !is_red_alert_toggle(&ev.msg) {
-            continue;
+    for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
+        if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
+            ship.toggle_red_alert();
         }
-        if !policy.accept_human_input {
-            continue;
-        }
-        if sessions
-            .0
-            .console_holder(&Console::CaptainChair, &ship_config.0)
-            != Some(ev.token.as_str())
-        {
-            continue;
-        }
-        ship.toggle_red_alert();
     }
 }
 
-fn is_red_alert_toggle(msg: &ClientMessage) -> bool {
-    match msg {
-        ClientMessage::ControlSystem { target, payload } => {
-            target.0 == crate::system_registry::RED_ALERT_SYSTEM_ID
-                && matches!(payload, SystemControlPayload::ToggleRedAlert)
-        }
-        _ => false,
-    }
-}
-
-fn view_request_from_message(msg: &ClientMessage) -> Option<(SystemId, ViewMode)> {
-    match msg {
-        ClientMessage::ControlSystem { target, payload }
-            if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID =>
+fn view_request_from_admitted(cmd: &crate::messages::AdmittedCommand) -> Option<(SystemId, ViewMode)> {
+    match &cmd.payload {
+        SystemControlPayload::SetView { mode }
+            if cmd.target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID =>
         {
-            match payload {
-                SystemControlPayload::SetView { mode } => Some((
-                    crate::ship::viewscreen::source_system_for_view_mode(mode),
-                    mode.clone(),
-                )),
-                _ => None,
-            }
+            Some((crate::ship::viewscreen::source_system_for_view_mode(mode), mode.clone()))
         }
-        ClientMessage::ControlSystem { target, payload }
-            if target.0 == crate::system_registry::HELM_SYSTEM_ID =>
+        SystemControlPayload::SetView { mode }
+            if cmd.target.0 == crate::system_registry::HELM_SYSTEM_ID =>
         {
-            match payload {
-                SystemControlPayload::SetView { mode } => {
-                    Some((crate::system_registry::helm_system_id(), mode.clone()))
-                }
-                _ => None,
-            }
+            Some((crate::system_registry::helm_system_id(), mode.clone()))
         }
         _ => None,
     }
 }
 
 fn handle_set_view(
-    mut reader: MessageReader<InboundMessage>,
+    admitted: Res<AdmittedCommands>,
     mut ship: ResMut<ShipState>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
-        return;
-    };
-    for ev in reader.read() {
-        if let Some((source, mode)) = view_request_from_message(&ev.msg) {
-            if source_can_request_view(
-                &source,
-                &ev.token,
-                &sessions,
-                ship_config,
-                control_sources,
-            ) {
-                ship.request_view_mode_from(source, mode);
-            }
+    for cmd in admitted.0.iter() {
+        if let Some((source, mode)) = view_request_from_admitted(cmd) {
+            ship.request_view_mode_from(source, mode);
         }
-    }
-}
-
-fn source_can_request_view(
-    source: &SystemId,
-    token: &str,
-    sessions: &Sessions,
-    ship_config: &ShipConfigComponent,
-    control_sources: &ShipSystemControlSources,
-) -> bool {
-    let policy = control_sources.0.policy_for(source);
-    if policy.operate_ai {
-        return true;
-    }
-    if !policy.accept_human_input {
-        return false;
-    }
-    let Some(console) = console_for_view_source(source) else {
-        return false;
-    };
-    sessions.0.console_holder(&console, &ship_config.0) == Some(token)
-}
-
-fn console_for_view_source(source: &SystemId) -> Option<Console> {
-    match source.0.as_str() {
-        crate::system_registry::CAPTAIN_SYSTEM_ID => Some(Console::CaptainChair),
-        crate::system_registry::HELM_SYSTEM_ID => Some(Console::Helm),
-        crate::system_registry::SENSORS_SYSTEM_ID => Some(Console::Sensors),
-        crate::system_registry::NAVIGATION_SYSTEM_ID => Some(Console::Navigation),
-        crate::system_registry::COMMS_SYSTEM_ID => Some(Console::Comms),
-        _ => None,
     }
 }
 
@@ -315,8 +231,8 @@ fn push_captain_console_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lobby::{LobbyPlugin, OutboundMessage};
-    use crate::messages::ViewDirection;
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions};
+    use crate::messages::{ClientMessage, ViewDirection};
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
     use crate::simulation::Ship;
@@ -335,6 +251,7 @@ mod tests {
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(LobbyPlugin)
             .add_plugins(CaptainPlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
             .init_resource::<Outbox>()
             .insert_resource(ShipState::new())
             .add_systems(PostUpdate, collect);
@@ -526,6 +443,35 @@ mod tests {
         );
         tick(&mut app);
         assert!(!app.world().resource::<ShipState>().red_alert());
+    }
+
+    #[test]
+    fn admission_gate_rejects_unauthorized_network_command() {
+        // Verifies that the authority-at-admission gate (admit_system_commands)
+        // rejects a ControlSystem message from a token that doesn't hold the target
+        // console. The command must not appear in AdmittedCommands.
+        let mut app = test_app();
+        start_game(&mut app);
+        push(
+            &mut app,
+            "rando",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(
+            !app.world().resource::<ShipState>().red_alert(),
+            "unauthorized command must have no effect"
+        );
+        assert!(
+            app.world()
+                .resource::<crate::messages::AdmittedCommands>()
+                .0
+                .is_empty(),
+            "unauthorized command must be rejected by the admission gate (AdmittedCommands should be empty)"
+        );
     }
 
     #[test]
@@ -827,7 +773,7 @@ mod tests {
 
         push(
             &mut app,
-            "ai",
+            "ai:helm",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {

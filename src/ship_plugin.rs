@@ -6,7 +6,8 @@ use crate::control_source::{ControlSourceResolver, ControlTickPolicy};
 use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{
-    ClientMessage, CoordinationPayload, ModifierSlot, StationId, SystemControlPayload,
+    AdmittedCommands, ClientMessage, CoordinationPayload, ModifierSlot, StationId,
+    SystemControlPayload,
 };
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
@@ -181,6 +182,7 @@ struct HelmDriveParams<'w> {
 
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<crate::messages::AdmittedCommands>();
         app.insert_resource(HelmInputTimer(Timer::from_seconds(
             1.0 / 30.0,
             TimerMode::Repeating,
@@ -222,23 +224,16 @@ impl Plugin for ShipPlugin {
 fn process_helm_inputs(
     time: Res<Time>,
     mut timer: ResMut<HelmInputTimer>,
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
+    admitted: Res<AdmittedCommands>,
     mut ship: ResMut<ShipState>,
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
-    ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
     drive: HelmDriveParams,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
-    let Some((ship_config, control_sources)) = ship_components.iter().next() else {
-        return;
-    };
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
     // last cached helm input so a stale steering/thrust value can't
     // resurface the moment impulse cancels or the autopilot disengages.
-    // Mirrors the `prev_phase` Local pattern in
-    // `modifiers/coordination.rs::translate_impulse_modifiers`.
     let current_phase = drive.impulse.0.phase;
     if Some(current_phase) != *prev_phase {
         if current_phase == crate::impulse::ImpulsePhase::Charging {
@@ -252,25 +247,10 @@ fn process_helm_inputs(
         return;
     }
 
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::helm_system_id());
-    let helm_token = sessions
-        .0
-        .console_holder(&crate::messages::Console::Helm, &ship_config.0);
-    if policy.accept_human_input && helm_token.is_none() {
-        return;
-    }
-
-    for ev in reader.read() {
-        if !policy.accept_human_input {
-            continue;
-        }
-        if helm_token != Some(ev.token.as_str()) {
-            continue;
-        }
-        if let Some(input) = helm_input_from_message(&ev.msg) {
-            *last_input = input;
+    for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
+        if let SystemControlPayload::HelmInput { thrust, steering } = &cmd.payload {
+            last_input.thrust = *thrust;
+            last_input.steering = *steering;
         }
     }
     let dt = timer.0.duration().as_secs_f32();
@@ -415,34 +395,6 @@ fn operate_helm_ai(
     }
 }
 
-fn helm_input_from_message(msg: &ClientMessage) -> Option<LastHelmInput> {
-    match msg {
-        ClientMessage::ControlSystem { target, payload }
-            if target.0 == crate::system_registry::HELM_SYSTEM_ID =>
-        {
-            match payload {
-                SystemControlPayload::HelmInput { thrust, steering } => Some(LastHelmInput {
-                    thrust: *thrust,
-                    steering: *steering,
-                }),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-fn helm_payload_from_message(msg: &ClientMessage) -> Option<&SystemControlPayload> {
-    match msg {
-        ClientMessage::ControlSystem { target, payload }
-            if target.0 == crate::system_registry::HELM_SYSTEM_ID =>
-        {
-            Some(payload)
-        }
-        _ => None,
-    }
-}
-
 fn sync_ship_position(ship: Res<ShipState>, mut ship_query: Query<&mut Transform, With<Ship>>) {
     let Ok(mut transform) = ship_query.single_mut() else {
         return;
@@ -454,18 +406,14 @@ fn sync_ship_position(ship: Res<ShipState>, mut ship_query: Query<&mut Transform
 }
 
 pub fn handle_impulse_messages(
-    mut reader: MessageReader<InboundMessage>,
+    admitted: Res<AdmittedCommands>,
     mut impulse: ResMut<ShipImpulse>,
     hull: Res<ShipHullIntegrity>,
     mut last_hull_hp: Local<f32>,
     membership: Option<Res<RegionMembership>>,
     region_query: Query<&RegionEffectsSection>,
     ship_query: Query<Entity, With<Ship>>,
-    ship_components: Query<&ShipSystemControlSources, With<Ship>>,
 ) {
-    let Ok(control_sources) = ship_components.single() else {
-        return;
-    };
     if *last_hull_hp == 0.0 && (hull.0.total_current() - hull.0.total_max()).abs() < 1e-6 {
         *last_hull_hp = hull.0.total_max();
     }
@@ -476,26 +424,14 @@ pub fn handle_impulse_messages(
     }
     *last_hull_hp = current_hp;
 
-    let policy = helm_control_policy(&control_sources);
-    for msg in reader.read() {
-        match &msg.msg {
-            ClientMessage::ControlSystem { .. }
-                if policy.accept_human_input
-                    && matches!(
-                        helm_payload_from_message(&msg.msg),
-                        Some(SystemControlPayload::StartImpulseCharge)
-                    )
-                    && !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
+    for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
+        match &cmd.payload {
+            SystemControlPayload::StartImpulseCharge
+                if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
             {
                 impulse.0.start_charge();
             }
-            ClientMessage::ControlSystem { .. }
-                if policy.accept_human_input
-                    && matches!(
-                        helm_payload_from_message(&msg.msg),
-                        Some(SystemControlPayload::CancelImpulse)
-                    ) =>
-            {
+            SystemControlPayload::CancelImpulse => {
                 impulse.0.cancel_charge();
             }
             _ => {}
@@ -511,44 +447,26 @@ fn tick_impulse(
     impulse.0.tick(time.delta_secs(), config.charge_duration);
 }
 
-/// Toggle the boost drive in response to Helm boost controls. No-op when the
-/// feature is disabled or Helm is currently AI-operated.
+/// Toggle the boost drive in response to Helm boost controls. No-op when
+/// the feature is disabled.
 pub fn handle_boost_messages(
-    mut reader: MessageReader<InboundMessage>,
+    admitted: Res<AdmittedCommands>,
     mut boost: ResMut<ShipBoost>,
     config: Res<BoostConfigResource>,
-    ship_components: Query<&ShipSystemControlSources, With<Ship>>,
 ) {
-    let Ok(control_sources) = ship_components.single() else {
-        return;
-    };
     if !config.enabled {
         return;
     }
-    let policy = helm_control_policy(&control_sources);
-    if !policy.accept_human_input {
-        for _ in reader.read() {}
-        return;
-    }
-    for msg in reader.read() {
-        match &msg.msg {
-            ClientMessage::ControlSystem { .. }
-                if matches!(
-                    helm_payload_from_message(&msg.msg),
-                    Some(SystemControlPayload::ToggleBoost)
-                ) =>
-            {
+    for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
+        match &cmd.payload {
+            SystemControlPayload::ToggleBoost => {
                 boost.0.toggle();
             }
-            ClientMessage::ControlSystem { .. } => {
-                if let Some(SystemControlPayload::SetBoost { active }) =
-                    helm_payload_from_message(&msg.msg)
-                {
-                    if *active {
-                        boost.0.activate();
-                    } else {
-                        boost.0.deactivate();
-                    }
+            SystemControlPayload::SetBoost { active } => {
+                if *active {
+                    boost.0.activate();
+                } else {
+                    boost.0.deactivate();
                 }
             }
             _ => {}
@@ -806,6 +724,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))

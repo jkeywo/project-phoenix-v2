@@ -5,8 +5,8 @@ use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::ModifierSlot;
 use crate::messages::{
-    ClientMessage, Console, ConsoleHullStatus, RepairConsoleState, RepairTarget, ServerMessage,
-    SystemControlPayload, TeamSlot,
+    AdmittedCommands, ClientMessage, Console, ConsoleHullStatus, RepairConsoleState, RepairTarget,
+    ServerMessage, SystemControlPayload, TeamSlot,
 };
 use crate::modifiers::ShipModifiers;
 use crate::repair_teams::RepairTeams;
@@ -36,6 +36,7 @@ pub struct RepairPlugin;
 impl Plugin for RepairPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>();
+        app.init_resource::<crate::messages::AdmittedCommands>();
         app.insert_resource(ShipRepairTeams(RepairTeams::default()))
             .add_systems(Startup, spawn_repair_console_state_entity)
             .add_systems(
@@ -88,66 +89,52 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 /// ownerless ship-wide systems.
 pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
+    admitted: Res<AdmittedCommands>,
     sessions: Res<Sessions>,
     ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
+    // ── ControlSystem path (authority already checked at admission) ────────
+    for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
+        if let SystemControlPayload::DispatchRepairTeam {
+            team_idx,
+            target: repair_target,
+        } = &cmd.payload
+        {
+            let console = match repair_target {
+                RepairTarget::Station(station_id) => {
+                    match Console::from_console_id(&station_id.0) {
+                        Some(c) => c,
+                        None => continue,
+                    }
+                }
+                RepairTarget::Core => Console::Core,
+            };
+            teams.0.dispatch(*team_idx as usize, console);
+        }
+    }
+
+    // ── Legacy path (DispatchRepairTeam message type, still auth-gated here) ─
     let Ok((ship_config, control_sources)) = ship_query.single() else {
         return;
     };
-
     let policy = control_sources.0.policy_for(&repair_system_id());
-
+    if !policy.accept_human_input {
+        for _ in reader.read() {}
+        return;
+    }
+    let Some(repair_token) = sessions.0.console_holder(&Console::Repair, &ship_config.0) else {
+        for _ in reader.read() {}
+        return;
+    };
     for ev in reader.read() {
-        // Extract (team_idx, target_console) from either message form.
-        let (team_idx, target_console): (usize, Console) = match &ev.msg {
-            // ── Legacy path ───────────────────────────────────────────────
-            ClientMessage::DispatchRepairTeam { team_idx, console } => {
-                (*team_idx as usize, console.clone())
-            }
-            // ── ControlSystem path ────────────────────────────────────────
-            ClientMessage::ControlSystem { target, payload } if target.0 == REPAIR_SYSTEM_ID => {
-                match payload {
-                    SystemControlPayload::DispatchRepairTeam { team_idx, target } => {
-                        let console = match target {
-                            RepairTarget::Station(station_id) => {
-                                match Console::from_console_id(&station_id.0) {
-                                    Some(c) => c,
-                                    None => continue, // unknown station id
-                                }
-                            }
-                            RepairTarget::Core => Console::Core,
-                        };
-                        (*team_idx as usize, console)
-                    }
-                    _ => continue,
-                }
-            }
-            _ => continue,
-        };
-
-        // Gate: reject if the repair system is under AI control.
-        if !policy.accept_human_input {
-            continue;
-        }
-
-        // Gate: only the Repair console holder may dispatch teams.
-        let Some(repair_token) = sessions.0.console_holder(&Console::Repair, &ship_config.0) else {
-            warn!(
-                "[repair-auth] ignored repair action from token={} holder=None",
-                ev.token,
-            );
+        let ClientMessage::DispatchRepairTeam { team_idx, console } = &ev.msg else {
             continue;
         };
         if ev.token.as_str() != repair_token {
-            warn!(
-                "[repair-auth] ignored repair action from token={} holder={}",
-                ev.token, repair_token,
-            );
             continue;
         }
-
-        teams.0.dispatch(team_idx, target_console);
+        teams.0.dispatch(*team_idx as usize, console.clone());
     }
 }
 
@@ -279,6 +266,7 @@ mod tests {
         )
         .add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
+        .add_plugins(crate::server_app::AdmissionPlugin)
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))

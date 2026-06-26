@@ -1567,6 +1567,32 @@ pub enum SystemBlackboard {
     Helm(HelmBlackboard),
 }
 
+/// An authority-checked intra-system command produced by `admit_system_commands`.
+///
+/// The source identity is stripped at admission; `response_token` carries the
+/// originating client's token purely for routing replies (not for behavioral
+/// branching).
+#[derive(Clone, Debug)]
+pub struct AdmittedCommand {
+    pub target: SystemId,
+    pub payload: SystemControlPayload,
+    /// Token used to address a reply back to the originating client.
+    /// Handlers must not branch on this for any behavioral decision.
+    pub response_token: Option<String>,
+}
+
+/// Cleared and refilled each tick by `admit_system_commands` (runs before
+/// `SimSet::Input`). Handlers read from this instead of `InboundMessage`.
+#[derive(bevy::prelude::Resource, Default)]
+pub struct AdmittedCommands(pub Vec<AdmittedCommand>);
+
+impl AdmittedCommands {
+    /// Iterate admitted commands targeting the given system ID string.
+    pub fn for_target<'a>(&'a self, target: &'a str) -> impl Iterator<Item = &'a AdmittedCommand> {
+        self.0.iter().filter(move |c| c.target.0.as_str() == target)
+    }
+}
+
 /// Serialised Shields console state pushed to the HTML shields panel (issue #423).
 ///
 /// Broadcast at 10 Hz only to the player holding `Console::Shields`.

@@ -4,9 +4,9 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::comms_inbox::CommsInbox;
-use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
+use crate::lobby::{Sessions, Target, WorldResource};
 use crate::messages::{
-    ClientMessage, CommsContact, CommsMessage, Console, GamePhase, ServerMessage, ViewMode,
+    CommsContact, CommsMessage, Console, GamePhase, ServerMessage, ViewMode,
 };
 use crate::objectives::ObjectiveManager;
 use crate::ship_state::ShipState;
@@ -199,7 +199,8 @@ pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WorldContentRuntime>()
+        app.init_resource::<crate::messages::AdmittedCommands>()
+            .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()
@@ -714,35 +715,13 @@ fn mark_comms_dirty_on_game_start(
 /// Evaluates matching `on_hailed` comms templates for the target entity,
 /// injects new messages into the inbox, and records active dialogues.
 fn handle_hail(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<crate::messages::AdmittedCommands>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
 ) {
-    let (ship_config, control_sources) = match ship_query.single() {
-        Ok(pair) => pair,
-        Err(_) => return,
-    };
-    let policy = control_sources.0.policy_for(&crate::system_registry::comms_system_id());
-
-    for ev in reader.read() {
-        if !policy.accept_human_input {
-            continue;
-        }
-        // Gate: sender must hold Console::Comms.
-        if !sessions
-            .0
-            .player_has_console(&ev.token, &Console::Comms, &ship_config.0)
-        {
-            continue;
-        }
-
-        let target_uuid = match &ev.msg {
-            ClientMessage::ControlSystem {
-                target,
-                payload: crate::messages::SystemControlPayload::Hail { target_uuid },
-            } if target.0 == crate::system_registry::COMMS_SYSTEM_ID => target_uuid,
+    for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
+        let target_uuid = match &cmd.payload {
+            crate::messages::SystemControlPayload::Hail { target_uuid } => target_uuid,
             _ => continue,
         };
 
@@ -1063,9 +1042,7 @@ fn strip_parent_prefix(name: &str) -> &str {
 /// Records the chosen response on the inbox message, fires any associated
 /// trigger actions, and advances the dialogue to the follow-up node if present.
 fn handle_respond_to_message(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<crate::messages::AdmittedCommands>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
@@ -1084,34 +1061,12 @@ fn handle_respond_to_message(
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
 ) {
-    let (ship_config, control_sources) = match ship_query.single() {
-        Ok(pair) => pair,
-        Err(_) => return,
-    };
-    let policy = control_sources.0.policy_for(&crate::system_registry::comms_system_id());
-
-    for ev in reader.read() {
-        if !policy.accept_human_input {
-            continue;
-        }
-        if !sessions
-            .0
-            .player_has_console(&ev.token, &Console::Comms, &ship_config.0)
-        {
-            continue;
-        }
-
-        let (message_id, response_index) = match &ev.msg {
-            ClientMessage::ControlSystem {
-                target,
-                payload:
-                    crate::messages::SystemControlPayload::RespondToMessage {
-                        message_id,
-                        response_index,
-                    },
-            } if target.0 == crate::system_registry::COMMS_SYSTEM_ID => {
-                (message_id, response_index)
-            }
+    for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
+        let (message_id, response_index) = match &cmd.payload {
+            crate::messages::SystemControlPayload::RespondToMessage {
+                message_id,
+                response_index,
+            } => (message_id, response_index),
             _ => continue,
         };
 
@@ -1738,36 +1693,11 @@ fn handle_respond_to_message(
 
 /// Handle `ClearComms` from Comms console holders.
 fn handle_clear_comms(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<crate::messages::AdmittedCommands>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
-    let (ship_config, control_sources) = match ship_query.single() {
-        Ok(pair) => pair,
-        Err(_) => return,
-    };
-    let policy = control_sources.0.policy_for(&crate::system_registry::comms_system_id());
-
-    for ev in reader.read() {
-        if !policy.accept_human_input {
-            continue;
-        }
-        if !sessions
-            .0
-            .player_has_console(&ev.token, &Console::Comms, &ship_config.0)
-        {
-            continue;
-        }
-
-        let is_clear = match &ev.msg {
-            ClientMessage::ControlSystem {
-                target,
-                payload: crate::messages::SystemControlPayload::ClearComms,
-            } if target.0 == crate::system_registry::COMMS_SYSTEM_ID => true,
-            _ => false,
-        };
-        if is_clear {
+    for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
+        if matches!(cmd.payload, crate::messages::SystemControlPayload::ClearComms) {
             inbox.0.clear();
         }
     }
@@ -1778,35 +1708,16 @@ fn handle_clear_comms(
 /// Looks up the message in the inbox, stores it in `OnScreenMessage`, and
 /// pushes `ViewMode::Comms` so the viewscreen switches to the comms overlay.
 fn handle_show_on_screen(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &crate::ship_plugin::ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<crate::messages::AdmittedCommands>,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
     mut ship: ResMut<ShipState>,
 ) {
-    let (ship_config, control_sources) = match ship_query.single() {
-        Ok(pair) => pair,
-        Err(_) => return,
-    };
-    let policy = control_sources.0.policy_for(&crate::system_registry::comms_system_id());
-
-    for ev in reader.read() {
-        if !policy.accept_human_input {
-            continue;
-        }
-        if !sessions
-            .0
-            .player_has_console(&ev.token, &Console::Comms, &ship_config.0)
-        {
-            continue;
-        }
-
-        let show_message_id: Option<&String> = match &ev.msg {
-            ClientMessage::ControlSystem {
-                target,
-                payload: crate::messages::SystemControlPayload::ShowOnScreen { message_id },
-            } if target.0 == crate::system_registry::COMMS_SYSTEM_ID => Some(message_id),
+    for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
+        let show_message_id: Option<&String> = match &cmd.payload {
+            crate::messages::SystemControlPayload::ShowOnScreen { message_id } => {
+                Some(message_id)
+            }
             _ => None,
         };
         if let Some(message_id) = show_message_id {
@@ -3406,7 +3317,7 @@ fn load_scenario_toml(path: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::ai_plugin::{AiEntityAttacked, AiEntityDestroyed};
-    use crate::lobby::{LobbyPlugin, OutboundMessage, WorldResource};
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, WorldResource};
     use crate::messages::*;
     use crate::world::content::{
         CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition,
@@ -3474,6 +3385,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
@@ -3491,7 +3403,8 @@ mod tests {
                     broadcast_comms_state,
                     broadcast_objective_summary,
                 )
-                    .chain(),
+                    .chain()
+                    .after(crate::server_app::AdmissionSet),
             )
             .add_systems(PostUpdate, collect);
         app.world_mut().spawn((

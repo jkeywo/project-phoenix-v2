@@ -6,9 +6,9 @@ use crate::console_bridge::ConsoleStateChanged;
 use crate::entity_spawner::EntityConsoleHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    ClientMessage, Console, GamePhase, ModifierSlot, PhaserBank, PhaserBankClientConfig,
-    PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage, SystemControlPayload,
-    TorpedoTubeClientConfig, TorpedoTubeState, WeaponsConsoleState,
+    AdmittedCommands, ClientMessage, Console, GamePhase, ModifierSlot, PhaserBank,
+    PhaserBankClientConfig, PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage,
+    SystemControlPayload, TorpedoTubeClientConfig, TorpedoTubeState, WeaponsConsoleState,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipState;
@@ -224,6 +224,7 @@ pub struct WeaponsPlugin;
 
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<crate::messages::AdmittedCommands>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>()
             .init_resource::<WeaponsTarget>()
             .init_resource::<LastWeaponsUpdate>()
@@ -305,9 +306,7 @@ fn live_entity_xz(
 }
 
 fn handle_set_target(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<AdmittedCommands>,
     ship: Res<ShipState>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
@@ -316,38 +315,15 @@ fn handle_set_target(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    let Ok((ship_authoring_config, control_sources)) = ship_query.single() else { return; };
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::tactical_system_id());
-    for ev in reader.read() {
-        let uuid: &str = match &ev.msg {
-            ClientMessage::ControlSystem { target, payload }
-                if target.0 == crate::system_registry::TACTICAL_SYSTEM_ID =>
-            {
-                match payload {
-                    SystemControlPayload::SetTarget { uuid } => uuid.as_str(),
-                    _ => continue,
-                }
-            }
-            _ => continue,
+    for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
+        let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
+            continue;
         };
-
-        if !policy.accept_human_input {
-            continue;
-        }
-
-        let holder = sessions
-            .0
-            .console_holder(&Console::Tactical, &ship_authoring_config.0);
-        if holder != Some(ev.token.as_str()) {
-            continue;
-        }
 
         let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
         let base_range = ship_config.0.tactical_radar_range;
         let effective_weapons_range = base_range * radar_range_mult;
-        let live_pos = live_entity_xz(uuid, &asteroid_q, &entity_q);
+        let live_pos = live_entity_xz(uuid.as_str(), &asteroid_q, &entity_q);
         let locked = match live_pos {
             None => false,
             Some((x, z)) => {
@@ -357,18 +333,20 @@ fn handle_set_target(
             }
         };
         if locked {
-            weapons_target.0 = Some(uuid.to_string());
+            weapons_target.0 = Some(uuid.clone());
         } else {
             weapons_target.0 = None;
         }
 
-        outbox.0.push((
-            Target::Token(ev.token.clone()),
-            ServerMessage::TargetLock {
-                uuid: uuid.to_string(),
-                locked,
-            },
-        ));
+        if let Some(reply_token) = &cmd.response_token {
+            outbox.0.push((
+                Target::Token(reply_token.clone()),
+                ServerMessage::TargetLock {
+                    uuid: uuid.clone(),
+                    locked,
+                },
+            ));
+        }
     }
 }
 
@@ -987,38 +965,13 @@ fn handle_fire_phaser_npc(
 }
 
 fn handle_set_phaser_mode(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
+    admitted: Res<AdmittedCommands>,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::tactical_system_id());
-    for ev in reader.read() {
-        let mode: PhaserMode = match &ev.msg {
-            ClientMessage::ControlSystem { target, payload }
-                if target.0 == crate::system_registry::TACTICAL_SYSTEM_ID =>
-            {
-                match payload {
-                    SystemControlPayload::SetPhaserMode { mode } => *mode,
-                    _ => continue,
-                }
-            }
-            _ => continue,
-        };
-        if !policy.accept_human_input {
-            continue;
+    for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
+        if let SystemControlPayload::SetPhaserMode { mode } = &cmd.payload {
+            phaser_mode.0 = *mode;
         }
-        if sessions
-            .0
-            .console_holder(&Console::Tactical, &ship_config.0)
-            != Some(ev.token.as_str())
-        {
-            continue;
-        }
-        phaser_mode.0 = mode;
     }
 }
 
@@ -2499,6 +2452,7 @@ station = "tactical"
         )
         .add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
+        .add_plugins(crate::server_app::AdmissionPlugin)
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))

@@ -1561,6 +1561,25 @@ pub struct WeaponsBlackboard {
 pub enum SystemBlackboard {
     Helm(HelmBlackboard),
     Weapons(WeaponsBlackboard),
+    Power(PowerBlackboard),
+}
+
+/// Raw sim truth for the Power system, published each tick into the ship
+/// blackboard (issue #561).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PowerBlackboard {
+    /// Per-console power allocation entries (data-driven from ship config).
+    pub consoles: Vec<PowerConsoleEntry>,
+    /// Sum of current allocations across all powered consoles.
+    pub total: u8,
+    /// Maximum total allocation (pool cap).
+    pub total_max: u8,
+    /// Current battery charge (0 – `battery_max`).
+    pub battery_charge: f32,
+    /// Maximum battery capacity.
+    pub battery_max: f32,
+    /// Whether the power system is locked (battery exhausted).
+    pub locked: bool,
 }
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.
@@ -1645,28 +1664,7 @@ pub struct ShieldsConsoleState {
     pub target_bearing: Option<f32>,
 }
 
-/// Serialised Power console state pushed to the HTML power panel (issue #425).
-///
-/// Data-driven: `consoles` is derived from `PowerMultiplierResource` so adding
-/// new powered consoles in the ship TOML automatically extends the panel without
-/// any HTML changes.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct PowerConsoleState {
-    /// Per-console power allocation entries. One entry per powered console.
-    pub consoles: Vec<PowerConsoleEntry>,
-    /// Sum of current allocations across all powered consoles.
-    pub total: u8,
-    /// Maximum total allocation (pool cap).
-    pub total_max: u8,
-    /// Current battery charge (0 – `battery_max`).
-    pub battery_charge: f32,
-    /// Maximum battery capacity (from `PowerConfig::capacity`).
-    pub battery_max: f32,
-    /// Whether the power system is locked (battery exhausted).
-    pub locked: bool,
-}
-
-/// A single entry in [`PowerConsoleState::consoles`].
+/// A single entry in [`PowerBlackboard::consoles`].
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PowerConsoleEntry {
     /// Console identifier — the `Console` enum variant name (e.g. `"Helm"`).

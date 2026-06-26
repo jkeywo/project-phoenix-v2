@@ -407,16 +407,34 @@ export function buildRepairConsoleState(state) {
 
 /**
  * Power console.
- * @param {{ powerHelm, powerWeapons, powerSensors, powerBattery, powerLocked }} state
+ *
+ * Reads raw sim truth from `state.blackboards['power']` (PowerBlackboard),
+ * falling back to legacy camelCase properties from PowerState messages.
+ *
+ * @param {{ blackboards?, powerHelm?, powerWeapons?, powerSensors?,
+ *           powerBattery?, powerLocked? }} state
  */
 export function buildPowerConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['power']) || null;
+  if (bb) {
+    return JSON.stringify({
+      consoles:       bb.consoles       || [],
+      total:          bb.total          ?? 0,
+      total_max:      bb.total_max      ?? 8,
+      battery_charge: bb.battery_charge ?? 0,
+      battery_max:    bb.battery_max    ?? 100,
+      locked:         bb.locked         || false,
+      own_hull:       ownHull('Power', state),
+    });
+  }
+  // Legacy fallback: PowerState message fields.
   return JSON.stringify({
     helm:           state.powerHelm    || 0,
     weapons:        state.powerWeapons || 0,
     sensors:        state.powerSensors || 0,
     battery_charge: state.powerBattery || 0,
     locked:         state.powerLocked  || false,
-    own_hull: ownHull('Power', state),
+    own_hull:       ownHull('Power', state),
   });
 }
 

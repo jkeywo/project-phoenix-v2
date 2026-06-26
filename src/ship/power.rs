@@ -1,10 +1,9 @@
 use bevy::prelude::*;
 
-use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    Console, InterSystemPayload, InterSystemQueue, PowerConsoleEntry, PowerConsoleState,
-    ServerMessage,
+    Console, InterSystemPayload, InterSystemQueue, PowerBlackboard, PowerConsoleEntry,
+    ServerMessage, SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
     power_group_for_console, power_level_for_console, PowerConfig, PowerSystem,
@@ -74,15 +73,6 @@ impl Default for PowerAiConfigResource {
     }
 }
 
-// ── Console state component ────────────────────────────────────────────────────
-
-/// Bevy component that caches the current `PowerConsoleState` for the HTML panel.
-///
-/// Spawned once at `Startup`, recomputed each broadcast frame, and pushed via
-/// `ConsoleStateChanged` whenever the value changes (Bevy `Changed<T>` filter).
-#[derive(Component, Clone, PartialEq)]
-pub struct PowerConsoleStateComp(pub PowerConsoleState);
-
 /// Canonical display order for powered consoles in the HTML panel.
 ///
 /// Consoles absent from `PowerMultiplierResource.multipliers` are skipped,
@@ -127,14 +117,12 @@ pub struct ShipPowerPlugin;
 
 impl Plugin for ShipPowerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ConsoleStateChanged>();
         app.init_resource::<crate::messages::AdmittedCommands>();
         app.init_resource::<crate::messages::InterSystemQueue>();
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
             .init_resource::<PowerAiConfigResource>()
-            .add_systems(Startup, spawn_power_console_state_entity)
             .add_systems(
                 Update,
                 (
@@ -142,10 +130,7 @@ impl Plugin for ShipPowerPlugin {
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
                     operate_power_ai.in_set(crate::sim_sets::SimSet::Physics),
                     handle_power_inter_system.in_set(crate::sim_sets::SimSet::Modifiers),
-                    recompute_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-                    push_power_console_state
-                        .in_set(crate::sim_sets::SimSet::Broadcast)
-                        .after(recompute_power_console_state),
+                    publish_power_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             )
             .add_plugins(power_state_broadcaster());
@@ -293,23 +278,16 @@ pub fn operate_power_ai(
     power.0.sensors = power.0.sensors.clamp(1, 4);
 }
 
-// ── HTML console state push ────────────────────────────────────────────────────
+// ── Blackboard publish (issue #561) ──────────────────────────────────────────
 
-pub fn spawn_power_console_state_entity(mut commands: Commands) {
-    commands.spawn(PowerConsoleStateComp(PowerConsoleState::default()));
-}
-
-/// Recompute `PowerConsoleStateComp` from live resources each broadcast frame.
-///
-/// The component is only mutated when the computed value differs from the stored
-/// one, so `Changed<PowerConsoleStateComp>` will only fire when something actually
-/// changed — preventing spurious HTML pushes.
-pub fn recompute_power_console_state(
+fn publish_power_blackboard(
     power: Res<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
     multipliers: Res<PowerMultiplierResource>,
-    mut q: Query<&mut PowerConsoleStateComp>,
+    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
+    use crate::system_registry::POWER_SYSTEM_ID;
+
     let entries: Vec<PowerConsoleEntry> = POWER_CONSOLE_ORDER
         .iter()
         .filter(|c| multipliers.multipliers.contains_key(c))
@@ -326,35 +304,19 @@ pub fn recompute_power_console_state(
         })
         .collect();
 
-    let next = PowerConsoleState {
+    let bb = PowerBlackboard {
+        consoles: entries,
         total: power.0.total(),
         total_max: 8,
         battery_charge: power.0.battery_charge,
         battery_max: config.0.capacity,
         locked: power.0.locked,
-        consoles: entries,
     };
 
-    for mut comp in q.iter_mut() {
-        if comp.0 != next {
-            comp.0 = next.clone();
-        }
-    }
-}
-
-/// Push `PowerConsoleState` as a `ConsoleStateChanged` whenever it changes.
-pub fn push_power_console_state(
-    q: Query<&PowerConsoleStateComp, Changed<PowerConsoleStateComp>>,
-    mut writer: MessageWriter<ConsoleStateChanged>,
-) {
-    for comp in q.iter() {
-        if let Ok(json) = crate::core::codec::encode_console_state(&comp.0) {
-            writer.write(ConsoleStateChanged {
-                name: "Power".into(),
-                json,
-            });
-        }
-    }
+    blackboards.0.insert(
+        SystemId(POWER_SYSTEM_ID.to_string()),
+        SystemBlackboard::Power(bb),
+    );
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -406,6 +368,7 @@ mod tests {
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
+            .init_resource::<crate::server_app::SystemBlackboards>()
             .add_plugins(ShipPowerPlugin)
             .add_systems(
                 Update,
@@ -708,129 +671,47 @@ mod tests {
         );
     }
 
-    // ── HTML push tests ─────────────────────────────────────────────────────
+    // ── Blackboard publish tests ────────────────────────────────────────────
 
-    #[derive(Resource, Default)]
-    struct PushOutbox(Vec<ConsoleStateChanged>);
-
-    fn collect_pushes(
-        mut reader: MessageReader<ConsoleStateChanged>,
-        mut box_: ResMut<PushOutbox>,
-    ) {
-        for m in reader.read() {
-            box_.0.push(m.clone());
+    fn power_blackboard(app: &mut App) -> PowerBlackboard {
+        use crate::messages::{SystemBlackboard, SystemId};
+        use crate::server_app::SystemBlackboards;
+        use crate::system_registry::POWER_SYSTEM_ID;
+        let bbs = app.world().resource::<SystemBlackboards>();
+        match bbs.0.get(&SystemId(POWER_SYSTEM_ID.to_string())) {
+            Some(SystemBlackboard::Power(bb)) => bb.clone(),
+            _ => PowerBlackboard::default(),
         }
     }
 
-    fn push_test_app() -> App {
-        let mut app = App::new();
-        app.add_message::<ConsoleStateChanged>()
-            .insert_resource(ShipPowerSystem(PowerSystem::default()))
-            .init_resource::<PowerConfigResource>()
-            .init_resource::<PowerMultiplierResource>()
-            .init_resource::<PushOutbox>()
-            .add_systems(Startup, spawn_power_console_state_entity)
-            .add_systems(
-                Update,
-                (
-                    recompute_power_console_state,
-                    push_power_console_state.after(recompute_power_console_state),
-                    collect_pushes.after(push_power_console_state),
-                ),
-            );
-        app
+    #[test]
+    fn publish_power_blackboard_contains_correct_data() {
+        let mut app = test_app();
+        start_game(&mut app);
+        tick(&mut app);
+
+        let bb = power_blackboard(&mut app);
+        assert!(!bb.consoles.is_empty(), "expected at least one power console entry");
+        assert!(bb.consoles.iter().any(|e| e.label == "HELM"), "expected HELM entry");
+        assert!(bb.consoles.iter().any(|e| e.label == "WEAPONS"), "expected WEAPONS entry");
+        assert!(bb.consoles.iter().any(|e| e.label == "SENSORS"), "expected SENSORS entry");
+        assert!(bb.total > 0, "total should be > 0");
+        assert!(!bb.locked, "should not be locked initially");
     }
 
     #[test]
-    fn push_emits_power_console_state_on_first_update() {
-        let mut app = push_test_app();
-        app.update();
+    fn publish_power_blackboard_reflects_helm_level_change() {
+        let mut app = test_app();
+        // Human holds Power so operate_power_ai yields and doesn't override.
+        start_game_with_power(&mut app);
+        tick(&mut app);
 
-        let pushes = &app.world().resource::<PushOutbox>().0;
-        assert!(
-            !pushes.is_empty(),
-            "expected at least one ConsoleStateChanged on startup"
-        );
-        let push = pushes
-            .iter()
-            .find(|p| p.name == "Power")
-            .expect("expected push named 'Power'");
-        assert!(
-            push.json.contains("\"consoles\""),
-            "json should contain consoles array: {}",
-            push.json
-        );
-        assert!(
-            push.json.contains("\"HELM\""),
-            "json should contain HELM label: {}",
-            push.json
-        );
-        assert!(
-            push.json.contains("\"total\""),
-            "json should contain total field: {}",
-            push.json
-        );
-        assert!(
-            push.json.contains("\"locked\""),
-            "json should contain locked field: {}",
-            push.json
-        );
-    }
-
-    #[test]
-    fn push_emits_on_power_change_and_not_without_change() {
-        let mut app = push_test_app();
-        // First update: spawned component is Changed → push fires.
-        app.update();
-        app.world_mut().resource_mut::<PushOutbox>().0.clear();
-
-        // No state change → no push.
-        app.update();
-        assert!(
-            app.world().resource::<PushOutbox>().0.is_empty(),
-            "no push expected when state has not changed"
-        );
-
-        // Mutate helm power → recompute detects change → push fires.
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 3;
-        app.update();
-        let pushes = &app.world().resource::<PushOutbox>().0;
-        assert!(!pushes.is_empty(), "expected push after helm power change");
-        let push = pushes.iter().find(|p| p.name == "Power").unwrap();
-        assert!(
-            push.json.contains("3"),
-            "new level 3 should appear in json: {}",
-            push.json
-        );
-    }
+        tick(&mut app);
 
-    #[test]
-    fn push_json_contains_correct_labels_and_ids() {
-        let mut app = push_test_app();
-        app.update();
-
-        let pushes = &app.world().resource::<PushOutbox>().0;
-        let push = pushes.iter().find(|p| p.name == "Power").unwrap();
-        assert!(
-            push.json.contains("\"helm\""),
-            "id should be helm power group id: {}",
-            push.json
-        );
-        assert!(
-            push.json.contains("\"HELM\""),
-            "label should be HELM: {}",
-            push.json
-        );
-        assert!(
-            push.json.contains("\"WEAPONS\""),
-            "Tactical label should be WEAPONS: {}",
-            push.json
-        );
-        assert!(
-            push.json.contains("\"SENSORS\""),
-            "Sensors label should be SENSORS: {}",
-            push.json
-        );
+        let bb = power_blackboard(&mut app);
+        let helm_entry = bb.consoles.iter().find(|e| e.label == "HELM").unwrap();
+        assert_eq!(helm_entry.level, 3, "helm level should be 3 after direct assignment");
     }
 
     #[test]

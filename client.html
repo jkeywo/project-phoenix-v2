@@ -1805,6 +1805,7 @@
           const updatedSystems = new Set((msg.data.updates || []).map(([id]) => id));
           if (updatedSystems.has('tactical')) pushWeaponsConsoleState();
           if (updatedSystems.has('helm'))     pushHelmConsoleState();
+          if (updatedSystems.has('power'))    pushPowerConsoleState();
           return;
         }
         case 'WeaponsUpdate': {

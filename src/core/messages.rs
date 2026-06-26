@@ -1363,12 +1363,12 @@ pub struct ViewscreenHudState {
 ///
 /// Positions are normalised to `[-1.0, 1.0]` where ±1.0 = the effective
 /// tactical radar range (base `tactical_radar_range` × `RadarRange` modifier).
-/// Produced server-side by `recompute_weapons_console_state` from live ECS
+/// Produced server-side by `publish_weapons_blackboard` from live ECS
 /// transforms joined with the static world entity registry for tags/radius.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RadarBlip {
     /// Stable entity UUID — matches `EntitySnapshot::uuid`. Used to correlate
-    /// with `WeaponsConsoleState::target_uuid` for lock highlight.
+    /// with `WeaponsBlackboard::target_uuid` for lock highlight.
     pub uuid: String,
     /// Radar-space X normalised to `[-1.0, 1.0]` at effective tactical range.
     /// Positive = starboard (right on the radar display).
@@ -1449,39 +1449,9 @@ pub struct RadarRegion {
     pub name: Option<String>,
 }
 
-/// Serialised Tactical (Weapons) console state pushed to the HTML console
-/// (issue #422). Mirrors the data assembled by `weapons_update_broadcaster`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct WeaponsConsoleState {
-    pub target_uuid: Option<String>,
-    #[serde(default)]
-    pub target_name: Option<String>,
-    pub banks: Vec<PhaserBankState>,
-    pub tubes: Vec<TorpedoTubeState>,
-    pub torpedo_count: u32,
-    pub phaser_mode: PhaserMode,
-    /// Phaser bank fire-arc geometry (static, sourced from `ShipClientConfigResource`).
-    /// Included in every push so the HTML console can draw arc overlays without
-    /// ever receiving a `Welcome` message (which only goes to Bevy clients).
-    #[serde(default)]
-    pub phaser_arcs: Vec<PhaserBankClientConfig>,
-    /// Torpedo tube fire-arc geometry (static, from `ShipClientConfigResource`).
-    #[serde(default)]
-    pub torpedo_arcs: Vec<TorpedoTubeClientConfig>,
-    /// Live radar blips: entities within effective tactical radar range, filtered
-    /// by `tactical_radar_shows`. Normalised to `[-1.0, 1.0]` radar space where
-    /// ±1.0 = effective range boundary.
-    #[serde(default)]
-    pub blips: Vec<RadarBlip>,
-    /// Region shapes for zone overlays on the HTML radar widget.
-    /// Sourced from world entities that carry a `shape` field.
-    #[serde(default)]
-    pub regions: Vec<RadarRegion>,
-}
-
 /// Serialised Captain console state pushed to the HTML captain panel.
 ///
-/// Mirrors `WeaponsConsoleState` — written into a single
+/// Written into a single
 /// `CaptainConsoleStateComp` component and pushed on change via
 /// `ConsoleStateChanged { name: "CaptainChair", json }`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1558,6 +1528,31 @@ pub struct HelmBlackboard {
     pub boost_enabled: bool,
 }
 
+/// Raw sim truth for the Weapons (Tactical) system, published each tick into
+/// the ship blackboard (issue #560).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct WeaponsBlackboard {
+    pub target_uuid: Option<String>,
+    pub target_name: Option<String>,
+    pub banks: Vec<PhaserBankState>,
+    pub tubes: Vec<TorpedoTubeState>,
+    pub torpedo_count: u32,
+    pub phaser_mode: PhaserMode,
+    /// Static phaser bank arc geometry (from ship config). Included so JS can
+    /// draw arc overlays without a separate config request.
+    #[serde(default)]
+    pub phaser_arcs: Vec<PhaserBankClientConfig>,
+    /// Static torpedo tube arc geometry (from ship config).
+    #[serde(default)]
+    pub torpedo_arcs: Vec<TorpedoTubeClientConfig>,
+    /// Radar blips projected into normalised ship-relative coordinates.
+    #[serde(default)]
+    pub blips: Vec<RadarBlip>,
+    /// World region overlays (static shapes drawn on the radar canvas).
+    #[serde(default)]
+    pub regions: Vec<RadarRegion>,
+}
+
 /// Per-system blackboard published each tick. One typed variant per system
 /// kind, mirroring the `SystemControlPayload` design. Wire-serialised as a
 /// tagged enum so the JS mirror can switch on `kind`.
@@ -1565,6 +1560,7 @@ pub struct HelmBlackboard {
 #[serde(tag = "kind", content = "data")]
 pub enum SystemBlackboard {
     Helm(HelmBlackboard),
+    Weapons(WeaponsBlackboard),
 }
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.

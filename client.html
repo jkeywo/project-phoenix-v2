@@ -1613,6 +1613,9 @@
             state.navigationWaypoint = window.simState.navigationWaypoint;
             state.controlSources = window.simState.controlSources || {};
             state.stationRatings = window.simState.stationRatings || {};
+            // Live blackboard reference — simState.blackboards is mutated in-place
+            // each tick so this reference assignment keeps state.blackboards current.
+            state.blackboards = window.simState.blackboards;
             // Push the pre-seeded repair teams so the Repair console renders its
             // rows immediately on (re)connect, before the first RepairState
             // broadcast (no-op unless Repair is the active console).
@@ -1793,6 +1796,15 @@
             state.weaponsFireReady = false;
           }
           pushWeaponsConsoleState();
+          return;
+        }
+        case 'BlackboardUpdate': {
+          // simState.apply() already wrote blackboards[systemId] = bb.data above.
+          // state.blackboards is the same object reference, so it's already current.
+          // Fire iframe pushes for any system whose blackboard was updated.
+          const updatedSystems = new Set((msg.data.updates || []).map(([id]) => id));
+          if (updatedSystems.has('tactical')) pushWeaponsConsoleState();
+          if (updatedSystems.has('helm'))     pushHelmConsoleState();
           return;
         }
         case 'WeaponsUpdate': {

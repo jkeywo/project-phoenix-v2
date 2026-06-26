@@ -2883,12 +2883,13 @@ mod tests {
     }
 
     #[test]
-    fn encode_console_state_round_trips_weapons() {
-        let state = WeaponsConsoleState {
+    fn system_blackboard_weapons_round_trips_json_codec() {
+        use crate::messages::{WeaponsBlackboard, SystemBlackboard, SystemId};
+        let bb = SystemBlackboard::Weapons(WeaponsBlackboard {
             target_uuid: Some("tgt-1".into()),
-            target_name: None,
+            target_name: Some("Raider Alpha".into()),
             banks: vec![PhaserBankState {
-                id: "port".into(),
+                id: "fore".into(),
                 fire_ready: true,
                 on_cooldown: false,
                 cooldown_remaining: 0.0,
@@ -2901,16 +2902,18 @@ mod tests {
                 progress: 1.0,
                 load_time: 10.0,
             }],
-            torpedo_count: 6,
+            torpedo_count: 4,
             phaser_mode: PhaserMode::Auto,
             phaser_arcs: Vec::new(),
             torpedo_arcs: Vec::new(),
             blips: Vec::new(),
             regions: Vec::new(),
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("tactical".into()), bb)],
         };
-        let json = encode_console_state(&state).expect("encode console");
-        let decoded: WeaponsConsoleState = serde_json::from_str(&json).unwrap();
-        assert_eq!(state, decoded);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
@@ -3279,48 +3282,4 @@ mod tests {
         assert!(json.contains("\"target_bearing\":"), "got: {json}");
     }
 
-    #[test]
-    fn weapons_console_state_with_regions_round_trips() {
-        let state = WeaponsConsoleState {
-            target_uuid: None,
-            target_name: None,
-            banks: Vec::new(),
-            tubes: Vec::new(),
-            torpedo_count: 0,
-            phaser_mode: PhaserMode::Auto,
-            phaser_arcs: Vec::new(),
-            torpedo_arcs: Vec::new(),
-            blips: vec![RadarBlip {
-                uuid: "ent-1".into(),
-                radar_x: 0.2,
-                radar_y: 0.4,
-                scaled_radius: 0.05,
-                kind: "asteroid".into(),
-                icon: "asteroid".into(),
-                color: [0.478, 0.753, 1.0],
-                objective_target: false,
-                name: None,
-                selectable: false,
-                threat_level: None,
-                description: None,
-                target_tags: Vec::new(),
-            }],
-            regions: vec![RadarRegion {
-                uuid: "zone-1".into(),
-                x: 50.0,
-                z: 50.0,
-                shape: "torus".into(),
-                radius: Some(80.0),
-                inner_radius: Some(20.0),
-                outer_radius: Some(80.0),
-                half_extents: None,
-                yaw: None,
-                color: [0.5, 0.2, 1.0],
-                name: Some("Ion Storm".into()),
-            }],
-        };
-        let json = encode_console_state(&state).expect("encode");
-        let decoded: WeaponsConsoleState = serde_json::from_str(&json).unwrap();
-        assert_eq!(state, decoded);
-    }
 }

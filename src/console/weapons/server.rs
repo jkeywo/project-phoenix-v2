@@ -1,15 +1,13 @@
 use bevy::prelude::*;
 
 use crate::ai_plugin::{AiControllerComponent, AiTokenRegistry, EntityPhaserState};
-use crate::codec;
-use crate::console_bridge::ConsoleStateChanged;
 use crate::entity_spawner::EntityConsoleHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     AdmittedCommands, ClientMessage, Console, GamePhase, InterSystemMsg, InterSystemPayload,
     InterSystemQueue, ModifierSlot, PhaserBank, PhaserBankClientConfig, PhaserBankState,
-    PhaserMode, RadarBlip, RadarRegion, ServerMessage, SystemControlPayload,
-    TorpedoTubeClientConfig, TorpedoTubeState, WeaponsConsoleState,
+    PhaserMode, RadarBlip, RadarRegion, ServerMessage, SystemBlackboard, SystemControlPayload,
+    SystemId, TorpedoTubeClientConfig, TorpedoTubeState, WeaponsBlackboard,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipState;
@@ -245,10 +243,8 @@ impl Plugin for WeaponsPlugin {
                 TorpedoConfig::default(),
             )))
             .add_message::<AsteroidDestroyedVfx>()
-            .add_message::<ConsoleStateChanged>()
             .add_observer(on_beam_started)
             .add_observer(on_beam_ended)
-            .add_systems(Startup, spawn_weapons_console_state_entity)
             .add_systems(
                 Update,
                 (
@@ -275,11 +271,7 @@ impl Plugin for WeaponsPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    recompute_weapons_console_state,
-                    push_weapons_console_state.after(recompute_weapons_console_state),
-                )
-                    .run_if(in_state(GamePhase::InProgress)),
+                publish_weapons_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             );
     }
 }
@@ -1984,33 +1976,227 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
     )
 }
 
-// ── HTML console state push (issue #422) ────────────────────────────────────
-//
-// Mirrors the data `weapons_update_broadcaster` assembles, but writes it into a
-// single `WeaponsConsoleStateComp` component on change so a `Changed<...>`
-// system can encode + emit a `ConsoleStateChanged` message. The wasm
-// forwarding to the JS `__updateConsole` callback lives in
-// `bridge::flush_console_state`.
+// ── Blackboard publish (issue #560) ─────────────────────────────────────────
 
-/// Single-entity component carrying the latest serialised Tactical console
-/// state. Bevy change-detection drives the JS push.
-#[derive(Component, Clone, PartialEq)]
-pub struct WeaponsConsoleStateComp(pub WeaponsConsoleState);
+/// Publish the Weapons system's blackboard from current sim state.
+/// Runs in `SimSet::Publish` (phase 1a). Dirty-tracking and broadcast are
+/// handled globally by `broadcast_blackboard_updates` in `SimSet::Broadcast`.
+fn publish_weapons_blackboard(
+    weapons_target: Res<WeaponsTarget>,
+    beam: Res<ActiveBeam>,
+    cooldown: Res<PhaserCooldown>,
+    combat_config: Res<PhaserCombatConfigResource>,
+    phaser_mode: Res<CurrentPhaserMode>,
+    torpedo_sys: Res<TorpedoSystemResource>,
+    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    ship: Res<ShipState>,
+    modifiers: Res<crate::modifiers::ShipModifiers>,
+    world_res: Res<WorldResource>,
+    entity_name_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityName,
+    )>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+) {
+    use crate::system_registry::TACTICAL_SYSTEM_ID;
 
-/// Startup system: spawn the single entity carrying the Tactical console state.
-fn spawn_weapons_console_state_entity(mut commands: Commands) {
-    commands.spawn(WeaponsConsoleStateComp(WeaponsConsoleState {
-        target_uuid: None,
-        target_name: None,
-        banks: Vec::new(),
-        tubes: Vec::new(),
-        torpedo_count: 0,
-        phaser_mode: crate::messages::PhaserMode::Auto,
-        phaser_arcs: Vec::new(),
-        torpedo_arcs: Vec::new(),
-        blips: Vec::new(),
-        regions: Vec::new(),
-    }));
+    let target_uuid = weapons_target.0.clone();
+    let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
+    let beam_active = beam.target_uuid.is_some();
+    let active_beam_bank = beam.bank.clone();
+
+    let target_live_pos: Option<(f32, f32)> = target_uuid
+        .as_deref()
+        .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
+
+    let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
+        entity_name_q
+            .iter()
+            .find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
+    });
+
+    let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
+        let effective_range =
+            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
+        let fire_ready = match target_live_pos {
+            None => false,
+            Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
+                tx,
+                tz,
+                ship.x,
+                ship.z,
+                ship.yaw,
+                effective_range,
+            ),
+        };
+        let cd = cooldown.bank_remaining_secs("");
+        vec![PhaserBankState {
+            id: String::new(),
+            fire_ready,
+            on_cooldown: beam_active || cd > 0.0,
+            cooldown_remaining: cd,
+        }]
+    } else {
+        combat_config
+            .0
+            .banks
+            .iter()
+            .map(|b| {
+                let bank_ready = match target_live_pos {
+                    None => false,
+                    Some((tx, tz)) => {
+                        let bank_base_range = if b.beam_range > 0.0 {
+                            b.beam_range
+                        } else {
+                            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                        };
+                        let effective_bank_range = bank_base_range * radar_range_mult;
+                        let (rx, ry) =
+                            crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
+                        let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
+                            <= effective_bank_range * effective_bank_range;
+                        range_ok && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
+                    }
+                };
+                let cd = cooldown.bank_remaining_secs(b.id.as_str());
+                let beam_on_this_bank =
+                    beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
+                PhaserBankState {
+                    id: b.id.clone(),
+                    fire_ready: bank_ready,
+                    on_cooldown: beam_on_this_bank || cd > 0.0,
+                    cooldown_remaining: cd,
+                }
+            })
+            .collect()
+    };
+
+    let tubes: Vec<TorpedoTubeState> = torpedo_sys
+        .0
+        .tubes
+        .iter()
+        .map(|t| {
+            let remaining = match &t.load_state {
+                crate::torpedo::TubeLoadState::Loading { remaining, .. }
+                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                _ => 0.0,
+            };
+            TorpedoTubeState {
+                id: t.id.clone(),
+                loaded: t.is_loaded(),
+                reload_secs: remaining,
+                state: t.load_state.label().to_string(),
+                progress: t.load_state.progress(),
+                load_time: t.load_time,
+            }
+        })
+        .collect();
+
+    // ── Radar blips ──────────────────────────────────────────────────────────
+    let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
+    let shows: Vec<crate::entity_tags::EntityTag> = ship_config
+        .0
+        .tactical_radar_shows
+        .iter()
+        .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
+        .collect();
+    let selects: Vec<crate::entity_tags::EntityTag> = ship_config
+        .0
+        .tactical_radar_selects
+        .iter()
+        .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
+        .collect();
+
+    let entity_meta: std::collections::HashMap<&str, &crate::messages::EntitySnapshot> = world_res
+        .0
+        .entities
+        .iter()
+        .map(|e| (e.uuid.as_str(), e))
+        .collect();
+
+    let mut blips: Vec<RadarBlip> = Vec::new();
+    if !shows.is_empty() && effective_tactical_range > 0.0 {
+        for (uuid_comp, transform) in asteroid_q.iter() {
+            let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
+            if let Some(b) = project_blip(
+                &uuid_comp.0,
+                transform.translation.x,
+                transform.translation.z,
+                ship.x,
+                ship.z,
+                ship.yaw,
+                effective_tactical_range,
+                meta,
+                &shows,
+                &selects,
+            ) {
+                blips.push(b);
+            }
+        }
+        for (uuid_comp, transform) in entity_q.iter() {
+            let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
+            if let Some(b) = project_blip(
+                &uuid_comp.0,
+                transform.translation.x,
+                transform.translation.z,
+                ship.x,
+                ship.z,
+                ship.yaw,
+                effective_tactical_range,
+                meta,
+                &shows,
+                &selects,
+            ) {
+                blips.push(b);
+            }
+        }
+    }
+
+    // ── Region overlays ──────────────────────────────────────────────────────
+    let regions: Vec<RadarRegion> = world_res
+        .0
+        .entities
+        .iter()
+        .filter_map(|e| {
+            let shape = e.shape.as_deref()?;
+            Some(RadarRegion {
+                uuid: e.uuid.clone(),
+                x: e.x(),
+                z: e.z(),
+                shape: shape.to_string(),
+                radius: e.radius,
+                inner_radius: e.inner_radius,
+                outer_radius: e.radius,
+                half_extents: e.half_extents.map(|h| [h[0], h[2]]),
+                yaw: e.yaw,
+                color: e.colour.unwrap_or([0.6, 0.4, 1.0]),
+                name: e.name.clone(),
+            })
+        })
+        .collect();
+
+    let phaser_arcs: Vec<PhaserBankClientConfig> = ship_config.0.phaser_banks.clone();
+    let torpedo_arcs: Vec<TorpedoTubeClientConfig> = ship_config.0.torpedo_tubes.clone();
+
+    let bb = WeaponsBlackboard {
+        target_uuid,
+        target_name,
+        banks,
+        tubes,
+        torpedo_count: torpedo_sys.0.torpedoes_remaining,
+        phaser_mode: phaser_mode.0,
+        phaser_arcs,
+        torpedo_arcs,
+        blips,
+        regions,
+    };
+
+    blackboards.0.insert(
+        SystemId(TACTICAL_SYSTEM_ID.to_string()),
+        SystemBlackboard::Weapons(bb),
+    );
 }
 
 /// Project a world-space entity to a [`RadarBlip`] for the HTML Tactical radar.
@@ -2143,271 +2329,6 @@ fn blip_default_color(icon: &str) -> [f32; 3] {
     }
 }
 
-/// Recompute the Tactical console state from the same resources as
-/// `weapons_update_broadcaster`, writing into `WeaponsConsoleStateComp` only on
-/// change so `Changed<WeaponsConsoleStateComp>` fires only on actual change.
-fn recompute_weapons_console_state(
-    ship: Res<ShipState>,
-    weapons_target: Res<WeaponsTarget>,
-    beam: Res<ActiveBeam>,
-    cooldown: Res<PhaserCooldown>,
-    modifiers: Res<crate::modifiers::ShipModifiers>,
-    combat_config: Res<PhaserCombatConfigResource>,
-    phaser_mode: Res<CurrentPhaserMode>,
-    torpedo_sys: Res<TorpedoSystemResource>,
-    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    world_res: Res<WorldResource>,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-    entity_name_q: Query<(
-        &crate::entity_spawner::EntityUuid,
-        &crate::entities::spawner::EntityName,
-    )>,
-    mut comp_q: Query<&mut WeaponsConsoleStateComp>,
-) {
-    let target_uuid = weapons_target.0.clone();
-    let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-    let beam_active = beam.target_uuid.is_some();
-    let active_beam_bank = beam.bank.clone();
-
-    let target_live_pos: Option<(f32, f32)> = target_uuid
-        .as_deref()
-        .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
-
-    let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
-        entity_name_q
-            .iter()
-            .find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
-    });
-
-    let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
-        let effective_phaser_range =
-            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
-        let fire_ready = match target_live_pos {
-            None => false,
-            Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
-                tx,
-                tz,
-                ship.x,
-                ship.z,
-                ship.yaw,
-                effective_phaser_range,
-            ),
-        };
-        let cd = cooldown.bank_remaining_secs("");
-        vec![PhaserBankState {
-            id: String::new(),
-            fire_ready,
-            on_cooldown: beam_active || cd > 0.0,
-            cooldown_remaining: cd,
-        }]
-    } else {
-        combat_config
-            .0
-            .banks
-            .iter()
-            .map(|b| {
-                let bank_ready = match target_live_pos {
-                    None => false,
-                    Some((tx, tz)) => {
-                        let bank_base_range = if b.beam_range > 0.0 {
-                            b.beam_range
-                        } else {
-                            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                        };
-                        let effective_bank_range = bank_base_range * radar_range_mult;
-                        let (rx, ry) =
-                            crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
-                        let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
-                            <= effective_bank_range * effective_bank_range;
-                        range_ok
-                            && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
-                    }
-                };
-                let cd = cooldown.bank_remaining_secs(b.id.as_str());
-                let beam_on_this_bank =
-                    beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
-                PhaserBankState {
-                    id: b.id.clone(),
-                    fire_ready: bank_ready,
-                    on_cooldown: beam_on_this_bank || cd > 0.0,
-                    cooldown_remaining: cd,
-                }
-            })
-            .collect()
-    };
-
-    let tubes: Vec<TorpedoTubeState> = torpedo_sys
-        .0
-        .tubes
-        .iter()
-        .map(|t| {
-            let remaining = match &t.load_state {
-                crate::torpedo::TubeLoadState::Loading { remaining, .. }
-                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
-                _ => 0.0,
-            };
-            TorpedoTubeState {
-                id: t.id.clone(),
-                loaded: t.is_loaded(),
-                reload_secs: remaining,
-                state: t.load_state.label().to_string(),
-                progress: t.load_state.progress(),
-                load_time: t.load_time,
-            }
-        })
-        .collect();
-
-    // ── Radar blips ──────────────────────────────────────────────────────────
-    //
-    // Join live ECS positions (from query iterators) with static entity
-    // metadata (tags, radius) from `WorldResource`. The ECS gives authoritative
-    // live positions for all currently-alive entities; `WorldResource` gives the
-    // stable tag set used for the `tactical_radar_shows` filter.
-    //
-    // The projection is the standard ship-aligned radar transform
-    // (see `gui::radar::project_radar_entity`) — forward = +radar_y,
-    // right = +radar_x, normalised to `[-1.0, 1.0]` at
-    // `effective_tactical_range`.
-    let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
-    let shows: Vec<crate::entity_tags::EntityTag> = ship_config
-        .0
-        .tactical_radar_shows
-        .iter()
-        .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
-        .collect();
-    let selects: Vec<crate::entity_tags::EntityTag> = ship_config
-        .0
-        .tactical_radar_selects
-        .iter()
-        .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
-        .collect();
-
-    // Build UUID → EntitySnapshot lookup for tags + radius. Allocation is
-    // per-frame but bounded by world entity count (typically tens, not millions).
-    //
-    // NOTE: `WorldResource` is populated once at `StartGame` and is not
-    // updated when entities spawn at runtime (via `EntitySpawned`). This means
-    // dynamically-spawned NPCs/stations won't appear as radar blips — only
-    // entities from the initial world TOML are visible. Asteroids are always
-    // in the initial world so they always show. This limitation can be lifted
-    // later by updating `WorldResource` from the `EntitySpawned` broadcast.
-    let entity_meta: std::collections::HashMap<&str, &crate::messages::EntitySnapshot> = world_res
-        .0
-        .entities
-        .iter()
-        .map(|e| (e.uuid.as_str(), e))
-        .collect();
-
-    let mut blips: Vec<RadarBlip> = Vec::new();
-
-    if !shows.is_empty() && effective_tactical_range > 0.0 {
-        // Asteroids
-        for (uuid_comp, transform) in asteroid_q.iter() {
-            let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
-            if let Some(b) = project_blip(
-                &uuid_comp.0,
-                transform.translation.x,
-                transform.translation.z,
-                ship.x,
-                ship.z,
-                ship.yaw,
-                effective_tactical_range,
-                meta,
-                &shows,
-                &selects,
-            ) {
-                blips.push(b);
-            }
-        }
-        // Generic entities (NPC ships, stations, torpedoes, etc.)
-        for (uuid_comp, transform) in entity_q.iter() {
-            let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
-            if let Some(b) = project_blip(
-                &uuid_comp.0,
-                transform.translation.x,
-                transform.translation.z,
-                ship.x,
-                ship.z,
-                ship.yaw,
-                effective_tactical_range,
-                meta,
-                &shows,
-                &selects,
-            ) {
-                blips.push(b);
-            }
-        }
-    }
-
-    // ── Fire-arc config (static after game start) ─────────────────────────
-    // Included in every push so the HTML console can render arc overlays
-    // without ever receiving the Bevy-only `Welcome` message.
-    let phaser_arcs: Vec<PhaserBankClientConfig> = ship_config.0.phaser_banks.clone();
-    let torpedo_arcs: Vec<TorpedoTubeClientConfig> = ship_config.0.torpedo_tubes.clone();
-
-    // ── Region shapes ──────────────────────────────────────────────────────
-    // Collect all world entities that carry a shape field so the HTML radar
-    // widget can draw coloured zone overlays.
-    let regions: Vec<RadarRegion> = world_res
-        .0
-        .entities
-        .iter()
-        .filter_map(|e| {
-            let shape = e.shape.as_deref()?;
-            Some(RadarRegion {
-                uuid: e.uuid.clone(),
-                x: e.x(),
-                z: e.z(),
-                shape: shape.to_string(),
-                radius: e.radius,
-                inner_radius: e.inner_radius,
-                outer_radius: e.radius, // torus: outer == radius
-                half_extents: e.half_extents.map(|h| [h[0], h[2]]),
-                yaw: e.yaw,
-                color: e.colour.unwrap_or([0.6, 0.4, 1.0]),
-                name: e.name.clone(),
-            })
-        })
-        .collect();
-
-    let next = WeaponsConsoleState {
-        target_uuid,
-        target_name,
-        banks,
-        tubes,
-        torpedo_count: torpedo_sys.0.torpedoes_remaining,
-        phaser_mode: phaser_mode.0,
-        phaser_arcs,
-        torpedo_arcs,
-        blips,
-        regions,
-    };
-
-    for mut comp in comp_q.iter_mut() {
-        if comp.0 != next {
-            comp.0 = next.clone();
-        }
-    }
-}
-
-/// `Changed<WeaponsConsoleStateComp>` system: encode the state and emit a
-/// `ConsoleStateChanged { name: "Tactical", json }` message for the wasm
-/// bridge to forward to the JS `__updateConsole` callback.
-fn push_weapons_console_state(
-    comp_q: Query<&WeaponsConsoleStateComp, Changed<WeaponsConsoleStateComp>>,
-    mut writer: MessageWriter<ConsoleStateChanged>,
-) {
-    for comp in comp_q.iter() {
-        if let Ok(json) = codec::encode_console_state(&comp.0) {
-            writer.write(ConsoleStateChanged {
-                name: "Tactical".into(),
-                json,
-            });
-        }
-    }
-}
-
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2471,6 +2392,7 @@ station = "tactical"
                 crate::sim_sets::SimSet::Physics,
                 crate::sim_sets::SimSet::Damage,
                 crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
                 crate::sim_sets::SimSet::Broadcast,
             )
                 .chain(),
@@ -2502,6 +2424,7 @@ station = "tactical"
         )))
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
+        .init_resource::<crate::server_app::SystemBlackboards>()
         .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
         .add_plugins(WeaponsPlugin)
         // Override with two banks so per-bank arc checks work.
@@ -4797,113 +4720,18 @@ station = "tactical"
         );
     }
 
-    // ── Weapons console state push (issue #422) ──────────────────────────
-
-    #[derive(Resource, Default)]
-    struct ConsolePushes(Vec<ConsoleStateChanged>);
-
-    fn collect_console_pushes(
-        mut reader: MessageReader<ConsoleStateChanged>,
-        mut sink: ResMut<ConsolePushes>,
-    ) {
-        for m in reader.read() {
-            sink.0.push(m.clone());
-        }
-    }
-
-    /// Minimal app exercising only the console-state push path: spawn the
-    /// component, register the push system + a mock observer that collects
-    /// `ConsoleStateChanged`, mutate the component, run an update, and assert a
-    /// single push carrying the expected JSON.
-    fn push_test_app() -> App {
-        let mut app = App::new();
-        app.add_message::<ConsoleStateChanged>()
-            .init_resource::<ConsolePushes>()
-            .add_systems(
-                Update,
-                (
-                    push_weapons_console_state,
-                    collect_console_pushes.after(push_weapons_console_state),
-                ),
-            );
-        app.world_mut()
-            .spawn(WeaponsConsoleStateComp(WeaponsConsoleState::default()));
-        app
-    }
-
-    #[test]
-    fn weapons_console_push_emits_one_message_with_expected_values() {
-        let mut app = push_test_app();
-
-        // First update: the freshly spawned component is `Changed`, so it
-        // pushes its initial state. Drain those.
-        app.update();
-        app.world_mut().resource_mut::<ConsolePushes>().0.clear();
-
-        // Mutate the component → next update should push exactly one message.
-        {
-            let mut q = app.world_mut().query::<&mut WeaponsConsoleStateComp>();
-            let mut comp = q.single_mut(app.world_mut()).unwrap();
-            comp.0 = WeaponsConsoleState {
-                target_uuid: Some("tgt-42".into()),
-                target_name: None,
-                banks: vec![PhaserBankState {
-                    id: "port".into(),
-                    fire_ready: true,
-                    on_cooldown: false,
-                    cooldown_remaining: 0.0,
-                }],
-                tubes: vec![TorpedoTubeState {
-                    id: "fore".into(),
-                    loaded: true,
-                    reload_secs: 0.0,
-                    state: "loaded".into(),
-                    progress: 1.0,
-                    load_time: 10.0,
-                }],
-                torpedo_count: 9,
-                phaser_mode: crate::messages::PhaserMode::Manual,
-                phaser_arcs: Vec::new(),
-                torpedo_arcs: Vec::new(),
-                blips: Vec::new(),
-                regions: Vec::new(),
-            };
-        }
-        app.update();
-
-        let pushes = &app.world().resource::<ConsolePushes>().0;
-        assert_eq!(pushes.len(), 1, "expected exactly one push after a change");
-        let push = &pushes[0];
-        assert_eq!(push.name, "Tactical");
-        assert!(
-            push.json.contains("\"target_uuid\":\"tgt-42\""),
-            "json: {}",
-            push.json
-        );
-        assert!(
-            push.json.contains("\"torpedo_count\":9"),
-            "json: {}",
-            push.json
-        );
-        assert!(push.json.contains("\"id\":\"port\""), "json: {}", push.json);
-        assert!(push.json.contains("\"id\":\"fore\""), "json: {}", push.json);
-        assert!(
-            push.json.contains("\"phaser_mode\":\"Manual\""),
-            "json: {}",
-            push.json
-        );
-
-        // No further change → no further pushes.
-        app.world_mut().resource_mut::<ConsolePushes>().0.clear();
-        app.update();
-
-        assert!(
-            app.world().resource::<ConsolePushes>().0.is_empty(),
-            "no push expected without a change"
-        );
-    }
-
     // ── Radar blip tests ─────────────────────────────────────────────────────
+
+    fn tactical_blips(app: &mut App) -> Vec<RadarBlip> {
+        use crate::messages::{SystemId, SystemBlackboard};
+        use crate::server_app::SystemBlackboards;
+        use crate::system_registry::TACTICAL_SYSTEM_ID;
+        let bbs = app.world().resource::<SystemBlackboards>();
+        match bbs.0.get(&SystemId(TACTICAL_SYSTEM_ID.to_string())) {
+            Some(SystemBlackboard::Weapons(bb)) => bb.blips.clone(),
+            _ => Vec::new(),
+        }
+    }
 
     #[test]
     fn radar_blip_appears_for_asteroid_within_tactical_range() {
@@ -4919,11 +4747,9 @@ station = "tactical"
         // Asteroid 50 units ahead (z=-50, within 300 range).
         setup_weapons_world(&mut app, 0.0, -50.0);
         start_game(&mut app);
-        tick(&mut app); // first InProgress tick → recompute runs
+        tick(&mut app); // first InProgress tick → publish runs
 
-        let mut q = app.world_mut().query::<&WeaponsConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
-        let blips = comp.0.blips.clone();
+        let blips = tactical_blips(&mut app);
 
         assert_eq!(blips.len(), 1, "expected one blip for in-range asteroid");
         assert_eq!(blips[0].uuid, "target-uuid");
@@ -4954,10 +4780,9 @@ station = "tactical"
         start_game(&mut app);
         tick(&mut app);
 
-        let mut q = app.world_mut().query::<&WeaponsConsoleStateComp>();
-        let comp = q.single(app.world()).unwrap();
+        let blips = tactical_blips(&mut app);
         assert!(
-            comp.0.blips.is_empty(),
+            blips.is_empty(),
             "asteroid beyond tactical range must not appear in blips"
         );
     }

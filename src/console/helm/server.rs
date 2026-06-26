@@ -98,7 +98,7 @@ mod tests {
 
         let bbs = app.world().resource::<SystemBlackboards>();
         let key = SystemId(HELM_SYSTEM_ID.to_string());
-        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap();
+        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap() else { panic!("expected Helm blackboard") };
         assert!((bb.x - 100.0).abs() < 0.001);
         assert!((bb.z - (-200.0)).abs() < 0.001);
         assert!((bb.forward_speed - 50.0).abs() < 0.001);
@@ -116,7 +116,7 @@ mod tests {
 
         let bbs = app.world().resource::<SystemBlackboards>();
         let key = SystemId(HELM_SYSTEM_ID.to_string());
-        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap();
+        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap() else { panic!("expected Helm blackboard") };
         assert!((bb.impulse_charge - 0.5).abs() < 0.001);
     }
 
@@ -135,7 +135,7 @@ mod tests {
 
         let bbs = app.world().resource::<SystemBlackboards>();
         let key = SystemId(HELM_SYSTEM_ID.to_string());
-        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap();
+        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap() else { panic!("expected Helm blackboard") };
         assert!(bb.boost_enabled);
         assert!(bb.boost_active);
         assert!((bb.boost_battery - 0.75).abs() < 0.001);
@@ -148,7 +148,7 @@ mod tests {
 
         let bbs = app.world().resource::<SystemBlackboards>();
         let key = SystemId(HELM_SYSTEM_ID.to_string());
-        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap();
+        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap() else { panic!("expected Helm blackboard") };
         assert!(!bb.boost_enabled);
         assert!(!bb.boost_active);
     }
@@ -189,7 +189,7 @@ mod tests {
         {
             let bbs = app.world().resource::<SystemBlackboards>();
             let key = SystemId(HELM_SYSTEM_ID.to_string());
-            let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap();
+            let SystemBlackboard::Helm(bb) = bbs.0.get(&key).unwrap() else { panic!("expected Helm blackboard") };
             assert!((bb.yaw - 1.0).abs() < 0.001, "SystemBlackboards should have yaw=1.0");
         }
 
@@ -201,7 +201,7 @@ mod tests {
         {
             let frozen = app.world().resource::<FrozenBlackboards>();
             let key = SystemId(HELM_SYSTEM_ID.to_string());
-            let SystemBlackboard::Helm(bb) = frozen.0.get(&key).unwrap();
+            let SystemBlackboard::Helm(bb) = frozen.0.get(&key).unwrap() else { panic!("expected Helm blackboard") };
             assert!(
                 (bb.yaw - 1.0).abs() < 0.001,
                 "FrozenBlackboards should still have last tick's yaw=1.0, got {}",

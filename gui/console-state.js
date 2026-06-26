@@ -275,39 +275,43 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
 
 /**
  * Tactical / Weapons console.
- * @param {{ weaponsTarget, weaponsBanks, weaponsTubes, weaponsTorpedoCount,
- *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw }} state
+ * Reads raw sim truth from `state.blackboards['tactical']` (WeaponsBlackboard),
+ * falling back to legacy camelCase properties for compatibility.
+ *
+ * @param {{ blackboards?, weaponsTarget?, weaponsBanks?, weaponsTubes?,
+ *           weaponsTorpedoCount?, weaponsPhaserMode? }} state
  */
 export function buildWeaponsConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['tactical']) || {};
+  const targetUuid   = bb.target_uuid   ?? state.weaponsTarget       ?? null;
+  const targetName   = bb.target_name   ?? state.weaponsTargetName   ?? null;
+  const banks        = bb.banks         ?? state.weaponsBanks        ?? [];
+  const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
+  const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
+  const phaserMode   = bb.phaser_mode   ?? state.weaponsPhaserMode   ?? 'Auto';
+  const blips        = bb.blips         ?? [];
+  const regions      = bb.regions       ?? [];
+  const phaserArcs   = bb.phaser_arcs   ?? state.phaserArcConfigs   ?? [];
+  const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
+
   const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
-  const blips = Array.isArray(state.weaponsBlips)
-    ? state.weaponsBlips
-    : buildBlips(
-      state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
-      range,
-      {
-        rotate: true,
-        shows: state.tacticalRadarShows,
-        selects: state.tacticalRadarSelects,
-      }
-    );
-  const targetUuid = state.weaponsTarget || null;
-  const targetBlip = targetUuid ? blips.find(b => b.uuid === targetUuid) : null;
-  const targetName = state.weaponsTargetName || (targetBlip && targetBlip.name) || null;
+  const mappedPhaserArcs = phaserArcs.map(a => ({
+    ...a,
+    range_frac: a.beam_range != null ? a.beam_range / range : null,
+  }));
+
   return JSON.stringify({
     target_uuid:   targetUuid,
     target_name:   targetName,
-    banks:         state.weaponsBanks       || [],
-    tubes:         state.weaponsTubes       || [],
-    torpedo_count: state.weaponsTorpedoCount || 0,
-    phaser_mode:   state.weaponsPhaserMode   || 'Auto',
+    banks,
+    tubes,
+    torpedo_count: torpedoCount,
+    phaser_mode:   phaserMode,
     blips,
-    phaser_arcs:   (state.phaserArcConfigs || []).map(a => ({
-      ...a,
-      range_frac: a.beam_range != null ? a.beam_range / range : null,
-    })),
-    torpedo_arcs:  state.torpedoArcConfigs || [],
-    own_hull: ownHull('Tactical', state),
+    regions,
+    phaser_arcs:   mappedPhaserArcs,
+    torpedo_arcs:  torpedoArcs,
+    own_hull:      ownHull('Tactical', state),
   });
 }
 

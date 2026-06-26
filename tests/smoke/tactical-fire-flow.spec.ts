@@ -42,6 +42,7 @@ tags = ["ship"]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
 transform     = { position = [-15.0, 0.0, -5.0] }
+spawn_on      = "game_start"
 `;
 
 async function waitForStation(

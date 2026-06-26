@@ -36,6 +36,7 @@ template_path = "assets/entities/player_ship.toml"
 id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
+tags = ["ship"]
 
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"

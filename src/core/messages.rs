@@ -1558,6 +1558,7 @@ pub enum SystemBlackboard {
     Power(PowerBlackboard),
     Shields(ShieldsBlackboard),
     Captain(CaptainBlackboard),
+    Repair(RepairBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -1671,12 +1672,10 @@ pub struct PowerConsoleEntry {
     pub max_level: u8,
 }
 
-/// Serialised Repair console state pushed to the HTML repair panel (issue #425).
-///
-/// Carries everything the HTML panel needs: team state machine slots, per-console
-/// hull status, travel timing, and the ordered list of dispatchable consoles.
+/// Raw sim truth for the Repair system, published each tick into the ship
+/// blackboard (issue #564).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct RepairConsoleState {
+pub struct RepairBlackboard {
     /// Current team slot states (one entry per repair team).
     pub teams: Vec<TeamSlot>,
     /// Per-console hull status. Drives the hull bar and team-destination labels.

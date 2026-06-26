@@ -412,9 +412,19 @@ export function buildHelmConsoleState(state) {
 
 /**
  * Repair console.
- * @param {{ repairTeams, consoleHull }} state
+ * @param {{ blackboards, repairTeams, consoleHull }} state
  */
 export function buildRepairConsoleState(state) {
+  const bb = state.blackboards && state.blackboards['repair'];
+  if (bb) {
+    return JSON.stringify({
+      teams:                bb.teams                ?? [],
+      console_hull:         bb.console_hull         ?? [],
+      travel_duration_secs: bb.travel_duration_secs ?? 5.0,
+      damageable_consoles:  bb.damageable_consoles  ?? [],
+    });
+  }
+  // Legacy fallback.
   return JSON.stringify({
     teams:                state.repairTeams || [],
     console_hull:         state.consoleHull || [],

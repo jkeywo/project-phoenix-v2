@@ -599,14 +599,25 @@ export function buildSensorsConsoleState(state) {
 
 /**
  * Comms console.
- * @param {{ commsMessages, commsContacts }} state
+ * @param {{ blackboards, commsMessages, commsContacts }} state
  */
 export function buildCommsConsoleState(state) {
+  const bb = state.blackboards && state.blackboards['comms'];
+  if (bb) {
+    return JSON.stringify({
+      messages:   bb.messages   ?? [],
+      objectives: bb.objectives ?? [],
+      contacts:   bb.contacts   ?? [],
+      on_screen:  state.currentView === 'Comms',
+      own_hull:   ownHull('Comms', state),
+    });
+  }
+  // Legacy fallback.
   return JSON.stringify({
-    messages: state.commsMessages || [],
-    contacts: state.commsContacts || [],
+    messages:  state.commsMessages || [],
+    contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
-    own_hull: ownHull('Comms', state),
+    own_hull:  ownHull('Comms', state),
   });
 }
 

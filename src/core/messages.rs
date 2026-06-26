@@ -1559,6 +1559,7 @@ pub enum SystemBlackboard {
     Shields(ShieldsBlackboard),
     Captain(CaptainBlackboard),
     Repair(RepairBlackboard),
+    Comms(CommsBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -1686,14 +1687,10 @@ pub struct RepairBlackboard {
     pub damageable_consoles: Vec<Console>,
 }
 
-/// Serialised Comms console state pushed to the HTML comms panel (issue #427).
-///
-/// Written into a single `CommsConsoleStateComp` component and pushed on change
-/// via `ConsoleStateChanged { name: "Comms", json }`. Mirrors the data already
-/// broadcast as `ServerMessage::CommsState` but delivered through the HTML
-/// console bridge (ADR-0001) so the HTML panel can live in a wry iframe.
+/// Raw sim truth for the Comms system, published each tick into the ship
+/// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct CommsConsoleState {
+pub struct CommsBlackboard {
     /// Current inbox messages for the Comms holder, in insertion order.
     pub messages: Vec<CommsMessage>,
     /// Mission objectives visible to Comms.

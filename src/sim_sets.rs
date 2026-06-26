@@ -11,6 +11,9 @@ pub enum SimSet {
     /// Cross-system reads during Physics/Damage/Modifiers use `FrozenBlackboards`
     /// (last tick's snapshot) for determinism.
     Publish,
+    /// Phase 1b: ship-wide aggregators read all phase-1a blackboards and write
+    /// cross-system views (e.g. the Viewscreen blackboard). Strictly after Publish.
+    PublishAggregate,
     Broadcast,
 }
 

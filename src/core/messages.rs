@@ -1562,6 +1562,7 @@ pub enum SystemBlackboard {
     Comms(CommsBlackboard),
     Sensors(SensorsBlackboard),
     Navigation(NavigationBlackboard),
+    Viewscreen(ViewscreenBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -1700,6 +1701,22 @@ pub struct CommsBlackboard {
     pub objectives: Vec<ObjectiveSnapshot>,
     /// Hailable contacts derived from the active world content.
     pub contacts: Vec<CommsContact>,
+}
+
+/// Ship-wide aggregate blackboard written by the Viewscreen phase-1b aggregator
+/// (issue #568). Reads all per-system phase-1a blackboards + world registry.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ViewscreenBlackboard {
+    /// Whether the ship is currently in red alert.
+    pub red_alert: bool,
+    /// Overall ship hull integrity as a percentage (0–100).
+    pub hull_integrity_pct: f32,
+    /// Elapsed-seconds timestamp when the ship last took hull damage, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_damage_taken_secs: Option<f32>,
+    /// Elapsed-seconds timestamp when a weapon was last fired, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_weapon_fired_secs: Option<f32>,
 }
 
 /// Raw sim truth for the Sensors system, published each tick into the ship

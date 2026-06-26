@@ -200,6 +200,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             crate::sim_sets::SimSet::Damage,
             crate::sim_sets::SimSet::Modifiers,
             crate::sim_sets::SimSet::Publish,
+            crate::sim_sets::SimSet::PublishAggregate,
             crate::sim_sets::SimSet::Broadcast,
         )
             .chain()
@@ -322,6 +323,10 @@ pub fn add_simulation_plugins(app: &mut App) {
         Update,
         crate::modifier_coordination::translate_impulse_modifiers
             .in_set(crate::sim_sets::SimSet::Modifiers),
+    )
+    .add_systems(
+        Update,
+        publish_viewscreen_blackboard.in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_plugins(weapons_update_broadcaster())
     .add_plugins(sim_state_broadcaster())
@@ -654,6 +659,39 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
 }
 
 // -- Systems -------------------------------------------------------------------
+
+fn publish_viewscreen_blackboard(
+    ship: Option<Res<ShipState>>,
+    hull: Option<Res<ShipHullIntegrity>>,
+    activity: Option<Res<crate::ship::combat_activity::RecentCombatActivity>>,
+    mut blackboards: ResMut<SystemBlackboards>,
+) {
+    use crate::messages::{SystemBlackboard, SystemId, ViewscreenBlackboard};
+    use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
+
+    let red_alert = ship.as_ref().map(|s| s.red_alert()).unwrap_or(false);
+    let hull_integrity_pct = if let Some(h) = &hull {
+        let max = h.0.total_max();
+        let cur = h.0.total_current();
+        if max > 0.0 { (cur / max * 100.0).clamp(0.0, 100.0) } else { 100.0 }
+    } else {
+        100.0
+    };
+    let last_damage_taken_secs = activity.as_ref().and_then(|a| a.last_damage_taken);
+    let last_weapon_fired_secs = activity.as_ref().and_then(|a| a.last_weapon_fired);
+
+    let bb = ViewscreenBlackboard {
+        red_alert,
+        hull_integrity_pct,
+        last_damage_taken_secs,
+        last_weapon_fired_secs,
+    };
+
+    blackboards.0.insert(
+        SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
+        SystemBlackboard::Viewscreen(bb),
+    );
+}
 
 fn handle_set_sensors_target(
     mut reader: MessageReader<InboundMessage>,

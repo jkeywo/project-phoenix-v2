@@ -1812,6 +1812,7 @@
           if (updatedSystems.has('comms'))      pushCommsConsoleState();
           if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
           if (updatedSystems.has('navigation')) pushNavigationConsoleState();
+          if (updatedSystems.has('viewscreen')) pushCaptainConsoleState();
           return;
         }
         case 'WeaponsUpdate': {

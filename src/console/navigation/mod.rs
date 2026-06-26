@@ -231,6 +231,7 @@ mod tests {
                     crate::sim_sets::SimSet::Damage,
                     crate::sim_sets::SimSet::Modifiers,
                     crate::sim_sets::SimSet::Publish,
+                    crate::sim_sets::SimSet::PublishAggregate,
                     crate::sim_sets::SimSet::Broadcast,
                 )
                     .chain(),

@@ -557,8 +557,8 @@
 
       arcFore.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, foreR, -Math.PI/4, Math.PI/4));
       arcAft.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, aftR, 3*Math.PI/4, 5*Math.PI/4));
-      arcPort.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, portR, Math.PI/4, 3*Math.PI/4));
-      arcStbd.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, stbdR, 5*Math.PI/4, 7*Math.PI/4));
+      arcPort.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, portR, 5*Math.PI/4, 7*Math.PI/4));
+      arcStbd.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, stbdR, Math.PI/4, 3*Math.PI/4));
 
       function arcColor(t) {
         if (t === 'down') return 'var(--fire-dim)';

@@ -1967,6 +1967,8 @@
           pushCaptainConsoleState();
           break;
         }
+        case 'ReadyChanged':
+          break; // state.players already updated via lobbyState.apply(); fall through to scheduleRender
         case 'ObjectiveSummary':
           break; // fall through to scheduleRender
         default:

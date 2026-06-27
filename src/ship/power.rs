@@ -240,7 +240,11 @@ pub fn operate_power_ai(
 ) {
     // Yield to any human Power console holder.
     if let (Some(sessions), Ok(ship_config)) = (sessions, ship_query.single()) {
-        if sessions.0.console_holder(&Console::Power, &ship_config.0).is_some() {
+        if sessions
+            .0
+            .console_holder(&Console::Power, &ship_config.0)
+            .is_some()
+        {
             return;
         }
     }
@@ -664,10 +668,22 @@ mod tests {
         tick(&mut app);
 
         let bb = power_blackboard(&mut app);
-        assert!(!bb.consoles.is_empty(), "expected at least one power console entry");
-        assert!(bb.consoles.iter().any(|e| e.label == "HELM"), "expected HELM entry");
-        assert!(bb.consoles.iter().any(|e| e.label == "WEAPONS"), "expected WEAPONS entry");
-        assert!(bb.consoles.iter().any(|e| e.label == "SENSORS"), "expected SENSORS entry");
+        assert!(
+            !bb.consoles.is_empty(),
+            "expected at least one power console entry"
+        );
+        assert!(
+            bb.consoles.iter().any(|e| e.label == "HELM"),
+            "expected HELM entry"
+        );
+        assert!(
+            bb.consoles.iter().any(|e| e.label == "WEAPONS"),
+            "expected WEAPONS entry"
+        );
+        assert!(
+            bb.consoles.iter().any(|e| e.label == "SENSORS"),
+            "expected SENSORS entry"
+        );
         assert!(bb.total > 0, "total should be > 0");
         assert!(!bb.locked, "should not be locked initially");
     }
@@ -684,7 +700,10 @@ mod tests {
 
         let bb = power_blackboard(&mut app);
         let helm_entry = bb.consoles.iter().find(|e| e.label == "HELM").unwrap();
-        assert_eq!(helm_entry.level, 3, "helm level should be 3 after direct assignment");
+        assert_eq!(
+            helm_entry.level, 3,
+            "helm level should be 3 after direct assignment"
+        );
     }
 
     #[test]
@@ -814,8 +833,7 @@ mod tests {
         let mut app = inter_system_test_app();
 
         // Simulate an active phaser beam.
-        app.world_mut().resource_mut::<ActiveBeam>().target_uuid =
-            Some("target-asteroid".into());
+        app.world_mut().resource_mut::<ActiveBeam>().target_uuid = Some("target-asteroid".into());
 
         let charge_before = app.world().resource::<ShipPowerSystem>().0.battery_charge;
         app.update();
@@ -857,8 +875,7 @@ mod tests {
             .resource_mut::<ShipPowerSystem>()
             .0
             .battery_charge = 0.1;
-        app.world_mut().resource_mut::<ActiveBeam>().target_uuid =
-            Some("target-asteroid".into());
+        app.world_mut().resource_mut::<ActiveBeam>().target_uuid = Some("target-asteroid".into());
 
         app.update();
 

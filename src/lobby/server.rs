@@ -273,7 +273,14 @@ pub fn process_lobby(
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
     preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
-    mut ship_query: Query<(&ShipConfigComponent, &mut ShipSystemControlSources, &mut ActiveStationRatings), With<Ship>>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<Ship>,
+    >,
 ) {
     // During the Lobby phase this system owns the inbound queue and handles
     // every message type. Outside the lobby the simulation systems own it, so
@@ -316,12 +323,15 @@ pub fn process_lobby(
             .unwrap_or(true)
     };
     // Collect all messages first to avoid borrow conflicts with ship_query.
-    let events: Vec<_> = inbound.read()
+    let events: Vec<_> = inbound
+        .read()
         .filter(|ev| accepts_all || matches!(ev.msg, ClientMessage::Identify { .. }))
         .cloned()
         .collect();
     for ev in events {
-        if let Some((ship_config, mut control_sources, mut active_ratings)) = ship_query.iter_mut().next() {
+        if let Some((ship_config, mut control_sources, mut active_ratings)) =
+            ship_query.iter_mut().next()
+        {
             let ratings_snapshot = active_ratings.0.clone();
             let result = lobby_handler::process_message(
                 &ev.token,
@@ -373,7 +383,14 @@ fn handle_disconnect(
     mut sessions: ResMut<Sessions>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
-    mut ship_query: Query<(&ShipConfigComponent, &mut ShipSystemControlSources, &mut ActiveStationRatings), With<Ship>>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<Ship>,
+    >,
     stations: Option<Res<ShipStations>>,
 ) {
     let empty_stations = ShipStations::default();

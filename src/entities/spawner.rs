@@ -271,7 +271,10 @@ pub fn spawn_entity(
         let ship_config = crate::ship_plugin::ShipConfigComponent::default();
         let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
         for system in &ship_config.0.systems {
-            resolver.set(system.id.clone(), crate::ship::control_source::ControlSource::Ai);
+            resolver.set(
+                system.id.clone(),
+                crate::ship::control_source::ControlSource::Ai,
+            );
         }
         entity_commands.insert((
             crate::server_app::NpcShip,
@@ -1275,11 +1278,11 @@ max_hp = 50.0
     /// and that the NPC helm/weapons operate functions run for all systems.
     #[test]
     fn npc_ship_spawn_gives_all_ai_roster_and_npc_ship_marker() {
-        use bevy::prelude::*;
         use crate::entity_config::{BehaviourConfig, DoctrineObjective, EntityConfig};
         use crate::server_app::{NpcShip, Ship};
         use crate::ship::control_source::ControlSource;
         use crate::ship_plugin::ShipSystemControlSources;
+        use bevy::prelude::*;
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -1299,7 +1302,13 @@ max_hp = 50.0
         };
 
         let mut cmds = app.world_mut().commands();
-        let entity = spawn_entity(&mut cmds, &config, bevy::math::Vec3::ZERO, "npc-001".into(), None);
+        let entity = spawn_entity(
+            &mut cmds,
+            &config,
+            bevy::math::Vec3::ZERO,
+            "npc-001".into(),
+            None,
+        );
         app.world_mut().flush();
 
         // NPC ship must have NpcShip, not Ship

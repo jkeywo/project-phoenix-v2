@@ -107,7 +107,11 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
     match directive {
         AiDirective::None => vec![],
         AiDirective::Destroy { .. } => {
-            vec![SystemAffinity::Helm, SystemAffinity::Weapons, SystemAffinity::Captain]
+            vec![
+                SystemAffinity::Helm,
+                SystemAffinity::Weapons,
+                SystemAffinity::Captain,
+            ]
         }
         AiDirective::Patrol { .. } | AiDirective::Reach { .. } => vec![SystemAffinity::Helm],
         AiDirective::Hail { .. } => vec![SystemAffinity::Captain],
@@ -296,7 +300,11 @@ impl ObjectiveManager {
                 }
             })
             .collect();
-        pool.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        pool.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         pool
     }
 
@@ -533,8 +541,14 @@ mod tests {
             "Patrol",
             false,
             vec![],
-            AiDirective::Patrol { anchors: vec!["alpha".into()], loop_path: true },
-            UtilityConfig { base_priority: 40.0, ..Default::default() },
+            AiDirective::Patrol {
+                anchors: vec!["alpha".into()],
+                loop_path: true,
+            },
+            UtilityConfig {
+                base_priority: 40.0,
+                ..Default::default()
+            },
             ObjectiveSource::Mission,
         );
         let pool = mgr.scored_pool(&WorldConditions::default());
@@ -550,7 +564,10 @@ mod tests {
             true,
             vec![],
             AiDirective::default(),
-            UtilityConfig { base_priority: 30.0, ..Default::default() },
+            UtilityConfig {
+                base_priority: 30.0,
+                ..Default::default()
+            },
             ObjectiveSource::Mission,
         );
         let pool = mgr.scored_pool(&WorldConditions::default());
@@ -577,7 +594,10 @@ mod tests {
             ObjectiveSource::Doctrine,
         );
         // Hull is 1.0 → hull_below(0.3) is false → gate fails → score = 0
-        let pool = mgr.scored_pool(&WorldConditions { hull_fraction: 1.0, ..Default::default() });
+        let pool = mgr.scored_pool(&WorldConditions {
+            hull_fraction: 1.0,
+            ..Default::default()
+        });
         assert_eq!(pool[0].score, 0.0);
     }
 
@@ -601,7 +621,10 @@ mod tests {
             ObjectiveSource::Doctrine,
         );
         // Hull is 0.2 → hull_below(0.3) is true → gate passes → full score
-        let pool = mgr.scored_pool(&WorldConditions { hull_fraction: 0.2, ..Default::default() });
+        let pool = mgr.scored_pool(&WorldConditions {
+            hull_fraction: 0.2,
+            ..Default::default()
+        });
         assert!((pool[0].score - 80.0).abs() < f32::EPSILON);
     }
 
@@ -613,7 +636,9 @@ mod tests {
             "Attack",
             false,
             vec![],
-            AiDirective::Destroy { target: "enemy".into() },
+            AiDirective::Destroy {
+                target: "enemy".into(),
+            },
             UtilityConfig {
                 base_priority: 50.0,
                 modifiers: vec![ConditionModifier {
@@ -625,7 +650,10 @@ mod tests {
             },
             ObjectiveSource::Doctrine,
         );
-        let pool = mgr.scored_pool(&WorldConditions { red_alert: true, hull_fraction: 1.0 });
+        let pool = mgr.scored_pool(&WorldConditions {
+            red_alert: true,
+            hull_fraction: 1.0,
+        });
         assert!((pool[0].score - 70.0).abs() < f32::EPSILON);
     }
 
@@ -637,7 +665,9 @@ mod tests {
             "Attack",
             false,
             vec![],
-            AiDirective::Destroy { target: "enemy".into() },
+            AiDirective::Destroy {
+                target: "enemy".into(),
+            },
             UtilityConfig {
                 base_priority: 50.0,
                 modifiers: vec![ConditionModifier {
@@ -649,7 +679,10 @@ mod tests {
             },
             ObjectiveSource::Doctrine,
         );
-        let pool = mgr.scored_pool(&WorldConditions { red_alert: false, hull_fraction: 1.0 });
+        let pool = mgr.scored_pool(&WorldConditions {
+            red_alert: false,
+            hull_fraction: 1.0,
+        });
         assert!((pool[0].score - 50.0).abs() < f32::EPSILON);
     }
 
@@ -662,7 +695,10 @@ mod tests {
             false,
             vec![],
             AiDirective::default(),
-            UtilityConfig { base_priority: 10.0, ..Default::default() },
+            UtilityConfig {
+                base_priority: 10.0,
+                ..Default::default()
+            },
             ObjectiveSource::Doctrine,
         );
         mgr.add_full(
@@ -671,7 +707,10 @@ mod tests {
             false,
             vec![],
             AiDirective::default(),
-            UtilityConfig { base_priority: 60.0, ..Default::default() },
+            UtilityConfig {
+                base_priority: 60.0,
+                ..Default::default()
+            },
             ObjectiveSource::Mission,
         );
         let pool = mgr.scored_pool(&WorldConditions::default());
@@ -687,8 +726,14 @@ mod tests {
             "Patrol",
             false,
             vec![],
-            AiDirective::Patrol { anchors: vec!["a".into()], loop_path: false },
-            UtilityConfig { base_priority: 1.0, ..Default::default() },
+            AiDirective::Patrol {
+                anchors: vec!["a".into()],
+                loop_path: false,
+            },
+            UtilityConfig {
+                base_priority: 1.0,
+                ..Default::default()
+            },
             ObjectiveSource::Mission,
         );
         let pool = mgr.scored_pool(&WorldConditions::default());
@@ -703,14 +748,23 @@ mod tests {
             "Destroy",
             false,
             vec![],
-            AiDirective::Destroy { target: "target".into() },
-            UtilityConfig { base_priority: 1.0, ..Default::default() },
+            AiDirective::Destroy {
+                target: "target".into(),
+            },
+            UtilityConfig {
+                base_priority: 1.0,
+                ..Default::default()
+            },
             ObjectiveSource::Mission,
         );
         let pool = mgr.scored_pool(&WorldConditions::default());
         assert_eq!(
             pool[0].relevance,
-            vec![SystemAffinity::Helm, SystemAffinity::Weapons, SystemAffinity::Captain]
+            vec![
+                SystemAffinity::Helm,
+                SystemAffinity::Weapons,
+                SystemAffinity::Captain
+            ]
         );
     }
 

@@ -1,9 +1,9 @@
+use bevy::camera::ClearColorConfig;
 use bevy::core_pipeline::core_2d::graph::Core2d;
 use bevy::core_pipeline::core_3d::graph::Core3d;
 use bevy::core_pipeline::Skybox;
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
-use bevy::camera::ClearColorConfig;
 use bevy::render::camera::CameraRenderGraph;
 use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
 use rand::Rng;
@@ -164,7 +164,9 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
         Transform::from_xyz(0.0, 2.0, -10.0),
     ));
-    bevy::log::info!("[renderer] GameCamera spawned (Camera3d, order=-1, is_active=false, NO Bloom)");
+    bevy::log::info!(
+        "[renderer] GameCamera spawned (Camera3d, order=-1, is_active=false, NO Bloom)"
+    );
 
     // Ambient light is now spawned by `spawn_world_ambient_light` in
     // `PostStartup`, which reads `WorldConfig.ambient_light` if present and
@@ -259,7 +261,10 @@ fn prepare_space_skybox_cubemap(
     );
     if image.texture_descriptor.array_layer_count() == 1 {
         let layers = image.height() / image.width();
-        bevy::log::info!("[renderer] skybox reinterpreting as {}-layer cubemap", layers);
+        bevy::log::info!(
+            "[renderer] skybox reinterpreting as {}-layer cubemap",
+            layers
+        );
         if layers != 6 {
             bevy::log::error!(
                 "space skybox expected a vertical 6-face cubemap, got {}x{}",
@@ -421,7 +426,10 @@ fn hull_camera(
     if !*logged {
         bevy::log::info!(
             "[renderer] hull_camera running: ship=({:.1},{:.1}) yaw={:.2} view={:?}",
-            ship.x, ship.z, ship.yaw, ship.view_mode,
+            ship.x,
+            ship.z,
+            ship.yaw,
+            ship.view_mode,
         );
         *logged = true;
     }

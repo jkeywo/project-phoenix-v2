@@ -105,10 +105,7 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 /// Validates: sender holds `Console::Shields`. Reads `ControlSystem` messages
 /// targeting the shields system ID with a `SetShieldFocus` payload, and calls
 /// `ShieldSystem::set_focused_facing`.
-pub fn handle_shields_messages(
-    admitted: Res<AdmittedCommands>,
-    mut shields: ResMut<ShipShields>,
-) {
+pub fn handle_shields_messages(admitted: Res<AdmittedCommands>, mut shields: ResMut<ShipShields>) {
     for cmd in admitted.for_target(crate::system_registry::SHIELDS_SYSTEM_ID) {
         let SystemControlPayload::SetShieldFocus { facing } = &cmd.payload else {
             continue;
@@ -145,7 +142,9 @@ pub fn emit_shields_coordination(
     let red_alert = ship.red_alert();
 
     let sender_origin = if let Ok(control_sources) = ship_query.single() {
-        control_sources.0.source_for(&crate::system_registry::shields_system_id())
+        control_sources
+            .0
+            .source_for(&crate::system_registry::shields_system_id())
     } else {
         ControlSource::Ai
     };
@@ -290,7 +289,6 @@ fn publish_shields_blackboard(
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
-
 
 // ── AI controller stub ─────────────────────────────────────────────────────────
 

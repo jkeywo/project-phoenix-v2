@@ -654,10 +654,9 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
                 .ok_or_else(|| "Directive 'Destroy' requires a 'target' field".to_string())?,
         }),
         Some("Reach") => Ok(AiDirective::Reach {
-            anchor: raw
-                .directive_anchor
-                .clone()
-                .ok_or_else(|| "Directive 'Reach' requires a 'directive_anchor' field".to_string())?,
+            anchor: raw.directive_anchor.clone().ok_or_else(|| {
+                "Directive 'Reach' requires a 'directive_anchor' field".to_string()
+            })?,
         }),
         Some("Hail") => Ok(AiDirective::Hail {
             target: raw

@@ -1,8 +1,8 @@
 //! Server-side Comms console plugin (issue #427, migrated to blackboard #565).
 
-use bevy::prelude::*;
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::simulation::Ship;
+use bevy::prelude::*;
 
 use crate::messages::{CommsBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemId};
 use crate::world::server::ObjectiveManagerRes;
@@ -107,8 +107,11 @@ mod tests {
     fn comms_bb(app: &App) -> CommsBlackboard {
         let bbs = app.world().resource::<SystemBlackboards>();
         let key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
-        let SystemBlackboard::Comms(bb) = bbs.0.get(&key).expect("comms blackboard missing").clone()
-        else { panic!("wrong blackboard variant"); };
+        let SystemBlackboard::Comms(bb) =
+            bbs.0.get(&key).expect("comms blackboard missing").clone()
+        else {
+            panic!("wrong blackboard variant");
+        };
         bb
     }
 
@@ -134,9 +137,7 @@ mod tests {
 /// Gated on policy.operate_ai for the Comms system. No behaviour is
 /// implemented yet — this is a compile-verified stub that will be filled in
 /// when the Comms AI controller is designed.
-fn operate_comms_ai(
-    ships: Query<&ShipSystemControlSources, With<Ship>>,
-) {
+fn operate_comms_ai(ships: Query<&ShipSystemControlSources, With<Ship>>) {
     for sources in &ships {
         let policy = sources
             .0

@@ -372,7 +372,13 @@ fn handle_fire_phaser(
     mut commands: Commands,
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+        ),
+        With<crate::simulation::Ship>,
+    >,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,
     mut beam: ResMut<ActiveBeam>,
@@ -383,7 +389,9 @@ fn handle_fire_phaser(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -969,10 +977,18 @@ fn handle_set_phaser_mode(
 fn handle_set_phaser_frequency(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+        ),
+        With<crate::simulation::Ship>,
+    >,
     mut ship: ResMut<ShipState>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
     let tactical_policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -998,10 +1014,18 @@ fn handle_set_phaser_frequency(
 fn handle_load_tube(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+        ),
+        With<crate::simulation::Ship>,
+    >,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1022,10 +1046,18 @@ fn handle_load_tube(
 fn handle_unload_tube(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+        ),
+        With<crate::simulation::Ship>,
+    >,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1046,7 +1078,13 @@ fn handle_unload_tube(
 fn handle_fire_torpedo(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+        ),
+        With<crate::simulation::Ship>,
+    >,
     ship: Res<ShipState>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
@@ -1054,7 +1092,9 @@ fn handle_fire_torpedo(
     weapons_target: Res<WeaponsTarget>,
     mut weapon_fired: ResMut<crate::server_app::WeaponFiredThisTick>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else { return; };
+    let Ok((ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1627,7 +1667,17 @@ fn tick_active_beam(
 // when the coarse Tactical system is decomposed into fine-grained systems.
 
 fn operate_tactical_ai(
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources, &crate::ship_plugin::ActiveStationRatings), (With<crate::simulation::Ship>, Without<crate::ai::server::AiControllerComponent>)>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+            &crate::ship_plugin::ActiveStationRatings,
+        ),
+        (
+            With<crate::simulation::Ship>,
+            Without<crate::ai::server::AiControllerComponent>,
+        ),
+    >,
     sessions: Res<Sessions>,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,
@@ -1640,7 +1690,9 @@ fn operate_tactical_ai(
         Without<crate::simulation::Asteroid>,
     >,
 ) {
-    let Ok((ship_config, control_sources, active_ratings)) = ship_query.single() else { return; };
+    let Ok((ship_config, control_sources, active_ratings)) = ship_query.single() else {
+        return;
+    };
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -2049,7 +2101,8 @@ fn publish_weapons_blackboard(
                             crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
                         let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
                             <= effective_bank_range * effective_bank_range;
-                        range_ok && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
+                        range_ok
+                            && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
                     }
                 };
                 let cd = cooldown.bank_remaining_secs(b.id.as_str());
@@ -4717,7 +4770,7 @@ station = "tactical"
     // ── Radar blip tests ─────────────────────────────────────────────────────
 
     fn tactical_blips(app: &mut App) -> Vec<RadarBlip> {
-        use crate::messages::{SystemId, SystemBlackboard};
+        use crate::messages::{SystemBlackboard, SystemId};
         use crate::server_app::SystemBlackboards;
         use crate::system_registry::TACTICAL_SYSTEM_ID;
         let bbs = app.world().resource::<SystemBlackboards>();
@@ -4788,8 +4841,8 @@ station = "tactical"
         source: crate::ship::control_source::ControlSource,
     ) {
         let world = app.world_mut();
-        let mut q = world
-            .query_filtered::<&mut ShipSystemControlSources, With<crate::simulation::Ship>>();
+        let mut q =
+            world.query_filtered::<&mut ShipSystemControlSources, With<crate::simulation::Ship>>();
         for mut cs in q.iter_mut(world) {
             cs.0.set(crate::system_registry::tactical_system_id(), source);
         }

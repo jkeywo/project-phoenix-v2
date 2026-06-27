@@ -140,12 +140,18 @@ transform     = { position = [150.0, 0.0, -20.0] }
 overrides     = { behaviour = { waypoint_arrival_radius = 42.0 } }
 "#;
 
-        let world = crate::world::config::parse_world(world_toml)
-            .expect("world TOML must parse");
-        assert_eq!(world.entities.len(), 1, "expected exactly one [[entity]] block");
+        let world = crate::world::config::parse_world(world_toml).expect("world TOML must parse");
+        assert_eq!(
+            world.entities.len(),
+            1,
+            "expected exactly one [[entity]] block"
+        );
 
         let inst = &world.entities[0];
-        assert!(inst.overrides.is_some(), "overrides must round-trip through parse_world");
+        assert!(
+            inst.overrides.is_some(),
+            "overrides must round-trip through parse_world"
+        );
 
         let config = resolve_entity(inst, &cache).unwrap();
         let beh = config

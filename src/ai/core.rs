@@ -236,11 +236,17 @@ pub fn score_doctrine_pool(
             }
         })
         .collect();
-    pool.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    pool.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     pool
 }
 
-fn parse_doctrine_directive(d: &crate::entity_config::DoctrineObjective) -> crate::messages::AiDirective {
+fn parse_doctrine_directive(
+    d: &crate::entity_config::DoctrineObjective,
+) -> crate::messages::AiDirective {
     match d.directive_kind.as_deref() {
         Some("Patrol") => crate::messages::AiDirective::Patrol {
             anchors: d.directive_anchors.clone(),
@@ -283,39 +289,67 @@ pub fn operate_helm(
 
     // Find top-scoring directive with Helm relevance (score > 0).
     // Helm serves: Patrol, Destroy, Reach. None of these if score == 0.
-    let top = scored_pool.iter().find(|o| {
-        o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm)
-    });
+    let top = scored_pool
+        .iter()
+        .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm));
 
     match top.map(|o| &o.directive) {
         Some(AiDirective::Destroy { .. }) => {
             // Find matching doctrine entry for target_speed / maintain_range config.
-            let cfg = doctrine.iter().find(|d| {
-                top.map(|o| o.id == d.id).unwrap_or(false)
-            });
+            let cfg = doctrine
+                .iter()
+                .find(|d| top.map(|o| o.id == d.id).unwrap_or(false));
             let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.8);
             let maintain_range = cfg.map(|d| d.maintain_range).unwrap_or(25.0);
-            helm_destroy(memory, world_view, anchors, avoidance_buffer,
-                avoidance_look_ahead_secs, forward_speed, faction_registry,
-                target_speed, maintain_range)
+            helm_destroy(
+                memory,
+                world_view,
+                anchors,
+                avoidance_buffer,
+                avoidance_look_ahead_secs,
+                forward_speed,
+                faction_registry,
+                target_speed,
+                maintain_range,
+            )
         }
-        Some(AiDirective::Patrol { anchors: waypoints, loop_path }) => {
-            let cfg = doctrine.iter().find(|d| {
-                top.map(|o| o.id == d.id).unwrap_or(false)
-            });
+        Some(AiDirective::Patrol {
+            anchors: waypoints,
+            loop_path,
+        }) => {
+            let cfg = doctrine
+                .iter()
+                .find(|d| top.map(|o| o.id == d.id).unwrap_or(false));
             let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.5);
-            helm_patrol(memory, world_view, waypoints, *loop_path, waypoint_arrival_radius,
-                avoidance_buffer, avoidance_look_ahead_secs, forward_speed,
-                target_speed, anchors)
+            helm_patrol(
+                memory,
+                world_view,
+                waypoints,
+                *loop_path,
+                waypoint_arrival_radius,
+                avoidance_buffer,
+                avoidance_look_ahead_secs,
+                forward_speed,
+                target_speed,
+                anchors,
+            )
         }
         Some(AiDirective::Reach { anchor }) => {
-            let cfg = doctrine.iter().find(|d| {
-                top.map(|o| o.id == d.id).unwrap_or(false)
-            });
+            let cfg = doctrine
+                .iter()
+                .find(|d| top.map(|o| o.id == d.id).unwrap_or(false));
             let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.6);
             if let Some(&pos) = anchors.get(anchor.as_str()) {
-                helm_navigate_to(memory, world_view, pos, waypoint_arrival_radius,
-                    avoidance_buffer, avoidance_look_ahead_secs, forward_speed, target_speed)
+                helm_navigate_to(
+                    memory,
+                    world_view,
+                    pos,
+                    waypoint_arrival_radius,
+                    avoidance_buffer,
+                    avoidance_look_ahead_secs,
+                    forward_speed,
+                    target_speed,
+                )
             } else {
                 (0.0, 0.0)
             }
@@ -379,11 +413,22 @@ fn helm_destroy(
 
     let self_uuid = uuid::Uuid::nil(); // excluded from avoidance (self already excluded upstream)
     let avoidance = avoidance_steering(
-        pos, world_view.entity_yaw, forward_speed, world_view.self_radius,
-        self_uuid, &world_view.entities, avoidance_buffer, avoidance_look_ahead_secs,
+        pos,
+        world_view.entity_yaw,
+        forward_speed,
+        world_view.self_radius,
+        self_uuid,
+        &world_view.entities,
+        avoidance_buffer,
+        avoidance_look_ahead_secs,
     );
 
-    let base_steer = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+    let base_steer = steer_toward(
+        world_view.entity_yaw,
+        dir,
+        PATROL_DEADBAND_RAD,
+        PATROL_FULL_STEER_RAD,
+    );
     let steering = (base_steer + avoidance).clamp(-1.0, 1.0);
 
     let thrust = if at_station { 0.0 } else { target_speed };
@@ -423,7 +468,9 @@ fn find_nearest_hostile(
         .entities
         .iter()
         .filter(|e| {
-            e.faction.map(|ef| crate::faction::is_enemy(Some(self_faction), Some(ef), faction_registry)).unwrap_or(false)
+            e.faction
+                .map(|ef| crate::faction::is_enemy(Some(self_faction), Some(ef), faction_registry))
+                .unwrap_or(false)
         })
         .min_by(|a, b| {
             let da = dist_sq(pos, a.position);
@@ -490,10 +537,21 @@ fn helm_patrol(
     let dir = [dx / dist, dz / dist];
     let self_uuid = uuid::Uuid::nil();
     let avoidance = avoidance_steering(
-        pos, world_view.entity_yaw, forward_speed, world_view.self_radius,
-        self_uuid, &world_view.entities, avoidance_buffer, avoidance_look_ahead_secs,
+        pos,
+        world_view.entity_yaw,
+        forward_speed,
+        world_view.self_radius,
+        self_uuid,
+        &world_view.entities,
+        avoidance_buffer,
+        avoidance_look_ahead_secs,
     );
-    let base_steer = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+    let base_steer = steer_toward(
+        world_view.entity_yaw,
+        dir,
+        PATROL_DEADBAND_RAD,
+        PATROL_FULL_STEER_RAD,
+    );
     let steering = (base_steer + avoidance).clamp(-1.0, 1.0);
     (target_speed, steering)
 }
@@ -521,10 +579,21 @@ fn helm_navigate_to(
     let dir = [dx / dist, dz / dist];
     let self_uuid = uuid::Uuid::nil();
     let avoidance = avoidance_steering(
-        pos, world_view.entity_yaw, forward_speed, world_view.self_radius,
-        self_uuid, &world_view.entities, avoidance_buffer, avoidance_look_ahead_secs,
+        pos,
+        world_view.entity_yaw,
+        forward_speed,
+        world_view.self_radius,
+        self_uuid,
+        &world_view.entities,
+        avoidance_buffer,
+        avoidance_look_ahead_secs,
     );
-    let base_steer = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+    let base_steer = steer_toward(
+        world_view.entity_yaw,
+        dir,
+        PATROL_DEADBAND_RAD,
+        PATROL_FULL_STEER_RAD,
+    );
     let steering = (base_steer + avoidance).clamp(-1.0, 1.0);
     (target_speed, steering)
 }
@@ -548,23 +617,27 @@ pub fn operate_weapons(
     use crate::messages::SystemAffinity;
 
     // Find top Destroy directive with Weapons relevance and positive score.
-    let has_destroy = scored_pool.iter().any(|o| {
-        o.score > 0.0 && o.relevance.contains(&SystemAffinity::Weapons)
-    });
+    let has_destroy = scored_pool
+        .iter()
+        .any(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Weapons));
     if !has_destroy {
         return (None, false);
     }
 
     // Resolve target: current target → last attacker → nearest hostile.
     let target = if let Some(t) = memory.target {
-        if world_view.entities.iter().any(|e| e.uuid == t) { Some(t) } else { None }
+        if world_view.entities.iter().any(|e| e.uuid == t) {
+            Some(t)
+        } else {
+            None
+        }
     } else {
         None
     };
     let target = target.or_else(|| {
-        memory.last_attacker.filter(|la| {
-            world_view.entities.iter().any(|e| e.uuid == *la)
-        })
+        memory
+            .last_attacker
+            .filter(|la| world_view.entities.iter().any(|e| e.uuid == *la))
     });
     let target = target.or_else(|| find_nearest_hostile(world_view, faction_registry));
 
@@ -605,10 +678,10 @@ impl CaptainAi {
         last_damage_taken_secs: Option<f32>,
         last_weapon_fired_secs: Option<f32>,
     ) -> Option<bool> {
-        let damage_recent = last_damage_taken_secs
-            .is_some_and(|s| now - s < CAPTAIN_COMBAT_WINDOW_SECS);
-        let weapon_recent = last_weapon_fired_secs
-            .is_some_and(|s| now - s < CAPTAIN_COMBAT_WINDOW_SECS);
+        let damage_recent =
+            last_damage_taken_secs.is_some_and(|s| now - s < CAPTAIN_COMBAT_WINDOW_SECS);
+        let weapon_recent =
+            last_weapon_fired_secs.is_some_and(|s| now - s < CAPTAIN_COMBAT_WINDOW_SECS);
         Some(damage_recent || weapon_recent)
     }
 
@@ -639,7 +712,10 @@ mod tests {
         let len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
         let unit = [dir[0] / len, dir[1] / len];
         let result = steer_toward(0.0, unit, 0.0, PATROL_FULL_STEER_RAD);
-        assert!(result > 0.0, "target to the right must give positive steering");
+        assert!(
+            result > 0.0,
+            "target to the right must give positive steering"
+        );
     }
 
     #[test]
@@ -648,7 +724,10 @@ mod tests {
         let len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
         let unit = [dir[0] / len, dir[1] / len];
         let result = steer_toward(0.0, unit, 0.0, PATROL_FULL_STEER_RAD);
-        assert!(result < 0.0, "target to the left must give negative steering");
+        assert!(
+            result < 0.0,
+            "target to the left must give negative steering"
+        );
     }
 
     #[test]
@@ -766,8 +845,15 @@ mod tests {
         let anchors = anchors_with_alpha();
 
         let (thrust, _steering) = operate_helm(
-            &mut memory, &world, &pool, &doctrine, &anchors,
-            WAYPOINT_ARRIVAL_RADIUS, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 0.0,
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
             &empty_registry(),
         );
         assert!(thrust > 0.0, "should thrust toward waypoint");
@@ -778,8 +864,15 @@ mod tests {
         let mut memory = AiMemory::default();
         let world = world_at_origin();
         let (thrust, steering) = operate_helm(
-            &mut memory, &world, &[], &[], &std::collections::HashMap::new(),
-            WAYPOINT_ARRIVAL_RADIUS, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 0.0,
+            &mut memory,
+            &world,
+            &[],
+            &[],
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
             &empty_registry(),
         );
         assert_eq!(thrust, 0.0);
@@ -796,8 +889,15 @@ mod tests {
         let anchors = anchors_with_alpha();
 
         let (thrust, steering) = operate_helm(
-            &mut memory, &world, &pool, &doctrine, &anchors,
-            WAYPOINT_ARRIVAL_RADIUS, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 0.0,
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
             &empty_registry(),
         );
         assert_eq!(thrust, 0.0, "zero-gated pool must produce no thrust");
@@ -821,13 +921,17 @@ mod tests {
             source: crate::messages::ObjectiveSource::Doctrine,
             relevance: vec![crate::messages::SystemAffinity::Helm],
             snapshot: crate::messages::ObjectiveSnapshot {
-                id: "patrol".into(), text: "".into(), mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active, targets: vec![],
+                id: "patrol".into(),
+                text: "".into(),
+                mandatory: false,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![],
                 source: crate::messages::ObjectiveSource::Doctrine,
             },
         }];
         let doctrine = vec![crate::entity_config::DoctrineObjective {
-            id: "patrol".into(), text: "".into(),
+            id: "patrol".into(),
+            text: "".into(),
             directive_kind: Some("Patrol".into()),
             directive_anchors: vec!["wp0".into(), "wp1".into()],
             directive_loop: false,
@@ -837,11 +941,21 @@ mod tests {
 
         let world = world_at_origin();
         operate_helm(
-            &mut memory, &world, &pool, &doctrine, &anchors,
-            WAYPOINT_ARRIVAL_RADIUS, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 0.0,
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
             &empty_registry(),
         );
-        assert_eq!(memory.waypoint_index, 1, "should advance past arrived waypoint");
+        assert_eq!(
+            memory.waypoint_index, 1,
+            "should advance past arrived waypoint"
+        );
     }
 
     // ── operate_weapons ───────────────────────────────────────────────────
@@ -858,8 +972,11 @@ mod tests {
                 crate::messages::SystemAffinity::Captain,
             ],
             snapshot: crate::messages::ObjectiveSnapshot {
-                id: "destroy".into(), text: "".into(), mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active, targets: vec![],
+                id: "destroy".into(),
+                text: "".into(),
+                mandatory: false,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![],
                 source: crate::messages::ObjectiveSource::Doctrine,
             },
         }]
@@ -868,10 +985,16 @@ mod tests {
     #[test]
     fn operate_weapons_returns_target_and_fire_when_ready_and_target_visible() {
         let target_id = Uuid::new_v4();
-        let memory = AiMemory { target: Some(target_id), ..Default::default() };
+        let memory = AiMemory {
+            target: Some(target_id),
+            ..Default::default()
+        };
         let world = WorldView {
             entity_phaser_ready: true,
-            entities: vec![AiWorldEntity { uuid: target_id, ..Default::default() }],
+            entities: vec![AiWorldEntity {
+                uuid: target_id,
+                ..Default::default()
+            }],
             ..Default::default()
         };
         let pool = destroy_pool_with_score(35.0);
@@ -883,10 +1006,16 @@ mod tests {
     #[test]
     fn operate_weapons_no_fire_when_phaser_not_ready() {
         let target_id = Uuid::new_v4();
-        let memory = AiMemory { target: Some(target_id), ..Default::default() };
+        let memory = AiMemory {
+            target: Some(target_id),
+            ..Default::default()
+        };
         let world = WorldView {
             entity_phaser_ready: false,
-            entities: vec![AiWorldEntity { uuid: target_id, ..Default::default() }],
+            entities: vec![AiWorldEntity {
+                uuid: target_id,
+                ..Default::default()
+            }],
             ..Default::default()
         };
         let pool = destroy_pool_with_score(35.0);
@@ -898,10 +1027,16 @@ mod tests {
     #[test]
     fn operate_weapons_zero_gated_destroy_returns_no_fire() {
         let target_id = Uuid::new_v4();
-        let memory = AiMemory { target: Some(target_id), ..Default::default() };
+        let memory = AiMemory {
+            target: Some(target_id),
+            ..Default::default()
+        };
         let world = WorldView {
             entity_phaser_ready: true,
-            entities: vec![AiWorldEntity { uuid: target_id, ..Default::default() }],
+            entities: vec![AiWorldEntity {
+                uuid: target_id,
+                ..Default::default()
+            }],
             ..Default::default()
         };
         let pool = destroy_pool_with_score(0.0); // zero-gated
@@ -919,7 +1054,10 @@ mod tests {
         };
         let world = WorldView {
             entity_phaser_ready: true,
-            entities: vec![AiWorldEntity { uuid: attacker_id, ..Default::default() }],
+            entities: vec![AiWorldEntity {
+                uuid: attacker_id,
+                ..Default::default()
+            }],
             ..Default::default()
         };
         let pool = destroy_pool_with_score(35.0);
@@ -979,7 +1117,10 @@ mod tests {
             base_priority: 20.0,
             ..Default::default()
         }];
-        let cond = WorldConditions { red_alert: false, hull_fraction: 1.0 };
+        let cond = WorldConditions {
+            red_alert: false,
+            hull_fraction: 1.0,
+        };
         let pool = score_doctrine_pool(&doctrine, &cond);
         assert_eq!(pool.len(), 1);
         assert!((pool[0].score - 20.0).abs() < 1e-5);
@@ -996,10 +1137,16 @@ mod tests {
             text: "Flee".into(),
             directive_kind: Some("Reach".into()),
             base_priority: 50.0,
-            zero_gates: vec![ZeroGateCondition { condition: "hull_below".into(), threshold: Some(0.3) }],
+            zero_gates: vec![ZeroGateCondition {
+                condition: "hull_below".into(),
+                threshold: Some(0.3),
+            }],
             ..Default::default()
         }];
-        let cond = WorldConditions { red_alert: false, hull_fraction: 1.0 };
+        let cond = WorldConditions {
+            red_alert: false,
+            hull_fraction: 1.0,
+        };
         let pool = score_doctrine_pool(&doctrine, &cond);
         assert_eq!(pool[0].score, 0.0, "zero-gate must veto at full hull");
     }
@@ -1010,11 +1157,29 @@ mod tests {
         use crate::objectives::WorldConditions;
 
         let doctrine = vec![
-            DoctrineObjective { id: "a".into(), text: "A".into(), base_priority: 10.0, ..Default::default() },
-            DoctrineObjective { id: "b".into(), text: "B".into(), base_priority: 35.0, ..Default::default() },
-            DoctrineObjective { id: "c".into(), text: "C".into(), base_priority: 20.0, ..Default::default() },
+            DoctrineObjective {
+                id: "a".into(),
+                text: "A".into(),
+                base_priority: 10.0,
+                ..Default::default()
+            },
+            DoctrineObjective {
+                id: "b".into(),
+                text: "B".into(),
+                base_priority: 35.0,
+                ..Default::default()
+            },
+            DoctrineObjective {
+                id: "c".into(),
+                text: "C".into(),
+                base_priority: 20.0,
+                ..Default::default()
+            },
         ];
-        let cond = WorldConditions { red_alert: false, hull_fraction: 1.0 };
+        let cond = WorldConditions {
+            red_alert: false,
+            hull_fraction: 1.0,
+        };
         let pool = score_doctrine_pool(&doctrine, &cond);
         assert_eq!(pool[0].id, "b");
         assert_eq!(pool[1].id, "c");

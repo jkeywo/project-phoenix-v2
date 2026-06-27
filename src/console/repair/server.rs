@@ -76,7 +76,13 @@ pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
     admitted: Res<AdmittedCommands>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent, &ShipSystemControlSources), With<crate::simulation::Ship>>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+        ),
+        With<crate::simulation::Ship>,
+    >,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
     // ── ControlSystem path (authority already checked at admission) ────────
@@ -173,7 +179,6 @@ fn publish_repair_blackboard(
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-
 // ── AI controller stub ─────────────────────────────────────────────────────────
 
 /// Per-kind AI plugin for repair.
@@ -181,13 +186,9 @@ fn publish_repair_blackboard(
 /// Gated on policy.operate_ai for the Repair system. No behaviour is
 /// implemented yet — this is a compile-verified stub that will be filled in
 /// when the Repair AI controller is designed.
-fn operate_repair_ai(
-    ships: Query<&ShipSystemControlSources, With<crate::simulation::Ship>>,
-) {
+fn operate_repair_ai(ships: Query<&ShipSystemControlSources, With<crate::simulation::Ship>>) {
     for sources in &ships {
-        let policy = sources
-            .0
-            .policy_for(&repair_system_id());
+        let policy = sources.0.policy_for(&repair_system_id());
         if !policy.operate_ai {
             continue;
         }
@@ -527,7 +528,9 @@ mod tests {
 
         // Set repair system to AI control.
         {
-            let mut q = app.world_mut().query_filtered::<&mut ShipSystemControlSources, With<crate::simulation::Ship>>();
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemControlSources, With<crate::simulation::Ship>>();
             for mut cs in q.iter_mut(app.world_mut()) {
                 cs.0.set(
                     crate::ship::system_registry::repair_system_id(),
@@ -644,7 +647,10 @@ mod tests {
         let bb = repair_bb(&app);
         assert!(!bb.teams.is_empty(), "expected at least one team slot");
         assert!(!bb.console_hull.is_empty(), "expected console_hull entries");
-        assert!(bb.travel_duration_secs > 0.0, "expected positive travel duration");
+        assert!(
+            bb.travel_duration_secs > 0.0,
+            "expected positive travel duration"
+        );
     }
 
     #[test]
@@ -661,7 +667,9 @@ mod tests {
 
         let bb = repair_bb(&app);
         assert!(
-            bb.teams.iter().any(|t| matches!(t, TeamSlot::Travelling { .. })),
+            bb.teams
+                .iter()
+                .any(|t| matches!(t, TeamSlot::Travelling { .. })),
             "expected a Travelling team slot after dispatch"
         );
     }
@@ -673,7 +681,10 @@ mod tests {
         tick(&mut app);
 
         let bb = repair_bb(&app);
-        assert!(!bb.damageable_consoles.is_empty(), "expected damageable_consoles");
+        assert!(
+            !bb.damageable_consoles.is_empty(),
+            "expected damageable_consoles"
+        );
         assert!(
             bb.damageable_consoles.contains(&Console::Helm),
             "Helm should appear in damageable_consoles"

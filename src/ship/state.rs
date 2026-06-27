@@ -81,7 +81,6 @@ impl ShipState {
         self.view_mode = resolution.mode;
         self.captain_view_direction = self.viewscreen.captain_view_direction();
     }
-
 }
 
 #[cfg(test)]
@@ -129,5 +128,4 @@ mod tests {
         s.request_view_mode(ViewMode::NavigationChart);
         assert_eq!(s.view_mode, ViewMode::Camera(ViewDirection::Port));
     }
-
 }

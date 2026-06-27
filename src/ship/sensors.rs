@@ -113,7 +113,9 @@ pub fn tick_sensors_frequency_hint(
     state.last_sent_frequency = Some(frequency);
 
     let sender_origin = if let Ok(control_sources) = ship_query.single() {
-        control_sources.0.source_for(&crate::system_registry::sensors_system_id())
+        control_sources
+            .0
+            .source_for(&crate::system_registry::sensors_system_id())
     } else {
         ControlSource::Human
     };
@@ -134,8 +136,8 @@ pub fn publish_sensors_blackboard(
 ) {
     let cfg = &ship_config.0;
     let bb = SensorsBlackboard {
-        radar_range:   cfg.sensors_radar_range,
-        radar_shows:   cfg.sensors_radar_shows.clone(),
+        radar_range: cfg.sensors_radar_range,
+        radar_shows: cfg.sensors_radar_shows.clone(),
         radar_selects: cfg.sensors_radar_selects.clone(),
     };
 

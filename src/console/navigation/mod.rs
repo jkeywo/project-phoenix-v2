@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
 use crate::messages::{
-    AdmittedCommands, NavigationBlackboard, SystemBlackboard, SystemControlPayload,
-    SystemId, WaypointSnapshot,
+    AdmittedCommands, NavigationBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
+    WaypointSnapshot,
 };
 use crate::ship::system_registry::NAVIGATION_SYSTEM_ID;
 
@@ -148,7 +148,6 @@ fn refresh_anchored_waypoint(
     }
 }
 
-
 // ── Blackboard publish ────────────────────────────────────────────────────────
 
 fn publish_navigation_blackboard(
@@ -158,9 +157,9 @@ fn publish_navigation_blackboard(
 ) {
     let cfg = &ship_config.0;
     let bb = NavigationBlackboard {
-        nav_chart_range:     cfg.nav_chart_range,
-        nav_chart_shows:     cfg.nav_chart_shows.clone(),
-        nav_chart_selects:   cfg.nav_chart_selects.clone(),
+        nav_chart_range: cfg.nav_chart_range,
+        nav_chart_shows: cfg.nav_chart_shows.clone(),
+        nav_chart_selects: cfg.nav_chart_selects.clone(),
         navigation_waypoint: waypoint.snapshot(),
     };
 
@@ -334,7 +333,9 @@ mod tests {
         })
     }
 
-    fn latest_navigation_blackboard(out: &[OutboundMessage]) -> Option<crate::messages::NavigationBlackboard> {
+    fn latest_navigation_blackboard(
+        out: &[OutboundMessage],
+    ) -> Option<crate::messages::NavigationBlackboard> {
         out.iter().rev().find_map(|m| match &m.msg {
             ServerMessage::BlackboardUpdate { updates } => {
                 updates.iter().find_map(|(_, bb)| match bb {

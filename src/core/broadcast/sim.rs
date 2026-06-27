@@ -175,7 +175,9 @@ fn dispatch_sim_broadcasts(world: &mut World) {
                     return None;
                 }
                 // Resolve audience → target.
-                let target = reg.audience.resolve(&sessions.0, ship_config_opt.as_ref().map(|c| &c.0))?;
+                let target = reg
+                    .audience
+                    .resolve(&sessions.0, ship_config_opt.as_ref().map(|c| &c.0))?;
                 Some((target, reg.producer.clone()))
             })
             .collect()

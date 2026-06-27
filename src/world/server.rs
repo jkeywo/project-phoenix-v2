@@ -1,13 +1,11 @@
-﻿use crate::damage::ConsoleHull;
+use crate::damage::ConsoleHull;
 use crate::simulation::{Ship, ShipHullIntegrity};
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::comms_inbox::CommsInbox;
 use crate::lobby::{Sessions, Target, WorldResource};
-use crate::messages::{
-    CommsContact, CommsMessage, Console, GamePhase, ServerMessage, ViewMode,
-};
+use crate::messages::{CommsContact, CommsMessage, Console, GamePhase, ServerMessage, ViewMode};
 use crate::objectives::ObjectiveManager;
 use crate::ship_state::ShipState;
 use crate::simulation::SimOutbox;
@@ -1678,7 +1676,10 @@ fn handle_clear_comms(
     mut inbox: ResMut<CommsInboxRes>,
 ) {
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
-        if matches!(cmd.payload, crate::messages::SystemControlPayload::ClearComms) {
+        if matches!(
+            cmd.payload,
+            crate::messages::SystemControlPayload::ClearComms
+        ) {
             inbox.0.clear();
         }
     }
@@ -1696,9 +1697,7 @@ fn handle_show_on_screen(
 ) {
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
         let show_message_id: Option<&String> = match &cmd.payload {
-            crate::messages::SystemControlPayload::ShowOnScreen { message_id } => {
-                Some(message_id)
-            }
+            crate::messages::SystemControlPayload::ShowOnScreen { message_id } => Some(message_id),
             _ => None,
         };
         if let Some(message_id) = show_message_id {
@@ -1732,7 +1731,9 @@ fn handle_comms_channel2(
     ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
 ) {
     let policy = if let Ok(control_sources) = ship_query.single() {
-        control_sources.0.policy_for(&crate::system_registry::comms_system_id())
+        control_sources
+            .0
+            .policy_for(&crate::system_registry::comms_system_id())
     } else {
         crate::control_source::ControlTickPolicy {
             accept_human_input: true,
@@ -1909,7 +1910,9 @@ fn broadcast_comms_state(
         return;
     }
 
-    let Ok(ship_config) = ship_query.single() else { return; };
+    let Ok(ship_config) = ship_query.single() else {
+        return;
+    };
     let Some(comms_token) = sessions.0.console_holder(&Console::Comms, &ship_config.0) else {
         inbox.0.mark_clean();
         runtime.needs_broadcast = false;
@@ -2936,9 +2939,9 @@ fn mutate_world_flag(
 }
 
 use crate::ai_plugin::AiControllerComponent;
-use crate::entity_spawner::EntityUuid;
 #[cfg(test)]
 use crate::entity_spawner::BehaviourSection;
+use crate::entity_spawner::EntityUuid;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Pending scenario load system Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 

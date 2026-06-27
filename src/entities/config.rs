@@ -2429,8 +2429,11 @@ base_priority = 35.0
             .expect("battleship must have [shields] (#474)");
         assert!((shields.max_hp - 120.0).abs() < 1e-6);
         let behaviour = config.behaviour.as_ref().expect("must have [behaviour]");
-        let directive_kinds: Vec<Option<&str>> =
-            behaviour.doctrine.iter().map(|d| d.directive_kind.as_deref()).collect();
+        let directive_kinds: Vec<Option<&str>> = behaviour
+            .doctrine
+            .iter()
+            .map(|d| d.directive_kind.as_deref())
+            .collect();
         assert!(
             directive_kinds.contains(&Some("Patrol")),
             "battleship must have a Patrol doctrine (#572 doctrine-based AI)"
@@ -2465,10 +2468,24 @@ base_priority = 35.0
             .behaviour
             .expect("pirate_raider must have a [behaviour] block");
         let ids: Vec<&str> = behaviour.doctrine.iter().map(|d| d.id.as_str()).collect();
-        assert!(ids.contains(&"patrol-sector"), "must have patrol-sector doctrine");
-        assert!(ids.contains(&"destroy-hostiles"), "must have destroy-hostiles doctrine");
-        let destroy = behaviour.doctrine.iter().find(|d| d.id == "destroy-hostiles").unwrap();
-        let patrol = behaviour.doctrine.iter().find(|d| d.id == "patrol-sector").unwrap();
+        assert!(
+            ids.contains(&"patrol-sector"),
+            "must have patrol-sector doctrine"
+        );
+        assert!(
+            ids.contains(&"destroy-hostiles"),
+            "must have destroy-hostiles doctrine"
+        );
+        let destroy = behaviour
+            .doctrine
+            .iter()
+            .find(|d| d.id == "destroy-hostiles")
+            .unwrap();
+        let patrol = behaviour
+            .doctrine
+            .iter()
+            .find(|d| d.id == "patrol-sector")
+            .unwrap();
         assert!(
             destroy.base_priority > patrol.base_priority,
             "destroy-hostiles must outscore patrol-sector"

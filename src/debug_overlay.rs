@@ -202,7 +202,11 @@ fn write_entity_debug_state(
     for (i, (ai, transform, name)) in entities.iter().enumerate() {
         let label = name.map(|n| n.0.as_str()).unwrap_or("<unnamed>");
         let p = transform.translation;
-        let target_str = ai.memory.target.map(|u| u.to_string()).unwrap_or_else(|| "none".to_string());
+        let target_str = ai
+            .memory
+            .target
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| "none".to_string());
         out.push_str(&format!(
             "{:>2}. {:<20} pos=({:>7.1},{:>7.1},{:>7.1})  target={}\n",
             i + 1,
@@ -378,7 +382,11 @@ fn update_entity_inspector(
         if let Some(ai_ctrl) = ai {
             out.push_str(&format!(
                 "    ai: target={}\n",
-                ai_ctrl.memory.target.map(|u| u.to_string()).unwrap_or_else(|| "none".to_string())
+                ai_ctrl
+                    .memory
+                    .target
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|| "none".to_string())
             ));
         }
     }

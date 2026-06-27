@@ -95,7 +95,6 @@ impl Default for ShipConfigComponent {
     }
 }
 
-
 /// Runtime ship physics config, loaded from `[helm_console]` in the entity TOML.
 /// When absent, `ShipPhysicsConfig::new()` defaults are used.
 #[derive(Resource, Clone)]
@@ -205,8 +204,7 @@ impl Plugin for ShipPlugin {
                 process_helm_inputs
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(player_ship_helm_ai),
-                detect_player_ship_objective_completion
-                    .in_set(crate::sim_sets::SimSet::Broadcast),
+                detect_player_ship_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
                 sync_ship_position
@@ -340,14 +338,20 @@ fn operate_helm_ai(
     mut last_input: ResMut<LastHelmInput>,
     player_ships: Query<
         &ShipSystemControlSources,
-        (With<Ship>, Without<crate::ai::server::AiControllerComponent>),
+        (
+            With<Ship>,
+            Without<crate::ai::server::AiControllerComponent>,
+        ),
     >,
-    mut npc_ships: Query<(
-        &mut Transform,
-        &mut crate::ai::server::AiControllerComponent,
-        &ShipSystemControlSources,
-        Option<&crate::entities::spawner::HelmConsoleSection>,
-    ), With<crate::ai::server::AiControllerComponent>>,
+    mut npc_ships: Query<
+        (
+            &mut Transform,
+            &mut crate::ai::server::AiControllerComponent,
+            &ShipSystemControlSources,
+            Option<&crate::entities::spawner::HelmConsoleSection>,
+        ),
+        With<crate::ai::server::AiControllerComponent>,
+    >,
 ) {
     // Player ship Backfill path: when helm is AI-controlled but there is no
     // behaviour tree to generate intent, hold the ship at zero thrust/steering
@@ -357,7 +361,10 @@ fn operate_helm_ai(
         if !policy.operate_ai {
             continue;
         }
-        *last_input = LastHelmInput { thrust: 0.0, steering: 0.0 };
+        *last_input = LastHelmInput {
+            thrust: 0.0,
+            steering: 0.0,
+        };
     }
 
     // NPC ship path: translate `last_helm_intent` into physics on the entity's
@@ -381,7 +388,12 @@ fn operate_helm_ai(
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
         let result = compute_physics(
-            ShipPhysicsState { x: pos.x, z: pos.z, yaw, forward_speed: ctrl.forward_speed },
+            ShipPhysicsState {
+                x: pos.x,
+                z: pos.z,
+                yaw,
+                forward_speed: ctrl.forward_speed,
+            },
             ShipPhysicsInput { thrust, steering },
             dt,
             &physics_config,
@@ -414,26 +426,36 @@ fn player_ship_helm_ai(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     player_ships: Query<
         &ShipSystemControlSources,
-        (With<Ship>, Without<crate::ai::server::AiControllerComponent>),
+        (
+            With<Ship>,
+            Without<crate::ai::server::AiControllerComponent>,
+        ),
     >,
 ) {
-    let Ok(sources) = player_ships.single() else { return };
-    if !helm_control_policy(sources).operate_ai { return; }
+    let Ok(sources) = player_ships.single() else {
+        return;
+    };
+    if !helm_control_policy(sources).operate_ai {
+        return;
+    }
 
-    let Some(blackboards) = blackboards else { return };
-    let scored: Vec<crate::messages::ScoredObjective> =
-        match blackboards.0.get(&crate::system_registry::viewscreen_system_id()) {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
-                bb.scored_objectives.clone()
-            }
-            _ => return,
-        };
+    let Some(blackboards) = blackboards else {
+        return;
+    };
+    let scored: Vec<crate::messages::ScoredObjective> = match blackboards
+        .0
+        .get(&crate::system_registry::viewscreen_system_id())
+    {
+        Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+        _ => return,
+    };
 
     let has_reach = scored.iter().any(|o| {
-        o.score > 0.0
-            && matches!(&o.directive, crate::messages::AiDirective::Reach { .. })
+        o.score > 0.0 && matches!(&o.directive, crate::messages::AiDirective::Reach { .. })
     });
-    if !has_reach { return; }
+    if !has_reach {
+        return;
+    }
 
     let anchors = world_config
         .as_ref()
@@ -479,22 +501,33 @@ fn detect_player_ship_objective_completion(
     mut objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
     player_ships: Query<
         &ShipSystemControlSources,
-        (With<Ship>, Without<crate::ai::server::AiControllerComponent>),
+        (
+            With<Ship>,
+            Without<crate::ai::server::AiControllerComponent>,
+        ),
     >,
 ) {
-    let Ok(sources) = player_ships.single() else { return };
-    if !helm_control_policy(sources).operate_ai { return; }
+    let Ok(sources) = player_ships.single() else {
+        return;
+    };
+    if !helm_control_policy(sources).operate_ai {
+        return;
+    }
 
-    let Some(blackboards) = blackboards else { return };
-    let Some(mut objectives) = objectives else { return };
+    let Some(blackboards) = blackboards else {
+        return;
+    };
+    let Some(mut objectives) = objectives else {
+        return;
+    };
 
-    let scored: Vec<crate::messages::ScoredObjective> =
-        match blackboards.0.get(&crate::system_registry::viewscreen_system_id()) {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
-                bb.scored_objectives.clone()
-            }
-            _ => return,
-        };
+    let scored: Vec<crate::messages::ScoredObjective> = match blackboards
+        .0
+        .get(&crate::system_registry::viewscreen_system_id())
+    {
+        Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+        _ => return,
+    };
 
     let anchors = world_config
         .as_ref()
@@ -502,9 +535,15 @@ fn detect_player_ship_objective_completion(
         .unwrap_or_default();
 
     for obj in &scored {
-        if obj.score <= 0.0 { continue; }
-        let crate::messages::AiDirective::Reach { anchor } = &obj.directive else { continue };
-        let Some(&target) = anchors.get(anchor.as_str()) else { continue };
+        if obj.score <= 0.0 {
+            continue;
+        }
+        let crate::messages::AiDirective::Reach { anchor } = &obj.directive else {
+            continue;
+        };
+        let Some(&target) = anchors.get(anchor.as_str()) else {
+            continue;
+        };
         let dx = target[0] - ship.x;
         let dz = target[2] - ship.z;
         if (dx * dx + dz * dz).sqrt() < crate::ai::WAYPOINT_ARRIVAL_RADIUS {
@@ -665,7 +704,14 @@ fn is_inside_blocks_impulse(
 pub fn handle_station_rating_change(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    mut ship_components: Query<(&ShipConfigComponent, &mut ShipSystemControlSources, &mut ActiveStationRatings), With<Ship>>,
+    mut ship_components: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<Ship>,
+    >,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
 ) {
     let messages: Vec<_> = reader.read().collect();
@@ -749,7 +795,14 @@ pub fn handle_coordination_enqueue(
 
 pub fn process_coordination_lag(
     time: Res<Time>,
-    mut ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources, &mut CoordinationQueue), With<Ship>>,
+    mut ship_components: Query<
+        (
+            &ShipConfigComponent,
+            &ShipSystemControlSources,
+            &mut CoordinationQueue,
+        ),
+        With<Ship>,
+    >,
     sessions: Res<Sessions>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
 ) {
@@ -931,21 +984,27 @@ mod tests {
     }
 
     fn set_helm_control_source(app: &mut App, source: ControlSource) {
-        let mut q = app.world_mut().query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
         for mut cs in q.iter_mut(app.world_mut()) {
             cs.0.set(crate::system_registry::helm_system_id(), source);
         }
     }
 
     fn get_ship_control_sources(app: &mut App) -> ShipSystemControlSources {
-        let mut q = app.world_mut().query_filtered::<&ShipSystemControlSources, With<Ship>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemControlSources, With<Ship>>();
         q.single(app.world())
             .expect("expected Ship entity with ShipSystemControlSources")
             .clone()
     }
 
     fn get_ship_active_ratings(app: &mut App) -> ActiveStationRatings {
-        let mut q = app.world_mut().query_filtered::<&ActiveStationRatings, With<Ship>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ActiveStationRatings, With<Ship>>();
         q.single(app.world())
             .expect("expected Ship entity with ActiveStationRatings")
             .clone()
@@ -1863,7 +1922,9 @@ station = "helm"
         // Apply the custom config directly on the Ship entity — PendingShipConfig
         // is consumed by spawn_game_start_entities which is not in the test app.
         let custom_config = ship_config_with_assisted_captain();
-        let mut q = app.world_mut().query_filtered::<&mut ShipConfigComponent, With<Ship>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipConfigComponent, With<Ship>>();
         for mut cfg in q.iter_mut(app.world_mut()) {
             *cfg = custom_config.clone();
         }
@@ -2025,7 +2086,9 @@ station = "helm"
         crate::messages::ScoredObjective {
             id: format!("reach-{anchor}"),
             score,
-            directive: crate::messages::AiDirective::Reach { anchor: anchor.into() },
+            directive: crate::messages::AiDirective::Reach {
+                anchor: anchor.into(),
+            },
             source: crate::messages::ObjectiveSource::Mission,
             relevance: vec![crate::messages::SystemAffinity::Helm],
             snapshot: crate::messages::ObjectiveSnapshot {
@@ -2110,7 +2173,9 @@ station = "helm"
         vb.scored_objectives = vec![ScoredObjective {
             id: "destroy-pirates".into(),
             score: 5.0,
-            directive: AiDirective::Destroy { target: "pirate".into() },
+            directive: AiDirective::Destroy {
+                target: "pirate".into(),
+            },
             source: ObjectiveSource::Mission,
             relevance: vec![SystemAffinity::Helm],
             snapshot: ObjectiveSnapshot {
@@ -2143,8 +2208,8 @@ station = "helm"
 
     #[test]
     fn detect_reach_completion_marks_objective_complete() {
-        use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::world::server::ObjectiveManagerRes;
 
         let mut app = test_app();
@@ -2161,7 +2226,9 @@ station = "helm"
             "Dock at Alpha",
             true,
             vec![],
-            AiDirective::Reach { anchor: anchor.into() },
+            AiDirective::Reach {
+                anchor: anchor.into(),
+            },
             UtilityConfig::default(),
             ObjectiveSource::Mission,
         );
@@ -2170,17 +2237,22 @@ station = "helm"
         tick(&mut app);
 
         let res = app.world().resource::<ObjectiveManagerRes>();
-        let obj = res.0.sorted_snapshots().into_iter().find(|o| o.id == "reach-dock-alpha");
+        let obj = res
+            .0
+            .sorted_snapshots()
+            .into_iter()
+            .find(|o| o.id == "reach-dock-alpha");
         assert!(
-            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Completed).unwrap_or(false),
+            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Completed)
+                .unwrap_or(false),
             "Reach objective should be completed when ship is within arrival radius"
         );
     }
 
     #[test]
     fn detect_reach_completion_does_not_complete_when_far() {
-        use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::world::server::ObjectiveManagerRes;
 
         let mut app = test_app();
@@ -2197,7 +2269,9 @@ station = "helm"
             "Dock at Far",
             true,
             vec![],
-            AiDirective::Reach { anchor: anchor.into() },
+            AiDirective::Reach {
+                anchor: anchor.into(),
+            },
             UtilityConfig::default(),
             ObjectiveSource::Mission,
         );
@@ -2206,17 +2280,22 @@ station = "helm"
         tick(&mut app);
 
         let res = app.world().resource::<ObjectiveManagerRes>();
-        let obj = res.0.sorted_snapshots().into_iter().find(|o| o.id == "reach-dock-far");
+        let obj = res
+            .0
+            .sorted_snapshots()
+            .into_iter()
+            .find(|o| o.id == "reach-dock-far");
         assert!(
-            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Active).unwrap_or(false),
+            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Active)
+                .unwrap_or(false),
             "Reach objective must remain Active when ship is far from the anchor"
         );
     }
 
     #[test]
     fn detect_reach_completion_does_not_complete_when_helm_human() {
-        use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::world::server::ObjectiveManagerRes;
 
         let mut app = test_app();
@@ -2232,7 +2311,9 @@ station = "helm"
             "Dock at Beta",
             true,
             vec![],
-            AiDirective::Reach { anchor: anchor.into() },
+            AiDirective::Reach {
+                anchor: anchor.into(),
+            },
             UtilityConfig::default(),
             ObjectiveSource::Mission,
         );
@@ -2241,9 +2322,14 @@ station = "helm"
         tick(&mut app);
 
         let res = app.world().resource::<ObjectiveManagerRes>();
-        let obj = res.0.sorted_snapshots().into_iter().find(|o| o.id == "reach-dock-beta");
+        let obj = res
+            .0
+            .sorted_snapshots()
+            .into_iter()
+            .find(|o| o.id == "reach-dock-beta");
         assert!(
-            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Active).unwrap_or(false),
+            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Active)
+                .unwrap_or(false),
             "Reach completion must not fire when helm is human-controlled"
         );
     }
@@ -2266,7 +2352,10 @@ station = "helm"
         }
         let sources = ShipSystemControlSources(resolver);
         let policy = helm_control_policy(&sources);
-        assert!(policy.operate_ai, "NPC raider helm must route through operate_helm_ai");
+        assert!(
+            policy.operate_ai,
+            "NPC raider helm must route through operate_helm_ai"
+        );
         assert!(
             !policy.accept_human_input,
             "NPC raider must not accept human helm input"

@@ -16,7 +16,11 @@ impl Audience {
     /// Resolve this audience to a `Target` given current session state.
     /// Returns `None` when `Holding` names a console with no current holder or
     /// when `ship_config` is `None`, signalling the caller to skip this broadcast.
-    pub fn resolve(&self, sessions: &SessionManager, ship_config: Option<&ShipConfig>) -> Option<Target> {
+    pub fn resolve(
+        &self,
+        sessions: &SessionManager,
+        ship_config: Option<&ShipConfig>,
+    ) -> Option<Target> {
         match self {
             Audience::All => Some(Target::All),
             Audience::Holding(console) => {

@@ -590,15 +590,19 @@ impl CaptainAi {
     /// Returns `Some(true)` when the ship should be in red alert (damage taken
     /// or weapon fired within the last 10 seconds), `Some(false)` otherwise.
     ///
-    /// `last_damage_taken_secs` and `last_weapon_fired_secs` are read from the
-    /// viewscreen blackboard, not from `RecentCombatActivity`.
+    /// `now` is the current simulation elapsed time in seconds. The
+    /// `last_damage_taken_secs` and `last_weapon_fired_secs` values are absolute
+    /// elapsed-second timestamps (read from the viewscreen blackboard).
     pub fn operate(
         &self,
+        now: f32,
         last_damage_taken_secs: Option<f32>,
         last_weapon_fired_secs: Option<f32>,
     ) -> Option<bool> {
-        let damage_recent = last_damage_taken_secs.is_some_and(|s| s < CAPTAIN_COMBAT_WINDOW_SECS);
-        let weapon_recent = last_weapon_fired_secs.is_some_and(|s| s < CAPTAIN_COMBAT_WINDOW_SECS);
+        let damage_recent = last_damage_taken_secs
+            .is_some_and(|s| now - s < CAPTAIN_COMBAT_WINDOW_SECS);
+        let weapon_recent = last_weapon_fired_secs
+            .is_some_and(|s| now - s < CAPTAIN_COMBAT_WINDOW_SECS);
         Some(damage_recent || weapon_recent)
     }
 
@@ -923,33 +927,36 @@ mod tests {
     #[test]
     fn captain_ai_returns_true_when_damage_within_window() {
         let ai = CaptainAi;
-        assert_eq!(ai.operate(Some(5.0), None), Some(true));
+        // now=10, damage at ts=5 → delta=5s < 10s → true
+        assert_eq!(ai.operate(10.0, Some(5.0), None), Some(true));
     }
 
     #[test]
     fn captain_ai_returns_true_when_weapon_fired_within_window() {
         let ai = CaptainAi;
-        assert_eq!(ai.operate(None, Some(3.0)), Some(true));
+        // now=10, weapon at ts=7 → delta=3s < 10s → true
+        assert_eq!(ai.operate(10.0, None, Some(7.0)), Some(true));
     }
 
     #[test]
     fn captain_ai_returns_false_when_no_activity() {
         let ai = CaptainAi;
-        assert_eq!(ai.operate(None, None), Some(false));
+        assert_eq!(ai.operate(10.0, None, None), Some(false));
     }
 
     #[test]
     fn captain_ai_returns_false_when_activity_older_than_window() {
         let ai = CaptainAi;
-        // 15 seconds since last event, window is 10s.
-        assert_eq!(ai.operate(Some(15.0), Some(12.0)), Some(false));
+        // now=20, damage at ts=5 → delta=15s > 10s → false
+        // weapon at ts=8 → delta=12s > 10s → false
+        assert_eq!(ai.operate(20.0, Some(5.0), Some(8.0)), Some(false));
     }
 
     #[test]
     fn captain_ai_returns_true_at_window_boundary() {
         let ai = CaptainAi;
-        // 9.9s — just within 10s window.
-        assert_eq!(ai.operate(Some(9.9), None), Some(true));
+        // now=10, damage at ts=0.1 → delta=9.9s < 10s → true
+        assert_eq!(ai.operate(10.0, Some(0.1), None), Some(true));
     }
 
     // ── score_doctrine_pool ───────────────────────────────────────────────

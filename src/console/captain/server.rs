@@ -103,6 +103,7 @@ fn handle_set_objective_priority(
 /// Combat timers are read from the viewscreen blackboard (issue #572) — no
 /// private `RecentCombatActivity` copy needed by the captain AI.
 fn operate_captain_ai(
+    time: Res<Time>,
     ship: Res<ShipState>,
     mut admitted: ResMut<AdmittedCommands>,
     ship_query: Query<&ShipSystemControlSources, With<Ship>>,
@@ -127,8 +128,9 @@ fn operate_captain_ai(
             _ => (None, None),
         };
 
+    let now = time.elapsed_secs();
     let ai = crate::ai::core::CaptainAi;
-    if let Some(should_be_red_alert) = ai.operate(last_damage_secs, last_weapon_secs) {
+    if let Some(should_be_red_alert) = ai.operate(now, last_damage_secs, last_weapon_secs) {
         if should_be_red_alert != ship.red_alert() {
             admitted.0.push(crate::messages::AdmittedCommand {
                 target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),

@@ -20,7 +20,9 @@ pub fn anchors_from_world_config(
     world.anchors().clone()
 }
 
-use crate::ai::{AiMemory, AiWorldEntity, WorldView, operate_helm, operate_weapons, score_doctrine_pool};
+use crate::ai::{
+    operate_helm, operate_weapons, score_doctrine_pool, AiMemory, AiWorldEntity, WorldView,
+};
 use crate::entity_spawner::{BehaviourSection, ColliderSection, EntityUuid};
 
 use crate::config_cache::FactionRegistryResource;
@@ -38,6 +40,8 @@ pub struct AiTokenRegistry {
     by_token: HashMap<String, String>,
     /// Bevy Entity id → entity_uuid (for despawn handler)
     by_bevy_entity: HashMap<Entity, String>,
+    /// entity_uuid → Bevy Entity (for admission-gate entity lookup)
+    uuid_to_bevy: HashMap<String, Entity>,
 }
 
 impl AiTokenRegistry {
@@ -66,6 +70,7 @@ impl AiTokenRegistry {
     pub fn register_with_entity(&mut self, entity_uuid: &str, entity: Entity) {
         self.register(entity_uuid);
         self.by_bevy_entity.insert(entity, entity_uuid.to_string());
+        self.uuid_to_bevy.insert(entity_uuid.to_string(), entity);
     }
 
     /// Unregister by entity UUID; silently does nothing if not present.
@@ -73,6 +78,7 @@ impl AiTokenRegistry {
         if let Some(token) = self.by_entity.remove(entity_uuid) {
             self.by_token.remove(&token);
         }
+        self.uuid_to_bevy.remove(entity_uuid);
     }
 
     /// Unregister by Bevy `Entity`; used by the despawn handler when the
@@ -81,6 +87,13 @@ impl AiTokenRegistry {
         if let Some(uuid) = self.by_bevy_entity.remove(&entity) {
             self.unregister(&uuid);
         }
+    }
+
+    /// Look up the Bevy `Entity` for an AI token string. Used by the
+    /// admission gate to verify the token belongs to the player ship.
+    pub fn bevy_entity_for_token(&self, token: &str) -> Option<Entity> {
+        let uuid = self.by_token.get(token)?;
+        self.uuid_to_bevy.get(uuid).copied()
     }
 
     /// Look up an entity UUID by its synthetic token. Returns `None` when
@@ -330,19 +343,25 @@ fn tick_ai_controllers(
     // Collect world entities from all non-AI entities.
     let mut world_entities: Vec<AiWorldEntity> = entity_query
         .iter()
-        .map(|(uid, t, faction_comp, hull_comp, collider)| AiWorldEntity {
-            uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
-            position: [t.translation.x, t.translation.y, t.translation.z],
-            faction: faction_comp.map(|f| f.0),
-            shields: None,
-            hull_fraction: hull_comp.and_then(|h| {
-                let max = h.0.total_max();
-                if max > 0.0 { Some(h.0.total_current() / max) } else { None }
-            }),
-            yaw: None,
-            radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
-            forward_speed: 0.0,
-        })
+        .map(
+            |(uid, t, faction_comp, hull_comp, collider)| AiWorldEntity {
+                uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
+                position: [t.translation.x, t.translation.y, t.translation.z],
+                faction: faction_comp.map(|f| f.0),
+                shields: None,
+                hull_fraction: hull_comp.and_then(|h| {
+                    let max = h.0.total_max();
+                    if max > 0.0 {
+                        Some(h.0.total_current() / max)
+                    } else {
+                        None
+                    }
+                }),
+                yaw: None,
+                radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+                forward_speed: 0.0,
+            },
+        )
         .collect();
 
     // Also snapshot all AI-controlled entities so ships can avoid each other.
@@ -400,7 +419,11 @@ fn tick_ai_controllers(
         // Populate hull fraction from EntityConsoleHull if present.
         let self_hull_fraction = hull_comp.and_then(|h| {
             let max = h.0.total_max();
-            if max > 0.0 { Some(h.0.total_current() / max) } else { None }
+            if max > 0.0 {
+                Some(h.0.total_current() / max)
+            } else {
+                None
+            }
         });
 
         // Populate weapons range and phaser readiness from WeaponsConsoleSection and EntityPhaserState.
@@ -408,7 +431,11 @@ fn tick_ai_controllers(
             Some(wc) => {
                 let ready = phaser_state.map(|ps| ps.is_ready()).unwrap_or(false);
                 let range = wc.0.phaser_banks.first().and_then(|b| {
-                    if b.beam_range > 0.0 { Some(b.beam_range) } else { None }
+                    if b.beam_range > 0.0 {
+                        Some(b.beam_range)
+                    } else {
+                        None
+                    }
                 });
                 (ready, range)
             }
@@ -472,12 +499,8 @@ fn tick_ai_controllers(
 
         // ── Phase 3: operate_weapons ──────────────────────────────────────
 
-        let (_target_opt, should_fire) = operate_weapons(
-            &ctrl.memory,
-            &world_view,
-            &scored_pool,
-            registry,
-        );
+        let (_target_opt, should_fire) =
+            operate_weapons(&ctrl.memory, &world_view, &scored_pool, registry);
 
         // ── Update memory: track last attacker ────────────────────────────
 
@@ -801,7 +824,9 @@ mod tests {
         app.update(); // first attacker tick — emits AiEntityAttacked
 
         // Insert the same attacker again
-        app.world_mut().entity_mut(entity).insert(AttackerThisTick(attacker_id));
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(AttackerThisTick(attacker_id));
         app.update(); // second attacker tick — must NOT re-emit
 
         let events = app.world().resource::<AttackedBox>().0.clone();

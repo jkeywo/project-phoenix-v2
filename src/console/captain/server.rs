@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 
 use crate::messages::{
-    AdmittedCommands, CaptainBlackboard, ObjectiveSource, ObjectiveSnapshot, SystemBlackboard,
+    AdmittedCommands, CaptainBlackboard, ObjectiveSnapshot, ObjectiveSource, SystemBlackboard,
     SystemControlPayload, SystemId, ViewDirection, ViewMode,
 };
 use crate::objectives::WorldConditions;
+use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship_state::ShipState;
 use crate::simulation::Ship;
 use crate::world::server::ObjectiveManagerRes;
@@ -39,10 +39,7 @@ impl Plugin for CaptainPlugin {
 
 // ── Input handlers ───────────────────────────────────────────────────────────
 
-fn handle_toggle_red_alert(
-    admitted: Res<AdmittedCommands>,
-    mut ship: ResMut<ShipState>,
-) {
+fn handle_toggle_red_alert(admitted: Res<AdmittedCommands>, mut ship: ResMut<ShipState>) {
     for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
         if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
             ship.toggle_red_alert();
@@ -50,12 +47,17 @@ fn handle_toggle_red_alert(
     }
 }
 
-fn view_request_from_admitted(cmd: &crate::messages::AdmittedCommand) -> Option<(SystemId, ViewMode)> {
+fn view_request_from_admitted(
+    cmd: &crate::messages::AdmittedCommand,
+) -> Option<(SystemId, ViewMode)> {
     match &cmd.payload {
         SystemControlPayload::SetView { mode }
             if cmd.target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID =>
         {
-            Some((crate::ship::viewscreen::source_system_for_view_mode(mode), mode.clone()))
+            Some((
+                crate::ship::viewscreen::source_system_for_view_mode(mode),
+                mode.clone(),
+            ))
         }
         SystemControlPayload::SetView { mode }
             if cmd.target.0 == crate::system_registry::HELM_SYSTEM_ID =>
@@ -66,10 +68,7 @@ fn view_request_from_admitted(cmd: &crate::messages::AdmittedCommand) -> Option<
     }
 }
 
-fn handle_set_view(
-    admitted: Res<AdmittedCommands>,
-    mut ship: ResMut<ShipState>,
-) {
+fn handle_set_view(admitted: Res<AdmittedCommands>, mut ship: ResMut<ShipState>) {
     for cmd in admitted.0.iter() {
         if let Some((source, mode)) = view_request_from_admitted(cmd) {
             ship.request_view_mode_from(source, mode);
@@ -120,13 +119,15 @@ fn operate_captain_ai(
     }
 
     // Read combat timers from the viewscreen blackboard (published by phase-1b aggregator).
-    let (last_damage_secs, last_weapon_secs) =
-        match blackboards.0.get(&crate::system_registry::viewscreen_system_id()) {
-            Some(SystemBlackboard::Viewscreen(bb)) => {
-                (bb.last_damage_taken_secs, bb.last_weapon_fired_secs)
-            }
-            _ => (None, None),
-        };
+    let (last_damage_secs, last_weapon_secs) = match blackboards
+        .0
+        .get(&crate::system_registry::viewscreen_system_id())
+    {
+        Some(SystemBlackboard::Viewscreen(bb)) => {
+            (bb.last_damage_taken_secs, bb.last_weapon_fired_secs)
+        }
+        _ => (None, None),
+    };
 
     let now = time.elapsed_secs();
     let ai = crate::ai::core::CaptainAi;
@@ -152,10 +153,17 @@ fn publish_captain_blackboard(
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     let red_alert = ship.red_alert();
-    let hull_fraction = hull.as_ref().map(|h| {
-        let max = h.0.total_max();
-        if max > 0.0 { h.0.total_current() / max } else { 1.0 }
-    }).unwrap_or(1.0);
+    let hull_fraction = hull
+        .as_ref()
+        .map(|h| {
+            let max = h.0.total_max();
+            if max > 0.0 {
+                h.0.total_current() / max
+            } else {
+                1.0
+            }
+        })
+        .unwrap_or(1.0);
     let control_sources = ship_query.single().ok();
     let red_alert_auto = control_sources.is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::captain_system_id()) == ControlSource::Ai
@@ -175,9 +183,14 @@ fn publish_captain_blackboard(
     // Score objectives to determine which doctrine ones are currently relevant.
     // Mission objectives are always shown; doctrine objectives are hidden when
     // their utility score is zero (conditions not met).
-    let conditions = WorldConditions { red_alert, hull_fraction };
+    let conditions = WorldConditions {
+        red_alert,
+        hull_fraction,
+    };
     let captain_boost = boost.as_ref().and_then(|b| {
-        b.boosted_id.as_deref().map(|id| (id, crate::server_app::CaptainPriorityBoost::BOOST_AMOUNT))
+        b.boosted_id
+            .as_deref()
+            .map(|id| (id, crate::server_app::CaptainPriorityBoost::BOOST_AMOUNT))
     });
     let objectives_snap: Vec<ObjectiveSnapshot> = objectives
         .as_ref()
@@ -493,6 +506,48 @@ mod tests {
                 .0
                 .is_empty(),
             "unauthorized command must be rejected by the admission gate (AdmittedCommands should be empty)"
+        );
+    }
+
+    #[test]
+    fn admission_gate_rejects_npc_ai_token() {
+        // An ai:<uuid> token whose entity is not the player Ship must be rejected
+        // even when the target system has operate_ai = true (Backfill).
+        let mut app = test_app();
+        // Put Tactical under AI control so operate_ai is true — without the NPC
+        // check the token would pass is_command_authorized.
+        set_control_source(
+            &mut app,
+            crate::system_registry::tactical_system_id(),
+            ControlSource::Ai,
+        );
+        start_game(&mut app);
+
+        // Spawn a fake NPC entity (no Ship component) and register its AI token.
+        let npc_uuid = "npc-test-001";
+        let npc_entity = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<crate::ai::server::AiTokenRegistry>()
+            .register_with_entity(npc_uuid, npc_entity);
+        let npc_token = format!("ai:{}", npc_uuid);
+
+        push(
+            &mut app,
+            &npc_token,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "enemy-ship".into(),
+                },
+            },
+        );
+        tick(&mut app);
+        assert!(
+            app.world()
+                .resource::<crate::messages::AdmittedCommands>()
+                .0
+                .is_empty(),
+            "NPC ai: token must be rejected by the admission gate"
         );
     }
 
@@ -826,7 +881,9 @@ mod tests {
         // Simulate recent damage via the viewscreen blackboard (issue #572 path).
         {
             use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
-            let mut bbs = app.world_mut().resource_mut::<crate::server_app::SystemBlackboards>();
+            let mut bbs = app
+                .world_mut()
+                .resource_mut::<crate::server_app::SystemBlackboards>();
             bbs.0.insert(
                 crate::system_registry::viewscreen_system_id(),
                 SystemBlackboard::Viewscreen(ViewscreenBlackboard {
@@ -872,7 +929,9 @@ mod tests {
         // Even with recent damage in the viewscreen blackboard, captain is human-controlled.
         {
             use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
-            let mut bbs = app.world_mut().resource_mut::<crate::server_app::SystemBlackboards>();
+            let mut bbs = app
+                .world_mut()
+                .resource_mut::<crate::server_app::SystemBlackboards>();
             bbs.0.insert(
                 crate::system_registry::viewscreen_system_id(),
                 SystemBlackboard::Viewscreen(ViewscreenBlackboard {
@@ -931,12 +990,16 @@ mod tests {
             crate::system_registry::captain_system_id(),
             ControlSource::Ai,
         );
-        app.world_mut().spawn((Ship, ShipConfigComponent::default(), cs));
+        app.world_mut()
+            .spawn((Ship, ShipConfigComponent::default(), cs));
         app.update();
 
         let bb = captain_bb(&app);
         assert!(bb.red_alert_auto);
-        assert_eq!(bb.red_alert_system_id, crate::system_registry::red_alert_system_id());
+        assert_eq!(
+            bb.red_alert_system_id,
+            crate::system_registry::red_alert_system_id()
+        );
     }
 
     #[test]
@@ -947,19 +1010,29 @@ mod tests {
             crate::system_registry::viewscreen_system_id(),
             ControlSource::Ai,
         );
-        app.world_mut().spawn((Ship, ShipConfigComponent::default(), cs));
+        app.world_mut()
+            .spawn((Ship, ShipConfigComponent::default(), cs));
         app.update();
 
         let bb = captain_bb(&app);
-        assert!(bb.viewscreen_auto, "viewscreen_auto should be true when viewscreen is AI");
-        assert_eq!(bb.viewscreen_system_id, crate::system_registry::viewscreen_system_id());
+        assert!(
+            bb.viewscreen_auto,
+            "viewscreen_auto should be true when viewscreen is AI"
+        );
+        assert_eq!(
+            bb.viewscreen_system_id,
+            crate::system_registry::viewscreen_system_id()
+        );
     }
 
     #[test]
     fn publish_captain_blackboard_viewscreen_auto_false_by_default() {
         let mut app = bb_test_app();
         app.update();
-        assert!(!captain_bb(&app).viewscreen_auto, "viewscreen_auto should default to false");
+        assert!(
+            !captain_bb(&app).viewscreen_auto,
+            "viewscreen_auto should default to false"
+        );
     }
 
     #[test]
@@ -1018,7 +1091,10 @@ mod tests {
             crate::messages::AiDirective::None,
             UtilityConfig {
                 base_priority: 30.0,
-                zero_gates: vec![ZeroGateCondition { condition: "red_alert".into(), threshold: None }],
+                zero_gates: vec![ZeroGateCondition {
+                    condition: "red_alert".into(),
+                    threshold: None,
+                }],
                 ..Default::default()
             },
             ObjectiveSource::Doctrine,
@@ -1029,7 +1105,8 @@ mod tests {
     #[test]
     fn doctrine_objective_hidden_from_captain_bb_when_score_zero() {
         let mut app = bb_test_app();
-        app.world_mut().insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
+        app.world_mut()
+            .insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
         app.update();
 
         let bb = captain_bb(&app);
@@ -1042,12 +1119,19 @@ mod tests {
     #[test]
     fn doctrine_objective_shown_in_captain_bb_when_score_positive() {
         let mut app = bb_test_app();
-        app.world_mut().resource_mut::<ShipState>().toggle_red_alert();
-        app.world_mut().insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
+        app.world_mut()
+            .resource_mut::<ShipState>()
+            .toggle_red_alert();
+        app.world_mut()
+            .insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
         app.update();
 
         let bb = captain_bb(&app);
-        assert_eq!(bb.objectives.len(), 1, "doctrine objective should be visible when conditions met");
+        assert_eq!(
+            bb.objectives.len(),
+            1,
+            "doctrine objective should be visible when conditions met"
+        );
         assert_eq!(bb.objectives[0].id, "destroy-hostiles");
         assert_eq!(bb.objectives[0].source, ObjectiveSource::Doctrine);
     }
@@ -1069,9 +1153,10 @@ mod tests {
     #[test]
     fn boosted_objective_id_propagates_to_captain_bb() {
         let mut app = bb_test_app();
-        app.world_mut().insert_resource(crate::server_app::CaptainPriorityBoost {
-            boosted_id: Some("destroy-hostiles".into()),
-        });
+        app.world_mut()
+            .insert_resource(crate::server_app::CaptainPriorityBoost {
+                boosted_id: Some("destroy-hostiles".into()),
+            });
         app.update();
 
         assert_eq!(
@@ -1085,21 +1170,28 @@ mod tests {
         // A doctrine objective gated on red_alert would normally be hidden (score=0).
         // The captain's priority boost overcomes the zero-score so it appears.
         let mut app = bb_test_app();
-        app.world_mut().insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
-        app.world_mut().insert_resource(crate::server_app::CaptainPriorityBoost {
-            boosted_id: Some("destroy-hostiles".into()),
-        });
+        app.world_mut()
+            .insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
+        app.world_mut()
+            .insert_resource(crate::server_app::CaptainPriorityBoost {
+                boosted_id: Some("destroy-hostiles".into()),
+            });
         app.update();
 
         let bb = captain_bb(&app);
-        assert_eq!(bb.objectives.len(), 1, "boosted objective must appear despite zero-gate");
+        assert_eq!(
+            bb.objectives.len(),
+            1,
+            "boosted objective must appear despite zero-gate"
+        );
         assert_eq!(bb.objectives[0].id, "destroy-hostiles");
     }
 
     #[test]
     fn set_objective_priority_command_sets_boost() {
         let mut app = test_app();
-        app.world_mut().insert_resource(crate::server_app::CaptainPriorityBoost::default());
+        app.world_mut()
+            .insert_resource(crate::server_app::CaptainPriorityBoost::default());
         start_game(&mut app);
         push(
             &mut app,
@@ -1113,7 +1205,10 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<crate::server_app::CaptainPriorityBoost>().boosted_id.as_deref(),
+            app.world()
+                .resource::<crate::server_app::CaptainPriorityBoost>()
+                .boosted_id
+                .as_deref(),
             Some("destroy-hostiles"),
         );
     }
@@ -1121,9 +1216,10 @@ mod tests {
     #[test]
     fn set_objective_priority_command_toggles_off_when_same_id() {
         let mut app = test_app();
-        app.world_mut().insert_resource(crate::server_app::CaptainPriorityBoost {
-            boosted_id: Some("destroy-hostiles".into()),
-        });
+        app.world_mut()
+            .insert_resource(crate::server_app::CaptainPriorityBoost {
+                boosted_id: Some("destroy-hostiles".into()),
+            });
         start_game(&mut app);
         push(
             &mut app,
@@ -1137,7 +1233,9 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<crate::server_app::CaptainPriorityBoost>().boosted_id,
+            app.world()
+                .resource::<crate::server_app::CaptainPriorityBoost>()
+                .boosted_id,
             None,
             "sending the same id again should clear the boost"
         );

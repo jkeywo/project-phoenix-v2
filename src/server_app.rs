@@ -602,7 +602,11 @@ fn publish_viewscreen_blackboard(
     let hull_integrity_pct = if let Some(h) = &hull {
         let max = h.0.total_max();
         let cur = h.0.total_current();
-        if max > 0.0 { (cur / max * 100.0).clamp(0.0, 100.0) } else { 100.0 }
+        if max > 0.0 {
+            (cur / max * 100.0).clamp(0.0, 100.0)
+        } else {
+            100.0
+        }
     } else {
         100.0
     };
@@ -614,7 +618,9 @@ fn publish_viewscreen_blackboard(
         hull_fraction: hull_integrity_pct / 100.0,
     };
     let captain_boost = boost.as_ref().and_then(|b| {
-        b.boosted_id.as_deref().map(|id| (id, CaptainPriorityBoost::BOOST_AMOUNT))
+        b.boosted_id
+            .as_deref()
+            .map(|id| (id, CaptainPriorityBoost::BOOST_AMOUNT))
     });
     let scored_objectives = objectives
         .as_ref()
@@ -641,7 +647,9 @@ fn handle_set_sensors_target(
     ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<Ship>>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    let Ok(ship_config) = ship_query.single() else { return; };
+    let Ok(ship_config) = ship_query.single() else {
+        return;
+    };
     for ev in reader.read() {
         let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
             continue;
@@ -821,7 +829,9 @@ fn broadcast_shield_status(
     ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<Ship>>,
     mut last: ResMut<LastBroadcastShields>,
 ) {
-    let Ok(ship_config) = ship_query.single() else { return; };
+    let Ok(ship_config) = ship_query.single() else {
+        return;
+    };
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
@@ -952,6 +962,7 @@ impl Plugin for AdmissionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::messages::AdmittedCommands>()
             .init_resource::<crate::messages::InterSystemQueue>()
+            .init_resource::<crate::ai::server::AiTokenRegistry>()
             .configure_sets(
                 Update,
                 AdmissionSet
@@ -981,8 +992,10 @@ fn admit_system_commands(
     mut reader: MessageReader<InboundMessage>,
     mut admitted: ResMut<crate::messages::AdmittedCommands>,
     sessions: Res<Sessions>,
+    ai_registry: Res<crate::ai::server::AiTokenRegistry>,
     ship_query: Query<
         (
+            Entity,
             &crate::ship_plugin::ShipConfigComponent,
             &crate::ship_plugin::ShipSystemControlSources,
         ),
@@ -990,14 +1003,36 @@ fn admit_system_commands(
     >,
 ) {
     admitted.0.clear();
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
+    let Ok((ship_entity, ship_config, control_sources)) = ship_query.single() else {
         return;
     };
     for ev in reader.read() {
         let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
             continue;
         };
-        if is_command_authorized(&ev.token, target, payload, control_sources, &sessions, ship_config) {
+        // Reject registered NPC ai: tokens that don't belong to the player ship.
+        // Only tokens present in AiTokenRegistry are NPC-owned; unregistered ai:
+        // tokens (player Backfill AI or synthetic test tokens) pass through.
+        if ev.token.starts_with("ai:") {
+            if let Some(entity) = ai_registry.bevy_entity_for_token(&ev.token) {
+                if entity != ship_entity {
+                    warn!(
+                        "[admit] rejected NPC ai: token {} → {:?}",
+                        &ev.token[..ev.token.len().min(12)],
+                        std::mem::discriminant(payload),
+                    );
+                    continue;
+                }
+            }
+        }
+        if is_command_authorized(
+            &ev.token,
+            target,
+            payload,
+            control_sources,
+            &sessions,
+            ship_config,
+        ) {
             admitted.0.push(crate::messages::AdmittedCommand {
                 target: target.clone(),
                 payload: payload.clone(),
@@ -1617,7 +1652,8 @@ fn spawn_game_start_entities(
             } else {
                 crate::ship_plugin::load_ship_config_from_disk()
             };
-            commands.entity(spawned)
+            commands
+                .entity(spawned)
                 .insert(Ship)
                 .insert(ship_config)
                 .insert(crate::ship_plugin::ShipSystemControlSources::default())
@@ -2361,6 +2397,7 @@ mod tests {
         .init_resource::<LastBroadcastBlackboards>()
         .init_resource::<crate::messages::AdmittedCommands>()
         .init_resource::<crate::messages::InterSystemQueue>()
+        .init_resource::<crate::ai::server::AiTokenRegistry>()
         .init_resource::<Outbox>()
         .add_message::<crate::ai_plugin::AiEntityDestroyed>()
         .add_plugins(crate::captain_plugin::CaptainPlugin)

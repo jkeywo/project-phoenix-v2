@@ -132,44 +132,11 @@ test('HelmInput changes ship position in subsequent blackboard updates', async (
   const initX: number = firstHelm[1].data.x;
   const initZ: number = firstHelm[1].data.z;
 
-  // Start repeating HelmInput so the server receives sustained thrust
-  await helm.page.evaluate(() => {
-    (window as any).__helmInterval = setInterval(() => {
-      (window as any).__conn.send(JSON.stringify({
-        type: 'HelmInput',
-        data: { thrust: 1.0, steering: 0.0 },
-      }));
-    }, 100);
-  });
-
   // Keep the WASM server page in the foreground so Chrome doesn't throttle
   // its rAF/timers, which would stall the Bevy simulation tick.
   await serverPage.bringToFront();
 
-  // Wait up to 20 s for a BlackboardUpdate showing the ship has moved
-  await helm.page.waitForFunction(
-    ({ x, z }: { x: number; z: number }) => {
-      const msgs: any[] = (window as any).__messages;
-      return msgs.some(
-        (m) =>
-          m.type === 'BlackboardUpdate' &&
-          m.data.updates?.some(
-            ([id, bb]: [string, any]) =>
-              id === 'helm' &&
-              (Math.abs(bb.data.x - x) > 0.05 ||
-                Math.abs(bb.data.z - z) > 0.05),
-          ),
-      );
-    },
-    { x: initX, z: initZ },
-    { timeout: 20_000 },
-  );
-
-  // Stop repeating inputs
-  await helm.page.evaluate(() => clearInterval((window as any).__helmInterval));
-
-  // Confirm at least one moved BlackboardUpdate exists
-  const moved = await helm.page.evaluate(
+  const movedBlackboardCount = async () => helm.page.evaluate(
     ({ x, z }: { x: number; z: number }) => {
       const msgs: any[] = (window as any).__messages;
       return msgs.filter(
@@ -186,6 +153,32 @@ test('HelmInput changes ship position in subsequent blackboard updates', async (
     { x: initX, z: initZ },
   );
 
+  // Send sustained thrust from the Playwright side instead of relying on an
+  // in-page interval. The helm page is backgrounded while the server stays in
+  // front, and Chromium can throttle background page timers on CI runners.
+  await expect.poll(
+    async () => {
+      await helm.send('ControlSystem', {
+        target: 'helm',
+        payload: { type: 'HelmInput', data: { thrust: 1.0, steering: 0.0 } },
+      });
+      await serverPage.bringToFront();
+      return movedBlackboardCount();
+    },
+    {
+      timeout: 20_000,
+      intervals: [100, 100, 200, 200, 500],
+    },
+  ).toBeGreaterThan(0);
+
+  // Stop thrust so this test leaves the shared server page in a quiet state.
+  await helm.send('ControlSystem', {
+    target: 'helm',
+    payload: { type: 'HelmInput', data: { thrust: 0.0, steering: 0.0 } },
+  });
+
+  // Confirm at least one moved BlackboardUpdate exists.
+  const moved = await movedBlackboardCount();
   expect(moved).toBeGreaterThan(0);
 
   await captain.close();

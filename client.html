@@ -541,6 +541,13 @@
       transition: background .15s, border-color .15s; }
     #detail-panel .segmented button.active { background: #0a2830;
       border-color: var(--signal-cyan); color: var(--signal-cyan); }
+    #detail-panel .detail-release-btn { padding: 2px 10px; border-radius: 3px;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
+      font-weight: 600; letter-spacing: .06em; cursor: pointer;
+      border: 1px solid var(--alert-red); background: transparent; color: var(--alert-red);
+      display: block; width: auto; margin: 0; flex-shrink: 0;
+      transition: background .15s; }
+    #detail-panel .detail-release-btn:hover { background: rgba(255,51,68,0.1); }
     /* Lobby footer */
     #lobby-footer { flex-shrink: 0; display: flex; align-items: center;
       justify-content: space-between; padding: 6px 0 4px;
@@ -1138,9 +1145,19 @@
       // Detail panel
       const detail = document.getElementById('detail-panel');
       if (detail) {
+        const detailHeader = detail.querySelector('.detail-header');
         if (myStation) {
           detail.className = 'active';
-          detail.querySelector('.detail-station-name').textContent = myStation.name;
+          detailHeader.innerHTML = '';
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'detail-station-name';
+          nameSpan.textContent = myStation.name;
+          detailHeader.appendChild(nameSpan);
+          const releaseBtn = document.createElement('button');
+          releaseBtn.className = 'detail-release-btn';
+          releaseBtn.textContent = 'LEAVE';
+          releaseBtn.addEventListener('click', () => send('ReleaseStation'));
+          detailHeader.appendChild(releaseBtn);
           const consolesArea = detail.querySelector('.detail-consoles');
           consolesArea.innerHTML = '';
           for (const c of (myStation.consoles || [])) {
@@ -1151,7 +1168,11 @@
           }
         } else {
           detail.className = 'idle';
-          detail.querySelector('.detail-station-name').textContent = 'No station assigned';
+          detailHeader.innerHTML = '';
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'detail-station-name';
+          nameSpan.textContent = 'No station assigned';
+          detailHeader.appendChild(nameSpan);
           detail.querySelector('.detail-consoles').innerHTML = '';
         }
       }

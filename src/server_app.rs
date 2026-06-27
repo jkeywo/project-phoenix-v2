@@ -113,6 +113,12 @@ impl CaptainPriorityBoost {
     pub const BOOST_AMOUNT: f32 = 15.0;
 }
 
+/// Per-tick AI memory for the player ship when running under AI helm control.
+/// Holds waypoint cursor and last-known target so `operate_helm` can navigate
+/// across multiple frames without resetting its state on every tick.
+#[derive(Resource, Default)]
+pub struct PlayerAiMemory(pub crate::ai::AiMemory);
+
 /// Carries the reason string when the game ends. Set to `Some(reason)` before
 /// transitioning to `GamePhase::GameOver`. The `OnEnter(GameOver)` system reads
 /// this resource and broadcasts the reason to all clients.
@@ -257,6 +263,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .insert_resource(ShipBoost(crate::boost::BoostState::new()))
     .init_resource::<WeaponFiredThisTick>()
     .init_resource::<CaptainPriorityBoost>()
+    .init_resource::<PlayerAiMemory>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
         crate::config_cache::get_faction_registry(),
     ))

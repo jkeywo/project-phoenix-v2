@@ -199,9 +199,14 @@ impl Plugin for ShipPlugin {
                 operate_helm_ai
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel),
-                process_helm_inputs
+                player_ship_helm_ai
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(operate_helm_ai),
+                process_helm_inputs
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(player_ship_helm_ai),
+                detect_player_ship_objective_completion
+                    .in_set(crate::sim_sets::SimSet::Broadcast),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
                 sync_ship_position
@@ -392,6 +397,119 @@ fn operate_helm_ai(
         let new_roll = current_roll + (target_roll - current_roll) * lerp_factor;
         transform.rotation = Quat::from_euler(EulerRot::YXZ, result.yaw, 0.0, new_roll);
         ctrl.forward_speed = result.forward_speed;
+    }
+}
+
+/// Drive the player ship toward its top-scoring Reach mission objective.
+///
+/// Runs after `operate_helm_ai` (which writes the Backfill zero-stop) and
+/// before `process_helm_inputs` (which applies `LastHelmInput` to physics).
+/// When a Reach objective is active, overwrites the Backfill stop with
+/// real thrust/steering from `operate_helm`.
+fn player_ship_helm_ai(
+    ship: Res<ShipState>,
+    mut last_input: ResMut<LastHelmInput>,
+    mut memory: Option<ResMut<crate::server_app::PlayerAiMemory>>,
+    blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    player_ships: Query<
+        &ShipSystemControlSources,
+        (With<Ship>, Without<crate::ai::server::AiControllerComponent>),
+    >,
+) {
+    let Ok(sources) = player_ships.single() else { return };
+    if !helm_control_policy(sources).operate_ai { return; }
+
+    let Some(blackboards) = blackboards else { return };
+    let scored: Vec<crate::messages::ScoredObjective> =
+        match blackboards.0.get(&crate::system_registry::viewscreen_system_id()) {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
+                bb.scored_objectives.clone()
+            }
+            _ => return,
+        };
+
+    let has_reach = scored.iter().any(|o| {
+        o.score > 0.0
+            && matches!(&o.directive, crate::messages::AiDirective::Reach { .. })
+    });
+    if !has_reach { return; }
+
+    let anchors = world_config
+        .as_ref()
+        .map(|wc| wc.anchors.clone())
+        .unwrap_or_default();
+
+    let world_view = crate::ai::WorldView {
+        entity_pos: [ship.x, 0.0, ship.z],
+        entity_yaw: ship.yaw,
+        anchors: anchors.clone(),
+        ..crate::ai::WorldView::default()
+    };
+
+    let (thrust, steering) = if let Some(mem) = memory.as_mut() {
+        crate::ai::operate_helm(
+            &mut mem.0,
+            &world_view,
+            &scored,
+            &[],
+            &anchors,
+            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            ship.forward_speed,
+            &crate::faction::FactionRegistry::default(),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+
+    *last_input = LastHelmInput { thrust, steering };
+}
+
+/// Mark Reach objectives complete once the player ship arrives within
+/// `WAYPOINT_ARRIVAL_RADIUS` of the objective's anchor.
+///
+/// Runs in `Broadcast` (after `PublishAggregate` so `scored_objectives` is
+/// fresh) and only when the helm system is AI-controlled.
+fn detect_player_ship_objective_completion(
+    ship: Res<ShipState>,
+    blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
+    player_ships: Query<
+        &ShipSystemControlSources,
+        (With<Ship>, Without<crate::ai::server::AiControllerComponent>),
+    >,
+) {
+    let Ok(sources) = player_ships.single() else { return };
+    if !helm_control_policy(sources).operate_ai { return; }
+
+    let Some(blackboards) = blackboards else { return };
+    let Some(mut objectives) = objectives else { return };
+
+    let scored: Vec<crate::messages::ScoredObjective> =
+        match blackboards.0.get(&crate::system_registry::viewscreen_system_id()) {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
+                bb.scored_objectives.clone()
+            }
+            _ => return,
+        };
+
+    let anchors = world_config
+        .as_ref()
+        .map(|wc| wc.anchors.clone())
+        .unwrap_or_default();
+
+    for obj in &scored {
+        if obj.score <= 0.0 { continue; }
+        let crate::messages::AiDirective::Reach { anchor } = &obj.directive else { continue };
+        let Some(&target) = anchors.get(anchor.as_str()) else { continue };
+        let dx = target[0] - ship.x;
+        let dz = target[2] - ship.z;
+        if (dx * dx + dz * dz).sqrt() < crate::ai::WAYPOINT_ARRIVAL_RADIUS {
+            objectives.0.complete(&obj.snapshot.id);
+        }
     }
 }
 
@@ -1899,6 +2017,235 @@ station = "helm"
             )
         });
         assert!(has_rating_changed, "expected RatingChanged in outbox");
+    }
+
+    // ── #575: player ship AI helm navigation ──────────────────────────────────
+
+    fn reach_scored_objective(anchor: &str, score: f32) -> crate::messages::ScoredObjective {
+        crate::messages::ScoredObjective {
+            id: format!("reach-{anchor}"),
+            score,
+            directive: crate::messages::AiDirective::Reach { anchor: anchor.into() },
+            source: crate::messages::ObjectiveSource::Mission,
+            relevance: vec![crate::messages::SystemAffinity::Helm],
+            snapshot: crate::messages::ObjectiveSnapshot {
+                id: format!("reach-{anchor}"),
+                text: format!("Reach {anchor}"),
+                mandatory: true,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![],
+                source: crate::messages::ObjectiveSource::Mission,
+            },
+        }
+    }
+
+    fn viewscreen_with_reach(anchor: &str, score: f32) -> crate::server_app::SystemBlackboards {
+        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        use crate::server_app::SystemBlackboards;
+        let mut bbs = SystemBlackboards::default();
+        let mut vb = ViewscreenBlackboard::default();
+        vb.scored_objectives = vec![reach_scored_objective(anchor, score)];
+        bbs.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(vb),
+        );
+        bbs
+    }
+
+    fn world_config_with_anchor(anchor: &str, pos: [f32; 3]) -> crate::world::config::WorldConfig {
+        let mut cfg = crate::world::config::WorldConfig::default();
+        cfg.anchors.insert(anchor.into(), pos);
+        cfg
+    }
+
+    #[test]
+    fn player_ship_helm_ai_navigates_toward_reach_objective() {
+        let mut app = test_app();
+        // Place anchor 100 units ahead (positive X) — ship starts at origin.
+        let anchor = "station-alpha";
+        app.insert_resource(viewscreen_with_reach(anchor, 10.0));
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        let last = *app.world().resource::<LastHelmInput>();
+        assert!(
+            last.thrust > 0.0,
+            "AI helm must apply positive thrust toward Reach anchor; got {last:?}"
+        );
+    }
+
+    #[test]
+    fn player_ship_helm_ai_does_nothing_when_helm_human() {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        app.insert_resource(viewscreen_with_reach(anchor, 10.0));
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        // helm stays Human (default)
+
+        tick(&mut app);
+
+        let last = *app.world().resource::<LastHelmInput>();
+        assert_eq!(
+            last,
+            LastHelmInput::default(),
+            "helm AI must not overwrite LastHelmInput when helm is human; got {last:?}"
+        );
+    }
+
+    #[test]
+    fn player_ship_helm_ai_stays_zero_when_no_reach_objective() {
+        let mut app = test_app();
+        // Blackboard has a Destroy directive, not a Reach.
+        use crate::messages::{
+            AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+            SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
+        };
+        use crate::server_app::SystemBlackboards;
+        let mut bbs = SystemBlackboards::default();
+        let mut vb = ViewscreenBlackboard::default();
+        vb.scored_objectives = vec![ScoredObjective {
+            id: "destroy-pirates".into(),
+            score: 5.0,
+            directive: AiDirective::Destroy { target: "pirate".into() },
+            source: ObjectiveSource::Mission,
+            relevance: vec![SystemAffinity::Helm],
+            snapshot: ObjectiveSnapshot {
+                id: "destroy-pirates".into(),
+                text: "Destroy pirates".into(),
+                mandatory: true,
+                status: ObjectiveStatus::Active,
+                targets: vec![],
+                source: ObjectiveSource::Mission,
+            },
+        }];
+        bbs.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(vb),
+        );
+        app.insert_resource(bbs);
+        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        // `operate_helm_ai` wrote zero; `player_ship_helm_ai` found no Reach, left it alone.
+        let last = *app.world().resource::<LastHelmInput>();
+        assert_eq!(
+            last,
+            LastHelmInput::default(),
+            "no Reach objective means Backfill zero should remain; got {last:?}"
+        );
+    }
+
+    #[test]
+    fn detect_reach_completion_marks_objective_complete() {
+        use crate::objectives::{ObjectiveManager, UtilityConfig};
+        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::world::server::ObjectiveManagerRes;
+
+        let mut app = test_app();
+        let anchor = "dock-alpha";
+        // Anchor at origin — ship also starts at origin, so distance == 0.
+        app.insert_resource(viewscreen_with_reach(anchor, 8.0));
+        app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
+        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "reach-dock-alpha",
+            "Dock at Alpha",
+            true,
+            vec![],
+            AiDirective::Reach { anchor: anchor.into() },
+            UtilityConfig::default(),
+            ObjectiveSource::Mission,
+        );
+        app.insert_resource(ObjectiveManagerRes(mgr));
+
+        tick(&mut app);
+
+        let res = app.world().resource::<ObjectiveManagerRes>();
+        let obj = res.0.sorted_snapshots().into_iter().find(|o| o.id == "reach-dock-alpha");
+        assert!(
+            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Completed).unwrap_or(false),
+            "Reach objective should be completed when ship is within arrival radius"
+        );
+    }
+
+    #[test]
+    fn detect_reach_completion_does_not_complete_when_far() {
+        use crate::objectives::{ObjectiveManager, UtilityConfig};
+        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::world::server::ObjectiveManagerRes;
+
+        let mut app = test_app();
+        let anchor = "dock-far";
+        // Anchor 500 units away — ship starts at origin.
+        app.insert_resource(viewscreen_with_reach(anchor, 8.0));
+        app.insert_resource(world_config_with_anchor(anchor, [500.0, 0.0, 0.0]));
+        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "reach-dock-far",
+            "Dock at Far",
+            true,
+            vec![],
+            AiDirective::Reach { anchor: anchor.into() },
+            UtilityConfig::default(),
+            ObjectiveSource::Mission,
+        );
+        app.insert_resource(ObjectiveManagerRes(mgr));
+
+        tick(&mut app);
+
+        let res = app.world().resource::<ObjectiveManagerRes>();
+        let obj = res.0.sorted_snapshots().into_iter().find(|o| o.id == "reach-dock-far");
+        assert!(
+            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Active).unwrap_or(false),
+            "Reach objective must remain Active when ship is far from the anchor"
+        );
+    }
+
+    #[test]
+    fn detect_reach_completion_does_not_complete_when_helm_human() {
+        use crate::objectives::{ObjectiveManager, UtilityConfig};
+        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::world::server::ObjectiveManagerRes;
+
+        let mut app = test_app();
+        let anchor = "dock-beta";
+        app.insert_resource(viewscreen_with_reach(anchor, 8.0));
+        app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
+        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        // helm stays Human — completion system must not fire
+
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "reach-dock-beta",
+            "Dock at Beta",
+            true,
+            vec![],
+            AiDirective::Reach { anchor: anchor.into() },
+            UtilityConfig::default(),
+            ObjectiveSource::Mission,
+        );
+        app.insert_resource(ObjectiveManagerRes(mgr));
+
+        tick(&mut app);
+
+        let res = app.world().resource::<ObjectiveManagerRes>();
+        let obj = res.0.sorted_snapshots().into_iter().find(|o| o.id == "reach-dock-beta");
+        assert!(
+            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Active).unwrap_or(false),
+            "Reach completion must not fire when helm is human-controlled"
+        );
     }
 
     // ── E5 smoke tests (#553) ─────────────────────────────────────────────────

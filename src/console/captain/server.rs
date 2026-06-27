@@ -21,9 +21,11 @@ impl Plugin for CaptainPlugin {
         app.add_systems(
             Update,
             (
+                operate_captain_ai
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .before(handle_toggle_red_alert),
                 handle_toggle_red_alert.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
-                operate_captain_ai.in_set(crate::sim_sets::SimSet::Input),
                 crate::ship::combat_activity::update_combat_activity
                     .in_set(crate::sim_sets::SimSet::Broadcast),
                 publish_captain_blackboard.in_set(crate::sim_sets::SimSet::Publish),
@@ -73,9 +75,12 @@ fn handle_set_view(
 }
 
 /// AI system: if the captain system is AI-controlled, run `CaptainAi::operate`
-/// and toggle red alert when the result differs from the current state.
+/// and emit `ToggleRedAlert` into `AdmittedCommands` when the desired state
+/// differs from the current state. Runs before `handle_toggle_red_alert` so
+/// the command is visible to the handler in the same tick.
 fn operate_captain_ai(
-    mut ship: ResMut<ShipState>,
+    ship: Res<ShipState>,
+    mut admitted: ResMut<AdmittedCommands>,
     ship_query: Query<&ShipSystemControlSources, With<Ship>>,
     activity: Option<Res<RecentCombatActivity>>,
     time: Res<Time>,
@@ -96,7 +101,11 @@ fn operate_captain_ai(
     let ai = crate::ai::core::CaptainAi;
     if let Some(should_be_red_alert) = ai.operate(activity, time.elapsed_secs()) {
         if should_be_red_alert != ship.red_alert() {
-            ship.toggle_red_alert();
+            admitted.0.push(crate::messages::AdmittedCommand {
+                target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
+                payload: SystemControlPayload::ToggleRedAlert,
+                response_token: None,
+            });
         }
     }
 }
@@ -158,6 +167,7 @@ fn publish_captain_blackboard(
         viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
         viewscreen_auto,
         view_direction,
+        view_mode: ship.view_mode.clone(),
         objectives: objectives_snap,
         hull_integrity_pct,
         game_status,
@@ -363,10 +373,18 @@ mod tests {
     #[test]
     fn ai_controlled_red_alert_ignores_human_control_system_toggle() {
         let mut app = test_app();
-        // Set captain system to AI control
+        // Set both the captain system and the red-alert system to AI control.
+        // In a real game, the TOML sets every system under a console to the same
+        // source; the admission gate checks the red-alert system's policy, so
+        // both must be Ai for human commands targeting red-alert to be rejected.
         set_control_source(
             &mut app,
             crate::system_registry::captain_system_id(),
+            ControlSource::Ai,
+        );
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         start_game(&mut app);

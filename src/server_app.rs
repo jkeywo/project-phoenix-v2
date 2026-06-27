@@ -473,64 +473,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 
         let entity_states: Vec<_> = asteroid_states.into_iter().chain(npc_states).collect();
 
-        // Extract control sources from Ship entity before the immutable-borrow block below.
-        let source_entries: std::collections::HashMap<_, _> = world
-            .query_filtered::<&crate::ship_plugin::ShipSystemControlSources, With<Ship>>()
-            .single(world)
-            .ok()
-            .map(|control_sources| {
-                control_sources
-                    .0
-                    .entries()
-                    .map(|(id, src)| {
-                        (
-                            id.clone(),
-                            match src {
-                                crate::ship::control_source::ControlSource::Ai => "Ai".to_string(),
-                                crate::ship::control_source::ControlSource::Human => {
-                                    "Human".to_string()
-                                }
-                            },
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // ── Extract ship state and hull (borrows confined to this block).
-        let (
-            power_levels,
-            flags,
-            charge_progress,
-            engine_thrust,
-            ship_x,
-            ship_z,
-            ship_yaw,
-            ship_forward_speed,
-            ship_red_alert,
-            ship_view_mode,
-            navigation_waypoint,
-            current_hull,
-            boost_battery,
-            boost_active,
-            boost_enabled,
-        ) = {
-            let ship = world.resource::<ShipState>();
+        // ── Emit ConsoleHullUpdate only when hull HP changed.
+        {
             let hull = world.resource::<ShipHullIntegrity>();
-            let power = world.get_resource::<ShipPowerSystem>();
-            let impulse = world.resource::<ShipImpulse>();
-            let modifiers = world.resource::<crate::modifiers::ShipModifiers>();
-            let last_helm = world.get_resource::<crate::ship_plugin::LastHelmInput>();
-            let navigation_waypoint = world
-                .get_resource::<crate::navigation_plugin::NavigationWaypoint>()
-                .and_then(|w| w.snapshot());
-            let boost = world.get_resource::<ShipBoost>();
-            let boost_config = world.get_resource::<crate::ship_plugin::BoostConfigResource>();
-
-            let power_levels = power
-                .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
-                .unwrap_or((2, 2, 2));
-            let flags = modifiers.flags();
             let current_hull: Vec<crate::messages::ConsoleHullStatus> = hull
                 .0
                 .entries()
@@ -541,37 +486,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     max_hp: *max,
                 })
                 .collect();
-            let engine_thrust = if impulse.0.charge_progress >= 1.0 {
-                1.0_f32
-            } else {
-                last_helm.map(|h| h.thrust.abs()).unwrap_or(0.0)
-            };
-            let boost_enabled = boost_config.map(|c| c.enabled).unwrap_or(false);
-            let boost_battery = boost.map(|b| b.0.battery).unwrap_or(0.0);
-            let boost_active = boost.map(|b| b.0.is_active()).unwrap_or(false);
-            (
-                power_levels,
-                flags,
-                impulse.0.charge_progress,
-                engine_thrust,
-                ship.x,
-                ship.z,
-                ship.yaw,
-                ship.forward_speed,
-                ship.red_alert(),
-                ship.view_mode.clone(),
-                navigation_waypoint,
-                current_hull,
-                boost_battery,
-                boost_active,
-                boost_enabled,
-            )
-        };
-
-        // ── Emit ConsoleHullUpdate only when hull HP changed.
-        {
-            let last = world.resource::<LastBroadcastHull>();
-            let hull_changed = last.0 != current_hull;
+            let hull_changed = world.resource::<LastBroadcastHull>().0 != current_hull;
             if hull_changed {
                 let entries = current_hull.clone();
                 world.resource_mut::<LastBroadcastHull>().0 = current_hull;
@@ -582,25 +497,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             }
         }
 
-        let snapshot = crate::messages::SimSnapshot {
-            red_alert: ship_red_alert,
-            view_mode: ship_view_mode,
-            ship_x,
-            ship_z,
-            ship_yaw,
-            forward_speed: ship_forward_speed,
-            console_hull: vec![],
-            power_levels,
-            flags,
-            entity_states,
-            impulse_charge_progress: charge_progress,
-            engine_thrust,
-            navigation_waypoint,
-            boost_battery,
-            boost_active,
-            boost_enabled,
-            control_sources: source_entries,
-        };
+        let snapshot = crate::messages::SimSnapshot { entity_states };
         vec![ServerMessage::SimState { snapshot }]
     })
 }
@@ -973,7 +870,7 @@ pub fn snapshot_blackboards_for_test(
 /// Emit `BlackboardUpdate` for any system whose blackboard has changed since
 /// the last broadcast. Runs in `SimSet::Broadcast` so it sees the current
 /// tick's fully-published blackboards.
-fn broadcast_blackboard_updates(
+pub fn broadcast_blackboard_updates(
     blackboards: Res<SystemBlackboards>,
     mut last: ResMut<LastBroadcastBlackboards>,
     mut outbox: ResMut<SimOutbox>,
@@ -3057,47 +2954,6 @@ mod tests {
     }
 
     #[test]
-    fn sim_state_broadcast_carries_ship_position_and_view_mode() {
-        let mut app = test_app();
-        start_game_with_helm(&mut app);
-        // Move the ship and switch to radar
-        {
-            let mut ship = app.world_mut().resource_mut::<ShipState>();
-            ship.x = 12.0;
-            ship.z = -3.5;
-            ship.yaw = 1.25;
-        }
-        push(
-            &mut app,
-            "helm",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
-                payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Radar,
-                },
-            },
-        );
-        tick(&mut app);
-        // Ensure Time has accumulated some real delta and the broadcast fires.
-        // Two prior ticks have already advanced TimePlugin's clock; a fresh
-        // tick now sees a non-zero delta, finishing the 1-ns broadcast timer.
-        let out = tick(&mut app);
-
-        let snap = out
-            .iter()
-            .find_map(|m| match &m.msg {
-                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-                _ => None,
-            })
-            .expect("expected a SimState broadcast");
-
-        assert_eq!(snap.ship_x, 12.0);
-        assert_eq!(snap.ship_z, -3.5);
-        assert_eq!(snap.ship_yaw, 1.25);
-        assert_eq!(snap.view_mode, ViewMode::Radar);
-    }
-
-    #[test]
     fn world_setup_is_broadcast_once_after_start_game() {
         let mut app = test_app();
         // Pre-populate world data so the broadcast has something to emit.
@@ -5062,53 +4918,6 @@ mod tests {
         assert!(
             !any_power_state,
             "no PowerState should be sent when no Power console holder exists"
-        );
-    }
-
-    #[test]
-    fn sim_state_includes_power_levels() {
-        let mut app = test_app();
-        start_game_with_power(&mut app);
-
-        // Set Helm to 3 via Power console.
-        push(
-            &mut app,
-            "power",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Helm,
-                    level: 3,
-                },
-            },
-        );
-        // Set Sensors to 3 via Power console.
-        push(
-            &mut app,
-            "power",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Sensors,
-                    level: 3,
-                },
-            },
-        );
-        let _ = tick(&mut app);
-        let out = tick(&mut app);
-
-        let snap = out
-            .iter()
-            .find_map(|m| match &m.msg {
-                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-                _ => None,
-            })
-            .expect("expected a SimState broadcast");
-        // Default (2,2,2) ? increase helm ? (3,2,2) ? increase sensors ? (3,2,3)
-        assert_eq!(
-            snap.power_levels,
-            (3, 2, 3),
-            "SimState.power_levels should reflect power system state"
         );
     }
 

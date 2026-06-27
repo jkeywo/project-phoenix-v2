@@ -153,13 +153,15 @@ fn refresh_anchored_waypoint(
 
 fn publish_navigation_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    waypoint: Res<NavigationWaypoint>,
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     let cfg = &ship_config.0;
     let bb = NavigationBlackboard {
-        nav_chart_range:   cfg.nav_chart_range,
-        nav_chart_shows:   cfg.nav_chart_shows.clone(),
-        nav_chart_selects: cfg.nav_chart_selects.clone(),
+        nav_chart_range:     cfg.nav_chart_range,
+        nav_chart_shows:     cfg.nav_chart_shows.clone(),
+        nav_chart_selects:   cfg.nav_chart_selects.clone(),
+        navigation_waypoint: waypoint.snapshot(),
     };
 
     blackboards.0.insert(
@@ -237,10 +239,17 @@ mod tests {
                     .chain(),
             )
             .init_resource::<crate::server_app::SystemBlackboards>()
+            .init_resource::<crate::server_app::LastBroadcastBlackboards>()
             .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(NavigationPlugin)
             .add_plugins(sim_state_broadcaster())
+            .add_plugins(crate::server_app::sim_outbox_broadcaster())
             .init_resource::<crate::simulation::SimOutbox>()
+            .add_systems(
+                Update,
+                crate::server_app::broadcast_blackboard_updates
+                    .in_set(crate::sim_sets::SimSet::Broadcast),
+            )
             .init_resource::<Outbox>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
@@ -321,6 +330,18 @@ mod tests {
     fn latest_sim_snapshot(out: &[OutboundMessage]) -> Option<crate::messages::SimSnapshot> {
         out.iter().rev().find_map(|m| match &m.msg {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        })
+    }
+
+    fn latest_navigation_blackboard(out: &[OutboundMessage]) -> Option<crate::messages::NavigationBlackboard> {
+        out.iter().rev().find_map(|m| match &m.msg {
+            ServerMessage::BlackboardUpdate { updates } => {
+                updates.iter().find_map(|(_, bb)| match bb {
+                    crate::messages::SystemBlackboard::Navigation(nav) => Some(nav.clone()),
+                    _ => None,
+                })
+            }
             _ => None,
         })
     }
@@ -420,9 +441,9 @@ mod tests {
             },
         );
         let out = tick(&mut app);
-        let snap = latest_sim_snapshot(&out).expect("expected SimState");
+        let bb = latest_navigation_blackboard(&out).expect("expected NavigationBlackboard");
         assert_eq!(
-            snap.navigation_waypoint,
+            bb.navigation_waypoint,
             Some(WaypointSnapshot {
                 x: 10.0,
                 z: 20.0,
@@ -439,8 +460,8 @@ mod tests {
             },
         );
         let out = tick(&mut app);
-        let snap = latest_sim_snapshot(&out).expect("expected SimState");
-        assert!(snap.navigation_waypoint.is_none());
+        let bb = latest_navigation_blackboard(&out).expect("expected NavigationBlackboard");
+        assert!(bb.navigation_waypoint.is_none());
     }
 
     #[test]
@@ -474,9 +495,9 @@ mod tests {
             },
         );
         let out = tick(&mut app);
-        let snap = latest_sim_snapshot(&out).expect("expected SimState");
+        let bb = latest_navigation_blackboard(&out).expect("expected NavigationBlackboard");
         assert_eq!(
-            snap.navigation_waypoint,
+            bb.navigation_waypoint,
             Some(WaypointSnapshot {
                 x: 50.0,
                 z: -100.0,
@@ -490,9 +511,9 @@ mod tests {
             .entity_mut(target)
             .insert(Transform::from_xyz(75.0, 0.0, -150.0));
         let out = tick(&mut app);
-        let snap = latest_sim_snapshot(&out).expect("expected SimState");
+        let bb = latest_navigation_blackboard(&out).expect("expected NavigationBlackboard");
         assert_eq!(
-            snap.navigation_waypoint,
+            bb.navigation_waypoint,
             Some(WaypointSnapshot {
                 x: 75.0,
                 z: -150.0,
@@ -534,8 +555,8 @@ mod tests {
         app.world_mut().entity_mut(target).despawn();
         let out = tick(&mut app);
         assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
-        let snap = latest_sim_snapshot(&out).expect("expected SimState");
-        assert!(snap.navigation_waypoint.is_none());
+        let bb = latest_navigation_blackboard(&out).expect("expected NavigationBlackboard");
+        assert!(bb.navigation_waypoint.is_none());
     }
 
     #[test]

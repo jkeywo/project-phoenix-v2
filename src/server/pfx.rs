@@ -13,9 +13,9 @@ use crate::simulation::{
 };
 use crate::weapons_plugin::PhaserCombatConfigResource;
 
-const BEAM_RADIUS: f32 = 0.08;
+const BEAM_RADIUS: f32 = 0.04;
 const BEAM_Y_OFFSET: f32 = 0.0;
-const CONTACT_GLOW_RADIUS: f32 = 0.9;
+const CONTACT_GLOW_RADIUS: f32 = 0.45;
 
 const TORPEDO_RADIUS: f32 = 0.45;
 const TORPEDO_TRAIL_RADIUS: f32 = 0.18;
@@ -198,7 +198,7 @@ fn sync_phaser_beams(
         let origin = bank
             .and_then(|b| marker_origin(src_t, src_markers, b.marker.as_deref()))
             .unwrap_or(src_t.translation + Vec3::new(0.0, BEAM_Y_OFFSET, 0.0));
-        let end = clamp_endpoint(origin, target_pos, range);
+        let end = clamp_endpoint(origin, target_pos, src_t.translation, range);
 
         let key = format!("npc:{}:{}", src_uuid.0, target_uuid);
         live_keys.insert(key.clone());
@@ -261,7 +261,8 @@ fn resolve_player_beam(
     } else {
         player_bank_fallback_origin(ship, bank_config)
     };
-    let end = clamp_endpoint(origin, target_pos, range);
+    let range_origin = Vec3::new(ship.x, BEAM_Y_OFFSET, ship.z);
+    let end = clamp_endpoint(origin, target_pos, range_origin, range);
     Some((origin, end, color))
 }
 
@@ -620,13 +621,28 @@ fn player_bank_fallback_origin(ship: &ShipState, bank: Option<&PhaserBankConfig>
     center + forward * facing.cos() * 3.0 + right * facing.sin() * beam_render::BANK_HULL_OFFSET
 }
 
-fn clamp_endpoint(origin: Vec3, target: Vec3, max_range: f32) -> Vec3 {
-    let delta = target - origin;
-    let dist = delta.length();
-    if dist <= max_range || dist < 1e-6 {
+fn clamp_endpoint(start: Vec3, target: Vec3, range_origin: Vec3, max_range: f32) -> Vec3 {
+    if (target - range_origin).length() <= max_range {
         target
+    } else if max_range <= 0.0 {
+        start
     } else {
-        origin + delta / dist * max_range
+        let delta = target - start;
+        let dist = delta.length();
+        if dist < 1e-6 {
+            return target;
+        }
+
+        let dir = delta / dist;
+        let from_center = start - range_origin;
+        let b = from_center.dot(dir);
+        let c = from_center.length_squared() - max_range * max_range;
+        let discriminant = b * b - c;
+        if discriminant < 0.0 {
+            start
+        } else {
+            start + dir * (-b + discriminant.sqrt()).clamp(0.0, dist)
+        }
     }
 }
 
@@ -836,6 +852,27 @@ mod tests {
         assert_eq!(settings.color, [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(settings.lifetime_secs, 0.8);
         assert_eq!(settings.spawn_interval_secs, 0.03);
+    }
+
+    #[test]
+    fn clamp_endpoint_returns_target_inside_center_range() {
+        let start = Vec3::new(4.0, 0.0, 0.0);
+        let target = Vec3::new(0.0, 0.0, -40.0);
+        let range_origin = Vec3::ZERO;
+
+        assert_eq!(clamp_endpoint(start, target, range_origin, 50.0), target);
+    }
+
+    #[test]
+    fn clamp_endpoint_limits_ray_to_centered_range_sphere() {
+        let start = Vec3::new(4.0, 0.0, 0.0);
+        let target = Vec3::new(4.0, 0.0, -80.0);
+        let range_origin = Vec3::ZERO;
+        let endpoint = clamp_endpoint(start, target, range_origin, 50.0);
+
+        assert!((endpoint.x - 4.0).abs() < 1e-5);
+        assert!((endpoint.z - -49.839745).abs() < 1e-4);
+        assert!((endpoint.distance(range_origin) - 50.0).abs() < 1e-4);
     }
 
     #[test]

@@ -2,7 +2,6 @@ use bevy::core_pipeline::core_2d::graph::Core2d;
 use bevy::core_pipeline::core_3d::graph::Core3d;
 use bevy::core_pipeline::Skybox;
 use bevy::pbr::{DistanceFog, FogFalloff};
-use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::camera::ClearColorConfig;
 use bevy::render::camera::CameraRenderGraph;
@@ -140,6 +139,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         CameraRenderGraph::new(Core2d),
         IsDefaultUiCamera,
     ));
+    bevy::log::info!("[renderer] LobbyCamera spawned (Camera2d, order=0, ClearColorConfig::None)");
 
     // 3D camera — active during in-game phase, positioned for ship view.
     // order: -1 so the 3D scene composites before the UI layer (LobbyCamera
@@ -157,7 +157,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             far: 5000.0,
             ..default()
         }),
-        Bloom::NATURAL,
         Skybox {
             image: skybox_image,
             brightness: SPACE_SKYBOX_BRIGHTNESS,
@@ -165,6 +164,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
         Transform::from_xyz(0.0, 2.0, -10.0),
     ));
+    bevy::log::info!("[renderer] GameCamera spawned (Camera3d, order=-1, is_active=false, NO Bloom)");
 
     // Ambient light is now spawned by `spawn_world_ambient_light` in
     // `PostStartup`, which reads `WorldConfig.ambient_light` if present and
@@ -251,8 +251,15 @@ fn prepare_space_skybox_cubemap(
     let Some(image) = images.get_mut(&skybox_asset.image) else {
         return;
     };
+    bevy::log::info!(
+        "[renderer] skybox image loaded: {}x{}, array_layers={}",
+        image.width(),
+        image.height(),
+        image.texture_descriptor.array_layer_count(),
+    );
     if image.texture_descriptor.array_layer_count() == 1 {
         let layers = image.height() / image.width();
+        bevy::log::info!("[renderer] skybox reinterpreting as {}-layer cubemap", layers);
         if layers != 6 {
             bevy::log::error!(
                 "space skybox expected a vertical 6-face cubemap, got {}x{}",
@@ -267,6 +274,7 @@ fn prepare_space_skybox_cubemap(
             skybox_asset.is_loaded = true;
             return;
         }
+        bevy::log::info!("[renderer] skybox cubemap conversion succeeded");
         image.texture_view_descriptor = Some(TextureViewDescriptor {
             dimension: Some(TextureViewDimension::Cube),
             ..default()
@@ -363,11 +371,20 @@ fn toggle_cameras(
     // LobbyCamera (Camera2d, IsDefaultUiCamera).
     let game_active = in_game && matches!(ship.view_mode, ViewMode::Camera(_) | ViewMode::Comms);
 
+    bevy::log::info!(
+        "[renderer] toggle_cameras: phase={:?}, view_mode={:?}, game_active={}",
+        state.get(),
+        ship.view_mode,
+        game_active,
+    );
+
     // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
     // in all phases so that UI nodes (FPS counter, radar widgets) continue to
     // render during InProgress without an explicit UiTargetCamera.
     if let Ok(mut cam) = game.single_mut() {
         cam.is_active = game_active;
+    } else {
+        bevy::log::warn!("[renderer] toggle_cameras: GameCamera entity not found!");
     }
 }
 
@@ -389,10 +406,25 @@ fn update_view_screen_text(
 /// First-person hull camera: positioned at the ship's hull edge in the view direction,
 /// looking straight out. Ship is always behind the camera.
 /// Hull offset = 6.0 units (matches the ship's collision capsule radius).
-fn hull_camera(ship: Res<ShipState>, mut cam_query: Query<&mut Transform, With<GameCamera>>) {
+fn hull_camera(
+    ship: Res<ShipState>,
+    mut cam_query: Query<&mut Transform, With<GameCamera>>,
+    mut logged: Local<bool>,
+) {
     let Ok(mut transform) = cam_query.single_mut() else {
+        if !*logged {
+            bevy::log::warn!("[renderer] hull_camera: GameCamera not found in InProgress!");
+            *logged = true;
+        }
         return;
     };
+    if !*logged {
+        bevy::log::info!(
+            "[renderer] hull_camera running: ship=({:.1},{:.1}) yaw={:.2} view={:?}",
+            ship.x, ship.z, ship.yaw, ship.view_mode,
+        );
+        *logged = true;
+    }
 
     // Direction vectors relative to ship heading (yaw=0 → ship faces -Z).
     // fwd = (sin(yaw), 0, -cos(yaw)), port = left of heading, starboard = right.

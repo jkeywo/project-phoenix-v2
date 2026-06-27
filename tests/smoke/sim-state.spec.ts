@@ -25,7 +25,7 @@ async function waitForStation(client: { page: import('@playwright/test').Page; t
   );
 }
 
-async function startGame(context: BrowserContext): Promise<{ captain: TestClient; helm: TestClient }> {
+async function startGame(context: BrowserContext): Promise<{ captain: TestClient; helm: TestClient; serverPage: import('@playwright/test').Page }> {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);
@@ -55,7 +55,7 @@ async function startGame(context: BrowserContext): Promise<{ captain: TestClient
   await helm.waitForMessage('GameStarted', 5_000);
   await captain.waitForMessage('GameStarted', 5_000);
 
-  return { captain, helm };
+  return { captain, helm, serverPage };
 }
 
 test('SimState is broadcast to all clients within 2 s of game start', async ({ context }) => {
@@ -124,7 +124,7 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
 });
 
 test('HelmInput changes ship position in subsequent blackboard updates', async ({ context }) => {
-  const { captain, helm } = await startGame(context);
+  const { captain, helm, serverPage } = await startGame(context);
 
   // Record initial position from first HelmBlackboard
   const first = await helm.waitForMessage('BlackboardUpdate', 2_000) as any;
@@ -142,7 +142,11 @@ test('HelmInput changes ship position in subsequent blackboard updates', async (
     }, 100);
   });
 
-  // Wait up to 10 s for a BlackboardUpdate showing the ship has moved
+  // Keep the WASM server page in the foreground so Chrome doesn't throttle
+  // its rAF/timers, which would stall the Bevy simulation tick.
+  await serverPage.bringToFront();
+
+  // Wait up to 20 s for a BlackboardUpdate showing the ship has moved
   await helm.page.waitForFunction(
     ({ x, z }: { x: number; z: number }) => {
       const msgs: any[] = (window as any).__messages;
@@ -158,7 +162,7 @@ test('HelmInput changes ship position in subsequent blackboard updates', async (
       );
     },
     { x: initX, z: initZ },
-    { timeout: 10_000 },
+    { timeout: 20_000 },
   );
 
   // Stop repeating inputs

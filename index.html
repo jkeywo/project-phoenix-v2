@@ -640,7 +640,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-49c7de8ae9d83bdd.js" crossorigin="anonymous" integrity="sha384-8Si8NGwpK1l+Ll4lhohUJpwtJ8RtaKON/eCov1YvLDT+4ql2WqJvs7GrXar9mPyC"><link rel="preload" href="./project-phoenix-49c7de8ae9d83bdd_bg.wasm" crossorigin="anonymous" integrity="sha384-3cwTUPS/4G/uVdwZ8jjo42hxLGC7UnZ0QTCXZ7+VD8NNcmJ5FUtDP6YcczPLxSVf" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-c883a6dcbf2ca14f.js" crossorigin="anonymous" integrity="sha384-ppWHMTwHOWEvLSnRZ3hCBsvrDAC6Wr+z3UgMAnJd7+k8m/Uc6Npd5qZWMlX68jPP"><link rel="preload" href="./project-phoenix-c883a6dcbf2ca14f_bg.wasm" crossorigin="anonymous" integrity="sha384-1/RPPPKBgEfDTaMEmqmw/49joD8NiOUb3IDy9oGHF9INYRPyPpRRhHL7wWCKzsvb" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -852,8 +852,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-49c7de8ae9d83bdd.js';
-const wasm = await init({ module_or_path: './project-phoenix-49c7de8ae9d83bdd_bg.wasm' });
+import init, * as bindings from './project-phoenix-c883a6dcbf2ca14f.js';
+const wasm = await init({ module_or_path: './project-phoenix-c883a6dcbf2ca14f_bg.wasm' });
 
 
 window.wasmBindings = bindings;

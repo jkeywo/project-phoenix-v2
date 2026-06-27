@@ -84,6 +84,10 @@ enemy_s_outer  = [900.0, 0.0, 800.0]     # 1204
 enemy_ene      = [1100.0, 0.0, -150.0]   # 1110
 enemy_ese      = [1100.0, 0.0, 350.0]    # 1154
 enemy_e_far    = [1400.0, 0.0, 100.0]    # 1404
+starbase_patrol_north = [500.0, 0.0, -80.0]
+starbase_patrol_east  = [680.0, 0.0, 100.0]
+starbase_patrol_south = [500.0, 0.0, 280.0]
+starbase_patrol_west  = [320.0, 0.0, 100.0]
 
 # ── Static map entities ───────────────────────────────────────────────────────
 
@@ -167,6 +171,16 @@ after_secs = 0.0
   name          = "wave_1"
   anchor        = "enemy_n_outer"
 
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-wave-1"
+  text           = "Destroy wave 1: Harrow destroyer."
+  mandatory      = true
+  targets        = ["wave_1"]
+  target         = "wave_1"
+  directive_kind = "Destroy"
+  base_priority  = 80.0
+
 # Wave 2: destroyer at t=45
 [[trigger]]
 condition = "on_timer"
@@ -177,6 +191,16 @@ after_secs = 45.0
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_2"
   anchor        = "enemy_se"
+
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-wave-2"
+  text           = "Destroy wave 2: Harrow destroyer."
+  mandatory      = true
+  targets        = ["wave_2"]
+  target         = "wave_2"
+  directive_kind = "Destroy"
+  base_priority  = 80.0
 
 # Wave 3: destroyer at t=60
 [[trigger]]
@@ -189,6 +213,16 @@ after_secs = 60.0
   name          = "wave_3"
   anchor        = "enemy_e"
 
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-wave-3"
+  text           = "Destroy wave 3: Harrow destroyer."
+  mandatory      = true
+  targets        = ["wave_3"]
+  target         = "wave_3"
+  directive_kind = "Destroy"
+  base_priority  = 80.0
+
 # Wave 4: cruiser at t=120
 [[trigger]]
 condition = "on_timer"
@@ -199,6 +233,16 @@ after_secs = 120.0
   template_path = "assets/entities/ship_harrow_patrol.toml"
   name          = "wave_4"
   anchor        = "enemy_ne"
+
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-wave-4"
+  text           = "Destroy wave 4: Harrow cruiser."
+  mandatory      = true
+  targets        = ["wave_4"]
+  target         = "wave_4"
+  directive_kind = "Destroy"
+  base_priority  = 80.0
 
 # Wave 5: destroyer at t=210
 [[trigger]]
@@ -211,6 +255,16 @@ after_secs = 210.0
   name          = "wave_5"
   anchor        = "enemy_ese"
 
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-wave-5"
+  text           = "Destroy wave 5: Harrow destroyer."
+  mandatory      = true
+  targets        = ["wave_5"]
+  target         = "wave_5"
+  directive_kind = "Destroy"
+  base_priority  = 80.0
+
 # Wave 6: cruiser at t=240
 [[trigger]]
 condition = "on_timer"
@@ -221,6 +275,16 @@ after_secs = 240.0
   template_path = "assets/entities/ship_harrow_patrol.toml"
   name          = "wave_6"
   anchor        = "enemy_ene"
+
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-wave-6"
+  text           = "Destroy wave 6: Harrow cruiser."
+  mandatory      = true
+  targets        = ["wave_6"]
+  target         = "wave_6"
+  directive_kind = "Destroy"
+  base_priority  = 80.0
 
 # Wave 7: destroyer at t=270
 [[trigger]]
@@ -233,6 +297,16 @@ after_secs = 270.0
   name          = "wave_7"
   anchor        = "enemy_s_outer"
 
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-wave-7"
+  text           = "Destroy wave 7: Harrow destroyer."
+  mandatory      = true
+  targets        = ["wave_7"]
+  target         = "wave_7"
+  directive_kind = "Destroy"
+  base_priority  = 80.0
+
 # Wave 8 (final): battleship at t=300
 [[trigger]]
 condition = "on_timer"
@@ -243,6 +317,16 @@ after_secs = 300.0
   template_path = "assets/entities/ship_harrow_warhawk.toml"
   name          = "wave_8"
   anchor        = "enemy_e_far"
+
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-wave-8"
+  text           = "Destroy wave 8: Harrow battleship."
+  mandatory      = true
+  targets        = ["wave_8"]
+  target         = "wave_8"
+  directive_kind = "Destroy"
+  base_priority  = 80.0
 
 # ── Endings ──────────────────────────────────────────────────────────────────
 
@@ -264,6 +348,71 @@ entity    = "Starbase Alpha"
   type    = "game_over"
   message = "DEFEAT: Starbase Alpha lost. The Harrow strike fleet has secured the system."
 
+# Complete wave objectives as their named attackers are destroyed.
+[[trigger]]
+condition = "on_destroyed"
+entity    = "wave_1"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-1"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "wave_2"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-2"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "wave_3"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-3"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "wave_4"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-4"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "wave_5"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-5"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "wave_6"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-6"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "wave_7"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-7"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "wave_8"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-destroy-wave-8"
+
 # ── Objectives ───────────────────────────────────────────────────────────────
 
 [[trigger]]
@@ -275,6 +424,11 @@ condition = "on_world_loaded"
   text      = "Defend Starbase Alpha against the incoming Harrow fleet."
   mandatory = true
   targets   = ["Starbase Alpha"]
+  source            = "mission"
+  base_priority     = 20.0
+  directive_kind    = "Patrol"
+  directive_anchors = ["starbase_patrol_north", "starbase_patrol_east", "starbase_patrol_south", "starbase_patrol_west"]
+  directive_loop    = true
 
 # ── Comms ────────────────────────────────────────────────────────────────────
 #

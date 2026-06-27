@@ -638,60 +638,13 @@ impl Default for ShipClientConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+/// Minimal per-tick world-entity registry broadcast. All per-system ship state
+/// has migrated to `SystemBlackboard` (issue #570); only world entity snapshots
+/// remain here so the client can track NPC/asteroid positions and hull.
 pub struct SimSnapshot {
-    pub red_alert: bool,
-    pub view_mode: ViewMode,
-    pub ship_x: f32,
-    pub ship_z: f32,
-    pub ship_yaw: f32,
-    /// Current forward speed in world units per second. Negative = reversing.
-    #[serde(default)]
-    pub forward_speed: f32,
-    /// Current power allocation levels (Helm, Weapons, Science).
-    /// Added to SimSnapshot so all clients see the current configuration.
-    #[serde(default = "default_power_levels")]
-    pub power_levels: (u8, u8, u8),
-    /// Impulse drive charge progress (0.0 = idle, 0.1–1.0 = charging, 1.0 = active).
-    /// Broadcast so console panels can show the current impulse drive status.
-    #[serde(default)]
-    pub impulse_charge_progress: f32,
-    /// Engine thrust level for audio volume mapping.
-    /// 1.0 when the impulse drive is fully active; otherwise `|helm_thrust|` (0.0–1.0).
-    #[serde(default)]
-    pub engine_thrust: f32,
-    /// Boolean flags that are currently active on the ship.
-    /// Populated from `ShipModifiers::flags()` each tick.
-    #[serde(default)]
-    pub flags: Vec<FlagKind>,
     /// Per-tick entity state snapshots (position, yaw, hull, flags).
     #[serde(default)]
     pub entity_states: Vec<EntityStateSnapshot>,
-    /// Per-console hull integrity. Omitted when empty (sent via ConsoleHullUpdate events instead).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub console_hull: Vec<ConsoleHullStatus>,
-    /// Shared custom waypoint set by the Navigation console.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub navigation_waypoint: Option<WaypointSnapshot>,
-    /// Boost drive battery charge (0.0 empty → 1.0 full).
-    /// Defaults to 0 on clients that receive snapshots from pre-boost servers.
-    #[serde(default)]
-    pub boost_battery: f32,
-    /// True while the boost drive is engaged and draining the battery.
-    #[serde(default)]
-    pub boost_active: bool,
-    /// True when the ship's TOML provides a `[helm_console.boost]` table.
-    /// Drives client-side button visibility without a separate config request.
-    #[serde(default)]
-    pub boost_enabled: bool,
-    /// Per-system control source status ("Human" or "Ai") so clients can
-    /// render AUTO/read-only badges on any system fragment without local
-    /// rating-resolution logic. Populated from `ShipSystemControlSources`.
-    #[serde(default)]
-    pub control_sources: HashMap<SystemId, String>,
-}
-
-fn default_power_levels() -> (u8, u8, u8) {
-    (2, 2, 2)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1470,6 +1423,11 @@ pub struct CaptainBlackboard {
     /// Current camera direction: `"Fore"`, `"Port"`, `"Starboard"`, `"Aft"`,
     /// or `""` for non-camera views.
     pub view_direction: String,
+    /// Full current view mode (tagged enum). Supersedes the removed
+    /// `SimSnapshot.view_mode` field (issue #570) so clients can derive
+    /// `state.currentView` from the blackboard alone.
+    #[serde(default)]
+    pub view_mode: ViewMode,
     /// Mission objectives. Updated when `ObjectiveManager` is dirty.
     #[serde(default)]
     pub objectives: Vec<ObjectiveSnapshot>,
@@ -1497,6 +1455,7 @@ impl Default for CaptainBlackboard {
             viewscreen_system_id: default_viewscreen_system_id(),
             viewscreen_auto: false,
             view_direction: "Fore".into(),
+            view_mode: ViewMode::Camera(ViewDirection::Fore),
             objectives: Vec::new(),
             hull_integrity_pct: 100.0,
             game_status: String::new(),
@@ -1757,6 +1716,9 @@ pub struct NavigationBlackboard {
     /// Targetability filter for the navigation chart.
     #[serde(default)]
     pub nav_chart_selects: Vec<String>,
+    /// Current shared navigation waypoint (supersedes SimSnapshot.navigation_waypoint).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation_waypoint: Option<WaypointSnapshot>,
 }
 
 impl Default for NavigationBlackboard {
@@ -1765,6 +1727,7 @@ impl Default for NavigationBlackboard {
             nav_chart_range: default_nav_chart_range(),
             nav_chart_shows: Vec::new(),
             nav_chart_selects: Vec::new(),
+            navigation_waypoint: None,
         }
     }
 }

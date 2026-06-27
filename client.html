@@ -1700,36 +1700,9 @@
         }
         case 'SimState': {
           const snap = msg.data.snapshot;
-          // SimSnapshot has view_mode: ViewMode (tagged enum), not view_direction.
-          const vm = snap.view_mode;
-          const vd = vm && vm.kind === 'Camera' ? vm.data : null;
-          const hp = snap.hull_integrity;
-          const repairTarget = snap.authorized_repair_console || null;
-          state.shipX = snap.ship_x || 0;
-          state.shipZ = snap.ship_z || 0;
-          state.shipYaw = snap.ship_yaw || 0;
-          state.forwardSpeed = snap.forward_speed || 0;
-          state.impulseChargeProgress = snap.impulse_charge_progress || 0;
-          state.boostEnabled = !!snap.boost_enabled;
-          state.boostBattery = snap.boost_battery || 0;
-          state.boostActive  = !!snap.boost_active;
-          state.controlSources = snap.control_sources || {};
-            state.navigationWaypoint = window.simState
-              ? window.simState.navigationWaypoint
-              : (snap.navigation_waypoint || null);
-          state.currentView = vd || (vm && vm.kind) || state.currentView;
-          // Red alert visual (issue #439): drives the phone bezel image swap.
-          // `snap.red_alert` is a snake-cased serde field on SimSnapshot.
-          const nextAlert = !!snap.red_alert;
-          if (state.redAlert !== nextAlert) {
-            state.redAlert = nextAlert;
-            applyBezelAlert(nextAlert);
-          }
-          // Update entity positions from per-tick entity state snapshots.
-          // When window.simState is present it already applied these in place
-          // to the shared entities array (state.asteroids is aliased to it in
-          // the Welcome handler), so this loop runs only as the no-module
-          // fallback to avoid a redundant second pass.
+          // SimSnapshot now carries only entity_states. Per-system fields
+          // (ship position, view_mode, red_alert, etc.) are now delivered
+          // via BlackboardUpdate; see the 'BlackboardUpdate' case below.
           if (!window.simState && snap.entity_states) {
             for (const es of snap.entity_states) {
               const match = state.asteroids.find(a => a.uuid === es.uuid);
@@ -1738,14 +1711,6 @@
               }
             }
           }
-          // Hull integrity + authorized repair target are mirrored into the
-          // inline state for any shell reader; the Repair console iframe owns
-          // the actual hull readout via pushRepairConsoleState (issue #462).
-          if (typeof hp === 'number') {
-            state.hullIntegrity = hp;
-            state.repairTarget = repairTarget;
-          }
-          if (snap.console_hull) state.consoleHull = snap.console_hull;
           // Refresh every radar-bearing console each tick. The tactical radar
           // blips are built client-side from ship_x/z/yaw + the entity array
           // (same as sensors), so the weapons console must be pushed here too —
@@ -1801,18 +1766,49 @@
         case 'BlackboardUpdate': {
           // simState.apply() already wrote blackboards[systemId] = bb.data above.
           // state.blackboards is the same object reference, so it's already current.
-          // Fire iframe pushes for any system whose blackboard was updated.
           const updatedSystems = new Set((msg.data.updates || []).map(([id]) => id));
+          // Mirror per-system blackboard data into flat state fields used by
+          // non-module fallback builders and by radar blip calculations that
+          // need ship_x/z/yaw on every SimState tick.
+          if (updatedSystems.has('helm')) {
+            const bb = state.blackboards['helm'];
+            if (bb) {
+              state.shipX                = bb.x             ?? state.shipX;
+              state.shipZ                = bb.z             ?? state.shipZ;
+              state.shipYaw              = bb.yaw           ?? state.shipYaw;
+              state.forwardSpeed         = bb.forward_speed ?? state.forwardSpeed;
+              state.impulseChargeProgress = bb.impulse_charge ?? state.impulseChargeProgress;
+              state.boostBattery         = bb.boost_battery ?? state.boostBattery;
+              state.boostActive          = !!bb.boost_active;
+              state.boostEnabled         = !!bb.boost_enabled;
+            }
+            pushHelmConsoleState();
+          }
+          if (updatedSystems.has('captain') || updatedSystems.has('viewscreen')) {
+            const bb = state.blackboards['captain'];
+            if (bb) {
+              const vm = bb.view_mode;
+              const vd = vm && vm.kind === 'Camera' ? vm.data : null;
+              state.currentView = vd || (vm && vm.kind) || state.currentView;
+              const nextAlert = !!bb.red_alert;
+              if (state.redAlert !== nextAlert) {
+                state.redAlert = nextAlert;
+                applyBezelAlert(nextAlert);
+              }
+            }
+            pushCaptainConsoleState();
+          }
+          if (updatedSystems.has('navigation')) {
+            const bb = state.blackboards['navigation'];
+            if (bb) state.navigationWaypoint = bb.navigation_waypoint || null;
+            pushNavigationConsoleState();
+          }
           if (updatedSystems.has('tactical'))   pushWeaponsConsoleState();
-          if (updatedSystems.has('helm'))       pushHelmConsoleState();
           if (updatedSystems.has('power'))      pushPowerConsoleState();
           if (updatedSystems.has('shields'))    pushShieldsConsoleState();
-          if (updatedSystems.has('captain'))    pushCaptainConsoleState();
           if (updatedSystems.has('repair'))     pushRepairConsoleState();
           if (updatedSystems.has('comms'))      pushCommsConsoleState();
           if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
-          if (updatedSystems.has('navigation')) pushNavigationConsoleState();
-          if (updatedSystems.has('viewscreen')) pushCaptainConsoleState();
           return;
         }
         case 'WeaponsUpdate': {

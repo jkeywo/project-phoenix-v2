@@ -611,195 +611,7 @@ mod tests {
     #[test]
     fn server_sim_state() {
         let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: true,
-                view_mode: ViewMode::Camera(ViewDirection::Fore),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn sim_snapshot_view_mode_starboard() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::Camera(ViewDirection::Starboard),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn sim_snapshot_view_mode_radar() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::Radar,
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn sim_snapshot_carries_ship_position_and_yaw() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 12.5,
-                ship_z: -8.25,
-                ship_yaw: std::f32::consts::FRAC_PI_2,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn sim_snapshot_round_trips_without_hull_integrity() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn sim_snapshot_with_navigation_waypoint_round_trips() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: Some(WaypointSnapshot {
-                    x: 12.5,
-                    z: -8.0,
-                    source_uuid: None,
-                }),
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn sim_snapshot_with_anchored_navigation_waypoint_round_trips() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: Some(WaypointSnapshot {
-                    x: 12.5,
-                    z: -8.0,
-                    source_uuid: Some("anchor-entity-1".into()),
-                }),
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
+            snapshot: SimSnapshot { entity_states: vec![] },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -1659,62 +1471,6 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
-    #[test]
-    fn sim_snapshot_with_power_levels_round_trips() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: true,
-                view_mode: ViewMode::Radar,
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (4, 2, 1),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn sim_snapshot_with_default_power_levels_serializes_correctly() {
-        let with_defaults = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
-                entity_states: vec![],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
-            },
-        };
-        // Encoding then decoding should preserve (2, 2, 2) for power_levels.
-        let encoded = serde_json::to_string(&with_defaults).unwrap();
-        let decoded: ServerMessage = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(with_defaults, decoded);
-    }
-
     // ── EntitySnapshot / EntityState / RadarState tests ──────────────────
 
     #[test]
@@ -2036,14 +1792,6 @@ mod tests {
     fn entity_state_snapshot_minimal_round_trips() {
         let msg = ServerMessage::SimState {
             snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
                 entity_states: vec![EntityStateSnapshot {
                     uuid: "ast-1".into(),
                     position: Some([12.0, 0.0, -5.0]),
@@ -2054,14 +1802,6 @@ mod tests {
                     shields: None,
                     warp_out_remaining_secs: None,
                 }],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2072,14 +1812,6 @@ mod tests {
     fn entity_state_snapshot_minimal_fields_round_trips() {
         let msg = ServerMessage::SimState {
             snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
                 entity_states: vec![EntityStateSnapshot {
                     uuid: "ast-2".into(),
                     position: None,
@@ -2090,14 +1822,6 @@ mod tests {
                     shields: None,
                     warp_out_remaining_secs: None,
                 }],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2108,14 +1832,6 @@ mod tests {
     fn sim_snapshot_with_multiple_entity_states_round_trips() {
         let msg = ServerMessage::SimState {
             snapshot: SimSnapshot {
-                red_alert: true,
-                view_mode: ViewMode::Radar,
-                ship_x: 10.0,
-                ship_z: -20.0,
-                ship_yaw: 1.0,
-                forward_speed: 0.0,
-                power_levels: (3, 2, 1),
-                flags: vec![crate::flag_kind::FlagKind::SensorBlind],
                 entity_states: vec![
                     EntityStateSnapshot {
                         uuid: "e1".into(),
@@ -2138,14 +1854,6 @@ mod tests {
                         warp_out_remaining_secs: None,
                     },
                 ],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2631,14 +2339,6 @@ mod tests {
         use crate::messages::ShieldFacingStatus;
         let msg = ServerMessage::SimState {
             snapshot: crate::messages::SimSnapshot {
-                red_alert: false,
-                view_mode: crate::messages::ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                forward_speed: 0.0,
-                power_levels: (2, 2, 2),
-                flags: vec![],
                 entity_states: vec![crate::messages::EntityStateSnapshot {
                     uuid: "ship-1".into(),
                     position: Some([50.0, 0.0, 0.0]),
@@ -2682,14 +2382,6 @@ mod tests {
                     ]),
                     warp_out_remaining_secs: None,
                 }],
-                impulse_charge_progress: 0.0,
-                engine_thrust: 0.0,
-                console_hull: vec![],
-                navigation_waypoint: None,
-                boost_battery: 0.0,
-                boost_active: false,
-                boost_enabled: false,
-                control_sources: HashMap::new(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

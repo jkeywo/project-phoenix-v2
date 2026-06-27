@@ -167,6 +167,7 @@ fn publish_captain_blackboard(
         viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
         viewscreen_auto,
         view_direction,
+        view_mode: ship.view_mode.clone(),
         objectives: objectives_snap,
         hull_integrity_pct,
         game_status,

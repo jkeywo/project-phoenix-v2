@@ -546,33 +546,6 @@ mod tests {
     }
 
     #[test]
-    fn sim_state_includes_power_levels() {
-        let mut app = test_app();
-        start_game_with_power(&mut app);
-
-        // Directly mutate to check sim state reflects power levels.
-        {
-            let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            ps.0.helm = 3;
-            ps.0.sensors = 3;
-        }
-        let out = tick(&mut app);
-
-        let snap = out
-            .iter()
-            .find_map(|m| match &m.msg {
-                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-                _ => None,
-            })
-            .expect("expected a SimState broadcast");
-        assert_eq!(
-            snap.power_levels,
-            (3, 2, 3),
-            "SimState.power_levels should reflect power system state"
-        );
-    }
-
-    #[test]
     fn increasing_helm_power_updates_max_speed_via_modifiers() {
         let mut app = test_app();
         start_game_with_power(&mut app);

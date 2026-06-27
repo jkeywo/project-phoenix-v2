@@ -208,6 +208,27 @@
       animation: spin 0.8s linear infinite;
     }
     #asset-loading .pct { font-size: 1.4rem; font-weight: 600; }
+
+    /* ── Game-over overlay (shown when GamePhase::GameOver) ────────── */
+    #game-over-overlay {
+      display: none;
+      position: fixed; inset: 0; z-index: 190;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.88);
+      color: #cde;
+      font-family: 'Chakra Petch', monospace;
+      text-align: center;
+      padding: 32px;
+    }
+    #game-over-overlay .game-over-message {
+      font-size: clamp(0.95rem, 2.5vw, 1.15rem);
+      white-space: pre-wrap;
+      line-height: 1.7;
+      max-width: 64ch;
+      letter-spacing: 0.03em;
+    }
     .bezel-corner, .bezel-edge {
       position: absolute;
       pointer-events: none;
@@ -532,7 +553,11 @@
     #detail-panel.active .detail-station-name { color: var(--signal-cyan); }
     #detail-panel .detail-consoles { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
     #detail-panel .detail-consoles .chip { padding: 2px 8px; border-radius: 3px;
-      font-size: 0.6rem; background: var(--surface2); color: #7aa; border: 1px solid var(--edge); }
+      font-size: 0.6rem; background: var(--surface2); color: #7aa; border: 1px solid var(--edge);
+      cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+    #detail-panel .detail-consoles .chip:hover { border-color: var(--signal-cyan); color: var(--signal-cyan); }
+    #detail-panel .detail-consoles .chip.selected { background: #0a2830;
+      border-color: var(--signal-cyan); color: var(--signal-cyan); }
     #detail-panel .segmented { display: flex; gap: 2px; }
     #detail-panel .segmented button { padding: 2px 10px; border-radius: 3px;
       font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
@@ -712,6 +737,12 @@
     <span>Preparing scenario&hellip; <span class="pct" id="asset-loading-pct">0</span>%</span>
   </div>
 
+  <!-- Game-over overlay: shown when GamePhase::GameOver. Displays either
+       "Ship Destroyed" (hull death) or the scenario's game_over message. -->
+  <div id="game-over-overlay">
+    <div class="game-over-message" id="game-over-message"></div>
+  </div>
+
   <!-- Coordination popup overlay (issue #494). Shown for AI-to-human
        coordination messages. Click-to-dismiss, auto-dismiss after 8s. -->
   <div id="coordination-popup" onclick="dismissCoordinationPopup()">
@@ -851,6 +882,7 @@
       shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, boostEnabled: false, boostBattery: 0, boostActive: false, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
       stations: [], maxPlayers: 0, allFilled: false, allReady: false,
+      shipDestroyed: false, gameOverReason: null,
       // Weapons console iframe state (issue #422)
       weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto',
       // Repair console iframe state (issue #425)
@@ -868,6 +900,10 @@
 
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
+
+    /// Console selected in the lobby detail panel. Null until the player picks one.
+    /// Resets when the player releases their station.
+    let lobbyConsole = null;
 
     // Single source of truth for changing the active console. Called by
     // the render() reconciler, the tab-bar onPress handler, and the swipe
@@ -1051,6 +1087,18 @@
         }
       }
 
+      // Game-over overlay: covers the game shell when phase is GameOver.
+      const gameOverEl = document.getElementById('game-over-overlay');
+      const gameOverMsgEl = document.getElementById('game-over-message');
+      if (gameOverEl && gameOverMsgEl) {
+        if (s.phase === 'GameOver') {
+          gameOverMsgEl.textContent = s.shipDestroyed ? 'Ship Destroyed' : (s.gameOverReason || '');
+          gameOverEl.style.display = 'flex';
+        } else {
+          gameOverEl.style.display = 'none';
+        }
+      }
+
       if (inGame) renderGame(s);
       else renderLobby(s);
     }
@@ -1160,10 +1208,19 @@
           detailHeader.appendChild(releaseBtn);
           const consolesArea = detail.querySelector('.detail-consoles');
           consolesArea.innerHTML = '';
-          for (const c of (myStation.consoles || [])) {
+          const stationConsoles = myStation.consoles || [];
+          // Auto-select when there is only one console
+          if (stationConsoles.length === 1 && lobbyConsole !== stationConsoles[0]) {
+            lobbyConsole = stationConsoles[0];
+          }
+          for (const c of stationConsoles) {
             const chip = document.createElement('span');
-            chip.className = 'chip';
+            chip.className = 'chip' + (c === lobbyConsole ? ' selected' : '');
             chip.textContent = consoleLabel(c);
+            chip.addEventListener('click', () => {
+              lobbyConsole = c;
+              scheduleRender();
+            });
             consolesArea.appendChild(chip);
           }
         } else {
@@ -1174,6 +1231,7 @@
           nameSpan.textContent = 'No station assigned';
           detailHeader.appendChild(nameSpan);
           detail.querySelector('.detail-consoles').innerHTML = '';
+          lobbyConsole = null;
         }
       }
 
@@ -1189,7 +1247,7 @@
       // Ready button (per-player, replaces captain-only Engage)
       const readyBtn = document.getElementById('ready-btn');
       if (readyBtn) {
-        if (myPlayer && hasStation) {
+        if (myPlayer && hasStation && lobbyConsole) {
           readyBtn.style.display = 'block';
           const isReady = !!myPlayer.ready;
           if (isReady) {
@@ -1213,14 +1271,14 @@
       if (statusLine) {
         if (!myPlayer || !hasStation) {
           statusLine.textContent = 'Select a station to join the crew';
+        } else if (!lobbyConsole) {
+          statusLine.textContent = 'Select a console at ' + myStation.name + ' to continue';
         } else if (s.allReady) {
           statusLine.textContent = 'All crew ready — launching!';
         } else if (myPlayer.ready) {
           statusLine.textContent = 'Waiting for the rest of the crew…';
         } else {
-          statusLine.textContent = myStation
-            ? 'Standing by at ' + myStation.name + ' — press READY when ready'
-            : 'Select a station to join the crew';
+          statusLine.textContent = 'Standing by at ' + myStation.name + ' — press READY when ready';
         }
       }
     }
@@ -2016,8 +2074,12 @@
           pushCommsConsoleState();
           return;
         }
+        case 'ShipDestroyed':
+          state.shipDestroyed = true;
+          break;
         case 'GameOver':
           state.phase = 'GameOver';
+          state.gameOverReason = msg.data.reason || null;
           break;
         case 'RatingChanged': {
           // sim-state.js already updated window.simState.stationRatings with the

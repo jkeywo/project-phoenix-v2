@@ -413,6 +413,31 @@
       transition: all .3s ease;
     }
 
+    /* AI-only launch button (bottom-left, lobby only, no-players condition) */
+    #ai-launch-btn {
+      position: absolute;
+      bottom: 1.5rem;
+      left: 1.5rem;
+      padding: 8px 16px;
+      background: #0a1a20;
+      color: #5fd8e8;
+      border: 1px solid #2a8a96;
+      border-radius: 4px;
+      font-family: 'Chakra Petch', system-ui, monospace;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background .2s, border-color .2s, box-shadow .2s;
+      z-index: 2;
+    }
+    #ai-launch-btn:hover {
+      background: #0d2830;
+      border-color: #5fd8e8;
+      box-shadow: 0 0 8px rgba(95,216,232,0.25);
+    }
+
     /* Compact form: portrait OR narrow landscape */
     @media (orientation: portrait), (max-width: 720px) {
       .lobby-body {
@@ -615,7 +640,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-67e6eccde07f5ce4.js" crossorigin="anonymous" integrity="sha384-UXmCv/p9zIOcJGySubBIL57vGJjFA2DDJOMkzdfaxsklxCoytm/7kB+m5CSLyoJr"><link rel="preload" href="./project-phoenix-67e6eccde07f5ce4_bg.wasm" crossorigin="anonymous" integrity="sha384-MhS8Mztt/j5HlPB7/lyddP6PP40sS+d9aZAklLMabOrDYq6nAjDHtexw1g2la+c9" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-5372fc8c0c62a65d.js" crossorigin="anonymous" integrity="sha384-ffVPTPcUk0JNi9kUlxBgzZPjgEgw5x5OS+6QCEOgDh3jdRbnR7SLK2DNiD+c+gsu"><link rel="preload" href="./project-phoenix-5372fc8c0c62a65d_bg.wasm" crossorigin="anonymous" integrity="sha384-lRVlw8VixMqihOUoj9z3bAra1h1N4X827vrJ2QYHmNM5xi7izl/axDMFe3TBdvj7" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -688,6 +713,11 @@
     <!-- Background overlay -->
     <div class="lobby-bg"></div>
 
+    <!-- AI-only launch: visible only when no players are connected -->
+    <button id="ai-launch-btn" style="display:none;" title="Launch with fully AI-controlled crew">
+      ⬡ Launch AI Ship
+    </button>
+
     <div class="lobby-panel-wrap">
 
       <!-- Header row: title + crew counter + ready badge -->
@@ -743,6 +773,11 @@
 
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
+
+  <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
+  <div id="game-over-overlay" style="display:none;position:fixed;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
+    <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+  </div>
 
   <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
        z-index; pointer-events:none so it never intercepts canvas input.
@@ -817,8 +852,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-67e6eccde07f5ce4.js';
-const wasm = await init({ module_or_path: './project-phoenix-67e6eccde07f5ce4_bg.wasm' });
+import init, * as bindings from './project-phoenix-5372fc8c0c62a65d.js';
+const wasm = await init({ module_or_path: './project-phoenix-5372fc8c0c62a65d_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -882,6 +917,17 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     if (s.ship_name) {
       const desig = document.getElementById('hud-designation');
       if (desig) desig.textContent = s.ship_name;
+    }
+    // ── Game-over overlay ───────────────────────────────────────────────────
+    const goOverlay = document.getElementById('game-over-overlay');
+    const goMsg     = document.getElementById('game-over-message');
+    if (goOverlay && goMsg) {
+      if (s.game_over_message != null) {
+        goMsg.textContent = s.game_over_message;
+        goOverlay.style.display = 'flex';
+      } else {
+        goOverlay.style.display = 'none';
+      }
     }
   };
 
@@ -1087,7 +1133,26 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         hint.style.color = '#889';
       }
     }
+
+    // ── AI-only launch button ─────────────────────────────────────────
+    const aiBtn = document.getElementById('ai-launch-btn');
+    if (aiBtn) {
+      const noPlayers = crewN === 0 && (!s.spectators || s.spectators.length === 0);
+      aiBtn.style.display = noPlayers ? '' : 'none';
+    }
   };
+
+    // ── AI-only launch button click handler ───────────────────────────────
+    (function() {
+      const btn = document.getElementById('ai-launch-btn');
+      if (btn) {
+        btn.addEventListener('click', function() {
+          if (typeof wasm_force_start === 'function') {
+            wasm_force_start();
+          }
+        });
+      }
+    })();
 
     // ── Connection status ──────────────────────────────────────────────────
 
@@ -1526,6 +1591,7 @@ function finishInit() {
   // registrations. The HUD callback is wired immediately so the viewscreen
   // overlay starts receiving state as soon as the sim runs.
   window.wasm_ui_action = wasmBindings.wasm_ui_action;
+  window.wasm_force_start = wasmBindings.wasm_force_start;
   window.set_console_state_callback = wasmBindings.set_console_state_callback;
   window.set_hud_state_callback = wasmBindings.set_hud_state_callback;
   window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;

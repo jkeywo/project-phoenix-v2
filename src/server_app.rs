@@ -41,8 +41,15 @@ pub use crate::power_plugin::{
 };
 
 // â"€â"€ Marker Components â"€â"€â"€â"€â"€â"€â"€â"€
+/// Marks the player-controlled ship entity. Use `With<Ship>` to find the
+/// player ship in queries. NPC ships use `NpcShip` instead.
 #[derive(Component)]
 pub struct Ship;
+
+/// Marks an NPC ship entity (driven by `AiControllerComponent`).
+/// Player-ship queries use `With<Ship>`; NPC-ship systems use `With<NpcShip>`.
+#[derive(Component)]
+pub struct NpcShip;
 
 #[derive(Component)]
 pub struct Asteroid;

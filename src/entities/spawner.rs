@@ -263,7 +263,8 @@ pub fn spawn_entity(
         }
     }
 
-    // Behaviour section â€” signals to ai_plugin to attach an AiController
+    // Behaviour section — signals ai_plugin to attach an AiControllerComponent.
+    // NPC ships receive NpcShip (not Ship) so player-console queries stay unambiguous.
     if let Some(behaviour) = &config.behaviour {
         entity_commands.insert(BehaviourSection(behaviour.clone()));
 
@@ -273,7 +274,7 @@ pub fn spawn_entity(
             resolver.set(system.id.clone(), crate::ship::control_source::ControlSource::Ai);
         }
         entity_commands.insert((
-            crate::server_app::Ship,
+            crate::server_app::NpcShip,
             ship_config,
             crate::ship_plugin::ShipSystemControlSources(resolver),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -1264,5 +1265,74 @@ max_hp = 50.0
             route_coordination(ControlSource::Ai, ControlSource::Ai),
             DeliverAction::Consume,
         );
+    }
+
+    // ── #573: NPC all-AI roster ───────────────────────────────────────────────
+
+    /// NPC ships spawned with a [behaviour] block must carry NpcShip (not Ship)
+    /// and have every registered system set to ControlSource::Ai. This ensures
+    /// player-console queries using With<Ship> are never polluted by NPC entities,
+    /// and that the NPC helm/weapons operate functions run for all systems.
+    #[test]
+    fn npc_ship_spawn_gives_all_ai_roster_and_npc_ship_marker() {
+        use bevy::prelude::*;
+        use crate::entity_config::{BehaviourConfig, DoctrineObjective, EntityConfig};
+        use crate::server_app::{NpcShip, Ship};
+        use crate::ship::control_source::ControlSource;
+        use crate::ship_plugin::ShipSystemControlSources;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+
+        let config = EntityConfig {
+            behaviour: Some(BehaviourConfig {
+                doctrine: vec![DoctrineObjective {
+                    id: "destroy-hostiles".into(),
+                    text: "Destroy hostiles".into(),
+                    directive_kind: Some("Destroy".into()),
+                    base_priority: 35.0,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let mut cmds = app.world_mut().commands();
+        let entity = spawn_entity(&mut cmds, &config, bevy::math::Vec3::ZERO, "npc-001".into(), None);
+        app.world_mut().flush();
+
+        // NPC ship must have NpcShip, not Ship
+        assert!(
+            app.world().get::<NpcShip>(entity).is_some(),
+            "NPC ship must carry NpcShip marker"
+        );
+        assert!(
+            app.world().get::<Ship>(entity).is_none(),
+            "NPC ship must NOT carry Ship marker (reserved for player ship)"
+        );
+
+        // All registered systems must be AI-controlled
+        let sources = app
+            .world()
+            .get::<ShipSystemControlSources>(entity)
+            .expect("NPC ship must have ShipSystemControlSources");
+        let config_comp = app
+            .world()
+            .get::<crate::ship_plugin::ShipConfigComponent>(entity)
+            .expect("NPC ship must have ShipConfigComponent");
+        for sys in &config_comp.0.systems {
+            let policy = sources.0.policy_for(&sys.id);
+            assert!(
+                policy.operate_ai,
+                "system '{}' must be AI-controlled on NPC ship",
+                sys.id.0
+            );
+            assert!(
+                !policy.accept_human_input,
+                "system '{}' must not accept human input on NPC ship",
+                sys.id.0
+            );
+        }
     }
 }

@@ -342,7 +342,7 @@ fn operate_helm_ai(
         &mut crate::ai::server::AiControllerComponent,
         &ShipSystemControlSources,
         Option<&crate::entities::spawner::HelmConsoleSection>,
-    ), (With<Ship>, With<crate::ai::server::AiControllerComponent>)>,
+    ), With<crate::ai::server::AiControllerComponent>>,
 ) {
     // Player ship Backfill path: when helm is AI-controlled but there is no
     // behaviour tree to generate intent, hold the ship at zero thrust/steering

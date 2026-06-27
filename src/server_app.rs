@@ -1622,7 +1622,8 @@ fn spawn_game_start_entities(
                 .insert(ship_config)
                 .insert(crate::ship_plugin::ShipSystemControlSources::default())
                 .insert(crate::ship_plugin::ActiveStationRatings::default())
-                .insert(crate::ship_plugin::CoordinationQueue::default());
+                .insert(crate::ship_plugin::CoordinationQueue::default())
+                .remove::<crate::entity_spawner::EntityConsoleHull>();
             ship_spawned = true;
 
             // Seed authoritative ship position from the world TOML so that

@@ -551,6 +551,7 @@ fn update_engine_trail(
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(mat_handle),
                     Transform::default(),
+                    bevy::camera::visibility::NoFrustumCulling,
                 ))
                 .id();
             state.emitters.insert(
@@ -690,8 +691,7 @@ fn build_ribbon_into_mesh(mesh: &mut Mesh, crumbs: &VecDeque<TrailCrumb>) {
         uvs.push([u, 0.0]);
         uvs.push([u, 1.0]);
 
-        // Alpha fades with age.
-        let alpha = (1.0 - age_frac) * crumb.age.min(0.05) / 0.05; // brief pop-in guard
+        let alpha = 1.0 - age_frac;
         colors.push([1.0, 1.0, 1.0, alpha]);
         colors.push([1.0, 1.0, 1.0, alpha]);
 

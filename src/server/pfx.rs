@@ -601,7 +601,10 @@ fn update_engine_trail(
 }
 
 fn empty_ribbon_mesh() -> Mesh {
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
     let empty_pos: Vec<[f32; 3]> = vec![];
     let empty_uv: Vec<[f32; 2]> = vec![];
     let empty_col: Vec<[f32; 4]> = vec![];

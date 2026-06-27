@@ -62,18 +62,27 @@ export function isClaimedByOtherTab(registry, token, myTabId, now, ttl = REGISTR
 
 // Pure: decide which token this tab should use and what to persist.
 //
-//   tabToken      — sessionStorage token for this tab (null on first load)
-//   sharedToken   — localStorage persistent token (null if none yet)
-//   sharedClaimed — is `sharedToken` currently held by another live tab?
-//   freshToken    — a freshly minted token to use when we can't adopt
+//   tabToken        — sessionStorage token for this tab (null on first load)
+//   tabTokenClaimed — is `tabToken` currently held by another live tab?
+//   isReload        — did this document load from a browser reload?
+//   sharedToken     — localStorage persistent token (null if none yet)
+//   sharedClaimed   — is `sharedToken` currently held by another live tab?
+//   freshToken      — a freshly minted token to use when we can't adopt
 //
 // Returns { token, storeAsTab, storeAsShared }:
 //   storeAsTab    — write `token` to sessionStorage (skip when reusing it)
 //   storeAsShared — write `token` to localStorage (only when seeding the first
 //                   persistent token, so we never overwrite another tab's)
-export function decideToken({ tabToken, sharedToken, sharedClaimed, freshToken }) {
+export function decideToken({
+  tabToken,
+  tabTokenClaimed = false,
+  isReload = false,
+  sharedToken,
+  sharedClaimed,
+  freshToken,
+}) {
   // Reload of this same tab: reuse our own token untouched.
-  if (tabToken) {
+  if (tabToken && (!tabTokenClaimed || isReload)) {
     return { token: tabToken, storeAsTab: false, storeAsShared: false };
   }
   // First/only tab: adopt the persistent shared token if no live tab holds it.
@@ -109,10 +118,19 @@ export function installSessionToken(win = (typeof window !== 'undefined' ? windo
 
   const tabToken = sessionStore.getItem(TAB_KEY);
   const sharedToken = localStore.getItem(SHARED_KEY);
-  const sharedClaimed = isClaimedByOtherTab(readRegistry(), sharedToken, tabId, now);
+  const registry = readRegistry();
+  const tabTokenClaimed = isClaimedByOtherTab(registry, tabToken, tabId, now);
+  const sharedClaimed = isClaimedByOtherTab(registry, sharedToken, tabId, now);
+  const navEntry = win.performance
+    && typeof win.performance.getEntriesByType === 'function'
+    && win.performance.getEntriesByType('navigation')[0];
+  const legacyReload = win.performance
+    && win.performance.navigation
+    && win.performance.navigation.type === 1;
+  const isReload = (navEntry && navEntry.type === 'reload') || legacyReload;
 
   const { token, storeAsTab, storeAsShared } =
-    decideToken({ tabToken, sharedToken, sharedClaimed, freshToken });
+    decideToken({ tabToken, tabTokenClaimed, isReload, sharedToken, sharedClaimed, freshToken });
 
   try {
     if (storeAsTab) sessionStore.setItem(TAB_KEY, token);

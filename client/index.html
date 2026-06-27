@@ -882,7 +882,7 @@
     function me(s) { return s.players.find(p => p.token === myToken); }
     function myConsoles(s) {
       const m = me(s);
-      return (m && Array.isArray(m.consoles)) ? m.consoles : [];
+      return m ? consolesOf(m, s.shipStations) : [];
     }
     function hasConsole(s, c) { return myConsoles(s).includes(c); }
     function isCaptain(s)     { return hasConsole(s, 'CaptainChair'); }
@@ -891,15 +891,17 @@
     /// Returns the consoles list for any player, normalising old single-console
     /// fields and deriving current wire payloads from Player.station.
     function consolesOf(p, shipStations) {
-      if (Array.isArray(p.consoles)) return p.consoles;
-      if (p.console) return [p.console];
       const stationId = typeof p.station === 'string'
         ? p.station
         : (p.station && p.station.id) || null;
-      if (!stationId) return [];
-      const station = (((shipStations || state.shipStations) || {}).stations || [])
-        .find(s => s.id === stationId || s.name === stationId);
-      return station && Array.isArray(station.consoles) ? station.consoles : [];
+      if (stationId) {
+        const station = (((shipStations || state.shipStations) || {}).stations || [])
+          .find(s => s.id === stationId || s.name === stationId);
+        if (station && Array.isArray(station.consoles)) return station.consoles;
+      }
+      if (Array.isArray(p.consoles)) return p.consoles;
+      if (p.console) return [p.console];
+      return [];
     }
 
     function send(type, data) {
@@ -1050,7 +1052,9 @@
       const list = document.getElementById('station-list');
       if (!list) return;
       const myPlayer = me(s);
-      const hasStation = myPlayer && myPlayer.consoles && myPlayer.consoles.length > 0;
+      const mine = myConsoles(s);
+      const myStation = myPlayer ? s.stations.find(st => st.holder_token === myToken) : null;
+      const hasStation = !!myStation;
 
       // Toggle station list vs tutorial
       const tutorial = document.getElementById('lobby-tutorial');
@@ -1058,7 +1062,7 @@
         list.style.display = 'none';
         if (tutorial) {
           if (typeof window.renderInlineHelp === 'function') {
-            window.renderInlineHelp(tutorial, myPlayer.consoles);
+            window.renderInlineHelp(tutorial, mine);
           }
           tutorial.setAttribute('aria-hidden', 'false');
         }
@@ -1134,8 +1138,6 @@
       // Detail panel
       const detail = document.getElementById('detail-panel');
       if (detail) {
-        const myStation = myPlayer && myPlayer.consoles && myPlayer.consoles.length > 0
-          ? s.stations.find(st => st.holder_token === myToken) : null;
         if (myStation) {
           detail.className = 'active';
           detail.querySelector('.detail-station-name').textContent = myStation.name;
@@ -1166,7 +1168,7 @@
       // Ready button (per-player, replaces captain-only Engage)
       const readyBtn = document.getElementById('ready-btn');
       if (readyBtn) {
-        if (myPlayer) {
+        if (myPlayer && hasStation) {
           readyBtn.style.display = 'block';
           const isReady = !!myPlayer.ready;
           if (isReady) {
@@ -1188,14 +1190,13 @@
       // Status line
       const statusLine = document.getElementById('status-line');
       if (statusLine) {
-        if (!myPlayer) {
+        if (!myPlayer || !hasStation) {
           statusLine.textContent = 'Select a station to join the crew';
         } else if (s.allReady) {
           statusLine.textContent = 'All crew ready — launching!';
         } else if (myPlayer.ready) {
           statusLine.textContent = 'Waiting for the rest of the crew…';
         } else {
-          const myStation = s.stations.find(st => st.holder_token === myToken);
           statusLine.textContent = myStation
             ? 'Standing by at ' + myStation.name + ' — press READY when ready'
             : 'Select a station to join the crew';
@@ -1209,8 +1210,7 @@
       state.stations = defs.map(def => {
         const defConsoles = def.consoles || [];
         const holder = state.players.find(p =>
-          p.consoles && p.consoles.length > 0
-          && defConsoles.some(c => p.consoles.includes(c))
+          consolesOf(p, state.shipStations).some(c => defConsoles.includes(c))
         );
         return {
           name: def.name || '',
@@ -1701,8 +1701,8 @@
             // Clear these consoles from any other player who held them.
             for (const c of (consoles || [])) {
               for (const p of state.players) {
-                if (p.token !== token && p.consoles) {
-                  p.consoles = p.consoles.filter(x => x !== c);
+                if (p.token !== token) {
+                  p.consoles = consolesOf(p, state.shipStations).filter(x => x !== c);
                 }
               }
             }
@@ -2010,7 +2010,14 @@
           break;
         }
         case 'ReadyChanged':
-          break; // state.players already updated via lobbyState.apply(); fall through to scheduleRender
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            const p = state.players.find(p => p.token === msg.data.token);
+            if (p) p.ready = msg.data.ready;
+          }
+          rebuildStations();
+          break;
         case 'ObjectiveSummary':
           break; // fall through to scheduleRender
         default:

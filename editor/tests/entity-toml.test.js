@@ -28,7 +28,9 @@ describe('entity-toml', () => {
       expect(result.faction).toBeTruthy();
       expect(result.hull.hull_integrity).toBe(30.0);
       expect(result.collider.shape).toBe('Capsule');
-      expect(result.behaviour.initial_state).toBe('patrol');
+      expect(Array.isArray(result.behaviour.doctrine)).toBe(true);
+      expect(result.behaviour.doctrine.length).toBeGreaterThanOrEqual(1);
+      expect(result.behaviour.doctrine[0].id).toBe('patrol-sector');
     });
 
     it('parses asteroid_common_1_large.toml', () => {

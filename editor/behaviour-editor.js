@@ -3,10 +3,10 @@
  *
  * Pure-logic module for editing the [behaviour] block of an entity TOML.
  *
- * The [behaviour] block defines the AI state machine for NPC entities:
- *  - initial_state: which state the entity starts in
- *  - state[]: array of state definitions (with kind + parameters)
- *  - transition[]: array of transition rules between states
+ * Two formats are supported:
+ *   - Doctrine-based AI (issue #572): `[[behaviour.doctrine]]` entries.
+ *     No FSM; behaviour driven by standing doctrine objectives scored each tick.
+ *   - Legacy FSM: `initial_state`, `state[]`, `transition[]`.
  *
  * No DOM manipulation is performed here; the class is fully testable in Node.
  */
@@ -40,6 +40,7 @@ export class BehaviourEditor {
     this._initialState = null;
     this._states = [];
     this._transitions = [];
+    this._doctrine = [];
   }
 
   load(behaviour = {}) {
@@ -47,6 +48,11 @@ export class BehaviourEditor {
     this._initialState = b.initial_state ?? null;
     this._states = [];
     this._transitions = [];
+    this._doctrine = [];
+
+    if (Array.isArray(b.doctrine)) {
+      this._doctrine = b.doctrine.map((d) => ({ ...d }));
+    }
 
     if (Array.isArray(b.state)) {
       for (const s of b.state) {
@@ -60,9 +66,6 @@ export class BehaviourEditor {
 
     if (Array.isArray(b.transition)) {
       for (const t of b.transition) {
-        // `from` in TOML may be either a string (single source state) or
-        // an array of strings. Normalise to an array so [...t.from] in
-        // cloneTransition doesn't spread a string into characters.
         const fromRaw = t.from;
         const fromArr = Array.isArray(fromRaw)
           ? fromRaw
@@ -81,6 +84,7 @@ export class BehaviourEditor {
       initialState: this._initialState,
       states: this._states.map(cloneState),
       transitions: this._transitions.map(cloneTransition),
+      doctrine: this._doctrine.map((d) => ({ ...d })),
     };
   }
 
@@ -165,6 +169,10 @@ export class BehaviourEditor {
     }
   }
 
+  getDoctrine() {
+    return this._doctrine.map((d) => ({ ...d }));
+  }
+
   toBehaviour() {
     const out = {};
     if (this._initialState) {
@@ -172,6 +180,9 @@ export class BehaviourEditor {
     }
     out.state = this._states.map(cloneState);
     out.transition = this._transitions.map(cloneTransition);
+    if (this._doctrine.length > 0) {
+      out.doctrine = this._doctrine.map((d) => ({ ...d }));
+    }
     return out;
   }
 
@@ -182,6 +193,27 @@ export class BehaviourEditor {
   validate() {
     const errors = [];
 
+    // Doctrine-based validation (issue #572).
+    if (this._doctrine.length > 0) {
+      for (let i = 0; i < this._doctrine.length; i++) {
+        const d = this._doctrine[i];
+        if (!d.id) {
+          errors.push(`Doctrine [${i}]: missing id`);
+        }
+        if (!d.directive_kind) {
+          errors.push(`Doctrine [${i}]: missing directive_kind`);
+        }
+        if (d.base_priority == null || typeof d.base_priority !== 'number') {
+          errors.push(`Doctrine [${i}]: base_priority must be a number`);
+        }
+        if ((d.directive_kind === 'Patrol' || d.directive_kind === 'patrol') && (!Array.isArray(d.directive_anchors) || d.directive_anchors.length === 0)) {
+          errors.push(`Doctrine [${i}]: Patrol directive needs directive_anchors`);
+        }
+      }
+      return { valid: errors.length === 0, errors };
+    }
+
+    // Legacy FSM validation.
     if (this._states.length === 0) {
       errors.push('Must have at least one state');
     }

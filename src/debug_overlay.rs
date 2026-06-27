@@ -202,15 +202,15 @@ fn write_entity_debug_state(
     for (i, (ai, transform, name)) in entities.iter().enumerate() {
         let label = name.map(|n| n.0.as_str()).unwrap_or("<unnamed>");
         let p = transform.translation;
-        let state = &ai.controller.current_state_name;
+        let target_str = ai.memory.target.map(|u| u.to_string()).unwrap_or_else(|| "none".to_string());
         out.push_str(&format!(
-            "{:>2}. {:<20} pos=({:>7.1},{:>7.1},{:>7.1})  state={}\n",
+            "{:>2}. {:<20} pos=({:>7.1},{:>7.1},{:>7.1})  target={}\n",
             i + 1,
             label,
             p.x,
             p.y,
             p.z,
-            state
+            target_str
         ));
     }
     crate::bridge::set_entity_debug_string(out);
@@ -377,8 +377,8 @@ fn update_entity_inspector(
         // AI state
         if let Some(ai_ctrl) = ai {
             out.push_str(&format!(
-                "    ai: {}\n",
-                ai_ctrl.controller.current_state_name
+                "    ai: target={}\n",
+                ai_ctrl.memory.target.map(|u| u.to_string()).unwrap_or_else(|| "none".to_string())
             ));
         }
     }

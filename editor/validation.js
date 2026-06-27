@@ -55,6 +55,27 @@ function validateBehaviourBlock(behaviour) {
   const states = behaviour.state;
   const transitions = behaviour.transition;
   const initialState = behaviour.initial_state;
+  const doctrine = behaviour.doctrine;
+
+  // Doctrine-based AI (issue #572) — validate doctrine entries.
+  if (Array.isArray(doctrine) && doctrine.length > 0) {
+    for (let i = 0; i < doctrine.length; i++) {
+      const d = doctrine[i];
+      if (!d.id) {
+        results.push({ path: `behaviour.doctrine[${i}]`, severity: 'error', message: 'Doctrine entry must have an id' });
+      }
+      if (!d.directive_kind) {
+        results.push({ path: `behaviour.doctrine[${i}]`, severity: 'error', message: 'Doctrine entry must have a directive_kind' });
+      }
+      if (d.base_priority == null || typeof d.base_priority !== 'number') {
+        results.push({ path: `behaviour.doctrine[${i}]`, severity: 'error', message: 'Doctrine entry must have a numeric base_priority' });
+      }
+      if ((d.directive_kind === 'Patrol' || d.directive_kind === 'patrol') && (!Array.isArray(d.directive_anchors) || d.directive_anchors.length === 0)) {
+        results.push({ path: `behaviour.doctrine[${i}]`, severity: 'error', message: 'Patrol doctrine must have directive_anchors' });
+      }
+    }
+    return results;
+  }
 
   const stateNames = Array.isArray(states) ? states.map((s) => s.name).filter(Boolean) : [];
   const hasStates = Array.isArray(states) && states.length > 0;

@@ -927,7 +927,7 @@ fn handle_fire_phaser_npc(
                             }
                             if tgt_hull.0.is_destroyed() {
                                 target_destroyed = true;
-                                commands.entity(tgt_entity).despawn();
+                                commands.entity(tgt_entity).try_despawn();
                                 destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
                                     entity_uuid: tgt_uid.0.clone(),
                                 });
@@ -1301,7 +1301,7 @@ fn tick_torpedo_system(
             }
 
             if hull_comp.0.is_destroyed() {
-                commands.entity(entity).despawn();
+                commands.entity(entity).try_despawn();
                 if is_asteroid {
                     asteroid_destroyed = true;
                 } else {
@@ -1548,7 +1548,7 @@ fn tick_active_beam(
             }
 
             if hull_comp.0.is_destroyed() {
-                commands.entity(entity).despawn();
+                commands.entity(entity).try_despawn();
                 if is_asteroid {
                     asteroid_destroyed = true;
                 } else {

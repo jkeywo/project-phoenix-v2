@@ -1515,7 +1515,7 @@ fn handle_respond_to_message(
                         }
                     });
                     if let Some(ent) = target_entity {
-                        commands.entity(ent).despawn();
+                        commands.entity(ent).try_despawn();
                     }
                 }
                 TriggerAction::AddFactionEnemy { faction, enemy } => {
@@ -2623,7 +2623,7 @@ fn handle_ai_events(
                         });
                         // Despawn the underlying entity if we found it.
                         if let Some(ent) = target_entity {
-                            commands.entity(ent).despawn();
+                            commands.entity(ent).try_despawn();
                         }
                     }
                     TriggerAction::AddFactionEnemy { faction, enemy } => {
@@ -3203,8 +3203,9 @@ fn apply_world_layer_changes(
                 };
 
                 // Despawn ECS entities that were spawned when this layer loaded.
+                // Use try_despawn: entities may have already died (e.g. hull = 0) before the layer unloads.
                 for entity in &layer.spawned_entities {
-                    commands.entity(*entity).despawn();
+                    commands.entity(*entity).try_despawn();
                 }
 
                 // Remove trigger states belonging to this layer.

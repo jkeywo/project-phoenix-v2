@@ -472,7 +472,7 @@ fn tick_ai_controllers(
 
         // ── Phase 3: operate_weapons ──────────────────────────────────────
 
-        let (target_opt, should_fire) = operate_weapons(
+        let (_target_opt, should_fire) = operate_weapons(
             &ctrl.memory,
             &world_view,
             &scored_pool,
@@ -494,28 +494,16 @@ fn tick_ai_controllers(
 
         // ── Emit weapon InboundMessages ───────────────────────────────────
 
-        let ai_token = registry_res
-            .token_for_entity(&entity_uuid)
-            .map(|s| s.to_string());
-        if let Some(token) = ai_token {
-            if let Some(t) = target_opt {
-                inbound.write(crate::lobby::InboundMessage {
-                    token: token.clone(),
-                    msg: crate::messages::ClientMessage::ControlSystem {
-                        target: crate::system_registry::tactical_system_id(),
-                        payload: crate::messages::SystemControlPayload::SetTarget {
-                            uuid: t.to_string(),
-                        },
-                    },
-                });
-            }
-            if should_fire {
+        // NPC fire: target is already stored in ctrl.memory by operate_weapons and
+        // read directly by the NPC phaser handler — no SetTarget message needed.
+        if should_fire {
+            if let Some(token) = registry_res.token_for_entity(&entity_uuid) {
                 let bank_id = weapons_section
                     .and_then(|wc| wc.0.phaser_banks.first())
                     .map(|b| b.id.clone())
                     .unwrap_or_else(|| "fore".to_string());
                 inbound.write(crate::lobby::InboundMessage {
-                    token,
+                    token: token.to_string(),
                     msg: crate::messages::ClientMessage::FirePhaser { bank: bank_id },
                 });
             }

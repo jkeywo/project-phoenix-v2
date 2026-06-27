@@ -359,15 +359,22 @@ fn helm_destroy(
     }
 
     let effective_range = world_view.entity_weapons_range.unwrap_or(maintain_range);
-    let approach_target = offset_approach_target(pos, target_pos, effective_range * 0.8);
-    let nav_dx = approach_target[0] - pos[0];
-    let nav_dz = approach_target[2] - pos[2];
-    let nav_dist = (nav_dx * nav_dx + nav_dz * nav_dz).sqrt();
+    let at_station = dist <= effective_range * 0.8;
 
-    let dir = if nav_dist > 0.1 {
-        [nav_dx / nav_dist, nav_dz / nav_dist]
-    } else {
+    // When holding station, steer to face the target so the phaser forward-arc
+    // gate passes. When approaching, steer toward the offset approach point.
+    let dir = if at_station {
         [dx / dist, dz / dist]
+    } else {
+        let approach_target = offset_approach_target(pos, target_pos, effective_range * 0.8);
+        let nav_dx = approach_target[0] - pos[0];
+        let nav_dz = approach_target[2] - pos[2];
+        let nav_dist = (nav_dx * nav_dx + nav_dz * nav_dz).sqrt();
+        if nav_dist > 0.1 {
+            [nav_dx / nav_dist, nav_dz / nav_dist]
+        } else {
+            [dx / dist, dz / dist]
+        }
     };
 
     let self_uuid = uuid::Uuid::nil(); // excluded from avoidance (self already excluded upstream)
@@ -379,8 +386,7 @@ fn helm_destroy(
     let base_steer = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
     let steering = (base_steer + avoidance).clamp(-1.0, 1.0);
 
-    // Hold station when inside effective range; thrust otherwise.
-    let thrust = if dist <= effective_range * 0.8 { 0.0 } else { target_speed };
+    let thrust = if at_station { 0.0 } else { target_speed };
     (thrust, steering)
 }
 

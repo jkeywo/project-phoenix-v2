@@ -1,8 +1,11 @@
+use bevy::core_pipeline::core_2d::graph::Core2d;
+use bevy::core_pipeline::core_3d::graph::Core3d;
 use bevy::core_pipeline::Skybox;
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::camera::ClearColorConfig;
+use bevy::render::camera::CameraRenderGraph;
 use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
 use rand::Rng;
 use rand::SeedableRng;
@@ -134,6 +137,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             clear_color: ClearColorConfig::None,
             ..default()
         },
+        CameraRenderGraph::new(Core2d),
         IsDefaultUiCamera,
     ));
 
@@ -148,6 +152,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             order: -1,
             ..default()
         },
+        CameraRenderGraph::new(Core3d),
         Projection::Perspective(PerspectiveProjection {
             far: 5000.0,
             ..default()

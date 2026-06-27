@@ -30,6 +30,7 @@ use crate::lobby::{OutboundMessage, Sessions, WorldResource};
 use crate::messages::{
     GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState,
 };
+use crate::server_app::GameOverReason;
 use crate::server::renderer::GameCamera;
 use crate::ship_state::ShipState;
 use crate::sim_sets::SimSet;
@@ -152,7 +153,9 @@ impl Plugin for ViewscreenBorderPlugin {
                     push_hud_state.after(recompute_hud_state),
                 )
                     .run_if(in_state(GamePhase::InProgress)),
-            );
+            )
+            // On GameOver, push one final HUD state with the game-over message.
+            .add_systems(OnEnter(GamePhase::GameOver), push_game_over_hud_state);
     }
 }
 
@@ -398,23 +401,45 @@ fn spawn_hud_state_entity(mut commands: Commands) {
         hull_pct: 100,
         condition: "NOMINAL".to_string(),
         red_alert: false,
+        game_over_message: None,
     }));
 }
 
 /// Compute the current HUD state from ship + hull resources. Reuses the exact
 /// formulas from the retired in-game HUD strip.
-fn compute_hud_state(ship: &ShipState, hull: &ShipHullIntegrity) -> ViewscreenHudState {
+fn compute_hud_state(
+    ship: &ShipState,
+    hull: &ShipHullIntegrity,
+    phase: &GamePhase,
+    game_over_reason: Option<&GameOverReason>,
+) -> ViewscreenHudState {
     let alert = ship.red_alert();
     let hull_pct = if hull.0.total_max() > 0.0 {
         (hull.0.total_current() / hull.0.total_max() * 100.0).clamp(0.0, 100.0)
     } else {
         0.0
     };
+    let game_over_message = if *phase == GamePhase::GameOver {
+        let reason = game_over_reason
+            .and_then(|r| r.0.as_deref())
+            .unwrap_or("");
+        let msg = if reason.starts_with("All consoles destroyed")
+            || reason.starts_with("Ship destroyed")
+        {
+            "Ship Destroyed".to_string()
+        } else {
+            reason.to_string()
+        };
+        Some(msg)
+    } else {
+        None
+    };
     ViewscreenHudState {
         heading: yaw_to_compass_bearing(ship.yaw),
         hull_pct: hull_pct.round() as i32,
         condition: if alert { "ALERT" } else { "NOMINAL" }.to_string(),
         red_alert: alert,
+        game_over_message,
     }
 }
 
@@ -424,15 +449,48 @@ fn compute_hud_state(ship: &ShipState, hull: &ShipHullIntegrity) -> ViewscreenHu
 fn recompute_hud_state(
     ship: Option<Res<ShipState>>,
     hull: Option<Res<ShipHullIntegrity>>,
+    phase: Option<Res<State<GamePhase>>>,
+    game_over_reason: Option<Res<GameOverReason>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
     let Some(ship) = ship else { return };
     let Some(hull) = hull else { return };
-    let next = compute_hud_state(&ship, &hull);
+    let Some(phase) = phase else { return };
+    let next = compute_hud_state(
+        &ship,
+        &hull,
+        phase.get(),
+        game_over_reason.as_deref(),
+    );
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
             hud.0 = next.clone();
         }
+    }
+}
+
+/// `OnEnter(GamePhase::GameOver)` system: push one final HUD state that
+/// carries `game_over_message` so the viewscreen overlay can display it.
+fn push_game_over_hud_state(
+    ship: Option<Res<ShipState>>,
+    hull: Option<Res<ShipHullIntegrity>>,
+    game_over_reason: Option<Res<GameOverReason>>,
+    mut hud_q: Query<&mut ViewscreenHud>,
+    mut writer: MessageWriter<HudStateChanged>,
+) {
+    let Some(ship) = ship else { return };
+    let Some(hull) = hull else { return };
+    let next = compute_hud_state(
+        &ship,
+        &hull,
+        &GamePhase::GameOver,
+        game_over_reason.as_deref(),
+    );
+    for mut hud in hud_q.iter_mut() {
+        hud.0 = next.clone();
+    }
+    if let Ok(json) = codec::encode_hud_state(&next) {
+        writer.write(HudStateChanged { json });
     }
 }
 
@@ -477,11 +535,12 @@ mod tests {
     fn compute_hud_state_nominal() {
         let ship = ShipState::new();
         let hull = hull_at(100.0, 100.0);
-        let state = compute_hud_state(&ship, &hull);
+        let state = compute_hud_state(&ship, &hull, &GamePhase::InProgress, None);
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
         assert_eq!(state.condition, "NOMINAL");
         assert!(!state.red_alert);
+        assert!(state.game_over_message.is_none());
     }
 
     #[test]
@@ -490,11 +549,34 @@ mod tests {
         ship.toggle_red_alert();
         ship.yaw = std::f32::consts::FRAC_PI_2; // right turn (clockwise) → East → bearing 090
         let hull = hull_at(50.0, 100.0);
-        let state = compute_hud_state(&ship, &hull);
+        let state = compute_hud_state(&ship, &hull, &GamePhase::InProgress, None);
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
         assert_eq!(state.condition, "ALERT");
         assert!(state.red_alert);
+    }
+
+    #[test]
+    fn compute_hud_state_game_over_ship_destroyed() {
+        use crate::server_app::GameOverReason;
+        let ship = ShipState::new();
+        let hull = hull_at(0.0, 100.0);
+        let reason = GameOverReason(Some("All consoles destroyed".into()));
+        let state = compute_hud_state(&ship, &hull, &GamePhase::GameOver, Some(&reason));
+        assert_eq!(state.game_over_message.as_deref(), Some("Ship Destroyed"));
+    }
+
+    #[test]
+    fn compute_hud_state_game_over_scenario_message() {
+        use crate::server_app::GameOverReason;
+        let ship = ShipState::new();
+        let hull = hull_at(50.0, 100.0);
+        let reason = GameOverReason(Some("VICTORY: All enemies eliminated.".into()));
+        let state = compute_hud_state(&ship, &hull, &GamePhase::GameOver, Some(&reason));
+        assert_eq!(
+            state.game_over_message.as_deref(),
+            Some("VICTORY: All enemies eliminated.")
+        );
     }
 
     // ── yaw_to_compass_bearing ───────────────────────────────────────

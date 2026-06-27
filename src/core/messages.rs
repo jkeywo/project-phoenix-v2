@@ -1315,6 +1315,10 @@ pub struct ViewscreenHudState {
     pub condition: String,
     /// Whether the ship is at red alert (drives the CSS vignette).
     pub red_alert: bool,
+    /// Set when the game has ended. "Ship Destroyed" for hull death; the
+    /// scenario `game_over` message otherwise. `None` while in progress.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_over_message: Option<String>,
 }
 
 /// A single radar blip on the Tactical console radar.
@@ -2258,7 +2262,10 @@ pub enum AiDirective {
     /// Destroy the named target entity.
     Destroy { target: String },
     /// Patrol between the listed anchors in order.
-    Patrol { anchors: Vec<String>, loop_path: bool },
+    Patrol {
+        anchors: Vec<String>,
+        loop_path: bool,
+    },
     /// Reach the named anchor position.
     Reach { anchor: String },
     /// Hail the named target entity.

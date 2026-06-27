@@ -611,7 +611,9 @@ mod tests {
     #[test]
     fn server_sim_state() {
         let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot { entity_states: vec![] },
+            snapshot: SimSnapshot {
+                entity_states: vec![],
+            },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -2509,6 +2511,7 @@ mod tests {
             hull_pct: 75,
             condition: "ALERT".into(),
             red_alert: true,
+            game_over_message: None,
         };
         let json = encode_hud_state(&state).expect("encode hud");
         let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
@@ -2522,6 +2525,7 @@ mod tests {
             hull_pct: 100,
             condition: "NOMINAL".into(),
             red_alert: false,
+            game_over_message: None,
         };
         let json = encode_hud_state(&state).expect("encode hud");
         assert!(json.contains("\"heading\":0"), "got: {json}");
@@ -2580,7 +2584,7 @@ mod tests {
 
     #[test]
     fn system_blackboard_weapons_round_trips_json_codec() {
-        use crate::messages::{WeaponsBlackboard, SystemBlackboard, SystemId};
+        use crate::messages::{SystemBlackboard, SystemId, WeaponsBlackboard};
         let bb = SystemBlackboard::Weapons(WeaponsBlackboard {
             target_uuid: Some("tgt-1".into()),
             target_name: Some("Raider Alpha".into()),
@@ -2719,6 +2723,4 @@ mod tests {
             }
         );
     }
-
-
 }

@@ -275,51 +275,91 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
 
 /**
  * Tactical / Weapons console.
- * @param {{ weaponsTarget, weaponsBanks, weaponsTubes, weaponsTorpedoCount,
- *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw }} state
+ * Reads raw sim truth from `state.blackboards['tactical']` (WeaponsBlackboard),
+ * falling back to legacy camelCase properties for compatibility.
+ *
+ * @param {{ blackboards?, weaponsTarget?, weaponsBanks?, weaponsTubes?,
+ *           weaponsTorpedoCount?, weaponsPhaserMode? }} state
  */
 export function buildWeaponsConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['tactical']) || {};
+  const targetUuid   = bb.target_uuid   ?? state.weaponsTarget       ?? null;
+  const targetName   = bb.target_name   ?? state.weaponsTargetName   ?? null;
+  const banks        = bb.banks         ?? state.weaponsBanks        ?? [];
+  const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
+  const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
+  const phaserMode   = bb.phaser_mode   ?? state.weaponsPhaserMode   ?? 'Auto';
+  const regions      = bb.regions       ?? [];
+  const phaserArcs   = bb.phaser_arcs   ?? state.phaserArcConfigs   ?? [];
+  const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
+
   const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
-  const blips = Array.isArray(state.weaponsBlips)
-    ? state.weaponsBlips
-    : buildBlips(
-      state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
+  const mappedPhaserArcs = phaserArcs.map(a => ({
+    ...a,
+    range_frac: a.beam_range != null ? a.beam_range / range : null,
+  }));
+
+  // Blips: authoritative server blips if provided, otherwise build from asteroids.
+  let blips = bb.blips;
+  if (!blips || blips.length === 0) {
+    blips = state.weaponsBlips || [];
+  }
+  if (!blips || blips.length === 0) {
+    blips = buildBlips(
+      state.asteroids || [],
+      state.shipX || 0,
+      state.shipZ || 0,
+      state.shipYaw || 0,
       range,
-      {
-        rotate: true,
-        shows: state.tacticalRadarShows,
-        selects: state.tacticalRadarSelects,
-      }
+      { rotate: true }
     );
-  const targetUuid = state.weaponsTarget || null;
-  const targetBlip = targetUuid ? blips.find(b => b.uuid === targetUuid) : null;
-  const targetName = state.weaponsTargetName || (targetBlip && targetBlip.name) || null;
+  }
+
+  // Derive target_name from the locked server blip when no explicit name is stored.
+  const resolvedTargetName = targetName || (targetUuid && blips.find(b => b.uuid === targetUuid)?.name) || null;
+
   return JSON.stringify({
     target_uuid:   targetUuid,
-    target_name:   targetName,
-    banks:         state.weaponsBanks       || [],
-    tubes:         state.weaponsTubes       || [],
-    torpedo_count: state.weaponsTorpedoCount || 0,
-    phaser_mode:   state.weaponsPhaserMode   || 'Auto',
+    target_name:   resolvedTargetName,
+    banks,
+    tubes,
+    torpedo_count: torpedoCount,
+    phaser_mode:   phaserMode,
     blips,
-    phaser_arcs:   (state.phaserArcConfigs || []).map(a => ({
-      ...a,
-      range_frac: a.beam_range != null ? a.beam_range / range : null,
-    })),
-    torpedo_arcs:  state.torpedoArcConfigs || [],
-    own_hull: ownHull('Tactical', state),
+    regions,
+    phaser_arcs:   mappedPhaserArcs,
+    torpedo_arcs:  torpedoArcs,
+    own_hull:      ownHull('Tactical', state),
   });
 }
 
 /**
  * CaptainChair console.
- * @param {{ redAlert, currentView, objectives, hullPct, blips }} state
+ * @param {{ blackboards, redAlert, currentView, objectives, hullPct, blips }} state
  */
 export function buildCaptainConsoleState(state) {
-  const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
+  const bb = state.blackboards && state.blackboards['captain'];
+  if (bb) {
+    return JSON.stringify({
+      red_alert:             bb.red_alert             ?? false,
+      red_alert_system_id:   bb.red_alert_system_id   ?? 'red-alert',
+      red_alert_auto:        bb.red_alert_auto         ?? false,
+      viewscreen_system_id:  bb.viewscreen_system_id  ?? 'viewscreen',
+      viewscreen_auto:       bb.viewscreen_auto        ?? false,
+      view_direction:        bb.view_direction         ?? '',
+      view_mode:             'Camera',
+      objectives:            bb.objectives             ?? [],
+      hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
+      game_status:           bb.game_status            ?? '',
+      blips:                 state.blips               || [],
+      own_hull:              ownHull('CaptainChair', state),
+    });
+  }
+  // Legacy fallback.
   const controlSources = state.controlSources || {};
   const redAlertAuto = controlSources['red-alert'] === 'Ai';
   const viewscreenAuto = controlSources['viewscreen'] === 'Ai';
+  const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
   return JSON.stringify({
     red_alert:             state.redAlert    || false,
     red_alert_system_id:   'red-alert',
@@ -340,52 +380,69 @@ export function buildCaptainConsoleState(state) {
 
 /**
  * Helm console.
- * @param {{ shipYaw, forwardSpeed, shipX, shipZ, impulseChargeProgress,
- *           currentView, weaponsTarget, asteroids,
- *           boostEnabled, boostBattery, boostActive }} state
+ *
+ * Reads raw sim truth from the blackboard mirror (`state.blackboards['helm']`)
+ * when available, falling back to legacy camelCase properties for compatibility.
+ *
+ * @param {{ blackboards?, shipYaw?, forwardSpeed?, shipX?, shipZ?,
+ *           impulseChargeProgress?, currentView?, asteroids?,
+ *           boostEnabled?, boostBattery?, boostActive? }} state
  */
 export function buildHelmConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['helm']) || {};
+  const shipYaw    = bb.yaw            ?? state.shipYaw            ?? 0;
+  const shipX      = bb.x              ?? state.shipX              ?? 0;
+  const shipZ      = bb.z              ?? state.shipZ              ?? 0;
+  const forwardSpeed         = bb.forward_speed  ?? state.forwardSpeed         ?? 0;
+  const impulseChargeProgress = bb.impulse_charge ?? state.impulseChargeProgress ?? 0;
+  const boostEnabled = bb.boost_enabled ?? state.boostEnabled ?? false;
+  const boostBattery = bb.boost_battery ?? state.boostBattery ?? 0;
+  const boostActive  = bb.boost_active  ?? state.boostActive  ?? false;
+
   const range = state.helmRadarRange ?? HELM_RADAR_RANGE;
   // Exclude objective_marker entities — objectives only show on the nav chart.
   const helmEntities = (state.asteroids || []).filter(e => {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
     return !tags.includes('objective_marker');
   });
-  const blips = buildBlips(
-    helmEntities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
-    range, { rotate: true }
-  );
+  const blips = buildBlips(helmEntities, shipX, shipZ, shipYaw, range, { rotate: true });
   const waypoint = buildWaypointBlip(
-    state.navigationWaypoint || null,
-    state.shipX || 0,
-    state.shipZ || 0,
-    state.shipYaw || 0,
-    range,
+    state.navigationWaypoint || null, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true }
   );
   if (waypoint) blips.push(waypoint);
   return JSON.stringify({
-    heading:                 (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
-    speed:                   state.forwardSpeed          || 0,
-    x:                       state.shipX                 || 0,
-    z:                       state.shipZ                 || 0,
-    yaw:                     state.shipYaw               || 0,
-    impulse_charge_progress: state.impulseChargeProgress || 0,
+    heading:                 (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
+    speed:                   forwardSpeed,
+    x:                       shipX,
+    z:                       shipZ,
+    yaw:                     shipYaw,
+    impulse_charge_progress: impulseChargeProgress,
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
     own_hull:                ownHull('Helm', state),
-    boost_enabled:           !!state.boostEnabled,
-    boost_battery:           state.boostBattery        || 0,
-    boost_active:            !!state.boostActive,
+    boost_enabled:           !!boostEnabled,
+    boost_battery:           boostBattery,
+    boost_active:            !!boostActive,
   });
 }
 
 /**
  * Repair console.
- * @param {{ repairTeams, consoleHull }} state
+ * @param {{ blackboards, repairTeams, consoleHull }} state
  */
 export function buildRepairConsoleState(state) {
+  const bb = state.blackboards && state.blackboards['repair'];
+  if (bb) {
+    return JSON.stringify({
+      teams:                bb.teams                ?? [],
+      console_hull:         bb.console_hull         ?? [],
+      travel_duration_secs: bb.travel_duration_secs ?? 5.0,
+      damageable_consoles:  bb.damageable_consoles  ?? [],
+    });
+  }
+  // Legacy fallback.
   return JSON.stringify({
     teams:                state.repairTeams || [],
     console_hull:         state.consoleHull || [],
@@ -396,25 +453,54 @@ export function buildRepairConsoleState(state) {
 
 /**
  * Power console.
- * @param {{ powerHelm, powerWeapons, powerSensors, powerBattery, powerLocked }} state
+ *
+ * Reads raw sim truth from `state.blackboards['power']` (PowerBlackboard),
+ * falling back to legacy camelCase properties from PowerState messages.
+ *
+ * @param {{ blackboards?, powerHelm?, powerWeapons?, powerSensors?,
+ *           powerBattery?, powerLocked? }} state
  */
 export function buildPowerConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['power']) || null;
+  if (bb) {
+    return JSON.stringify({
+      consoles:       bb.consoles       || [],
+      total:          bb.total          ?? 0,
+      total_max:      bb.total_max      ?? 8,
+      battery_charge: bb.battery_charge ?? 0,
+      battery_max:    bb.battery_max    ?? 100,
+      locked:         bb.locked         || false,
+      own_hull:       ownHull('Power', state),
+    });
+  }
+  // Legacy fallback: PowerState message fields.
   return JSON.stringify({
     helm:           state.powerHelm    || 0,
     weapons:        state.powerWeapons || 0,
     sensors:        state.powerSensors || 0,
     battery_charge: state.powerBattery || 0,
     locked:         state.powerLocked  || false,
-    own_hull: ownHull('Power', state),
+    own_hull:       ownHull('Power', state),
   });
 }
 
 /**
  * Shields console.
- * @param {{ weaponsTarget, asteroids, shipX, shipZ,
- *           shieldFacings, hullIntegrity, shieldFocusedFacing }} state
+ * @param {{ blackboards, shieldFacings, hullIntegrity, shieldFocusedFacing }} state
  */
 export function buildShieldsConsoleState(state) {
+  const bb = state.blackboards && state.blackboards['shields'];
+  if (bb) {
+    return JSON.stringify({
+      facings:            bb.facings            ?? [],
+      hull_integrity_pct: bb.hull_integrity_pct ?? 100,
+      focused_facing:     bb.focused_facing     ?? null,
+      target_bearing:     bb.target_bearing     ?? null,
+      grid_status:        bb.grid_status        ?? 'GRID NOMINAL',
+      own_hull: ownHull('Shields', state),
+    });
+  }
+  // Legacy fallback: read from ShieldStatus broadcast fields.
   let targetBearing = null;
   if (state.weaponsTarget && state.asteroids) {
     const target = state.asteroids.find(a => a.uuid === state.weaponsTarget);
@@ -437,19 +523,25 @@ export function buildShieldsConsoleState(state) {
 
 /**
  * Sensors console.
- * @param {{ asteroids, shipX, shipZ, shipYaw, sensorsTarget, regions,
- *           complexity, impulseChargeProgress }} state
+ * @param {{ blackboards, asteroids, shipX, shipZ, shipYaw, sensorsTarget,
+ *           regions, complexity, impulseChargeProgress }} state
  */
 export function buildSensorsConsoleState(state) {
-  const range = state.sensorsRadarRange ?? SENSORS_RADAR_RANGE;
+  const bb = state.blackboards && state.blackboards['sensors'];
+  const range = bb ? (bb.radar_range ?? SENSORS_RADAR_RANGE)
+                   : (state.sensorsRadarRange ?? SENSORS_RADAR_RANGE);
+  const radarShows   = bb ? (bb.radar_shows   ?? state.sensorsRadarShows)
+                          : state.sensorsRadarShows;
+  const radarSelects = bb ? (bb.radar_selects ?? state.sensorsRadarSelects)
+                          : state.sensorsRadarSelects;
   const entities = state.asteroids;
   const blips = buildBlips(
     entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
     range,
     {
       rotate: true,
-      shows: state.sensorsRadarShows,
-      selects: state.sensorsRadarSelects,
+      shows: radarShows,
+      selects: radarSelects,
       extra: (a) => ({
         color:   null,
         name:    a.name    || null,
@@ -531,14 +623,25 @@ export function buildSensorsConsoleState(state) {
 
 /**
  * Comms console.
- * @param {{ commsMessages, commsContacts }} state
+ * @param {{ blackboards, commsMessages, commsContacts }} state
  */
 export function buildCommsConsoleState(state) {
+  const bb = state.blackboards && state.blackboards['comms'];
+  if (bb) {
+    return JSON.stringify({
+      messages:   bb.messages   ?? [],
+      objectives: bb.objectives ?? [],
+      contacts:   bb.contacts   ?? [],
+      on_screen:  state.currentView === 'Comms',
+      own_hull:   ownHull('Comms', state),
+    });
+  }
+  // Legacy fallback.
   return JSON.stringify({
-    messages: state.commsMessages || [],
-    contacts: state.commsContacts || [],
+    messages:  state.commsMessages || [],
+    contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
-    own_hull: ownHull('Comms', state),
+    own_hull:  ownHull('Comms', state),
   });
 }
 
@@ -554,13 +657,18 @@ export const NAVIGATION_RADAR_RANGE = 5000.0;
  * `nav_chart_selects` lists. No JS-side default — an unauthored ship_config
  * shows nothing on the nav chart until the TOML specifies these lists.
  *
- * @param {{ asteroids, shipX, shipZ, impulseChargeProgress, currentView }} state
+ * @param {{ blackboards, asteroids, shipX, shipZ, impulseChargeProgress,
+ *           currentView }} state
  */
 export function buildNavigationConsoleState(state) {
-  const range = state.navChartRange ?? NAVIGATION_RADAR_RANGE;
-  const navShows = state.navChartShows || [];
+  const bb = state.blackboards && state.blackboards['navigation'];
+  const range = bb ? (bb.nav_chart_range ?? NAVIGATION_RADAR_RANGE)
+                   : (state.navChartRange ?? NAVIGATION_RADAR_RANGE);
+  const navShows = bb ? (bb.nav_chart_shows ?? state.navChartShows ?? [])
+                      : (state.navChartShows || []);
   const navShowsLower = navShows.map(s => String(s).toLowerCase());
-  const navSelects = (state.navChartSelects || []).map(t => String(t).toLowerCase());
+  const navSelects = (bb ? (bb.nav_chart_selects ?? state.navChartSelects ?? [])
+                         : (state.navChartSelects || [])).map(t => String(t).toLowerCase());
   const entities = withObjectiveTargets(state.asteroids, state.objectives);
   // Filter to navigational entities only.
   const navEntities = entities.filter(e => {

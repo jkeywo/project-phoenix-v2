@@ -103,6 +103,10 @@ export class ClientSimState {
     this.stationRatings = {};
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = {};
+    /** Per-system blackboard mirror, keyed by SystemId string.
+     *  Each value is the inner `data` object of the `SystemBlackboard` variant
+     *  (e.g. `this.blackboards['helm']` is a `HelmBlackboard`). */
+    this.blackboards = {};
     this.currentTargetName = null;
     /** Shared waypoint set by the Navigation console, or null when clear. */
     this.navigationWaypoint = null;
@@ -268,6 +272,14 @@ export class ClientSimState {
       case 'RatingChanged':
         if (d.station_id != null) {
           this.stationRatings[d.station_id] = d.rating_name || '';
+        }
+        break;
+      case 'BlackboardUpdate':
+        for (const [systemId, bb] of (d.updates || [])) {
+          // bb is { kind: "Helm", data: { yaw, forward_speed, ... } }
+          if (bb && bb.kind && bb.data) {
+            this.blackboards[systemId] = bb.data;
+          }
         }
         break;
       default:

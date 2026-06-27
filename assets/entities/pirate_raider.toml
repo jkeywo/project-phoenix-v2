@@ -73,74 +73,26 @@ range = 400.0
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
-# (#474) No flee/warp_out from combat — Harrow destroyers fight to the
-# death in the combat-test scenario. `warp_out` retained only for clean
-# scenario teardown (on_scenario_unloaded).
+# (#472/#574) Doctrine-based behaviour (FSM dissolved in issue #572).
+# Two standing objectives scored each tick: Destroy outscores Patrol so the
+# ship immediately pursues any hostile it can find; when no hostile is visible
+# operate_helm falls back to the Patrol directive.
 
 [behaviour]
-initial_state = "patrol"
 
-[[behaviour.state]]
-name = "idle"
-kind = "idle"
-target_speed = 0.0
+[[behaviour.doctrine]]
+id        = "patrol-sector"
+text      = "Patrol the sector"
+directive_kind    = "Patrol"
+directive_anchors = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
+directive_loop    = true
+base_priority     = 20.0
+target_speed      = 0.4
 
-[[behaviour.state]]
-name = "patrol"
-kind = "patrolling"
-waypoints = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
-loop_path = true
-target_speed = 0.4
-
-[[behaviour.state]]
-name = "pursue"
-kind = "pursuing"
-target_speed = 0.9
-
-[[behaviour.state]]
-name = "attack"
-kind = "attacking"
+[[behaviour.doctrine]]
+id            = "destroy-hostiles"
+text          = "Engage and destroy hostile ships"
+directive_kind = "Destroy"
+base_priority  = 35.0
+target_speed   = 0.9
 maintain_range = 25.0
-target_speed = 0.8
-
-[[behaviour.state]]
-name = "warp_out"
-kind = "warping_out"
-duration_secs = 8.0
-target_speed = 1.0
-
-# ── Transitions ───────────────────────────────────────────────────────────────
-
-# Any state: attacked → pursue attacker immediately.
-[[behaviour.transition]]
-from = ["patrol", "idle", "pursue", "attack"]
-condition = "on_attacked"
-to = "pursue"
-
-# Patrolling or idle: enemy comes into detection range → pursue.
-# (#475) Radius extended to 5000 so destroyers detect the player from
-# anywhere on the map in the combat-test scenario, where they spawn
-# 600-1000u away and need to engage immediately.
-[[behaviour.transition]]
-from = ["patrol", "idle"]
-condition = "enemy_in_range"
-radius = 5000.0
-to = "pursue"
-
-# Pursuing: enemy enters weapons range → attack.
-[[behaviour.transition]]
-from = "pursue"
-condition = "in_weapons_range"
-to = "attack"
-
-# Attacking: target destroyed → return to patrol.
-[[behaviour.transition]]
-from = "attack"
-condition = "target_destroyed"
-to = "patrol"
-
-# Any active state: scenario unloaded → warp out gracefully.
-[[behaviour.transition]]
-from = ["patrol", "idle", "pursue", "attack"]
-condition = "on_scenario_unloaded"
-to = "warp_out"

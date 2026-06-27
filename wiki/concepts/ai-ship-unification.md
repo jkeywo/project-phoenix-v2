@@ -2,7 +2,7 @@
 title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, per-kind-plugin, control-source, prd-520]
-updated: 2026-06-25
+updated: 2026-06-27
 ---
 
 # AI Ship Unification
@@ -76,6 +76,10 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 | `operate_comms_ai` | `src/console/comms/server.rs` | Stub |
 | `operate_repair_ai` | `src/console/repair/server.rs` | Stub |
 | `operate_navigation_ai` | `src/console/navigation/mod.rs` | Stub |
+
+## Captain red alert automation
+
+`operate_captain_ai` in `src/console/captain/server.rs` controls the `red-alert` system, so it is gated by `ControlSourceResolver::policy_for(red_alert_system_id())`, not by the umbrella `captain` system. The AI reads recent combat from `RecentCombatActivity` in `src/ship/combat_activity.rs`; `publish_viewscreen_blackboard` mirrors those timestamps into the viewscreen aggregate for UI and cross-system visibility. `update_combat_activity` treats an uninitialized previous-hull value as the configured maximum hull, so a first observed damaged hull records combat instead of being missed.
 
 ## NPC ship spawn
 

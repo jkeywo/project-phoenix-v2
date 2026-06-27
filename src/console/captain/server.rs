@@ -98,40 +98,28 @@ fn handle_set_objective_priority(
 /// and emit `ToggleRedAlert` into `AdmittedCommands` when the desired state
 /// differs from the current state. Runs before `handle_toggle_red_alert` so
 /// the command is visible to the handler in the same tick.
-///
-/// Combat timers are read from the viewscreen blackboard (issue #572) — no
-/// private `RecentCombatActivity` copy needed by the captain AI.
 fn operate_captain_ai(
     time: Res<Time>,
     ship: Res<ShipState>,
     mut admitted: ResMut<AdmittedCommands>,
     ship_query: Query<&ShipSystemControlSources, With<Ship>>,
-    blackboards: Res<crate::server_app::SystemBlackboards>,
+    activity: Res<RecentCombatActivity>,
 ) {
     let Ok(control_sources) = ship_query.single() else {
         return;
     };
     let policy = control_sources
         .0
-        .policy_for(&crate::system_registry::captain_system_id());
+        .policy_for(&crate::system_registry::red_alert_system_id());
     if !policy.operate_ai {
         return;
     }
 
-    // Read combat timers from the viewscreen blackboard (published by phase-1b aggregator).
-    let (last_damage_secs, last_weapon_secs) = match blackboards
-        .0
-        .get(&crate::system_registry::viewscreen_system_id())
-    {
-        Some(SystemBlackboard::Viewscreen(bb)) => {
-            (bb.last_damage_taken_secs, bb.last_weapon_fired_secs)
-        }
-        _ => (None, None),
-    };
-
     let now = time.elapsed_secs();
     let ai = crate::ai::core::CaptainAi;
-    if let Some(should_be_red_alert) = ai.operate(now, last_damage_secs, last_weapon_secs) {
+    if let Some(should_be_red_alert) =
+        ai.operate(now, activity.last_damage_taken, activity.last_weapon_fired)
+    {
         if should_be_red_alert != ship.red_alert() {
             admitted.0.push(crate::messages::AdmittedCommand {
                 target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
@@ -166,7 +154,7 @@ fn publish_captain_blackboard(
         .unwrap_or(1.0);
     let control_sources = ship_query.single().ok();
     let red_alert_auto = control_sources.is_some_and(|cs| {
-        cs.0.source_for(&crate::system_registry::captain_system_id()) == ControlSource::Ai
+        cs.0.source_for(&crate::system_registry::red_alert_system_id()) == ControlSource::Ai
     });
     let viewscreen_auto = control_sources.is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::viewscreen_system_id()) == ControlSource::Ai
@@ -875,23 +863,12 @@ mod tests {
         // Set captain to AI mode
         set_control_source(
             &mut app,
-            crate::system_registry::captain_system_id(),
+            crate::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
-        // Simulate recent damage via the viewscreen blackboard (issue #572 path).
-        {
-            use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
-            let mut bbs = app
-                .world_mut()
-                .resource_mut::<crate::server_app::SystemBlackboards>();
-            bbs.0.insert(
-                crate::system_registry::viewscreen_system_id(),
-                SystemBlackboard::Viewscreen(ViewscreenBlackboard {
-                    last_damage_taken_secs: Some(0.0),
-                    ..Default::default()
-                }),
-            );
-        }
+        app.world_mut()
+            .resource_mut::<RecentCombatActivity>()
+            .last_damage_taken = Some(0.0);
         tick(&mut app);
         assert!(
             app.world().resource::<ShipState>().red_alert(),
@@ -911,7 +888,7 @@ mod tests {
         // Set captain to AI mode with no recent activity
         set_control_source(
             &mut app,
-            crate::system_registry::captain_system_id(),
+            crate::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         // No recent damage or weapons fire — activity is default (None)
@@ -926,25 +903,35 @@ mod tests {
     fn operate_captain_ai_does_nothing_when_human_controlled() {
         let mut app = test_app();
         start_game(&mut app);
-        // Even with recent damage in the viewscreen blackboard, captain is human-controlled.
-        {
-            use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
-            let mut bbs = app
-                .world_mut()
-                .resource_mut::<crate::server_app::SystemBlackboards>();
-            bbs.0.insert(
-                crate::system_registry::viewscreen_system_id(),
-                SystemBlackboard::Viewscreen(ViewscreenBlackboard {
-                    last_damage_taken_secs: Some(0.0),
-                    ..Default::default()
-                }),
-            );
-        }
+        app.world_mut()
+            .resource_mut::<RecentCombatActivity>()
+            .last_damage_taken = Some(0.0);
         tick(&mut app);
         // Human-controlled: AI system should not fire
         assert!(
             !app.world().resource::<ShipState>().red_alert(),
             "AI system must not fire when captain is human-controlled"
+        );
+    }
+
+    #[test]
+    fn operate_captain_ai_uses_red_alert_control_source_not_captain() {
+        let mut app = test_app();
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::captain_system_id(),
+            ControlSource::Ai,
+        );
+        app.world_mut()
+            .resource_mut::<RecentCombatActivity>()
+            .last_damage_taken = Some(0.0);
+
+        tick(&mut app);
+
+        assert!(
+            !app.world().resource::<ShipState>().red_alert(),
+            "AI must only operate red alert when the red-alert system is automated"
         );
     }
 
@@ -987,7 +974,7 @@ mod tests {
         let mut app = bb_test_app();
         let mut cs = ShipSystemControlSources::default();
         cs.0.set(
-            crate::system_registry::captain_system_id(),
+            crate::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         app.world_mut()

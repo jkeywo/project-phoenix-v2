@@ -1,3 +1,5 @@
+use bevy::asset::RenderAssetUsages;
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -25,10 +27,9 @@ const TORPEDO_BURST_LIFETIME_SECS: f32 = 0.35;
 
 const ENGINE_DEFAULT_COLOR: [f32; 4] = [0.25, 0.75, 1.0, 0.72];
 const ENGINE_TRAIL_RADIUS: f32 = 0.22;
-const ENGINE_TRAIL_LENGTH: f32 = 3.5;
-const ENGINE_TRAIL_LIFETIME_SECS: f32 = 0.55;
-const ENGINE_TRAIL_SPAWN_INTERVAL_SECS: f32 = 0.06;
-const ENGINE_TRAIL_CAP: usize = 160;
+const ENGINE_TRAIL_CRUMB_LIFETIME_SECS: f32 = 1.5;
+const ENGINE_TRAIL_MAX_CRUMBS: usize = 200;
+const ENGINE_TRAIL_MIN_CRUMB_DIST: f32 = 0.08;
 
 pub struct PfxPlugin;
 
@@ -102,10 +103,23 @@ struct TorpedoPfxState {
     active: HashMap<String, TorpedoEntities>,
 }
 
+struct TrailCrumb {
+    pos: Vec3,
+    width: f32,
+    age: f32,
+    lifetime: f32,
+}
+
+struct EmitterTrail {
+    crumbs: VecDeque<TrailCrumb>,
+    mesh_handle: Handle<Mesh>,
+    #[allow(dead_code)]
+    entity: Entity,
+}
+
 #[derive(Resource, Default)]
 struct EngineTrailState {
-    timers: HashMap<String, f32>,
-    segments: VecDeque<Entity>,
+    emitters: HashMap<String, EmitterTrail>,
 }
 
 fn sync_phaser_beams(
@@ -462,18 +476,21 @@ fn spawn_engine_trails(
     let dt = time.delta_secs();
 
     if let Ok((transform, markers, helm, uuid)) = player_q.single() {
-        let key = uuid
+        let key_base = uuid
             .map(|u| format!("engine:{}", u.0))
             .unwrap_or_else(|| "engine:player".to_string());
         let max_speed = helm.map(|h| h.0.max_speed).unwrap_or(12.5).max(0.1);
         let normalized = (ship.forward_speed / max_speed).clamp(0.0, 1.0);
-        spawn_engine_trails_for_source(
-            key,
+        let cfg = helm.and_then(|h| h.0.engine_pfx.as_ref());
+        let settings = EnginePfxSettings::from_config(cfg);
+        update_engine_trail(
+            &key_base,
             transform,
             markers,
-            helm.map(|h| h.0.engine_pfx.as_ref()).flatten(),
+            cfg,
             normalized,
             dt,
+            &settings,
             &mut state,
             &mut commands,
             &mut meshes,
@@ -485,15 +502,19 @@ fn spawn_engine_trails(
         let Some(uuid) = uuid else {
             continue;
         };
+        let key_base = format!("engine:{}", uuid.0);
         let max_speed = helm.map(|h| h.0.max_speed).unwrap_or(12.5).max(0.1);
         let normalized = (ai.forward_speed / max_speed).clamp(0.0, 1.0);
-        spawn_engine_trails_for_source(
-            format!("engine:{}", uuid.0),
+        let cfg = helm.and_then(|h| h.0.engine_pfx.as_ref());
+        let settings = EnginePfxSettings::from_config(cfg);
+        update_engine_trail(
+            &key_base,
             transform,
             markers,
-            helm.map(|h| h.0.engine_pfx.as_ref()).flatten(),
+            cfg,
             normalized,
             dt,
+            &settings,
             &mut state,
             &mut commands,
             &mut meshes,
@@ -502,54 +523,187 @@ fn spawn_engine_trails(
     }
 }
 
-fn spawn_engine_trails_for_source(
-    key: String,
+#[allow(clippy::too_many_arguments)]
+fn update_engine_trail(
+    key_base: &str,
     transform: &Transform,
     markers: Option<&ModelMarkers>,
     cfg: Option<&EnginePfxConfig>,
     normalized_speed: f32,
     dt: f32,
+    settings: &EnginePfxSettings,
     state: &mut EngineTrailState,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) {
-    let settings = EnginePfxSettings::from_config(cfg);
-    let timer = state.timers.entry(key).or_insert(0.0);
-    *timer -= dt;
-
-    if normalized_speed <= 0.05 {
-        return;
-    }
-    if *timer > 0.0 {
-        return;
-    }
-    *timer = settings.spawn_interval_secs;
-
     let emitters = engine_emitters(transform, markers, cfg);
-    for (origin, trail_direction) in emitters {
-        let length = ENGINE_TRAIL_LENGTH * normalized_speed.max(0.2);
-        let start = origin;
-        let end = origin + trail_direction.normalize_or_zero() * length;
-        let entity = spawn_trail_segment(
-            start,
-            end,
-            ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35),
-            settings.color,
-            3.5,
-            settings.lifetime_secs,
-            commands,
-            meshes,
-            materials,
-        );
-        state.segments.push_back(entity);
-    }
+    for (emitter_idx, (origin, _dir)) in emitters.iter().enumerate() {
+        let key = format!("{}:{}", key_base, emitter_idx);
 
-    while state.segments.len() > ENGINE_TRAIL_CAP {
-        if let Some(oldest) = state.segments.pop_front() {
-            commands.entity(oldest).despawn();
+        // Lazily create the ribbon entity and mesh for this emitter.
+        if !state.emitters.contains_key(&key) {
+            let mesh_handle = meshes.add(empty_ribbon_mesh());
+            let mat_handle = trail_ribbon_material(materials, settings.color);
+            let entity = commands
+                .spawn((
+                    PfxEntity,
+                    Mesh3d(mesh_handle.clone()),
+                    MeshMaterial3d(mat_handle),
+                    Transform::default(),
+                ))
+                .id();
+            state.emitters.insert(
+                key.clone(),
+                EmitterTrail {
+                    crumbs: VecDeque::new(),
+                    mesh_handle,
+                    entity,
+                },
+            );
+        }
+
+        let trail = state.emitters.get_mut(&key).unwrap();
+
+        // Age crumbs and drop expired ones from the tail.
+        for crumb in trail.crumbs.iter_mut() {
+            crumb.age += dt;
+        }
+        while trail.crumbs.back().map(|c| c.age >= c.lifetime).unwrap_or(false) {
+            trail.crumbs.pop_back();
+        }
+
+        // Push a new crumb at the emitter origin if the ship has moved enough.
+        if normalized_speed > 0.05 {
+            let far_enough = trail
+                .crumbs
+                .front()
+                .map(|c| c.pos.distance(*origin) >= ENGINE_TRAIL_MIN_CRUMB_DIST)
+                .unwrap_or(true);
+            if far_enough {
+                trail.crumbs.push_front(TrailCrumb {
+                    pos: *origin,
+                    width: ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35),
+                    age: 0.0,
+                    lifetime: settings.lifetime_secs,
+                });
+                if trail.crumbs.len() > ENGINE_TRAIL_MAX_CRUMBS {
+                    trail.crumbs.pop_back();
+                }
+            }
+        }
+
+        // Rebuild the ribbon mesh in place.
+        if let Some(mesh) = meshes.get_mut(&trail.mesh_handle) {
+            build_ribbon_into_mesh(mesh, &trail.crumbs);
         }
     }
+}
+
+fn empty_ribbon_mesh() -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    let empty_pos: Vec<[f32; 3]> = vec![];
+    let empty_uv: Vec<[f32; 2]> = vec![];
+    let empty_col: Vec<[f32; 4]> = vec![];
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, empty_pos.clone());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, empty_pos);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, empty_uv);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, empty_col);
+    mesh.insert_indices(Indices::U32(vec![]));
+    mesh
+}
+
+fn trail_ribbon_material(
+    materials: &mut Assets<StandardMaterial>,
+    color: [f32; 4],
+) -> Handle<StandardMaterial> {
+    materials.add(StandardMaterial {
+        base_color: Color::srgba(color[0], color[1], color[2], color[3]),
+        emissive: LinearRgba::new(color[0] * 3.0, color[1] * 3.0, color[2] * 3.0, 1.0),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    })
+}
+
+/// Rebuilds the ribbon geometry in-place from the ordered breadcrumb deque.
+/// crumbs[0] is the newest point (near the ship), crumbs[n-1] is the oldest.
+fn build_ribbon_into_mesh(mesh: &mut Mesh, crumbs: &VecDeque<TrailCrumb>) {
+    if crumbs.len() < 2 {
+        let empty_pos: Vec<[f32; 3]> = vec![];
+        let empty_uv: Vec<[f32; 2]> = vec![];
+        let empty_col: Vec<[f32; 4]> = vec![];
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, empty_pos.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, empty_pos);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, empty_uv);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, empty_col);
+        mesh.insert_indices(Indices::U32(vec![]));
+        return;
+    }
+
+    let n = crumbs.len();
+    let crumbs_slice: Vec<&TrailCrumb> = crumbs.iter().collect();
+
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n * 2);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(n * 2);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(n * 2);
+    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(n * 2);
+    let mut indices: Vec<u32> = Vec::with_capacity((n - 1) * 6);
+
+    for (i, crumb) in crumbs_slice.iter().enumerate() {
+        // Central-difference tangent (direction toward newer crumb).
+        let tangent = if i == 0 {
+            (crumbs_slice[0].pos - crumbs_slice[1].pos).normalize_or_zero()
+        } else if i == n - 1 {
+            (crumbs_slice[n - 2].pos - crumbs_slice[n - 1].pos).normalize_or_zero()
+        } else {
+            (crumbs_slice[i - 1].pos - crumbs_slice[i + 1].pos).normalize_or_zero()
+        };
+
+        // Perpendicular in the XZ plane for ribbon width.
+        let perp = if tangent.length_squared() > 1e-6 {
+            Vec3::new(-tangent.z, 0.0, tangent.x).normalize_or_zero()
+        } else {
+            Vec3::X
+        };
+
+        let age_frac = (crumb.age / crumb.lifetime.max(0.001)).clamp(0.0, 1.0);
+        let hw = crumb.width * 0.5;
+        let base = Vec3::new(crumb.pos.x, crumb.pos.y + 0.05, crumb.pos.z);
+
+        positions.push((base - perp * hw).to_array());
+        positions.push((base + perp * hw).to_array());
+        normals.push([0.0, 1.0, 0.0]);
+        normals.push([0.0, 1.0, 0.0]);
+
+        let u = i as f32 / (n - 1) as f32;
+        uvs.push([u, 0.0]);
+        uvs.push([u, 1.0]);
+
+        // Alpha fades with age.
+        let alpha = (1.0 - age_frac) * crumb.age.min(0.05) / 0.05; // brief pop-in guard
+        colors.push([1.0, 1.0, 1.0, alpha]);
+        colors.push([1.0, 1.0, 1.0, alpha]);
+
+        // Two CCW triangles per quad (viewed from +Y).
+        if i < n - 1 {
+            let base_idx = (i * 2) as u32;
+            indices.push(base_idx);
+            indices.push(base_idx + 2);
+            indices.push(base_idx + 3);
+            indices.push(base_idx);
+            indices.push(base_idx + 3);
+            indices.push(base_idx + 1);
+        }
+    }
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
 }
 
 fn tick_lifetime_pfx(
@@ -605,8 +759,7 @@ fn cleanup_pfx(
     }
     beam_state.active.clear();
     torpedo_state.active.clear();
-    engine_state.timers.clear();
-    engine_state.segments.clear();
+    engine_state.emitters.clear();
 }
 
 fn target_position(
@@ -808,7 +961,6 @@ fn engine_emitters(
 struct EnginePfxSettings {
     color: [f32; 4],
     lifetime_secs: f32,
-    spawn_interval_secs: f32,
 }
 
 impl EnginePfxSettings {
@@ -817,12 +969,8 @@ impl EnginePfxSettings {
             color: cfg.and_then(|c| c.color).unwrap_or(ENGINE_DEFAULT_COLOR),
             lifetime_secs: cfg
                 .and_then(|c| c.trail_lifetime_secs)
-                .unwrap_or(ENGINE_TRAIL_LIFETIME_SECS)
+                .unwrap_or(ENGINE_TRAIL_CRUMB_LIFETIME_SECS)
                 .max(0.05),
-            spawn_interval_secs: cfg
-                .and_then(|c| c.trail_spawn_interval_secs)
-                .unwrap_or(ENGINE_TRAIL_SPAWN_INTERVAL_SECS)
-                .max(0.01),
         }
     }
 }
@@ -883,11 +1031,7 @@ mod tests {
         let cfg = EnginePfxConfig::default();
         let settings = EnginePfxSettings::from_config(Some(&cfg));
         assert_eq!(settings.color, ENGINE_DEFAULT_COLOR);
-        assert_eq!(settings.lifetime_secs, ENGINE_TRAIL_LIFETIME_SECS);
-        assert_eq!(
-            settings.spawn_interval_secs,
-            ENGINE_TRAIL_SPAWN_INTERVAL_SECS
-        );
+        assert_eq!(settings.lifetime_secs, ENGINE_TRAIL_CRUMB_LIFETIME_SECS);
     }
 
     #[test]
@@ -901,7 +1045,6 @@ mod tests {
         let settings = EnginePfxSettings::from_config(Some(&cfg));
         assert_eq!(settings.color, [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(settings.lifetime_secs, 0.8);
-        assert_eq!(settings.spawn_interval_secs, 0.03);
     }
 
     #[test]

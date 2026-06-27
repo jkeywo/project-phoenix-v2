@@ -48,6 +48,23 @@ transform     = { anchor = "patrol_alpha" }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 
+# Tracer objective (issue #571): a Patrol directive added on world load, scored
+# by the viewscreen aggregator and rendered as prose on the captain panel.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type              = "add_objective"
+  id                = "obj-patrol-sector"
+  text              = "Patrol the sector and neutralize threats."
+  mandatory         = true
+  source            = "mission"
+  base_priority     = 40.0
+  directive_kind    = "Patrol"
+  directive_anchors = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
+  directive_loop    = true
+  zero_gates        = [{condition = "hull_below", threshold = 0.1}]
+
 [[trigger]]
 condition = "on_destroyed"
 entity    = "raider_alpha"

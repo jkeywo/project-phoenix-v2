@@ -561,9 +561,11 @@ fn publish_viewscreen_blackboard(
     ship: Option<Res<ShipState>>,
     hull: Option<Res<ShipHullIntegrity>>,
     activity: Option<Res<crate::ship::combat_activity::RecentCombatActivity>>,
+    objectives: Option<Res<ObjectiveManagerRes>>,
     mut blackboards: ResMut<SystemBlackboards>,
 ) {
     use crate::messages::{SystemBlackboard, SystemId, ViewscreenBlackboard};
+    use crate::objectives::WorldConditions;
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
     let red_alert = ship.as_ref().map(|s| s.red_alert()).unwrap_or(false);
@@ -577,11 +579,21 @@ fn publish_viewscreen_blackboard(
     let last_damage_taken_secs = activity.as_ref().and_then(|a| a.last_damage_taken);
     let last_weapon_fired_secs = activity.as_ref().and_then(|a| a.last_weapon_fired);
 
+    let conditions = WorldConditions {
+        red_alert,
+        hull_fraction: hull_integrity_pct / 100.0,
+    };
+    let scored_objectives = objectives
+        .as_ref()
+        .map(|o| o.0.scored_pool(&conditions))
+        .unwrap_or_default();
+
     let bb = ViewscreenBlackboard {
         red_alert,
         hull_integrity_pct,
         last_damage_taken_secs,
         last_weapon_fired_secs,
+        scored_objectives,
     };
 
     blackboards.0.insert(

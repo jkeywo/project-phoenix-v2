@@ -1676,6 +1676,11 @@ pub struct ViewscreenBlackboard {
     /// Elapsed-seconds timestamp when a weapon was last fired, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_weapon_fired_secs: Option<f32>,
+    /// Utility-scored objective pool, computed by the phase-1b aggregator from
+    /// the active `ObjectiveManager` + current world conditions (issue #571).
+    /// Per-system AI reads this to select the top directive it can serve.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scored_objectives: Vec<ScoredObjective>,
 }
 
 /// Raw sim truth for the Sensors system, published each tick into the ship
@@ -2229,6 +2234,63 @@ pub struct ObjectiveSnapshot {
     /// target.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<String>,
+}
+
+/// Mission-altitude directive attached to an objective. Drives per-system AI
+/// operate logic to select which directive to act on (issue #571).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum AiDirective {
+    /// No AI directive — objective is human-facing only.
+    None,
+    /// Destroy the named target entity.
+    Destroy { target: String },
+    /// Patrol between the listed anchors in order.
+    Patrol { anchors: Vec<String>, loop_path: bool },
+    /// Reach the named anchor position.
+    Reach { anchor: String },
+    /// Hail the named target entity.
+    Hail { target: String },
+}
+
+impl Default for AiDirective {
+    fn default() -> Self {
+        AiDirective::None
+    }
+}
+
+/// Whether an objective originates from the active mission or from standing doctrine.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum ObjectiveSource {
+    #[default]
+    Mission,
+    Doctrine,
+}
+
+/// Which player-ship system cares about a given directive kind.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SystemAffinity {
+    Helm,
+    Weapons,
+    Captain,
+}
+
+/// An objective with its computed utility score, published on the Viewscreen
+/// blackboard each tick so per-system AI can select the best directive to serve.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ScoredObjective {
+    /// Stable identifier, matches `ObjectiveSnapshot::id`.
+    pub id: String,
+    /// Computed utility score (0.0 = gated-out / inactive).
+    pub score: f32,
+    /// Machine-readable directive for AI systems.
+    pub directive: AiDirective,
+    /// Whether this came from the mission or from standing doctrine.
+    pub source: ObjectiveSource,
+    /// Which ship systems consider this directive relevant.
+    pub relevance: Vec<SystemAffinity>,
+    /// Human-readable snapshot (prose text, status, targets).
+    pub snapshot: ObjectiveSnapshot,
 }
 
 /// JSON payload pushed to the HTML lobby via `LobbyStateChanged`.

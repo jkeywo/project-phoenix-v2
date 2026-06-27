@@ -541,6 +541,9 @@ mod tests {
             text: format!("Objective {id}"),
             mandatory: false,
             targets: vec![],
+            directive: crate::messages::AiDirective::None,
+            utility: crate::objectives::UtilityConfig::default(),
+            source: crate::messages::ObjectiveSource::default(),
         }
     }
 

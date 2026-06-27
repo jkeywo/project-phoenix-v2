@@ -6,14 +6,113 @@
 // explicitly cleared.
 //
 // The public surface is intentionally narrow:
-//   - `ObjectiveManager::add` — register a new active objective
+//   - `ObjectiveManager::add` — register a new active objective (backward compat)
+//   - `ObjectiveManager::add_full` — register with directive + utility config
 //   - `ObjectiveManager::complete` — transition active → completed
 //   - `ObjectiveManager::fail` — transition active → failed
 //   - `ObjectiveManager::sorted_snapshots` — sorted view (mandatory first)
+//   - `ObjectiveManager::scored_pool` — utility-scored pool for AI (issue #571)
 //   - `ObjectiveManager::is_dirty` / `ObjectiveManager::mark_clean` — change tracking
 //     so callers can push `ObjectiveSummary` only on change
 
-use crate::messages::{ObjectiveSnapshot, ObjectiveStatus};
+use crate::messages::{
+    AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+    SystemAffinity,
+};
+
+// ── Utility scoring types ──────────────────────────────────────────────────
+
+/// A condition-weighted modifier added to a utility score when the condition
+/// evaluates to true at scoring time.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ConditionModifier {
+    /// Condition name: `"red_alert"`, `"hull_below"`, `"hull_above"`.
+    pub condition: String,
+    /// Optional numeric threshold (required for `hull_below` / `hull_above`).
+    pub threshold: Option<f32>,
+    /// Weight added to (or subtracted from) the score when the condition is true.
+    pub weight: f32,
+}
+
+/// A veto condition. When the condition evaluates to **false** the objective's
+/// score is forced to 0 and it is never selected by the AI.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ZeroGateCondition {
+    /// Condition name: `"red_alert"`, `"hull_below"`, `"hull_above"`.
+    pub condition: String,
+    /// Optional numeric threshold (required for `hull_below` / `hull_above`).
+    pub threshold: Option<f32>,
+}
+
+/// TOML-authored utility configuration for an objective (issue #571).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UtilityConfig {
+    /// Base score before modifiers. Mandatory objectives receive an extra
+    /// `MANDATORY_BONUS` on top of this.
+    pub base_priority: f32,
+    /// Condition-weighted score modifiers, applied when their condition is true.
+    pub modifiers: Vec<ConditionModifier>,
+    /// Veto conditions. Any gate whose condition evaluates to `false` forces the
+    /// final score to 0 (never selected by AI).
+    pub zero_gates: Vec<ZeroGateCondition>,
+}
+
+/// Extra score added when an objective is marked `mandatory = true`.
+const MANDATORY_BONUS: f32 = 10.0;
+
+/// Snapshot of world conditions evaluated when scoring the objective pool.
+/// Derived from published blackboards + world registry (no live Bevy reads).
+#[derive(Clone, Debug, Default)]
+pub struct WorldConditions {
+    /// Whether the ship is currently in red alert.
+    pub red_alert: bool,
+    /// Current hull integrity fraction [0.0, 1.0].
+    pub hull_fraction: f32,
+}
+
+fn evaluate_condition(condition: &str, threshold: Option<f32>, cond: &WorldConditions) -> bool {
+    match condition {
+        "red_alert" => cond.red_alert,
+        "hull_below" => cond.hull_fraction < threshold.unwrap_or(0.3),
+        "hull_above" => cond.hull_fraction > threshold.unwrap_or(0.3),
+        _ => false,
+    }
+}
+
+impl UtilityConfig {
+    /// Compute the utility score given current world conditions.
+    ///
+    /// Returns 0.0 if any zero-gate condition evaluates to `false`.
+    pub fn score(&self, mandatory: bool, cond: &WorldConditions) -> f32 {
+        for gate in &self.zero_gates {
+            if !evaluate_condition(&gate.condition, gate.threshold, cond) {
+                return 0.0;
+            }
+        }
+        let mut score = self.base_priority;
+        if mandatory {
+            score += MANDATORY_BONUS;
+        }
+        for m in &self.modifiers {
+            if evaluate_condition(&m.condition, m.threshold, cond) {
+                score += m.weight;
+            }
+        }
+        score.max(0.0)
+    }
+}
+
+/// Derive which ship systems care about a given directive kind.
+fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
+    match directive {
+        AiDirective::None => vec![],
+        AiDirective::Destroy { .. } => {
+            vec![SystemAffinity::Helm, SystemAffinity::Weapons, SystemAffinity::Captain]
+        }
+        AiDirective::Patrol { .. } | AiDirective::Reach { .. } => vec![SystemAffinity::Helm],
+        AiDirective::Hail { .. } => vec![SystemAffinity::Captain],
+    }
+}
 
 // ── Internal record ────────────────────────────────────────────────────────
 
@@ -24,6 +123,12 @@ struct ObjectiveRecord {
     mandatory: bool,
     status: ObjectiveStatus,
     targets: Vec<String>,
+    /// Mission-altitude AI directive for this objective.
+    directive: AiDirective,
+    /// TOML-authored utility scoring configuration.
+    utility: UtilityConfig,
+    /// Whether this originated from a mission trigger or standing doctrine.
+    source: ObjectiveSource,
 }
 
 // ── Manager ────────────────────────────────────────────────────────────────
@@ -41,7 +146,7 @@ impl ObjectiveManager {
         Self::default()
     }
 
-    /// Add a new `Active` objective.
+    /// Add a new `Active` objective (backward-compatible; directive defaults to `None`).
     ///
     /// If an objective with this `id` already exists it is **not** duplicated;
     /// the call is a no-op and returns `false`. Returns `true` when the
@@ -53,6 +158,31 @@ impl ObjectiveManager {
         mandatory: bool,
         targets: Vec<String>,
     ) -> bool {
+        self.add_full(
+            id,
+            text,
+            mandatory,
+            targets,
+            AiDirective::default(),
+            UtilityConfig::default(),
+            ObjectiveSource::default(),
+        )
+    }
+
+    /// Add a new `Active` objective with full directive + utility config.
+    ///
+    /// If an objective with this `id` already exists it is **not** duplicated;
+    /// the call is a no-op and returns `false`. Returns `true` when inserted.
+    pub fn add_full(
+        &mut self,
+        id: impl Into<String>,
+        text: impl Into<String>,
+        mandatory: bool,
+        targets: Vec<String>,
+        directive: AiDirective,
+        utility: UtilityConfig,
+        source: ObjectiveSource,
+    ) -> bool {
         let id = id.into();
         if self.objectives.iter().any(|o| o.id == id) {
             return false;
@@ -63,6 +193,9 @@ impl ObjectiveManager {
             mandatory,
             status: ObjectiveStatus::Active,
             targets,
+            directive,
+            utility,
+            source,
         });
         self.dirty = true;
         true
@@ -122,6 +255,33 @@ impl ObjectiveManager {
             .map(record_to_snapshot)
             .collect();
         mandatory.into_iter().chain(optional).collect()
+    }
+
+    /// Compute and return the utility-scored pool of all **active** objectives.
+    ///
+    /// Each objective is scored against the supplied `WorldConditions`. Zero-gated
+    /// objectives are included with `score = 0.0` so the AI can see them and
+    /// skip them cleanly. The pool is sorted descending by score.
+    pub fn scored_pool(&self, conditions: &WorldConditions) -> Vec<ScoredObjective> {
+        let mut pool: Vec<ScoredObjective> = self
+            .objectives
+            .iter()
+            .filter(|o| o.status == ObjectiveStatus::Active)
+            .map(|o| {
+                let score = o.utility.score(o.mandatory, conditions);
+                let relevance = directive_relevance(&o.directive);
+                ScoredObjective {
+                    id: o.id.clone(),
+                    score,
+                    directive: o.directive.clone(),
+                    source: o.source.clone(),
+                    relevance,
+                    snapshot: record_to_snapshot(o),
+                }
+            })
+            .collect();
+        pool.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        pool
     }
 
     /// `true` when the objective list has changed since the last `mark_clean` call.
@@ -325,5 +485,223 @@ mod tests {
         mgr.add("obj-1", "Survive", true, vec![]);
         let snaps = mgr.sorted_snapshots();
         assert!(snaps[0].targets.is_empty());
+    }
+
+    // ── scored_pool tests (issue #571) ─────────────────────────────────────
+
+    #[test]
+    fn scored_pool_empty_when_no_objectives() {
+        let mgr = ObjectiveManager::new();
+        assert!(mgr.scored_pool(&WorldConditions::default()).is_empty());
+    }
+
+    #[test]
+    fn scored_pool_excludes_completed_and_failed() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("a", "Active", false, vec![]);
+        mgr.add("b", "Done", false, vec![]);
+        mgr.complete("b");
+        mgr.add("c", "Failed", false, vec![]);
+        mgr.fail("c");
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert_eq!(pool.len(), 1);
+        assert_eq!(pool[0].id, "a");
+    }
+
+    #[test]
+    fn scored_pool_base_priority_is_score() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "obj-1",
+            "Patrol",
+            false,
+            vec![],
+            AiDirective::Patrol { anchors: vec!["alpha".into()], loop_path: true },
+            UtilityConfig { base_priority: 40.0, ..Default::default() },
+            ObjectiveSource::Mission,
+        );
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert!((pool[0].score - 40.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn mandatory_bonus_added_to_score() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "obj-1",
+            "Mandatory patrol",
+            true,
+            vec![],
+            AiDirective::default(),
+            UtilityConfig { base_priority: 30.0, ..Default::default() },
+            ObjectiveSource::Mission,
+        );
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert!((pool[0].score - (30.0 + MANDATORY_BONUS)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn zero_gate_forces_score_to_zero_when_condition_false() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "obj-1",
+            "Flee",
+            false,
+            vec![],
+            AiDirective::default(),
+            UtilityConfig {
+                base_priority: 80.0,
+                zero_gates: vec![ZeroGateCondition {
+                    condition: "hull_below".into(),
+                    threshold: Some(0.3),
+                }],
+                ..Default::default()
+            },
+            ObjectiveSource::Doctrine,
+        );
+        // Hull is 1.0 → hull_below(0.3) is false → gate fails → score = 0
+        let pool = mgr.scored_pool(&WorldConditions { hull_fraction: 1.0, ..Default::default() });
+        assert_eq!(pool[0].score, 0.0);
+    }
+
+    #[test]
+    fn zero_gate_passes_when_condition_true() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "obj-1",
+            "Flee",
+            false,
+            vec![],
+            AiDirective::default(),
+            UtilityConfig {
+                base_priority: 80.0,
+                zero_gates: vec![ZeroGateCondition {
+                    condition: "hull_below".into(),
+                    threshold: Some(0.3),
+                }],
+                ..Default::default()
+            },
+            ObjectiveSource::Doctrine,
+        );
+        // Hull is 0.2 → hull_below(0.3) is true → gate passes → full score
+        let pool = mgr.scored_pool(&WorldConditions { hull_fraction: 0.2, ..Default::default() });
+        assert!((pool[0].score - 80.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn modifier_adds_weight_when_condition_true() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "obj-1",
+            "Attack",
+            false,
+            vec![],
+            AiDirective::Destroy { target: "enemy".into() },
+            UtilityConfig {
+                base_priority: 50.0,
+                modifiers: vec![ConditionModifier {
+                    condition: "red_alert".into(),
+                    threshold: None,
+                    weight: 20.0,
+                }],
+                ..Default::default()
+            },
+            ObjectiveSource::Doctrine,
+        );
+        let pool = mgr.scored_pool(&WorldConditions { red_alert: true, hull_fraction: 1.0 });
+        assert!((pool[0].score - 70.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn modifier_skipped_when_condition_false() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "obj-1",
+            "Attack",
+            false,
+            vec![],
+            AiDirective::Destroy { target: "enemy".into() },
+            UtilityConfig {
+                base_priority: 50.0,
+                modifiers: vec![ConditionModifier {
+                    condition: "red_alert".into(),
+                    threshold: None,
+                    weight: 20.0,
+                }],
+                ..Default::default()
+            },
+            ObjectiveSource::Doctrine,
+        );
+        let pool = mgr.scored_pool(&WorldConditions { red_alert: false, hull_fraction: 1.0 });
+        assert!((pool[0].score - 50.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scored_pool_sorted_descending_by_score() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "low",
+            "Low priority",
+            false,
+            vec![],
+            AiDirective::default(),
+            UtilityConfig { base_priority: 10.0, ..Default::default() },
+            ObjectiveSource::Doctrine,
+        );
+        mgr.add_full(
+            "high",
+            "High priority",
+            false,
+            vec![],
+            AiDirective::default(),
+            UtilityConfig { base_priority: 60.0, ..Default::default() },
+            ObjectiveSource::Mission,
+        );
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert_eq!(pool[0].id, "high");
+        assert_eq!(pool[1].id, "low");
+    }
+
+    #[test]
+    fn patrol_directive_has_helm_relevance() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "p",
+            "Patrol",
+            false,
+            vec![],
+            AiDirective::Patrol { anchors: vec!["a".into()], loop_path: false },
+            UtilityConfig { base_priority: 1.0, ..Default::default() },
+            ObjectiveSource::Mission,
+        );
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert_eq!(pool[0].relevance, vec![SystemAffinity::Helm]);
+    }
+
+    #[test]
+    fn destroy_directive_has_helm_weapons_captain_relevance() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "d",
+            "Destroy",
+            false,
+            vec![],
+            AiDirective::Destroy { target: "target".into() },
+            UtilityConfig { base_priority: 1.0, ..Default::default() },
+            ObjectiveSource::Mission,
+        );
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert_eq!(
+            pool[0].relevance,
+            vec![SystemAffinity::Helm, SystemAffinity::Weapons, SystemAffinity::Captain]
+        );
+    }
+
+    #[test]
+    fn none_directive_has_no_relevance() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("obj", "No directive", false, vec![]);
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert!(pool[0].relevance.is_empty());
     }
 }

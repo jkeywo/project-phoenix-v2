@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::entity_config::GlobalConfig;
+use crate::messages::{AiDirective, ObjectiveSource};
+use crate::objectives::{ConditionModifier, UtilityConfig, ZeroGateCondition};
 
 // -- World-tree entity instance types ---------------------------------------
 
@@ -165,6 +167,23 @@ struct RawTriggerEntry {
     actions: Vec<RawActionEntry>,
 }
 
+/// A single condition-weighted modifier inside an `add_objective` TOML action.
+#[derive(Debug, Deserialize)]
+struct RawModifier {
+    condition: String,
+    #[serde(default)]
+    threshold: Option<f32>,
+    weight: f32,
+}
+
+/// A zero-gate veto condition inside an `add_objective` TOML action.
+#[derive(Debug, Deserialize)]
+struct RawZeroGate {
+    condition: String,
+    #[serde(default)]
+    threshold: Option<f32>,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawActionEntry {
     #[serde(rename = "type")]
@@ -231,6 +250,31 @@ struct RawActionEntry {
     /// Enemy faction `name` for `add_faction_enemy` / `remove_faction_enemy`.
     #[serde(default)]
     enemy: Option<String>,
+    // ── add_objective extended fields (issue #571) ─────────────────────────
+    /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Hail"`, or omit for `None`.
+    #[serde(default)]
+    directive_kind: Option<String>,
+    /// Anchor names for a `Patrol` directive.
+    #[serde(default)]
+    directive_anchors: Option<Vec<String>>,
+    /// Whether a `Patrol` directive loops back to the first anchor.
+    #[serde(default)]
+    directive_loop: Option<bool>,
+    /// Anchor name for a `Reach` directive.
+    #[serde(default)]
+    directive_anchor: Option<String>,
+    /// Base utility score for the objective (default 0.0).
+    #[serde(default)]
+    base_priority: Option<f32>,
+    /// Objective source: `"mission"` (default) or `"doctrine"`.
+    #[serde(default)]
+    source: Option<String>,
+    /// Condition-weighted score modifiers.
+    #[serde(default)]
+    modifiers: Option<Vec<RawModifier>>,
+    /// Zero-gate veto conditions.
+    #[serde(default)]
+    zero_gates: Option<Vec<RawZeroGate>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -387,6 +431,12 @@ pub enum TriggerAction {
         text: String,
         mandatory: bool,
         targets: Vec<String>,
+        /// AI directive attached to this objective (issue #571).
+        directive: AiDirective,
+        /// Utility scoring configuration (issue #571).
+        utility: UtilityConfig,
+        /// Whether this is a mission objective or standing doctrine (issue #571).
+        source: ObjectiveSource,
     },
     CompleteObjective {
         id: String,
@@ -590,6 +640,67 @@ pub struct CommsTemplate {
 
 // -- Parser helpers -----------------------------------------------------------
 
+fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
+    match raw.directive_kind.as_deref() {
+        None | Some("None") => Ok(AiDirective::None),
+        Some("Patrol") => Ok(AiDirective::Patrol {
+            anchors: raw.directive_anchors.clone().unwrap_or_default(),
+            loop_path: raw.directive_loop.unwrap_or(false),
+        }),
+        Some("Destroy") => Ok(AiDirective::Destroy {
+            target: raw
+                .target
+                .clone()
+                .ok_or_else(|| "Directive 'Destroy' requires a 'target' field".to_string())?,
+        }),
+        Some("Reach") => Ok(AiDirective::Reach {
+            anchor: raw
+                .directive_anchor
+                .clone()
+                .ok_or_else(|| "Directive 'Reach' requires a 'directive_anchor' field".to_string())?,
+        }),
+        Some("Hail") => Ok(AiDirective::Hail {
+            target: raw
+                .target
+                .clone()
+                .ok_or_else(|| "Directive 'Hail' requires a 'target' field".to_string())?,
+        }),
+        Some(other) => Err(format!(
+            "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Hail",
+            other
+        )),
+    }
+}
+
+fn parse_utility_config(raw: &RawActionEntry) -> UtilityConfig {
+    let modifiers = raw
+        .modifiers
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|m| ConditionModifier {
+            condition: m.condition.clone(),
+            threshold: m.threshold,
+            weight: m.weight,
+        })
+        .collect();
+    let zero_gates = raw
+        .zero_gates
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|g| ZeroGateCondition {
+            condition: g.condition.clone(),
+            threshold: g.threshold,
+        })
+        .collect();
+    UtilityConfig {
+        base_priority: raw.base_priority.unwrap_or(0.0),
+        modifiers,
+        zero_gates,
+    }
+}
+
 fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String> {
     use crate::messages::ModifierSlot;
     match s {
@@ -631,16 +742,27 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
     for raw_action in raw_actions {
         let action =
             match raw_action.kind.as_str() {
-                "add_objective" => TriggerAction::AddObjective {
-                    id: raw_action.id.clone().ok_or_else(|| {
-                        "Action 'add_objective' requires an 'id' field".to_string()
-                    })?,
-                    text: raw_action.text.clone().ok_or_else(|| {
-                        "Action 'add_objective' requires a 'text' field".to_string()
-                    })?,
-                    mandatory: raw_action.mandatory.unwrap_or(false),
-                    targets: raw_action.targets.clone().unwrap_or_default(),
-                },
+                "add_objective" => {
+                    let directive = parse_directive(raw_action)?;
+                    let utility = parse_utility_config(raw_action);
+                    let source = match raw_action.source.as_deref() {
+                        Some("doctrine") => ObjectiveSource::Doctrine,
+                        _ => ObjectiveSource::Mission,
+                    };
+                    TriggerAction::AddObjective {
+                        id: raw_action.id.clone().ok_or_else(|| {
+                            "Action 'add_objective' requires an 'id' field".to_string()
+                        })?,
+                        text: raw_action.text.clone().ok_or_else(|| {
+                            "Action 'add_objective' requires a 'text' field".to_string()
+                        })?,
+                        mandatory: raw_action.mandatory.unwrap_or(false),
+                        targets: raw_action.targets.clone().unwrap_or_default(),
+                        directive,
+                        utility,
+                        source,
+                    }
+                }
                 "complete_objective" => TriggerAction::CompleteObjective {
                     id: raw_action.id.clone().ok_or_else(|| {
                         "Action 'complete_objective' requires an 'id' field".to_string()
@@ -2712,7 +2834,8 @@ entity    = "raider"
     fn parse_world_patrol_toml_loads_triggers_with_no_comms() {
         let toml = include_str!("../../assets/worlds/patrol.toml");
         let cfg = parse_world(toml).expect("patrol.toml must parse");
-        assert_eq!(cfg.triggers.len(), 1);
+        // patrol.toml has 2 triggers: on_world_loaded (Patrol directive) + on_destroyed
+        assert_eq!(cfg.triggers.len(), 2);
         assert!(cfg.comms.is_empty());
     }
 

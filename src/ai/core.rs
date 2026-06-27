@@ -50,6 +50,8 @@ pub struct AiMemory {
 pub struct AiWorldEntity {
     /// Stable UUID of the entity.
     pub uuid: Uuid,
+    /// Authored scenario name or display name, when available.
+    pub name: Option<String>,
     /// World-space position [x, y, z].
     pub position: [f32; 3],
     /// Faction UUID, if any.
@@ -294,7 +296,7 @@ pub fn operate_helm(
         .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm));
 
     match top.map(|o| &o.directive) {
-        Some(AiDirective::Destroy { .. }) => {
+        Some(AiDirective::Destroy { target }) => {
             // Find matching doctrine entry for target_speed / maintain_range config.
             let cfg = doctrine
                 .iter()
@@ -309,6 +311,7 @@ pub fn operate_helm(
                 avoidance_look_ahead_secs,
                 forward_speed,
                 faction_registry,
+                Some(target.as_str()),
                 target_speed,
                 maintain_range,
             )
@@ -367,11 +370,13 @@ fn helm_destroy(
     avoidance_look_ahead_secs: f32,
     forward_speed: f32,
     faction_registry: &crate::faction::FactionRegistry,
+    directive_target: Option<&str>,
     target_speed: f32,
     maintain_range: f32,
 ) -> (f32, f32) {
     // Validate / refresh target.
-    let target_uuid = resolve_destroy_target(memory, world_view, faction_registry);
+    let target_uuid =
+        resolve_destroy_target(memory, world_view, faction_registry, directive_target);
     let Some(target_uuid) = target_uuid else {
         return (0.0, 0.0);
     };
@@ -440,7 +445,12 @@ fn resolve_destroy_target(
     memory: &AiMemory,
     world_view: &WorldView,
     faction_registry: &crate::faction::FactionRegistry,
+    directive_target: Option<&str>,
 ) -> Option<Uuid> {
+    if let Some(target) = directive_target.filter(|t| !t.is_empty()) {
+        return resolve_objective_target(target, world_view);
+    }
+
     // Prefer current target if still in world view.
     if let Some(t) = memory.target {
         if world_view.entities.iter().any(|e| e.uuid == t) {
@@ -455,6 +465,21 @@ fn resolve_destroy_target(
     }
     // Scan for nearest hostile.
     find_nearest_hostile(world_view, faction_registry)
+}
+
+/// Resolve an authored objective target against the AI world view.
+///
+/// The target may be the entity UUID string itself or the scenario/display name
+/// carried on `AiWorldEntity::name`.
+pub fn resolve_objective_target(target: &str, world_view: &WorldView) -> Option<Uuid> {
+    if target.is_empty() {
+        return None;
+    }
+    world_view
+        .entities
+        .iter()
+        .find(|e| e.uuid.to_string() == target || e.name.as_deref() == Some(target))
+        .map(|e| e.uuid)
 }
 
 /// Find the nearest entity that is hostile to this AI's faction.
@@ -617,29 +642,20 @@ pub fn operate_weapons(
     use crate::messages::SystemAffinity;
 
     // Find top Destroy directive with Weapons relevance and positive score.
-    let has_destroy = scored_pool
+    let top_destroy = scored_pool
         .iter()
-        .any(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Weapons));
-    if !has_destroy {
+        .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Weapons));
+    let Some(top_destroy) = top_destroy else {
         return (None, false);
-    }
-
-    // Resolve target: current target → last attacker → nearest hostile.
-    let target = if let Some(t) = memory.target {
-        if world_view.entities.iter().any(|e| e.uuid == t) {
-            Some(t)
-        } else {
-            None
-        }
-    } else {
-        None
     };
-    let target = target.or_else(|| {
-        memory
-            .last_attacker
-            .filter(|la| world_view.entities.iter().any(|e| e.uuid == *la))
-    });
-    let target = target.or_else(|| find_nearest_hostile(world_view, faction_registry));
+    let directive_target = match &top_destroy.directive {
+        crate::messages::AiDirective::Destroy { target } => Some(target.as_str()),
+        _ => return (None, false),
+    };
+
+    // Resolve target: explicit directive target, or current target →
+    // last attacker → nearest hostile for standing "destroy hostiles" doctrine.
+    let target = resolve_destroy_target(memory, world_view, faction_registry, directive_target);
 
     let Some(t) = target else {
         return (None, false);
@@ -961,10 +977,16 @@ mod tests {
     // ── operate_weapons ───────────────────────────────────────────────────
 
     fn destroy_pool_with_score(score: f32) -> Vec<crate::messages::ScoredObjective> {
+        destroy_pool_with_target(score, "")
+    }
+
+    fn destroy_pool_with_target(score: f32, target: &str) -> Vec<crate::messages::ScoredObjective> {
         vec![crate::messages::ScoredObjective {
             id: "destroy".into(),
             score,
-            directive: crate::messages::AiDirective::Destroy { target: "".into() },
+            directive: crate::messages::AiDirective::Destroy {
+                target: target.into(),
+            },
             source: crate::messages::ObjectiveSource::Doctrine,
             relevance: vec![
                 crate::messages::SystemAffinity::Helm,
@@ -1064,6 +1086,70 @@ mod tests {
         let (t, fire) = operate_weapons(&memory, &world, &pool, &empty_registry());
         assert_eq!(t, Some(attacker_id));
         assert!(fire);
+    }
+
+    #[test]
+    fn operate_weapons_prefers_named_destroy_target_over_nearest_hostile() {
+        let named_id = Uuid::new_v4();
+        let nearer_hostile = Uuid::new_v4();
+        let hostile_faction = Uuid::new_v4();
+        let self_faction = Uuid::new_v4();
+        let mut registry = crate::faction::FactionRegistry::new();
+        registry.add_enemy(self_faction, hostile_faction);
+        let memory = AiMemory::default();
+        let world = WorldView {
+            entity_phaser_ready: true,
+            self_faction: Some(self_faction),
+            entities: vec![
+                AiWorldEntity {
+                    uuid: nearer_hostile,
+                    faction: Some(hostile_faction),
+                    position: [1.0, 0.0, 0.0],
+                    ..Default::default()
+                },
+                AiWorldEntity {
+                    uuid: named_id,
+                    name: Some("wave_1".into()),
+                    faction: Some(hostile_faction),
+                    position: [100.0, 0.0, 0.0],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let pool = destroy_pool_with_target(35.0, "wave_1");
+
+        let (target, fire) = operate_weapons(&memory, &world, &pool, &registry);
+
+        assert_eq!(target, Some(named_id));
+        assert!(fire);
+    }
+
+    #[test]
+    fn operate_weapons_ignores_missing_named_destroy_target() {
+        let hostile_id = Uuid::new_v4();
+        let hostile_faction = Uuid::new_v4();
+        let self_faction = Uuid::new_v4();
+        let mut registry = crate::faction::FactionRegistry::new();
+        registry.add_enemy(self_faction, hostile_faction);
+        let memory = AiMemory::default();
+        let world = WorldView {
+            entity_phaser_ready: true,
+            self_faction: Some(self_faction),
+            entities: vec![AiWorldEntity {
+                uuid: hostile_id,
+                name: Some("other_wave".into()),
+                faction: Some(hostile_faction),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let pool = destroy_pool_with_target(35.0, "wave_1");
+
+        let (target, fire) = operate_weapons(&memory, &world, &pool, &registry);
+
+        assert_eq!(target, None);
+        assert!(!fire);
     }
 
     // ── CaptainAi ─────────────────────────────────────────────────────────

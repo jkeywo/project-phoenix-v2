@@ -18,6 +18,7 @@ impl Plugin for CaptainPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RecentCombatActivity>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>();
+        app.init_resource::<crate::server_app::ShipAttackedThisTick>();
         app.init_resource::<crate::messages::AdmittedCommands>();
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         app.add_systems(
@@ -117,8 +118,9 @@ fn operate_captain_ai(
 
     let now = time.elapsed_secs();
     let ai = crate::ai::core::CaptainAi;
-    if let Some(should_be_red_alert) =
-        ai.operate(now, activity.last_damage_taken, activity.last_weapon_fired)
+    let last_under_attack =
+        most_recent(activity.last_damage_taken, activity.last_hostile_fire_taken);
+    if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, activity.last_weapon_fired)
     {
         if should_be_red_alert != ship.red_alert() {
             admitted.0.push(crate::messages::AdmittedCommand {
@@ -127,6 +129,15 @@ fn operate_captain_ai(
                 response_token: None,
             });
         }
+    }
+}
+
+fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
     }
 }
 
@@ -911,6 +922,27 @@ mod tests {
         assert!(
             !app.world().resource::<ShipState>().red_alert(),
             "AI system must not fire when captain is human-controlled"
+        );
+    }
+
+    #[test]
+    fn operate_captain_ai_activates_red_alert_when_under_hostile_fire() {
+        let mut app = test_app();
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+        app.world_mut()
+            .resource_mut::<RecentCombatActivity>()
+            .last_hostile_fire_taken = Some(0.0);
+
+        tick(&mut app);
+
+        assert!(
+            app.world().resource::<ShipState>().red_alert(),
+            "AI should activate red alert when hostile fire targets the ship"
         );
     }
 

@@ -424,15 +424,32 @@ fn player_ship_helm_ai(
     mut memory: Option<ResMut<crate::server_app::PlayerAiMemory>>,
     blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     player_ships: Query<
-        &ShipSystemControlSources,
+        (
+            &ShipSystemControlSources,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::FactionComponent>,
+            Option<&crate::entities::spawner::ColliderSection>,
+        ),
         (
             With<Ship>,
             Without<crate::ai::server::AiControllerComponent>,
         ),
     >,
+    entity_q: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            Option<&crate::entities::spawner::EntityName>,
+            Option<&crate::entities::spawner::FactionComponent>,
+            Option<&crate::entities::spawner::EntityConsoleHull>,
+            Option<&crate::entities::spawner::ColliderSection>,
+        ),
+        Without<Ship>,
+    >,
 ) {
-    let Ok(sources) = player_ships.single() else {
+    let Ok((sources, player_uuid, player_faction, player_collider)) = player_ships.single() else {
         return;
     };
     if !helm_control_policy(sources).operate_ai {
@@ -450,10 +467,10 @@ fn player_ship_helm_ai(
         _ => return,
     };
 
-    let has_reach = scored.iter().any(|o| {
-        o.score > 0.0 && matches!(&o.directive, crate::messages::AiDirective::Reach { .. })
-    });
-    if !has_reach {
+    let has_helm_objective = scored
+        .iter()
+        .any(|o| o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm));
+    if !has_helm_objective {
         return;
     }
 
@@ -461,11 +478,45 @@ fn player_ship_helm_ai(
         .as_ref()
         .map(|wc| wc.anchors.clone())
         .unwrap_or_default();
+    let runtime = runtime.as_deref();
+    let player_uuid = player_uuid.map(|u| u.0.as_str());
+    let entities = entity_q
+        .iter()
+        .filter(|(uuid, _, _, _, _, _)| Some(uuid.0.as_str()) != player_uuid)
+        .map(|(uuid, transform, name, faction, hull, collider)| {
+            let runtime_name = runtime.and_then(|rt| {
+                rt.name_to_uuid
+                    .iter()
+                    .find_map(|(name, mapped_uuid)| (mapped_uuid == &uuid.0).then(|| name.clone()))
+            });
+            let hull_fraction = hull.and_then(|h| {
+                let max = h.0.total_max();
+                (max > 0.0).then(|| h.0.total_current() / max)
+            });
+            crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
+                name: runtime_name.or_else(|| name.map(|n| n.0.clone())),
+                position: [
+                    transform.translation.x,
+                    transform.translation.y,
+                    transform.translation.z,
+                ],
+                faction: faction.map(|f| f.0),
+                hull_fraction,
+                yaw: Some(transform.rotation.to_euler(EulerRot::YXZ).0),
+                radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+                ..Default::default()
+            }
+        })
+        .collect();
 
     let world_view = crate::ai::WorldView {
         entity_pos: [ship.x, 0.0, ship.z],
         entity_yaw: ship.yaw,
         anchors: anchors.clone(),
+        entities,
+        self_faction: player_faction.map(|f| f.0),
+        self_radius: player_collider.map(|c| c.0.radius).unwrap_or(0.0),
         ..crate::ai::WorldView::default()
     };
 
@@ -498,7 +549,7 @@ fn detect_player_ship_objective_completion(
     ship: Res<ShipState>,
     blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    mut objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
+    objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
     player_ships: Query<
         &ShipSystemControlSources,
         (
@@ -2102,17 +2153,68 @@ station = "helm"
         }
     }
 
-    fn viewscreen_with_reach(anchor: &str, score: f32) -> crate::server_app::SystemBlackboards {
+    fn patrol_scored_objective(anchors: Vec<&str>, score: f32) -> crate::messages::ScoredObjective {
+        crate::messages::ScoredObjective {
+            id: "obj-defend".into(),
+            score,
+            directive: crate::messages::AiDirective::Patrol {
+                anchors: anchors.into_iter().map(str::to_string).collect(),
+                loop_path: true,
+            },
+            source: crate::messages::ObjectiveSource::Mission,
+            relevance: vec![crate::messages::SystemAffinity::Helm],
+            snapshot: crate::messages::ObjectiveSnapshot {
+                id: "obj-defend".into(),
+                text: "Defend Starbase Alpha".into(),
+                mandatory: true,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec!["Starbase Alpha".into()],
+                source: crate::messages::ObjectiveSource::Mission,
+            },
+        }
+    }
+
+    fn destroy_scored_objective(target: &str, score: f32) -> crate::messages::ScoredObjective {
+        crate::messages::ScoredObjective {
+            id: format!("destroy-{target}"),
+            score,
+            directive: crate::messages::AiDirective::Destroy {
+                target: target.into(),
+            },
+            source: crate::messages::ObjectiveSource::Mission,
+            relevance: vec![
+                crate::messages::SystemAffinity::Helm,
+                crate::messages::SystemAffinity::Weapons,
+                crate::messages::SystemAffinity::Captain,
+            ],
+            snapshot: crate::messages::ObjectiveSnapshot {
+                id: format!("destroy-{target}"),
+                text: format!("Destroy {target}"),
+                mandatory: true,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![target.into()],
+                source: crate::messages::ObjectiveSource::Mission,
+            },
+        }
+    }
+
+    fn viewscreen_with_objectives(
+        objectives: Vec<crate::messages::ScoredObjective>,
+    ) -> crate::server_app::SystemBlackboards {
         use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
         use crate::server_app::SystemBlackboards;
         let mut bbs = SystemBlackboards::default();
         let mut vb = ViewscreenBlackboard::default();
-        vb.scored_objectives = vec![reach_scored_objective(anchor, score)];
+        vb.scored_objectives = objectives;
         bbs.0.insert(
             crate::system_registry::viewscreen_system_id(),
             SystemBlackboard::Viewscreen(vb),
         );
         bbs
+    }
+
+    fn viewscreen_with_reach(anchor: &str, score: f32) -> crate::server_app::SystemBlackboards {
+        viewscreen_with_objectives(vec![reach_scored_objective(anchor, score)])
     }
 
     fn world_config_with_anchor(anchor: &str, pos: [f32; 3]) -> crate::world::config::WorldConfig {
@@ -2141,6 +2243,54 @@ station = "helm"
     }
 
     #[test]
+    fn player_ship_helm_ai_patrols_from_viewscreen_objective() {
+        let mut app = test_app();
+        let anchor = "starbase_patrol_east";
+        app.insert_resource(viewscreen_with_objectives(vec![patrol_scored_objective(
+            vec![anchor],
+            20.0,
+        )]));
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        let last = *app.world().resource::<LastHelmInput>();
+        assert!(
+            last.thrust > 0.0,
+            "AI helm must apply positive thrust toward Patrol anchor; got {last:?}"
+        );
+    }
+
+    #[test]
+    fn player_ship_helm_ai_pursues_named_destroy_objective() {
+        let mut app = test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.name_to_uuid.insert("wave_1".into(), target_uuid);
+        app.insert_resource(runtime);
+        app.insert_resource(viewscreen_with_objectives(vec![destroy_scored_objective(
+            "wave_1", 80.0,
+        )]));
+        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        let last = *app.world().resource::<LastHelmInput>();
+        assert!(
+            last.thrust > 0.0,
+            "AI helm must pursue named Destroy objective target; got {last:?}"
+        );
+    }
+
+    #[test]
     fn player_ship_helm_ai_does_nothing_when_helm_human() {
         let mut app = test_app();
         let anchor = "station-alpha";
@@ -2160,9 +2310,9 @@ station = "helm"
     }
 
     #[test]
-    fn player_ship_helm_ai_stays_zero_when_no_reach_objective() {
+    fn player_ship_helm_ai_stays_zero_when_destroy_target_missing() {
         let mut app = test_app();
-        // Blackboard has a Destroy directive, not a Reach.
+        // Blackboard has a Destroy directive, but no live entity resolves to it.
         use crate::messages::{
             AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
             SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
@@ -2197,12 +2347,12 @@ station = "helm"
 
         tick(&mut app);
 
-        // `operate_helm_ai` wrote zero; `player_ship_helm_ai` found no Reach, left it alone.
+        // `operate_helm_ai` wrote zero; unresolved Destroy target leaves it there.
         let last = *app.world().resource::<LastHelmInput>();
         assert_eq!(
             last,
             LastHelmInput::default(),
-            "no Reach objective means Backfill zero should remain; got {last:?}"
+            "missing Destroy target means Backfill zero should remain; got {last:?}"
         );
     }
 

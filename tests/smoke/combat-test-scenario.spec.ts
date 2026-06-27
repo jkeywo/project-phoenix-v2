@@ -71,11 +71,24 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
     objectives.length,
     `Expected at least one objective after game start. Got: ${JSON.stringify(objectives)}`,
   ).toBeGreaterThan(0);
+  expect(
+    objectives.some((o: any) => o.id === 'obj-defend'),
+    `Expected obj-defend objective after game start. Got: ${JSON.stringify(objectives)}`,
+  ).toBe(true);
 
   // Wave 1 spawn (on_timer at_secs = 0) should fire promptly. Wait a few
   // ticks for the spawn to register and the EntitySpawned message to
   // broadcast.
   await captain.waitForMessage('EntitySpawned', 5_000);
+  await captain.page.waitForFunction(
+    () => (window as any).__messages?.some(
+      (m: any) => m.type === 'ObjectiveSummary'
+        && Array.isArray(m.data?.objectives)
+        && m.data.objectives.some((o: any) => o.id === 'obj-destroy-wave-1'),
+    ),
+    undefined,
+    { timeout: 5_000 },
+  );
 
   await captain.close();
 });

@@ -2844,7 +2844,8 @@ entity    = "raider"
         //   - 8 on_timer wave-spawn triggers
         //   - 1 on_all_destroyed victory trigger
         //   - 1 on_destroyed starbase defeat trigger
-        //   - 1 on_world_loaded objective trigger
+        //   - 8 on_destroyed wave objective-completion triggers
+        //   - 1 on_world_loaded patrol objective trigger
         //   - 9 comms templates (1 intro + 8 wave announcements)
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
@@ -2882,6 +2883,105 @@ entity    = "raider"
             defeat,
             "must have on_destroyed Starbase Alpha defeat trigger"
         );
+
+        for anchor in [
+            "starbase_patrol_north",
+            "starbase_patrol_east",
+            "starbase_patrol_south",
+            "starbase_patrol_west",
+        ] {
+            assert!(
+                cfg.anchors.contains_key(anchor),
+                "combat_test must define patrol anchor {anchor}"
+            );
+        }
+
+        let wave_completion_count = cfg
+            .triggers
+            .iter()
+            .filter(|t| {
+                matches!(
+                    &t.condition,
+                    TriggerCondition::OnDestroyed { entity_name }
+                        if entity_name.starts_with("wave_")
+                ) && t.actions.iter().any(|a| {
+                    matches!(a, TriggerAction::CompleteObjective { id }
+                        if id.starts_with("obj-destroy-wave-"))
+                })
+            })
+            .count();
+        assert_eq!(
+            wave_completion_count, 8,
+            "combat_test must complete all 8 wave destroy objectives"
+        );
+
+        let defend = cfg
+            .triggers
+            .iter()
+            .flat_map(|t| t.actions.iter())
+            .find(|a| matches!(a, TriggerAction::AddObjective { id, .. } if id == "obj-defend"))
+            .expect("combat_test must add obj-defend");
+        match defend {
+            TriggerAction::AddObjective {
+                directive, utility, ..
+            } => {
+                assert_eq!(
+                    *directive,
+                    crate::messages::AiDirective::Patrol {
+                        anchors: vec![
+                            "starbase_patrol_north".into(),
+                            "starbase_patrol_east".into(),
+                            "starbase_patrol_south".into(),
+                            "starbase_patrol_west".into(),
+                        ],
+                        loop_path: true,
+                    }
+                );
+                assert_eq!(utility.base_priority, 20.0);
+            }
+            other => panic!("expected obj-defend AddObjective, got {other:?}"),
+        }
+
+        let destroy_objectives: Vec<_> = cfg
+            .triggers
+            .iter()
+            .flat_map(|t| t.actions.iter())
+            .filter_map(|a| match a {
+                TriggerAction::AddObjective {
+                    id,
+                    directive,
+                    targets,
+                    utility,
+                    ..
+                } if id.starts_with("obj-destroy-wave-") => {
+                    Some((id, directive, targets, utility.base_priority))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            destroy_objectives.len(),
+            8,
+            "combat_test must add 8 wave destroy objectives"
+        );
+        for wave in 1..=8 {
+            let id = format!("obj-destroy-wave-{wave}");
+            let target = format!("wave_{wave}");
+            let Some((_, directive, targets, base_priority)) = destroy_objectives
+                .iter()
+                .find(|(objective_id, _, _, _)| *objective_id == &id)
+            else {
+                panic!("missing destroy objective {id}");
+            };
+            assert_eq!(
+                **directive,
+                crate::messages::AiDirective::Destroy {
+                    target: target.clone(),
+                }
+            );
+            assert_eq!(targets, &&vec![target]);
+            assert_eq!(*base_priority, 80.0);
+        }
 
         // Comms: 1 on_world_loaded urgent intro + 8 on_timer wave
         // announcements = 9 total.

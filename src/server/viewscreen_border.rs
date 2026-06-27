@@ -30,8 +30,8 @@ use crate::lobby::{OutboundMessage, Sessions, WorldResource};
 use crate::messages::{
     GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState,
 };
-use crate::server_app::GameOverReason;
 use crate::server::renderer::GameCamera;
+use crate::server_app::GameOverReason;
 use crate::ship_state::ShipState;
 use crate::sim_sets::SimSet;
 use crate::simulation::ShipHullIntegrity;
@@ -420,9 +420,7 @@ fn compute_hud_state(
         0.0
     };
     let game_over_message = if *phase == GamePhase::GameOver {
-        let reason = game_over_reason
-            .and_then(|r| r.0.as_deref())
-            .unwrap_or("");
+        let reason = game_over_reason.and_then(|r| r.0.as_deref()).unwrap_or("");
         let msg = if reason.starts_with("All consoles destroyed")
             || reason.starts_with("Ship destroyed")
         {
@@ -456,12 +454,7 @@ fn recompute_hud_state(
     let Some(ship) = ship else { return };
     let Some(hull) = hull else { return };
     let Some(phase) = phase else { return };
-    let next = compute_hud_state(
-        &ship,
-        &hull,
-        phase.get(),
-        game_over_reason.as_deref(),
-    );
+    let next = compute_hud_state(&ship, &hull, phase.get(), game_over_reason.as_deref());
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
             hud.0 = next.clone();

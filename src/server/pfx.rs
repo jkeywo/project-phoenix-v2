@@ -569,7 +569,12 @@ fn update_engine_trail(
         for crumb in trail.crumbs.iter_mut() {
             crumb.age += dt;
         }
-        while trail.crumbs.back().map(|c| c.age >= c.lifetime).unwrap_or(false) {
+        while trail
+            .crumbs
+            .back()
+            .map(|c| c.age >= c.lifetime)
+            .unwrap_or(false)
+        {
             trail.crumbs.pop_back();
         }
 

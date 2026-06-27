@@ -3,7 +3,7 @@ title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
 sources: [src/world/server.rs, src/world/config.rs, src/world/content.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
-updated: 2026-06-24
+updated: 2026-06-27
 ---
 
 # WorldPlugin
@@ -96,6 +96,12 @@ Authoring shape per action variant:
 
 The editor mirrors this catalogue in `editor/action-schema.js`'s `ACTION_SCHEMA` map (plus a `covers every action type` regression test in `editor/tests/action-schema.test.js`).
 
+### Objective directives
+
+`add_objective` can carry AI-facing directive fields as well as the human-facing text: `directive_kind = "Patrol"` with `directive_anchors` / `directive_loop`, `directive_kind = "Destroy"` with `target`, or `directive_kind = "Reach"` with `directive_anchor`. `ObjectiveManager` scores active objectives into the viewscreen blackboard; player Backfill Helm and Tactical now read that shared pool as a bridge until the per-entity blackboard model from issue #581 lands.
+
+`assets/worlds/combat_test.toml` uses this path: `obj-defend` is a low-priority Patrol loop around Starbase Alpha, and each spawned `wave_N` immediately adds a higher-priority Destroy objective targeting the runtime `name_to_uuid` entry for that wave. Matching `on_destroyed wave_N` triggers complete those objectives so the AI falls back to the starbase patrol.
+
 ### Factions
 
 Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/faction.rs:17`) into a `FactionRegistry` (`src/ai/faction.rs:29`) exposed as `FactionRegistryResource` (`src/entities/config_cache.rs:588`). The asymmetric `is_enemy(a, b, registry)` predicate (`src/ai/faction.rs:72`) returns `true` only when `a`'s `enemies` list contains `b`; factionless entities are neutral to everyone. The AI's `enemy_in_range` transition (`src/ai/core.rs:879`) consults this predicate every tick when picking a target.
@@ -123,5 +129,6 @@ Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/fa
 |---|---|
 | `assets/worlds/default.toml` | Starbase Alpha, asteroid field, initial pirate raider patrol, hailable starbase comms |
 | `assets/worlds/patrol.toml` | Three-anchor patrol with a single raider and an on-destroyed objective |
+| `assets/worlds/combat_test.toml` | Eight-wave Harrow defence scenario; starbase patrol objective plus per-wave Destroy objectives for Backfill Helm/Tactical |
 
 See also: [World Data](../entities/world-data.md)

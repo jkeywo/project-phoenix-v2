@@ -99,6 +99,11 @@ pub struct ShipBoost(pub crate::boost::BoostState);
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WeaponFiredThisTick(pub bool);
 
+/// Set to `true` when hostile fire targets the player ship this tick, even if
+/// shields absorb the hit before hull damage leaks through.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ShipAttackedThisTick(pub bool);
+
 /// Tracks the objective id the captain has chosen to prioritize.
 /// Applied as a score bonus in `publish_viewscreen_blackboard` so the AI
 /// immediately sees the updated priority ordering.
@@ -262,6 +267,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .insert_resource(ShipImpulse(ImpulseState::new()))
     .insert_resource(ShipBoost(crate::boost::BoostState::new()))
     .init_resource::<WeaponFiredThisTick>()
+    .init_resource::<ShipAttackedThisTick>()
     .init_resource::<CaptainPriorityBoost>()
     .init_resource::<PlayerAiMemory>()
     .insert_resource(crate::config_cache::FactionRegistryResource(

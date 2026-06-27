@@ -323,6 +323,7 @@ fn tick_ai_controllers(
         (
             &EntityUuid,
             &Transform,
+            Option<&crate::entities::spawner::EntityName>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::entities::spawner::EntityConsoleHull>,
             Option<&ColliderSection>,
@@ -344,8 +345,9 @@ fn tick_ai_controllers(
     let mut world_entities: Vec<AiWorldEntity> = entity_query
         .iter()
         .map(
-            |(uid, t, faction_comp, hull_comp, collider)| AiWorldEntity {
+            |(uid, t, name, faction_comp, hull_comp, collider)| AiWorldEntity {
                 uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
+                name: name.map(|n| n.0.clone()),
                 position: [t.translation.x, t.translation.y, t.translation.z],
                 faction: faction_comp.map(|f| f.0),
                 shields: None,
@@ -372,6 +374,7 @@ fn tick_ai_controllers(
             let yaw = t.rotation.to_euler(EulerRot::YXZ).0;
             AiWorldEntity {
                 uuid: uuid::Uuid::parse_str(&ctrl.entity_uuid).unwrap_or_default(),
+                name: None,
                 position: [t.translation.x, t.translation.y, t.translation.z],
                 faction: None,
                 shields: None,

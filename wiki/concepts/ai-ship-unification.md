@@ -77,6 +77,12 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 | `operate_repair_ai` | `src/console/repair/server.rs` | Stub |
 | `operate_navigation_ai` | `src/console/navigation/mod.rs` | Stub |
 
+## Objective-driven Backfill bridge
+
+Until issue #581 moves blackboards to per-ship components, the player ship's Backfill AI reads the singleton viewscreen blackboard as a bridge. `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries; `player_ship_helm_ai` consumes Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. `operate_tactical_ai` uses the same pool to lock the top positive Destroy target before existing phaser/torpedo automation runs.
+
+This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anchors around Starbase Alpha, while each spawned `wave_N` gets a higher-scored Destroy objective that resolves through the runtime `wave_N -> uuid` mapping. Missing named targets are ignored rather than falling back to an arbitrary hostile.
+
 ## Captain red alert automation
 
 `operate_captain_ai` in `src/console/captain/server.rs` controls the `red-alert` system, so it is gated by `ControlSourceResolver::policy_for(red_alert_system_id())`, not by the umbrella `captain` system. The AI reads recent combat from `RecentCombatActivity` in `src/ship/combat_activity.rs`; `publish_viewscreen_blackboard` mirrors those timestamps into the viewscreen aggregate for UI and cross-system visibility. `update_combat_activity` treats an uninitialized previous-hull value as the configured maximum hull, so a first observed damaged hull records combat instead of being missed.

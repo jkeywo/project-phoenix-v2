@@ -230,6 +230,7 @@ impl Plugin for WeaponsPlugin {
         app.init_resource::<crate::messages::AdmittedCommands>();
         app.init_resource::<crate::messages::InterSystemQueue>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>()
+            .init_resource::<crate::server_app::ShipAttackedThisTick>()
             .init_resource::<WeaponsTarget>()
             .init_resource::<LastWeaponsUpdate>()
             .init_resource::<ActiveBeam>()
@@ -613,6 +614,7 @@ fn handle_fire_phaser_npc(
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     player_ship_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), With<Ship>>,
     ship_state: Option<Res<crate::ship_state::ShipState>>,
+    mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
     mut hull_resource: Option<ResMut<ShipHullIntegrity>>,
     mut shields_resource: Option<ResMut<ShipShields>>,
     mut outbox: Option<ResMut<SimOutbox>>,
@@ -774,6 +776,9 @@ fn handle_fire_phaser_npc(
                 }
 
                 if fire_ok {
+                    if player_ship_q.iter().any(|(u, _)| u.0 == t_uuid.to_string()) {
+                        ship_attacked.0 = true;
+                    }
                     phaser_state.beam_active = true;
                     phaser_state.beam_target = Some(t_uuid);
                     phaser_state.beam_remaining_secs = beam_duration;
@@ -799,6 +804,9 @@ fn handle_fire_phaser_npc(
 
                 // Check if the beam target is the player ship.
                 let is_player = player_ship_q.iter().any(|(u, _)| u.0 == target_uuid_str);
+                if is_player {
+                    ship_attacked.0 = true;
+                }
 
                 // `shield_pierce` snapshot from the firing bank — used by
                 // both the player-target and NPC-target damage paths to
@@ -1680,13 +1688,19 @@ fn operate_tactical_ai(
     >,
     sessions: Res<Sessions>,
     ship: Res<ShipState>,
-    weapons_target: Res<WeaponsTarget>,
+    mut weapons_target: ResMut<WeaponsTarget>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
+    blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     npc_q: Query<
-        (&crate::entity_spawner::EntityUuid, &Transform),
+        (
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            Option<&crate::entities::spawner::EntityName>,
+        ),
         Without<crate::simulation::Asteroid>,
     >,
 ) {
@@ -1698,6 +1712,18 @@ fn operate_tactical_ai(
         .policy_for(&crate::system_registry::tactical_system_id());
     if !policy.operate_ai {
         return;
+    }
+
+    if let Some(target_name) = top_destroy_objective_target(blackboards.as_deref()) {
+        if target_name.is_empty() {
+            weapons_target.0 = None;
+        } else if let Some(uuid) =
+            resolve_objective_target_uuid(target_name, runtime.as_deref(), &npc_q)
+        {
+            weapons_target.0 = Some(uuid);
+        } else {
+            weapons_target.0 = None;
+        }
     }
 
     // ── TORPEDO AUTO-FIRE (future: split to torpedo_tube system) ─────────────
@@ -1729,7 +1755,7 @@ fn operate_tactical_ai(
                     (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
                 })
                 .or_else(|| {
-                    npc_q.iter().find_map(|(u, t)| {
+                    npc_q.iter().find_map(|(u, t, _)| {
                         (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
                     })
                 });
@@ -1812,6 +1838,52 @@ fn operate_tactical_ai(
     //
     // Science AI emits FrequencyHint when its preset grants auto_hint.
     // The Tactical AI has no corresponding action at the coarse level.
+}
+
+fn top_destroy_objective_target(
+    blackboards: Option<&crate::server_app::SystemBlackboards>,
+) -> Option<&str> {
+    let bb = blackboards?
+        .0
+        .get(&crate::system_registry::viewscreen_system_id())?;
+    let crate::messages::SystemBlackboard::Viewscreen(viewscreen) = bb else {
+        return None;
+    };
+    viewscreen.scored_objectives.iter().find_map(|objective| {
+        if objective.score <= 0.0
+            || !objective
+                .relevance
+                .contains(&crate::messages::SystemAffinity::Weapons)
+        {
+            return None;
+        }
+        match &objective.directive {
+            crate::messages::AiDirective::Destroy { target } => Some(target.as_str()),
+            _ => None,
+        }
+    })
+}
+
+fn resolve_objective_target_uuid(
+    target_name: &str,
+    runtime: Option<&crate::world::server::WorldContentRuntime>,
+    npc_q: &Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            Option<&crate::entities::spawner::EntityName>,
+        ),
+        Without<crate::simulation::Asteroid>,
+    >,
+) -> Option<String> {
+    runtime
+        .and_then(|rt| rt.name_to_uuid.get(target_name).cloned())
+        .or_else(|| {
+            npc_q.iter().find_map(|(uuid, _, name)| {
+                (uuid.0 == target_name || name.is_some_and(|n| n.0 == target_name))
+                    .then(|| uuid.0.clone())
+            })
+        })
 }
 
 // ── Broadcaster ───────────────────────────────────────────────────────────
@@ -2471,6 +2543,7 @@ station = "tactical"
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
         .init_resource::<crate::server_app::SystemBlackboards>()
+        .init_resource::<crate::world::server::WorldContentRuntime>()
         .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
         .add_plugins(WeaponsPlugin)
         // Override with two banks so per-bank arc checks work.
@@ -4481,7 +4554,7 @@ station = "tactical"
         // must route through shields → hull resource, not EntityConsoleHull.
         use crate::ai_plugin::{AiTokenRegistry, EntityPhaserState};
         use crate::entity_spawner::EntityUuid;
-        use crate::server_app::Ship;
+        use crate::server_app::{Ship, ShipAttackedThisTick};
         use crate::shield::ShieldConfig;
         use crate::simulation::{GameOverReason, ShipShields};
 
@@ -4598,6 +4671,10 @@ station = "tactical"
         assert!(
             hull_lost > 0.0 || shields_lost > 0,
             "NPC beam must damage player ship: hull {hull_before}->{hull_after} ({hull_lost}), shields {shields_sum_before}->{shields_sum_after} ({shields_lost})"
+        );
+        assert!(
+            app.world().resource::<ShipAttackedThisTick>().0,
+            "NPC beam targeting the player ship must mark the ship as attacked for Captain AI"
         );
     }
 
@@ -4858,6 +4935,85 @@ station = "tactical"
             )])),
             Transform::from_xyz(x, 0.0, z),
         ));
+    }
+
+    fn spawn_entity_target(app: &mut App, uuid: &str, x: f32, z: f32) {
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid.into()),
+            Transform::from_xyz(x, 0.0, z),
+        ));
+    }
+
+    fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) {
+        use crate::messages::{
+            AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+            SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
+        };
+        use crate::server_app::SystemBlackboards;
+
+        let mut bbs = SystemBlackboards::default();
+        let mut viewscreen = ViewscreenBlackboard::default();
+        viewscreen.scored_objectives = vec![ScoredObjective {
+            id: format!("obj-destroy-{target}"),
+            score,
+            directive: AiDirective::Destroy {
+                target: target.into(),
+            },
+            source: ObjectiveSource::Mission,
+            relevance: vec![
+                SystemAffinity::Helm,
+                SystemAffinity::Weapons,
+                SystemAffinity::Captain,
+            ],
+            snapshot: ObjectiveSnapshot {
+                id: format!("obj-destroy-{target}"),
+                text: format!("Destroy {target}"),
+                mandatory: true,
+                status: ObjectiveStatus::Active,
+                targets: vec![target.into()],
+                source: ObjectiveSource::Mission,
+            },
+        }];
+        bbs.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(viewscreen),
+        );
+        app.insert_resource(bbs);
+    }
+
+    #[test]
+    fn tactical_ai_selects_named_destroy_objective_target() {
+        let mut app = test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        spawn_entity_target(&mut app, &target_uuid, 0.0, -30.0);
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<WeaponsTarget>().0.as_deref(),
+            Some(target_uuid.as_str()),
+            "Tactical AI must lock the live entity named by the Destroy objective"
+        );
+    }
+
+    #[test]
+    fn tactical_ai_ignores_missing_destroy_objective_target() {
+        let mut app = test_app();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        insert_destroy_objective_blackboard(&mut app, "wave_404", 80.0);
+
+        tick(&mut app);
+
+        assert!(
+            app.world().resource::<WeaponsTarget>().0.is_none(),
+            "Tactical AI must not lock an arbitrary target when the objective target is missing"
+        );
     }
 
     #[test]

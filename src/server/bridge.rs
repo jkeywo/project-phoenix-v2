@@ -11,7 +11,9 @@ use {
     crate::console_bridge::{
         ConsoleStateChanged, HudStateChanged, LobbyStateChanged, LOCAL_CONSOLE_TOKEN,
     },
-    crate::lobby::{InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
+    crate::lobby::{
+        InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target,
+    },
     crate::messages,
     crate::modifier_coordination::ModifierCoordinationPlugin,
     crate::renderer::RendererPlugin,
@@ -747,7 +749,9 @@ fn drain_force_start(
     };
     if preload_complete {
         next_state.set(messages::GamePhase::InProgress);
-        outbox.0.push((Target::All, messages::ServerMessage::GameStarted));
+        outbox
+            .0
+            .push((Target::All, messages::ServerMessage::GameStarted));
     } else {
         next_state.set(messages::GamePhase::Loading);
     }

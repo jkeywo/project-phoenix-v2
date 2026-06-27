@@ -497,12 +497,11 @@ fn spawn_engine_trails_for_source(
     }
     *timer = settings.spawn_interval_secs;
 
-    let forward = transform.rotation * Vec3::NEG_Z;
-    let origins = engine_origins(transform, markers, cfg);
-    for origin in origins {
+    let emitters = engine_emitters(transform, markers, cfg);
+    for (origin, trail_direction) in emitters {
         let length = ENGINE_TRAIL_LENGTH * normalized_speed.max(0.2);
         let start = origin;
-        let end = origin - forward.normalize_or_zero() * length;
+        let end = origin + trail_direction.normalize_or_zero() * length;
         let entity = spawn_trail_segment(
             start,
             end,
@@ -608,6 +607,17 @@ fn marker_origin(
 ) -> Option<Vec3> {
     let marker = markers?.get(marker_name?)?;
     Some(transform.transform_point(Vec3::from_array(marker.position)))
+}
+
+fn marker_emitter(
+    transform: &Transform,
+    markers: Option<&ModelMarkers>,
+    marker_name: Option<&str>,
+) -> Option<(Vec3, Vec3)> {
+    let marker = markers?.get(marker_name?)?;
+    let origin = transform.transform_point(Vec3::from_array(marker.position));
+    let direction = transform.rotation * Vec3::from_array(marker.direction);
+    (direction.length_squared() > 1e-6).then_some((origin, direction.normalize()))
 }
 
 fn player_bank_fallback_origin(ship: &ShipState, bank: Option<&PhaserBankConfig>) -> Vec3 {
@@ -737,22 +747,23 @@ fn spawn_torpedo_burst(
     ));
 }
 
-fn engine_origins(
+fn engine_emitters(
     transform: &Transform,
     markers: Option<&ModelMarkers>,
     cfg: Option<&EnginePfxConfig>,
-) -> Vec<Vec3> {
-    let marker_origins: Vec<Vec3> = cfg
+) -> Vec<(Vec3, Vec3)> {
+    let marker_emitters: Vec<(Vec3, Vec3)> = cfg
         .into_iter()
         .flat_map(|cfg| cfg.markers.iter())
-        .filter_map(|name| marker_origin(transform, markers, Some(name.as_str())))
+        .filter_map(|name| marker_emitter(transform, markers, Some(name.as_str())))
         .collect();
-    if !marker_origins.is_empty() {
-        return marker_origins;
+    if !marker_emitters.is_empty() {
+        return marker_emitters;
     }
 
     let forward = transform.rotation * Vec3::NEG_Z;
-    vec![transform.translation - forward.normalize_or_zero() * 3.0]
+    let aft = -forward.normalize_or_zero();
+    vec![(transform.translation + aft * 3.0, aft)]
 }
 
 struct EnginePfxSettings {
@@ -880,5 +891,73 @@ mod tests {
         let transform = segment_transform(Vec3::ZERO, Vec3::new(0.0, 4.0, 0.0), 0.25);
         assert_eq!(transform.translation, Vec3::new(0.0, 2.0, 0.0));
         assert_eq!(transform.scale, Vec3::new(0.25, 4.0, 0.25));
+    }
+
+    #[test]
+    fn engine_emitters_use_marker_direction() {
+        let mut map = HashMap::new();
+        map.insert(
+            "aft_exhaust".to_string(),
+            crate::model_rig::Marker {
+                position: [1.0, 0.5, -2.0],
+                direction: [0.0, 0.0, -1.0],
+            },
+        );
+        let markers = ModelMarkers(map);
+        let cfg = EnginePfxConfig {
+            color: None,
+            markers: vec!["aft_exhaust".to_string()],
+            trail_lifetime_secs: None,
+            trail_spawn_interval_secs: None,
+        };
+
+        let emitters = engine_emitters(
+            &Transform::from_translation(Vec3::new(10.0, 0.0, 20.0)),
+            Some(&markers),
+            Some(&cfg),
+        );
+
+        assert_eq!(emitters.len(), 1);
+        assert_eq!(emitters[0].0, Vec3::new(11.0, 0.5, 18.0));
+        assert_eq!(emitters[0].1, Vec3::NEG_Z);
+    }
+
+    #[test]
+    fn engine_emitters_rotate_marker_direction_with_ship() {
+        let mut map = HashMap::new();
+        map.insert(
+            "aft_exhaust".to_string(),
+            crate::model_rig::Marker {
+                position: [0.0, 0.0, 0.0],
+                direction: [0.0, 0.0, -1.0],
+            },
+        );
+        let markers = ModelMarkers(map);
+        let cfg = EnginePfxConfig {
+            color: None,
+            markers: vec!["aft_exhaust".to_string()],
+            trail_lifetime_secs: None,
+            trail_spawn_interval_secs: None,
+        };
+        let transform =
+            Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
+
+        let emitters = engine_emitters(&transform, Some(&markers), Some(&cfg));
+
+        let expected = transform.rotation * Vec3::NEG_Z;
+        assert!((emitters[0].1 - expected).length() < 1e-6);
+    }
+
+    #[test]
+    fn engine_emitters_fallback_points_aft_from_ship_forward() {
+        let emitters = engine_emitters(
+            &Transform::from_translation(Vec3::new(1.0, 0.0, 2.0)),
+            None,
+            None,
+        );
+
+        assert_eq!(emitters.len(), 1);
+        assert_eq!(emitters[0].0, Vec3::new(1.0, 0.0, 5.0));
+        assert_eq!(emitters[0].1, Vec3::Z);
     }
 }

@@ -1592,6 +1592,7 @@ fn spawn_game_start_entities(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut ship_state: ResMut<crate::ship_state::ShipState>,
     mut pending_ship_config: Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
     mut has_spawned: Local<bool>,
 ) {
     if *has_spawned {
@@ -1658,11 +1659,35 @@ fn spawn_game_start_entities(
             } else {
                 crate::ship_plugin::load_ship_config_from_disk()
             };
+            let initial_control_sources = {
+                let mut resolver =
+                    crate::ship::control_source::ControlSourceResolver::new();
+                if let Some(ref sess) = sessions {
+                    let manned: std::collections::HashSet<_> = sess
+                        .0
+                        .players()
+                        .iter()
+                        .filter(|p| p.connected)
+                        .filter_map(|p| p.station.as_ref())
+                        .collect();
+                    for station in &ship_config.0.stations {
+                        if !manned.contains(&station.id) {
+                            crate::ship::rating::apply_rating(
+                                &ship_config.0,
+                                &station.id,
+                                crate::ship::rating::BACKFILL_RATING,
+                                &mut resolver,
+                            );
+                        }
+                    }
+                }
+                crate::ship_plugin::ShipSystemControlSources(resolver)
+            };
             commands
                 .entity(spawned)
                 .insert(Ship)
                 .insert(ship_config)
-                .insert(crate::ship_plugin::ShipSystemControlSources::default())
+                .insert(initial_control_sources)
                 .insert(crate::ship_plugin::ActiveStationRatings::default())
                 .insert(crate::ship_plugin::CoordinationQueue::default())
                 .remove::<crate::entity_spawner::EntityConsoleHull>();

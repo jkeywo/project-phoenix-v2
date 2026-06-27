@@ -64,6 +64,28 @@ describe('decideToken', () => {
       .toEqual({ token: 'mine', storeAsTab: false, storeAsShared: false });
   });
 
+  it('mints fresh when a duplicated tab inherits a token already live elsewhere', () => {
+    expect(decideToken({
+      tabToken: 'mine',
+      tabTokenClaimed: true,
+      isReload: false,
+      sharedToken: 'mine',
+      sharedClaimed: true,
+      freshToken: 'fresh',
+    })).toEqual({ token: 'fresh', storeAsTab: true, storeAsShared: false });
+  });
+
+  it('keeps this tab token on reload even while its old lease is expiring', () => {
+    expect(decideToken({
+      tabToken: 'mine',
+      tabTokenClaimed: true,
+      isReload: true,
+      sharedToken: 'mine',
+      sharedClaimed: true,
+      freshToken: 'fresh',
+    })).toEqual({ token: 'mine', storeAsTab: false, storeAsShared: false });
+  });
+
   it('first/only tab adopts the persistent shared token', () => {
     expect(decideToken({ tabToken: null, sharedToken: 'shared', sharedClaimed: false, freshToken: 'fresh' }))
       .toEqual({ token: 'shared', storeAsTab: true, storeAsShared: false });

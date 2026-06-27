@@ -198,6 +198,15 @@ describe('view derivations', () => {
     expect(s.isHelm('b')).toBe(true);
   });
 
+  it('derives my consoles from Player.station when the legacy consoles array is stale', () => {
+    const s = new LobbyState();
+    s.shipStations = TWO_STATION_SHIP;
+    s.players = [{ token: 'me', name: 'Me', station: 'helm', consoles: [], connected: true }];
+    expect(s.myConsoles('me')).toEqual(['Helm', 'CaptainChair']);
+    expect(s.isCaptain('me')).toBe(true);
+    expect(s.isHelm('me')).toBe(true);
+  });
+
   it('isSpectator true for unknown token or empty consoles', () => {
     const s = new LobbyState();
     s.players = [p('me', 'Me', [])];
@@ -234,6 +243,16 @@ describe('stationSlots', () => {
     const s = new LobbyState();
     s.shipStations = TWO_STATION_SHIP;
     s.players = [p('me', 'Me', ['CaptainChair', 'Helm']), p('b', 'Bob', ['Tactical'])];
+    const slots = s.stationSlots('me');
+    expect(slots[0].kind).toBe('mine');
+    expect(slots[1].kind).toBe('occupied');
+    expect(slots[1].holder_name).toBe('Bob');
+  });
+
+  it('classifies station-based players even when consoles are absent', () => {
+    const s = new LobbyState();
+    s.shipStations = TWO_STATION_SHIP;
+    s.players = [ps('me', 'Me', 'helm'), ps('b', 'Bob', 'tactical')];
     const slots = s.stationSlots('me');
     expect(slots[0].kind).toBe('mine');
     expect(slots[1].kind).toBe('occupied');
@@ -330,6 +349,13 @@ describe('allStationsFilled', () => {
     ];
     expect(s.allStationsFilled()).toBe(true);
   });
+
+  it('derives filled stations from Player.station when consoles are absent', () => {
+    const s = new LobbyState();
+    s.shipStations = TWO_STATION_SHIP;
+    s.players = [ps('a', 'Alice', 'helm'), ps('b', 'Bob', 'tactical')];
+    expect(s.allStationsFilled()).toBe(true);
+  });
 });
 
 describe('reconcileActiveConsole', () => {
@@ -356,5 +382,10 @@ describe('consolesOf', () => {
 
   it('derives consoles from station and ship stations', () => {
     expect(consolesOf({ station: 'helm' }, TWO_STATION_SHIP)).toEqual(['Helm', 'CaptainChair']);
+  });
+
+  it('prefers Player.station over a stale legacy consoles array', () => {
+    expect(consolesOf({ station: 'helm', consoles: [] }, TWO_STATION_SHIP))
+      .toEqual(['Helm', 'CaptainChair']);
   });
 });

@@ -3,7 +3,7 @@ title: Networking
 type: concept
 tags: [networking, peerjs, webrtc, session-token, star-topology]
 sources: [server.html, client.html, AGENTS.md, PRD-001, PRD-017]
-updated: 2026-05-08
+updated: 2026-06-27
 ---
 
 # Networking
@@ -30,7 +30,9 @@ Two distinct identifiers:
 | | Lifetime | Used for |
 |---|---|---|
 | **PeerJS peer ID** | Per `new Peer()` instance — changes every page load | WebRTC routing only |
-| **Session token** (UUIDv4 in `localStorage`) | Per device, forever | Server-side player identity |
+| **Session token** (UUID-like 32 hex chars, resolved by `gui/session-token.js`) | Per browser tab during play; reload-safe for that tab; persistent `localStorage` token is only adopted when not already live elsewhere | Server-side player identity |
+
+`client.html` resolves the local player token just before sending `Identify`. The helper stores the active tab token in `sessionStorage`, uses a short-TTL `localStorage` heartbeat registry to detect other live tabs, and mints a fresh token when a duplicated tab inherits a token already in use. This keeps multiple clients on one computer from collapsing into one server-side player while preserving normal reload reconnects.
 
 The JS shell on `server.html` keeps two maps:
 

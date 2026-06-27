@@ -23,15 +23,17 @@ export const ALL_CONSOLES = Object.freeze([
  * `station`, and consoles are derived from shipStations.stations.
  */
 export function consolesOf(player, shipStations) {
-  if (Array.isArray(player.consoles)) return player.consoles;
-  if (player.console) return [player.console];
   const stationId = typeof player.station === 'string'
     ? player.station
     : (player.station && player.station.id) || null;
-  if (!stationId) return [];
-  const station = ((shipStations && shipStations.stations) || [])
-    .find(s => s.id === stationId || s.name === stationId);
-  return station && Array.isArray(station.consoles) ? station.consoles : [];
+  if (stationId) {
+    const station = ((shipStations && shipStations.stations) || [])
+      .find(s => s.id === stationId || s.name === stationId);
+    if (station && Array.isArray(station.consoles)) return station.consoles;
+  }
+  if (Array.isArray(player.consoles)) return player.consoles;
+  if (player.console) return [player.console];
+  return [];
 }
 
 function normalisePlayer(p, shipStations) {
@@ -118,7 +120,7 @@ export class LobbyState {
         for (const c of consoles) {
           for (const p of this.players) {
             if (p.token !== d.token) {
-              p.consoles = consolesOf(p).filter(existing => existing !== c);
+              p.consoles = consolesOf(p, this.shipStations).filter(existing => existing !== c);
             }
           }
         }
@@ -147,7 +149,7 @@ export class LobbyState {
   /** Consoles held by the local player (empty if no matching token). */
   myConsoles(myToken) {
     const p = this.players.find(p => p.token === myToken);
-    return p ? consolesOf(p) : [];
+    return p ? consolesOf(p, this.shipStations) : [];
   }
 
   isCaptain(myToken)    { return this.myConsoles(myToken).includes('CaptainChair'); }
@@ -200,7 +202,7 @@ export class LobbyState {
     for (const def of defs) {
       const defConsoles = def.consoles || [];
       const holder = this.players.find(p =>
-        consolesOf(p).some(c => defConsoles.includes(c)));
+        consolesOf(p, this.shipStations).some(c => defConsoles.includes(c)));
       const base = {
         station: def.name || '',
         short_code: def.short_code || '',
@@ -219,7 +221,7 @@ export class LobbyState {
 
     // Spectator rows: players whose consoles are not in any station definition.
     for (const p of this.players) {
-      const hasStation = consolesOf(p).some(c => stationConsoles.has(c));
+      const hasStation = consolesOf(p, this.shipStations).some(c => stationConsoles.has(c));
       if (!hasStation) {
         slots.push({ kind: 'spectator', player_name: p.name });
       }
@@ -235,7 +237,7 @@ export class LobbyState {
   allStationsFilled() {
     const defs = this.shipStations.stations || [];
     if (!defs.length) return false;
-    const allHeld = this.players.flatMap(p => consolesOf(p));
+    const allHeld = this.players.flatMap(p => consolesOf(p, this.shipStations));
     return defs.every(def => (def.consoles || []).some(c => allHeld.includes(c)));
   }
 }

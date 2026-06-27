@@ -71,7 +71,8 @@ async function startGame(context: BrowserContext) {
   return { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer };
 }
 
-// Helper: wait for a SimState whose view_mode matches the expected value.
+// Helper: wait for a BlackboardUpdate whose captain view_mode matches the
+// expected value (issue #570: view_mode moved from SimSnapshot to CaptainBlackboard).
 async function waitForViewMode(
   client: { page: import('@playwright/test').Page },
   expected: unknown,
@@ -82,8 +83,13 @@ async function waitForViewMode(
       const msgs: any[] = (window as any).__messages ?? [];
       return msgs.some(
         (m) =>
-          m.type === 'SimState' &&
-          JSON.stringify(m.data.snapshot.view_mode) === JSON.stringify(exp),
+          m.type === 'BlackboardUpdate' &&
+          m.data.updates?.some(
+            ([id, bb]: [string, any]) =>
+              id === 'captain' &&
+              bb?.data?.view_mode != null &&
+              JSON.stringify(bb.data.view_mode) === JSON.stringify(exp),
+          ),
       );
     },
     expected,
@@ -205,8 +211,17 @@ test('helm cannot set view to SensorsRadar — unauthorised request is ignored',
 }) => {
   const { captainPlayer, helmPlayer, commsPlayer, sensorsPlayer, navPlayer } = await startGame(context);
 
-  // Wait for initial SimState to confirm view_mode is default Camera(Fore)
-  await helmPlayer.waitForMessage('SimState', 2_000);
+  // Wait for a BlackboardUpdate with captain blackboard to confirm the
+  // default view_mode is Camera(Fore).
+  await helmPlayer.page.waitForFunction(
+    () => (window as any).__messages?.some(
+      (m) => m.type === 'BlackboardUpdate' && m.data.updates?.some(
+        ([id]: [string, any]) => id === 'captain',
+      ),
+    ),
+    undefined,
+    { timeout: 5_000 },
+  );
 
   // Helm player attempts SensorsRadar — not authorised (Helm station only has Helm console)
   await helmPlayer.send('SetView', { mode: { kind: 'SensorsRadar' } });
@@ -214,13 +229,18 @@ test('helm cannot set view to SensorsRadar — unauthorised request is ignored',
   // Give the server a generous window to respond
   await helmPlayer.page.waitForTimeout(1_000);
 
-  // No SimState with SensorsRadar should have arrived for the helm player
+  // No BlackboardUpdate with SensorsRadar view_mode should have arrived
   const rejected = await helmPlayer.page.evaluate(() => {
     const msgs: any[] = (window as any).__messages ?? [];
     return msgs.some(
       (m) =>
-        m.type === 'SimState' &&
-        JSON.stringify(m.data.snapshot.view_mode) === JSON.stringify({ kind: 'SensorsRadar' }),
+        m.type === 'BlackboardUpdate' &&
+        m.data.updates?.some(
+          ([id, bb]: [string, any]) =>
+            id === 'captain' &&
+            bb?.data?.view_mode != null &&
+            JSON.stringify(bb.data.view_mode) === JSON.stringify({ kind: 'SensorsRadar' }),
+        ),
     );
   });
   expect(rejected).toBe(false);

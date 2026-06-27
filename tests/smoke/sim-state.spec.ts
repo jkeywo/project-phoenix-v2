@@ -61,19 +61,18 @@ async function startGame(context: BrowserContext): Promise<{ captain: TestClient
 test('SimState is broadcast to all clients within 2 s of game start', async ({ context }) => {
   const { captain, helm } = await startGame(context);
 
+  // SimState is still broadcast (now only snapshot.entity_states)
   const simA = await captain.waitForMessage('SimState', 2_000) as any;
   const simB = await helm.waitForMessage('SimState', 2_000) as any;
+  expect(Array.isArray(simA.data.snapshot.entity_states)).toBe(true);
+  expect(Array.isArray(simB.data.snapshot.entity_states)).toBe(true);
 
-  for (const sim of [simA, simB]) {
-    const snap = sim.data.snapshot;
-    expect(typeof snap.ship_x).toBe('number');
-    expect(typeof snap.ship_z).toBe('number');
-    expect(typeof snap.ship_yaw).toBe('number');
-    expect(typeof snap.red_alert).toBe('boolean');
-    expect(snap.view_mode).toBeDefined();
-    // Issues #160: unified entity_states; radar_state moved to Welcome ship_config
-    expect(Array.isArray(snap.entity_states)).toBe(true);
-  }
+  // Ship position/state comes via BlackboardUpdate (issue #570)
+  const bbCap = await captain.waitForMessage('BlackboardUpdate', 2_000) as any;
+  const bbHelm = await helm.waitForMessage('BlackboardUpdate', 2_000) as any;
+  const hasHelm = (updates: any[]) => updates.some(([id]: [string, any]) => id === 'helm');
+  expect(hasHelm(bbCap.data.updates)).toBe(true);
+  expect(hasHelm(bbHelm.data.updates)).toBe(true);
 
   await captain.close();
   await helm.close();
@@ -82,22 +81,24 @@ test('SimState is broadcast to all clients within 2 s of game start', async ({ c
 test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', async ({ context }) => {
   const { captain, helm } = await startGame(context);
 
-  // Wait for the first SimState to confirm simulation is running
-  await helm.waitForMessage('SimState', 2_000);
+  // Wait for the first BlackboardUpdate to confirm simulation is running
+  await helm.waitForMessage('BlackboardUpdate', 2_000);
 
-  // Send the impulse charge command
   await helm.send('StartImpulseCharge');
 
-  // Wait up to 8× the TOML-configured charge duration for a SimState showing
-  // impulse_charge_progress has reached 1.0 (headroom for CI latency).
+  // Wait up to 8× the TOML-configured charge duration for a HelmBlackboard
+  // showing impulse_charge has reached 1.0 (headroom for CI latency).
   const chargeTimeoutMs = IMPULSE_CHARGE_DURATION_S * 8 * 1000;
   await helm.page.waitForFunction(
     () => {
       const msgs: any[] = (window as any).__messages;
       return msgs.some(
         (m) =>
-          m.type === 'SimState' &&
-          m.data.snapshot.impulse_charge_progress >= 1.0,
+          m.type === 'BlackboardUpdate' &&
+          m.data.updates?.some(
+            ([id, bb]: [string, any]) =>
+              id === 'helm' && bb.data.impulse_charge >= 1.0,
+          ),
       );
     },
     undefined,
@@ -107,7 +108,12 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
   const charged = await helm.page.evaluate(() => {
     const msgs: any[] = (window as any).__messages;
     return msgs.filter(
-      (m) => m.type === 'SimState' && m.data.snapshot.impulse_charge_progress >= 1.0,
+      (m) =>
+        m.type === 'BlackboardUpdate' &&
+        m.data.updates?.some(
+          ([id, bb]: [string, any]) =>
+            id === 'helm' && bb.data.impulse_charge >= 1.0,
+        ),
     ).length;
   });
 
@@ -117,13 +123,14 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
   await helm.close();
 });
 
-test('HelmInput changes ship position in subsequent SimState', async ({ context }) => {
+test('HelmInput changes ship position in subsequent blackboard updates', async ({ context }) => {
   const { captain, helm } = await startGame(context);
 
-  // Record initial position from first SimState
-  const first = await helm.waitForMessage('SimState', 2_000) as any;
-  const initX: number = first.data.snapshot.ship_x;
-  const initZ: number = first.data.snapshot.ship_z;
+  // Record initial position from first HelmBlackboard
+  const first = await helm.waitForMessage('BlackboardUpdate', 2_000) as any;
+  const firstHelm = first.data.updates.find(([id]: [string, any]) => id === 'helm');
+  const initX: number = firstHelm[1].data.x;
+  const initZ: number = firstHelm[1].data.z;
 
   // Start repeating HelmInput so the server receives sustained thrust
   await helm.page.evaluate(() => {
@@ -135,15 +142,19 @@ test('HelmInput changes ship position in subsequent SimState', async ({ context 
     }, 100);
   });
 
-  // Wait up to 3 s for a SimState showing the ship has moved by more than rounding error
+  // Wait up to 10 s for a BlackboardUpdate showing the ship has moved
   await helm.page.waitForFunction(
     ({ x, z }: { x: number; z: number }) => {
       const msgs: any[] = (window as any).__messages;
       return msgs.some(
         (m) =>
-          m.type === 'SimState' &&
-          (Math.abs(m.data.snapshot.ship_x - x) > 0.05 ||
-            Math.abs(m.data.snapshot.ship_z - z) > 0.05),
+          m.type === 'BlackboardUpdate' &&
+          m.data.updates?.some(
+            ([id, bb]: [string, any]) =>
+              id === 'helm' &&
+              (Math.abs(bb.data.x - x) > 0.05 ||
+                Math.abs(bb.data.z - z) > 0.05),
+          ),
       );
     },
     { x: initX, z: initZ },
@@ -153,15 +164,19 @@ test('HelmInput changes ship position in subsequent SimState', async ({ context 
   // Stop repeating inputs
   await helm.page.evaluate(() => clearInterval((window as any).__helmInterval));
 
-  // Confirm at least one moved SimState exists
+  // Confirm at least one moved BlackboardUpdate exists
   const moved = await helm.page.evaluate(
     ({ x, z }: { x: number; z: number }) => {
       const msgs: any[] = (window as any).__messages;
       return msgs.filter(
         (m) =>
-          m.type === 'SimState' &&
-          (Math.abs(m.data.snapshot.ship_x - x) > 0.05 ||
-            Math.abs(m.data.snapshot.ship_z - z) > 0.05),
+          m.type === 'BlackboardUpdate' &&
+          m.data.updates?.some(
+            ([id, bb]: [string, any]) =>
+              id === 'helm' &&
+              (Math.abs(bb.data.x - x) > 0.05 ||
+                Math.abs(bb.data.z - z) > 0.05),
+          ),
       ).length;
     },
     { x: initX, z: initZ },

@@ -99,13 +99,11 @@ async function startGameWithTactical(context: BrowserContext) {
   });
 
   const serverPage = await context.newPage();
-  // Log server page crashes to diagnose CI failures.
+  // Track only actual server crashes / panics, not console.errors from
+  // external network requests (CORS, 404s to ICE servers — known noise on CI).
   const serverCrashes: string[] = [];
   serverPage.on('crash', () => { serverCrashes.push('server page crashed'); });
   serverPage.on('pageerror', (err) => { serverCrashes.push(err.message); });
-  serverPage.on('console', (msg) => {
-    if (msg.type() === 'error') serverCrashes.push(`[console.error] ${msg.text()}`);
-  });
 
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(serverPage);

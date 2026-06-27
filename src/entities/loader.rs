@@ -85,25 +85,21 @@ mod tests {
         assert_eq!(config.tags, vec!["asteroid"]);
     }
 
-    /// Locks in the override-payload used by the tactical-fire-flow smoke test.
-    /// The smoke test appends a `[[entity]]` block to the world TOML referencing
-    /// the pirate-raider template plus `overrides = { behaviour = { initial_state
-    /// = "idle", transition = [] } }`. This keeps the raider stationary and
-    /// prevents the `hull_below` flee transition from carrying it out of the
-    /// player's 40-unit phaser range mid-kill (which makes the second beam
-    /// sever-by-range, the test then times out waiting for EntityDespawned).
+    /// Verifies that a world override on `[behaviour]` round-trips cleanly.
+    /// (#572) FSM dissolved — `initial_state`/`transition` fields removed.
+    /// Overrides now target `waypoint_arrival_radius` or doctrine entries.
+    /// This test confirms that overriding `waypoint_arrival_radius` merges
+    /// correctly while preserving the template's doctrine objectives.
     #[test]
-    fn pirate_raider_override_for_smoke_test_disables_transitions() {
+    fn pirate_raider_behaviour_override_merges_arrival_radius() {
         let template_toml = std::fs::read_to_string("assets/entities/pirate_raider.toml")
             .expect("pirate_raider.toml must exist");
         let cache = make_cache("assets/entities/pirate_raider.toml", &template_toml);
 
-        // Same payload the smoke test embeds in the world TOML it serves.
         let override_value: toml::Value = toml::from_str(
             r#"
 [behaviour]
-initial_state = "idle"
-transition = []
+waypoint_arrival_radius = 99.0
 "#,
         )
         .unwrap();
@@ -117,62 +113,51 @@ transition = []
         let beh = config
             .behaviour
             .expect("raider must keep [behaviour] section");
-        assert_eq!(
-            beh.initial_state, "idle",
-            "initial_state must be overridden to idle"
+        assert!(
+            (beh.waypoint_arrival_radius - 99.0).abs() < 1e-6,
+            "overridden waypoint_arrival_radius must be 99.0"
         );
         assert!(
-            beh.transition.is_empty(),
-            "all transitions must be replaced with []"
-        );
-        assert!(
-            !beh.state.is_empty(),
-            "template state blocks must be preserved by name-merge"
+            !beh.doctrine.is_empty(),
+            "template doctrine objectives must be preserved by override merge"
         );
     }
 
-    /// End-to-end check that the smoke test's appended world TOML (inline-table
-    /// `overrides`) parses through `parse_world` → `resolve_entity` and yields
-    /// an idle raider with no transitions.
+    /// End-to-end check that an inline-table `overrides` block parses through
+    /// `parse_world` → `resolve_entity` and merges correctly.
+    /// (#572) FSM dissolved — override now targets `waypoint_arrival_radius`.
     #[test]
-    fn smoke_test_world_inline_override_round_trips_to_idle_raider() {
+    fn world_inline_override_round_trips_behaviour_merge() {
         let template_toml = std::fs::read_to_string("assets/entities/pirate_raider.toml")
             .expect("pirate_raider.toml must exist");
         let cache = make_cache("assets/entities/pirate_raider.toml", &template_toml);
 
-        // Mirrors the inline-table form the smoke test appends to its modified
-        // default.toml (see tests/smoke/tactical-fire-flow.spec.ts).
         let world_toml = r#"
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
 transform     = { position = [150.0, 0.0, -20.0] }
-overrides     = { behaviour = { initial_state = "idle", transition = [] } }
+overrides     = { behaviour = { waypoint_arrival_radius = 42.0 } }
 "#;
 
         let world = crate::world::config::parse_world(world_toml)
-            .expect("smoke-test world TOML must parse");
-        assert_eq!(
-            world.entities.len(),
-            1,
-            "expected exactly one [[entity]] block"
-        );
+            .expect("world TOML must parse");
+        assert_eq!(world.entities.len(), 1, "expected exactly one [[entity]] block");
 
         let inst = &world.entities[0];
-        assert!(
-            inst.overrides.is_some(),
-            "overrides must round-trip through parse_world"
-        );
+        assert!(inst.overrides.is_some(), "overrides must round-trip through parse_world");
 
         let config = resolve_entity(inst, &cache).unwrap();
         let beh = config
             .behaviour
             .expect("raider keeps behaviour section after merge");
-        assert_eq!(beh.initial_state, "idle");
         assert!(
-            beh.transition.is_empty(),
-            "smoke-test override must produce zero transitions; got {} transitions",
-            beh.transition.len()
+            (beh.waypoint_arrival_radius - 42.0).abs() < 1e-6,
+            "inline override must set waypoint_arrival_radius to 42.0"
+        );
+        assert!(
+            !beh.doctrine.is_empty(),
+            "template doctrine must survive an inline override"
         );
     }
 

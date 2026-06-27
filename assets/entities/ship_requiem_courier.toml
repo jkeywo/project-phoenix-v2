@@ -37,15 +37,17 @@ max_bank_deg = 15.0
 [comms]
 range = 800.0
 
+# ── Behaviour ────────────────────────────────────────────────────────────────
+#
+# (#572) Doctrine-based AI. Courier is non-combat — only objective is to
+# reach its destination. No Destroy doctrine.
+
 [behaviour]
-initial_state = "idle"
 
-[[behaviour.state]]
-name = "fleeing"
-kind = "fleeing"
-target_speed = 1.0
-
-[[behaviour.transition]]
-from = "idle"
-condition = "on_attacked"
-to = "fleeing"
+[[behaviour.doctrine]]
+id         = "reach-destination"
+text       = "Proceed to destination"
+directive_kind = "Reach"
+directive_anchors = ["destination"]
+base_priority    = 30.0
+target_speed     = 0.8

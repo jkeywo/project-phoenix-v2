@@ -4,9 +4,9 @@ use crate::messages::{
     AdmittedCommands, CaptainBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemControlPayload,
     SystemId, ViewDirection, ViewMode,
 };
-use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::ShipSystemControlSources;
+use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship_state::ShipState;
 use crate::simulation::Ship;
 use crate::world::server::ObjectiveManagerRes;
@@ -78,12 +78,14 @@ fn handle_set_view(
 /// and emit `ToggleRedAlert` into `AdmittedCommands` when the desired state
 /// differs from the current state. Runs before `handle_toggle_red_alert` so
 /// the command is visible to the handler in the same tick.
+///
+/// Combat timers are read from the viewscreen blackboard (issue #572) — no
+/// private `RecentCombatActivity` copy needed by the captain AI.
 fn operate_captain_ai(
     ship: Res<ShipState>,
     mut admitted: ResMut<AdmittedCommands>,
     ship_query: Query<&ShipSystemControlSources, With<Ship>>,
-    activity: Option<Res<RecentCombatActivity>>,
-    time: Res<Time>,
+    blackboards: Res<crate::server_app::SystemBlackboards>,
 ) {
     let Ok(control_sources) = ship_query.single() else {
         return;
@@ -94,12 +96,18 @@ fn operate_captain_ai(
     if !policy.operate_ai {
         return;
     }
-    let activity = match activity.as_deref() {
-        Some(a) => a,
-        None => return,
-    };
+
+    // Read combat timers from the viewscreen blackboard (published by phase-1b aggregator).
+    let (last_damage_secs, last_weapon_secs) =
+        match blackboards.0.get(&crate::system_registry::viewscreen_system_id()) {
+            Some(SystemBlackboard::Viewscreen(bb)) => {
+                (bb.last_damage_taken_secs, bb.last_weapon_fired_secs)
+            }
+            _ => (None, None),
+        };
+
     let ai = crate::ai::core::CaptainAi;
-    if let Some(should_be_red_alert) = ai.operate(activity, time.elapsed_secs()) {
+    if let Some(should_be_red_alert) = ai.operate(last_damage_secs, last_weapon_secs) {
         if should_be_red_alert != ship.red_alert() {
             admitted.0.push(crate::messages::AdmittedCommand {
                 target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
@@ -772,10 +780,17 @@ mod tests {
             crate::system_registry::captain_system_id(),
             ControlSource::Ai,
         );
-        // Simulate recent damage (at t=0, now is ~0 so within 10s window)
+        // Simulate recent damage via the viewscreen blackboard (issue #572 path).
         {
-            let mut activity = app.world_mut().resource_mut::<RecentCombatActivity>();
-            activity.last_damage_taken = Some(0.0);
+            use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+            let mut bbs = app.world_mut().resource_mut::<crate::server_app::SystemBlackboards>();
+            bbs.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                SystemBlackboard::Viewscreen(ViewscreenBlackboard {
+                    last_damage_taken_secs: Some(0.0),
+                    ..Default::default()
+                }),
+            );
         }
         tick(&mut app);
         assert!(
@@ -811,10 +826,17 @@ mod tests {
     fn operate_captain_ai_does_nothing_when_human_controlled() {
         let mut app = test_app();
         start_game(&mut app);
-        // Simulate damage — but captain is human-controlled (default)
+        // Even with recent damage in the viewscreen blackboard, captain is human-controlled.
         {
-            let mut activity = app.world_mut().resource_mut::<RecentCombatActivity>();
-            activity.last_damage_taken = Some(0.0);
+            use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+            let mut bbs = app.world_mut().resource_mut::<crate::server_app::SystemBlackboards>();
+            bbs.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                SystemBlackboard::Viewscreen(ViewscreenBlackboard {
+                    last_damage_taken_secs: Some(0.0),
+                    ..Default::default()
+                }),
+            );
         }
         tick(&mut app);
         // Human-controlled: AI system should not fire

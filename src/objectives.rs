@@ -24,7 +24,7 @@ use crate::messages::{
 
 /// A condition-weighted modifier added to a utility score when the condition
 /// evaluates to true at scoring time.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConditionModifier {
     /// Condition name: `"red_alert"`, `"hull_below"`, `"hull_above"`.
     pub condition: String,
@@ -36,7 +36,7 @@ pub struct ConditionModifier {
 
 /// A veto condition. When the condition evaluates to **false** the objective's
 /// score is forced to 0 and it is never selected by the AI.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ZeroGateCondition {
     /// Condition name: `"red_alert"`, `"hull_below"`, `"hull_above"`.
     pub condition: String,
@@ -45,7 +45,7 @@ pub struct ZeroGateCondition {
 }
 
 /// TOML-authored utility configuration for an objective (issue #571).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct UtilityConfig {
     /// Base score before modifiers. Mandatory objectives receive an extra
     /// `MANDATORY_BONUS` on top of this.
@@ -103,7 +103,7 @@ impl UtilityConfig {
 }
 
 /// Derive which ship systems care about a given directive kind.
-fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
+pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
     match directive {
         AiDirective::None => vec![],
         AiDirective::Destroy { .. } => {

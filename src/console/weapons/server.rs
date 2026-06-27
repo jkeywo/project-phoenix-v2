@@ -667,7 +667,7 @@ fn handle_fire_phaser_npc(
         // Tick cooldown.
         phaser_state.cooldown_remaining = (phaser_state.cooldown_remaining - dt).max(0.0);
 
-        let target_uuid: Option<uuid::Uuid> = ctrl_opt.and_then(|c| c.controller.blackboard.target);
+        let target_uuid: Option<uuid::Uuid> = ctrl_opt.and_then(|c| c.memory.target);
 
         use crate::entity_config::PhaserCombatConfig;
         let first_bank = weapons_section.and_then(|wc| wc.0.phaser_banks.first().cloned());
@@ -706,16 +706,8 @@ fn handle_fire_phaser_npc(
         let npc_z = transform.translation.z;
         let npc_yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
 
-        // Activate beam on FirePhaser order when ready, or auto-fire when the AI
-        // is in the Attacking state with a valid target (eliminates the 1-frame
-        // event delay between tick_ai_controllers → InboundMessage → here).
-        let should_fire = fire_orders.contains(&token)
-            || ctrl_opt.as_ref().is_some_and(|c| {
-                matches!(
-                    c.controller.current_state,
-                    crate::ai::AiState::Attacking { .. }
-                ) && c.controller.blackboard.target.is_some()
-            });
+        // Activate beam on FirePhaser order (AI fires through InboundMessage path from tick_ai_controllers).
+        let should_fire = fire_orders.contains(&token);
 
         // DEBUG: instrument the NPC fire decision so we can see why phasers
         // are (or aren't) connecting in play sessions. Logged once per tick per
@@ -748,7 +740,7 @@ fn handle_fire_phaser_npc(
                 }
             } else {
                 info!(
-                    "[npc-fire] uuid={} should_fire=true but blackboard.target=None",
+                    "[npc-fire] uuid={} should_fire=true but memory.target=None",
                     npc_uuid.0,
                 );
             }
@@ -4292,7 +4284,7 @@ station = "tactical"
         target_x: f32,
         target_z: f32,
     ) -> (bevy::ecs::entity::Entity, bevy::ecs::entity::Entity) {
-        use crate::ai::AiController;
+        use crate::ai::AiMemory;
         use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
         use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
 
@@ -4302,10 +4294,12 @@ station = "tactical"
             reg.register(npc_uuid);
         }
 
-        // Build a minimal AiController with the target on its blackboard.
+        // Build AiMemory with the target pre-selected.
         let target_as_uuid = uuid::Uuid::parse_str(target_uuid).ok();
-        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
-        ctrl.blackboard.target = target_as_uuid;
+        let memory = AiMemory {
+            target: target_as_uuid,
+            ..Default::default()
+        };
 
         // Spawn NPC entity facing toward negative-Z (yaw = 0 → forward = -Z).
         let npc_entity = app
@@ -4313,7 +4307,7 @@ station = "tactical"
             .spawn((
                 EntityUuid(npc_uuid.to_string()),
                 AiControllerComponent {
-                    controller: ctrl,
+                    memory,
                     entity_uuid: npc_uuid.to_string(),
                     forward_speed: 0.0,
                     last_helm_intent: None,
@@ -4477,9 +4471,11 @@ station = "tactical"
 
         // Spawn NPC entity (same pattern as setup_npc_shooter).
         let npc_entity = {
-            use crate::ai::AiController;
-            let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
-            ctrl.blackboard.target = Some(player_uuid_parsed);
+            use crate::ai::AiMemory;
+            let memory = AiMemory {
+                target: Some(player_uuid_parsed),
+                ..Default::default()
+            };
 
             let mut reg = app.world_mut().resource_mut::<AiTokenRegistry>();
             reg.register(npc_uuid);
@@ -4488,7 +4484,7 @@ station = "tactical"
                 .spawn((
                     EntityUuid(npc_uuid.to_string()),
                     crate::ai_plugin::AiControllerComponent {
-                        controller: ctrl,
+                        memory,
                         entity_uuid: npc_uuid.to_string(),
                         forward_speed: 0.0,
                         last_helm_intent: None,
@@ -4613,13 +4609,13 @@ station = "tactical"
 
     #[test]
     fn tick_ai_controllers_fire_phaser_routes_through_handle_fire_phaser_npc() {
-        // Full end-to-end test: an NPC in the `Attacking` state with a target
-        // directly in its forward arc and within beam range causes
-        // `tick_ai_controllers` to write a `FirePhaser` `InboundMessage`, which
-        // `handle_fire_phaser_npc` picks up and sets `EntityPhaserState::beam_active`.
+        // Full end-to-end test: an NPC with a Destroy doctrine and a pre-selected
+        // target directly in its forward arc causes `tick_ai_controllers` to write
+        // a `FirePhaser` `InboundMessage`, which `handle_fire_phaser_npc` picks up
+        // and sets `EntityPhaserState::beam_active`.
         use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
         use crate::damage::ConsoleHull;
-        use crate::entity_config::{BehaviourConfig, StateConfig};
+        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
         use crate::entity_spawner::{EntityConsoleHull, EntityUuid, WeaponsConsoleSection};
         use crate::messages::{Console, GamePhase};
         use bevy::prelude::State;
@@ -4635,20 +4631,17 @@ station = "tactical"
         let target_uuid_str = "ee000000-0000-0000-0000-000000000011";
         let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();
 
-        // Behaviour: start directly in `attacking` state so FirePhaser is emitted
-        // on the very first tick when the target is in range.
+        // Doctrine: single Destroy objective at high priority — always scores > 0.
         let behaviour = BehaviourConfig {
-            initial_state: "attack".into(),
-            state: vec![StateConfig {
-                name: "attack".into(),
-                kind: "attacking".into(),
-                waypoints: vec![],
-                loop_path: false,
-                target_speed: 0.5,
-                maintain_range: 0.0,
-                duration_secs: 0.0,
+            doctrine: vec![DoctrineObjective {
+                id: "destroy-hostiles".into(),
+                text: "Destroy target".into(),
+                directive_kind: Some("Destroy".into()),
+                base_priority: 35.0,
+                target_speed: 0.9,
+                maintain_range: 25.0,
+                ..Default::default()
             }],
-            transition: vec![],
             ..Default::default()
         };
 
@@ -4696,13 +4689,13 @@ station = "tactical"
         //         and token registered in AiTokenRegistry.
         app.update();
 
-        // Set blackboard target so `tick_attacking` fires phasers.
+        // Set memory.target so `operate_weapons` selects it (target is in WorldView).
         {
             let mut ctrl = app
                 .world_mut()
                 .get_mut::<AiControllerComponent>(npc_entity)
                 .unwrap();
-            ctrl.controller.blackboard.target = Some(target_uuid_parsed);
+            ctrl.memory.target = Some(target_uuid_parsed);
         }
 
         // Tick 2: `tick_ai_controllers` emits FirePhaser InboundMessage.

@@ -4,59 +4,78 @@ use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Configuration for a single named AI state.
+/// A single standing-doctrine objective declared in an entity's `[behaviour]` block.
 ///
-/// Each entry in a `[[behaviour.state]]` array defines the parameters
-/// for one state. The `name` field is used as a stable identifier for
-/// per-spawn `[spawn.overrides]` by-name replacement.
+/// Doctrine objectives replace the old FSM state/transition model: each entry
+/// carries a typed `AiDirective`, a utility score (base priority + modifiers +
+/// zero-gates), and an optional target speed for the helm to use when executing
+/// the directive. The viewscreen aggregator scores these the same way it scores
+/// mission objectives; per-system operate functions select the top-scoring
+/// directive they can serve.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct StateConfig {
-    /// Stable name for this state (used in `initial_state` and overrides).
-    pub name: String,
-    /// State kind: `"idle"`, `"patrolling"`, `"pursuing"`, or `"attacking"`.
+pub struct DoctrineObjective {
+    /// Stable identifier (e.g. `"patrol-sector"`, `"destroy-hostiles"`).
+    pub id: String,
+    /// Human-readable prose shown on the captain panel when active.
+    pub text: String,
+    /// Whether this objective blocks mission completion when active (usually `false` for doctrine).
     #[serde(default)]
-    pub kind: String,
-    /// Ordered waypoint anchor names (used by `patrolling`).
+    pub mandatory: bool,
+    /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Hail"`, or absent for `None`.
     #[serde(default)]
-    pub waypoints: Vec<String>,
-    /// Whether to loop back to the first waypoint after the last (patrolling).
+    pub directive_kind: Option<String>,
+    /// Anchor names for `Patrol` directives.
     #[serde(default)]
-    pub loop_path: bool,
-    /// Desired forward speed fraction [0, 1], clamped at load time.
+    pub directive_anchors: Vec<String>,
+    /// Whether the patrol loops back to the first anchor after the last.
     #[serde(default)]
+    pub directive_loop: bool,
+    /// Named target for `Destroy` directives. Runtime-resolved via `AiMemory.target`.
+    #[serde(default)]
+    pub directive_target: Option<String>,
+    /// Named anchor for `Reach` directives.
+    #[serde(default)]
+    pub directive_anchor: Option<String>,
+    /// Named target for `Hail` directives.
+    #[serde(default)]
+    pub directive_hail_target: Option<String>,
+    /// Base utility score before modifiers.
+    #[serde(default)]
+    pub base_priority: f32,
+    /// Veto conditions — force score to 0 when the condition evaluates to false.
+    #[serde(default)]
+    pub zero_gates: Vec<crate::objectives::ZeroGateCondition>,
+    /// Additive score modifiers applied when their condition is true.
+    #[serde(default)]
+    pub modifiers: Vec<crate::objectives::ConditionModifier>,
+    /// Desired helm speed fraction [0, 1] when executing this directive.
+    #[serde(default = "default_doctrine_target_speed")]
     pub target_speed: f32,
-    /// Distance to maintain from target (world units) for the `attacking` state.
-    /// The AI thrusts at `target_speed` when further than this, and holds station
-    /// (thrust = 0) when closer.
-    #[serde(default)]
+    /// Distance to maintain from the target (world units) for Destroy directives.
+    /// The helm stops thrusting when closer than this.
+    #[serde(default = "default_maintain_range")]
     pub maintain_range: f32,
-    /// Duration in seconds for the `warping_out` state before the entity self-despawns.
-    #[serde(default)]
-    pub duration_secs: f32,
 }
 
-impl StateConfig {
-    /// Clamp mutable fields into valid ranges after deserialisation.
-    fn clamp(&mut self) {
-        self.target_speed = self.target_speed.clamp(0.0, 1.0);
-    }
+fn default_doctrine_target_speed() -> f32 {
+    0.8
+}
+
+fn default_maintain_range() -> f32 {
+    25.0
 }
 
 /// Configuration for an AI behaviour controller attached to an entity.
-/// Re-exports the AI module's config type so callers only need `entity_config`.
+///
+/// The FSM (AiState/TransitionConfig) is dissolved in issue #572. Behaviour is
+/// now driven by a list of `DoctrineObjective`s scored by the viewscreen
+/// aggregator and interpreted per-system via operate functions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct BehaviourConfig {
-    /// Name of the initial AI state (e.g. `"idle"`).
-    pub initial_state: String,
-    /// Typed state parameter blocks.  An empty vec is valid (only `initial_state`
-    /// is required; states with no extra params — like `idle` — need no entry).
+    /// Standing-doctrine objectives for this entity template.
     #[serde(default)]
-    pub state: Vec<StateConfig>,
-    /// Transition rules evaluated in declaration order.
-    #[serde(default)]
-    pub transition: Vec<crate::ai::TransitionConfig>,
+    pub doctrine: Vec<DoctrineObjective>,
     /// Arrival radius in world units — closer than this counts as "reached waypoint".
     /// Defaults to [`crate::ai::WAYPOINT_ARRIVAL_RADIUS`] when absent.
     #[serde(default = "default_waypoint_arrival_radius")]
@@ -1139,10 +1158,10 @@ impl EntityConfig {
             }
         }
 
-        // Clamp target_speed in every StateConfig entry.
+        // Clamp target_speed in every doctrine entry.
         if let Some(ref mut b) = config.behaviour {
-            for s in &mut b.state {
-                s.clamp();
+            for d in &mut b.doctrine {
+                d.target_speed = d.target_speed.clamp(0.0, 1.0);
             }
         }
 
@@ -2156,19 +2175,6 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
     // ── Behaviour block tests ─────────────────────────────────────────────
 
     #[test]
-    fn behaviour_block_parses_initial_state() {
-        let toml_str = r##"
-tags = ["npc", "patrol"]
-
-[behaviour]
-initial_state = "idle"
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let behaviour = config.behaviour.expect("behaviour must be Some");
-        assert_eq!(behaviour.initial_state, "idle");
-    }
-
-    #[test]
     fn behaviour_block_absent_when_not_in_toml() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.behaviour.is_none());
@@ -2183,115 +2189,129 @@ tags = ["npc"]
 hull_integrity = 50.0
 
 [behaviour]
-initial_state = "idle"
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         assert!(config.hull.is_some());
-        let behaviour = config.behaviour.expect("behaviour must be Some");
-        assert_eq!(behaviour.initial_state, "idle");
+        assert!(config.behaviour.is_some());
     }
 
-    // ── StateConfig tests ──────────────────────────────────────────────────
+    // ── DoctrineObjective tests ────────────────────────────────────────────
 
     #[test]
-    fn behaviour_with_patrolling_state_parses() {
+    fn behaviour_with_patrol_doctrine_parses() {
         let toml_str = r##"
 [behaviour]
-initial_state = "patrol_route"
 
-[[behaviour.state]]
-name = "patrol_route"
-kind = "patrolling"
-waypoints = ["alpha", "beta"]
-loop_path = true
-target_speed = 0.6
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let behaviour = config.behaviour.expect("behaviour must be Some");
-        assert_eq!(behaviour.initial_state, "patrol_route");
-        assert_eq!(behaviour.state.len(), 1);
-        let state = &behaviour.state[0];
-        assert_eq!(state.name, "patrol_route");
-        assert_eq!(state.kind, "patrolling");
-        assert_eq!(state.waypoints, vec!["alpha", "beta"]);
-        assert!(state.loop_path);
-        assert!((state.target_speed - 0.6).abs() < 1e-5);
-    }
-
-    #[test]
-    fn target_speed_clamped_to_zero_when_negative() {
-        let toml_str = r##"
-[behaviour]
-initial_state = "p"
-
-[[behaviour.state]]
-name = "p"
-kind = "patrolling"
-waypoints = []
-target_speed = -0.5
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let state = &config.behaviour.unwrap().state[0];
-        assert_eq!(
-            state.target_speed, 0.0,
-            "negative target_speed must clamp to 0"
-        );
-    }
-
-    #[test]
-    fn target_speed_clamped_to_one_when_above_one() {
-        let toml_str = r##"
-[behaviour]
-initial_state = "p"
-
-[[behaviour.state]]
-name = "p"
-kind = "patrolling"
-waypoints = []
-target_speed = 1.5
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let state = &config.behaviour.unwrap().state[0];
-        assert_eq!(state.target_speed, 1.0, "target_speed > 1 must clamp to 1");
-    }
-
-    #[test]
-    fn behaviour_state_empty_by_default() {
-        let toml_str = r##"
-[behaviour]
-initial_state = "idle"
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let behaviour = config.behaviour.expect("behaviour must be Some");
-        assert!(
-            behaviour.state.is_empty(),
-            "state array must default to empty"
-        );
-    }
-
-    #[test]
-    fn behaviour_multiple_states_parse() {
-        let toml_str = r##"
-[behaviour]
-initial_state = "idle"
-
-[[behaviour.state]]
-name = "idle"
-kind = "idle"
-target_speed = 0.0
-
-[[behaviour.state]]
-name = "patrol"
-kind = "patrolling"
-waypoints = ["wp1", "wp2"]
-loop_path = false
+[[behaviour.doctrine]]
+id = "patrol-sector"
+text = "Patrol the sector"
+directive_kind = "Patrol"
+directive_anchors = ["alpha", "beta"]
+directive_loop = true
+base_priority = 20.0
 target_speed = 0.5
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let behaviour = config.behaviour.expect("behaviour must be Some");
-        assert_eq!(behaviour.state.len(), 2);
-        assert_eq!(behaviour.state[0].name, "idle");
-        assert_eq!(behaviour.state[1].name, "patrol");
+        assert_eq!(behaviour.doctrine.len(), 1);
+        let d = &behaviour.doctrine[0];
+        assert_eq!(d.id, "patrol-sector");
+        assert_eq!(d.directive_kind.as_deref(), Some("Patrol"));
+        assert_eq!(d.directive_anchors, vec!["alpha", "beta"]);
+        assert!(d.directive_loop);
+        assert!((d.base_priority - 20.0).abs() < 1e-5);
+        assert!((d.target_speed - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn behaviour_with_destroy_doctrine_parses() {
+        let toml_str = r##"
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+text = "Engage and destroy hostile ships"
+directive_kind = "Destroy"
+base_priority = 35.0
+target_speed = 0.8
+maintain_range = 25.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let d = &config.behaviour.unwrap().doctrine[0];
+        assert_eq!(d.id, "destroy-hostiles");
+        assert_eq!(d.directive_kind.as_deref(), Some("Destroy"));
+        assert!((d.base_priority - 35.0).abs() < 1e-5);
+        assert!((d.maintain_range - 25.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn doctrine_target_speed_clamped_to_zero_when_negative() {
+        let toml_str = r##"
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "patrol"
+text = "Patrol"
+base_priority = 10.0
+target_speed = -0.5
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let d = &config.behaviour.unwrap().doctrine[0];
+        assert_eq!(d.target_speed, 0.0, "negative target_speed must clamp to 0");
+    }
+
+    #[test]
+    fn doctrine_target_speed_clamped_to_one_when_above_one() {
+        let toml_str = r##"
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "pursue"
+text = "Pursue"
+base_priority = 10.0
+target_speed = 1.5
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let d = &config.behaviour.unwrap().doctrine[0];
+        assert_eq!(d.target_speed, 1.0, "target_speed > 1 must clamp to 1");
+    }
+
+    #[test]
+    fn behaviour_doctrine_empty_by_default() {
+        let toml_str = r##"
+[behaviour]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        assert!(
+            behaviour.doctrine.is_empty(),
+            "doctrine array must default to empty"
+        );
+    }
+
+    #[test]
+    fn behaviour_multiple_doctrine_objectives_parse() {
+        let toml_str = r##"
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "patrol"
+text = "Patrol"
+directive_kind = "Patrol"
+directive_anchors = ["wp1", "wp2"]
+base_priority = 20.0
+
+[[behaviour.doctrine]]
+id = "destroy"
+text = "Destroy"
+directive_kind = "Destroy"
+base_priority = 35.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        assert_eq!(behaviour.doctrine.len(), 2);
+        assert_eq!(behaviour.doctrine[0].id, "patrol");
+        assert_eq!(behaviour.doctrine[1].id, "destroy");
     }
 
     // ── pirate_raider.toml compile-time template tests ─────────────────────
@@ -2409,13 +2429,16 @@ target_speed = 0.5
             .expect("battleship must have [shields] (#474)");
         assert!((shields.max_hp - 120.0).abs() < 1e-6);
         let behaviour = config.behaviour.as_ref().expect("must have [behaviour]");
-        let kinds: Vec<&str> = behaviour.state.iter().map(|s| s.kind.as_str()).collect();
-        for required in &["idle", "patrolling", "pursuing", "attacking"] {
-            assert!(
-                kinds.contains(required),
-                "battleship must have '{required}' state (#474 full behaviour tree)"
-            );
-        }
+        let directive_kinds: Vec<Option<&str>> =
+            behaviour.doctrine.iter().map(|d| d.directive_kind.as_deref()).collect();
+        assert!(
+            directive_kinds.contains(&Some("Patrol")),
+            "battleship must have a Patrol doctrine (#572 doctrine-based AI)"
+        );
+        assert!(
+            directive_kinds.contains(&Some("Destroy")),
+            "battleship must have a Destroy doctrine (#572 doctrine-based AI)"
+        );
     }
 
     #[test]
@@ -2432,70 +2455,43 @@ target_speed = 0.5
     }
 
     #[test]
-    fn pirate_raider_template_has_behaviour_states() {
-        // (#474) Rebalanced to fight to the death — removed `fleeing`
-        // state. `warping_out` retained only for clean scenario teardown
-        // (`on_scenario_unloaded`).
+    fn pirate_raider_template_has_doctrine_objectives() {
+        // (#572) FSM dissolved — pirate_raider now uses doctrine-based AI.
+        // Expects a Patrol objective (sector sweep) and a higher-priority
+        // Destroy objective (engage hostiles on sight).
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         let behaviour = config
             .behaviour
             .expect("pirate_raider must have a [behaviour] block");
-        let state_kinds: Vec<&str> = behaviour.state.iter().map(|s| s.kind.as_str()).collect();
+        let ids: Vec<&str> = behaviour.doctrine.iter().map(|d| d.id.as_str()).collect();
+        assert!(ids.contains(&"patrol-sector"), "must have patrol-sector doctrine");
+        assert!(ids.contains(&"destroy-hostiles"), "must have destroy-hostiles doctrine");
+        let destroy = behaviour.doctrine.iter().find(|d| d.id == "destroy-hostiles").unwrap();
+        let patrol = behaviour.doctrine.iter().find(|d| d.id == "patrol-sector").unwrap();
         assert!(
-            state_kinds.contains(&"patrolling"),
-            "must have patrolling state"
-        );
-        assert!(
-            state_kinds.contains(&"pursuing"),
-            "must have pursuing state"
-        );
-        assert!(
-            state_kinds.contains(&"attacking"),
-            "must have attacking state"
-        );
-        assert!(
-            !state_kinds.contains(&"fleeing"),
-            "fleeing state was removed in #474 — destroyers fight to the death"
-        );
-        assert!(
-            state_kinds.contains(&"warping_out"),
-            "warping_out retained for clean on_scenario_unloaded teardown"
+            destroy.base_priority > patrol.base_priority,
+            "destroy-hostiles must outscore patrol-sector"
         );
     }
 
     #[test]
-    fn pirate_raider_template_transitions_include_enemy_in_range_and_on_attacked() {
-        // (#474) Rebalanced — removed `hull_below` (flee threshold) and
-        // `on_timer` (flee→warp_out delay) transitions. The destroyer
-        // now fights to the death.
+    fn pirate_raider_doctrine_destroy_has_correct_directive_kind() {
+        // (#572) FSM transitions dissolved — engagement logic now lives in the
+        // utility scorer. Verify the destroy-hostiles objective carries the
+        // Destroy directive kind so operate_weapons picks it up.
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         let behaviour = config.behaviour.expect("behaviour must be Some");
-        let conditions: Vec<&str> = behaviour
-            .transition
+        let destroy = behaviour
+            .doctrine
             .iter()
-            .map(|t| t.condition.as_str())
-            .collect();
-        assert!(
-            conditions.contains(&"enemy_in_range"),
-            "must have enemy_in_range transition"
-        );
-        assert!(
-            conditions.contains(&"on_attacked"),
-            "must have on_attacked transition"
-        );
-        assert!(
-            conditions.contains(&"in_weapons_range"),
-            "must have in_weapons_range transition"
-        );
-        assert!(
-            !conditions.contains(&"hull_below"),
-            "hull_below (flee threshold) was removed in #474"
-        );
-        assert!(
-            conditions.contains(&"on_scenario_unloaded"),
-            "must have on_scenario_unloaded transition"
+            .find(|d| d.id == "destroy-hostiles")
+            .expect("destroy-hostiles doctrine must be present");
+        assert_eq!(
+            destroy.directive_kind.as_deref(),
+            Some("Destroy"),
+            "destroy-hostiles must carry directive_kind = 'Destroy'"
         );
     }
 

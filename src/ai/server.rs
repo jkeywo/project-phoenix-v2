@@ -1,4 +1,4 @@
-/// Bevy plugin: AI controller lifecycle Ã¢â‚¬â€ attaches `AiController` components
+/// Bevy plugin: AI controller lifecycle — attaches `AiControllerComponent`
 /// to entities that declare a `[behaviour]` block, mints synthetic
 /// `ai:<entity_uuid>` session tokens, and ticks controllers during
 /// `InProgress` phase.
@@ -20,23 +20,23 @@ pub fn anchors_from_world_config(
     world.anchors().clone()
 }
 
-use crate::ai::{AiController, AiTickOutput, AiWorldEntity, WorldView};
+use crate::ai::{AiMemory, AiWorldEntity, WorldView, operate_helm, operate_weapons, score_doctrine_pool};
 use crate::entity_spawner::{BehaviourSection, ColliderSection, EntityUuid};
 
 use crate::config_cache::FactionRegistryResource;
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ AiTokenRegistry Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── AiTokenRegistry ───────────────────────────────────────────────────────────
 
-/// Maps entity UUID Ã¢â€ â€™ synthetic token string (`"ai:<uuid>"`).
+/// Maps entity UUID → synthetic token string (`"ai:<uuid>"`).
 /// The simulation's token-to-entity lookup falls back to this registry when
 /// a player session lookup misses.
 #[derive(Resource, Default)]
 pub struct AiTokenRegistry {
-    /// entity_uuid Ã¢â€ â€™ token string
+    /// entity_uuid → token string
     by_entity: HashMap<String, String>,
-    /// token string Ã¢â€ â€™ entity_uuid (reverse lookup)
+    /// token string → entity_uuid (reverse lookup)
     by_token: HashMap<String, String>,
-    /// Bevy Entity id Ã¢â€ â€™ entity_uuid (for despawn handler)
+    /// Bevy Entity id → entity_uuid (for despawn handler)
     by_bevy_entity: HashMap<Entity, String>,
 }
 
@@ -100,14 +100,14 @@ impl AiTokenRegistry {
     }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ AiControllerComponent Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── AiControllerComponent ─────────────────────────────────────────────────────
 
-/// Marker component wrapping an `AiController` (the pure state machine).
+/// Marker component wrapping per-entity `AiMemory` (private reasoning state).
 /// Also carries the entity UUID so the despawn handler can unregister
 /// the synthetic token without querying a potentially-absent UUID component.
 #[derive(Component)]
 pub struct AiControllerComponent {
-    pub controller: AiController,
+    pub memory: AiMemory,
     pub entity_uuid: String,
     /// Current forward speed in world-units/sec, carried across ticks so the
     /// ship can accelerate over multiple frames (like the player helm does).
@@ -153,9 +153,10 @@ impl EntityPhaserState {
     }
 }
 
-/// Marker component set on NPC entities currently in the `WarpingOut` AI state.
+/// Marker component set on NPC entities currently in a warp-out sequence.
 /// Carries the data needed to draw the warp-exit visual and to populate
 /// `EntitySnapshot::warp_out_remaining_secs` in the broadcast.
+/// Kept for interface compatibility; not set by the doctrine-based AI system.
 #[derive(Component)]
 pub struct WarpOutMarker {
     pub remaining_secs: f32,
@@ -170,7 +171,7 @@ pub struct WarpOutMarker {
 pub struct AttackerThisTick(pub uuid::Uuid);
 
 /// Component: tracks the hull integrity fraction [0.0, 1.0] of an NPC entity.
-/// Default 1.0 (full health). When it reaches Ã¢â€°Â¤ 0.0 the `detect_npc_hull_zero`
+/// Default 1.0 (full health). When it reaches ≤ 0.0 the `detect_npc_hull_zero`
 /// system emits an `AiEntityDestroyed` event and despawns the entity.
 #[derive(Component, Clone, Debug)]
 pub struct NpcHullFraction(pub f32);
@@ -181,14 +182,13 @@ impl Default for NpcHullFraction {
     }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Events Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Events ────────────────────────────────────────────────────────────────────
 
 /// Marker component added to an AI entity when its owning scenario is unloaded.
 ///
 /// `tick_ai_controllers` reads this component to set `scenario_unloaded: true`
-/// in the `WorldView`, allowing `on_scenario_unloaded` transitions to fire.
-/// The component persists until `tick_ai_controllers` removes it (or until the
-/// entity despawns alongside its scenario cleanup).
+/// in the `WorldView`. The component persists until `tick_ai_controllers`
+/// removes it (or until the entity despawns alongside its scenario cleanup).
 #[derive(Component)]
 pub struct ScenarioUnloadedMarker;
 
@@ -196,8 +196,8 @@ pub struct ScenarioUnloadedMarker;
 #[derive(Resource, Default)]
 pub struct ScenariosBeingUnloaded(pub std::collections::HashSet<String>);
 
-/// Emitted by the AI plugin when an NPC entity's `on_attacked` condition fires
-/// (first hit per state-entry, i.e. while `on_attacked_armed` is true).
+/// Emitted by the AI plugin when an NPC entity's `last_attacker` in memory
+/// changes (a new attacker UUID arrives).
 ///
 /// The world plugin observes this event to evaluate `on_entity_attacked`
 /// trigger conditions without a direct dependency on the AI module.
@@ -207,7 +207,7 @@ pub struct AiEntityAttacked {
     pub attacker_uuid: uuid::Uuid,
 }
 
-/// Emitted by the AI plugin when an NPC entity's hull reaches Ã¢â€°Â¤ 0.0.
+/// Emitted by the AI plugin when an NPC entity's hull reaches ≤ 0.0.
 ///
 /// The world plugin observes this event to evaluate `on_entity_destroyed`
 /// trigger conditions without a direct dependency on the AI module.
@@ -216,7 +216,7 @@ pub struct AiEntityDestroyed {
     pub entity_uuid: String,
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Plugin Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct AiPlugin;
 
@@ -240,7 +240,7 @@ impl Plugin for AiPlugin {
     }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Systems Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Systems ───────────────────────────────────────────────────────────────────
 
 /// Attach an `AiControllerComponent` (and register a synthetic token) when a
 /// newly-spawned entity carries a `BehaviourSection` but no controller yet.
@@ -258,22 +258,17 @@ fn attach_controllers_on_spawn(
         ),
         Without<AiControllerComponent>,
     >,
-    time: Res<Time>,
 ) {
-    for (entity, uuid, transform, behaviour, weapons_section, existing_phaser) in &query {
+    for (entity, uuid, transform, _behaviour, weapons_section, existing_phaser) in &query {
         let pos = transform.translation;
-        let initial_state = crate::ai::build_initial_state(&behaviour.0);
-        let initial_state_name = behaviour.0.initial_state.clone();
-        let mut controller = AiController::new([pos.x, pos.y, pos.z], time.elapsed_secs_f64());
-        controller.current_state = initial_state;
-        controller.current_state_name = initial_state_name;
-        controller.waypoint_arrival_radius = behaviour.0.waypoint_arrival_radius;
-        controller.avoidance_buffer = behaviour.0.avoidance_buffer;
-        controller.avoidance_look_ahead_secs = behaviour.0.avoidance_look_ahead_secs;
+        let memory = AiMemory {
+            home_position: [pos.x, pos.y, pos.z],
+            ..Default::default()
+        };
         registry.register_with_entity(&uuid.0, entity);
         let mut entity_cmd = commands.entity(entity);
         entity_cmd.insert(AiControllerComponent {
-            controller,
+            memory,
             entity_uuid: uuid.0.clone(),
             forward_speed: 0.0,
             last_helm_intent: None,
@@ -286,7 +281,12 @@ fn attach_controllers_on_spawn(
     }
 }
 
-/// Tick AI controllers.
+/// Tick AI controllers — one tick per entity per frame.
+///
+/// Phase 1: score doctrine pool from `BehaviourSection.doctrine` + per-entity
+///   `WorldConditions` (hull fraction + recent attacker).
+/// Phase 2: `operate_helm` → `(thrust, steering)` → `last_helm_intent`
+/// Phase 3: `operate_weapons` → `(target, fire?)` → InboundMessages
 fn tick_ai_controllers(
     mut commands: Commands,
     mut query: Query<(
@@ -327,33 +327,26 @@ fn tick_ai_controllers(
         HashMap::new()
     };
 
-    // Collect world entities from all non-AI entities, including faction and hull if present.
+    // Collect world entities from all non-AI entities.
     let mut world_entities: Vec<AiWorldEntity> = entity_query
         .iter()
-        .map(
-            |(uid, t, faction_comp, hull_comp, collider)| AiWorldEntity {
-                uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
-                position: [t.translation.x, t.translation.y, t.translation.z],
-                faction: faction_comp.map(|f| f.0),
-                shields: None,
-                hull_fraction: hull_comp.and_then(|h| {
-                    let max = h.0.total_max();
-                    if max > 0.0 {
-                        Some(h.0.total_current() / max)
-                    } else {
-                        None
-                    }
-                }),
-                yaw: None,
-                radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
-                forward_speed: 0.0,
-            },
-        )
+        .map(|(uid, t, faction_comp, hull_comp, collider)| AiWorldEntity {
+            uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
+            position: [t.translation.x, t.translation.y, t.translation.z],
+            faction: faction_comp.map(|f| f.0),
+            shields: None,
+            hull_fraction: hull_comp.and_then(|h| {
+                let max = h.0.total_max();
+                if max > 0.0 { Some(h.0.total_current() / max) } else { None }
+            }),
+            yaw: None,
+            radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+            forward_speed: 0.0,
+        })
         .collect();
 
     // Also snapshot all AI-controlled entities so ships can avoid each other.
-    // This immutable pass MUST come before the mutable loop below; sequential
-    // borrows of the same Query are fine, simultaneous ones are not.
+    // This immutable pass MUST come before the mutable loop below.
     let ai_snapshots: Vec<AiWorldEntity> = query
         .iter()
         .map(|(_, ctrl, t, _, _, _, _, _, _, _, _, collider)| {
@@ -394,16 +387,12 @@ fn tick_ai_controllers(
 
         // Read attacker from component (set externally by simulation / tests).
         let attacker_this_tick = attacker_comp.map(|a| a.0);
-        // Consume the marker so the `on_attacked` condition only fires once per
-        // incoming hit (the simulation re-inserts it whenever a new hit lands).
         if attacker_this_tick.is_some() {
             commands.entity(entity).remove::<AttackerThisTick>();
         }
 
-        // `scenario_unloaded` is true when this entity carries the marker set
-        // by `handle_ai_events` when its owning scenario was unloaded.
+        // Remove ScenarioUnloadedMarker after reading it (fires only once).
         let scenario_unloaded = unloaded_marker.is_some();
-        // Remove the marker so the transition only fires once.
         if scenario_unloaded {
             commands.entity(entity).remove::<ScenarioUnloadedMarker>();
         }
@@ -411,11 +400,7 @@ fn tick_ai_controllers(
         // Populate hull fraction from EntityConsoleHull if present.
         let self_hull_fraction = hull_comp.and_then(|h| {
             let max = h.0.total_max();
-            if max > 0.0 {
-                Some(h.0.total_current() / max)
-            } else {
-                None
-            }
+            if max > 0.0 { Some(h.0.total_current() / max) } else { None }
         });
 
         // Populate weapons range and phaser readiness from WeaponsConsoleSection and EntityPhaserState.
@@ -423,31 +408,24 @@ fn tick_ai_controllers(
             Some(wc) => {
                 let ready = phaser_state.map(|ps| ps.is_ready()).unwrap_or(false);
                 let range = wc.0.phaser_banks.first().and_then(|b| {
-                    if b.beam_range > 0.0 {
-                        Some(b.beam_range)
-                    } else {
-                        None
-                    }
+                    if b.beam_range > 0.0 { Some(b.beam_range) } else { None }
                 });
                 (ready, range)
             }
             None => (false, None),
         };
 
+        let self_uuid_str = ctrl.entity_uuid.clone();
         let world_view = WorldView {
             sim_time,
             entity_pos: [pos.x, pos.y, pos.z],
             entity_yaw: yaw,
             anchors: anchors.clone(),
-            // Exclude self from the entity list — the AI shouldn't try to avoid itself.
-            entities: {
-                let self_uuid_str = &ctrl.entity_uuid;
-                world_entities
-                    .iter()
-                    .filter(|e| e.uuid.to_string() != *self_uuid_str)
-                    .cloned()
-                    .collect()
-            },
+            entities: world_entities
+                .iter()
+                .filter(|e| e.uuid.to_string() != self_uuid_str)
+                .cloned()
+                .collect(),
             attacker_this_tick,
             self_faction: self_faction_comp.map(|f| f.0),
             entity_phaser_ready,
@@ -459,120 +437,94 @@ fn tick_ai_controllers(
         };
 
         let registry = &faction_registry.0;
-        let output: AiTickOutput =
-            crate::ai::tick(&ctrl.controller, &world_view, &behaviour.0, registry);
 
-        // Emit AiEntityAttacked when the on_attacked condition just fired.
-        // We detect this by checking: attacker present AND on_attacked_armed was true
-        // before the tick (i.e. the new blackboard has on_attacked_armed == false).
+        // ── Phase 1: score doctrine pool ──────────────────────────────────
+
+        let conditions = crate::objectives::WorldConditions {
+            red_alert: attacker_this_tick.is_some() || ctrl.memory.last_attacker.is_some(),
+            hull_fraction: self_hull_fraction.unwrap_or(1.0),
+        };
+        let scored_pool = score_doctrine_pool(&behaviour.0.doctrine, &conditions);
+
+        // Read values from ctrl before any mutable borrows.
+        let forward_speed = ctrl.forward_speed;
+        let entity_uuid = ctrl.entity_uuid.clone();
+
+        // ── Phase 2: operate_helm ─────────────────────────────────────────
+
+        let (thrust, steering) = operate_helm(
+            &mut ctrl.memory,
+            &world_view,
+            &scored_pool,
+            &behaviour.0.doctrine,
+            &anchors,
+            behaviour.0.waypoint_arrival_radius,
+            behaviour.0.avoidance_buffer,
+            behaviour.0.avoidance_look_ahead_secs,
+            forward_speed,
+            registry,
+        );
+        ctrl.last_helm_intent = if thrust != 0.0 || steering != 0.0 {
+            Some((thrust, steering))
+        } else {
+            None
+        };
+
+        // ── Phase 3: operate_weapons ──────────────────────────────────────
+
+        let (target_opt, should_fire) = operate_weapons(
+            &ctrl.memory,
+            &world_view,
+            &scored_pool,
+            registry,
+        );
+
+        // ── Update memory: track last attacker ────────────────────────────
+
         if let Some(attacker_uuid) = attacker_this_tick {
-            let was_armed = ctrl.controller.blackboard.on_attacked_armed;
-            let now_disarmed = output
-                .new_blackboard
-                .as_ref()
-                .map(|bb| !bb.on_attacked_armed)
-                .unwrap_or(false);
-            if was_armed && now_disarmed {
+            let is_new = ctrl.memory.last_attacker != Some(attacker_uuid);
+            if is_new {
                 attacked_events.write(AiEntityAttacked {
-                    entity_uuid: ctrl.entity_uuid.clone(),
+                    entity_uuid: entity_uuid.clone(),
                     attacker_uuid,
                 });
             }
+            ctrl.memory.last_attacker = Some(attacker_uuid);
         }
 
-        // Apply blackboard update
-        if let Some(new_bb) = output.new_blackboard {
-            ctrl.controller.blackboard = new_bb;
-        }
-        // Update state name when state changes
-        if output.new_state != ctrl.controller.current_state {
-            // Find the config entry matching the new state kind to get its name
-            ctrl.controller.current_state_name = behaviour
-                .0
-                .transition
-                .iter()
-                .find(|t| build_state_by_name_matches(&output.new_state, &behaviour.0, &t.to))
-                .map(|t| t.to.clone())
-                .unwrap_or_else(|| output.new_state.kind_name().to_string());
-        }
-        ctrl.controller.current_state = output.new_state;
+        // ── Emit weapon InboundMessages ───────────────────────────────────
 
-        // Inject weapon AI outputs as InboundMessages so they are processed by
-        // handle_fire_phaser_npc (WeaponsPlugin) using the entity's synthetic token.
         let ai_token = registry_res
-            .token_for_entity(&ctrl.entity_uuid)
+            .token_for_entity(&entity_uuid)
             .map(|s| s.to_string());
         if let Some(token) = ai_token {
-            for input in &output.inputs {
-                match input {
-                    crate::ai::AiInput::SetTarget { uuid: target } => {
-                        inbound.write(crate::lobby::InboundMessage {
-                            token: token.clone(),
-                            msg: crate::messages::ClientMessage::ControlSystem {
-                                target: crate::system_registry::tactical_system_id(),
-                                payload: crate::messages::SystemControlPayload::SetTarget {
-                                    uuid: target.to_string(),
-                                },
-                            },
-                        });
-                    }
-                    crate::ai::AiInput::FirePhaser => {
-                        // Use the first declared phaser bank id when available,
-                        // otherwise fall back to "fore" (handle_fire_phaser_npc
-                        // ignores the bank name, but the field must be present).
-                        let bank_id = weapons_section
-                            .and_then(|wc| wc.0.phaser_banks.first())
-                            .map(|b| b.id.clone())
-                            .unwrap_or_else(|| "fore".to_string());
-                        inbound.write(crate::lobby::InboundMessage {
-                            token: token.clone(),
-                            msg: crate::messages::ClientMessage::FirePhaser { bank: bank_id },
-                        });
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // Record helm intent for operate_helm_ai (helm_ai_plugin) to consume.
-        // Physics application has moved to the per-kind plugin; server.rs is
-        // intent-only for helm.
-        ctrl.last_helm_intent = None;
-        for input in &output.inputs {
-            if let crate::ai::AiInput::Helm { thrust, steering } = *input {
-                ctrl.last_helm_intent = Some((thrust, steering));
-                break;
-            }
-        }
-
-        // Handle self-despawn (e.g. WarpingOut timer expired).
-        if output.despawn {
-            commands.entity(entity).despawn();
-            continue;
-        }
-
-        // Update WarpOutMarker: insert/update when warping out, remove otherwise.
-        match &ctrl.controller.current_state {
-            crate::ai::AiState::WarpingOut {
-                duration_secs,
-                target_speed,
-            } => {
-                let elapsed = sim_time as f32 - ctrl.controller.blackboard.state_entered_at as f32;
-                let remaining = (duration_secs - elapsed).max(0.0);
-                commands.entity(entity).insert(WarpOutMarker {
-                    remaining_secs: remaining,
-                    target_speed: *target_speed,
+            if let Some(t) = target_opt {
+                inbound.write(crate::lobby::InboundMessage {
+                    token: token.clone(),
+                    msg: crate::messages::ClientMessage::ControlSystem {
+                        target: crate::system_registry::tactical_system_id(),
+                        payload: crate::messages::SystemControlPayload::SetTarget {
+                            uuid: t.to_string(),
+                        },
+                    },
                 });
             }
-            _ => {
-                commands.entity(entity).remove::<WarpOutMarker>();
+            if should_fire {
+                let bank_id = weapons_section
+                    .and_then(|wc| wc.0.phaser_banks.first())
+                    .map(|b| b.id.clone())
+                    .unwrap_or_else(|| "fore".to_string());
+                inbound.write(crate::lobby::InboundMessage {
+                    token,
+                    msg: crate::messages::ClientMessage::FirePhaser { bank: bank_id },
+                });
             }
         }
     }
 }
 
 /// Emit `AiEntityDestroyed` and despawn any NPC entity whose `NpcHullFraction`
-/// has dropped to Ã¢â€°Â¤ 0.0.
+/// has dropped to ≤ 0.0.
 fn detect_npc_hull_zero(
     mut commands: Commands,
     query: Query<(Entity, &EntityUuid, &NpcHullFraction), Changed<NpcHullFraction>>,
@@ -588,23 +540,6 @@ fn detect_npc_hull_zero(
     }
 }
 
-/// Helper: check if a state built from `name` in `behaviour` matches `new_state`.
-fn build_state_by_name_matches(
-    new_state: &crate::ai::AiState,
-    behaviour: &crate::entity_config::BehaviourConfig,
-    name: &str,
-) -> bool {
-    let built = crate::ai::build_initial_state(&crate::entity_config::BehaviourConfig {
-        initial_state: name.to_string(),
-        state: behaviour.state.clone(),
-        transition: vec![],
-        waypoint_arrival_radius: behaviour.waypoint_arrival_radius,
-        avoidance_buffer: behaviour.avoidance_buffer,
-        avoidance_look_ahead_secs: behaviour.avoidance_look_ahead_secs,
-    });
-    &built == new_state
-}
-
 /// Unregister synthetic tokens when AI-controlled entities are despawned.
 fn unregister_on_despawn(
     mut registry: ResMut<AiTokenRegistry>,
@@ -615,13 +550,13 @@ fn unregister_on_despawn(
     }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Unit Tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Unit Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ anchors_from_world_config (PRD #337/#338 slice 1) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── anchors_from_world_config (PRD #337/#338 slice 1) ──────────────────
 
     #[test]
     fn anchors_from_world_config_clones_anchor_table() {
@@ -641,7 +576,7 @@ mod tests {
         assert!(anchors_from_world_config(&world).is_empty());
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ AiTokenRegistry unit tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── AiTokenRegistry unit tests ─────────────────────────────────────────
 
     #[test]
     fn register_produces_ai_prefixed_token() {
@@ -724,9 +659,9 @@ mod tests {
         assert_eq!(reg.token_for_entity("beta"), Some("ai:beta"));
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Bevy integration tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Bevy integration tests ─────────────────────────────────────────────
 
-    use crate::entity_config::{BehaviourConfig, StateConfig};
+    use crate::entity_config::BehaviourConfig;
     use crate::entity_spawner::EntityUuid;
     use crate::lobby::LobbyPlugin;
     use crate::messages::GamePhase;
@@ -762,20 +697,13 @@ mod tests {
     }
 
     fn spawn_behaviour_entity(app: &mut App, uuid: &str) -> Entity {
-        let entity = app
-            .world_mut()
+        app.world_mut()
             .spawn((
                 Transform::from_xyz(1.0, 0.0, 2.0),
                 EntityUuid(uuid.to_string()),
-                BehaviourSection(BehaviourConfig {
-                    initial_state: "idle".to_string(),
-                    state: vec![],
-                    transition: vec![],
-                    ..Default::default()
-                }),
+                BehaviourSection(BehaviourConfig::default()),
             ))
-            .id();
-        entity
+            .id()
     }
 
     #[test]
@@ -790,15 +718,6 @@ mod tests {
     }
 
     #[test]
-    fn controller_starts_in_idle_state() {
-        let mut app = build_test_app();
-        let entity = spawn_behaviour_entity(&mut app, "ent-002");
-        app.update();
-        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        assert_eq!(ctrl.controller.current_state, crate::ai::AiState::Idle);
-    }
-
-    #[test]
     fn token_registered_after_spawn() {
         let mut app = build_test_app();
         spawn_behaviour_entity(&mut app, "ent-003");
@@ -809,49 +728,21 @@ mod tests {
     }
 
     #[test]
-    fn blackboard_seeded_with_spawn_position() {
+    fn memory_seeded_with_spawn_position() {
         let mut app = build_test_app();
         let entity = app
             .world_mut()
             .spawn((
                 Transform::from_xyz(10.0, 0.0, -5.0),
                 EntityUuid("ent-004".to_string()),
-                BehaviourSection(BehaviourConfig {
-                    initial_state: "idle".to_string(),
-                    state: vec![],
-                    transition: vec![],
-                    ..Default::default()
-                }),
+                BehaviourSection(BehaviourConfig::default()),
             ))
             .id();
         app.update();
         let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        let home = ctrl.controller.blackboard.home_position;
+        let home = ctrl.memory.home_position;
         assert!((home[0] - 10.0).abs() < 0.001, "home x must be spawn x");
         assert!((home[2] - -5.0).abs() < 0.001, "home z must be spawn z");
-    }
-
-    #[test]
-    fn idle_controller_produces_no_inputs_in_progress_phase() {
-        let mut app = build_test_app();
-        // Set InProgress phase
-        app.world_mut()
-            .insert_resource(State::new(GamePhase::InProgress));
-        let entity = spawn_behaviour_entity(&mut app, "ent-005");
-        app.update();
-        // Controller stays idle - we verify it's still Idle
-        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        assert_eq!(ctrl.controller.current_state, crate::ai::AiState::Idle);
-    }
-
-    #[test]
-    fn idle_controller_does_not_change_state_in_lobby_phase() {
-        let mut app = build_test_app();
-        // Default phase is Lobby
-        let entity = spawn_behaviour_entity(&mut app, "ent-006");
-        app.update();
-        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        assert_eq!(ctrl.controller.current_state, crate::ai::AiState::Idle);
     }
 
     #[test]
@@ -875,59 +766,65 @@ mod tests {
         );
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ AiEntityAttacked event Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-
-    fn build_on_attacked_behaviour() -> BehaviourConfig {
-        BehaviourConfig {
-            initial_state: "idle".into(),
-            state: vec![StateConfig {
-                name: "chase".into(),
-                kind: "pursuing".into(),
-                waypoints: vec![],
-                loop_path: false,
-                target_speed: 0.8,
-                maintain_range: 0.0,
-                duration_secs: 0.0,
-            }],
-            transition: vec![crate::ai::TransitionConfig {
-                from: crate::ai::StringOrVec::Single("idle".into()),
-                to: "chase".into(),
-                condition: "on_attacked".into(),
-                radius: None,
-                threshold: None,
-                seconds: None,
-            }],
-            ..Default::default()
-        }
-    }
+    // ── AiEntityAttacked event ─────────────────────────────────────────────
 
     #[test]
-    fn ai_entity_attacked_event_emitted_when_attacker_set_and_on_attacked_fires() {
+    fn ai_entity_attacked_event_emitted_when_new_attacker_arrives() {
         let mut app = build_test_app();
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
 
-        // Spawn entity with on_attacked transition and an attacker component.
         let attacker_id = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000099").unwrap();
         app.world_mut().spawn((
             Transform::from_xyz(0.0, 0.0, 0.0),
             EntityUuid("ent-attacked-001".to_string()),
-            BehaviourSection(build_on_attacked_behaviour()),
+            BehaviourSection(BehaviourConfig::default()),
             AttackerThisTick(attacker_id),
         ));
 
-        app.update(); // attach controller + first tick
-        app.update(); // tick fires transition
+        app.update(); // attach controller (AttackerThisTick still present)
+        app.update(); // tick processes AttackerThisTick — emits AiEntityAttacked
 
         let events = app.world().resource::<AttackedBox>().0.clone();
-
         assert!(
             events.iter().any(|e| e.entity_uuid == "ent-attacked-001"),
-            "AiEntityAttacked must be emitted when on_attacked fires"
+            "AiEntityAttacked must be emitted when new attacker arrives"
         );
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ AiEntityDestroyed event Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    #[test]
+    fn ai_entity_attacked_not_re_emitted_for_same_attacker() {
+        let mut app = build_test_app();
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+
+        let attacker_id = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000088").unwrap();
+        let entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                EntityUuid("ent-attacked-002".to_string()),
+                BehaviourSection(BehaviourConfig::default()),
+                AttackerThisTick(attacker_id),
+            ))
+            .id();
+
+        app.update(); // attach
+        app.update(); // first attacker tick — emits AiEntityAttacked
+
+        // Insert the same attacker again
+        app.world_mut().entity_mut(entity).insert(AttackerThisTick(attacker_id));
+        app.update(); // second attacker tick — must NOT re-emit
+
+        let events = app.world().resource::<AttackedBox>().0.clone();
+        let count = events
+            .iter()
+            .filter(|e| e.entity_uuid == "ent-attacked-002")
+            .count();
+        assert_eq!(count, 1, "same attacker must not re-emit AiEntityAttacked");
+    }
+
+    // ── AiEntityDestroyed event ────────────────────────────────────────────
 
     #[test]
     fn ai_entity_destroyed_event_emitted_when_hull_reaches_zero() {
@@ -954,7 +851,6 @@ mod tests {
         app.update();
 
         let events = app.world().resource::<DestroyedBox>().0.clone();
-
         assert!(
             events.iter().any(|e| e.entity_uuid == "ent-hull-001"),
             "AiEntityDestroyed must be emitted when hull reaches 0"
@@ -988,148 +884,7 @@ mod tests {
         );
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ scenario_unloaded flag in WorldView Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-
-    // When ScenarioUnloadedMarker is on an entity, it fires on_scenario_unloaded transition.
-    #[test]
-    fn on_scenario_unloaded_transition_fires_when_scenario_being_unloaded() {
-        use crate::ai::{StringOrVec, TransitionConfig};
-        use crate::entity_config::{BehaviourConfig, StateConfig};
-
-        let mut app = build_test_app();
-        app.world_mut()
-            .insert_resource(State::new(GamePhase::InProgress));
-
-        let behaviour = BehaviourConfig {
-            initial_state: "patrol".to_string(),
-            state: vec![
-                StateConfig {
-                    name: "patrol".to_string(),
-                    kind: "idle".to_string(),
-                    waypoints: vec![],
-                    loop_path: false,
-                    target_speed: 0.0,
-                    maintain_range: 0.0,
-                    duration_secs: 0.0,
-                },
-                StateConfig {
-                    name: "free".to_string(),
-                    kind: "warping_out".to_string(),
-                    waypoints: vec![],
-                    loop_path: false,
-                    target_speed: 0.5,
-                    maintain_range: 0.0,
-                    duration_secs: 3.0,
-                },
-            ],
-            transition: vec![TransitionConfig {
-                from: StringOrVec::Single("patrol".into()),
-                to: "free".into(),
-                condition: "on_scenario_unloaded".into(),
-                radius: None,
-                threshold: None,
-                seconds: None,
-            }],
-            ..Default::default()
-        };
-
-        let entity = app
-            .world_mut()
-            .spawn((
-                Transform::from_xyz(0.0, 0.0, 0.0),
-                EntityUuid("ent-unloaded-001".to_string()),
-                BehaviourSection(behaviour),
-            ))
-            .id();
-
-        app.update(); // attach controller
-
-        // Mark entity as scenario-unloaded via component
-        app.world_mut()
-            .entity_mut(entity)
-            .insert(ScenarioUnloadedMarker);
-
-        app.update(); // tick Ã¢â‚¬â€ should fire transition
-
-        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        assert_eq!(
-            ctrl.controller.current_state_name, "free",
-            "on_scenario_unloaded must fire when ScenarioUnloadedMarker is present"
-        );
-    }
-
-    // Entity without ScenarioUnloadedMarker does not get scenario_unloaded flag
-    #[test]
-    fn entity_without_scenario_owner_does_not_see_scenario_unloaded() {
-        use crate::ai::{StringOrVec, TransitionConfig};
-        use crate::entity_config::{BehaviourConfig, StateConfig};
-
-        let mut app = build_test_app();
-        app.world_mut()
-            .insert_resource(State::new(GamePhase::InProgress));
-
-        let behaviour = BehaviourConfig {
-            initial_state: "patrol".to_string(),
-            state: vec![
-                StateConfig {
-                    name: "patrol".to_string(),
-                    kind: "idle".to_string(),
-                    waypoints: vec![],
-                    loop_path: false,
-                    target_speed: 0.0,
-                    maintain_range: 0.0,
-                    duration_secs: 0.0,
-                },
-                StateConfig {
-                    name: "free".to_string(),
-                    kind: "idle".to_string(),
-                    waypoints: vec![],
-                    loop_path: false,
-                    target_speed: 0.0,
-                    maintain_range: 0.0,
-                    duration_secs: 0.0,
-                },
-            ],
-            transition: vec![TransitionConfig {
-                from: StringOrVec::Single("patrol".into()),
-                to: "free".into(),
-                condition: "on_scenario_unloaded".into(),
-                radius: None,
-                threshold: None,
-                seconds: None,
-            }],
-            ..Default::default()
-        };
-
-        // Entity has no ScenarioUnloadedMarker
-        let entity = app
-            .world_mut()
-            .spawn((
-                Transform::from_xyz(0.0, 0.0, 0.0),
-                EntityUuid("ent-free-002".to_string()),
-                BehaviourSection(behaviour),
-            ))
-            .id();
-
-        app.update();
-
-        // A different entity gets the marker Ã¢â‚¬â€ this entity should not transition
-        // (simulates: only owned entities get ScenarioUnloadedMarker)
-        let _other = app
-            .world_mut()
-            .spawn(Transform::from_xyz(0.0, 0.0, 0.0))
-            .id();
-
-        app.update();
-
-        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        assert_eq!(
-            ctrl.controller.current_state_name, "patrol",
-            "entity without ScenarioUnloadedMarker must not fire on_scenario_unloaded"
-        );
-    }
-
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Issue #314: WorldView population from components Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Issue #314: WorldView population from components ───────────────────
 
     fn make_weapons_console_config(beam_range: f32) -> crate::entity_config::WeaponsConsoleConfig {
         crate::entity_config::WeaponsConsoleConfig {
@@ -1155,7 +910,6 @@ mod tests {
     #[test]
     fn self_hull_fraction_reflects_entity_console_hull() {
         use crate::damage::ConsoleHull;
-        use crate::entity_config::BehaviourConfig;
         use crate::entity_spawner::EntityConsoleHull;
         use crate::messages::Console;
 
@@ -1173,12 +927,7 @@ mod tests {
             .spawn((
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-hull-frac-001".to_string()),
-                BehaviourSection(BehaviourConfig {
-                    initial_state: "idle".into(),
-                    state: vec![],
-                    transition: vec![],
-                    ..Default::default()
-                }),
+                BehaviourSection(BehaviourConfig::default()),
                 EntityConsoleHull(hull),
             ))
             .id();
@@ -1197,27 +946,7 @@ mod tests {
     }
 
     #[test]
-    fn entity_phaser_ready_false_without_weapons_console() {
-        let mut app = build_test_app();
-        app.world_mut()
-            .insert_resource(State::new(GamePhase::InProgress));
-
-        let entity = spawn_behaviour_entity(&mut app, "ent-phaser-001");
-        app.update(); // attach controller + tick
-
-        // No WeaponsConsoleSection Ã¢â€ â€™ entity_phaser_ready should never have been true;
-        // the controller stays idle with no inputs.
-        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        assert_eq!(
-            ctrl.controller.current_state,
-            crate::ai::AiState::Idle,
-            "idle without weapons console"
-        );
-    }
-
-    #[test]
     fn entity_phaser_ready_true_when_weapons_console_present_and_no_cooldown() {
-        use crate::entity_config::BehaviourConfig;
         use crate::entity_spawner::WeaponsConsoleSection;
 
         let mut app = build_test_app();
@@ -1229,14 +958,9 @@ mod tests {
             .spawn((
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-phaser-002".to_string()),
-                BehaviourSection(BehaviourConfig {
-                    initial_state: "idle".into(),
-                    state: vec![],
-                    transition: vec![],
-                    ..Default::default()
-                }),
+                BehaviourSection(BehaviourConfig::default()),
                 WeaponsConsoleSection(make_weapons_console_config(40.0)),
-                EntityPhaserState::default(), // cooldown 0 Ã¢â€ â€™ ready
+                EntityPhaserState::default(), // cooldown 0 → ready
             ))
             .id();
 
@@ -1251,7 +975,6 @@ mod tests {
 
     #[test]
     fn entity_phaser_ready_false_when_cooldown_active() {
-        use crate::entity_config::BehaviourConfig;
         use crate::entity_spawner::WeaponsConsoleSection;
 
         let mut app = build_test_app();
@@ -1263,12 +986,7 @@ mod tests {
             .spawn((
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-phaser-003".to_string()),
-                BehaviourSection(BehaviourConfig {
-                    initial_state: "idle".into(),
-                    state: vec![],
-                    transition: vec![],
-                    ..Default::default()
-                }),
+                BehaviourSection(BehaviourConfig::default()),
                 WeaponsConsoleSection(make_weapons_console_config(40.0)),
                 EntityPhaserState {
                     cooldown_remaining: 5.0,
@@ -1350,21 +1068,20 @@ mod tests {
         );
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ PRD #307: FactionRegistryResource must be accessible as Res (not Option) Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── PRD #307: FactionRegistryResource must be accessible as Res (not Option) ──
 
     /// A minimal system that takes `Res<FactionRegistryResource>` (non-Option).
     /// If the resource is not present, Bevy panics with a missing-resource error.
-    /// This test verifies that `build_test_app` Ã¢â‚¬â€ which calls `insert_faction_registry`
-    /// via the unconditional path Ã¢â‚¬â€ makes the resource available on native.
+    /// This test verifies that `build_test_app` — which calls `insert_faction_registry`
+    /// via the unconditional path — makes the resource available on native.
     fn read_faction_registry_system(reg: Res<FactionRegistryResource>) {
-        // Just accessing it is enough Ã¢â‚¬â€ the test verifies the resource exists.
+        // Just accessing it is enough — the test verifies the resource exists.
         let _ = &reg.0;
     }
 
     #[test]
     fn faction_registry_resource_is_present_on_native() {
         let app = build_test_app();
-        // The resource must already be present (inserted unconditionally).
         assert!(
             app.world()
                 .get_resource::<FactionRegistryResource>()
@@ -1376,8 +1093,6 @@ mod tests {
     #[test]
     fn faction_registry_resource_accessible_as_res_not_option() {
         let mut app = build_test_app();
-        // Add a system that takes Res<> (not Option<Res<>>). If the resource is
-        // absent Bevy panics; the test passes only when the resource is present.
         app.add_systems(bevy::app::Update, read_faction_registry_system);
         app.update(); // Must not panic
     }

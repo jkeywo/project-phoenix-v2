@@ -1051,7 +1051,6 @@ fn handle_respond_to_message(
     mut ai_query: Query<(
         &EntityUuid,
         &mut AiControllerComponent,
-        &BehaviourSection,
         Option<&crate::entities::spawner::FactionComponent>,
     )>,
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
@@ -1163,42 +1162,13 @@ fn handle_respond_to_message(
                 TriggerAction::SetAiState {
                     entity,
                     state,
-                    target,
+                    target: _,
                 } => {
-                    let target_uuid = match name_to_uuid_snapshot.get(entity) {
-                        Some(u) => u.clone(),
-                        None => {
-                            bevy::log::warn!(
-                                "handle_respond_to_message: SetAiState: unknown entity name '{entity}'"
-                            );
-                            continue;
-                        }
-                    };
-                    for (uuid_comp, mut ctrl, behaviour, _faction) in ai_query.iter_mut() {
-                        if uuid_comp.0 != target_uuid {
-                            continue;
-                        }
-                        let new_ai_state = crate::ai::build_initial_state(
-                            &crate::entity_config::BehaviourConfig {
-                                initial_state: state.clone(),
-                                state: behaviour.0.state.clone(),
-                                transition: behaviour.0.transition.clone(),
-                                waypoint_arrival_radius: behaviour.0.waypoint_arrival_radius,
-                                avoidance_buffer: behaviour.0.avoidance_buffer,
-                                avoidance_look_ahead_secs: behaviour.0.avoidance_look_ahead_secs,
-                            },
-                        );
-                        ctrl.controller.current_state = new_ai_state;
-                        ctrl.controller.current_state_name = state.clone();
-                        if let Some(target_name) = target {
-                            if let Some(target_uuid) = name_to_uuid_snapshot.get(target_name) {
-                                if let Ok(uuid) = uuid::Uuid::parse_str(target_uuid) {
-                                    ctrl.controller.blackboard.target = Some(uuid);
-                                }
-                            }
-                        }
-                        break;
-                    }
+                    // No-op in doctrine-based AI (issue #572). FSM state slots are
+                    // gone; NPC behaviour is now driven by the scored doctrine pool.
+                    bevy::log::warn!(
+                        "handle_respond_to_message: SetAiState('{entity}' → '{state}') ignored — doctrine-based AI"
+                    );
                 }
                 TriggerAction::ApplyModifier {
                     entity,
@@ -1606,7 +1576,7 @@ fn handle_respond_to_message(
                     if removed {
                         let ai_factions: Vec<(uuid::Uuid, uuid::Uuid)> = ai_query
                             .iter()
-                            .filter_map(|(uid, _, _, fc)| {
+                            .filter_map(|(uid, _, fc)| {
                                 let self_uuid = uuid::Uuid::parse_str(&uid.0).ok()?;
                                 fc.map(|fc| (self_uuid, fc.0))
                             })
@@ -2019,7 +1989,6 @@ fn handle_ai_events(
     mut ai_query: Query<(
         &EntityUuid,
         &mut AiControllerComponent,
-        &BehaviourSection,
         Option<&crate::entities::spawner::FactionComponent>,
     )>,
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
@@ -2268,46 +2237,13 @@ fn handle_ai_events(
                     TriggerAction::SetAiState {
                         entity,
                         state,
-                        target,
+                        target: _,
                     } => {
-                        // Resolve spawn name â†’ UUID
-                        let target_uuid = match name_to_uuid.get(entity) {
-                            Some(u) => u.clone(),
-                            None => {
-                                bevy::log::warn!(
-                                    "handle_ai_events: SetAiState: unknown entity name '{entity}'"
-                                );
-                                continue;
-                            }
-                        };
-                        // Find the Bevy entity with that UUID and mutate its controller.
-                        for (uuid_comp, mut ctrl, behaviour, _faction) in ai_query.iter_mut() {
-                            if uuid_comp.0 != target_uuid {
-                                continue;
-                            }
-                            let new_ai_state = crate::ai::build_initial_state(
-                                &crate::entity_config::BehaviourConfig {
-                                    initial_state: state.clone(),
-                                    state: behaviour.0.state.clone(),
-                                    transition: behaviour.0.transition.clone(),
-                                    waypoint_arrival_radius: behaviour.0.waypoint_arrival_radius,
-                                    avoidance_buffer: behaviour.0.avoidance_buffer,
-                                    avoidance_look_ahead_secs: behaviour
-                                        .0
-                                        .avoidance_look_ahead_secs,
-                                },
-                            );
-                            ctrl.controller.current_state = new_ai_state;
-                            ctrl.controller.current_state_name = state.clone();
-                            if let Some(target_name) = target {
-                                if let Some(target_uuid) = name_to_uuid.get(target_name) {
-                                    if let Ok(uuid) = uuid::Uuid::parse_str(target_uuid) {
-                                        ctrl.controller.blackboard.target = Some(uuid);
-                                    }
-                                }
-                            }
-                            break;
-                        }
+                        // No-op in doctrine-based AI (issue #572). FSM state slots are
+                        // gone; NPC behaviour is now driven by the scored doctrine pool.
+                        bevy::log::warn!(
+                            "handle_ai_events: SetAiState(‘{entity}’ \u{2192} ‘{state}’) ignored \u{2014} doctrine-based AI"
+                        );
                     }
                     TriggerAction::ApplyModifier {
                         entity,
@@ -2757,7 +2693,7 @@ fn handle_ai_events(
                             // with the subsequent `iter_mut()`.
                             let ai_factions: Vec<(uuid::Uuid, uuid::Uuid)> = ai_query
                                 .iter()
-                                .filter_map(|(uid, _, _, fc)| {
+                                .filter_map(|(uid, _, fc)| {
                                     let self_uuid = uuid::Uuid::parse_str(&uid.0).ok()?;
                                     fc.map(|fc| (self_uuid, fc.0))
                                 })
@@ -2872,20 +2808,19 @@ fn revalidate_ai_targets_after_faction_change(
     ai_query: &mut Query<(
         &EntityUuid,
         &mut AiControllerComponent,
-        &BehaviourSection,
         Option<&crate::entities::spawner::FactionComponent>,
     )>,
     registry: &crate::faction::FactionRegistry,
     uuid_to_faction: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
 ) {
-    for (_uid, mut ctrl, _bhv, self_faction_comp) in ai_query.iter_mut() {
-        let Some(target_uuid) = ctrl.controller.blackboard.target else {
+    for (_uid, mut ctrl, self_faction_comp) in ai_query.iter_mut() {
+        let Some(target_uuid) = ctrl.memory.target else {
             continue;
         };
         let self_faction = self_faction_comp.map(|fc| fc.0);
         let target_faction = uuid_to_faction.get(&target_uuid).copied();
         if !crate::faction::is_enemy(self_faction, target_faction, registry) {
-            ctrl.controller.blackboard.target = None;
+            ctrl.memory.target = None;
         }
     }
 }
@@ -5102,64 +5037,28 @@ mod tests {
     }
 
     #[test]
-    fn set_ai_state_action_mutates_controller_state() {
-        use crate::ai::AiState;
-        use crate::entity_config::{BehaviourConfig, StateConfig};
+    fn set_ai_state_action_is_noop_in_doctrine_based_ai() {
+        // Issue #572: SetAiState is kept in TriggerAction for TOML backward compat
+        // but is now a no-op — doctrine-based AI has no FSM state slots. Verify
+        // the system doesn't crash and the controller is unmodified.
+        use crate::entity_config::BehaviourConfig;
 
         let mut app = ai_trigger_test_app();
 
         let npc_uuid = "npc-state-change-uuid-003";
         let attacker_uuid = uuid::Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap();
 
-        // Spawn an NPC entity with a behaviour that has an "idle" and "chase" state.
-        let behaviour = BehaviourConfig {
-            initial_state: "idle".to_string(),
-            state: vec![
-                StateConfig {
-                    name: "idle".to_string(),
-                    kind: "idle".to_string(),
-                    waypoints: vec![],
-                    loop_path: false,
-                    target_speed: 0.0,
-                    maintain_range: 0.0,
-                    duration_secs: 0.0,
-                },
-                StateConfig {
-                    name: "chase".to_string(),
-                    kind: "pursuing".to_string(),
-                    waypoints: vec![],
-                    loop_path: false,
-                    target_speed: 0.8,
-                    maintain_range: 0.0,
-                    duration_secs: 0.0,
-                },
-            ],
-            transition: vec![],
-            ..Default::default()
-        };
-
         let entity = app
             .world_mut()
             .spawn((
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid(npc_uuid.to_string()),
-                BehaviourSection(behaviour),
+                BehaviourSection(BehaviourConfig::default()),
             ))
             .id();
-        // First update: attach controller
-        app.update();
+        app.update(); // attach controller
 
-        // Verify controller starts in Idle
-        let ctrl_state_name = app
-            .world()
-            .get::<AiControllerComponent>(entity)
-            .expect("controller must be attached")
-            .controller
-            .current_state_name
-            .clone();
-        assert_eq!(ctrl_state_name, "idle");
-
-        // Set up trigger: on attacked ? SetAiState to "chase"
+        // Set up trigger: on attacked → SetAiState (now a no-op).
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime
@@ -5183,7 +5082,7 @@ mod tests {
             }];
         }
 
-        // Fire the attacked event
+        // Fire the attacked event.
         app.world_mut()
             .resource_mut::<Messages<AiEntityAttacked>>()
             .write(AiEntityAttacked {
@@ -5191,16 +5090,13 @@ mod tests {
                 attacker_uuid,
             });
 
+        // Must not panic — SetAiState is silently ignored.
         app.update();
 
-        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        assert_eq!(
-            ctrl.controller.current_state_name, "chase",
-            "SetAiState must update current_state_name to 'chase'"
-        );
+        // Controller must still exist and have default memory (no FSM state).
         assert!(
-            matches!(ctrl.controller.current_state, AiState::Pursuing { .. }),
-            "current_state must be Pursuing after SetAiState to 'chase'"
+            app.world().get::<AiControllerComponent>(entity).is_some(),
+            "AiControllerComponent must survive a SetAiState no-op"
         );
     }
 
@@ -5373,12 +5269,7 @@ mod tests {
             .spawn((
                 Transform::from_xyz(10.0, 0.0, 0.0),
                 EntityUuid(npc_uuid_str.to_string()),
-                BehaviourSection(BehaviourConfig {
-                    initial_state: "idle".to_string(),
-                    state: vec![],
-                    transition: vec![],
-                    ..Default::default()
-                }),
+                BehaviourSection(BehaviourConfig::default()),
                 crate::entities::spawner::FactionComponent(harrow_faction_uuid()),
             ))
             .id();
@@ -5386,13 +5277,13 @@ mod tests {
         // First update: attach the AiControllerComponent.
         app.update();
 
-        // Manually seed the engagement: NPC's blackboard.target = player.
+        // Manually seed the engagement: NPC's memory.target = player.
         {
             let mut ctrl = app
                 .world_mut()
                 .get_mut::<AiControllerComponent>(npc_entity)
                 .expect("controller must be attached");
-            ctrl.controller.blackboard.target = Some(player_uuid);
+            ctrl.memory.target = Some(player_uuid);
         }
 
         // Bring both sides into mutual hostility, then fire
@@ -5445,15 +5336,15 @@ mod tests {
 
         app.update();
 
-        // The NPC's blackboard.target must be cleared because Harrow
+        // The NPC's memory.target must be cleared because Harrow
         // no longer considers Federation hostile.
         let ctrl = app
             .world()
             .get::<AiControllerComponent>(npc_entity)
             .unwrap();
         assert_eq!(
-            ctrl.controller.blackboard.target, None,
-            "remove_faction_enemy must clear blackboard.target when target is no longer hostile"
+            ctrl.memory.target, None,
+            "remove_faction_enemy must clear memory.target when target is no longer hostile"
         );
     }
 
@@ -5887,9 +5778,12 @@ mod tests {
 tags = ["ship","npc","enemy"]
 
 [behaviour]
-initial_state = "idle"
-state = []
-transition = []
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+text = "Destroy hostiles"
+directive_kind = "Destroy"
+base_priority = 35.0
 "#;
         let mut world_cfg = UnifiedWorldConfig::default();
         world_cfg

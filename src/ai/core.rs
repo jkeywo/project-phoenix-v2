@@ -231,6 +231,7 @@ pub fn score_doctrine_pool(
                     mandatory: d.mandatory,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
+                    source: crate::messages::ObjectiveSource::Doctrine,
                 },
             }
         })
@@ -709,6 +710,7 @@ mod tests {
                 mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active,
                 targets: vec![],
+                source: crate::messages::ObjectiveSource::Doctrine,
             },
         }]
     }
@@ -811,6 +813,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "patrol".into(), text: "".into(), mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active, targets: vec![],
+                source: crate::messages::ObjectiveSource::Doctrine,
             },
         }];
         let doctrine = vec![crate::entity_config::DoctrineObjective {
@@ -847,6 +850,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "destroy".into(), text: "".into(), mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active, targets: vec![],
+                source: crate::messages::ObjectiveSource::Doctrine,
             },
         }]
     }

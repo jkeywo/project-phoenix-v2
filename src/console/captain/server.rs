@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 
 use crate::messages::{
-    AdmittedCommands, CaptainBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemControlPayload,
-    SystemId, ViewDirection, ViewMode,
+    AdmittedCommands, CaptainBlackboard, ObjectiveSource, ObjectiveSnapshot, SystemBlackboard,
+    SystemControlPayload, SystemId, ViewDirection, ViewMode,
 };
+use crate::objectives::WorldConditions;
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship::combat_activity::RecentCombatActivity;
@@ -18,6 +19,7 @@ impl Plugin for CaptainPlugin {
         app.init_resource::<RecentCombatActivity>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>();
         app.init_resource::<crate::messages::AdmittedCommands>();
+        app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         app.add_systems(
             Update,
             (
@@ -26,6 +28,7 @@ impl Plugin for CaptainPlugin {
                     .before(handle_toggle_red_alert),
                 handle_toggle_red_alert.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
+                handle_set_objective_priority.in_set(crate::sim_sets::SimSet::Input),
                 crate::ship::combat_activity::update_combat_activity
                     .in_set(crate::sim_sets::SimSet::Broadcast),
                 publish_captain_blackboard.in_set(crate::sim_sets::SimSet::Publish),
@@ -70,6 +73,24 @@ fn handle_set_view(
     for cmd in admitted.0.iter() {
         if let Some((source, mode)) = view_request_from_admitted(cmd) {
             ship.request_view_mode_from(source, mode);
+        }
+    }
+}
+
+/// Toggle the captain's priority boost for a doctrine objective.
+/// Sending the same id twice clears the boost.
+fn handle_set_objective_priority(
+    admitted: Res<AdmittedCommands>,
+    boost: Option<ResMut<crate::server_app::CaptainPriorityBoost>>,
+) {
+    let Some(mut boost) = boost else { return };
+    for cmd in admitted.for_target(crate::system_registry::CAPTAIN_SYSTEM_ID) {
+        if let SystemControlPayload::SetObjectivePriority { id } = &cmd.payload {
+            if boost.boosted_id.as_deref() == Some(id.as_str()) {
+                boost.boosted_id = None;
+            } else {
+                boost.boosted_id = Some(id.clone());
+            }
         }
     }
 }
@@ -124,10 +145,15 @@ fn publish_captain_blackboard(
     ship: Res<ShipState>,
     hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
+    boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
     ship_query: Query<&ShipSystemControlSources, With<Ship>>,
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     let red_alert = ship.red_alert();
+    let hull_fraction = hull.as_ref().map(|h| {
+        let max = h.0.total_max();
+        if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+    }).unwrap_or(1.0);
     let control_sources = ship_query.single().ok();
     let red_alert_auto = control_sources.is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::captain_system_id()) == ControlSource::Ai
@@ -144,9 +170,23 @@ fn publish_captain_blackboard(
     }
     .to_string();
 
+    // Score objectives to determine which doctrine ones are currently relevant.
+    // Mission objectives are always shown; doctrine objectives are hidden when
+    // their utility score is zero (conditions not met).
+    let conditions = WorldConditions { red_alert, hull_fraction };
+    let captain_boost = boost.as_ref().and_then(|b| {
+        b.boosted_id.as_deref().map(|id| (id, crate::server_app::CaptainPriorityBoost::BOOST_AMOUNT))
+    });
     let objectives_snap: Vec<ObjectiveSnapshot> = objectives
         .as_ref()
-        .map(|obj| obj.0.sorted_snapshots())
+        .map(|obj| {
+            let scored = obj.0.scored_pool_with_boost(&conditions, captain_boost);
+            scored
+                .into_iter()
+                .filter(|o| o.source == ObjectiveSource::Mission || o.score > 0.0)
+                .map(|o| o.snapshot)
+                .collect()
+        })
         .unwrap_or_default();
 
     let hull_integrity_pct = hull
@@ -179,6 +219,7 @@ fn publish_captain_blackboard(
         objectives: objectives_snap,
         hull_integrity_pct,
         game_status,
+        boosted_objective_id: boost.as_ref().and_then(|b| b.boosted_id.clone()),
     };
 
     blackboards.0.insert(
@@ -957,5 +998,146 @@ mod tests {
         app.world_mut().resource_mut::<ShipState>().view_mode = ViewMode::Radar;
         app.update();
         assert_eq!(captain_bb(&app).view_direction, "");
+    }
+
+    // ── #574 objective filtering + priority boost tests ──────────────────────
+
+    use crate::messages::{ObjectiveSource, ObjectiveStatus};
+    use crate::objectives::{UtilityConfig, ZeroGateCondition};
+
+    fn doctrine_objective_manager() -> ObjectiveManager {
+        let mut mgr = ObjectiveManager::new();
+        // Doctrine objective gated on red_alert — score=0 when not at red alert.
+        mgr.add_full(
+            "destroy-hostiles",
+            "Destroy hostiles",
+            false,
+            vec![],
+            crate::messages::AiDirective::None,
+            UtilityConfig {
+                base_priority: 30.0,
+                zero_gates: vec![ZeroGateCondition { condition: "red_alert".into(), threshold: None }],
+                ..Default::default()
+            },
+            ObjectiveSource::Doctrine,
+        );
+        mgr
+    }
+
+    #[test]
+    fn doctrine_objective_hidden_from_captain_bb_when_score_zero() {
+        let mut app = bb_test_app();
+        app.world_mut().insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
+        app.update();
+
+        let bb = captain_bb(&app);
+        assert!(
+            bb.objectives.is_empty(),
+            "doctrine objective with zero score must be hidden from the captain panel"
+        );
+    }
+
+    #[test]
+    fn doctrine_objective_shown_in_captain_bb_when_score_positive() {
+        let mut app = bb_test_app();
+        app.world_mut().resource_mut::<ShipState>().toggle_red_alert();
+        app.world_mut().insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
+        app.update();
+
+        let bb = captain_bb(&app);
+        assert_eq!(bb.objectives.len(), 1, "doctrine objective should be visible when conditions met");
+        assert_eq!(bb.objectives[0].id, "destroy-hostiles");
+        assert_eq!(bb.objectives[0].source, ObjectiveSource::Doctrine);
+    }
+
+    #[test]
+    fn mission_objective_always_shown_in_captain_bb() {
+        // Mission objectives are never filtered regardless of utility score.
+        let mut app = bb_test_app();
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("reach-station", "Reach station", true, vec![]);
+        app.world_mut().insert_resource(ObjectiveManagerRes(mgr));
+        app.update();
+
+        let bb = captain_bb(&app);
+        assert_eq!(bb.objectives.len(), 1);
+        assert_eq!(bb.objectives[0].source, ObjectiveSource::Mission);
+    }
+
+    #[test]
+    fn boosted_objective_id_propagates_to_captain_bb() {
+        let mut app = bb_test_app();
+        app.world_mut().insert_resource(crate::server_app::CaptainPriorityBoost {
+            boosted_id: Some("destroy-hostiles".into()),
+        });
+        app.update();
+
+        assert_eq!(
+            captain_bb(&app).boosted_objective_id.as_deref(),
+            Some("destroy-hostiles"),
+        );
+    }
+
+    #[test]
+    fn captain_priority_boost_makes_gated_doctrine_objective_visible() {
+        // A doctrine objective gated on red_alert would normally be hidden (score=0).
+        // The captain's priority boost overcomes the zero-score so it appears.
+        let mut app = bb_test_app();
+        app.world_mut().insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
+        app.world_mut().insert_resource(crate::server_app::CaptainPriorityBoost {
+            boosted_id: Some("destroy-hostiles".into()),
+        });
+        app.update();
+
+        let bb = captain_bb(&app);
+        assert_eq!(bb.objectives.len(), 1, "boosted objective must appear despite zero-gate");
+        assert_eq!(bb.objectives[0].id, "destroy-hostiles");
+    }
+
+    #[test]
+    fn set_objective_priority_command_sets_boost() {
+        let mut app = test_app();
+        app.world_mut().insert_resource(crate::server_app::CaptainPriorityBoost::default());
+        start_game(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::captain_system_id(),
+                payload: SystemControlPayload::SetObjectivePriority {
+                    id: "destroy-hostiles".into(),
+                },
+            },
+        );
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<crate::server_app::CaptainPriorityBoost>().boosted_id.as_deref(),
+            Some("destroy-hostiles"),
+        );
+    }
+
+    #[test]
+    fn set_objective_priority_command_toggles_off_when_same_id() {
+        let mut app = test_app();
+        app.world_mut().insert_resource(crate::server_app::CaptainPriorityBoost {
+            boosted_id: Some("destroy-hostiles".into()),
+        });
+        start_game(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::captain_system_id(),
+                payload: SystemControlPayload::SetObjectivePriority {
+                    id: "destroy-hostiles".into(),
+                },
+            },
+        );
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<crate::server_app::CaptainPriorityBoost>().boosted_id,
+            None,
+            "sending the same id again should clear the boost"
+        );
     }
 }

@@ -946,6 +946,11 @@ pub enum SystemControlPayload {
     SetScienceTarget {
         uuid: String,
     },
+    /// Captain boosts (or toggles off) the priority of a doctrine objective.
+    /// Sending the same `id` twice toggles the boost off.
+    SetObjectivePriority {
+        id: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1436,6 +1441,9 @@ pub struct CaptainBlackboard {
     /// Computed game status string shown in the captain panel.
     #[serde(default)]
     pub game_status: String,
+    /// The objective id the captain has chosen to prioritize, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boosted_objective_id: Option<String>,
 }
 
 fn default_red_alert_system_id() -> SystemId {
@@ -1459,6 +1467,7 @@ impl Default for CaptainBlackboard {
             objectives: Vec::new(),
             hull_integrity_pct: 100.0,
             game_status: String::new(),
+            boosted_objective_id: None,
         }
     }
 }
@@ -2234,6 +2243,9 @@ pub struct ObjectiveSnapshot {
     /// target.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<String>,
+    /// Whether this objective originates from the active mission or from standing doctrine.
+    #[serde(default)]
+    pub source: ObjectiveSource,
 }
 
 /// Mission-altitude directive attached to an objective. Drives per-system AI

@@ -2135,6 +2135,7 @@ mod tests {
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec!["Axiom Station".into(), "Research Outpost".into()],
+                    source: crate::messages::ObjectiveSource::Mission,
                 },
                 crate::messages::ObjectiveSnapshot {
                     id: "obj-2".into(),
@@ -2142,6 +2143,7 @@ mod tests {
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Completed,
                     targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
                 },
                 crate::messages::ObjectiveSnapshot {
                     id: "obj-2".into(),
@@ -2149,6 +2151,7 @@ mod tests {
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Completed,
                     targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
                 },
             ],
         };
@@ -2172,6 +2175,7 @@ mod tests {
                 mandatory: true,
                 status: crate::messages::ObjectiveStatus::Failed,
                 targets: vec![],
+                source: crate::messages::ObjectiveSource::Mission,
             }],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

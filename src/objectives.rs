@@ -263,12 +263,28 @@ impl ObjectiveManager {
     /// objectives are included with `score = 0.0` so the AI can see them and
     /// skip them cleanly. The pool is sorted descending by score.
     pub fn scored_pool(&self, conditions: &WorldConditions) -> Vec<ScoredObjective> {
+        self.scored_pool_with_boost(conditions, None)
+    }
+
+    /// Like `scored_pool` but applies an optional captain priority boost.
+    /// `boost` is `Some((objective_id, bonus_score))` — the named objective gets
+    /// `bonus_score` added to its computed utility score before sorting.
+    pub fn scored_pool_with_boost(
+        &self,
+        conditions: &WorldConditions,
+        boost: Option<(&str, f32)>,
+    ) -> Vec<ScoredObjective> {
         let mut pool: Vec<ScoredObjective> = self
             .objectives
             .iter()
             .filter(|o| o.status == ObjectiveStatus::Active)
             .map(|o| {
-                let score = o.utility.score(o.mandatory, conditions);
+                let mut score = o.utility.score(o.mandatory, conditions);
+                if let Some((boost_id, bonus)) = boost {
+                    if o.id == boost_id {
+                        score += bonus;
+                    }
+                }
                 let relevance = directive_relevance(&o.directive);
                 ScoredObjective {
                     id: o.id.clone(),
@@ -302,6 +318,7 @@ fn record_to_snapshot(r: &ObjectiveRecord) -> ObjectiveSnapshot {
         mandatory: r.mandatory,
         status: r.status.clone(),
         targets: r.targets.clone(),
+        source: r.source.clone(),
     }
 }
 

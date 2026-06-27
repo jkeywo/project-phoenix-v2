@@ -99,6 +99,20 @@ pub struct ShipBoost(pub crate::boost::BoostState);
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WeaponFiredThisTick(pub bool);
 
+/// Tracks the objective id the captain has chosen to prioritize.
+/// Applied as a score bonus in `publish_viewscreen_blackboard` so the AI
+/// immediately sees the updated priority ordering.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct CaptainPriorityBoost {
+    /// The objective currently boosted. `None` when no boost is set.
+    pub boosted_id: Option<String>,
+}
+
+impl CaptainPriorityBoost {
+    /// Score bonus added to the boosted objective's utility score.
+    pub const BOOST_AMOUNT: f32 = 15.0;
+}
+
 /// Carries the reason string when the game ends. Set to `Some(reason)` before
 /// transitioning to `GamePhase::GameOver`. The `OnEnter(GameOver)` system reads
 /// this resource and broadcasts the reason to all clients.
@@ -242,6 +256,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .insert_resource(ShipImpulse(ImpulseState::new()))
     .insert_resource(ShipBoost(crate::boost::BoostState::new()))
     .init_resource::<WeaponFiredThisTick>()
+    .init_resource::<CaptainPriorityBoost>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
         crate::config_cache::get_faction_registry(),
     ))
@@ -569,6 +584,7 @@ fn publish_viewscreen_blackboard(
     hull: Option<Res<ShipHullIntegrity>>,
     activity: Option<Res<crate::ship::combat_activity::RecentCombatActivity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
+    boost: Option<Res<CaptainPriorityBoost>>,
     mut blackboards: ResMut<SystemBlackboards>,
 ) {
     use crate::messages::{SystemBlackboard, SystemId, ViewscreenBlackboard};
@@ -590,9 +606,12 @@ fn publish_viewscreen_blackboard(
         red_alert,
         hull_fraction: hull_integrity_pct / 100.0,
     };
+    let captain_boost = boost.as_ref().and_then(|b| {
+        b.boosted_id.as_deref().map(|id| (id, CaptainPriorityBoost::BOOST_AMOUNT))
+    });
     let scored_objectives = objectives
         .as_ref()
-        .map(|o| o.0.scored_pool(&conditions))
+        .map(|o| o.0.scored_pool_with_boost(&conditions, captain_boost))
         .unwrap_or_default();
 
     let bb = ViewscreenBlackboard {

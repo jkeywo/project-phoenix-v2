@@ -413,6 +413,31 @@
       transition: all .3s ease;
     }
 
+    /* AI-only launch button (bottom-left, lobby only, no-players condition) */
+    #ai-launch-btn {
+      position: absolute;
+      bottom: 1.5rem;
+      left: 1.5rem;
+      padding: 8px 16px;
+      background: #0a1a20;
+      color: #5fd8e8;
+      border: 1px solid #2a8a96;
+      border-radius: 4px;
+      font-family: 'Chakra Petch', system-ui, monospace;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background .2s, border-color .2s, box-shadow .2s;
+      z-index: 2;
+    }
+    #ai-launch-btn:hover {
+      background: #0d2830;
+      border-color: #5fd8e8;
+      box-shadow: 0 0 8px rgba(95,216,232,0.25);
+    }
+
     /* Compact form: portrait OR narrow landscape */
     @media (orientation: portrait), (max-width: 720px) {
       .lobby-body {
@@ -687,6 +712,11 @@
   <div id="lobby-panel" class="lobby-panel" style="display:none;">
     <!-- Background overlay -->
     <div class="lobby-bg"></div>
+
+    <!-- AI-only launch: visible only when no players are connected -->
+    <button id="ai-launch-btn" style="display:none;" title="Launch with fully AI-controlled crew">
+      ⬡ Launch AI Ship
+    </button>
 
     <div class="lobby-panel-wrap">
 
@@ -1076,7 +1106,26 @@
         hint.style.color = '#889';
       }
     }
+
+    // ── AI-only launch button ─────────────────────────────────────────
+    const aiBtn = document.getElementById('ai-launch-btn');
+    if (aiBtn) {
+      const noPlayers = crewN === 0 && (!s.spectators || s.spectators.length === 0);
+      aiBtn.style.display = noPlayers ? '' : 'none';
+    }
   };
+
+    // ── AI-only launch button click handler ───────────────────────────────
+    (function() {
+      const btn = document.getElementById('ai-launch-btn');
+      if (btn) {
+        btn.addEventListener('click', function() {
+          if (typeof wasm_force_start === 'function') {
+            wasm_force_start();
+          }
+        });
+      }
+    })();
 
     // ── Connection status ──────────────────────────────────────────────────
 
@@ -1515,6 +1564,7 @@ function finishInit() {
   // registrations. The HUD callback is wired immediately so the viewscreen
   // overlay starts receiving state as soon as the sim runs.
   window.wasm_ui_action = wasmBindings.wasm_ui_action;
+  window.wasm_force_start = wasmBindings.wasm_force_start;
   window.set_console_state_callback = wasmBindings.set_console_state_callback;
   window.set_hud_state_callback = wasmBindings.set_hud_state_callback;
   window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;

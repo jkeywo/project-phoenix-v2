@@ -11,7 +11,7 @@ use {
     crate::console_bridge::{
         ConsoleStateChanged, HudStateChanged, LobbyStateChanged, LOCAL_CONSOLE_TOKEN,
     },
-    crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
+    crate::lobby::{InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
     crate::messages,
     crate::modifier_coordination::ModifierCoordinationPlugin,
     crate::renderer::RendererPlugin,
@@ -100,6 +100,11 @@ thread_local! {
     /// each `PostUpdate` frame when the overlay is enabled. Read by
     /// `wasm_get_entity_inspector()` from JS.
     static ENTITY_INSPECTOR_STRING: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// Pending force-start request from `wasm_force_start()`. Drained by
+    /// `drain_force_start` each `PreUpdate` frame to transition directly to
+    /// `InProgress` without any connected players (fully AI-crewed ship).
+    static PENDING_FORCE_START: RefCell<bool> = const { RefCell::new(false) };
 
     /// Raw `__sendAction` JSON envelopes pushed by `wasm_ui_action`, waiting to
     /// be decoded and injected into Bevy by `drain_ui_actions`.
@@ -287,6 +292,7 @@ pub fn wasm_init() {
             drain_disconnects,
             drain_debug_toggles,
             drain_ui_actions,
+            drain_force_start,
         ),
     )
     .add_systems(
@@ -528,6 +534,18 @@ pub fn set_entity_inspector_string(text: String) {
     ENTITY_INSPECTOR_STRING.with(|v| *v.borrow_mut() = text);
 }
 
+/// Called by JS (lobby "Launch AI Ship" button) to start the game with no
+/// human players — all stations run under AI/backfill control.
+///
+/// Only takes effect when the game is currently in the `Lobby` phase. The
+/// actual phase transition is applied by `drain_force_start` on the next
+/// `PreUpdate` frame so it runs safely inside the Bevy schedule.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_force_start() {
+    PENDING_FORCE_START.with(|v| *v.borrow_mut() = true);
+}
+
 // ── Config Preload Exports ──────────────────────────────────────────────────
 
 /// Re-export config preload functions from config_cache module.
@@ -698,6 +716,40 @@ fn drain_disconnects(mut writer: MessageWriter<PlayerDisconnected>) {
     let pending: Vec<String> = DISCONNECT_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
     for token in pending {
         writer.write(PlayerDisconnected { token });
+    }
+}
+
+/// Drains the force-start flag each frame. When set, transitions the game
+/// directly to `InProgress` (or `Loading` if the asset preload isn't done)
+/// without requiring any connected players — used for fully AI-crewed runs.
+#[cfg(target_arch = "wasm32")]
+fn drain_force_start(
+    state: Res<State<messages::GamePhase>>,
+    mut next_state: ResMut<NextState<messages::GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
+) {
+    let pending = PENDING_FORCE_START.with(|v| {
+        let was = *v.borrow();
+        *v.borrow_mut() = false;
+        was
+    });
+    if !pending || state.get() != &messages::GamePhase::Lobby {
+        return;
+    }
+    let preload_complete = if crate::debug_overlay::is_playwright_automation() {
+        true
+    } else {
+        preload
+            .as_ref()
+            .map(|p| !p.started || p.complete)
+            .unwrap_or(true)
+    };
+    if preload_complete {
+        next_state.set(messages::GamePhase::InProgress);
+        outbox.0.push((Target::All, messages::ServerMessage::GameStarted));
+    } else {
+        next_state.set(messages::GamePhase::Loading);
     }
 }
 

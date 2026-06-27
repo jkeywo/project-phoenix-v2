@@ -474,6 +474,26 @@
     /* Station list */
     #station-list { flex: 1; overflow-y: auto; padding: 8px 0; display: flex;
       flex-direction: column; gap: 6px; }
+    /* Tutorial text — replaces station list when player has a station */
+    #lobby-tutorial { flex: 1; overflow-y: auto; padding: 8px 0; display: none;
+      flex-direction: column; gap: 12px; }
+    #lobby-tutorial[aria-hidden="false"] { display: flex; }
+    #lobby-tutorial .help-console-group { margin-bottom: 0.5rem; }
+    #lobby-tutorial .help-console-heading {
+      font-family: 'Chakra Petch', monospace; font-size: 0.85rem;
+      font-weight: 600; letter-spacing: 0.08em; color: var(--signal-cyan);
+      margin-bottom: 0.4rem; text-transform: uppercase;
+    }
+    #lobby-tutorial .help-sections { display: flex; flex-direction: column; gap: 0.35rem; }
+    #lobby-tutorial .help-section { margin-bottom: 0; }
+    #lobby-tutorial .help-section-title {
+      font-family: 'Chakra Petch', monospace; font-size: 0.75rem;
+      font-weight: 600; color: #cce;
+    }
+    #lobby-tutorial .help-section-body {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+      color: #889; margin-top: 0.1rem;
+    }
     .station-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
       border-radius: 6px; background: var(--surface); border: 1px solid var(--edge);
       transition: border-color .2s, background .2s; }
@@ -589,6 +609,9 @@
 
       <!-- Station list -->
       <div id="station-list"></div>
+
+      <!-- Tutorial text shown when player has selected a station -->
+      <div id="lobby-tutorial" aria-hidden="true"></div>
 
       <!-- At-your-station detail panel -->
       <div id="detail-panel" class="idle">
@@ -1026,8 +1049,27 @@
     function renderLobby(s) {
       const list = document.getElementById('station-list');
       if (!list) return;
-      list.innerHTML = '';
       const myPlayer = me(s);
+      const hasStation = myPlayer && myPlayer.consoles && myPlayer.consoles.length > 0;
+
+      // Toggle station list vs tutorial
+      const tutorial = document.getElementById('lobby-tutorial');
+      if (hasStation) {
+        list.style.display = 'none';
+        if (tutorial) {
+          if (typeof window.renderInlineHelp === 'function') {
+            window.renderInlineHelp(tutorial, myPlayer.consoles);
+          }
+          tutorial.setAttribute('aria-hidden', 'false');
+        }
+      } else {
+        list.style.display = '';
+        if (tutorial) {
+          tutorial.setAttribute('aria-hidden', 'true');
+        }
+      }
+
+      list.innerHTML = '';
       for (const st of (s.stations || [])) {
         const isMine = !!st.holder_token && st.holder_token === myToken;
         const row = document.createElement('div');
@@ -1967,6 +2009,8 @@
           pushCaptainConsoleState();
           break;
         }
+        case 'ReadyChanged':
+          break; // state.players already updated via lobbyState.apply(); fall through to scheduleRender
         case 'ObjectiveSummary':
           break; // fall through to scheduleRender
         default:

@@ -2139,17 +2139,29 @@
           return base;
         }
 
-        console.log('[PeerJS] fetching ICE servers…');
-        const iceServers = await getIceServers();
+        // Gate on DOMContentLoaded before touching any module-dependent state.
+        // The IIFE runs during HTML parsing; <script type="module"> tags are
+        // deferred and only execute after parsing completes. If getIceServers()
+        // fails fast (Cloudflare blocked, offline), it resolves as a microtask
+        // that fires BEFORE deferred modules run as tasks — leaving
+        // window.lobbyState and window.installSessionToken undefined. That
+        // causes Welcome to use the inline fallback while lobbyState stays empty,
+        // and StationAssigned then overwrites state.players with that empty list,
+        // so the help panel and Ready button never appear. Waiting for
+        // DOMContentLoaded guarantees all modules have run before any PeerJS
+        // activity, and moving installSessionToken() here tightens the
+        // same-machine token-collision window (heartbeat fires before ICE
+        // negotiation, not after the Cloudflare fetch which can take seconds).
+        if (document.readyState === 'loading') {
+          await new Promise(resolve =>
+            document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+        }
 
-        // Resolve this tab's session token. Done HERE — after the first await —
-        // not in this IIFE's synchronous prefix, because gui/session-token.js is
-        // a deferred module: at parse time window.installSessionToken does not
-        // exist yet, so resolving earlier would always hit the fallback. After
-        // the await, parsing is complete and the module has run. Each tab gets
-        // its own token, which is what lets several clients on one desktop
-        // connect as distinct players. The inline branch is a last-ditch
-        // fallback for the rare case the module genuinely failed to load.
+        // Resolve this tab's session token now that all deferred modules have
+        // run. Each tab gets its own token, which is what lets several clients
+        // on one desktop connect as distinct players. The inline branch is a
+        // last-ditch fallback for the rare case the module genuinely failed to
+        // load.
         myToken = (typeof window.installSessionToken === 'function')
           ? window.installSessionToken()
           : (() => {
@@ -2162,6 +2174,9 @@
               return t;
             })();
         console.log(`[client] session token ${myToken.slice(0, 8)}…`);
+
+        console.log('[PeerJS] fetching ICE servers…');
+        const iceServers = await getIceServers();
         console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
         console.log(`[PeerJS] connecting to host peer ID: ${hostPeerId}`);
         const clientPeer = new Peer({ config: { iceServers } });

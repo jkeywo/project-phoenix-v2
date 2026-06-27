@@ -52,7 +52,7 @@ impl Default for ShieldConfig {
         Self {
             num_facings: 4,
             max_hp: 100,
-            regen_per_sec: 5.0,
+            regen_per_sec: 2.0,
             offline_duration: 10.0,
         }
     }
@@ -85,7 +85,7 @@ impl Default for ShieldFocusConfig {
             bonus_max_hp: 50,
             bonus_regen: 5.0,
             penalty_max_hp: 25,
-            penalty_regen: 2.5,
+            penalty_regen: 1.0,
             decay_rate: 10.0,
         }
     }
@@ -559,12 +559,12 @@ mod tests {
 
     #[test]
     fn tick_regenerates_all_facings() {
-        let mut s = ShieldSystem::default(); // regen 5/s
+        let mut s = ShieldSystem::default(); // regen 2/s
         s.apply_damage(20, 0.0); // fore: 80
         s.apply_damage(10, PI / 2.0); // starboard: 90
-        s.tick(2.0); // +10 fore → 90, +10 starboard → 100
-        assert_eq!(s.facings[0].hp, 90);
-        assert_eq!(s.facings[3].hp, 100);
+        s.tick(2.0); // +4 fore → 84, +4 starboard → 94
+        assert_eq!(s.facings[0].hp, 84);
+        assert_eq!(s.facings[3].hp, 94);
     }
 
     // ── ShieldSystem snapshot ────────────────────────────────────────────────
@@ -714,18 +714,18 @@ mod tests {
         s.set_focused_facing(Some(0));
         // Default focus config: bonus_max_hp=50, bonus_regen=5.0
         assert_eq!(s.facings[0].max_hp, 150);
-        assert!((s.facings[0].regen_per_sec - 10.0).abs() < 1e-4);
+        assert!((s.facings[0].regen_per_sec - 7.0).abs() < 1e-4);
     }
 
     #[test]
     fn non_focused_facings_get_penalty_max_hp_and_regen() {
         let mut s = ShieldSystem::default();
         s.set_focused_facing(Some(0)); // Focus Fore
-                                       // Default: penalty_max_hp=25, penalty_regen=2.5
+                                       // Default: penalty_max_hp=25, penalty_regen=1.0
         assert_eq!(s.facings[1].max_hp, 75); // Port
         assert_eq!(s.facings[2].max_hp, 75); // Aft
         assert_eq!(s.facings[3].max_hp, 75); // Starboard
-        assert!((s.facings[1].regen_per_sec - 2.5).abs() < 1e-4);
+        assert!((s.facings[1].regen_per_sec - 1.0).abs() < 1e-4);
     }
 
     #[test]
@@ -739,7 +739,7 @@ mod tests {
         s.set_focused_facing(None);
         for f in &s.facings {
             assert_eq!(f.max_hp, 100);
-            assert!((f.regen_per_sec - 5.0).abs() < 1e-4);
+            assert!((f.regen_per_sec - 2.0).abs() < 1e-4);
         }
         // HP is NOT snapped immediately — it decays gradually via tick().
         assert_eq!(
@@ -751,7 +751,7 @@ mod tests {
         s.tick(3.0); // 125 - min(10*3, 125-100) = 100
         assert_eq!(s.facings[0].hp, 100);
         // Once at max, regen applies normally on subsequent ticks.
-        s.tick(0.5); // regen 5/s → 100 + 2.5 = 102.5 → capped to 100
+        s.tick(0.5); // regen 2/s → 100 + 1.0 = 101.0 → capped to 100
         assert_eq!(s.facings[0].hp, 100);
     }
 
@@ -775,8 +775,8 @@ mod tests {
         assert_eq!(s.facings[0].hp, 95);
         // Facing 3 (Starboard): HP was 120, max becomes 75. Decays 10/s for 0.5s = 5.
         assert_eq!(s.facings[3].hp, 115);
-        // Facing 1 (Port, focused): normal tick (bonus regen 10/s). 130 + 10*0.5 = 135.
-        assert_eq!(s.facings[1].hp, 135);
+        // Facing 1 (Port, focused): normal tick (base 2.0 + bonus 5.0 = 7.0/s). 130 + 7.0*0.5 ≈ +3 → 133.
+        assert_eq!(s.facings[1].hp, 133);
     }
 
     #[test]
@@ -812,7 +812,7 @@ mod tests {
         s.set_focused_facing(Some(0));
         s.facings[0].hp = 200;
         s.tick(0.5);
-        // Normal regen tick caps at max_hp=150: (200 + 10*0.5).min(150) = 150
+        // Normal regen tick caps at max_hp=150: (200 + 7.0*0.5 → +3).min(150) = 150
         assert_eq!(s.facings[0].hp, 150);
         // The decay code (which only targets non-focused facings) did not run,
         // confirming the focused arc does not get focus-decayed.

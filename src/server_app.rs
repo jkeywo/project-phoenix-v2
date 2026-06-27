@@ -336,7 +336,7 @@ pub fn add_simulation_plugins(app: &mut App) {
         Update,
         (
             handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
-            tick_shields.in_set(crate::sim_sets::SimSet::Physics),
+            tick_shields.in_set(crate::sim_sets::SimSet::Modifiers),
             broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
             handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
             sim_processing_anchor,

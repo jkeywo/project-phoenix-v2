@@ -160,13 +160,13 @@ range = 1200
 focus_bonus_max_hp = 50
 focus_bonus_regen = 5
 focus_penalty_max_hp = 25
-focus_penalty_regen = 2.5
+focus_penalty_regen = 1.0
 focus_decay_rate = 10
 
 [shields_console.base]
 num_facings = 4
 max_hp = 100
-regen_per_sec = 5
+regen_per_sec = 2
 offline_duration = 10
 
 [engineering_console]

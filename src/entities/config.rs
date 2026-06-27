@@ -711,7 +711,7 @@ fn default_focus_penalty_max_hp() -> i32 {
     25
 }
 fn default_focus_penalty_regen() -> f32 {
-    2.5
+    1.0
 }
 fn default_focus_decay_rate() -> f32 {
     10.0
@@ -765,7 +765,7 @@ fn default_shields_max_hp() -> i32 {
     100
 }
 fn default_shields_regen_per_sec() -> f32 {
-    5.0
+    2.0
 }
 fn default_shields_offline_duration() -> f32 {
     10.0
@@ -2728,7 +2728,7 @@ max_hp = 250
             .expect("base");
         assert_eq!(base.max_hp, 250, "override applied");
         assert_eq!(base.num_facings, 4, "default preserved");
-        assert_eq!(base.regen_per_sec, 5.0, "default preserved");
+        assert_eq!(base.regen_per_sec, 2.0, "default preserved");
         assert_eq!(base.offline_duration, 10.0, "default preserved");
     }
 

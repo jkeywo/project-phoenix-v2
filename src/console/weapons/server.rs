@@ -266,7 +266,7 @@ impl Plugin for WeaponsPlugin {
                     tick_active_beam.in_set(crate::sim_sets::SimSet::Physics),
                     drain_power_for_active_beam.in_set(crate::sim_sets::SimSet::Physics),
                     tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
-                    tick_npc_shield_regen.in_set(crate::sim_sets::SimSet::Physics),
+                    tick_npc_shield_regen.in_set(crate::sim_sets::SimSet::Modifiers),
                 ),
             )
             .add_systems(

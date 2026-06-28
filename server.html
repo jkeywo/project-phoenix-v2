@@ -872,6 +872,21 @@
   // set_hud_state_callback. We parse it, write the status strip cells, and
   // toggle the red-alert vignette class.
 
+  // ── Screen shake (issue #116 follow-up) ────────────────────────────────
+  // Rust pushes (x, y) pixel offsets every frame via set_shake_callback.
+  // Apply as CSS transform on the body so the entire page (canvas + HUD
+  // overlay + border) shakes together. When offset is (0, 0) the transform
+  // is removed.
+  window.__applyShake = function(x, y) {
+    if (x === 0 && y === 0) {
+      document.body.style.transform = '';
+      document.body.style.willChange = '';
+    } else {
+      document.body.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+      document.body.style.willChange = 'transform';
+    }
+  };
+
   window.__updateHud = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
@@ -1610,11 +1625,15 @@ function finishInit() {
   window.set_console_state_callback = wasmBindings.set_console_state_callback;
   window.set_hud_state_callback = wasmBindings.set_hud_state_callback;
   window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;
+  window.set_shake_callback = wasmBindings.set_shake_callback;
   if (typeof set_hud_state_callback === 'function') {
     set_hud_state_callback(window.__updateHud);
   }
   if (typeof set_lobby_state_callback === 'function') {
     set_lobby_state_callback(window.__updateLobby);
+  }
+  if (typeof set_shake_callback === 'function') {
+    set_shake_callback(window.__applyShake);
   }
 
   // ── HTML console state relay (issue #428) ────────────────────────────────

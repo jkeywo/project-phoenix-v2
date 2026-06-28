@@ -123,6 +123,16 @@ thread_local! {
     /// JS callback registered by the HTML lobby overlay to receive lobby state
     /// pushes. Signature: `callback(stateJson: string)`.
     static LOBBY_STATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// JS callback registered by the HTML viewscreen overlay to receive screen
+    /// shake offsets. Signature: `callback(x: number, y: number)`.
+    /// Called every frame with the current pixel offset; (0, 0) when no shake.
+    static SHAKE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// Latest screen shake offset (x, y) in CSS pixels, written by
+    /// [`viewscreen_border::apply_camera_shake`] each frame and read by
+    /// [`flush_shake_state`] for the JS callback.
+    static SHAKE_OFFSET: RefCell<(f32, f32)> = const { RefCell::new((0.0, 0.0)) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -304,6 +314,7 @@ pub fn wasm_init() {
             flush_hud_state,
             flush_console_state,
             flush_lobby_state,
+            flush_shake_state,
         ),
     );
 
@@ -398,6 +409,26 @@ pub fn set_hud_state_callback(callback: Function) {
 pub fn set_lobby_state_callback(callback: Function) {
     LOBBY_STATE_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by JS once to register the screen-shake callback.
+/// Bevy calls `callback(x: number, y: number)` every frame with the current
+/// CSS pixel offset. `(0, 0)` means no shake.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_shake_callback(callback: Function) {
+    SHAKE_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by [`viewscreen_border::apply_camera_shake`] (WASM builds only) to
+/// store the current frame's screen-shake offset for JS.
+#[cfg(target_arch = "wasm32")]
+pub fn set_shake_offset(x: f32, y: f32) {
+    SHAKE_OFFSET.with(|slot| {
+        *slot.borrow_mut() = (x, y);
     });
 }
 
@@ -864,6 +895,25 @@ fn flush_lobby_state(mut reader: MessageReader<LobbyStateChanged>) {
             for json in &payloads {
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
             }
+        }
+    });
+}
+
+/// Reads the current screen-shake offset each frame and forwards it to the
+/// registered shake callback via `cb.call2(NULL, x, y)`.
+///
+/// Always fires on every frame (even with (0, 0)) so the JS handler resets
+/// the CSS transform when shake ends.
+#[cfg(target_arch = "wasm32")]
+fn flush_shake_state() {
+    let current = SHAKE_OFFSET.with(|slot| *slot.borrow());
+    SHAKE_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            let _ = cb.call2(
+                &JsValue::NULL,
+                &JsValue::from_f64(current.0 as f64),
+                &JsValue::from_f64(current.1 as f64),
+            );
         }
     });
 }

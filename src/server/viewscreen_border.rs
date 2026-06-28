@@ -7,8 +7,10 @@
 //!
 //! - **Shield-hit white flash** — [`RedAlertVignetteMaterial`] over the 3D
 //!   scene, driven by [`process_shield_flash`] / [`drive_vignette_intensity`].
-//! - **Hull-damage camera shake** — [`process_hull_shake`] /
-//!   [`apply_camera_shake`] jitter the active `GameCamera`.
+//! - **Hull-damage screen shake** — [`process_hull_shake`] /
+//!   [`apply_camera_shake`] jitter the active `GameCamera` (native) or
+//!   forward pixel offsets to JS for a CSS `transform: translate()` on the
+//!   whole page (WASM).
 //! - **HUD state push** — [`recompute_hud_state`] / [`push_hud_state`]
 //!   serialise heading/hull/condition for the HTML overlay via
 //!   `HudStateChanged`.
@@ -42,7 +44,7 @@ use crate::stations_config::ShipStations;
 /// Rate at which shield-hit flash decays per second (1.0 → 0.0 in 0.3 s).
 const FLASH_DECAY_RATE: f32 = 1.0 / 0.3;
 
-/// Exponential decay rate for hull-damage camera shake.
+/// Exponential decay rate for hull-damage screen shake.
 /// `exp(-5.0 * 0.8) ≈ 0.018` — fully settled within ~0.8 s at max magnitude.
 const SHAKE_DECAY_RATE: f32 = 5.0;
 
@@ -64,14 +66,17 @@ pub struct ShieldFlashState {
     pub intensity: f32,
 }
 
-/// Tracks hull-damage camera shake on the viewscreen.
+/// Tracks hull-damage screen shake on the viewscreen.
 ///
 /// `magnitude` is accumulated by [`process_hull_shake`] on each
 /// `DamageTaken` with `hull > 0`, then decayed exponentially each
 /// frame by [`apply_camera_shake`] — fully settled in ~0.8 s at max.
+///
+/// On WASM the magnitude represents CSS pixels; on native it represents
+/// 3D world units.
 #[derive(Resource, Default)]
 pub struct ShakeState {
-    /// Current shake magnitude in world units (0.0 = no shake).
+    /// Current shake magnitude in CSS pixels (WASM) or world units (native).
     pub magnitude: f32,
 }
 
@@ -286,7 +291,7 @@ fn process_shield_flash(
 
 /// Reads [`OutboundMessage`] for [`ServerMessage::DamageTaken`] with
 /// `hull > 0` and accumulates [`ShakeState::magnitude`] scaled linearly
-/// over 0–30 HP (max ~5 world units at 30+ HP).
+/// over 0–30 HP (max ~2.5 px at 30+ HP).
 ///
 /// Runs after `SimSet::Broadcast` so the outbox has been drained into
 /// `OutboundMessage` messages and is safe to read.
@@ -294,43 +299,59 @@ fn process_hull_shake(mut outbound: MessageReader<OutboundMessage>, mut shake: R
     for msg in outbound.read() {
         if let ServerMessage::DamageTaken { hull, .. } = &msg.msg {
             if *hull > 0.0 {
-                let added = (*hull / 30.0).min(1.0) * 5.0;
+                let added = (*hull / 30.0).min(1.0) * 2.5;
                 shake.magnitude += added;
             }
         }
     }
 }
 
-/// Applies a random XZ offset to the active 3D camera each frame based on
+/// Applies a random screen-space offset each frame based on
 /// [`ShakeState::magnitude`], then decays the magnitude exponentially.
+///
+/// On native (non-WASM) the offset is applied to the 3D camera transform,
+/// shaking the Bevy viewport. On WASM the offset is forwarded to JavaScript
+/// which applies a CSS `transform: translate()` to the whole page, so the
+/// canvas *and* HTML overlay elements (border, HUD) shake together.
 ///
 /// Runs after [`process_hull_shake`] (so it reads the accumulated shake
 /// for the current frame) and after [`hull_camera`] in the renderer plugin
 /// (so the base camera position is already set).
 ///
-/// When magnitude drops below 0.01 units the shake is fully settled; the
-/// camera is left at the position set by [`hull_camera`].
+/// When magnitude drops below 0.01 the shake is fully settled; offsets are
+/// reset to zero.
 fn apply_camera_shake(
     time: Res<Time>,
     mut shake: ResMut<ShakeState>,
-    mut cam_query: Query<&mut Transform, With<GameCamera>>,
+    #[cfg(not(target_arch = "wasm32"))] mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
-    let Ok(mut transform) = cam_query.single_mut() else {
-        return;
-    };
-
     if shake.magnitude > 0.01 {
         let dt = time.delta_secs();
         let mut rng = rand::rng();
         let offset_x = rng.random_range(-shake.magnitude..shake.magnitude);
-        let offset_z = rng.random_range(-shake.magnitude..shake.magnitude);
+        let offset_y = rng.random_range(-shake.magnitude..shake.magnitude);
 
-        transform.translation.x += offset_x;
-        transform.translation.z += offset_z;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Ok(mut transform) = cam_query.single_mut() {
+                transform.translation.x += offset_x;
+                transform.translation.y += offset_y;
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::server::bridge::set_shake_offset(offset_x, offset_y);
+        }
 
         shake.magnitude *= (-SHAKE_DECAY_RATE * dt).exp();
         if shake.magnitude < 0.01 {
             shake.magnitude = 0.0;
+        }
+    } else {
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::server::bridge::set_shake_offset(0.0, 0.0);
         }
     }
 }

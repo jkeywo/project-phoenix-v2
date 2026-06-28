@@ -38,6 +38,11 @@ deceleration = 30.0
 max_yaw_rate = 2.0
 max_bank_deg = 15.0
 
+[helm_console.engine_pfx]
+color = [ 1.0, 0.22, 0.08, 0.68 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.45
+
 [weapons_console]
 
 [[weapons_console.phaser_banks]]

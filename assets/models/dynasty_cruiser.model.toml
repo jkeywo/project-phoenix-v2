@@ -8,4 +8,19 @@ min = [ -1.3691397150193694, -0.4, -1.1267647541034258 ]
 max = [ 1.368830553179971, 0.8132160663604736, 1.7255248113575536 ]
 size = [ 2.7379702681993403, 1.2132160663604736, 2.8522895654609792 ]
 
-[markers]
+[[target_points]]
+position = [ 0.5, -0.1, 0 ]
+
+[[target_points]]
+position = [ -0.25, -0.1, 0.25 ]
+
+[[target_points]]
+position = [ -0.25, -0.1, -0.25 ]
+
+[markers.engine_port]
+position = [ -0.65, 0.0, 1.55 ]
+direction = [ 0, 0, 1 ]
+
+[markers.engine_starboard]
+position = [ 0.65, 0.0, 1.55 ]
+direction = [ 0, 0, 1 ]

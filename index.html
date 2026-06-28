@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-6858c5af13eb8064.js" crossorigin="anonymous" integrity="sha384-ZBgwRcwunGkj0IP0iBFDsf7CUzmtIsy/HqnT4bx+zdRRi5x6jIEm6iAufOxh1bRB"><link rel="preload" href="./project-phoenix-6858c5af13eb8064_bg.wasm" crossorigin="anonymous" integrity="sha384-UITr9LYWRpEr5mNw5qyIFw/CjGh5P4q1Cg+7AjwfForYD6foGzNFMVFaMl2RGlKk" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-1b9b9434b9db4244.js" crossorigin="anonymous" integrity="sha384-+ojYlqn2J6t60GsmfY9EwfH9ocBt0V71Qu17Wv2Y0oApie++TMmr9adZAZ/mb2fe"><link rel="preload" href="./project-phoenix-1b9b9434b9db4244_bg.wasm" crossorigin="anonymous" integrity="sha384-656NBp+bsktDTeShsRNVeSfjEVVNuoXV8yMBfABTec77uyB+YWTRPePrm3KyOPfv" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -856,8 +856,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-6858c5af13eb8064.js';
-const wasm = await init({ module_or_path: './project-phoenix-6858c5af13eb8064_bg.wasm' });
+import init, * as bindings from './project-phoenix-1b9b9434b9db4244.js';
+const wasm = await init({ module_or_path: './project-phoenix-1b9b9434b9db4244_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -882,6 +882,21 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   // Rust pushes ViewscreenHudState JSON here via the registered
   // set_hud_state_callback. We parse it, write the status strip cells, and
   // toggle the red-alert vignette class.
+
+  // ── Screen shake (issue #116 follow-up) ────────────────────────────────
+  // Rust pushes (x, y) pixel offsets every frame via set_shake_callback.
+  // Apply as CSS transform on the body so the entire page (canvas + HUD
+  // overlay + border) shakes together. When offset is (0, 0) the transform
+  // is removed.
+  window.__applyShake = function(x, y) {
+    if (x === 0 && y === 0) {
+      document.body.style.transform = '';
+      document.body.style.willChange = '';
+    } else {
+      document.body.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+      document.body.style.willChange = 'transform';
+    }
+  };
 
   window.__updateHud = function(json) {
     let s;
@@ -963,6 +978,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       else if (s.phase === 'Loading') { qrVisible = false; qrOverlay.style.display = 'none'; }
       // During InProgress/GameOver the toggle button is the sole controller
     }
+    window.__lastPhase = s.phase;
 
     // ── Title / subtitle ──────────────────────────────────────────────
     const titleEl = document.getElementById('lobby-title');
@@ -1443,6 +1459,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       try {
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
+          console.log('[Phoenix] GameStarted — hiding QR overlay');
           qrVisible = false;
           document.getElementById('overlay').style.display = 'none';
           const al = document.getElementById('asset-loading');
@@ -1599,11 +1616,16 @@ function finishInit() {
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
-  document.getElementById('qr-toggle-btn').addEventListener('click', function() {
-    const qrOverlay = document.getElementById('overlay');
-    qrVisible = !qrVisible;
-    qrOverlay.style.display = qrVisible ? 'block' : 'none';
-  });
+  var qrBtn = document.getElementById('qr-toggle-btn');
+  console.log('[Phoenix] QR toggle button:', qrBtn);
+  if (qrBtn) {
+    qrBtn.addEventListener('click', function() {
+      const qrOverlay = document.getElementById('overlay');
+      qrVisible = !qrVisible;
+      qrOverlay.style.display = qrVisible ? 'block' : 'none';
+      console.log('[Phoenix] QR toggle: visible=' + qrVisible + ', overlay=' + qrOverlay.style.display + ', phase=' + (window.__lastPhase || '?'));
+    });
+  }
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
   // Expose the inbound action entry point and the state-push callback
@@ -1614,11 +1636,15 @@ function finishInit() {
   window.set_console_state_callback = wasmBindings.set_console_state_callback;
   window.set_hud_state_callback = wasmBindings.set_hud_state_callback;
   window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;
+  window.set_shake_callback = wasmBindings.set_shake_callback;
   if (typeof set_hud_state_callback === 'function') {
     set_hud_state_callback(window.__updateHud);
   }
   if (typeof set_lobby_state_callback === 'function') {
     set_lobby_state_callback(window.__updateLobby);
+  }
+  if (typeof set_shake_callback === 'function') {
+    set_shake_callback(window.__applyShake);
   }
 
   // ── HTML console state relay (issue #428) ────────────────────────────────

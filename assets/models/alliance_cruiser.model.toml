@@ -8,12 +8,29 @@ min = [ -0.823185887415566, -0.30000000149011613, -3.8000859359157366 ]
 max = [ 0.8227897828165098, 0.23574371933937072, 3.8000861895702283 ]
 size = [ 1.6459756702320758, 0.5357437208294868, 7.600172125485965 ]
 
+[[target_points]]
+position = [ 0.5, -0.1, 0 ]
+
+[[target_points]]
+position = [ -0.25, -0.1, 0.25 ]
+
+[[target_points]]
+position = [ -0.25, -0.1, -0.25 ]
+
 [markers.phasers_fore]
 position = [ 0, 0, -0.9 ]
 direction = [ 0, 0, -1 ]
 
 [markers.phasers_aft]
 position = [ 0, 0.25, 0.4 ]
+direction = [ 0, 0, 1 ]
+
+[markers.engine_port]
+position = [ -0.35, 0.05, 3.55 ]
+direction = [ 0, 0, 1 ]
+
+[markers.engine_starboard]
+position = [ 0.35, 0.05, 3.55 ]
 direction = [ 0, 0, 1 ]
 
 [markers.torpdo_aft]

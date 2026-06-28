@@ -47,6 +47,11 @@ deceleration = 12.5
 max_yaw_rate = 0.196
 max_bank_deg = 10.0
 
+[helm_console.engine_pfx]
+color = [ 1.0, 0.22, 0.08, 0.68 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.55
+
 [weapons_console]
 
 # Port bank: facing -90° (left side), wide auto-arc so the cruiser can

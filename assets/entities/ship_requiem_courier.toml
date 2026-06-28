@@ -34,6 +34,11 @@ deceleration = 12.5
 max_yaw_rate = 0.196
 max_bank_deg = 15.0
 
+[helm_console.engine_pfx]
+color = [ 0.25, 0.75, 1.0, 0.65 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.5
+
 [comms]
 range = 800.0
 

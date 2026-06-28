@@ -995,6 +995,11 @@
         : { lobby: s.phase !== 'InProgress' && s.phase !== 'GameOver',
             game: s.phase === 'InProgress' || s.phase === 'GameOver',
             bezel: s.phase === 'InProgress' || s.phase === 'GameOver' };
+      const mine = myConsoles(s);
+      // Spectators / new joiners see the lobby even during InProgress
+      if (s.phase === 'InProgress' && !mine.length) {
+        vis.lobby = true; vis.game = false; vis.bezel = false;
+      }
       const inGame = vis.game;
       $('lobby-ui').className = vis.lobby ? 'active' : '';
       // Phone bezel (issue #439) is part of the game shell only — the lobby
@@ -1005,7 +1010,6 @@
 
       // Reconcile activeConsole with current consoles list (port of the
       // deleted Bevy reconcile_active_console — see gui/lobby-state.js).
-      const mine = myConsoles(s);
       if (inGame) {
         const next = (typeof window.reconcileActiveConsole === 'function')
           ? window.reconcileActiveConsole(activeConsole, mine)

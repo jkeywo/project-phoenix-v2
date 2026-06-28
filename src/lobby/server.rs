@@ -286,7 +286,10 @@ pub fn process_lobby(
     // every message type. Outside the lobby the simulation systems own it, so
     // here we handle *only* the reconnect handshake (`Identify`) — a browser
     // refresh mid-game must still receive its `Welcome` and have its seat
-    // restored. All other message types are left for the in-game systems.
+    // restored. Additionally, station management messages (`SelectStation`,
+    // `ReleaseStation`) are allowed during `InProgress` so players can claim
+    // vacated stations mid-game. All other message types are left for the
+    // in-game systems.
     // (Bevy `MessageReader`s have independent cursors, so reading here never
     // hides messages from those systems.)
     //
@@ -323,9 +326,16 @@ pub fn process_lobby(
             .unwrap_or(true)
     };
     // Collect all messages first to avoid borrow conflicts with ship_query.
+    // During InProgress, allow station management messages (SelectStation, ReleaseStation)
+    // so players can claim stations mid-game.
     let events: Vec<_> = inbound
         .read()
-        .filter(|ev| accepts_all || matches!(ev.msg, ClientMessage::Identify { .. }))
+        .filter(|ev| {
+            accepts_all
+                || matches!(ev.msg, ClientMessage::Identify { .. })
+                || matches!(ev.msg, ClientMessage::SelectStation { .. })
+                || matches!(ev.msg, ClientMessage::ReleaseStation)
+        })
         .cloned()
         .collect();
     for ev in events {

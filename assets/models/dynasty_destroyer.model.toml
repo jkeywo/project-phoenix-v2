@@ -11,3 +11,11 @@ size = [ 1.903133862307798, 0.5212138667702675, 3.507648827225491 ]
 [markers.fore_emitter]
 position = [ 0, 0, -0.4440326898074707 ]
 direction = [ -0.01890820440480865, 0, 0.99982122392265 ]
+
+[markers.engine_port]
+position = [ -0.35, 0.0, 0.9 ]
+direction = [ 0, 0, 1 ]
+
+[markers.engine_starboard]
+position = [ 0.35, 0.0, 0.9 ]
+direction = [ 0, 0, 1 ]

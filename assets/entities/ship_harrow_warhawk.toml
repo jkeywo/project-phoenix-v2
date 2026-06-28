@@ -49,6 +49,11 @@ deceleration = 9.0
 max_yaw_rate = 0.12
 max_bank_deg = 5.0
 
+[helm_console.engine_pfx]
+color = [ 1.0, 0.22, 0.08, 0.68 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.65
+
 [weapons_console]
 
 # Port heavy bank.

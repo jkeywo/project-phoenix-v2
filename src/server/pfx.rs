@@ -103,6 +103,7 @@ struct TorpedoPfxState {
     active: HashMap<String, TorpedoEntities>,
 }
 
+#[derive(Clone, Debug)]
 struct TrailCrumb {
     pos: Vec3,
     width: f32,
@@ -538,7 +539,7 @@ fn update_engine_trail(
     materials: &mut Assets<StandardMaterial>,
 ) {
     let emitters = engine_emitters(transform, markers, cfg);
-    for (emitter_idx, (origin, _dir)) in emitters.iter().enumerate() {
+    for (emitter_idx, (origin, direction)) in emitters.iter().enumerate() {
         let key = format!("{}:{}", key_base, emitter_idx);
 
         // Lazily create the ribbon entity and mesh for this emitter.
@@ -579,31 +580,100 @@ fn update_engine_trail(
             trail.crumbs.pop_back();
         }
 
-        // Push a new crumb at the emitter origin if the ship has moved enough.
+        // Pin the ribbon head to the emitter origin; older crumbs form the
+        // trail behind it.
         if normalized_speed > 0.05 {
-            let far_enough = trail
-                .crumbs
-                .front()
-                .map(|c| c.pos.distance(*origin) >= ENGINE_TRAIL_MIN_CRUMB_DIST)
-                .unwrap_or(true);
-            if far_enough {
-                trail.crumbs.push_front(TrailCrumb {
-                    pos: *origin,
-                    width: ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35),
-                    age: 0.0,
-                    lifetime: settings.lifetime_secs,
-                });
-                if trail.crumbs.len() > ENGINE_TRAIL_MAX_CRUMBS {
-                    trail.crumbs.pop_back();
-                }
-            }
+            upsert_engine_head_crumb(
+                &mut trail.crumbs,
+                *origin,
+                ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35),
+                settings.lifetime_secs,
+            );
         }
 
         // Rebuild the ribbon mesh in place.
         if let Some(mesh) = meshes.get_mut(&trail.mesh_handle) {
-            build_ribbon_into_mesh(mesh, &trail.crumbs);
+            let render_crumbs = if normalized_speed > 0.05 {
+                render_crumbs_from_marker(
+                    &trail.crumbs,
+                    *origin,
+                    *direction,
+                    ENGINE_TRAIL_RADIUS * normalized_speed.max(0.35),
+                    settings.lifetime_secs,
+                )
+            } else {
+                trail.crumbs.clone()
+            };
+            build_ribbon_into_mesh(mesh, &render_crumbs);
         }
     }
+}
+
+fn upsert_engine_head_crumb(
+    crumbs: &mut VecDeque<TrailCrumb>,
+    origin: Vec3,
+    width: f32,
+    lifetime: f32,
+) {
+    let should_insert = crumbs
+        .front()
+        .map(|c| c.pos.distance(origin) >= ENGINE_TRAIL_MIN_CRUMB_DIST)
+        .unwrap_or(true);
+
+    if should_insert {
+        crumbs.push_front(TrailCrumb {
+            pos: origin,
+            width,
+            age: 0.0,
+            lifetime,
+        });
+    } else if let Some(front) = crumbs.front_mut() {
+        front.pos = origin;
+        front.width = width;
+        front.age = 0.0;
+        front.lifetime = lifetime;
+    }
+
+    while crumbs.len() > ENGINE_TRAIL_MAX_CRUMBS {
+        crumbs.pop_back();
+    }
+}
+
+fn render_crumbs_from_marker(
+    crumbs: &VecDeque<TrailCrumb>,
+    origin: Vec3,
+    direction: Vec3,
+    width: f32,
+    lifetime: f32,
+) -> VecDeque<TrailCrumb> {
+    let mut render_crumbs = crumbs.clone();
+    if let Some(front) = render_crumbs.front_mut() {
+        front.pos = origin;
+        front.width = width;
+        front.age = 0.0;
+        front.lifetime = lifetime;
+    } else {
+        render_crumbs.push_front(TrailCrumb {
+            pos: origin,
+            width,
+            age: 0.0,
+            lifetime,
+        });
+    }
+
+    if render_crumbs.len() == 1 {
+        let tail_dir = direction.normalize_or_zero();
+        if tail_dir.length_squared() > 1e-6 {
+            render_crumbs.push_back(TrailCrumb {
+                pos: origin + tail_dir * ENGINE_TRAIL_MIN_CRUMB_DIST,
+                width,
+                age: 0.0,
+                lifetime,
+            });
+        }
+    }
+
+    render_crumbs
 }
 
 fn empty_ribbon_mesh() -> Mesh {
@@ -1088,6 +1158,48 @@ mod tests {
         let transform = segment_transform(Vec3::ZERO, Vec3::new(0.0, 4.0, 0.0), 0.25);
         assert_eq!(transform.translation, Vec3::new(0.0, 2.0, 0.0));
         assert_eq!(transform.scale, Vec3::new(0.25, 4.0, 0.25));
+    }
+
+    #[test]
+    fn upsert_engine_head_crumb_pins_existing_head_to_marker() {
+        let mut crumbs = VecDeque::from([
+            TrailCrumb {
+                pos: Vec3::new(0.02, 0.0, 0.0),
+                width: 0.2,
+                age: 0.2,
+                lifetime: 1.0,
+            },
+            TrailCrumb {
+                pos: Vec3::new(0.0, 0.0, 0.5),
+                width: 0.2,
+                age: 0.4,
+                lifetime: 1.0,
+            },
+        ]);
+
+        upsert_engine_head_crumb(&mut crumbs, Vec3::ZERO, 0.5, 1.5);
+
+        assert_eq!(crumbs.len(), 2);
+        assert_eq!(crumbs[0].pos, Vec3::ZERO);
+        assert_eq!(crumbs[0].width, 0.5);
+        assert_eq!(crumbs[0].age, 0.0);
+        assert_eq!(crumbs[1].pos, Vec3::new(0.0, 0.0, 0.5));
+    }
+
+    #[test]
+    fn render_crumbs_from_marker_adds_backward_tail_for_new_trail() {
+        let crumbs = VecDeque::from([TrailCrumb {
+            pos: Vec3::ZERO,
+            width: 0.5,
+            age: 0.0,
+            lifetime: 1.5,
+        }]);
+
+        let render = render_crumbs_from_marker(&crumbs, Vec3::ZERO, Vec3::Z, 0.5, 1.5);
+
+        assert_eq!(render.len(), 2);
+        assert_eq!(render[0].pos, Vec3::ZERO);
+        assert_eq!(render[1].pos, Vec3::Z * ENGINE_TRAIL_MIN_CRUMB_DIST);
     }
 
     #[test]

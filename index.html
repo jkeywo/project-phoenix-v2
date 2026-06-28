@@ -105,7 +105,7 @@
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000 url('assets/logo.png') center center / contain no-repeat; overflow: hidden; }
     #canvas { display: block; width: 100vw; height: 100vh; background: #000; }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
-    #qr-toggle-btn { position: fixed; bottom: 0; left: 0; width: 60px; height: 60px; z-index: 200; opacity: 0; cursor: pointer; }
+    #qr-toggle-btn { position: fixed; bottom: 0; left: 0; width: 80px; height: 80px; z-index: 200; opacity: 0.01; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     #qr { display: none; }
     #top-bar {
       position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-1b9b9434b9db4244.js" crossorigin="anonymous" integrity="sha384-+ojYlqn2J6t60GsmfY9EwfH9ocBt0V71Qu17Wv2Y0oApie++TMmr9adZAZ/mb2fe"><link rel="preload" href="./project-phoenix-1b9b9434b9db4244_bg.wasm" crossorigin="anonymous" integrity="sha384-656NBp+bsktDTeShsRNVeSfjEVVNuoXV8yMBfABTec77uyB+YWTRPePrm3KyOPfv" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-e206adfa5ab2903a.js" crossorigin="anonymous" integrity="sha384-x42RN+YPdnf8SZooa3Qv3Agb7dbUZ0AmcEhH4lW8QM61Ovqf+yxbrF91y/iVFRiK"><link rel="preload" href="./project-phoenix-e206adfa5ab2903a_bg.wasm" crossorigin="anonymous" integrity="sha384-GRBmtdRsXghPdlz5+C487umVc7uS/O0q+n2w/HoPqnbn9H/EKHN9JCAq3OXtBRMO" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -856,8 +856,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-1b9b9434b9db4244.js';
-const wasm = await init({ module_or_path: './project-phoenix-1b9b9434b9db4244_bg.wasm' });
+import init, * as bindings from './project-phoenix-e206adfa5ab2903a.js';
+const wasm = await init({ module_or_path: './project-phoenix-e206adfa5ab2903a_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -978,7 +978,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       else if (s.phase === 'Loading') { qrVisible = false; qrOverlay.style.display = 'none'; }
       // During InProgress/GameOver the toggle button is the sole controller
     }
-    window.__lastPhase = s.phase;
 
     // ── Title / subtitle ──────────────────────────────────────────────
     const titleEl = document.getElementById('lobby-title');
@@ -1459,7 +1458,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       try {
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
-          console.log('[Phoenix] GameStarted — hiding QR overlay');
           qrVisible = false;
           document.getElementById('overlay').style.display = 'none';
           const al = document.getElementById('asset-loading');
@@ -1616,16 +1614,11 @@ function finishInit() {
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
-  var qrBtn = document.getElementById('qr-toggle-btn');
-  console.log('[Phoenix] QR toggle button:', qrBtn);
-  if (qrBtn) {
-    qrBtn.addEventListener('click', function() {
-      const qrOverlay = document.getElementById('overlay');
-      qrVisible = !qrVisible;
-      qrOverlay.style.display = qrVisible ? 'block' : 'none';
-      console.log('[Phoenix] QR toggle: visible=' + qrVisible + ', overlay=' + qrOverlay.style.display + ', phase=' + (window.__lastPhase || '?'));
-    });
-  }
+  document.getElementById('qr-toggle-btn').addEventListener('click', function() {
+    const qrOverlay = document.getElementById('overlay');
+    qrVisible = !qrVisible;
+    qrOverlay.style.display = qrVisible ? 'block' : 'none';
+  });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
   // Expose the inbound action entry point and the state-push callback

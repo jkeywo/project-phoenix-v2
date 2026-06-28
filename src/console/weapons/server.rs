@@ -495,8 +495,11 @@ fn handle_fire_phaser(
     }
 }
 
-/// When phaser mode is Auto, fires the first ready in-arc bank at the locked
-/// target each tick. Mirrors the arc/range guard in `handle_fire_phaser`.
+/// Fires an in-arc phaser bank at the locked target each tick.  Auto-fires when
+/// either (a) `CurrentPhaserMode` is `Auto`, or (b) the Tactical station is
+/// unclaimed (no human holding it) — so AI/unclaimed stations auto-attack even
+/// when the mode flag reads `Manual`.  Mirrors the arc/range guard in
+/// `handle_fire_phaser`.
 fn tick_phaser_auto_fire(
     mut commands: Commands,
     phaser_mode: Res<CurrentPhaserMode>,
@@ -506,10 +509,22 @@ fn tick_phaser_auto_fire(
     modifiers: Res<crate::modifiers::ShipModifiers>,
     combat_config: Res<PhaserCombatConfigResource>,
     ship: Res<ShipState>,
+    sessions: Option<Res<Sessions>>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    if phaser_mode.0 != PhaserMode::Auto {
+    let auto_mode = phaser_mode.0 == PhaserMode::Auto
+        || sessions.is_some_and(|s| {
+            ship_query
+                .single()
+                .ok()
+                .is_some_and(|cfg| {
+                    s.0.console_holder(&Console::Tactical, &cfg.0)
+                        .is_none()
+                })
+        });
+    if !auto_mode {
         return;
     }
     if beam.target_uuid.is_some() {

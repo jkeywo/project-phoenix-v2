@@ -104,7 +104,7 @@
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000 url('assets/logo.png') center center / contain no-repeat; overflow: hidden; }
     #canvas { display: block; width: 100vw; height: 100vh; background: #000; }
-    #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; }
+    #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
     #qr-toggle-btn { position: fixed; bottom: 0; left: 0; width: 60px; height: 60px; z-index: 200; opacity: 0; cursor: pointer; }
     #qr { display: none; }
     #top-bar {
@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-9137b31cf0aa992d.js" crossorigin="anonymous" integrity="sha384-n7XwOl1Ya5K06uHToNkymN+bbIHsceIv521yMOcqC9y9uP2xIFubbH2UmIylmQii"><link rel="preload" href="./project-phoenix-9137b31cf0aa992d_bg.wasm" crossorigin="anonymous" integrity="sha384-MhToyYDnyTHZW/vvTVs1LWOK5EZDeFRMUr9eDCXQAVmD0L7d1qguqvlH8FjTau2W" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-6858c5af13eb8064.js" crossorigin="anonymous" integrity="sha384-ZBgwRcwunGkj0IP0iBFDsf7CUzmtIsy/HqnT4bx+zdRRi5x6jIEm6iAufOxh1bRB"><link rel="preload" href="./project-phoenix-6858c5af13eb8064_bg.wasm" crossorigin="anonymous" integrity="sha384-UITr9LYWRpEr5mNw5qyIFw/CjGh5P4q1Cg+7AjwfForYD6foGzNFMVFaMl2RGlKk" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -856,8 +856,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-9137b31cf0aa992d.js';
-const wasm = await init({ module_or_path: './project-phoenix-9137b31cf0aa992d_bg.wasm' });
+import init, * as bindings from './project-phoenix-6858c5af13eb8064.js';
+const wasm = await init({ module_or_path: './project-phoenix-6858c5af13eb8064_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -874,6 +874,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   
 
   <script>
+  // ── QR code toggle state (global, shared across handlers) ─────────────
+  let qrVisible = false;
+
   // ── HTML viewscreen HUD overlay (issue #422) ───────────────────────────
   //
   // Rust pushes ViewscreenHudState JSON here via the registered
@@ -955,7 +958,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // with display:none causes Bevy to see a 0×0 window and throttle / suspend
     // its rAF loop, which delays SimState delivery after game start and breaks
     // the smoke tests. The canvas must stay in the render tree at all times.
-    if (qrOverlay) qrOverlay.style.display = isLobby ? (qrVisible = true, '') : (qrVisible ? '' : 'none');
+    if (qrOverlay) {
+      if (isLobby) { qrVisible = true; qrOverlay.style.display = 'block'; }
+      else if (s.phase === 'Loading') { qrVisible = false; qrOverlay.style.display = 'none'; }
+      // During InProgress/GameOver the toggle button is the sole controller
+    }
 
     // ── Title / subtitle ──────────────────────────────────────────────
     const titleEl = document.getElementById('lobby-title');
@@ -1436,7 +1443,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       try {
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
-          if (!qrVisible) document.getElementById('overlay').style.display = 'none';
+          qrVisible = false;
+          document.getElementById('overlay').style.display = 'none';
           const al = document.getElementById('asset-loading');
           if (al) al.style.display = 'none';
           startGameAudio();
@@ -1591,11 +1599,10 @@ function finishInit() {
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
-  let qrVisible = false;
   document.getElementById('qr-toggle-btn').addEventListener('click', function() {
     const qrOverlay = document.getElementById('overlay');
     qrVisible = !qrVisible;
-    qrOverlay.style.display = qrVisible ? '' : 'none';
+    qrOverlay.style.display = qrVisible ? 'block' : 'none';
   });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────

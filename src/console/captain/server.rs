@@ -120,7 +120,8 @@ fn operate_captain_ai(
     let ai = crate::ai::core::CaptainAi;
     let last_under_attack =
         most_recent(activity.last_damage_taken, activity.last_hostile_fire_taken);
-    if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, activity.last_weapon_fired)
+    if let Some(should_be_red_alert) =
+        ai.operate(now, last_under_attack, activity.last_weapon_fired)
     {
         if should_be_red_alert != ship.red_alert() {
             admitted.0.push(crate::messages::AdmittedCommand {

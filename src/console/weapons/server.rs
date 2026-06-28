@@ -519,10 +519,7 @@ fn tick_phaser_auto_fire(
             ship_query
                 .single()
                 .ok()
-                .is_some_and(|cfg| {
-                    s.0.console_holder(&Console::Tactical, &cfg.0)
-                        .is_none()
-                })
+                .is_some_and(|cfg| s.0.console_holder(&Console::Tactical, &cfg.0).is_none())
         });
     if !auto_mode {
         return;
@@ -1741,11 +1738,7 @@ fn operate_tactical_ai(
     // resolved), fall back to the last NPC that attacked the player ship.
     let objective_target = match top_destroy_objective_target(blackboards.as_deref()) {
         Some(target_name) if target_name.is_empty() => None,
-        Some(target_name) => resolve_objective_target_uuid(
-            target_name,
-            runtime.as_deref(),
-            &npc_q,
-        ),
+        Some(target_name) => resolve_objective_target_uuid(target_name, runtime.as_deref(), &npc_q),
         None => None,
     };
     if let Some(uuid) = objective_target.or_else(|| last_attacker.0.clone()) {

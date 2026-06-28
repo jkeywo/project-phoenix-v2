@@ -1660,8 +1660,7 @@ fn spawn_game_start_entities(
                 crate::ship_plugin::load_ship_config_from_disk()
             };
             let initial_control_sources = {
-                let mut resolver =
-                    crate::ship::control_source::ControlSourceResolver::new();
+                let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
                 if let Some(ref sess) = sessions {
                     let manned: std::collections::HashSet<_> = sess
                         .0

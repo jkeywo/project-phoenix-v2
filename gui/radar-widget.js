@@ -465,6 +465,10 @@
 
       if (b.kind === 'waypoint') {
         self._drawWaypointBlip(ctx, bx, by, dotR, !!b.edge);
+      } else if (b.kind === 'tactical-target') {
+        self._drawTargetBlip(ctx, bx, by, dotR, !!b.edge, '#ff3344');
+      } else if (b.kind === 'science-target') {
+        self._drawTargetBlip(ctx, bx, by, dotR, !!b.edge, '#3399ff');
       } else if (iconLoaded) {
         self._drawIconBlip(ctx, icon, bx, by, dotR, b.color);
       } else {
@@ -513,30 +517,55 @@
   };
 
   RadarWidget.prototype._drawWaypointBlip = function (ctx, bx, by, dotR, edge) {
+    this._drawTargetBlip(ctx, bx, by, dotR, edge, '#d4a820');
+  };
+
+  /**
+   * Draw a diamond-shaped target marker with outer ring and optional off-screen
+   * arrow indicator. Used for navigation waypoints (yellow), tactical targets
+   * (red), and science targets (blue).
+   *
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} bx  Canvas X (pixels)
+   * @param {number} by  Canvas Y (pixels)
+   * @param {number} dotR  Base radius in canvas pixels
+   * @param {boolean} edge  True when the target is off-screen (show arrow)
+   * @param {string} color  CSS hex colour for stroke/fill (e.g. '#d4a820')
+   */
+  RadarWidget.prototype._drawTargetBlip = function (ctx, bx, by, dotR, edge, color) {
+    color = color || '#d4a820';
     var r = Math.max(7, dotR + 3);
     ctx.save();
     ctx.translate(bx, by);
-    ctx.strokeStyle = '#72f3ff';
-    ctx.fillStyle = edge ? 'rgba(114,243,255,0.26)' : 'rgba(114,243,255,0.42)';
+    ctx.strokeStyle = color;
     ctx.lineWidth = edge ? 2.5 : 2;
+
+    // Diamond
     ctx.beginPath();
     ctx.moveTo(0, -r);
     ctx.lineTo(r, 0);
     ctx.lineTo(0, r);
     ctx.lineTo(-r, 0);
     ctx.closePath();
+    ctx.globalAlpha = edge ? 0.15 : 0.26;
+    ctx.fillStyle = color;
     ctx.fill();
+    ctx.globalAlpha = 1.0;
     ctx.stroke();
+
+    // Outer ring
     ctx.beginPath();
     ctx.arc(0, 0, r + 5, 0, Math.PI * 2);
     ctx.stroke();
+
+    // Off-screen arrow (pointing outward from radar centre)
     if (edge) {
       ctx.beginPath();
       ctx.moveTo(0, -r - 8);
       ctx.lineTo(4, -r - 1);
       ctx.lineTo(-4, -r - 1);
       ctx.closePath();
-      ctx.fillStyle = '#72f3ff';
+      ctx.fillStyle = color;
       ctx.fill();
     }
     ctx.restore();

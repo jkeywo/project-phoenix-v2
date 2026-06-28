@@ -158,7 +158,7 @@ describe('RadarWidget: waypoint drawing', () => {
       blips: [{ uuid: 'navigation-waypoint', radar_x: 0, radar_y: 0, scaled_radius: 0.02, kind: 'waypoint', edge: true }],
     });
     expect(ctx._drawn.arcs.length).toBeGreaterThan(arcsBefore);
-    expect(ctx._drawn.strokeStyles).toContain('#72f3ff');
+    expect(ctx._drawn.strokeStyles).toContain('#d4a820');
     widget.destroy();
   });
 });

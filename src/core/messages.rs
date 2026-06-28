@@ -1709,6 +1709,10 @@ pub struct SensorsBlackboard {
     /// Targetability filter: only these entities are selectable on the radar.
     #[serde(default)]
     pub radar_selects: Vec<String>,
+    /// The UUID of the current science target (set by Sensors console). Broadcast
+    /// so all radar views can render a blue target marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub science_target_uuid: Option<String>,
 }
 
 impl Default for SensorsBlackboard {
@@ -1717,6 +1721,7 @@ impl Default for SensorsBlackboard {
             radar_range: default_sensors_radar_range(),
             radar_shows: Vec::new(),
             radar_selects: Vec::new(),
+            science_target_uuid: None,
         }
     }
 }

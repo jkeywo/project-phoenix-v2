@@ -4,6 +4,7 @@ import {
   buildBlips,
   buildRadarRegions,
   buildWaypointBlip,
+  buildTargetBlip,
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
   NAVIGATION_RADAR_RANGE,
   buildWeaponsConsoleState,
@@ -245,6 +246,68 @@ describe('buildWaypointBlip', () => {
     const blip = buildWaypointBlip({ x: 500, z: 0 }, 0, 0, 0, 100, { rotate: true, edgeClamp: true });
     expect(Math.hypot(blip.radar_x, blip.radar_y)).toBeCloseTo(0.96);
     expect(blip.edge).toBe(true);
+  });
+});
+
+// ── buildTargetBlip ───────────────────────────────────────────────────────────
+
+const TARGET_ENTITY = { uuid: 'tgt-1', x: 80, z: 0, name: 'Kobayashi Maru' };
+const ENTITIES = [TARGET_ENTITY];
+
+describe('buildTargetBlip', () => {
+  it('returns null when targetUuid is absent', () => {
+    expect(buildTargetBlip(null, ENTITIES, 0, 0, 0, 100)).toBeNull();
+  });
+
+  it('returns null when entities list is empty', () => {
+    expect(buildTargetBlip('tgt-1', [], 0, 0, 0, 100)).toBeNull();
+  });
+
+  it('returns null when target entity is not found', () => {
+    expect(buildTargetBlip('unknown-uuid', ENTITIES, 0, 0, 0, 100)).toBeNull();
+  });
+
+  it('projects in-range target without edge flag', () => {
+    const blip = buildTargetBlip('tgt-1', ENTITIES, 0, 0, 0, 100, { edgeClamp: true });
+    expect(blip.uuid).toBe('tgt-1');
+    expect(blip.radar_x).toBeCloseTo(0.8);
+    expect(blip.radar_y).toBeCloseTo(0);
+    expect(blip.edge).toBe(false);
+    expect(blip.kind).toBe('target-marker');
+  });
+
+  it('clamps out-of-range target to the edge when requested', () => {
+    const blip = buildTargetBlip('tgt-1', ENTITIES, 0, 0, 0, 10, { edgeClamp: true });
+    expect(Math.hypot(blip.radar_x, blip.radar_y)).toBeCloseTo(0.96);
+    expect(blip.edge).toBe(true);
+  });
+
+  it('accepts custom kind and color', () => {
+    const blip = buildTargetBlip('tgt-1', ENTITIES, 0, 0, 0, 100, {
+      kind: 'tactical-target',
+      color: [1.0, 0.2, 0.2],
+      label: 'TACTICAL TARGET',
+    });
+    expect(blip.kind).toBe('tactical-target');
+    expect(blip.color).toEqual([1.0, 0.2, 0.2]);
+    expect(blip.name).toBe('TACTICAL TARGET');
+  });
+
+  it('preserves world_x/world_z for canvas rendering', () => {
+    const blip = buildTargetBlip('tgt-1', ENTITIES, 0, 0, 0, 100);
+    expect(blip.world_x).toBe(80);
+    expect(blip.world_z).toBe(0);
+  });
+
+  it('falls back to target.name when no label is provided', () => {
+    const blip = buildTargetBlip('tgt-1', ENTITIES, 0, 0, 0, 100);
+    expect(blip.name).toBe('Kobayashi Maru');
+  });
+
+  it('supports rotate=false for world-axis projection', () => {
+    const blip = buildTargetBlip('tgt-1', ENTITIES, 10, 20, 0, 100, { rotate: false });
+    expect(blip.radar_x).toBeCloseTo(0.7);
+    expect(blip.radar_y).toBeCloseTo(-0.2);
   });
 });
 

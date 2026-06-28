@@ -61,6 +61,13 @@ impl Default for WeaponsUpdateFirstTick {
 #[derive(Resource, Default)]
 pub struct WeaponsTarget(pub Option<String>);
 
+/// UUID of the NPC (or asteroid) that last attacked the player ship.
+/// Set by `handle_fire_phaser_npc` in the Damage phase; consumed as a
+/// fallback target in the next frame's Input phase. `None` when no recent
+/// attacker is known.
+#[derive(Resource, Default)]
+pub struct LastShipAttacker(pub Option<String>);
+
 /// Active phaser beam state. `target_uuid` is `Some` while a beam is firing.
 /// `remaining_secs` counts down to 0. `damage_accumulator` tracks fractional
 /// damage between ticks so 5 HP/s is applied accurately at any frame rate.
@@ -232,6 +239,7 @@ impl Plugin for WeaponsPlugin {
         app.init_resource::<crate::server_app::WeaponFiredThisTick>()
             .init_resource::<crate::server_app::ShipAttackedThisTick>()
             .init_resource::<WeaponsTarget>()
+            .init_resource::<LastShipAttacker>()
             .init_resource::<LastWeaponsUpdate>()
             .init_resource::<ActiveBeam>()
             .init_resource::<PhaserCooldown>()
@@ -615,6 +623,7 @@ fn handle_fire_phaser_npc(
     player_ship_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), With<Ship>>,
     ship_state: Option<Res<crate::ship_state::ShipState>>,
     mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
+    mut last_attacker: ResMut<LastShipAttacker>,
     mut hull_resource: Option<ResMut<ShipHullIntegrity>>,
     mut shields_resource: Option<ResMut<ShipShields>>,
     mut outbox: Option<ResMut<SimOutbox>>,
@@ -778,6 +787,7 @@ fn handle_fire_phaser_npc(
                 if fire_ok {
                     if player_ship_q.iter().any(|(u, _)| u.0 == t_uuid.to_string()) {
                         ship_attacked.0 = true;
+                        last_attacker.0 = Some(npc_uuid.0.clone());
                     }
                     phaser_state.beam_active = true;
                     phaser_state.beam_target = Some(t_uuid);
@@ -1703,27 +1713,28 @@ fn operate_tactical_ai(
         ),
         Without<crate::simulation::Asteroid>,
     >,
+    last_attacker: Res<LastShipAttacker>,
 ) {
-    let Ok((ship_config, control_sources, active_ratings)) = ship_query.single() else {
+    let Ok((ship_config, _control_sources, active_ratings)) = ship_query.single() else {
         return;
     };
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::tactical_system_id());
-    if !policy.operate_ai {
-        return;
-    }
 
-    if let Some(target_name) = top_destroy_objective_target(blackboards.as_deref()) {
-        if target_name.is_empty() {
-            weapons_target.0 = None;
-        } else if let Some(uuid) =
-            resolve_objective_target_uuid(target_name, runtime.as_deref(), &npc_q)
-        {
-            weapons_target.0 = Some(uuid);
-        } else {
-            weapons_target.0 = None;
-        }
+    // Always set weapons_target from Destroy objectives regardless of control
+    // source. This lets both human and AI Tactical operators benefit from
+    // mission objective auto-targeting.
+    // When no Destroy objective is available (or its target entity can't be
+    // resolved), fall back to the last NPC that attacked the player ship.
+    let objective_target = match top_destroy_objective_target(blackboards.as_deref()) {
+        Some(target_name) if target_name.is_empty() => None,
+        Some(target_name) => resolve_objective_target_uuid(
+            target_name,
+            runtime.as_deref(),
+            &npc_q,
+        ),
+        None => None,
+    };
+    if let Some(uuid) = objective_target.or_else(|| last_attacker.0.clone()) {
+        weapons_target.0 = Some(uuid);
     }
 
     // ── TORPEDO AUTO-FIRE (future: split to torpedo_tube system) ─────────────

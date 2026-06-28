@@ -14,6 +14,12 @@ const PLACEHOLDER_SHIELD_FREQUENCY: f32 = 0.5;
 
 // ── Resources ──────────────────────────────────────────────────────────────────
 
+/// The currently selected science target on the Sensors console. `None` means
+/// no target is selected. Broadcast to all clients via SensorsBlackboard so
+/// every radar can render a blue science-target marker.
+#[derive(Resource, Default)]
+pub struct SensorsTarget(pub Option<String>);
+
 /// Tracks the last frequency value sent for a given target so we avoid
 /// re-emitting when nothing has changed.
 #[derive(Resource, Default)]
@@ -31,6 +37,7 @@ impl Plugin for ShipSensorsPlugin {
         app.init_resource::<crate::messages::AdmittedCommands>();
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<SensorsFrequencyState>()
+            .init_resource::<SensorsTarget>()
             .add_systems(
                 Update,
                 (
@@ -47,12 +54,14 @@ impl Plugin for ShipSensorsPlugin {
 /// Handle `SetScienceTarget` messages from the Sensors console.
 ///
 /// Validates: sender holds `Console::Sensors` and `accept_human_input` is true.
-/// Emits `SensorsTargetSuggestion` directly to the Tactical console holder.
+/// Stores the target in [`SensorsTarget`] for blackboard broadcast, and emits
+/// `SensorsTargetSuggestion` directly to the Tactical console holder.
 pub fn handle_sensors_messages(
     admitted: Res<AdmittedCommands>,
     sessions: Res<Sessions>,
     ship_query: Query<(&crate::ship_plugin::ShipConfigComponent,), With<crate::simulation::Ship>>,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
+    mut sensors_target: ResMut<SensorsTarget>,
 ) {
     let Ok((ship_config,)) = ship_query.single() else {
         return;
@@ -62,6 +71,9 @@ pub fn handle_sensors_messages(
         let SystemControlPayload::SetScienceTarget { uuid } = &cmd.payload else {
             continue;
         };
+
+        // Store so it's broadcast via SensorsBlackboard to all clients.
+        sensors_target.0 = Some(uuid.clone());
 
         // Route the suggestion to whoever currently holds the Tactical console.
         let Some(tactical_token) = sessions
@@ -132,6 +144,7 @@ pub fn tick_sensors_frequency_hint(
 
 pub fn publish_sensors_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    sensors_target: Res<SensorsTarget>,
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     let cfg = &ship_config.0;
@@ -139,6 +152,7 @@ pub fn publish_sensors_blackboard(
         radar_range: cfg.sensors_radar_range,
         radar_shows: cfg.sensors_radar_shows.clone(),
         radar_selects: cfg.sensors_radar_selects.clone(),
+        science_target_uuid: sensors_target.0.clone(),
     };
 
     blackboards.0.insert(

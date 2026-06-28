@@ -405,7 +405,7 @@
     function drawWaypointLine() {
       if (!_waypoint) return;
       ctx.save();
-      ctx.strokeStyle = 'rgba(240,132,56,0.55)';
+      ctx.strokeStyle = 'rgba(212,168,32,0.55)';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([10,8]);
       ctx.beginPath();
@@ -415,10 +415,10 @@
       ctx.setLineDash([]);
       const px = toSX(_waypoint.x), py = toSY(_waypoint.z);
       const d = 9;
-      ctx.fillStyle = 'rgba(240,132,56,0.18)';
-      ctx.strokeStyle = '#f08438';
+      ctx.fillStyle = 'rgba(212,168,32,0.18)';
+      ctx.strokeStyle = '#d4a820';
       ctx.lineWidth = 1.5;
-      ctx.shadowColor = '#f08438';
+      ctx.shadowColor = '#d4a820';
       ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.moveTo(px, py-d); ctx.lineTo(px+d, py);
@@ -428,7 +428,7 @@
       ctx.shadowBlur = 0;
       if (zoom > 0.1) {
         ctx.font = '8px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#f08438';
+        ctx.fillStyle = '#d4a820';
         ctx.textAlign = 'left';
         ctx.fillText('WP', px + d + 5, py + 3);
       }
@@ -440,6 +440,10 @@
       hostile:  '#ff6040',
       friendly: '#4ec870',
       neutral:  '#7a90c0',
+    };
+    const TARGET_COL = {
+      'tactical-target': '#ff3344',
+      'science-target':  '#3399ff',
     };
 
     // Icon cache: same naming convention as radar-widget.js.
@@ -552,12 +556,25 @@
         ctx.shadowBlur  = sel ? 16 : 7;
 
         if (e.kind === 'waypoint') {
-          ctx.fillStyle   = '#f08438';
-          ctx.strokeStyle = '#f08438';
+          ctx.fillStyle   = '#d4a820';
+          ctx.strokeStyle = '#d4a820';
           ctx.lineWidth   = 1;
           ctx.beginPath();
           ctx.moveTo(0,-r); ctx.lineTo(r*.6,0); ctx.lineTo(0,r*.8); ctx.lineTo(-r*.6,0);
           ctx.closePath(); ctx.fill();
+        } else if (e.kind === 'tactical-target' || e.kind === 'science-target') {
+          var tcol = TARGET_COL[e.kind] || '#ff3344';
+          ctx.fillStyle   = tcol;
+          ctx.strokeStyle = tcol;
+          ctx.lineWidth   = 1.5;
+          ctx.globalAlpha = 0.25;
+          ctx.beginPath();
+          ctx.moveTo(0,-r); ctx.lineTo(r*.6,0); ctx.lineTo(0,r*.8); ctx.lineTo(-r*.6,0);
+          ctx.closePath(); ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.beginPath();
+          ctx.arc(0, 0, r + 4, 0, Math.PI * 2);
+          ctx.stroke();
         } else {
           const icon = getNavIcon(e.kind);
           if (icon && icon.complete && icon.naturalWidth > 0) {

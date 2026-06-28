@@ -260,7 +260,7 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
     scaled_radius: 10 / safeRange,
     kind: 'waypoint',
     icon: 'waypoint',
-    color: [0.45, 0.95, 1.0],
+    color: [0.83, 0.66, 0.13],
     name: 'WAYPOINT',
     selectable: sourceUuid !== null,
     objective_target: false,
@@ -268,6 +268,70 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
     world_x: waypoint.x,
     world_z: waypoint.z,
     source_uuid: sourceUuid,
+  };
+}
+
+/**
+ * Build a radar blip for a target entity (tactical or science) with off-screen
+ * edge arrows, matching the same projection as buildWaypointBlip.
+ *
+ * @param {string|null}  targetUuid UUID of the target entity
+ * @param {Array|null}   entities   Full entity list (state.asteroids / world.entities)
+ * @param {number}       shipX
+ * @param {number}       shipZ
+ * @param {number}       shipYaw
+ * @param {number}       range
+ * @param {object}       [opts]
+ * @param {boolean}      [opts.rotate=true]
+ * @param {boolean}      [opts.edgeClamp=false]
+ * @param {string}       [opts.kind='target-marker']  blip kind for the radar widget
+ * @param {Array}        [opts.color=[1,1,1]]         RGB float array
+ * @param {string}       [opts.label='TARGET']         display name
+ * @returns {object|null}
+ */
+export function buildTargetBlip(targetUuid, entities, shipX, shipZ, shipYaw, range, opts = {}) {
+  if (!targetUuid || !entities) return null;
+  const target = entities.find(e => e.uuid === targetUuid);
+  if (!target) return null;
+
+  const safeRange = Math.max(Number(range) || 0, 0.001);
+  const rotate = opts.rotate !== false;
+  const dx = entityX(target) - shipX;
+  const dz = entityZ(target) - shipZ;
+
+  let radar_x, radar_y;
+  if (rotate) {
+    const cosY = Math.cos(shipYaw || 0);
+    const sinY = Math.sin(shipYaw || 0);
+    radar_x = (dx * cosY + dz * sinY) / safeRange;
+    radar_y = (dx * sinY - dz * cosY) / safeRange;
+  } else {
+    radar_x = dx / safeRange;
+    radar_y = dz / safeRange;
+  }
+
+  const normalizedDistance = Math.hypot(radar_x, radar_y);
+  const edge = opts.edgeClamp && normalizedDistance > 1;
+  if (edge) {
+    const scale = 0.96 / normalizedDistance;
+    radar_x *= scale;
+    radar_y *= scale;
+  }
+
+  return {
+    uuid: targetUuid,
+    radar_x,
+    radar_y,
+    scaled_radius: 10 / safeRange,
+    kind: opts.kind || 'target-marker',
+    icon: opts.icon || 'target-marker',
+    color: opts.color || [1.0, 1.0, 1.0],
+    name: opts.label || target.name || 'TARGET',
+    selectable: false,
+    objective_target: false,
+    edge,
+    world_x: entityX(target),
+    world_z: entityZ(target),
   };
 }
 
@@ -317,6 +381,21 @@ export function buildWeaponsConsoleState(state) {
 
   // Derive target_name from the locked server blip when no explicit name is stored.
   const resolvedTargetName = targetName || (targetUuid && blips.find(b => b.uuid === targetUuid)?.name) || null;
+
+  // Add shared target markers (science target + navigation waypoint)
+  const entities = state.asteroids || [];
+  const sensBb = state.blackboards?.['sensors'];
+  const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
+  const sciMarker = buildTargetBlip(
+    sciTargetUuid, entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0, range,
+    { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: 'SCIENCE TARGET' }
+  );
+  if (sciMarker) blips.push(sciMarker);
+  const waypoint = buildWaypointBlip(
+    state.navigationWaypoint || null, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0, range,
+    { rotate: true, edgeClamp: true }
+  );
+  if (waypoint) blips.push(waypoint);
 
   return JSON.stringify({
     target_uuid:   targetUuid,
@@ -411,6 +490,23 @@ export function buildHelmConsoleState(state) {
     { rotate: true, edgeClamp: true }
   );
   if (waypoint) blips.push(waypoint);
+
+  // Shared target markers (every radar shows tactical + science targets)
+  const entities = state.asteroids || [];
+  const tacBb = state.blackboards?.['tactical'];
+  const sensBb = state.blackboards?.['sensors'];
+  const tacMarker = buildTargetBlip(
+    tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
+    { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: 'TACTICAL TARGET' }
+  );
+  if (tacMarker) blips.push(tacMarker);
+  const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
+  const sciMarker = buildTargetBlip(
+    sciTargetUuid, entities, shipX, shipZ, shipYaw, range,
+    { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: 'SCIENCE TARGET' }
+  );
+  if (sciMarker) blips.push(sciMarker);
+
   return JSON.stringify({
     heading:                 (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
     speed:                   forwardSpeed,
@@ -588,6 +684,20 @@ export function buildSensorsConsoleState(state) {
     }
   }
 
+  // Shared target markers (tactical target + navigation waypoint)
+  const shipX = state.shipX || 0, shipZ = state.shipZ || 0, shipYaw = state.shipYaw || 0;
+  const tacBb = state.blackboards?.['tactical'];
+  const tacMarker = buildTargetBlip(
+    tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
+    { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: 'TACTICAL TARGET' }
+  );
+  if (tacMarker) blips.push(tacMarker);
+  const waypoint = buildWaypointBlip(
+    state.navigationWaypoint || null, shipX, shipZ, shipYaw, range,
+    { rotate: true, edgeClamp: true }
+  );
+  if (waypoint) blips.push(waypoint);
+
   return JSON.stringify({
     scan_range:              range,
     complexity:              state.complexity?.Sensors || 'full',
@@ -595,9 +705,9 @@ export function buildSensorsConsoleState(state) {
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
     regions:                 state.regions || projectRadarRegions(
       buildRadarRegions(entities, []),
-      state.shipX || 0,
-      state.shipZ || 0,
-      state.shipYaw || 0,
+      shipX,
+      shipZ,
+      shipYaw,
       range,
       { rotate: true }
     ),
@@ -714,6 +824,22 @@ export function buildNavigationConsoleState(state) {
     { rotate: false, edgeClamp: true }
   );
   if (waypoint) blips.push(waypoint);
+
+  // Shared target markers (world-axis, north-up)
+  const allEntities = state.asteroids || [];
+  const tacBb = state.blackboards?.['tactical'];
+  const sensBb = state.blackboards?.['sensors'];
+  const tacMarker = buildTargetBlip(
+    tacBb?.target_uuid, allEntities, state.shipX || 0, state.shipZ || 0, 0, range,
+    { rotate: false, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: 'TACTICAL TARGET' }
+  );
+  if (tacMarker) blips.push(tacMarker);
+  const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
+  const sciMarker = buildTargetBlip(
+    sciTargetUuid, allEntities, state.shipX || 0, state.shipZ || 0, 0, range,
+    { rotate: false, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: 'SCIENCE TARGET' }
+  );
+  if (sciMarker) blips.push(sciMarker);
 
   const charge = state.impulseChargeProgress || 0;
   const onScreen = state.currentView === 'NavigationChart';

@@ -19,6 +19,9 @@
 //! [markers.fore_emitter]  # free-form name -> single point (post-base-rig space)
 //! position = [0.0,0.0,-6.0]
 //! direction = [0.0,0.0,-1.0]  # unit vector, forward basis (0,0,-1)
+//!
+//! [[target_points]]       # anonymous phaser hit points enemies can aim at
+//! position = [0.5,-0.1,0.0]
 //! ```
 //!
 //! # Composition
@@ -86,6 +89,15 @@ pub struct Marker {
     pub direction: [f32; 3],
 }
 
+/// A single anonymous target point in post-base-rig space.
+///
+/// Phaser PFX can resolve one of these points on the target model so beams hit
+/// plausible hull positions instead of always converging on the entity centre.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TargetPoint {
+    pub position: [f32; 3],
+}
+
 /// A parsed model-rig sidecar.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ModelRig {
@@ -99,6 +111,9 @@ pub struct ModelRig {
     /// crate (engine) both expand `[markers.<name>]` subtables into this map.
     #[serde(default)]
     pub markers: HashMap<String, Marker>,
+    /// Anonymous target points that incoming phaser beams can choose from.
+    #[serde(default)]
+    pub target_points: Vec<TargetPoint>,
 }
 
 impl ModelRig {
@@ -137,15 +152,40 @@ impl BaseTransform {
     }
 }
 
-/// ECS component carrying a model's resolved marker map so downstream systems
-/// can look up mount points by name without re-reading the sidecar.
+/// ECS component carrying a model's resolved rig points so downstream systems
+/// can look up mount points and target points without re-reading the sidecar.
 #[derive(Component, Debug, Clone, Default)]
-pub struct ModelMarkers(pub HashMap<String, Marker>);
+pub struct ModelMarkers {
+    markers: HashMap<String, Marker>,
+    target_points: Vec<TargetPoint>,
+}
 
 impl ModelMarkers {
+    pub fn from_rig(rig: &ModelRig) -> Self {
+        Self {
+            markers: rig.markers.clone(),
+            target_points: rig.target_points.clone(),
+        }
+    }
+
+    pub fn from_markers(markers: HashMap<String, Marker>) -> Self {
+        Self {
+            markers,
+            target_points: Vec::new(),
+        }
+    }
+
     /// Resolve a marker by name (None when missing -> caller falls back).
     pub fn get(&self, name: &str) -> Option<&Marker> {
-        self.0.get(name)
+        self.markers.get(name)
+    }
+
+    pub fn target_point(&self, index: usize) -> Option<&TargetPoint> {
+        self.target_points.get(index)
+    }
+
+    pub fn target_point_count(&self) -> usize {
+        self.target_points.len()
     }
 }
 
@@ -210,6 +250,12 @@ direction = [0.0, 0.0, -1.0]
 [markers.aft_exhaust]
 position = [0.0, 0.0, 6.0]
 direction = [0.0, 0.0, 1.0]
+
+[[target_points]]
+position = [0.5, -0.1, 0.0]
+
+[[target_points]]
+position = [-0.25, -0.1, 0.25]
 "##;
         let rig = ModelRig::from_toml(toml).expect("full sidecar must parse");
         assert!(approx(rig.base.offset, [1.0, 2.0, 3.0]));
@@ -225,6 +271,9 @@ direction = [0.0, 0.0, 1.0]
         let fore = rig.marker("fore_emitter").expect("fore marker present");
         assert!(approx(fore.position, [0.0, 0.0, -6.0]));
         assert!(approx(fore.direction, [0.0, 0.0, -1.0]));
+        assert_eq!(rig.target_points.len(), 2);
+        assert!(approx(rig.target_points[0].position, [0.5, -0.1, 0.0]));
+        assert!(approx(rig.target_points[1].position, [-0.25, -0.1, 0.25]));
     }
 
     #[test]
@@ -241,6 +290,7 @@ offset = [5.0, 0.0, 0.0]
         assert!(approx(rig.base.scale, [1.0, 1.0, 1.0]));
         assert!(rig.extents.is_none());
         assert!(rig.markers.is_empty());
+        assert!(rig.target_points.is_empty());
     }
 
     #[test]
@@ -251,6 +301,7 @@ offset = [5.0, 0.0, 0.0]
         assert!(approx(rig.base.scale, [1.0, 1.0, 1.0]));
         assert!(rig.extents.is_none());
         assert!(rig.markers.is_empty());
+        assert!(rig.target_points.is_empty());
     }
 
     #[test]
@@ -310,9 +361,31 @@ direction = [0.0, 0.0, -1.0]
         assert!(rig.marker("nope").is_none());
 
         // ModelMarkers component resolves identically.
-        let mm = ModelMarkers(rig.markers.clone());
+        let mm = ModelMarkers::from_rig(&rig);
         assert!(mm.get("fore_emitter").is_some());
         assert!(mm.get("missing").is_none());
+    }
+
+    #[test]
+    fn target_points_array_form_parses() {
+        let toml = r##"
+[[target_points]]
+position = [0.5, -0.1, 0.0]
+
+[[target_points]]
+position = [-0.25, -0.1, -0.25]
+"##;
+        let rig = ModelRig::from_toml(toml).expect("target points must parse");
+        assert_eq!(rig.target_points.len(), 2);
+        assert!(approx(rig.target_points[0].position, [0.5, -0.1, 0.0]));
+        assert!(approx(rig.target_points[1].position, [-0.25, -0.1, -0.25]));
+
+        let mm = ModelMarkers::from_rig(&rig);
+        assert_eq!(mm.target_point_count(), 2);
+        assert!(approx(
+            mm.target_point(1).unwrap().position,
+            [-0.25, -0.1, -0.25]
+        ));
     }
 
     #[test]

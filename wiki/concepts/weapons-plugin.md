@@ -402,6 +402,20 @@ Radar fire arcs are drawn by `gui/radar-widget.js` from the
 `phaser_arcs` (per-bank) and `torpedo_arcs` (per-tube) lists projected
 into render state by `gui/console-state.js`.
 
+### Phaser PFX target points
+
+Viewsceen phaser beams resolve their visual endpoint from model-rig
+sidecar `[[target_points]]` entries when the target model defines them.
+`ModelRig` parses the points, `ModelMarkers` carries them on rendered
+entities, and `src/server/pfx.rs` chooses one target point per live beam
+so the beam remains stable for its duration instead of jittering between
+points. Damage and target-lock logic still use the entity centre/range
+rules; this is a renderer-only endpoint choice.
+
+Ship sidecars currently carry three provisional points:
+`[0.5, -0.1, 0]`, `[-0.25, -0.1, 0.25]`, and
+`[-0.25, -0.1, -0.25]` in Bevy's Y-up model-rig space.
+
 ### Drift guards and tests
 
 - `validate_phaser_banks` / `validate_torpedo_tubes` reject empty lists,

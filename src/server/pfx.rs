@@ -1,6 +1,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
@@ -15,9 +16,9 @@ use crate::simulation::{
 };
 use crate::weapons_plugin::PhaserCombatConfigResource;
 
-const BEAM_RADIUS: f32 = 0.04;
+const BEAM_RADIUS: f32 = 0.02;
 const BEAM_Y_OFFSET: f32 = 0.0;
-const CONTACT_GLOW_RADIUS: f32 = 0.45;
+const CONTACT_GLOW_RADIUS: f32 = 0.225;
 
 const TORPEDO_RADIUS: f32 = 0.45;
 const TORPEDO_TRAIL_RADIUS: f32 = 0.18;
@@ -91,6 +92,7 @@ struct BeamEntities {
 #[derive(Resource, Default)]
 struct BeamPfxState {
     active: HashMap<String, BeamEntities>,
+    target_point_choices: HashMap<String, usize>,
 }
 
 struct TorpedoEntities {
@@ -133,7 +135,7 @@ fn sync_phaser_beams(
         (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
     entity_q: Query<
-        (&EntityUuid, &Transform),
+        (&EntityUuid, &Transform, Option<&ModelMarkers>),
         (
             Without<Asteroid>,
             Without<BeamBody>,
@@ -164,6 +166,16 @@ fn sync_phaser_beams(
     let mut live_keys = HashSet::new();
 
     if let Some(target_uuid) = &beam.target_uuid {
+        let key = format!(
+            "player:{}:{}",
+            beam.bank.as_ref().map(|b| b.as_str()).unwrap_or("default"),
+            target_uuid
+        );
+        let target_point_index = choose_target_point_index(
+            &key,
+            target_point_count(target_uuid, None, &entity_q, &player_ship_q),
+            &mut state,
+        );
         if let Some((start, end, color)) = resolve_player_beam(
             target_uuid,
             &ship,
@@ -173,12 +185,8 @@ fn sync_phaser_beams(
             &asteroid_q,
             &entity_q,
             &player_ship_q,
+            target_point_index,
         ) {
-            let key = format!(
-                "player:{}:{}",
-                beam.bank.as_ref().map(|b| b.as_str()).unwrap_or("default"),
-                target_uuid
-            );
             live_keys.insert(key.clone());
             upsert_beam(
                 key,
@@ -208,12 +216,25 @@ fn sync_phaser_beams(
             continue;
         };
         let target_uuid = target_uuid.to_string();
+        let key = format!("npc:{}:{}", src_uuid.0, target_uuid);
+        let target_point_index = choose_target_point_index(
+            &key,
+            target_point_count(
+                &target_uuid,
+                player_ship_uuid.as_deref(),
+                &entity_q,
+                &player_ship_q,
+            ),
+            &mut state,
+        );
         let Some(target_pos) = target_position(
             &target_uuid,
             &ship,
             player_ship_uuid.as_deref(),
+            target_point_index,
             &asteroid_q,
             &entity_q,
+            &player_ship_q,
         ) else {
             continue;
         };
@@ -231,7 +252,6 @@ fn sync_phaser_beams(
             .unwrap_or(src_t.translation + Vec3::new(0.0, BEAM_Y_OFFSET, 0.0));
         let end = clamp_endpoint(origin, target_pos, src_t.translation, range);
 
-        let key = format!("npc:{}:{}", src_uuid.0, target_uuid);
         live_keys.insert(key.clone());
         upsert_beam(
             key,
@@ -255,6 +275,7 @@ fn sync_phaser_beams(
         .collect();
     for key in dead {
         if let Some(entities) = state.active.remove(&key) {
+            state.target_point_choices.remove(&key);
             commands.entity(entities.body).despawn();
             commands.entity(entities.glow).despawn();
         }
@@ -272,7 +293,7 @@ fn resolve_player_beam(
         (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
     entity_q: &Query<
-        (&EntityUuid, &Transform),
+        (&EntityUuid, &Transform, Option<&ModelMarkers>),
         (
             Without<Asteroid>,
             Without<BeamBody>,
@@ -283,8 +304,17 @@ fn resolve_player_beam(
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
         (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
+    target_point_index: Option<usize>,
 ) -> Option<(Vec3, Vec3, [f32; 4])> {
-    let target_pos = target_position(target_uuid, ship, None, asteroid_q, entity_q)?;
+    let target_pos = target_position(
+        target_uuid,
+        ship,
+        None,
+        target_point_index,
+        asteroid_q,
+        entity_q,
+        player_ship_q,
+    )?;
     let bank_id = beam.bank.as_deref();
     let bank_config = bank_id.and_then(|id| combat_cfg.bank_by_id(id));
     let color = bank_config
@@ -843,38 +873,119 @@ fn cleanup_pfx(
         commands.entity(entity).despawn();
     }
     beam_state.active.clear();
+    beam_state.target_point_choices.clear();
     torpedo_state.active.clear();
     engine_state.emitters.clear();
 }
 
-fn target_position(
+fn choose_target_point_index(
+    key: &str,
+    target_point_count: usize,
+    state: &mut BeamPfxState,
+) -> Option<usize> {
+    if target_point_count == 0 {
+        state.target_point_choices.remove(key);
+        return None;
+    }
+
+    if let Some(index) = state.target_point_choices.get(key).copied() {
+        if index < target_point_count {
+            return Some(index);
+        }
+    }
+
+    let mut rng = rand::rng();
+    let index = rng.random_range(0..target_point_count);
+    state.target_point_choices.insert(key.to_string(), index);
+    Some(index)
+}
+
+fn target_point_count(
     uuid: &str,
-    ship: &ShipState,
     player_ship_uuid: Option<&str>,
-    asteroid_q: &Query<
-        (&AsteroidUuid, &Transform),
-        (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>),
-    >,
     entity_q: &Query<
-        (&EntityUuid, &Transform),
+        (&EntityUuid, &Transform, Option<&ModelMarkers>),
         (
             Without<Asteroid>,
             Without<BeamBody>,
             Without<BeamContactGlow>,
         ),
     >,
+    player_ship_q: &Query<
+        (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
+        (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>),
+    >,
+) -> usize {
+    if player_ship_uuid == Some(uuid) {
+        return player_ship_q
+            .single()
+            .ok()
+            .and_then(|(_, markers, _)| markers.map(ModelMarkers::target_point_count))
+            .unwrap_or(0);
+    }
+
+    entity_q
+        .iter()
+        .find_map(|(u, _, markers)| {
+            (u.0 == uuid).then(|| markers.map(ModelMarkers::target_point_count).unwrap_or(0))
+        })
+        .unwrap_or(0)
+}
+
+fn target_position(
+    uuid: &str,
+    ship: &ShipState,
+    player_ship_uuid: Option<&str>,
+    target_point_index: Option<usize>,
+    asteroid_q: &Query<
+        (&AsteroidUuid, &Transform),
+        (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>),
+    >,
+    entity_q: &Query<
+        (&EntityUuid, &Transform, Option<&ModelMarkers>),
+        (
+            Without<Asteroid>,
+            Without<BeamBody>,
+            Without<BeamContactGlow>,
+        ),
+    >,
+    player_ship_q: &Query<
+        (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
+        (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>),
+    >,
 ) -> Option<Vec3> {
     if player_ship_uuid == Some(uuid) {
+        if let Ok((transform, markers, _)) = player_ship_q.single() {
+            if let Some(point) = target_point_position(transform, markers, target_point_index) {
+                return Some(point);
+            }
+        }
         return Some(Vec3::new(ship.x, 0.0, ship.z));
     }
     asteroid_q
         .iter()
         .find_map(|(u, t)| (u.0 == uuid).then_some(t.translation))
         .or_else(|| {
-            entity_q
-                .iter()
-                .find_map(|(u, t)| (u.0 == uuid).then_some(t.translation))
+            entity_q.iter().find_map(|(u, t, markers)| {
+                if u.0 == uuid {
+                    Some(
+                        target_point_position(t, markers, target_point_index)
+                            .unwrap_or(t.translation),
+                    )
+                } else {
+                    None
+                }
+            })
         })
+}
+
+fn target_point_position(
+    transform: &Transform,
+    markers: Option<&ModelMarkers>,
+    target_point_index: Option<usize>,
+) -> Option<Vec3> {
+    let marker = markers?.target_point(target_point_index?)?;
+    Some(transform.transform_point(Vec3::from_array(marker.position)))
 }
 
 fn marker_origin(
@@ -1154,6 +1265,36 @@ mod tests {
     }
 
     #[test]
+    fn target_point_position_transforms_model_point() {
+        let rig = crate::model_rig::ModelRig::from_toml(
+            r#"
+[[target_points]]
+position = [0.5, -0.1, 0.25]
+"#,
+        )
+        .unwrap();
+        let markers = ModelMarkers::from_rig(&rig);
+        let transform = Transform::from_translation(Vec3::new(10.0, 2.0, -3.0));
+
+        let point = target_point_position(&transform, Some(&markers), Some(0)).unwrap();
+
+        assert_eq!(point, Vec3::new(10.5, 1.9, -2.75));
+    }
+
+    #[test]
+    fn target_point_choice_stays_stable_for_live_beam_key() {
+        let mut state = BeamPfxState::default();
+        let first = choose_target_point_index("beam:a", 3, &mut state).unwrap();
+        let second = choose_target_point_index("beam:a", 3, &mut state).unwrap();
+
+        assert_eq!(first, second);
+        assert!(first < 3);
+
+        assert_eq!(choose_target_point_index("beam:a", 0, &mut state), None);
+        assert!(state.target_point_choices.is_empty());
+    }
+
+    #[test]
     fn segment_transform_places_midpoint_and_scales_height() {
         let transform = segment_transform(Vec3::ZERO, Vec3::new(0.0, 4.0, 0.0), 0.25);
         assert_eq!(transform.translation, Vec3::new(0.0, 2.0, 0.0));
@@ -1212,7 +1353,7 @@ mod tests {
                 direction: [0.0, 0.0, -1.0],
             },
         );
-        let markers = ModelMarkers(map);
+        let markers = ModelMarkers::from_markers(map);
         let cfg = EnginePfxConfig {
             color: None,
             markers: vec!["aft_exhaust".to_string()],
@@ -1241,7 +1382,7 @@ mod tests {
                 direction: [0.0, 0.0, -1.0],
             },
         );
-        let markers = ModelMarkers(map);
+        let markers = ModelMarkers::from_markers(map);
         let cfg = EnginePfxConfig {
             color: None,
             markers: vec!["aft_exhaust".to_string()],

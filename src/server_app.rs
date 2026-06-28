@@ -2118,7 +2118,7 @@ fn render_spawned_entities(
                             continue;
                         }
                     };
-                    ec.insert(crate::model_rig::ModelMarkers(rig.markers.clone()));
+                    ec.insert(crate::model_rig::ModelMarkers::from_rig(&rig));
                     rendered = true;
                 } else {
                     // PATH A (render): load the GLB scene and its sidecar. Issue the
@@ -2194,7 +2194,7 @@ fn render_spawned_entities(
 
                         // Attach the resolved marker map so downstream systems (weapons,
                         // exhaust, …) can resolve mount points by name.
-                        ec.insert(crate::model_rig::ModelMarkers(rig.markers.clone()));
+                        ec.insert(crate::model_rig::ModelMarkers::from_rig(&rig));
 
                         rendered = true;
                     }

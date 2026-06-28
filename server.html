@@ -105,7 +105,7 @@
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000 url('assets/logo.png') center center / contain no-repeat; overflow: hidden; }
     #canvas { display: block; width: 100vw; height: 100vh; background: #000; }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
-    #qr-toggle-btn { position: fixed; bottom: 0; left: 0; width: 60px; height: 60px; z-index: 200; opacity: 0; cursor: pointer; }
+    #qr-toggle-btn { position: fixed; bottom: 0; left: 0; width: 80px; height: 80px; z-index: 200; opacity: 0.01; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     #qr { display: none; }
     #top-bar {
       position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
@@ -967,7 +967,6 @@
       else if (s.phase === 'Loading') { qrVisible = false; qrOverlay.style.display = 'none'; }
       // During InProgress/GameOver the toggle button is the sole controller
     }
-    window.__lastPhase = s.phase;
 
     // ── Title / subtitle ──────────────────────────────────────────────
     const titleEl = document.getElementById('lobby-title');
@@ -1448,7 +1447,6 @@
       try {
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
-          console.log('[Phoenix] GameStarted — hiding QR overlay');
           qrVisible = false;
           document.getElementById('overlay').style.display = 'none';
           const al = document.getElementById('asset-loading');
@@ -1605,16 +1603,11 @@ function finishInit() {
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
-  var qrBtn = document.getElementById('qr-toggle-btn');
-  console.log('[Phoenix] QR toggle button:', qrBtn);
-  if (qrBtn) {
-    qrBtn.addEventListener('click', function() {
-      const qrOverlay = document.getElementById('overlay');
-      qrVisible = !qrVisible;
-      qrOverlay.style.display = qrVisible ? 'block' : 'none';
-      console.log('[Phoenix] QR toggle: visible=' + qrVisible + ', overlay=' + qrOverlay.style.display + ', phase=' + (window.__lastPhase || '?'));
-    });
-  }
+  document.getElementById('qr-toggle-btn').addEventListener('click', function() {
+    const qrOverlay = document.getElementById('overlay');
+    qrVisible = !qrVisible;
+    qrOverlay.style.display = qrVisible ? 'block' : 'none';
+  });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
   // Expose the inbound action entry point and the state-push callback

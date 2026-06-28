@@ -552,4 +552,177 @@ mod tests {
             .iter()
             .any(|m| matches!(&m.msg, ServerMessage::Welcome { .. })));
     }
+
+    #[test]
+    fn select_station_works_during_in_progress_phase() {
+        use crate::messages::StationId;
+        use crate::ship::config::{ShipConfig, StationConfig};
+        use bevy::prelude::State;
+
+        let mut app = test_app();
+
+        // Set phase to InProgress
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+
+        // Add a ship with station config
+        let ship_config = ShipConfig {
+            stations: vec![
+                StationConfig {
+                    id: StationId("helm".into()),
+                    name: "Helm".into(),
+                    console: "helm".into(),
+                    description: "Helm station".into(),
+                    rank: "Crew".into(),
+                    short_code: "H".into(),
+                    ratings: vec!["Std".into()],
+                },
+                StationConfig {
+                    id: StationId("tactical".into()),
+                    name: "Tactical".into(),
+                    console: "tactical".into(),
+                    description: "Tactical station".into(),
+                    rank: "Crew".into(),
+                    short_code: "T".into(),
+                    ratings: vec!["Std".into()],
+                },
+            ],
+        };
+        app.world_mut()
+            .insert_resource(ShipClientConfigResource(ship_config.clone()));
+
+        // Register two players in lobby first
+        push(
+            &mut app,
+            "p1",
+            ClientMessage::Identify {
+                token: "t1".into(),
+                name: "Player1".into(),
+            },
+        );
+        push(
+            &mut app,
+            "p2",
+            ClientMessage::Identify {
+                token: "t2".into(),
+                name: "Player2".into(),
+            },
+        );
+        tick(&mut app);
+
+        // Player1 claims Helm in lobby
+        push(
+            &mut app,
+            "p1",
+            ClientMessage::SelectStation {
+                station: "Helm".into(),
+            },
+        );
+        let out = tick(&mut app);
+        assert!(out.iter().any(|m| {
+            matches!(&m.msg, ServerMessage::StationAssigned { token, station, .. }
+                if token == "t1" && station == &Some("Helm".into()))
+        }));
+
+        // Start the game
+        push(
+            &mut app,
+            "p1",
+            ClientMessage::SetReady { ready: true },
+        );
+        push(
+            &mut app,
+            "p2",
+            ClientMessage::SetReady { ready: true },
+        );
+        let out = tick(&mut app);
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
+
+        // Now in InProgress: Player2 claims Tactical (was unclaimed)
+        push(
+            &mut app,
+            "p2",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
+        let out = tick(&mut app);
+        assert!(
+            out.iter().any(|m| {
+                matches!(&m.msg, ServerMessage::StationAssigned { token, station, .. }
+                    if token == "t2" && station == &Some("Tactical".into()))
+            }),
+            "SelectStation should work during InProgress phase"
+        );
+    }
+
+    #[test]
+    fn release_station_works_during_in_progress_phase() {
+        use crate::messages::StationId;
+        use crate::ship::config::{ShipConfig, StationConfig};
+        use bevy::prelude::State;
+
+        let mut app = test_app();
+
+        // Set phase to InProgress
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+
+        // Add a ship with station config
+        let ship_config = ShipConfig {
+            stations: vec![StationConfig {
+                id: StationId("helm".into()),
+                name: "Helm".into(),
+                console: "helm".into(),
+                description: "Helm station".into(),
+                rank: "Crew".into(),
+                short_code: "H".into(),
+                ratings: vec!["Std".into()],
+            }],
+        };
+        app.world_mut()
+            .insert_resource(ShipClientConfigResource(ship_config.clone()));
+
+        // Register player and claim station in lobby
+        push(
+            &mut app,
+            "p1",
+            ClientMessage::Identify {
+                token: "t1".into(),
+                name: "Player1".into(),
+            },
+        );
+        tick(&mut app);
+
+        push(
+            &mut app,
+            "p1",
+            ClientMessage::SelectStation {
+                station: "Helm".into(),
+            },
+        );
+        tick(&mut app);
+
+        // Start the game
+        push(
+            &mut app,
+            "p1",
+            ClientMessage::SetReady { ready: true },
+        );
+        let out = tick(&mut app);
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
+
+        // Now in InProgress: Player1 releases Helm
+        push(
+            &mut app,
+            "p1",
+            ClientMessage::ReleaseStation,
+        );
+        let out = tick(&mut app);
+        assert!(
+            out.iter().any(|m| {
+                matches!(&m.msg, ServerMessage::StationAssigned { token, station, .. }
+                    if token == "t1" && station == &None)
+            }),
+            "ReleaseStation should work during InProgress phase"
+        );
+    }
 }

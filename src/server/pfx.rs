@@ -26,7 +26,7 @@ const TORPEDO_TRAIL_MIN_DISTANCE: f32 = 0.35;
 const TORPEDO_BURST_LIFETIME_SECS: f32 = 0.35;
 
 const ENGINE_DEFAULT_COLOR: [f32; 4] = [0.25, 0.75, 1.0, 0.72];
-const ENGINE_TRAIL_RADIUS: f32 = 0.22;
+const ENGINE_TRAIL_RADIUS: f32 = 1.5;
 const ENGINE_TRAIL_CRUMB_LIFETIME_SECS: f32 = 1.5;
 const ENGINE_TRAIL_MAX_CRUMBS: usize = 200;
 const ENGINE_TRAIL_MIN_CRUMB_DIST: f32 = 0.08;
@@ -671,9 +671,16 @@ fn build_ribbon_into_mesh(mesh: &mut Mesh, crumbs: &VecDeque<TrailCrumb>) {
             (crumbs_slice[i - 1].pos - crumbs_slice[i + 1].pos).normalize_or_zero()
         };
 
-        // Perpendicular in the XZ plane for ribbon width.
+        // Perpendicular with a strong Y component so the ribbon is vertical
+        // (visible from the default behind/above camera angle).
         let perp = if tangent.length_squared() > 1e-6 {
-            Vec3::new(-tangent.z, 0.0, tangent.x).normalize_or_zero()
+            let tan = tangent.normalize();
+            let h = tan.cross(Vec3::Y).normalize_or_zero();
+            if h.length_squared() > 1e-6 {
+                tan.cross(h).normalize_or_zero()
+            } else {
+                Vec3::X
+            }
         } else {
             Vec3::X
         };

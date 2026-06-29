@@ -270,6 +270,19 @@ pub fn process_message(
                     station_id: Some(station_def.id.clone()),
                 },
             ));
+
+            // Mid-game claim: reset from Backfill (AI) to manual control.
+            if phase == GamePhase::InProgress {
+                let default_rating = "Std".to_string();
+                outbound.push((
+                    Target::All,
+                    ServerMessage::RatingChanged {
+                        station_id: station_def.id.clone(),
+                        rating_name: default_rating.clone(),
+                    },
+                ));
+                station_rating_update = Some((station_def.id.clone(), default_rating));
+            }
         }
         ClientMessage::ReleaseStation => {
             sessions.set_station(token, None);
@@ -1003,6 +1016,59 @@ max_level = 4
             .any(|(s, _)| s.as_deref() == Some("Tactical"));
         assert!(has_release, "swap must include a release StationAssigned");
         assert!(has_claim, "swap must include a claim StationAssigned");
+    }
+
+    // ── SelectStation mid-game: reset Backfill to Std ────────────────────
+
+    #[test]
+    fn select_station_during_inprogress_resets_backfill_rating() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let station_ratings =
+            HashMap::from([(StationId("captain".into()), rating::BACKFILL_RATING.to_string())]);
+        let result = process_message(
+            "t1",
+            &ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
+            &mut sessions,
+            GamePhase::InProgress,
+            None,
+            &ship_stations(),
+            &default_ship_config(),
+            true,
+            &station_ratings,
+        );
+        // Must emit RatingChanged to reset from Backfill to Std
+        assert!(result.outbound.iter().any(|(_, m)| matches!(
+            m,
+            ServerMessage::RatingChanged { station_id, rating_name }
+            if station_id.0 == "captain" && rating_name == "Std"
+        )));
+        // station_rating_update must be set for Bevy runtime
+        assert_eq!(
+            result.station_rating_update,
+            Some((StationId("captain".into()), "Std".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_station_during_lobby_does_not_emit_rating_changed() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let result = pm_stations(
+            "t1",
+            &ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        // In lobby, no rating change should occur
+        let has_rating_changed = result.outbound.iter().any(|(_, m)| {
+            matches!(m, ServerMessage::RatingChanged { .. })
+        });
+        assert!(!has_rating_changed, "lobby SelectStation must not emit RatingChanged");
+        assert!(result.station_rating_update.is_none(), "lobby SelectStation must not set station_rating_update");
     }
 
     // ── ReleaseStation: broadcasts empty station ──────────────────────────

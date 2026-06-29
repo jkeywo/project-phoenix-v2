@@ -32,7 +32,7 @@ const HELP_SECTIONS = {
   Helm: [
     ['Pilot', 'Keep the ship moving and the target in arc for Tactical. You control where the fight happens.'],
     ['Thrust & Steering', 'Drag to accelerate, reverse, or steer.'],
-    ['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it's best for non-combat travel.'],
+    ['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel.'],
     ['On Screen', 'Push your radar to the viewscreen when someone needs to see your situation.'],
   ],
   Tactical: [
@@ -43,7 +43,7 @@ const HELP_SECTIONS = {
   ],
   Repair: [
     ['Damage Control', 'Keep the ship in the fight. Damaged systems degrade everyone\'s performance — act early.'],
-    ['Hull Status', 'Your ship health gauge, it doesn't show where the damage is, the other bridge officers should ask for repairs.'],
+    ['Hull Status', 'Your ship health gauge, it doesn\'t show where the damage is, the other bridge officers should ask for repairs.'],
     ['Repair Teams', 'Dispatch teams to damaged consoles, sooner rather than later.'],
   ],
   Power: [

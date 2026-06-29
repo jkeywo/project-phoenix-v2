@@ -1137,12 +1137,12 @@
     // ── Status hint ───────────────────────────────────────────────────
     const hint = document.getElementById('lobby-status-hint');
     if (hint) {
-      if (s.all_ready) {
-        hint.textContent = 'All crew ready — launching!';
-        hint.style.color = '#5fd8e8';
-      } else if (crewN === 0) {
+      if (crewN === 0) {
         hint.textContent = 'Waiting for players to connect…';
         hint.style.color = '#667';
+      } else if (s.all_ready) {
+        hint.textContent = 'All crew ready — launching!';
+        hint.style.color = '#5fd8e8';
       } else {
         hint.textContent = 'Waiting for crew to ready up…';
         hint.style.color = '#889';

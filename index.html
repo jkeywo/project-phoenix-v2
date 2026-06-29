@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-e206adfa5ab2903a.js" crossorigin="anonymous" integrity="sha384-x42RN+YPdnf8SZooa3Qv3Agb7dbUZ0AmcEhH4lW8QM61Ovqf+yxbrF91y/iVFRiK"><link rel="preload" href="./project-phoenix-e206adfa5ab2903a_bg.wasm" crossorigin="anonymous" integrity="sha384-GRBmtdRsXghPdlz5+C487umVc7uS/O0q+n2w/HoPqnbn9H/EKHN9JCAq3OXtBRMO" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-df20f4a0d338c71f.js" crossorigin="anonymous" integrity="sha384-x42RN+YPdnf8SZooa3Qv3Agb7dbUZ0AmcEhH4lW8QM61Ovqf+yxbrF91y/iVFRiK"><link rel="preload" href="./project-phoenix-df20f4a0d338c71f_bg.wasm" crossorigin="anonymous" integrity="sha384-0Sa0Qjov43m4IvIsZtjDF52GRPdhcLl4x8XngrJeMB0vjk75eyhumqx+3psKvdih" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -856,8 +856,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-e206adfa5ab2903a.js';
-const wasm = await init({ module_or_path: './project-phoenix-e206adfa5ab2903a_bg.wasm' });
+import init, * as bindings from './project-phoenix-df20f4a0d338c71f.js';
+const wasm = await init({ module_or_path: './project-phoenix-df20f4a0d338c71f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1148,12 +1148,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── Status hint ───────────────────────────────────────────────────
     const hint = document.getElementById('lobby-status-hint');
     if (hint) {
-      if (s.all_ready) {
-        hint.textContent = 'All crew ready — launching!';
-        hint.style.color = '#5fd8e8';
-      } else if (crewN === 0) {
+      if (crewN === 0) {
         hint.textContent = 'Waiting for players to connect…';
         hint.style.color = '#667';
+      } else if (s.all_ready) {
+        hint.textContent = 'All crew ready — launching!';
+        hint.style.color = '#5fd8e8';
       } else {
         hint.textContent = 'Waiting for crew to ready up…';
         hint.style.color = '#889';

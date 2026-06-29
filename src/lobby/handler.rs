@@ -345,6 +345,8 @@ pub fn process_disconnect_with_stations(
     if let Some(ref sid) = station_id {
         let current_rating = station_ratings.get(sid).cloned();
         sessions.set_last_rating(token, current_rating);
+        // Clear the player's station ownership — the station goes to AI (Backfill).
+        sessions.set_station(token, None);
     }
 
     sessions.disconnect(token);
@@ -1198,13 +1200,21 @@ max_level = 4
     }
 
     #[test]
-    fn reconnect_restores_previous_station_when_free() {
+    fn reconnect_does_not_restore_station_when_disconnected() {
         let stations = ship_stations();
+        let config = backfill_ship_config();
         let mut sessions = sessions_at_max(&stations);
-        // t1 held the Captain station. They disconnect — Player.station remains
-        // so the Identify handler can restore the seat on reconnect.
-        let captain_station = sessions.station_for_token("t1").cloned();
-        sessions.disconnect("t1"); // clears connected flag, keeps Player.station
+        // t1 held the Captain station. They disconnect via the full handler path
+        // which clears station ownership.
+        let mut resolver = ControlSourceResolver::new();
+        let _ = process_disconnect_with_stations(
+            "t1",
+            &mut sessions,
+            &stations,
+            &config,
+            &mut resolver,
+            &HashMap::new(),
+        );
         let msg = ClientMessage::Identify {
             token: "t1".into(),
             name: "Alice".into(),
@@ -1220,11 +1230,11 @@ max_level = 4
             true,
             &HashMap::new(),
         );
-        // Reconnect restores the previously-held seat via station-yield logic.
-        let restored = sessions.station_for_token("t1").cloned();
-        assert_eq!(
-            restored, captain_station,
-            "reconnecting player should have their previous station restored when free"
+        // Station was cleared on disconnect, so reconnect must NOT restore it.
+        let restored = sessions.station_for_token("t1");
+        assert!(
+            restored.is_none(),
+            "reconnecting player should NOT have their previous station restored"
         );
     }
 
@@ -1638,9 +1648,10 @@ max_level = 4
     }
 
     #[test]
-    fn reconnect_after_backfill_restores_station_and_emits_rating_changed() {
-        // Full cycle: t1 connects, selects Captain, disconnects (backfill applied),
-        // then reconnects — should get Captain back and RatingChanged { "Manual" }.
+    fn reconnect_after_disconnect_does_not_restore_station() {
+        // Full cycle: t1 connects, selects Captain, disconnects (station cleared,
+        // backfill applied), then reconnects — must NOT get Captain back since
+        // disconnect clears station ownership.
         let stations = ship_stations();
         let config = backfill_ship_config();
         let mut sessions = sessions_with("t1", "Alice");
@@ -1665,9 +1676,6 @@ max_level = 4
             &mut resolver,
             &station_ratings,
         );
-        // station_ratings now reflects backfill (passed in next process_message call)
-        let station_ratings_post =
-            HashMap::from([(StationId("captain".into()), "Backfill".to_string())]);
         // t1 reconnects via Identify
         let reconnect_result = process_message(
             "t1",
@@ -1681,29 +1689,30 @@ max_level = 4
             &stations,
             &default_ship_config(),
             true,
-            &station_ratings_post,
+            &HashMap::new(),
         );
-        // Station must be restored
+        // Station must NOT be restored (cleared on disconnect)
         let restored_station = sessions.station_for_token("t1");
         assert!(
-            restored_station.is_some(),
-            "station must be restored on reconnect when rating was at Backfill"
+            restored_station.is_none(),
+            "station must NOT be restored on reconnect after disconnect"
         );
-        // StationAssigned must be in outbound
-        assert!(reconnect_result.outbound.iter().any(|(_, m)| matches!(
+        // No StationAssigned with a station
+        let has_station_assigned = reconnect_result.outbound.iter().any(|(_, m)| matches!(
             m,
             ServerMessage::StationAssigned { token, station: Some(_), .. } if token == "t1"
-        )));
-        // RatingChanged with "Manual" must be in outbound
-        assert!(reconnect_result.outbound.iter().any(|(_, m)| matches!(
+        ));
+        assert!(!has_station_assigned, "no StationAssigned with station for reconnecting player");
+        // No RatingChanged for station restore
+        let has_rating_changed = reconnect_result.outbound.iter().any(|(_, m)| matches!(
             m,
-            ServerMessage::RatingChanged { station_id, rating_name }
-            if station_id.0 == "captain" && rating_name == "Manual"
-        )));
-        // station_rating_update must carry the restore
-        assert_eq!(
-            reconnect_result.station_rating_update,
-            Some((StationId("captain".into()), "Manual".to_string()))
+            ServerMessage::RatingChanged { station_id: _, rating_name: _ }
+        ));
+        assert!(!has_rating_changed, "no RatingChanged emitted on reconnect after station was cleared");
+        // station_rating_update must be None
+        assert!(
+            reconnect_result.station_rating_update.is_none(),
+            "no station_rating_update on reconnect after station was cleared"
         );
     }
 

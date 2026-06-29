@@ -555,16 +555,16 @@ mod tests {
 
     #[test]
     fn select_station_works_during_in_progress_phase() {
+        use crate::lobby::stations_config::stations_from_ship_config;
         use crate::messages::StationId;
-        use crate::ship::config::{ShipConfig, StationConfig};
-        use bevy::prelude::State;
+        use crate::ship::config::{ShipConfig, StationConfig, StationRatingConfig};
+        use std::collections::HashMap;
 
         let mut app = test_app();
 
-        // Set phase to InProgress
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-
-        // Add a ship with station config
+        // Phase starts at Lobby by default.
+        // Add a ship with station config before startup so
+        // update_session_with_config sees non-empty stations.
         let ship_config = ShipConfig {
             stations: vec![
                 StationConfig {
@@ -574,7 +574,11 @@ mod tests {
                     description: "Helm station".into(),
                     rank: "Crew".into(),
                     short_code: "H".into(),
-                    ratings: vec!["Std".into()],
+                    ratings: vec![StationRatingConfig {
+                        name: "Std".into(),
+                        automated_systems: vec![],
+                        ai_tuning: None,
+                    }],
                 },
                 StationConfig {
                     id: StationId("tactical".into()),
@@ -583,17 +587,35 @@ mod tests {
                     description: "Tactical station".into(),
                     rank: "Crew".into(),
                     short_code: "T".into(),
-                    ratings: vec!["Std".into()],
+                    ratings: vec![StationRatingConfig {
+                        name: "Std".into(),
+                        automated_systems: vec![],
+                        ai_tuning: None,
+                    }],
                 },
             ],
+            systems: vec![],
+            power_groups: HashMap::new(),
+            coordination_lag_secs: 2.0,
         };
         app.world_mut()
-            .insert_resource(ShipClientConfigResource(ship_config.clone()));
+            .insert_resource(stations_from_ship_config(&ship_config));
+        app.world_mut()
+            .insert_resource(ShipClientConfigResource::default());
 
-        // Register two players in lobby first
+        // Verify stations are populated
+        {
+            let stations = app.world().resource::<ShipStations>();
+            assert!(!stations.stations.is_empty(), "ShipStations must be non-empty");
+            assert_eq!(stations.stations.len(), 2, "expected 2 stations");
+        }
+
+        // Register two players in lobby first.
+        // The peer ID (first arg to push) is the session token sent by the bridge,
+        // and the Identify message body carries the same token for registration.
         push(
             &mut app,
-            "p1",
+            "t1",
             ClientMessage::Identify {
                 token: "t1".into(),
                 name: "Player1".into(),
@@ -601,7 +623,7 @@ mod tests {
         );
         push(
             &mut app,
-            "p2",
+            "t2",
             ClientMessage::Identify {
                 token: "t2".into(),
                 name: "Player2".into(),
@@ -612,7 +634,7 @@ mod tests {
         // Player1 claims Helm in lobby
         push(
             &mut app,
-            "p1",
+            "t1",
             ClientMessage::SelectStation {
                 station: "Helm".into(),
             },
@@ -623,15 +645,15 @@ mod tests {
                 if token == "t1" && station == &Some("Helm".into()))
         }));
 
-        // Start the game
+        // Start the game — both ready triggers auto-start from Lobby
         push(
             &mut app,
-            "p1",
+            "t1",
             ClientMessage::SetReady { ready: true },
         );
         push(
             &mut app,
-            "p2",
+            "t2",
             ClientMessage::SetReady { ready: true },
         );
         let out = tick(&mut app);
@@ -640,7 +662,7 @@ mod tests {
         // Now in InProgress: Player2 claims Tactical (was unclaimed)
         push(
             &mut app,
-            "p2",
+            "t2",
             ClientMessage::SelectStation {
                 station: "Tactical".into(),
             },
@@ -657,16 +679,14 @@ mod tests {
 
     #[test]
     fn release_station_works_during_in_progress_phase() {
+        use crate::lobby::stations_config::stations_from_ship_config;
         use crate::messages::StationId;
-        use crate::ship::config::{ShipConfig, StationConfig};
-        use bevy::prelude::State;
+        use crate::ship::config::{ShipConfig, StationConfig, StationRatingConfig};
+        use std::collections::HashMap;
 
         let mut app = test_app();
 
-        // Set phase to InProgress
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-
-        // Add a ship with station config
+        // Phase starts at Lobby by default.
         let ship_config = ShipConfig {
             stations: vec![StationConfig {
                 id: StationId("helm".into()),
@@ -675,16 +695,26 @@ mod tests {
                 description: "Helm station".into(),
                 rank: "Crew".into(),
                 short_code: "H".into(),
-                ratings: vec!["Std".into()],
+                ratings: vec![StationRatingConfig {
+                    name: "Std".into(),
+                    automated_systems: vec![],
+                    ai_tuning: None,
+                }],
             }],
+            systems: vec![],
+            power_groups: HashMap::new(),
+            coordination_lag_secs: 2.0,
         };
         app.world_mut()
-            .insert_resource(ShipClientConfigResource(ship_config.clone()));
+            .insert_resource(stations_from_ship_config(&ship_config));
+        app.world_mut()
+            .insert_resource(ShipClientConfigResource::default());
 
-        // Register player and claim station in lobby
+        // Register player and claim station in lobby.
+        // The peer ID (first arg to push) is the session token sent by the bridge.
         push(
             &mut app,
-            "p1",
+            "t1",
             ClientMessage::Identify {
                 token: "t1".into(),
                 name: "Player1".into(),
@@ -694,17 +724,17 @@ mod tests {
 
         push(
             &mut app,
-            "p1",
+            "t1",
             ClientMessage::SelectStation {
                 station: "Helm".into(),
             },
         );
         tick(&mut app);
 
-        // Start the game
+        // Start the game — single player ready triggers auto-start from Lobby
         push(
             &mut app,
-            "p1",
+            "t1",
             ClientMessage::SetReady { ready: true },
         );
         let out = tick(&mut app);
@@ -713,7 +743,7 @@ mod tests {
         // Now in InProgress: Player1 releases Helm
         push(
             &mut app,
-            "p1",
+            "t1",
             ClientMessage::ReleaseStation,
         );
         let out = tick(&mut app);

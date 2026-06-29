@@ -1846,6 +1846,10 @@
           pushRepairConsoleState();
           pushSensorsConsoleState();
           pushNavigationConsoleState();
+          // Don't re-render the full lobby at 10Hz when spectator — it
+          // destroys CSS hover state on station selection buttons.
+          // The push calls are no-ops when no game console is active.
+          if (!myConsoles(state).length) return;
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state.
           break;

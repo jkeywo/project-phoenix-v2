@@ -11,7 +11,7 @@ use crate::region_effects::RegionEffectKind;
 use crate::server_app::SimOutbox;
 use crate::ship_state::ShipState;
 use crate::simulation::GameOverReason;
-use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse};
+use crate::simulation::{LocalShip, ShipHullIntegrity, ShipImpulse};
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -66,7 +66,7 @@ pub(crate) fn update_region_membership(
     region_query: Query<(Entity, &Transform, &RegionShapeSection)>,
     uuid_query: Query<&EntityUuid>,
     ship_state: Res<ShipState>,
-    ship_query: Query<Entity, With<Ship>>,
+    ship_query: Query<Entity, With<LocalShip>>,
 ) {
     let Ok(ship_entity) = ship_query.single() else {
         return;
@@ -127,7 +127,7 @@ fn apply_damage_zone_damage(
     time: Res<Time>,
     membership: Res<RegionMembership>,
     region_query: Query<(&RegionEffectsSection, Option<&EntityUuid>)>,
-    ship_query: Query<Entity, With<Ship>>,
+    ship_query: Query<Entity, With<LocalShip>>,
     hull: Option<ResMut<ShipHullIntegrity>>,
     mut shields: Option<ResMut<crate::simulation::ShipShields>>,
     mut outbox: Option<ResMut<SimOutbox>>,
@@ -294,7 +294,7 @@ mod tests {
             .insert_resource(ShipState::new())
             .insert_resource(ShipModifiers::new());
         // Spawn the ship entity
-        app.world_mut().spawn((Ship, Transform::default()));
+        app.world_mut().spawn((LocalShip, Transform::default()));
         app
     }
 
@@ -336,7 +336,7 @@ mod tests {
     }
 
     fn ship_entity(app: &mut App) -> Entity {
-        let mut query = QueryState::<Entity, With<Ship>>::new(app.world_mut());
+        let mut query = QueryState::<Entity, With<LocalShip>>::new(app.world_mut());
         query.iter(app.world()).next().unwrap()
     }
 
@@ -510,7 +510,7 @@ mod tests {
             (crate::messages::Console::Shields, 25.0),
         ])));
         app.insert_resource(ShipModifiers::new());
-        app.world_mut().spawn((Ship, Transform::default()));
+        app.world_mut().spawn((LocalShip, Transform::default()));
         app
     }
 
@@ -521,7 +521,7 @@ mod tests {
         app.insert_resource(ShipState::new());
         app.insert_resource(ShipImpulse(ImpulseState::new()));
         app.insert_resource(ShipModifiers::new());
-        app.world_mut().spawn((Ship, Transform::default()));
+        app.world_mut().spawn((LocalShip, Transform::default()));
         app
     }
 
@@ -864,7 +864,7 @@ mod tests {
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default())
             .insert_resource(ShipState::new());
-        app.world_mut().spawn((Ship, Transform::default()));
+        app.world_mut().spawn((LocalShip, Transform::default()));
         app
     }
 
@@ -1001,7 +1001,7 @@ mod tests {
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default())
             .insert_resource(ShipState::new());
-        app.world_mut().spawn((Ship, Transform::default()));
+        app.world_mut().spawn((LocalShip, Transform::default()));
         app
     }
 
@@ -1226,7 +1226,7 @@ mod tests {
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default())
             .insert_resource(ShipState::new());
-        app.world_mut().spawn((Ship, Transform::default()));
+        app.world_mut().spawn((LocalShip, Transform::default()));
         app
     }
 

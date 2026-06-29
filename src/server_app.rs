@@ -41,15 +41,16 @@ pub use crate::power_plugin::{
 };
 
 // â"€â"€ Marker Components â"€â"€â"€â"€â"€â"€â"€â"€
-/// Marks the player-controlled ship entity. Use `With<Ship>` to find the
-/// player ship in queries. NPC ships use `NpcShip` instead.
+/// Marks the player-controlled ship entity in simulation queries.
+/// Rendering and networking queries should use `With<LocalShip>` instead.
 #[derive(Component)]
 pub struct Ship;
 
-/// Marks an NPC ship entity (driven by `AiControllerComponent`).
-/// Player-ship queries use `With<Ship>`; NPC-ship systems use `With<NpcShip>`.
+/// Tags the single entity rendered on the viewscreen and broadcast to clients.
+/// Only rendering, networking (broadcast), pfx, comms-range, and
+/// region-membership systems filter on this. Simulation systems use `With<Ship>`.
 #[derive(Component)]
-pub struct NpcShip;
+pub struct LocalShip;
 
 #[derive(Component)]
 pub struct Asteroid;
@@ -832,7 +833,7 @@ fn broadcast_shield_status(
     shields: Res<ShipShields>,
     mut outbox: ResMut<SimOutbox>,
     sessions: Res<Sessions>,
-    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<Ship>>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<LocalShip>>,
     mut last: ResMut<LastBroadcastShields>,
 ) {
     let Ok(ship_config) = ship_query.single() else {
@@ -1685,6 +1686,7 @@ fn spawn_game_start_entities(
             commands
                 .entity(spawned)
                 .insert(Ship)
+                .insert(LocalShip)
                 .insert(ship_config)
                 .insert(initial_control_sources)
                 .insert(crate::ship_plugin::ActiveStationRatings::default())
@@ -2344,7 +2346,7 @@ fn spawn_child_light(
 /// Rotates every [`FacePlayerLight`] entity so it points toward the
 /// player's ship, independent of its parent entity's orientation.
 fn face_player_lights(
-    ship_query: Query<&GlobalTransform, With<Ship>>,
+    ship_query: Query<&GlobalTransform, With<LocalShip>>,
     mut light_query: Query<(&GlobalTransform, &mut Transform), With<FacePlayerLight>>,
 ) {
     let Ok(ship_transform) = ship_query.single() else {
@@ -2481,6 +2483,7 @@ mod tests {
         // during Lobby as well as InProgress.
         app.world_mut().spawn((
             crate::simulation::Ship,
+            crate::simulation::LocalShip,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),

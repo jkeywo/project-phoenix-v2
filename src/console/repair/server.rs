@@ -259,6 +259,7 @@ mod tests {
         // Spawn the player ship entity so handle_dispatch_repair_team can query it.
         app.world_mut().spawn((
             crate::simulation::Ship,
+            crate::simulation::LocalShip,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
         ));

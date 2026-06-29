@@ -383,6 +383,7 @@ mod tests {
         // Spawn the player ship entity so handle_power_messages can query it.
         app.world_mut().spawn((
             crate::simulation::Ship,
+            crate::simulation::LocalShip,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),

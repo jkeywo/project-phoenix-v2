@@ -251,6 +251,7 @@ mod tests {
     use crate::server_app::SystemBlackboards;
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
+    use crate::server_app::LocalShip;
     use crate::simulation::Ship;
     use crate::system_registry::CAPTAIN_SYSTEM_ID;
 
@@ -275,6 +276,7 @@ mod tests {
             .add_systems(PostUpdate, collect);
         app.world_mut().spawn((
             Ship,
+            LocalShip,
             ShipConfigComponent::default(),
             ShipSystemControlSources::default(),
         ));
@@ -1011,7 +1013,7 @@ mod tests {
             ControlSource::Ai,
         );
         app.world_mut()
-            .spawn((Ship, ShipConfigComponent::default(), cs));
+            .spawn((Ship, LocalShip, ShipConfigComponent::default(), cs));
         app.update();
 
         let bb = captain_bb(&app);
@@ -1031,7 +1033,7 @@ mod tests {
             ControlSource::Ai,
         );
         app.world_mut()
-            .spawn((Ship, ShipConfigComponent::default(), cs));
+            .spawn((Ship, LocalShip, ShipConfigComponent::default(), cs));
         app.update();
 
         let bb = captain_bb(&app);

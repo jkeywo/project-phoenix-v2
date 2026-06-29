@@ -153,7 +153,7 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
 
     // Collect ship config before borrowing registry/sessions to avoid borrow conflicts.
     let ship_config_opt: Option<crate::ship_plugin::ShipConfigComponent> = world
-        .query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>()
+        .query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::LocalShip>>()
         .single(world)
         .ok()
         .cloned();

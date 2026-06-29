@@ -941,6 +941,7 @@ mod tests {
     use crate::regions::server::RegionPlugin;
     use crate::ship::rating;
     use crate::ship_state::ShipState;
+    use crate::simulation::LocalShip;
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -967,6 +968,7 @@ mod tests {
             .add_plugins(ShipPlugin);
         app.world_mut().spawn((
             Ship,
+            LocalShip,
             Transform::default(),
             ShipConfigComponent::default(),
             ShipSystemControlSources::default(),

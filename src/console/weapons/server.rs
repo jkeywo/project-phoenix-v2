@@ -2566,6 +2566,7 @@ station = "tactical"
         // would do in a full server build.
         app.world_mut().spawn((
             crate::simulation::Ship,
+            crate::simulation::LocalShip,
             test_ship_config(),
             ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -4529,7 +4530,7 @@ station = "tactical"
         // must route through shields → hull resource, not EntityConsoleHull.
         use crate::ai_plugin::{AiTokenRegistry, EntityPhaserState};
         use crate::entity_spawner::EntityUuid;
-        use crate::server_app::{Ship, ShipAttackedThisTick};
+        use crate::server_app::{LocalShip, Ship, ShipAttackedThisTick};
         use crate::shield::ShieldConfig;
         use crate::simulation::{GameOverReason, ShipShields};
 
@@ -4558,6 +4559,7 @@ station = "tactical"
             .spawn((
                 EntityUuid(player_uuid.to_string()),
                 Ship,
+                LocalShip,
                 crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
                     &[
                         (Console::Helm, 25.0),

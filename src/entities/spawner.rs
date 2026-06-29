@@ -264,7 +264,6 @@ pub fn spawn_entity(
     }
 
     // Behaviour section — signals ai_plugin to attach an AiControllerComponent.
-    // NPC ships receive NpcShip (not Ship) so player-console queries stay unambiguous.
     if let Some(behaviour) = &config.behaviour {
         entity_commands.insert(BehaviourSection(behaviour.clone()));
 
@@ -277,7 +276,6 @@ pub fn spawn_entity(
             );
         }
         entity_commands.insert((
-            crate::server_app::NpcShip,
             ship_config,
             crate::ship_plugin::ShipSystemControlSources(resolver),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -1272,14 +1270,13 @@ max_hp = 50.0
 
     // ── #573: NPC all-AI roster ───────────────────────────────────────────────
 
-    /// NPC ships spawned with a [behaviour] block must carry NpcShip (not Ship)
-    /// and have every registered system set to ControlSource::Ai. This ensures
-    /// player-console queries using With<Ship> are never polluted by NPC entities,
-    /// and that the NPC helm/weapons operate functions run for all systems.
+    /// NPC ships spawned with a [behaviour] block must have every registered
+    /// system set to ControlSource::Ai. This ensures that NPC helm/weapons
+    /// operate functions run for all systems.
     #[test]
-    fn npc_ship_spawn_gives_all_ai_roster_and_npc_ship_marker() {
+    fn npc_ship_spawn_gives_all_ai_roster_and_no_ship_marker() {
         use crate::entity_config::{BehaviourConfig, DoctrineObjective, EntityConfig};
-        use crate::server_app::{NpcShip, Ship};
+        use crate::server_app::Ship;
         use crate::ship::control_source::ControlSource;
         use crate::ship_plugin::ShipSystemControlSources;
         use bevy::prelude::*;
@@ -1311,11 +1308,7 @@ max_hp = 50.0
         );
         app.world_mut().flush();
 
-        // NPC ship must have NpcShip, not Ship
-        assert!(
-            app.world().get::<NpcShip>(entity).is_some(),
-            "NPC ship must carry NpcShip marker"
-        );
+        // NPC ship must NOT carry Ship marker (reserved for player ship)
         assert!(
             app.world().get::<Ship>(entity).is_none(),
             "NPC ship must NOT carry Ship marker (reserved for player ship)"

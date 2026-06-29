@@ -575,7 +575,7 @@ fn setup_fallback_world(mut commands: Commands, _world: ResMut<WorldResource>) {
         ship_uuid,
         Some("player-ship".to_string()),
     );
-    commands.entity(ship_entity).insert(Ship);
+    commands.entity(ship_entity).insert((Ship, crate::simulation::LocalShip));
     commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
         (crate::messages::Console::Helm, 25.0),
         (crate::messages::Console::Tactical, 25.0),
@@ -847,7 +847,7 @@ fn tick_pending_follow_ups(
     mut inbox: ResMut<CommsInboxRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
     region_membership: Option<Res<crate::regions::server::RegionMembership>>,
-    ship_query: Query<Entity, With<crate::simulation::Ship>>,
+    ship_query: Query<Entity, With<crate::simulation::LocalShip>>,
     entity_uuid_q: Query<&EntityUuid>,
 ) {
     if runtime.pending_follow_ups.is_empty() {
@@ -1802,7 +1802,7 @@ fn auto_clear_on_screen_message(
 /// `runtime.needs_broadcast = true` if any flag flipped vs. the prior snapshot.
 fn update_comms_range_flags(
     mut runtime: ResMut<WorldContentRuntime>,
-    ship_q: Query<(&Transform, Option<&crate::comms::CommsRange>), With<crate::simulation::Ship>>,
+    ship_q: Query<(&Transform, Option<&crate::comms::CommsRange>), With<crate::simulation::LocalShip>>,
     entity_q: Query<(
         &crate::entities::spawner::EntityUuid,
         &Transform,
@@ -1899,7 +1899,7 @@ fn update_comms_range_flags(
 /// or `WorldContentRuntime::needs_broadcast` is set.
 fn broadcast_comms_state(
     sessions: Res<Sessions>,
-    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::LocalShip>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
@@ -3370,6 +3370,7 @@ mod tests {
             .add_systems(PostUpdate, collect);
         app.world_mut().spawn((
             crate::simulation::Ship,
+            crate::simulation::LocalShip,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -6578,7 +6579,7 @@ entity = "layer_npc"
         // then move the station far away to verify the flag flips.
         let ship_entity = app
             .world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)))
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)))
             .id();
         let station_entity = app
             .world_mut()
@@ -6649,7 +6650,7 @@ entity = "layer_npc"
         setup_game_with_comms(&mut app, station_uuid);
 
         app.world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
@@ -6712,7 +6713,7 @@ entity = "layer_npc"
         // Spawn the ship so range tracking activates, but DO NOT spawn an
         // entity with `bogus_uuid` + CommsRange.
         app.world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
 
         let out = tick(&mut app);
         let contacts = out
@@ -6746,7 +6747,7 @@ entity = "layer_npc"
         setup_game_with_comms(&mut app, station_uuid);
 
         app.world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)));
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)));
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
             Transform::from_xyz(5000.0, 0.0, 0.0),
@@ -6793,7 +6794,7 @@ entity = "layer_npc"
 
         // Start in range, hail, then move ship far away and respond.
         app.world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
         let station_entity = app
             .world_mut()
             .spawn((
@@ -6872,7 +6873,7 @@ entity = "layer_npc"
         setup_game_with_comms(&mut app, station_uuid);
 
         app.world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)));
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)));
         let station_entity = app
             .world_mut()
             .spawn((
@@ -6941,7 +6942,7 @@ entity = "layer_npc"
         }
 
         app.world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
         app.world_mut().spawn((
             EntityUuid(near_uuid.into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
@@ -6991,7 +6992,7 @@ entity = "layer_npc"
 
         let ship_entity = app
             .world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)))
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)))
             .id();
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
@@ -7035,7 +7036,7 @@ entity = "layer_npc"
 
         let ship_entity = app
             .world_mut()
-            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)))
+            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)))
             .id();
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
@@ -7343,6 +7344,7 @@ condition = "on_world_loaded"
         // membership query succeeds).
         app.world_mut().spawn((
             Ship,
+            crate::simulation::LocalShip,
             Transform::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
@@ -7602,8 +7604,8 @@ condition = "on_world_loaded"
 
     #[test]
     fn npc_entering_region_does_not_fire_trigger() {
-        // The region membership system only tracks the player Ship entity
-        // (queried via `With<Ship>`). Spawning an NPC inside a region must
+        // The region membership system only tracks the player ship entity
+        // (queried via `With<LocalShip>`). Spawning an NPC inside a region must
         // not cause an `OnEnteredRegion` trigger to fire.
         let mut app = region_trigger_test_app();
         let uuid = "uuid-quarantine";
@@ -9798,7 +9800,7 @@ size_max = 2.0
                 crate::system_registry::comms_system_id(),
                 crate::control_source::ControlSource::Ai,
             );
-            app.world_mut().spawn((crate::simulation::Ship, sources));
+            app.world_mut().spawn((crate::simulation::Ship, crate::simulation::LocalShip, sources));
         }
 
         // Install a template with a response, fired on WorldLoaded.

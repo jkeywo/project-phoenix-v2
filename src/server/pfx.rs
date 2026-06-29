@@ -12,7 +12,8 @@ use crate::messages::GamePhase;
 use crate::model_rig::ModelMarkers;
 use crate::ship_state::ShipState;
 use crate::simulation::{
-    ActiveBeam, Asteroid, AsteroidUuid, PhaserRenderConfig, Ship, TorpedoSystemResource,
+    ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, Ship,
+    TorpedoSystemResource,
 };
 use crate::weapons_plugin::PhaserCombatConfigResource;
 
@@ -144,7 +145,7 @@ fn sync_phaser_beams(
     >,
     player_ship_q: Query<
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
-        (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>),
+        (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
     npc_beam_q: Query<
         (
@@ -302,7 +303,7 @@ fn resolve_player_beam(
     >,
     player_ship_q: &Query<
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
-        (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>),
+        (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
     target_point_index: Option<usize>,
 ) -> Option<(Vec3, Vec3, [f32; 4])> {
@@ -488,7 +489,7 @@ fn spawn_engine_trails(
             Option<&HelmConsoleSection>,
             Option<&EntityUuid>,
         ),
-        With<Ship>,
+        With<LocalShip>,
     >,
     npc_q: Query<
         (
@@ -913,7 +914,7 @@ fn target_point_count(
     >,
     player_ship_q: &Query<
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
-        (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>),
+        (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
 ) -> usize {
     if player_ship_uuid == Some(uuid) {
@@ -951,7 +952,7 @@ fn target_position(
     >,
     player_ship_q: &Query<
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
-        (With<Ship>, Without<BeamBody>, Without<BeamContactGlow>),
+        (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
 ) -> Option<Vec3> {
     if player_ship_uuid == Some(uuid) {

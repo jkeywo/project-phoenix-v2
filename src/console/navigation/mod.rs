@@ -250,6 +250,7 @@ mod tests {
                     crate::server_app::dual_publish_blackboards,
                     crate::server_app::broadcast_blackboard_updates,
                 )
+                    .chain()
                     .in_set(crate::sim_sets::SimSet::PublishAggregate),
             )
             .init_resource::<Outbox>()

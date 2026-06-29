@@ -15,23 +15,25 @@ import {
 describe('helpSections', () => {
   it('returns the CaptainChair tuples', () => {
     expect(helpSections('CaptainChair')).toEqual([
-      ['Red Alert', 'Toggle ship-wide alert status.'],
-      ['View Selector', 'Switch viewscreen camera angle.'],
+      ['Command', 'You set the ship\'s posture. Coordinate the crew and call the shots — no one else has the full picture.'],
+      ['Red Alert', 'Raises ship-wide combat readiness. Call it before entering a fight, not after taking the first hit.'],
+      ['View Selector', 'Keep the main screen camera updated so the whole bridge sees what matters right now.'],
     ]);
   });
 
   it('returns the Helm tuples (4 sections incl. the 10× burst)', () => {
     const h = helpSections('Helm');
     expect(h).toHaveLength(4);
-    expect(h[0]).toEqual(['Thrust', 'Drag up to accelerate, down to reverse.']);
-    expect(h[3]).toEqual(['Impulse Drive', '10× speed burst. Cancelled by damage.']);
+    expect(h[0]).toEqual(['Pilot', 'Keep the ship moving and the target in arc for Tactical. You control where the fight happens.']);
+    expect(h[2]).toEqual(['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel.']);
   });
 
   it('returns the Tactical tuples', () => {
     expect(helpSections('Tactical')).toEqual([
-      ['Target Lock', 'Select a target within range and arc.'],
-      ['Phasers', 'Fire at locked target. Auto mode fires when in arc.'],
-      ['Torpedoes', 'Launch homing torpedoes from loaded tubes.'],
+      ['Weapons Officer', 'Deliver firepower to the enemy.'],
+      ['Target Lock', 'Lock first — phasers and torpedoes both require an active lock by clicking on the target.'],
+      ['Phasers', 'Fast and continuous but arc-limited. Enable Auto so they fire the instant the target crosses your fire arc.'],
+      ['Torpedoes', 'Use them when on priority target. They do less damage to shields than hull, sensors can monitor target shields.'],
     ]);
   });
 
@@ -273,6 +275,6 @@ describe('renderInlineHelp', () => {
     renderInlineHelp(root, ['Tactical'], doc);
     const sections = root.children[0].children.find((c) => c.className === 'help-sections');
     const titles = sections.children.map((s) => s.children.find((c) => c.className === 'help-section-title').textContent);
-    expect(titles).toEqual(['Target Lock', 'Phasers', 'Torpedoes']);
+    expect(titles).toEqual(['Weapons Officer', 'Target Lock', 'Phasers', 'Torpedoes']);
   });
 });

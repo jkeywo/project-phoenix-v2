@@ -213,6 +213,15 @@ pub struct LastBroadcastBlackboards(
     pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
 );
 
+/// Per-entity component holding a ship's system blackboards. During the
+/// dual-publish migration, every system writes to both the global
+/// `SystemBlackboards` resource AND this component on the `LocalShip` entity.
+/// The broadcast pipeline reads from this component instead of the resource.
+#[derive(Component, Default, Clone)]
+pub struct ShipSystemBlackboards(
+    pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
+);
+
 // â"€â"€ Plugin â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 /// Empty system used as an ordering anchor for the sim broadcast dispatch.
 /// All sim-phase systems (message handlers, tick systems, broadcasters) should
@@ -331,7 +340,9 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
-        broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::Broadcast),
+        broadcast_blackboard_updates
+            .after(dual_publish_blackboards)
+            .in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_systems(
         Update,
@@ -362,7 +373,11 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
-        publish_viewscreen_blackboard.in_set(crate::sim_sets::SimSet::PublishAggregate),
+        (
+            publish_viewscreen_blackboard,
+            dual_publish_blackboards,
+        )
+            .in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_plugins(weapons_update_broadcaster())
     .add_plugins(sim_state_broadcaster())
@@ -929,15 +944,40 @@ pub fn snapshot_blackboards_for_test(
     snapshot_blackboards(blackboards, frozen);
 }
 
-/// Emit `BlackboardUpdate` for any system whose blackboard has changed since
-/// the last broadcast. Runs in `SimSet::Broadcast` so it sees the current
-/// tick's fully-published blackboards.
-pub fn broadcast_blackboard_updates(
+/// Dual-publish bridge: copies the global `SystemBlackboards` resource into the
+/// `ShipSystemBlackboards` component on the `LocalShip` entity. Runs after all
+/// `publish_*_blackboard` systems (in `PublishAggregate`) so the component is in
+/// sync for broadcast and any downstream `FrozenBlackboards` reader.
+pub fn dual_publish_blackboards(
+
     blackboards: Res<SystemBlackboards>,
+    mut ship_query: Query<&mut ShipSystemBlackboards, With<LocalShip>>,
+) {
+    let Ok(mut component) = ship_query.single_mut() else {
+        return;
+    };
+    component.0 = blackboards.0.clone();
+}
+
+/// Emit `BlackboardUpdate` for any system whose blackboard has changed since
+/// the last broadcast. Reads from the `LocalShip` entity's per-entity component
+/// (populated by `dual_publish_blackboards`). Runs in `SimSet::PublishAggregate`
+/// (before `SimSet::Broadcast` so `dispatch_sim_broadcasts` sees the outbox entries).
+pub fn broadcast_blackboard_updates(
+    ship_query: Query<&ShipSystemBlackboards, With<LocalShip>>,
     mut last: ResMut<LastBroadcastBlackboards>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    let updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = blackboards
+    let Ok(bb) = ship_query.single() else {
+        eprintln!("[DEBUG] broadcast_blackboard_updates: no LocalShip entity found (total ships: {})", ship_query.iter().len());
+        return;
+    };
+    for (id, bb_val) in &bb.0 {
+        let prev = last.0.get(id);
+        let changed = prev != Some(bb_val);
+        eprintln!("[DEBUG] broadcast_bb: sys={}, changed={}, prev={:?}, cur={:?}", id.0, changed, prev.is_some(), bb_val);
+    }
+    let updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = bb
         .0
         .iter()
         .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
@@ -945,12 +985,15 @@ pub fn broadcast_blackboard_updates(
         .collect();
 
     if !updates.is_empty() {
+        eprintln!("[DEBUG] broadcast_bb: EMITTING {} updates", updates.len());
         for (id, bb) in &updates {
             last.0.insert(id.clone(), bb.clone());
         }
         outbox
             .0
             .push((Target::All, ServerMessage::BlackboardUpdate { updates }));
+    } else {
+        eprintln!("[DEBUG] broadcast_bb: no changes, skipping");
     }
 }
 
@@ -1687,6 +1730,7 @@ fn spawn_game_start_entities(
                 .entity(spawned)
                 .insert(Ship)
                 .insert(LocalShip)
+                .insert(ShipSystemBlackboards::default())
                 .insert(ship_config)
                 .insert(initial_control_sources)
                 .insert(crate::ship_plugin::ActiveStationRatings::default())
@@ -2484,6 +2528,7 @@ mod tests {
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,
+            crate::simulation::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),

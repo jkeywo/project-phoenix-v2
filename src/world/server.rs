@@ -575,7 +575,11 @@ fn setup_fallback_world(mut commands: Commands, _world: ResMut<WorldResource>) {
         ship_uuid,
         Some("player-ship".to_string()),
     );
-    commands.entity(ship_entity).insert((Ship, crate::simulation::LocalShip));
+    commands.entity(ship_entity).insert((
+        Ship,
+        crate::simulation::LocalShip,
+        crate::simulation::ShipSystemBlackboards::default(),
+    ));
     commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
         (crate::messages::Console::Helm, 25.0),
         (crate::messages::Console::Tactical, 25.0),

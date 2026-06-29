@@ -246,8 +246,11 @@ mod tests {
             .init_resource::<crate::simulation::SimOutbox>()
             .add_systems(
                 Update,
-                crate::server_app::broadcast_blackboard_updates
-                    .in_set(crate::sim_sets::SimSet::Broadcast),
+                (
+                    crate::server_app::dual_publish_blackboards,
+                    crate::server_app::broadcast_blackboard_updates,
+                )
+                    .in_set(crate::sim_sets::SimSet::PublishAggregate),
             )
             .init_resource::<Outbox>()
             .insert_resource(ShipState::new())
@@ -265,6 +268,7 @@ mod tests {
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,
+            crate::simulation::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
         ));

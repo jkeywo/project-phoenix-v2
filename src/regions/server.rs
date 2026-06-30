@@ -129,7 +129,7 @@ fn apply_damage_zone_damage(
     region_query: Query<(&RegionEffectsSection, Option<&EntityUuid>)>,
     ship_query: Query<Entity, With<LocalShip>>,
     hull: Option<ResMut<ShipHullIntegrity>>,
-    mut shields: Option<ResMut<crate::simulation::ShipShields>>,
+    mut player_shields: Query<&mut crate::simulation::ShipShields, With<crate::server_app::LocalShip>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
@@ -170,12 +170,12 @@ fn apply_damage_zone_damage(
                 let mut hull_amount = pierced;
                 let mut shield_amount = 0.0;
                 if absorbed > 0.0 {
-                    if let Some(shields) = shields.as_deref_mut() {
+                    if let Ok(mut shields) = player_shields.single_mut() {
                         let leak = shields.0.apply_uniform_damage(absorbed.round() as i32);
                         shield_amount = (absorbed - leak as f32).max(0.0);
                         hull_amount += leak as f32;
                     } else {
-                        // No shields resource (e.g. test app); treat absorbed as hull.
+                        // No LocalShip with ShipShields (e.g. test app); treat absorbed as hull.
                         hull_amount += absorbed;
                     }
                 }
@@ -499,7 +499,7 @@ mod tests {
     fn damage_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(RegionPlugin);
-        // Manually control time Ã¢â‚¬â€ no TimePlugin. Bevy 0.18 Time is generic;
+        // Manually control time — no TimePlugin. Bevy 0.18 Time is generic;
         // we insert Time<()> ourselves and use advance_by() before each update.
         app.insert_resource(Time::<()>::default());
         app.insert_resource(ShipState::new());
@@ -510,7 +510,12 @@ mod tests {
             (crate::messages::Console::Shields, 25.0),
         ])));
         app.insert_resource(ShipModifiers::new());
-        app.world_mut().spawn((LocalShip, Transform::default()));
+        use crate::shield::{ShieldConfig, ShieldSystem};
+        app.world_mut().spawn((
+            LocalShip,
+            Transform::default(),
+            crate::simulation::ShipShields(ShieldSystem::new(&ShieldConfig::default())),
+        ));
         app
     }
 
@@ -663,10 +668,11 @@ mod tests {
     #[test]
     fn damage_zone_bypasses_shields() {
         let mut app = damage_test_app();
-        // Add shields with known state
+        // Override shields with custom config via entity component
         use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        app.insert_resource(ShipShields(ShieldSystem::new(&ShieldConfig {
+        let ship = app.world_mut().query_filtered::<Entity, With<LocalShip>>().single(&app.world()).unwrap();
+        app.world_mut().entity_mut(ship).insert(ShipShields(ShieldSystem::new(&ShieldConfig {
             max_hp: 100,
             ..Default::default()
         })));
@@ -687,7 +693,7 @@ mod tests {
         );
 
         // Shields should be untouched (full HP)
-        let shields = app.world().resource::<ShipShields>();
+        let shields = app.world().entity(ship).get::<ShipShields>().unwrap();
         for facing in &shields.0.facings {
             assert_eq!(facing.hp, 100, "shield facing should be undamaged");
         }
@@ -698,7 +704,8 @@ mod tests {
         let mut app = damage_test_app();
         use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        app.insert_resource(ShipShields(ShieldSystem::new(&ShieldConfig {
+        let ship = app.world_mut().query_filtered::<Entity, With<LocalShip>>().single(&app.world()).unwrap();
+        app.world_mut().entity_mut(ship).insert(ShipShields(ShieldSystem::new(&ShieldConfig {
             max_hp: 1000,
             ..Default::default()
         })));
@@ -719,7 +726,7 @@ mod tests {
             hull_hp
         );
         // 70 absorbed ÷ 4 facings = 17 rem 2. Fore and Port get 18, Aft and Starboard get 17.
-        let shields = app.world().resource::<ShipShields>();
+        let shields = app.world().entity(ship).get::<ShipShields>().unwrap();
         assert_eq!(shields.0.facings[0].hp, 982, "fore should get 18 of 70");
         assert_eq!(shields.0.facings[1].hp, 982, "port should get 18 of 70");
         assert_eq!(shields.0.facings[2].hp, 983, "aft should get 17 of 70");
@@ -734,7 +741,8 @@ mod tests {
         let mut app = damage_test_app();
         use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        app.insert_resource(ShipShields(ShieldSystem::new(&ShieldConfig {
+        let ship = app.world_mut().query_filtered::<Entity, With<LocalShip>>().single(&app.world()).unwrap();
+        app.world_mut().entity_mut(ship).insert(ShipShields(ShieldSystem::new(&ShieldConfig {
             max_hp: 1000,
             ..Default::default()
         })));
@@ -754,7 +762,7 @@ mod tests {
             hull_hp
         );
         // 50 absorbed ÷ 4 facings = 12 rem 2. Fore and Port get 13, Aft and Starboard get 12.
-        let shields = app.world().resource::<ShipShields>();
+        let shields = app.world().entity(ship).get::<ShipShields>().unwrap();
         assert_eq!(shields.0.facings[0].hp, 987, "fore should get 13 of 50");
         assert_eq!(shields.0.facings[1].hp, 987, "port should get 13 of 50");
         assert_eq!(shields.0.facings[2].hp, 988, "aft should get 12 of 50");

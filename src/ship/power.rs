@@ -117,7 +117,6 @@ pub struct ShipPowerPlugin;
 
 impl Plugin for ShipPowerPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>();
         app.init_resource::<crate::messages::InterSystemQueue>();
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
@@ -169,9 +168,12 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 /// targeting the power system ID with a `SetPower` payload, and calls
 /// `PowerSystem::increase` / `decrease` to reach the requested level.
 pub fn handle_power_messages(
-    admitted: Res<crate::messages::AdmittedCommands>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::Ship>>,
     mut power: ResMut<ShipPowerSystem>,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::POWER_SYSTEM_ID) {
         match &cmd.payload {
             crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
@@ -387,6 +389,8 @@ mod tests {
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
         ));
         app
     }

@@ -197,8 +197,7 @@ pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>()
-            .init_resource::<WorldContentRuntime>()
+        app.init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()
@@ -717,10 +716,13 @@ fn mark_comms_dirty_on_game_start(
 /// Evaluates matching `on_hailed` comms templates for the target entity,
 /// injects new messages into the inbox, and records active dialogues.
 fn handle_hail(
-    admitted: Res<crate::messages::AdmittedCommands>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<Ship>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
         let target_uuid = match &cmd.payload {
             crate::messages::SystemControlPayload::Hail { target_uuid } => target_uuid,
@@ -1044,7 +1046,7 @@ fn strip_parent_prefix(name: &str) -> &str {
 /// Records the chosen response on the inbox message, fires any associated
 /// trigger actions, and advances the dialogue to the follow-up node if present.
 fn handle_respond_to_message(
-    admitted: Res<crate::messages::AdmittedCommands>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<Ship>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
@@ -1062,6 +1064,9 @@ fn handle_respond_to_message(
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
         let (message_id, response_index) = match &cmd.payload {
             crate::messages::SystemControlPayload::RespondToMessage {
@@ -1676,9 +1681,12 @@ fn handle_respond_to_message(
 
 /// Handle `ClearComms` from Comms console holders.
 fn handle_clear_comms(
-    admitted: Res<crate::messages::AdmittedCommands>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<Ship>>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
         if matches!(
             cmd.payload,
@@ -1694,11 +1702,14 @@ fn handle_clear_comms(
 /// Looks up the message in the inbox, stores it in `OnScreenMessage`, and
 /// pushes `ViewMode::Comms` so the viewscreen switches to the comms overlay.
 fn handle_show_on_screen(
-    admitted: Res<crate::messages::AdmittedCommands>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<Ship>>,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
     mut ship: ResMut<ShipState>,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
         let show_message_id: Option<&String> = match &cmd.payload {
             crate::messages::SystemControlPayload::ShowOnScreen { message_id } => Some(message_id),
@@ -3363,6 +3374,7 @@ mod tests {
                     handle_hail,
                     handle_respond_to_message,
                     handle_clear_comms,
+                    tick_pending_follow_ups,
                     handle_comms_channel2,
                     update_comms_range_flags,
                     broadcast_comms_state,
@@ -3379,6 +3391,7 @@ mod tests {
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
+            crate::messages::AdmittedCommands::default(),
         ));
         app
     }
@@ -4006,7 +4019,6 @@ mod tests {
         use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState};
 
         let mut app = ai_trigger_test_app();
-        app.add_systems(Update, tick_pending_follow_ups);
 
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
@@ -4080,7 +4092,6 @@ mod tests {
     fn root_follow_up_fires_on_hail_after_timer_expires() {
         let station_uuid = "station-uuid-rfu-001";
         let mut app = comms_test_app();
-        app.add_systems(Update, tick_pending_follow_ups);
         setup_game_with_root_follow_up(&mut app, station_uuid);
         let _ = tick(&mut app);
 
@@ -4148,7 +4159,6 @@ mod tests {
     fn root_follow_up_inherits_explicit_thread_id() {
         let station_uuid = "station-uuid-rfu-002";
         let mut app = comms_test_app();
-        app.add_systems(Update, tick_pending_follow_ups);
         setup_game_with_root_follow_up(&mut app, station_uuid);
 
         // Stamp the template with an explicit thread_id.
@@ -4192,7 +4202,6 @@ mod tests {
     fn root_follow_up_with_no_trigger_fires_on_next_tick() {
         let station_uuid = "station-uuid-rfu-003";
         let mut app = comms_test_app();
-        app.add_systems(Update, tick_pending_follow_ups);
         setup_game_with_root_follow_up(&mut app, station_uuid);
 
         // Drop the trigger on the chained node â€” now it's triggerless and
@@ -4246,7 +4255,6 @@ mod tests {
         use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState};
 
         let mut app = ai_trigger_test_app();
-        app.add_systems(Update, tick_pending_follow_ups);
 
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
@@ -4392,7 +4400,10 @@ mod tests {
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<SimOutbox>()
             .add_message::<CommsChannel2Event>()
-            .add_systems(Update, (handle_ai_events, handle_comms_channel2).chain());
+            .add_systems(
+                Update,
+                (tick_pending_follow_ups, handle_ai_events, handle_comms_channel2).chain(),
+            );
         // Set phase to InProgress
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));

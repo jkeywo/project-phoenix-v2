@@ -19,7 +19,6 @@ impl Plugin for CaptainPlugin {
         app.init_resource::<RecentCombatActivity>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>();
         app.init_resource::<crate::server_app::ShipAttackedThisTick>();
-        app.init_resource::<crate::messages::AdmittedCommands>();
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         app.add_systems(
             Update,
@@ -40,7 +39,13 @@ impl Plugin for CaptainPlugin {
 
 // ── Input handlers ───────────────────────────────────────────────────────────
 
-fn handle_toggle_red_alert(admitted: Res<AdmittedCommands>, mut ship: ResMut<ShipState>) {
+fn handle_toggle_red_alert(
+    ship_query: Query<&AdmittedCommands, With<Ship>>,
+    mut ship: ResMut<ShipState>,
+) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
         if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
             ship.toggle_red_alert();
@@ -69,7 +74,13 @@ fn view_request_from_admitted(
     }
 }
 
-fn handle_set_view(admitted: Res<AdmittedCommands>, mut ship: ResMut<ShipState>) {
+fn handle_set_view(
+    ship_query: Query<&AdmittedCommands, With<Ship>>,
+    mut ship: ResMut<ShipState>,
+) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.0.iter() {
         if let Some((source, mode)) = view_request_from_admitted(cmd) {
             ship.request_view_mode_from(source, mode);
@@ -80,10 +91,13 @@ fn handle_set_view(admitted: Res<AdmittedCommands>, mut ship: ResMut<ShipState>)
 /// Toggle the captain's priority boost for a doctrine objective.
 /// Sending the same id twice clears the boost.
 fn handle_set_objective_priority(
-    admitted: Res<AdmittedCommands>,
+    ship_query: Query<&AdmittedCommands, With<Ship>>,
     boost: Option<ResMut<crate::server_app::CaptainPriorityBoost>>,
 ) {
     let Some(mut boost) = boost else { return };
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::CAPTAIN_SYSTEM_ID) {
         if let SystemControlPayload::SetObjectivePriority { id } = &cmd.payload {
             if boost.boosted_id.as_deref() == Some(id.as_str()) {
@@ -102,11 +116,10 @@ fn handle_set_objective_priority(
 fn operate_captain_ai(
     time: Res<Time>,
     ship: Res<ShipState>,
-    mut admitted: ResMut<AdmittedCommands>,
-    ship_query: Query<&ShipSystemControlSources, With<Ship>>,
+    mut ship_query: Query<(&mut AdmittedCommands, &ShipSystemControlSources), With<Ship>>,
     activity: Res<RecentCombatActivity>,
 ) {
-    let Ok(control_sources) = ship_query.single() else {
+    let Ok((mut admitted, control_sources)) = ship_query.single_mut() else {
         return;
     };
     let policy = control_sources
@@ -279,7 +292,12 @@ mod tests {
             LocalShip,
             ShipConfigComponent::default(),
             ShipSystemControlSources::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
         ));
+        // Tests that read AdmittedCommands as a resource need it inserted.
+        app.insert_resource(crate::messages::AdmittedCommands::default());
         app
     }
 
@@ -1099,7 +1117,7 @@ mod tests {
 
     // ── #574 objective filtering + priority boost tests ──────────────────────
 
-    use crate::messages::{ObjectiveSource, ObjectiveStatus};
+    use crate::messages::ObjectiveSource;
     use crate::objectives::{UtilityConfig, ZeroGateCondition};
 
     fn doctrine_objective_manager() -> ObjectiveManager {

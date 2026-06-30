@@ -1571,7 +1571,7 @@ pub struct AdmittedCommand {
 
 /// Cleared and refilled each tick by `admit_system_commands` (runs before
 /// `SimSet::Input`). Handlers read from this instead of `InboundMessage`.
-#[derive(bevy::prelude::Resource, Default)]
+#[derive(bevy::prelude::Component, bevy::prelude::Resource, Default)]
 pub struct AdmittedCommands(pub Vec<AdmittedCommand>);
 
 impl AdmittedCommands {

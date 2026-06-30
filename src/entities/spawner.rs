@@ -280,6 +280,7 @@ pub fn spawn_entity(
         }
         entity_commands.insert((
             ship_config,
+            crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ShipSystemControlSources(resolver),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
@@ -1280,7 +1281,6 @@ max_hp = 50.0
     fn npc_ship_spawn_gives_all_ai_roster_and_no_ship_marker() {
         use crate::entity_config::{BehaviourConfig, DoctrineObjective, EntityConfig};
         use crate::server_app::Ship;
-        use crate::ship::control_source::ControlSource;
         use crate::ship_plugin::ShipSystemControlSources;
         use bevy::prelude::*;
 

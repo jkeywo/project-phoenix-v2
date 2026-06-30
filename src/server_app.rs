@@ -81,10 +81,8 @@ struct SimBroadcastTimer(Timer);
 #[derive(Resource)]
 pub struct ShipHullIntegrity(pub ConsoleHull);
 
-/// The ship's shield system. Damage from collisions is routed through shields
-/// first; only overflow passes through to the hull.
-#[derive(Resource)]
-pub struct ShipShields(pub ShieldSystem);
+// ShipShields has moved to `crate::ship::shields` as a Component.
+pub use crate::ship::shields::ShipShields;
 
 /// The ship's impulse drive state. Cancelled automatically when hull damage is taken.
 #[derive(Resource)]
@@ -273,7 +271,6 @@ pub fn add_simulation_plugins(app: &mut App) {
         (Console::Shields, 25.0),
         (Console::Core, 50.0),
     ])))
-    .insert_resource(ShipShields(ShieldSystem::default()))
     .insert_resource(ShipImpulse(ImpulseState::new()))
     .insert_resource(ShipBoost(crate::boost::BoostState::new()))
     .init_resource::<WeaponFiredThisTick>()
@@ -294,7 +291,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     .init_resource::<SystemBlackboards>()
     .init_resource::<FrozenBlackboards>()
     .init_resource::<LastBroadcastBlackboards>()
-    .init_resource::<crate::messages::AdmittedCommands>()
     .init_resource::<crate::messages::InterSystemQueue>()
     .insert_resource(SimBroadcastTimer(Timer::from_seconds(
         0.1,
@@ -714,9 +710,9 @@ fn handle_collisions(
     mut ship: ResMut<ShipState>,
     mut impulse: ResMut<ShipImpulse>,
     mut hull: ResMut<ShipHullIntegrity>,
-    mut shields: ResMut<ShipShields>,
     mut cooldown: ResMut<CollisionCooldown>,
     modifiers: Res<ShipModifiers>,
+    mut shields_q: Query<&mut ShipShields, With<LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut game_over_reason: ResMut<GameOverReason>,
@@ -727,6 +723,9 @@ fn handle_collisions(
 
     let Ok(ctx) = context.single() else { return };
     let Ok(ship_entity) = ship_query.single() else {
+        return;
+    };
+    let Ok(mut shields) = shields_q.single_mut() else {
         return;
     };
 
@@ -835,7 +834,10 @@ fn handle_collisions(
     }
 }
 /// Tick shield regen and offline timers each frame.
-fn tick_shields(time: Res<Time>, mut shields: ResMut<ShipShields>) {
+fn tick_shields(time: Res<Time>, mut ship_query: Query<&mut ShipShields, With<LocalShip>>) {
+    let Ok(mut shields) = ship_query.single_mut() else {
+        return;
+    };
     shields.0.tick(time.delta_secs());
 }
 
@@ -845,13 +847,15 @@ fn tick_shields(time: Res<Time>, mut shields: ResMut<ShipShields>) {
 fn broadcast_shield_status(
     time: Res<Time>,
     mut timer: ResMut<SimBroadcastTimer>,
-    shields: Res<ShipShields>,
     mut outbox: ResMut<SimOutbox>,
     sessions: Res<Sessions>,
-    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<LocalShip>>,
+    ship_query: Query<(
+        &ShipShields,
+        &crate::ship_plugin::ShipConfigComponent,
+    ), With<LocalShip>>,
     mut last: ResMut<LastBroadcastShields>,
 ) {
-    let Ok(ship_config) = ship_query.single() else {
+    let Ok((shields, ship_config)) = ship_query.single() else {
         return;
     };
     if !timer.0.tick(time.delta()).just_finished() {
@@ -1001,8 +1005,7 @@ pub struct AdmissionPlugin;
 
 impl Plugin for AdmissionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>()
-            .init_resource::<crate::messages::InterSystemQueue>()
+        app.init_resource::<crate::messages::InterSystemQueue>()
             .init_resource::<crate::ai::server::AiTokenRegistry>()
             .configure_sets(
                 Update,
@@ -1031,22 +1034,23 @@ fn clear_inter_system_queue(mut queue: ResMut<crate::messages::InterSystemQueue>
 /// branch on the origin.
 fn admit_system_commands(
     mut reader: MessageReader<InboundMessage>,
-    mut admitted: ResMut<crate::messages::AdmittedCommands>,
-    sessions: Res<Sessions>,
-    ai_registry: Res<crate::ai::server::AiTokenRegistry>,
-    ship_query: Query<
+    mut ship_query: Query<
         (
             Entity,
             &crate::ship_plugin::ShipConfigComponent,
             &crate::ship_plugin::ShipSystemControlSources,
+            &mut crate::messages::AdmittedCommands,
         ),
         With<Ship>,
     >,
+    sessions: Res<Sessions>,
+    ai_registry: Res<crate::ai::server::AiTokenRegistry>,
 ) {
-    admitted.0.clear();
-    let Ok((ship_entity, ship_config, control_sources)) = ship_query.single() else {
+    let Ok((ship_entity, ship_config, control_sources, mut admitted)) = ship_query.single_mut()
+    else {
         return;
     };
+    admitted.0.clear();
     for ev in reader.read() {
         let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
             continue;
@@ -1726,6 +1730,7 @@ fn spawn_game_start_entities(
                 .insert(initial_control_sources)
                 .insert(crate::ship_plugin::ActiveStationRatings::default())
                 .insert(crate::ship_plugin::CoordinationQueue::default())
+                .insert(crate::messages::AdmittedCommands::default())
                 .remove::<crate::entity_spawner::EntityConsoleHull>();
             ship_spawned = true;
 
@@ -1786,7 +1791,10 @@ fn spawn_game_start_entities(
                     penalty_regen: sc.focus_penalty_regen,
                     decay_rate: sc.focus_decay_rate,
                 };
-                commands.insert_resource(shields);
+                commands.entity(spawned).insert(shields);
+            } else {
+                // Default shields on the ship entity when no TOML shields_console block.
+                commands.entity(spawned).insert(ShipShields(ShieldSystem::default()));
             }
 
             if let Some(wc) = &config.weapons_console {
@@ -2411,6 +2419,9 @@ mod tests {
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
+    #[derive(Resource)]
+    struct ShipEntity(Entity);
+
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
         for m in reader.read() {
             box_.0.push(m.clone());
@@ -2445,7 +2456,6 @@ mod tests {
             (Console::Power, 25.0),
             (Console::Shields, 25.0),
         ])))
-        .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<WorldResource>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
@@ -2462,7 +2472,6 @@ mod tests {
         .init_resource::<SystemBlackboards>()
         .init_resource::<FrozenBlackboards>()
         .init_resource::<LastBroadcastBlackboards>()
-        .init_resource::<crate::messages::AdmittedCommands>()
         .init_resource::<crate::messages::InterSystemQueue>()
         .init_resource::<crate::ai::server::AiTokenRegistry>()
         .init_resource::<Outbox>()
@@ -2516,15 +2525,21 @@ mod tests {
         // Spawn the Ship entity immediately so systems that query it (including
         // auth checks in handle_fire_torpedo, handle_power_messages, etc.) work
         // during Lobby as well as InProgress.
-        app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
-            crate::simulation::ShipSystemBlackboards::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
-            crate::ship_plugin::ShipSystemControlSources::default(),
-            crate::ship_plugin::ActiveStationRatings::default(),
-            crate::ship_plugin::CoordinationQueue::default(),
-        ));
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::simulation::LocalShip,
+                crate::simulation::ShipSystemBlackboards::default(),
+                crate::ship_plugin::ShipConfigComponent::default(),
+                crate::ship_plugin::ShipSystemControlSources::default(),
+                crate::ship_plugin::ActiveStationRatings::default(),
+                crate::ship_plugin::CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+                ShipShields(ShieldSystem::default()),
+            ))
+            .id();
+        app.insert_resource(ShipEntity(ship));
         app
     }
 
@@ -5625,11 +5640,13 @@ mod tests {
         );
         tick(&mut app);
 
+        let ship = app.world().resource::<ShipEntity>().0;
+        let shields = app.world().entity(ship).get::<ShipShields>().unwrap();
         assert_eq!(
-            app.world().resource::<ShipShields>().0.focused_facing,
+            shields.0.focused_facing,
             Some(0)
         );
-        assert!(app.world().resource::<ShipShields>().0.facings[0].is_focused);
+        assert!(shields.0.facings[0].is_focused);
     }
 
     #[test]
@@ -5650,9 +5667,12 @@ mod tests {
         );
         tick(&mut app);
 
+        let ship = app.world().resource::<ShipEntity>().0;
         assert!(app
             .world()
-            .resource::<ShipShields>()
+            .entity(ship)
+            .get::<ShipShields>()
+            .unwrap()
             .0
             .focused_facing
             .is_none());
@@ -5674,8 +5694,10 @@ mod tests {
             },
         );
         tick(&mut app);
+        let ship = app.world().resource::<ShipEntity>().0;
+        let shields = app.world().entity(ship).get::<ShipShields>().unwrap();
         assert_eq!(
-            app.world().resource::<ShipShields>().0.focused_facing,
+            shields.0.focused_facing,
             Some(0)
         );
 
@@ -5688,9 +5710,12 @@ mod tests {
             },
         );
         tick(&mut app);
+        let ship = app.world().resource::<ShipEntity>().0;
         assert!(app
             .world()
-            .resource::<ShipShields>()
+            .entity(ship)
+            .get::<ShipShields>()
+            .unwrap()
             .0
             .focused_facing
             .is_none());
@@ -5730,9 +5755,12 @@ mod tests {
         );
         tick(&mut app);
 
+        let ship = app.world().resource::<ShipEntity>().0;
         assert!(app
             .world()
-            .resource::<ShipShields>()
+            .entity(ship)
+            .get::<ShipShields>()
+            .unwrap()
             .0
             .focused_facing
             .is_none());

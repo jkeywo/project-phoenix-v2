@@ -181,7 +181,6 @@ struct HelmDriveParams<'w> {
 
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>();
         app.insert_resource(HelmInputTimer(Timer::from_seconds(
             1.0 / 30.0,
             TimerMode::Repeating,
@@ -227,7 +226,7 @@ impl Plugin for ShipPlugin {
 fn process_helm_inputs(
     time: Res<Time>,
     mut timer: ResMut<HelmInputTimer>,
-    admitted: Res<AdmittedCommands>,
+    ship_query: Query<&AdmittedCommands, With<Ship>>,
     mut ship: ResMut<ShipState>,
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
@@ -245,6 +244,10 @@ fn process_helm_inputs(
         }
         *prev_phase = Some(current_phase);
     }
+
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
 
     if !timer.0.tick(time.delta()).just_finished() {
         return;
@@ -614,7 +617,7 @@ fn sync_ship_position(ship: Res<ShipState>, mut ship_query: Query<&mut Transform
 }
 
 pub fn handle_impulse_messages(
-    admitted: Res<AdmittedCommands>,
+    ship_ac_query: Query<&AdmittedCommands, With<Ship>>,
     mut impulse: ResMut<ShipImpulse>,
     hull: Res<ShipHullIntegrity>,
     mut last_hull_hp: Local<f32>,
@@ -622,6 +625,9 @@ pub fn handle_impulse_messages(
     region_query: Query<&RegionEffectsSection>,
     ship_query: Query<Entity, With<Ship>>,
 ) {
+    let Ok(admitted) = ship_ac_query.single() else {
+        return;
+    };
     if *last_hull_hp == 0.0 && (hull.0.total_current() - hull.0.total_max()).abs() < 1e-6 {
         *last_hull_hp = hull.0.total_max();
     }
@@ -658,10 +664,13 @@ fn tick_impulse(
 /// Toggle the boost drive in response to Helm boost controls. No-op when
 /// the feature is disabled.
 pub fn handle_boost_messages(
-    admitted: Res<AdmittedCommands>,
+    ship_query: Query<&AdmittedCommands, With<Ship>>,
     mut boost: ResMut<ShipBoost>,
     config: Res<BoostConfigResource>,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     if !config.enabled {
         return;
     }
@@ -974,6 +983,7 @@ mod tests {
             ShipSystemControlSources::default(),
             ActiveStationRatings::default(),
             CoordinationQueue::default(),
+            crate::messages::AdmittedCommands::default(),
         ));
         app
     }

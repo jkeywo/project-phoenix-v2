@@ -234,7 +234,6 @@ pub struct WeaponsPlugin;
 
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>();
         app.init_resource::<crate::messages::InterSystemQueue>();
         app.init_resource::<crate::server_app::WeaponFiredThisTick>()
             .init_resource::<crate::server_app::ShipAttackedThisTick>()
@@ -314,7 +313,7 @@ fn live_entity_xz(
 }
 
 fn handle_set_target(
-    admitted: Res<AdmittedCommands>,
+    ship_query: Query<&AdmittedCommands, With<Ship>>,
     ship: Res<ShipState>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
@@ -323,6 +322,9 @@ fn handle_set_target(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
         let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
             continue;
@@ -637,7 +639,7 @@ fn handle_fire_phaser_npc(
     mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
     mut last_attacker: ResMut<LastShipAttacker>,
     mut hull_resource: Option<ResMut<ShipHullIntegrity>>,
-    mut shields_resource: Option<ResMut<ShipShields>>,
+    mut player_shields_q: Query<&mut ShipShields, With<crate::server_app::LocalShip>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
@@ -819,11 +821,11 @@ fn handle_fire_phaser_npc(
                             info!(
                             "[npc-damage] uuid={} damage={:.3} shield_pierce={:.2} pierced={:.3} absorbed={:.3} hull_res={} shield_res={}",
                             npc_uuid.0, damage, shield_pierce, pierced, absorbed,
-                            hull_resource.is_some(), shields_resource.is_some(),
+                            hull_resource.is_some(), player_shields_q.single().is_ok(),
                         );
 
                             if absorbed > 0.0 {
-                                if let Some(ref mut shields) = shields_resource {
+                                if let Ok(mut shields) = player_shields_q.single_mut() {
                                     let leak = crate::damage::apply_damage_with_shields(
                                         absorbed.round() as i32,
                                         bearing,
@@ -950,9 +952,12 @@ fn handle_fire_phaser_npc(
 }
 
 fn handle_set_phaser_mode(
-    admitted: Res<AdmittedCommands>,
+    ship_query: Query<&AdmittedCommands, With<Ship>>,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
         if let SystemControlPayload::SetPhaserMode { mode } = &cmd.payload {
             phaser_mode.0 = *mode;
@@ -2570,6 +2575,8 @@ station = "tactical"
             test_ship_config(),
             ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
         ));
         app
     }

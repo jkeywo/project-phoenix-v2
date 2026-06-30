@@ -25,7 +25,6 @@ pub struct RepairPlugin;
 
 impl Plugin for RepairPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>();
         app.insert_resource(ShipRepairTeams(RepairTeams::default()))
             .add_systems(
                 Update,
@@ -74,10 +73,10 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 /// ownerless ship-wide systems.
 pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
-    admitted: Res<AdmittedCommands>,
     sessions: Res<Sessions>,
     ship_query: Query<
         (
+            &AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
@@ -85,6 +84,10 @@ pub fn handle_dispatch_repair_team(
     >,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
+    let Ok((admitted, ship_config, control_sources)) = ship_query.single() else {
+        return;
+    };
+
     // ── ControlSystem path (authority already checked at admission) ────────
     for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
         if let SystemControlPayload::DispatchRepairTeam {
@@ -106,9 +109,6 @@ pub fn handle_dispatch_repair_team(
     }
 
     // ── Legacy path (DispatchRepairTeam message type, still auth-gated here) ─
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
-        return;
-    };
     let policy = control_sources.0.policy_for(&repair_system_id());
     if !policy.accept_human_input {
         for _ in reader.read() {}
@@ -262,6 +262,9 @@ mod tests {
             crate::simulation::LocalShip,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
         ));
         app
     }

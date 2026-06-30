@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::lobby::Sessions;
 use crate::messages::{
-    AdmittedCommands, Console, CoordinationPayload, SensorsBlackboard, ServerMessage,
+    Console, CoordinationPayload, SensorsBlackboard, ServerMessage,
     SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship::control_source::ControlSource;
@@ -34,7 +34,6 @@ pub struct ShipSensorsPlugin;
 
 impl Plugin for ShipSensorsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>();
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<SensorsFrequencyState>()
             .init_resource::<SensorsTarget>()
@@ -57,13 +56,15 @@ impl Plugin for ShipSensorsPlugin {
 /// Stores the target in [`SensorsTarget`] for blackboard broadcast, and emits
 /// `SensorsTargetSuggestion` directly to the Tactical console holder.
 pub fn handle_sensors_messages(
-    admitted: Res<AdmittedCommands>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&crate::ship_plugin::ShipConfigComponent,), With<crate::simulation::Ship>>,
+    ship_query: Query<
+        (&crate::messages::AdmittedCommands, &crate::ship_plugin::ShipConfigComponent),
+        With<crate::simulation::Ship>,
+    >,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
     mut sensors_target: ResMut<SensorsTarget>,
 ) {
-    let Ok((ship_config,)) = ship_query.single() else {
+    let Ok((admitted, ship_config)) = ship_query.single() else {
         return;
     };
 
@@ -208,6 +209,9 @@ mod tests {
             crate::simulation::LocalShip,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
         ));
         app
     }

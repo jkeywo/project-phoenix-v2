@@ -10,7 +10,7 @@ pub struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>()
+        app
             .init_resource::<NavigationWaypoint>()
             .add_systems(
                 Update,
@@ -84,9 +84,12 @@ impl NavigationWaypoint {
 }
 
 fn handle_navigation_waypoint(
-    admitted: Res<AdmittedCommands>,
+    ship_query: Query<&AdmittedCommands, With<crate::simulation::Ship>>,
     mut waypoint: ResMut<NavigationWaypoint>,
 ) {
+    let Ok(admitted) = ship_query.single() else {
+        return;
+    };
     for cmd in admitted.for_target(NAVIGATION_SYSTEM_ID) {
         match &cmd.payload {
             SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
@@ -272,6 +275,9 @@ mod tests {
             crate::simulation::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
         ));
         app
     }

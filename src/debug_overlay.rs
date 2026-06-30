@@ -254,9 +254,12 @@ fn update_entity_inspector(
     >,
     ship_state: Res<crate::ship::state::ShipState>,
     ship_hull: Res<crate::server_app::ShipHullIntegrity>,
-    ship_shields: Res<crate::server_app::ShipShields>,
+    ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
     faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
 ) {
+    let Ok(ship_shields) = ship_shields_q.single() else {
+        return;
+    };
     let player_x = ship_state.x;
     let player_z = ship_state.z;
 
@@ -412,7 +415,7 @@ fn update_entity_inspector(
     >,
     _ship_state: Res<crate::ship::state::ShipState>,
     _ship_hull: Res<crate::server_app::ShipHullIntegrity>,
-    _ship_shields: Res<crate::server_app::ShipShields>,
+    _ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
     _faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
 ) {
 }

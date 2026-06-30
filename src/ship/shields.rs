@@ -7,7 +7,18 @@ use crate::messages::{
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
-use crate::simulation::ShipShields;
+
+
+// ── Components ─────────────────────────────────────────────────────────────────
+
+/// The ship's shield system.
+///
+/// Now a per-entity Component instead of a global Resource.  Derives both
+/// Component and Resource so that test code using `insert_resource` /
+/// `world.resource` continues to compile while production code treats it
+/// as a per-entity component.
+#[derive(Component, Resource)]
+pub struct ShipShields(pub crate::shield::ShieldSystem);
 
 // ── Resources ──────────────────────────────────────────────────────────────────
 
@@ -55,7 +66,6 @@ pub struct ShipShieldsPlugin;
 
 impl Plugin for ShipShieldsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::AdmittedCommands>();
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<ShieldsAiConfigResource>()
             .init_resource::<ShieldsCoordinationState>()
@@ -79,7 +89,12 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
         Audience::Holding(Console::Shields),
         Cadence::Hz(10.0),
         |world: &mut World| {
-            let shields = world.resource::<ShipShields>();
+            let Ok(shields) = world
+                .query_filtered::<&ShipShields, With<crate::server_app::LocalShip>>()
+                .single(world)
+            else {
+                return vec![];
+            };
             let facings: Vec<ShieldFacingStatus> = shields
                 .0
                 .snapshot()
@@ -105,7 +120,16 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 /// Validates: sender holds `Console::Shields`. Reads `ControlSystem` messages
 /// targeting the shields system ID with a `SetShieldFocus` payload, and calls
 /// `ShieldSystem::set_focused_facing`.
-pub fn handle_shields_messages(admitted: Res<AdmittedCommands>, mut shields: ResMut<ShipShields>) {
+pub fn handle_shields_messages(
+    ac_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
+    mut shields: Query<&mut ShipShields, With<crate::server_app::LocalShip>>,
+) {
+    let Ok(admitted) = ac_query.single() else {
+        return;
+    };
+    let Ok(mut shields) = shields.single_mut() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::SHIELDS_SYSTEM_ID) {
         let SystemControlPayload::SetShieldFocus { facing } = &cmd.payload else {
             continue;
@@ -129,13 +153,16 @@ pub fn handle_shields_messages(admitted: Res<AdmittedCommands>, mut shields: Res
 /// the delivery-time routing matrix (human target + AI sender → popup;
 /// AI target → consume; human → human → suppress).
 pub fn emit_shields_coordination(
-    shields: Res<ShipShields>,
+    shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
     ship: Res<crate::ship_state::ShipState>,
     mut coord_state: ResMut<ShieldsCoordinationState>,
     ai_config: Res<ShieldsAiConfigResource>,
     ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
+    let Ok(shields) = shields_q.single() else {
+        return;
+    };
     let snapshots = shields.0.snapshot();
     coord_state.ensure_len(snapshots.len());
 
@@ -206,7 +233,7 @@ pub fn emit_shields_coordination(
 // ── Blackboard publish ─────────────────────────────────────────────────────────
 
 fn publish_shields_blackboard(
-    shields: Res<ShipShields>,
+    shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
     hull: Res<crate::simulation::ShipHullIntegrity>,
     ship: Res<crate::ship_state::ShipState>,
     weapons_target: Option<Res<crate::weapons_plugin::WeaponsTarget>>,
@@ -220,6 +247,9 @@ fn publish_shields_blackboard(
     >,
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
+    let Ok(shields) = shields_q.single() else {
+        return;
+    };
     let facings: Vec<ShieldFacingStatus> = shields
         .0
         .snapshot()
@@ -326,6 +356,9 @@ mod tests {
     };
     use crate::system_registry::SHIELDS_SYSTEM_ID;
 
+    #[derive(Resource)]
+    struct ShipEntity(Entity);
+
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
@@ -355,6 +388,24 @@ mod tests {
             offline_duration: 10.0,
         };
         let mut app = App::new();
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::server_app::LocalShip,
+                ShipShields(crate::shield::ShieldSystem::new(&config)),
+                crate::ship_plugin::ShipConfigComponent::default(),
+                {
+                    let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
+                    cs.0.set(crate::system_registry::shields_system_id(), ControlSource::Ai);
+                    cs
+                },
+                crate::ship_plugin::ActiveStationRatings::default(),
+                crate::ship_plugin::CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+            ))
+            .id();
+        app.insert_resource(ShipEntity(ship));
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
@@ -367,7 +418,6 @@ mod tests {
                 (Console::Power, 25.0),
                 (Console::Shields, 25.0),
             ])))
-            .insert_resource(ShipShields(crate::shield::ShieldSystem::new(&config)))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
@@ -476,6 +526,23 @@ mod tests {
             offline_duration: 10.0,
         };
         let mut app = App::new();
+        let _ship = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::server_app::LocalShip,
+                ShipShields(crate::shield::ShieldSystem::new(&config)),
+                crate::ship_plugin::ShipConfigComponent::default(),
+                {
+                    let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
+                    cs.0.set(crate::system_registry::shields_system_id(), ControlSource::Ai);
+                    cs
+                },
+                crate::ship_plugin::ActiveStationRatings::default(),
+                crate::ship_plugin::CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+            ))
+            .id();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
@@ -486,7 +553,6 @@ mod tests {
                 (Console::Helm, 25.0),
                 (Console::Tactical, 25.0),
             ])))
-            .insert_resource(ShipShields(crate::shield::ShieldSystem::new(&config)))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
@@ -499,11 +565,18 @@ mod tests {
         assert_eq!(shields_bb(&app).facings.len(), 4);
     }
 
+    fn ship_e(app: &mut App) -> Entity {
+        app.world().resource::<ShipEntity>().0
+    }
+
     #[test]
     fn publish_shields_blackboard_shows_focused_facing() {
         let mut app = test_app();
+        let se = ship_e(&mut app);
         app.world_mut()
-            .resource_mut::<ShipShields>()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
             .0
             .set_focused_facing(Some(0));
         app.update();
@@ -513,14 +586,13 @@ mod tests {
     #[test]
     fn publish_shields_blackboard_clears_focused_facing() {
         let mut app = test_app();
-        app.world_mut()
-            .resource_mut::<ShipShields>()
-            .0
-            .set_focused_facing(Some(0));
-        app.world_mut()
-            .resource_mut::<ShipShields>()
-            .0
-            .set_focused_facing(None);
+        let se = ship_e(&mut app);
+        let mut e = app.world_mut().entity_mut(se);
+        let mut shields = e.get_mut::<ShipShields>().unwrap();
+        shields.0.set_focused_facing(Some(0));
+        shields.0.set_focused_facing(None);
+        drop(shields);
+        drop(e);
         app.update();
         assert_eq!(shields_bb(&app).focused_facing, None);
     }
@@ -528,8 +600,11 @@ mod tests {
     #[test]
     fn publish_shields_blackboard_grid_offline_when_facing_down() {
         let mut app = test_app();
+        let se = ship_e(&mut app);
         app.world_mut()
-            .resource_mut::<ShipShields>()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
             .0
             .apply_damage(9999, 0.0);
         app.update();
@@ -554,6 +629,24 @@ mod tests {
             offline_duration: 10.0,
         };
         let mut app = App::new();
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::server_app::LocalShip,
+                ShipShields(crate::shield::ShieldSystem::new(&config)),
+                crate::ship_plugin::ShipConfigComponent::default(),
+                {
+                    let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
+                    cs.0.set(crate::system_registry::shields_system_id(), ControlSource::Ai);
+                    cs
+                },
+                crate::ship_plugin::ActiveStationRatings::default(),
+                crate::ship_plugin::CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+            ))
+            .id();
+        app.insert_resource(ShipEntity(ship));
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
@@ -566,7 +659,6 @@ mod tests {
                 (Console::Power, 25.0),
                 (Console::Shields, 25.0),
             ])))
-            .insert_resource(ShipShields(crate::shield::ShieldSystem::new(&config)))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
@@ -628,8 +720,11 @@ mod tests {
         start_game_with_shields_and_helm(&mut app);
 
         // Drain facing 0 offline.
+        let se = ship_e(&mut app);
         app.world_mut()
-            .resource_mut::<ShipShields>()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
             .0
             .apply_damage(9999, 0.0);
 
@@ -658,8 +753,11 @@ mod tests {
         let mut app = test_app_with_helm();
         start_game_with_shields_and_helm(&mut app);
 
+        let se = ship_e(&mut app);
         app.world_mut()
-            .resource_mut::<ShipShields>()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
             .0
             .apply_damage(9999, 0.0);
 
@@ -686,8 +784,11 @@ mod tests {
         start_game_with_shields_and_helm(&mut app);
 
         // Put facing offline.
+        let se = ship_e(&mut app);
         app.world_mut()
-            .resource_mut::<ShipShields>()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
             .0
             .apply_damage(9999, 0.0);
         tick(&mut app);
@@ -695,7 +796,8 @@ mod tests {
 
         // Manually restore the facing and set HP to above threshold.
         {
-            let mut shields = app.world_mut().resource_mut::<ShipShields>();
+            let mut e = app.world_mut().entity_mut(se);
+            let mut shields = e.get_mut::<ShipShields>().unwrap();
             let facing = &mut shields.0.facings[0];
             facing.offline_remaining = 0.0;
             facing.hp = 60; // 60/100 = 0.6 >= 0.5 threshold
@@ -730,15 +832,19 @@ mod tests {
         let mut app = test_app_with_helm();
         start_game_with_shields_and_helm(&mut app);
 
+        let se = ship_e(&mut app);
         app.world_mut()
-            .resource_mut::<ShipShields>()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
             .0
             .apply_damage(9999, 0.0);
         tick(&mut app);
         drain_coord(&mut app); // discard down notification
 
         {
-            let mut shields = app.world_mut().resource_mut::<ShipShields>();
+            let mut e = app.world_mut().entity_mut(se);
+            let mut shields = e.get_mut::<ShipShields>().unwrap();
             let facing = &mut shields.0.facings[0];
             facing.offline_remaining = 0.0;
             facing.hp = 60;
@@ -772,8 +878,11 @@ mod tests {
         let mut app = test_app_with_helm();
         start_game_with_shields_and_helm(&mut app);
 
+        let se = ship_e(&mut app);
         app.world_mut()
-            .resource_mut::<ShipShields>()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
             .0
             .apply_damage(9999, 0.0);
 

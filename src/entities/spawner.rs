@@ -265,7 +265,10 @@ pub fn spawn_entity(
 
     // Behaviour section — signals ai_plugin to attach an AiControllerComponent.
     if let Some(behaviour) = &config.behaviour {
-        entity_commands.insert(BehaviourSection(behaviour.clone()));
+        entity_commands.insert((
+            BehaviourSection(behaviour.clone()),
+            crate::server_app::ShipSystemBlackboards::default(),
+        ));
 
         let ship_config = crate::ship_plugin::ShipConfigComponent::default();
         let mut resolver = crate::ship::control_source::ControlSourceResolver::new();

@@ -229,6 +229,106 @@ pub struct AiEntityDestroyed {
     pub entity_uuid: String,
 }
 
+// ── WorldSnapshot resource ────────────────────────────────────────────────────
+
+/// Snapshot of all ship/world-entity positions built once per tick.
+/// All `operate_*_ai` handlers read from this resource rather than building
+/// their own queries.
+#[derive(Resource, Default)]
+pub struct WorldSnapshot {
+    pub entities: Vec<crate::ai::AiWorldEntity>,
+}
+
+/// Build the [`WorldSnapshot`] from every entity with an `EntityUuid`. Runs in
+/// `SimSet::Physics` before `AiTickLabel` so per-system AI handlers see a
+/// consistent frame.
+fn build_world_snapshot(
+    mut snapshot: ResMut<WorldSnapshot>,
+    query: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &Transform,
+        Option<&crate::entity_spawner::EntityName>,
+        Option<&crate::entity_spawner::FactionComponent>,
+        Option<&crate::entity_spawner::EntityConsoleHull>,
+        Option<&crate::entity_spawner::ColliderSection>,
+        Option<&AiControllerComponent>,
+    )>,
+) {
+    snapshot.entities = query
+        .iter()
+        .map(|(uuid, transform, name, faction, hull, collider, ai)| {
+            let hull_fraction = hull
+                .map(|h| {
+                    let max = h.0.total_max();
+                    if max > 0.0 {
+                        h.0.total_current() / max
+                    } else {
+                        1.0
+                    }
+                });
+            let radius = collider.map(|c| c.0.radius).unwrap_or(0.0);
+            let forward_speed = ai.map(|a| a.forward_speed).unwrap_or(0.0);
+            crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
+                name: name.as_ref().map(|n| n.0.clone()),
+                position: [
+                    transform.translation.x,
+                    transform.translation.y,
+                    transform.translation.z,
+                ],
+                faction: faction.map(|f| f.0),
+                shields: None,
+                hull_fraction,
+                yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                radius,
+                forward_speed,
+            }
+        })
+        .collect();
+}
+
+/// Score each NPC entity's doctrine and write `scored_objectives` into its
+/// `ShipSystemBlackboards` viewscreen entry.
+fn aggregate_npc_doctrine_blackboards(
+    mut query: Query<(
+        &BehaviourSection,
+        &crate::entity_spawner::EntityConsoleHull,
+        &mut crate::server_app::ShipSystemBlackboards,
+    )>,
+) {
+    for (behaviour, hull, mut blackboards) in &mut query {
+        let hull_fraction = {
+            let max = hull.0.total_max();
+            if max > 0.0 {
+                (hull.0.total_current() / max).clamp(0.0, 1.0)
+            } else {
+                1.0
+            }
+        };
+        let conditions = crate::objectives::WorldConditions {
+            red_alert: false,
+            hull_fraction,
+        };
+        let scored = crate::ai::score_doctrine_pool(
+            &behaviour.0.doctrine,
+            &conditions,
+        );
+        let viewscreen_bb = crate::messages::ViewscreenBlackboard {
+            red_alert: false,
+            hull_integrity_pct: hull_fraction * 100.0,
+            last_damage_taken_secs: None,
+            last_weapon_fired_secs: None,
+            scored_objectives: scored,
+        };
+        blackboards.0.insert(
+            crate::messages::SystemId(
+                crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID.to_string(),
+            ),
+            crate::messages::SystemBlackboard::Viewscreen(viewscreen_bb),
+        );
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct AiPlugin;
@@ -239,6 +339,18 @@ impl Plugin for AiPlugin {
         app.init_resource::<ScenariosBeingUnloaded>();
         app.add_message::<AiEntityAttacked>();
         app.add_message::<AiEntityDestroyed>();
+        app.init_resource::<WorldSnapshot>();
+        app.add_systems(
+            Update,
+            build_world_snapshot
+                .in_set(crate::sim_sets::SimSet::Physics)
+                .before(crate::sim_sets::AiTickLabel),
+        );
+        app.add_systems(
+            Update,
+            aggregate_npc_doctrine_blackboards
+                .in_set(crate::sim_sets::SimSet::PublishAggregate),
+        );
         app.add_systems(
             Update,
             (

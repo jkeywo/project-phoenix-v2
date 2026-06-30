@@ -969,14 +969,8 @@ pub fn broadcast_blackboard_updates(
     mut outbox: ResMut<SimOutbox>,
 ) {
     let Ok(bb) = ship_query.single() else {
-        eprintln!("[DEBUG] broadcast_blackboard_updates: no LocalShip entity found (total ships: {})", ship_query.iter().len());
         return;
     };
-    for (id, bb_val) in &bb.0 {
-        let prev = last.0.get(id);
-        let changed = prev != Some(bb_val);
-        eprintln!("[DEBUG] broadcast_bb: sys={}, changed={}, prev={:?}, cur={:?}", id.0, changed, prev.is_some(), bb_val);
-    }
     let updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = bb
         .0
         .iter()
@@ -985,15 +979,12 @@ pub fn broadcast_blackboard_updates(
         .collect();
 
     if !updates.is_empty() {
-        eprintln!("[DEBUG] broadcast_bb: EMITTING {} updates", updates.len());
         for (id, bb) in &updates {
             last.0.insert(id.clone(), bb.clone());
         }
         outbox
             .0
             .push((Target::All, ServerMessage::BlackboardUpdate { updates }));
-    } else {
-        eprintln!("[DEBUG] broadcast_bb: no changes, skipping");
     }
 }
 

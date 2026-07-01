@@ -1,7 +1,5 @@
-/// Bevy plugin: AI controller lifecycle — attaches `AiControllerComponent`
-/// to entities that declare a `[behaviour]` block, mints synthetic
-/// `ai:<entity_uuid>` session tokens, and ticks controllers during
-/// `InProgress` phase.
+/// Bevy plugin: NPC AI lifecycle — registers synthetic `ai:<uuid>` tokens,
+/// drives per-entity helm/weapons/doctrine AI, and manages NPC hull tracking.
 ///
 /// Compiled only for the `server` feature (same gate as `simulation.rs`).
 use bevy::prelude::*;
@@ -20,12 +18,8 @@ pub fn anchors_from_world_config(
     world.anchors().clone()
 }
 
-use crate::ai::{
-    operate_helm, operate_weapons, score_doctrine_pool, AiMemory, AiWorldEntity, WorldView,
-};
-use crate::entity_spawner::{BehaviourSection, ColliderSection, EntityUuid};
-
-use crate::config_cache::FactionRegistryResource;
+use crate::ai::AiMemory;
+use crate::entity_spawner::{BehaviourSection, EntityUuid};
 
 // ── AiTokenRegistry ───────────────────────────────────────────────────────────
 
@@ -121,30 +115,15 @@ impl AiTokenRegistry {
 // ── AiControllerComponent ─────────────────────────────────────────────────────
 
 /// Per-entity AI memory component. Carries helm steering state (waypoint cursor,
-/// target, last attacker) across ticks for both the player ship and NPC ships.
-///
-/// The player ship gets this component inserted at spawn. NPC ships get it when
-/// `attach_controllers_on_spawn` runs (alongside `AiControllerComponent`).
-/// `operate_helm_ai` reads/writes this component exclusively; `AiControllerComponent`
-/// continues to carry a redundant copy in `memory` for backward compat with
-/// `tick_ai_controllers` until that function is retired in issue #595.
+/// target, last attacker) across ticks for all ship entities.
 #[derive(Component, Default, Clone, Debug)]
 pub struct ShipAiMemory(pub AiMemory);
 
-/// Marker component wrapping per-entity `AiMemory` (private reasoning state).
-/// Also carries the entity UUID so the despawn handler can unregister
-/// the synthetic token without querying a potentially-absent UUID component.
-#[derive(Component)]
-pub struct AiControllerComponent {
-    pub memory: AiMemory,
-    pub entity_uuid: String,
-    /// Current forward speed in world-units/sec, carried across ticks so the
-    /// ship can accelerate over multiple frames (like the player helm does).
-    pub forward_speed: f32,
-    /// Last helm intent from the AI tick: (thrust, steering). Reset each tick;
-    /// read by `operate_helm_ai` to drive ships when helm is on Backfill.
-    pub last_helm_intent: Option<(f32, f32)>,
-}
+/// Empty marker component placed on NPC entities that carry a `BehaviourSection`.
+/// Used as a query filter in systems that target NPC ships specifically
+/// (e.g. phaser beam handling). Inserted by `register_npc_tokens_on_spawn`.
+#[derive(Component, Default)]
+pub struct AiControllerComponent;
 
 /// Per-NPC phaser state. Mirrors the player-ship `PhaserCooldown` / `ActiveBeam`
 /// but lives as an ECS component so each NPC tracks its own cooldown independently.
@@ -267,13 +246,12 @@ fn build_world_snapshot(
         Option<&crate::entity_spawner::FactionComponent>,
         Option<&crate::entity_spawner::EntityConsoleHull>,
         Option<&crate::entity_spawner::ColliderSection>,
-        Option<&AiControllerComponent>,
         Option<&crate::ship_state::ShipPhysics>,
     )>,
 ) {
     snapshot.entities = query
         .iter()
-        .map(|(uuid, transform, name, faction, hull, collider, ai, physics)| {
+        .map(|(uuid, transform, name, faction, hull, collider, physics)| {
             let hull_fraction = hull
                 .map(|h| {
                     let max = h.0.total_max();
@@ -285,11 +263,9 @@ fn build_world_snapshot(
                 });
             let radius = collider.map(|c| c.0.radius).unwrap_or(0.0);
             // Prefer ShipPhysics.forward_speed (authoritative for all ships after #587);
-            // fall back to AiControllerComponent.forward_speed for entities that haven't
-            // been migrated yet.
+            // Use ShipPhysics.forward_speed (authoritative after #581).
             let forward_speed = physics
                 .map(|p| p.forward_speed)
-                .or_else(|| ai.map(|a| a.forward_speed))
                 .unwrap_or(0.0);
             crate::ai::AiWorldEntity {
                 uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
@@ -380,8 +356,8 @@ impl Plugin for AiPlugin {
         app.add_systems(
             Update,
             (
-                attach_controllers_on_spawn,
-                tick_ai_controllers
+                register_npc_tokens_on_spawn,
+                process_attacker_this_tick
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .in_set(crate::sim_sets::AiTickLabel),
                 detect_npc_hull_zero,
@@ -391,289 +367,67 @@ impl Plugin for AiPlugin {
     }
 }
 
-// ── Systems ───────────────────────────────────────────────────────────────────
+// -- Systems -------------------------------------------------------------------------------
 
-/// Attach an `AiControllerComponent` (and register a synthetic token) when a
-/// newly-spawned entity carries a `BehaviourSection` but no controller yet.
-fn attach_controllers_on_spawn(
+/// Register a synthetic `ai:<uuid>` token for any entity with `BehaviourSection`
+/// that has not yet been registered, and attach the `AiControllerComponent` empty
+/// marker so legacy `With<AiControllerComponent>` query filters still work.
+fn register_npc_tokens_on_spawn(
     mut commands: Commands,
     mut registry: ResMut<AiTokenRegistry>,
     query: Query<
-        (
-            Entity,
-            &EntityUuid,
-            &Transform,
-            &BehaviourSection,
-            Option<&crate::entity_spawner::WeaponsConsoleSection>,
-            Option<&EntityPhaserState>,
-        ),
-        Without<AiControllerComponent>,
+        (Entity, &EntityUuid, &Transform, Option<&ShipAiMemory>),
+        (With<BehaviourSection>, Without<AiControllerComponent>),
     >,
 ) {
-    for (entity, uuid, transform, _behaviour, weapons_section, existing_phaser) in &query {
-        let pos = transform.translation;
-        let memory = AiMemory {
-            home_position: [pos.x, pos.y, pos.z],
-            ..Default::default()
-        };
+    for (entity, uuid, transform, existing_mem) in &query {
+        let home = [transform.translation.x, transform.translation.y, transform.translation.z];
         registry.register_with_entity(&uuid.0, entity);
-        let mut entity_cmd = commands.entity(entity);
-        entity_cmd.insert(AiControllerComponent {
-            memory,
-            entity_uuid: uuid.0.clone(),
-            forward_speed: 0.0,
-            last_helm_intent: None,
-        });
-        // Pre-attach phaser state so the first attack tick can fire immediately,
-        // but only when one isn't already present (tests may set an explicit cooldown).
-        if weapons_section.is_some() && existing_phaser.is_none() {
-            entity_cmd.insert(EntityPhaserState::default());
+        let mut cmd = commands.entity(entity);
+        cmd.insert(AiControllerComponent);
+        // Seed ShipAiMemory with home_position if not already present (entities
+        // spawned via spawn_entity get it from the spawner; bare test entities don't).
+        if existing_mem.is_none() {
+            cmd.insert(ShipAiMemory(AiMemory {
+                home_position: home,
+                ..Default::default()
+            }));
         }
     }
 }
 
-/// Tick AI controllers — one tick per entity per frame.
+/// Update per-entity `ShipAiMemory.last_attacker` and emit `AiEntityAttacked`
+/// whenever an `AttackerThisTick` component arrives on an NPC entity.
+/// Replaces the attacker-tracking phase of the retired `tick_ai_controllers`.
 ///
-/// Phase 1: score doctrine pool from `BehaviourSection.doctrine` + per-entity
-///   `WorldConditions` (hull fraction + recent attacker).
-/// Phase 2: `operate_helm` → `(thrust, steering)` → `last_helm_intent`
-/// Phase 3: `operate_weapons` → `(target, fire?)` → InboundMessages
-fn tick_ai_controllers(
+/// Only processes entities that already have `ShipAiMemory` (i.e., that have been
+/// through at least one `register_npc_tokens_on_spawn` tick). On the very first
+/// frame of an entity's life the component arrives via deferred commands and will
+/// be processed on the following frame.
+fn process_attacker_this_tick(
     mut commands: Commands,
     mut query: Query<(
         Entity,
-        &mut AiControllerComponent,
-        &Transform,
-        &BehaviourSection,
-        Option<&AttackerThisTick>,
-        Option<&crate::entities::spawner::FactionComponent>,
-        Option<&ScenarioUnloadedMarker>,
-        Option<&crate::entities::spawner::EntityConsoleHull>,
-        Option<&crate::entities::spawner::WeaponsConsoleSection>,
-        Option<&EntityPhaserState>,
-        Option<&crate::entities::spawner::HelmConsoleSection>,
-        Option<&ColliderSection>,
+        &EntityUuid,
+        &AttackerThisTick,
+        &mut ShipAiMemory,
     )>,
-    time: Res<Time>,
-    world_config: Option<Res<crate::world::config::WorldConfig>>,
-    faction_registry: Res<FactionRegistryResource>,
-    entity_query: Query<
-        (
-            &EntityUuid,
-            &Transform,
-            Option<&crate::entities::spawner::EntityName>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::entities::spawner::EntityConsoleHull>,
-            Option<&ColliderSection>,
-        ),
-        Without<AiControllerComponent>,
-    >,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
-    mut inbound: MessageWriter<crate::lobby::InboundMessage>,
-    registry_res: Res<AiTokenRegistry>,
 ) {
-    // Build anchor map once (shared across all controllers this tick).
-    let anchors: HashMap<String, [f32; 3]> = if let Some(ref wc) = world_config {
-        anchors_from_world_config(wc.as_ref())
-    } else {
-        HashMap::new()
-    };
-
-    // Collect world entities from all non-AI entities.
-    let mut world_entities: Vec<AiWorldEntity> = entity_query
-        .iter()
-        .map(
-            |(uid, t, name, faction_comp, hull_comp, collider)| AiWorldEntity {
-                uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
-                name: name.map(|n| n.0.clone()),
-                position: [t.translation.x, t.translation.y, t.translation.z],
-                faction: faction_comp.map(|f| f.0),
-                shields: None,
-                hull_fraction: hull_comp.and_then(|h| {
-                    let max = h.0.total_max();
-                    if max > 0.0 {
-                        Some(h.0.total_current() / max)
-                    } else {
-                        None
-                    }
-                }),
-                yaw: None,
-                radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
-                forward_speed: 0.0,
-            },
-        )
-        .collect();
-
-    // Also snapshot all AI-controlled entities so ships can avoid each other.
-    // This immutable pass MUST come before the mutable loop below.
-    let ai_snapshots: Vec<AiWorldEntity> = query
-        .iter()
-        .map(|(_, ctrl, t, _, _, _, _, _, _, _, _, collider)| {
-            let yaw = t.rotation.to_euler(EulerRot::YXZ).0;
-            AiWorldEntity {
-                uuid: uuid::Uuid::parse_str(&ctrl.entity_uuid).unwrap_or_default(),
-                name: None,
-                position: [t.translation.x, t.translation.y, t.translation.z],
-                faction: None,
-                shields: None,
-                hull_fraction: None,
-                yaw: Some(yaw),
-                radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
-                forward_speed: ctrl.forward_speed,
-            }
-        })
-        .collect();
-    world_entities.extend(ai_snapshots);
-
-    let sim_time = time.elapsed_secs_f64();
-
-    for (
-        entity,
-        mut ctrl,
-        transform,
-        behaviour,
-        attacker_comp,
-        self_faction_comp,
-        unloaded_marker,
-        hull_comp,
-        weapons_section,
-        phaser_state,
-        _helm_section,
-        collider_section,
-    ) in &mut query
-    {
-        let pos = transform.translation;
-        let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
-
-        // Read attacker from component (set externally by simulation / tests).
-        let attacker_this_tick = attacker_comp.map(|a| a.0);
-        if attacker_this_tick.is_some() {
-            commands.entity(entity).remove::<AttackerThisTick>();
+    for (entity, uuid, attacker, mut ai_mem) in query.iter_mut() {
+        let attacker_uuid = attacker.0;
+        let is_new = ai_mem.0.last_attacker != Some(attacker_uuid);
+        if is_new {
+            attacked_events.write(AiEntityAttacked {
+                entity_uuid: uuid.0.clone(),
+                attacker_uuid,
+            });
+            ai_mem.0.last_attacker = Some(attacker_uuid);
         }
-
-        // Remove ScenarioUnloadedMarker after reading it (fires only once).
-        let scenario_unloaded = unloaded_marker.is_some();
-        if scenario_unloaded {
-            commands.entity(entity).remove::<ScenarioUnloadedMarker>();
-        }
-
-        // Populate hull fraction from EntityConsoleHull if present.
-        let self_hull_fraction = hull_comp.and_then(|h| {
-            let max = h.0.total_max();
-            if max > 0.0 {
-                Some(h.0.total_current() / max)
-            } else {
-                None
-            }
-        });
-
-        // Populate weapons range and phaser readiness from WeaponsConsoleSection and EntityPhaserState.
-        let (entity_phaser_ready, entity_weapons_range) = match weapons_section {
-            Some(wc) => {
-                let ready = phaser_state.map(|ps| ps.is_ready()).unwrap_or(false);
-                let range = wc.0.phaser_banks.first().and_then(|b| {
-                    if b.beam_range > 0.0 {
-                        Some(b.beam_range)
-                    } else {
-                        None
-                    }
-                });
-                (ready, range)
-            }
-            None => (false, None),
-        };
-
-        let self_uuid_str = ctrl.entity_uuid.clone();
-        let world_view = WorldView {
-            sim_time,
-            entity_pos: [pos.x, pos.y, pos.z],
-            entity_yaw: yaw,
-            anchors: anchors.clone(),
-            entities: world_entities
-                .iter()
-                .filter(|e| e.uuid.to_string() != self_uuid_str)
-                .cloned()
-                .collect(),
-            attacker_this_tick,
-            self_faction: self_faction_comp.map(|f| f.0),
-            entity_phaser_ready,
-            entity_weapons_range,
-            torpedo_tube_ready: None,
-            self_hull_fraction,
-            scenario_unloaded,
-            self_radius: collider_section.map(|c| c.0.radius).unwrap_or(0.0),
-        };
-
-        let registry = &faction_registry.0;
-
-        // ── Phase 1: score doctrine pool ──────────────────────────────────
-
-        let conditions = crate::objectives::WorldConditions {
-            red_alert: attacker_this_tick.is_some() || ctrl.memory.last_attacker.is_some(),
-            hull_fraction: self_hull_fraction.unwrap_or(1.0),
-        };
-        let scored_pool = score_doctrine_pool(&behaviour.0.doctrine, &conditions);
-
-        // Read values from ctrl before any mutable borrows.
-        let forward_speed = ctrl.forward_speed;
-        let entity_uuid = ctrl.entity_uuid.clone();
-
-        // ── Phase 2: operate_helm ─────────────────────────────────────────
-
-        let (thrust, steering) = operate_helm(
-            &mut ctrl.memory,
-            &world_view,
-            &scored_pool,
-            &behaviour.0.doctrine,
-            &anchors,
-            behaviour.0.waypoint_arrival_radius,
-            behaviour.0.avoidance_buffer,
-            behaviour.0.avoidance_look_ahead_secs,
-            forward_speed,
-            registry,
-        );
-        ctrl.last_helm_intent = if thrust != 0.0 || steering != 0.0 {
-            Some((thrust, steering))
-        } else {
-            None
-        };
-
-        // ── Phase 3: operate_weapons ──────────────────────────────────────
-
-        let (_target_opt, should_fire) =
-            operate_weapons(&ctrl.memory, &world_view, &scored_pool, registry);
-
-        // ── Update memory: track last attacker ────────────────────────────
-
-        if let Some(attacker_uuid) = attacker_this_tick {
-            let is_new = ctrl.memory.last_attacker != Some(attacker_uuid);
-            if is_new {
-                attacked_events.write(AiEntityAttacked {
-                    entity_uuid: entity_uuid.clone(),
-                    attacker_uuid,
-                });
-            }
-            ctrl.memory.last_attacker = Some(attacker_uuid);
-        }
-
-        // ── Emit weapon InboundMessages ───────────────────────────────────
-
-        // NPC fire: target is already stored in ctrl.memory by operate_weapons and
-        // read directly by the NPC phaser handler — no SetTarget message needed.
-        if should_fire {
-            if let Some(token) = registry_res.token_for_entity(&entity_uuid) {
-                let bank_id = weapons_section
-                    .and_then(|wc| wc.0.phaser_banks.first())
-                    .map(|b| b.id.clone())
-                    .unwrap_or_else(|| "fore".to_string());
-                inbound.write(crate::lobby::InboundMessage {
-                    token: token.to_string(),
-                    msg: crate::messages::ClientMessage::FirePhaser { bank: bank_id },
-                });
-            }
-        }
+        commands.entity(entity).remove::<AttackerThisTick>();
     }
 }
+
 
 /// Emit `AiEntityDestroyed` and despawn any NPC entity whose `NpcHullFraction`
 /// has dropped to ≤ 0.0.
@@ -817,6 +571,7 @@ mod tests {
     use crate::entity_spawner::EntityUuid;
     use crate::lobby::LobbyPlugin;
     use crate::messages::GamePhase;
+    use crate::config_cache::FactionRegistryResource;
 
     #[derive(Resource, Default)]
     struct AttackedBox(Vec<AiEntityAttacked>);
@@ -891,8 +646,9 @@ mod tests {
             ))
             .id();
         app.update();
-        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        let home = ctrl.memory.home_position;
+        // After register_npc_tokens_on_spawn, ShipAiMemory is inserted with home_position.
+        let mem = app.world().get::<ShipAiMemory>(entity).unwrap();
+        let home = mem.0.home_position;
         assert!((home[0] - 10.0).abs() < 0.001, "home x must be spawn x");
         assert!((home[2] - -5.0).abs() < 0.001, "home z must be spawn z");
     }

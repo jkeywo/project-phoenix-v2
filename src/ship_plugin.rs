@@ -369,7 +369,6 @@ fn operate_helm_ai(
         Option<&crate::entities::spawner::FactionComponent>,
         Option<&crate::entities::spawner::ColliderSection>,
         Option<&crate::entities::spawner::HelmConsoleSection>,
-        Option<&mut crate::ai::server::AiControllerComponent>,
         Has<crate::server_app::LocalShip>,
     )>,
 ) {
@@ -427,7 +426,6 @@ fn operate_helm_ai(
         faction,
         collider,
         helm_section,
-        mut ai_ctrl,
         is_local,
     ) in ships.iter_mut()
     {
@@ -453,9 +451,6 @@ fn operate_helm_ai(
             // No objectives → zero out intent (decelerate to stop).
             if is_local {
                 *last_input = LastHelmInput::default();
-            }
-            if let Some(ref mut ctrl) = ai_ctrl {
-                ctrl.last_helm_intent = Some((0.0, 0.0));
             }
             continue;
         }
@@ -523,13 +518,6 @@ fn operate_helm_ai(
         // sees the AI-driven intent (though it will re-apply physics anyway).
         if is_local {
             *last_input = LastHelmInput { thrust, steering };
-        }
-
-        // For NPC ships: keep AiControllerComponent.last_helm_intent in sync
-        // for backward compatibility until tick_ai_controllers is retired (#595).
-        if let Some(ref mut ctrl) = ai_ctrl {
-            ctrl.last_helm_intent = Some((thrust, steering));
-            ctrl.forward_speed = result.forward_speed;
         }
     }
 }

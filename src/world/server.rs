@@ -1054,9 +1054,9 @@ fn handle_respond_to_message(
     mut commands: Commands,
     mut ai_query: Query<(
         &EntityUuid,
-        &mut AiControllerComponent,
+        Option<&mut crate::ai_plugin::ShipAiMemory>,
         Option<&crate::entities::spawner::FactionComponent>,
-    )>,
+    ), With<AiControllerComponent>>,
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
@@ -2006,9 +2006,9 @@ fn handle_ai_events(
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
     mut ai_query: Query<(
         &EntityUuid,
-        &mut AiControllerComponent,
+        Option<&mut crate::ai_plugin::ShipAiMemory>,
         Option<&crate::entities::spawner::FactionComponent>,
-    )>,
+    ), With<AiControllerComponent>>,
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
@@ -2825,20 +2825,21 @@ pub struct FactionDispatchParams<'w, 's> {
 fn revalidate_ai_targets_after_faction_change(
     ai_query: &mut Query<(
         &EntityUuid,
-        &mut AiControllerComponent,
+        Option<&mut crate::ai_plugin::ShipAiMemory>,
         Option<&crate::entities::spawner::FactionComponent>,
-    )>,
+    ), With<AiControllerComponent>>,
     registry: &crate::faction::FactionRegistry,
     uuid_to_faction: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
 ) {
-    for (_uid, mut ctrl, self_faction_comp) in ai_query.iter_mut() {
-        let Some(target_uuid) = ctrl.memory.target else {
+    for (_uid, ai_mem_opt, self_faction_comp) in ai_query.iter_mut() {
+        let Some(mut ai_mem) = ai_mem_opt else { continue; };
+        let Some(target_uuid) = ai_mem.0.target else {
             continue;
         };
         let self_faction = self_faction_comp.map(|fc| fc.0);
         let target_faction = uuid_to_faction.get(&target_uuid).copied();
         if !crate::faction::is_enemy(self_faction, target_faction, registry) {
-            ctrl.memory.target = None;
+            ai_mem.0.target = None;
         }
     }
 }
@@ -5296,16 +5297,16 @@ mod tests {
             ))
             .id();
 
-        // First update: attach the AiControllerComponent.
+        // First update: attach the AiControllerComponent marker + ShipAiMemory.
         app.update();
 
-        // Manually seed the engagement: NPC's memory.target = player.
+        // Manually seed the engagement: NPC's ShipAiMemory.target = player.
         {
-            let mut ctrl = app
+            let mut mem = app
                 .world_mut()
-                .get_mut::<AiControllerComponent>(npc_entity)
-                .expect("controller must be attached");
-            ctrl.memory.target = Some(player_uuid);
+                .get_mut::<crate::ai_plugin::ShipAiMemory>(npc_entity)
+                .expect("ShipAiMemory must be attached");
+            mem.0.target = Some(player_uuid);
         }
 
         // Bring both sides into mutual hostility, then fire
@@ -5358,14 +5359,14 @@ mod tests {
 
         app.update();
 
-        // The NPC's memory.target must be cleared because Harrow
+        // The NPC's ShipAiMemory.target must be cleared because Harrow
         // no longer considers Federation hostile.
-        let ctrl = app
+        let mem = app
             .world()
-            .get::<AiControllerComponent>(npc_entity)
+            .get::<crate::ai_plugin::ShipAiMemory>(npc_entity)
             .unwrap();
         assert_eq!(
-            ctrl.memory.target, None,
+            mem.0.target, None,
             "remove_faction_enemy must clear memory.target when target is no longer hostile"
         );
     }

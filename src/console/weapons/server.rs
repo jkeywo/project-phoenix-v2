@@ -629,7 +629,7 @@ fn handle_npc_beam_fire(
             &crate::entity_spawner::EntityUuid,
             &ShipPhysics,
             Option<&crate::entity_spawner::WeaponsConsoleSection>,
-            Option<&AiControllerComponent>,
+            Option<&crate::ai_plugin::ShipAiMemory>,
         ),
         With<AiControllerComponent>,
     >,
@@ -658,7 +658,7 @@ fn handle_npc_beam_fire(
         return;
     }
 
-    for (npc_uuid, npc_physics, weapons_section, ctrl_opt) in npc_query.iter() {
+    for (npc_uuid, npc_physics, weapons_section, ai_mem_opt) in npc_query.iter() {
         let token = match registry.token_for_entity(&npc_uuid.0) {
             Some(t) => t.to_string(),
             None => continue,
@@ -667,8 +667,8 @@ fn handle_npc_beam_fire(
             continue;
         }
 
-        // Look up target from AiControllerComponent.memory.target.
-        let target_uuid: Option<uuid::Uuid> = ctrl_opt.and_then(|c| c.memory.target);
+        // Read target from ShipAiMemory (set by operate_helm_ai via AiMemory.target).
+        let target_uuid: Option<uuid::Uuid> = ai_mem_opt.and_then(|m| m.0.target);
         let Some(t_uuid) = target_uuid else {
             continue;
         };
@@ -4435,12 +4435,8 @@ station = "tactical"
             .world_mut()
             .spawn((
                 EntityUuid(npc_uuid.to_string()),
-                AiControllerComponent {
-                    memory,
-                    entity_uuid: npc_uuid.to_string(),
-                    forward_speed: 0.0,
-                    last_helm_intent: None,
-                },
+                AiControllerComponent,
+                crate::ai_plugin::ShipAiMemory(memory),
                 ActiveBeam::default(),
                 PhaserCooldown::default(),
                 ShipPhysics::default(),
@@ -4618,12 +4614,8 @@ station = "tactical"
                 .world_mut()
                 .spawn((
                     EntityUuid(npc_uuid.to_string()),
-                    crate::ai_plugin::AiControllerComponent {
-                        memory,
-                        entity_uuid: npc_uuid.to_string(),
-                        forward_speed: 0.0,
-                        last_helm_intent: None,
-                    },
+                    crate::ai_plugin::AiControllerComponent,
+                    crate::ai_plugin::ShipAiMemory(memory),
                     ActiveBeam::default(),
                     PhaserCooldown::default(),
                     ShipPhysics::default(),
@@ -4830,8 +4822,8 @@ station = "tactical"
             ))
             .id();
 
-        // Tick 1: `attach_controllers_on_spawn` runs → AiControllerComponent attached
-        //         and token registered in AiTokenRegistry (plus Bevy entity stored).
+        // Tick 1: `register_npc_tokens_on_spawn` runs → AiControllerComponent marker +
+        //         ShipAiMemory attached and token registered in AiTokenRegistry.
         app.update();
 
         // Register the Bevy entity in AiTokenRegistry (needed by handle_npc_beam_fire).
@@ -4840,18 +4832,22 @@ station = "tactical"
             reg.register_with_entity(npc_uuid_str, npc_entity);
         }
 
-        // Set memory.target so `operate_weapons` selects it (target is in WorldView).
+        // Set ShipAiMemory.target so handle_npc_beam_fire can look up the target.
         {
-            let mut ctrl = app
+            let mut mem = app
                 .world_mut()
-                .get_mut::<AiControllerComponent>(npc_entity)
+                .get_mut::<crate::ai_plugin::ShipAiMemory>(npc_entity)
                 .unwrap();
-            ctrl.memory.target = Some(target_uuid_parsed);
+            mem.0.target = Some(target_uuid_parsed);
         }
 
-        // Tick 2: `tick_ai_controllers` emits FirePhaser InboundMessage.
-        // Tick 3: `handle_npc_beam_fire` reads the message and activates ActiveBeam.
-        app.update();
+        // Push a synthetic FirePhaser message for the NPC's ai: token.
+        // In production this would be emitted by operate_tactical_ai/tick_phaser_auto_fire,
+        // but for this integration test we inject it directly.
+        let ai_token = format!("ai:{}", npc_uuid_str);
+        push(&mut app, &ai_token, ClientMessage::FirePhaser { bank: "fore".into() });
+
+        // Tick: handle_npc_beam_fire processes the message and activates ActiveBeam.
         app.update();
 
         let beam = app
@@ -4896,12 +4892,8 @@ station = "tactical"
             .world_mut()
             .spawn((
                 EntityUuid(npc_uuid.to_string()),
-                crate::ai_plugin::AiControllerComponent {
-                    memory: Default::default(),
-                    entity_uuid: npc_uuid.to_string(),
-                    forward_speed: 0.0,
-                    last_helm_intent: None,
-                },
+                crate::ai_plugin::AiControllerComponent,
+                crate::ai_plugin::ShipAiMemory::default(),
                 ActiveBeam {
                     target_uuid: Some(target_uuid.to_string()),
                     remaining_secs: 10.0,

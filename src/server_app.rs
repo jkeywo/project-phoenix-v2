@@ -1742,6 +1742,9 @@ fn spawn_game_start_entities(
                     ..Default::default()
                 })
                 .insert(crate::ai_plugin::ShipAiMemory::default())
+                .insert(crate::weapons_plugin::WeaponsTarget::default())
+                .insert(crate::weapons_plugin::ActiveBeam::default())
+                .insert(crate::weapons_plugin::PhaserCooldown::default())
                 .remove::<crate::entity_spawner::EntityConsoleHull>();
             ship_spawned = true;
 

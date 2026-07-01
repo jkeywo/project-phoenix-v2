@@ -107,6 +107,11 @@ impl AiTokenRegistry {
         self.by_entity.get(entity_uuid).map(|s| s.as_str())
     }
 
+    /// Look up the Bevy `Entity` for an entity UUID string.
+    pub fn bevy_entity_for_uuid(&self, entity_uuid: &str) -> Option<Entity> {
+        self.uuid_to_bevy.get(entity_uuid).copied()
+    }
+
     /// Returns `true` when the registry contains a record for this entity UUID.
     pub fn contains_entity(&self, entity_uuid: &str) -> bool {
         self.by_entity.contains_key(entity_uuid)

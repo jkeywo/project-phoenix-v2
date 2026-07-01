@@ -303,6 +303,9 @@ pub fn spawn_entity(
             crate::ship_plugin::CoordinationQueue::default(),
             ship_physics,
             crate::ai_plugin::ShipAiMemory::default(),
+            crate::weapons_plugin::WeaponsTarget::default(),
+            crate::weapons_plugin::ActiveBeam::default(),
+            crate::weapons_plugin::PhaserCooldown::default(),
         ));
     }
 

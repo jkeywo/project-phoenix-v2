@@ -159,7 +159,7 @@ fn refresh_anchored_waypoint(
 fn publish_navigation_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     waypoint: Res<NavigationWaypoint>,
-    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     let cfg = &ship_config.0;
     let bb = NavigationBlackboard {
@@ -169,10 +169,12 @@ fn publish_navigation_blackboard(
         navigation_waypoint: waypoint.snapshot(),
     };
 
-    blackboards.0.insert(
-        SystemId(NAVIGATION_SYSTEM_ID.to_string()),
-        SystemBlackboard::Navigation(bb),
-    );
+    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+        bbs.0.insert(
+            SystemId(NAVIGATION_SYSTEM_ID.to_string()),
+            SystemBlackboard::Navigation(bb),
+        );
+    }
 }
 
 // ── AI controller stub ─────────────────────────────────────────────────────────
@@ -242,7 +244,6 @@ mod tests {
                 )
                     .chain(),
             )
-            .init_resource::<crate::server_app::SystemBlackboards>()
             .init_resource::<crate::server_app::LastBroadcastBlackboards>()
             .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(NavigationPlugin)
@@ -251,11 +252,7 @@ mod tests {
             .init_resource::<crate::simulation::SimOutbox>()
             .add_systems(
                 Update,
-                (
-                    crate::server_app::dual_publish_blackboards,
-                    crate::server_app::broadcast_blackboard_updates,
-                )
-                    .chain()
+                crate::server_app::broadcast_blackboard_updates
                     .in_set(crate::sim_sets::SimSet::PublishAggregate),
             )
             .init_resource::<Outbox>()

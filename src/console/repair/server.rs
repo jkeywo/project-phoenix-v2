@@ -150,7 +150,10 @@ pub fn tick_repair_teams(
 fn publish_repair_blackboard(
     teams: Res<ShipRepairTeams>,
     hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
-    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+    mut blackboards_q: Query<
+        &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
@@ -179,10 +182,12 @@ fn publish_repair_blackboard(
         damageable_consoles,
     };
 
-    blackboards.0.insert(
-        SystemId(REPAIR_SYSTEM_ID.to_string()),
-        SystemBlackboard::Repair(bb),
-    );
+    if let Ok(mut blackboards) = blackboards_q.single_mut() {
+        blackboards.0.insert(
+            SystemId(REPAIR_SYSTEM_ID.to_string()),
+            SystemBlackboard::Repair(bb),
+        );
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -212,7 +217,6 @@ mod tests {
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::server_app::ShipHullIntegrity;
     use crate::messages::*;
-    use crate::server_app::SystemBlackboards;
     use crate::shield::ShieldSystem;
     use crate::ship_plugin::ShipSystemControlSources;
     use crate::simulation::SimOutbox;
@@ -261,7 +265,6 @@ mod tests {
         .init_resource::<crate::lobby::WorldResource>()
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
-        .init_resource::<SystemBlackboards>()
         .add_plugins(RepairPlugin)
         .add_plugins(repair_state_broadcaster())
         .add_systems(PostUpdate, collect);
@@ -282,12 +285,16 @@ mod tests {
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(hull_config)),
+            crate::server_app::ShipSystemBlackboards::default(),
         ));
         app
     }
 
-    fn repair_bb(app: &App) -> RepairBlackboard {
-        let bbs = app.world().resource::<SystemBlackboards>();
+    fn repair_bb(app: &mut App) -> RepairBlackboard {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
+        let bbs = q.single(app.world()).expect("LocalShip must have ShipSystemBlackboards");
         let key = SystemId(REPAIR_SYSTEM_ID.to_string());
         let SystemBlackboard::Repair(bb) = bbs.0.get(&key).unwrap() else {
             panic!("expected Repair blackboard");
@@ -665,7 +672,7 @@ mod tests {
         start_game(&mut app);
         tick(&mut app);
 
-        let bb = repair_bb(&app);
+        let bb = repair_bb(&mut app);
         assert!(!bb.teams.is_empty(), "expected at least one team slot");
         assert!(!bb.console_hull.is_empty(), "expected console_hull entries");
         assert!(
@@ -686,7 +693,7 @@ mod tests {
             .dispatch(0, Console::Helm);
         tick(&mut app);
 
-        let bb = repair_bb(&app);
+        let bb = repair_bb(&mut app);
         assert!(
             bb.teams
                 .iter()
@@ -701,7 +708,7 @@ mod tests {
         start_game(&mut app);
         tick(&mut app);
 
-        let bb = repair_bb(&app);
+        let bb = repair_bb(&mut app);
         assert!(
             !bb.damageable_consoles.is_empty(),
             "expected damageable_consoles"

@@ -157,7 +157,7 @@ pub fn tick_sensors_frequency_hint(
 pub fn publish_sensors_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     sensors_target: Res<SensorsTarget>,
-    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     let cfg = &ship_config.0;
     let bb = SensorsBlackboard {
@@ -167,10 +167,12 @@ pub fn publish_sensors_blackboard(
         science_target_uuid: sensors_target.0.clone(),
     };
 
-    blackboards.0.insert(
-        SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string()),
-        SystemBlackboard::Sensors(bb),
-    );
+    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+        bbs.0.insert(
+            SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string()),
+            SystemBlackboard::Sensors(bb),
+        );
+    }
 }
 
 /// Per-entity AI loop for the Sensors system. Loops over all ship entities
@@ -231,13 +233,13 @@ mod tests {
             .init_resource::<SimOutbox>()
             .init_resource::<WeaponsTarget>()
             .init_resource::<Outbox>()
-            .init_resource::<crate::server_app::SystemBlackboards>()
             .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(ShipSensorsPlugin)
             .add_systems(PostUpdate, collect);
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,
+            crate::server_app::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::messages::AdmittedCommands::default(),

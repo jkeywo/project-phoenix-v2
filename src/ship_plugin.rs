@@ -535,24 +535,20 @@ fn operate_helm_ai(
 /// Runs in `Broadcast` (after `PublishAggregate` so `scored_objectives` is
 /// fresh) and only when the helm system is AI-controlled.
 fn detect_player_ship_objective_completion(
-    blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
     player_ships: Query<
-        (&ShipSystemControlSources, &ShipPhysics),
+        (&ShipSystemControlSources, &ShipPhysics, &crate::server_app::ShipSystemBlackboards),
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    let Ok((sources, physics)) = player_ships.single() else {
+    let Ok((sources, physics, blackboards)) = player_ships.single() else {
         return;
     };
     if !helm_control_policy(sources).operate_ai {
         return;
     }
 
-    let Some(blackboards) = blackboards else {
-        return;
-    };
     let Some(mut objectives) = objectives else {
         return;
     };
@@ -2241,21 +2237,6 @@ station = "helm"
         }
     }
 
-    fn viewscreen_with_objectives(
-        objectives: Vec<crate::messages::ScoredObjective>,
-    ) -> crate::server_app::SystemBlackboards {
-        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
-        use crate::server_app::SystemBlackboards;
-        let mut bbs = SystemBlackboards::default();
-        let mut vb = ViewscreenBlackboard::default();
-        vb.scored_objectives = objectives;
-        bbs.0.insert(
-            crate::system_registry::viewscreen_system_id(),
-            SystemBlackboard::Viewscreen(vb),
-        );
-        bbs
-    }
-
     fn set_ship_blackboard_objectives(
         app: &mut App,
         objectives: Vec<crate::messages::ScoredObjective>,
@@ -2274,10 +2255,6 @@ station = "helm"
             .single_mut(app.world_mut())
             .expect("expected Ship with ShipSystemBlackboards");
         bbs.0.insert(entry.0, entry.1);
-    }
-
-    fn viewscreen_with_reach(anchor: &str, score: f32) -> crate::server_app::SystemBlackboards {
-        viewscreen_with_objectives(vec![reach_scored_objective(anchor, score)])
     }
 
     fn world_config_with_anchor(anchor: &str, pos: [f32; 3]) -> crate::world::config::WorldConfig {
@@ -2425,8 +2402,8 @@ station = "helm"
         let mut app = test_app();
         let anchor = "dock-alpha";
         // Anchor at origin — ship also starts at origin, so distance == 0.
-        // detect_player_ship_objective_completion reads from SystemBlackboards (resource).
-        app.insert_resource(viewscreen_with_reach(anchor, 8.0));
+        // detect_player_ship_objective_completion reads from ShipSystemBlackboards component.
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 8.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
         set_helm_control_source(&mut app, ControlSource::Ai);
 
@@ -2468,7 +2445,7 @@ station = "helm"
         let mut app = test_app();
         let anchor = "dock-far";
         // Anchor 500 units away — ship starts at origin.
-        app.insert_resource(viewscreen_with_reach(anchor, 8.0));
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 8.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [500.0, 0.0, 0.0]));
         set_helm_control_source(&mut app, ControlSource::Ai);
 
@@ -2509,7 +2486,7 @@ station = "helm"
 
         let mut app = test_app();
         let anchor = "dock-beta";
-        app.insert_resource(viewscreen_with_reach(anchor, 8.0));
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 8.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
         // helm stays Human — completion system must not fire
 

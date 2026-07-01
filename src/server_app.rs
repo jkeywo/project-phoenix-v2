@@ -181,42 +181,23 @@ pub struct TrackedEntities {
     pub seeded: bool,
 }
 
-/// Current-tick per-system blackboards. Each system writes its own entry
-/// during `SimSet::Publish`. Snapshotted into `FrozenBlackboards` before
-/// the next tick's `SimSet::Input` so cross-system reads in Physics/Damage/
-/// Modifiers always see last tick's values (deterministic, one-tick lag).
-#[derive(Resource, Default, Clone)]
-pub struct SystemBlackboards(
-    pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
-);
-
-/// Frozen snapshot of the previous tick's `SystemBlackboards`. Updated by
-/// `snapshot_blackboards` which runs before `SimSet::Input`. Cross-system
-/// readers in Physics/Damage/Modifiers should read this, never the live
-/// `SystemBlackboards`, to guarantee determinism.
-#[derive(Resource, Default, Clone)]
-pub struct FrozenBlackboards(
+/// Per-entity component holding a ship's system blackboards. All
+/// `publish_*_blackboard` systems write directly to this component on the
+/// `LocalShip` entity. The broadcast pipeline reads from this component.
+#[derive(Component, Default, Clone)]
+pub struct ShipSystemBlackboards(
     pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
 );
 
 /// Last-broadcast blackboard state per system. The `broadcast_blackboard_updates`
-/// system compares `SystemBlackboards` against this and only emits a
+/// system compares `ShipSystemBlackboards` against this and only emits a
 /// `BlackboardUpdate` for systems whose blackboard has changed.
 #[derive(Resource, Default)]
 pub struct LastBroadcastBlackboards(
     pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
 );
 
-/// Per-entity component holding a ship's system blackboards. During the
-/// dual-publish migration, every system writes to both the global
-/// `SystemBlackboards` resource AND this component on the `LocalShip` entity.
-/// The broadcast pipeline reads from this component instead of the resource.
-#[derive(Component, Default, Clone)]
-pub struct ShipSystemBlackboards(
-    pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
-);
-
-// â"€â"€ Plugin â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Plugin ───────────────────────────────────────────────────────────────────
 /// Empty system used as an ordering anchor for the sim broadcast dispatch.
 /// All sim-phase systems (message handlers, tick systems, broadcasters) should
 /// run before this anchor so that `dispatch_sim_broadcasts` (which has
@@ -282,8 +263,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     .init_resource::<LastBroadcastEntityPositions>()
     .init_resource::<LastBroadcastHull>()
     .init_resource::<LastBroadcastShields>()
-    .init_resource::<SystemBlackboards>()
-    .init_resource::<FrozenBlackboards>()
     .init_resource::<LastBroadcastBlackboards>()
     .init_resource::<crate::messages::InterSystemQueue>()
     .insert_resource(SimBroadcastTimer(Timer::from_seconds(
@@ -316,13 +295,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
-        snapshot_blackboards
-            .after(crate::lobby::process_lobby)
-            .before(crate::sim_sets::SimSet::Input)
-            .run_if(in_state(GamePhase::InProgress)),
-    )
-    .add_systems(
-        Update,
         (admit_system_commands, clear_inter_system_queue)
             .after(crate::lobby::process_lobby)
             .before(crate::sim_sets::SimSet::Input)
@@ -331,7 +303,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_systems(
         Update,
         broadcast_blackboard_updates
-            .after(dual_publish_blackboards)
             .in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_systems(
@@ -372,10 +343,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
-        (
-            publish_viewscreen_blackboard,
-            dual_publish_blackboards,
-        )
+        publish_viewscreen_blackboard
             .in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_plugins(weapons_update_broadcaster())
@@ -611,7 +579,6 @@ fn publish_viewscreen_blackboard(
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
     last_attacker: Option<Res<crate::weapons_plugin::LastShipAttacker>>,
-    mut blackboards: ResMut<SystemBlackboards>,
     mut ship_blackboards_q: Query<
         (&mut ShipSystemBlackboards, Option<&crate::ship_state::ShipRedAlert>),
         With<LocalShip>,
@@ -661,11 +628,7 @@ fn publish_viewscreen_blackboard(
         scored_objectives,
     };
 
-    // Write to global resource (backward compat) and directly to the per-entity component.
-    blackboards.0.insert(
-        SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
-        SystemBlackboard::Viewscreen(bb.clone()),
-    );
+    // Write directly to the per-entity component.
     if let Ok((mut entity_bbs, _)) = ship_blackboards_q.single_mut() {
         entity_bbs.0.insert(
             SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
@@ -945,43 +908,6 @@ fn reset_broadcast_caches_on_start(
     *positions = LastBroadcastEntityPositions::default();
     *weapons = LastWeaponsUpdate::default();
     *last_bb = LastBroadcastBlackboards::default();
-}
-
-/// Snapshot `SystemBlackboards` into `FrozenBlackboards` before each tick's
-/// `SimSet::Input`. Cross-system reads during Physics/Damage/Modifiers must
-/// read `FrozenBlackboards`; they will see last tick's published values
-/// (uniform one-tick lag, guaranteed determinism).
-fn snapshot_blackboards(
-    blackboards: Res<SystemBlackboards>,
-    mut frozen: ResMut<FrozenBlackboards>,
-) {
-    if blackboards.is_changed() {
-        frozen.0 = blackboards.0.clone();
-    }
-}
-
-/// Public alias of `snapshot_blackboards` for unit tests that need to
-/// verify the one-tick-lag determinism invariant in isolation.
-pub fn snapshot_blackboards_for_test(
-    blackboards: Res<SystemBlackboards>,
-    frozen: ResMut<FrozenBlackboards>,
-) {
-    snapshot_blackboards(blackboards, frozen);
-}
-
-/// Dual-publish bridge: copies the global `SystemBlackboards` resource into the
-/// `ShipSystemBlackboards` component on the `LocalShip` entity. Runs after all
-/// `publish_*_blackboard` systems (in `PublishAggregate`) so the component is in
-/// sync for broadcast and any downstream `FrozenBlackboards` reader.
-pub fn dual_publish_blackboards(
-
-    blackboards: Res<SystemBlackboards>,
-    mut ship_query: Query<&mut ShipSystemBlackboards, With<LocalShip>>,
-) {
-    let Ok(mut component) = ship_query.single_mut() else {
-        return;
-    };
-    component.0 = blackboards.0.clone();
 }
 
 /// Sync bridge: copies the player ship's `EntityConsoleHull` component into
@@ -2545,8 +2471,6 @@ mod tests {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<LastBroadcastHull>()
         .init_resource::<LastBroadcastShields>()
-        .init_resource::<SystemBlackboards>()
-        .init_resource::<FrozenBlackboards>()
         .init_resource::<LastBroadcastBlackboards>()
         .init_resource::<crate::messages::InterSystemQueue>()
         .init_resource::<crate::ai::server::AiTokenRegistry>()

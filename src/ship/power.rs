@@ -316,7 +316,7 @@ fn publish_power_blackboard(
     power: Res<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
     multipliers: Res<PowerMultiplierResource>,
-    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     use crate::system_registry::POWER_SYSTEM_ID;
 
@@ -345,10 +345,12 @@ fn publish_power_blackboard(
         locked: power.0.locked,
     };
 
-    blackboards.0.insert(
-        SystemId(POWER_SYSTEM_ID.to_string()),
-        SystemBlackboard::Power(bb),
-    );
+    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+        bbs.0.insert(
+            SystemId(POWER_SYSTEM_ID.to_string()),
+            SystemBlackboard::Power(bb),
+        );
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -399,7 +401,6 @@ mod tests {
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
-            .init_resource::<crate::server_app::SystemBlackboards>()
             .add_plugins(ShipPowerPlugin)
             .add_systems(
                 Update,
@@ -411,6 +412,7 @@ mod tests {
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,
+            crate::server_app::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -682,9 +684,10 @@ mod tests {
 
     fn power_blackboard(app: &mut App) -> PowerBlackboard {
         use crate::messages::{SystemBlackboard, SystemId};
-        use crate::server_app::SystemBlackboards;
+        use crate::server_app::{LocalShip, ShipSystemBlackboards};
         use crate::system_registry::POWER_SYSTEM_ID;
-        let bbs = app.world().resource::<SystemBlackboards>();
+        let mut q = app.world_mut().query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let bbs = q.single(app.world()).unwrap();
         match bbs.0.get(&SystemId(POWER_SYSTEM_ID.to_string())) {
             Some(SystemBlackboard::Power(bb)) => bb.clone(),
             _ => PowerBlackboard::default(),

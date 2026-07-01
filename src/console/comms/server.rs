@@ -27,7 +27,7 @@ fn publish_comms_blackboard(
     inbox: Option<Res<CommsInboxRes>>,
     runtime: Option<Res<WorldContentRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
-    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     let mut messages = inbox.as_ref().map(|r| r.0.messages()).unwrap_or_default();
 
@@ -62,10 +62,12 @@ fn publish_comms_blackboard(
         contacts,
     };
 
-    blackboards.0.insert(
-        SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string()),
-        SystemBlackboard::Comms(bb),
-    );
+    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+        bbs.0.insert(
+            SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string()),
+            SystemBlackboard::Comms(bb),
+        );
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -74,7 +76,7 @@ fn publish_comms_blackboard(
 mod tests {
     use super::*;
     use crate::messages::CommsMessage;
-    use crate::server_app::SystemBlackboards;
+    use crate::server_app::{LocalShip, ShipSystemBlackboards};
     use crate::world::server::CommsInboxRes;
 
     fn msg(id: &str) -> CommsMessage {
@@ -96,15 +98,20 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.init_resource::<SystemBlackboards>()
-            .insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
+        app.insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
             .insert_resource(WorldContentRuntime::default())
             .add_systems(Update, publish_comms_blackboard);
+        // Spawn a LocalShip entity so the query in publish_comms_blackboard resolves.
+        app.world_mut().spawn((
+            LocalShip,
+            ShipSystemBlackboards::default(),
+        ));
         app
     }
 
-    fn comms_bb(app: &App) -> CommsBlackboard {
-        let bbs = app.world().resource::<SystemBlackboards>();
+    fn comms_bb(app: &mut App) -> CommsBlackboard {
+        let mut q = app.world_mut().query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let bbs = q.single(app.world()).expect("no LocalShip with ShipSystemBlackboards");
         let key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
         let SystemBlackboard::Comms(bb) =
             bbs.0.get(&key).expect("comms blackboard missing").clone()
@@ -123,7 +130,7 @@ mod tests {
             .inject(msg("m1"));
         app.update();
 
-        let bb = comms_bb(&app);
+        let bb = comms_bb(&mut app);
         assert_eq!(bb.messages.len(), 1);
         assert_eq!(bb.messages[0].id, "m1");
     }

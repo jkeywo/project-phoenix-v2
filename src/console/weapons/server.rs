@@ -1681,7 +1681,7 @@ fn operate_tactical_ai(
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
-    blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
+    ship_bbs_q: Query<&crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     npc_q: Query<
         (
@@ -1703,7 +1703,7 @@ fn operate_tactical_ai(
     // mission objective auto-targeting.
     // When no Destroy objective is available (or its target entity can't be
     // resolved), fall back to the last NPC that attacked the player ship.
-    let objective_target = match top_destroy_objective_target(blackboards.as_deref()) {
+    let objective_target = match top_destroy_objective_target(ship_bbs_q.single().ok()) {
         Some(target_name) if target_name.is_empty() => None,
         Some(target_name) => resolve_objective_target_uuid(target_name, runtime.as_deref(), &npc_q),
         None => None,
@@ -1827,7 +1827,7 @@ fn operate_tactical_ai(
 }
 
 fn top_destroy_objective_target(
-    blackboards: Option<&crate::server_app::SystemBlackboards>,
+    blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
 ) -> Option<&str> {
     let bb = blackboards?
         .0
@@ -2104,7 +2104,7 @@ fn publish_weapons_blackboard(
     )>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+    mut ship_blackboards_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     use crate::system_registry::TACTICAL_SYSTEM_ID;
     let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
@@ -2301,10 +2301,12 @@ fn publish_weapons_blackboard(
         regions,
     };
 
-    blackboards.0.insert(
-        SystemId(TACTICAL_SYSTEM_ID.to_string()),
-        SystemBlackboard::Weapons(bb),
-    );
+    if let Ok(mut entity_bbs) = ship_blackboards_q.single_mut() {
+        entity_bbs.0.insert(
+            SystemId(TACTICAL_SYSTEM_ID.to_string()),
+            SystemBlackboard::Weapons(bb),
+        );
+    }
 }
 
 /// Project a world-space entity to a [`RadarBlip`] for the HTML Tactical radar.
@@ -2533,7 +2535,6 @@ station = "tactical"
         )))
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
-        .init_resource::<crate::server_app::SystemBlackboards>()
         .init_resource::<crate::world::server::WorldContentRuntime>()
         .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
         .add_plugins(WeaponsPlugin)
@@ -2597,6 +2598,7 @@ station = "tactical"
                 (Console::Power, 25.0),
                 (Console::Shields, 25.0),
             ])),
+            crate::server_app::ShipSystemBlackboards::default(),
         ));
         app
     }
@@ -4938,12 +4940,17 @@ station = "tactical"
 
     fn tactical_blips(app: &mut App) -> Vec<RadarBlip> {
         use crate::messages::{SystemBlackboard, SystemId};
-        use crate::server_app::SystemBlackboards;
+        use crate::server_app::ShipSystemBlackboards;
         use crate::system_registry::TACTICAL_SYSTEM_ID;
-        let bbs = app.world().resource::<SystemBlackboards>();
-        match bbs.0.get(&SystemId(TACTICAL_SYSTEM_ID.to_string())) {
-            Some(SystemBlackboard::Weapons(bb)) => bb.blips.clone(),
-            _ => Vec::new(),
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
+        match q.single(app.world()) {
+            Ok(bbs) => match bbs.0.get(&SystemId(TACTICAL_SYSTEM_ID.to_string())) {
+                Some(SystemBlackboard::Weapons(bb)) => bb.blips.clone(),
+                _ => Vec::new(),
+            },
+            Err(_) => Vec::new(),
         }
     }
 
@@ -5039,9 +5046,8 @@ station = "tactical"
             AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
             SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
         };
-        use crate::server_app::SystemBlackboards;
+        use crate::server_app::ShipSystemBlackboards;
 
-        let mut bbs = SystemBlackboards::default();
         let mut viewscreen = ViewscreenBlackboard::default();
         viewscreen.scored_objectives = vec![ScoredObjective {
             id: format!("obj-destroy-{target}"),
@@ -5064,11 +5070,16 @@ station = "tactical"
                 source: ObjectiveSource::Mission,
             },
         }];
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
+        let mut bbs = q
+            .single_mut(app.world_mut())
+            .expect("LocalShip must have ShipSystemBlackboards");
         bbs.0.insert(
             crate::system_registry::viewscreen_system_id(),
             SystemBlackboard::Viewscreen(viewscreen),
         );
-        app.insert_resource(bbs);
     }
 
     #[test]

@@ -25,7 +25,7 @@ Unify player and NPC ships into one ECS entity model. `LocalShip` is the sole vi
 - **`Ship` marker on all ships**: player ship has `Ship` + `LocalShip`; NPC ships have `Ship` only. `LocalShip` is the rendering/networking gate.
 - **`ShipPhysics` component**: on all ship entities; position/motion fields removed from `ShipState`. `sync_ship_position` syncs all `ShipPhysics` to `Transform`.
 - **`AdmittedCommands` per-entity**: inserted on all ships; `admit_system_commands` routes `ai:` tokens to owning entity via `AiTokenRegistry`.
-- **`ShipSystemBlackboards` per-entity**: `publish_viewscreen_blackboard` writes directly to the component; `broadcast_blackboard_updates` reads from it.
+- **`ShipSystemBlackboards` per-entity**: `publish_viewscreen_blackboard`, `publish_power_blackboard`, `publish_shields_blackboard`, `publish_sensors_blackboard`, `publish_navigation_blackboard`, and `publish_comms_blackboard` all write directly to the component; `broadcast_blackboard_updates` reads from it.
 - **`tick_ai_controllers` deleted**: replaced by `register_npc_tokens_on_spawn` (token registration) and `process_attacker_this_tick` (attacker tracking).
 - **`AiControllerComponent` empty marker**: all fields removed; kept as a query filter marker for NPC entities.
 - **`attach_controllers_on_spawn` deleted**: replaced by `register_npc_tokens_on_spawn`.
@@ -41,7 +41,7 @@ Unify player and NPC ships into one ECS entity model. `LocalShip` is the sole vi
 
 ### Dual-Write Bridges (Migration In Progress)
 
-- `SystemBlackboards` global resource → `ShipSystemBlackboards` component: `dual_publish_blackboards` still copies global → component; will be removed once all `publish_*_blackboard` functions write directly to per-entity.
+- `SystemBlackboards` global resource → `ShipSystemBlackboards` component: `dual_publish_blackboards` still copies global → component for the remaining publishers not yet migrated (only `publish_viewscreen_blackboard` was pre-migrated; power/shields/sensors/navigation/comms now write directly). Will be removed once all `publish_*_blackboard` functions write directly to per-entity.
 - `ShipHullIntegrity` resource ↔ `EntityConsoleHull` component: two sync systems keep them in sync; `ShipHullIntegrity` still read by ~20 systems.
 - `ShipState` (red_alert, view_mode, phaser_frequency): still a global Resource; per-entity `ShipRedAlert`/`ShipViewMode` are secondary writes.
 - `LastHelmInput`: still primarily used as Resource; Component derive added but not yet used as per-entity in production.

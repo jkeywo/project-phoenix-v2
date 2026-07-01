@@ -211,7 +211,7 @@ fn publish_captain_blackboard(
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     let (control_sources, red_alert_comp, view_mode_comp) = ship_query
         .single()
@@ -296,10 +296,12 @@ fn publish_captain_blackboard(
         boosted_objective_id: boost.as_ref().and_then(|b| b.boosted_id.clone()),
     };
 
-    blackboards.0.insert(
-        SystemId(crate::system_registry::CAPTAIN_SYSTEM_ID.to_string()),
-        SystemBlackboard::Captain(bb),
-    );
+    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+        bbs.0.insert(
+            SystemId(crate::system_registry::CAPTAIN_SYSTEM_ID.to_string()),
+            SystemBlackboard::Captain(bb),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -307,7 +309,6 @@ mod tests {
     use super::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions};
     use crate::messages::{ClientMessage, ViewDirection};
-    use crate::server_app::SystemBlackboards;
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
     use crate::server_app::LocalShip;
@@ -330,7 +331,6 @@ mod tests {
             .add_plugins(CaptainPlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
             .init_resource::<Outbox>()
-            .init_resource::<SystemBlackboards>()
                         .add_systems(PostUpdate, collect);
         app.world_mut().spawn((
             Ship,
@@ -374,8 +374,9 @@ mod tests {
         }
     }
 
-    fn captain_bb(app: &App) -> CaptainBlackboard {
-        let bbs = app.world().resource::<SystemBlackboards>();
+    fn captain_bb(app: &mut App) -> CaptainBlackboard {
+        let mut q = app.world_mut().query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
+        let bbs = q.single(app.world()).unwrap();
         let key = SystemId(CAPTAIN_SYSTEM_ID.to_string());
         let SystemBlackboard::Captain(bb) = bbs.0.get(&key).unwrap() else {
             panic!("expected Captain blackboard");
@@ -1067,13 +1068,12 @@ mod tests {
     use crate::server_app::ShipHullIntegrity;
     use crate::world::server::ObjectiveManagerRes;
 
-    /// Minimal app: just publish_captain_blackboard + per-entity components + SystemBlackboards.
+    /// Minimal app: just publish_captain_blackboard + per-entity components.
     fn bb_test_app() -> App {
         let mut app = App::new();
         app.add_systems(Update, publish_captain_blackboard);
         let hull = ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
         app.insert_resource(ShipHullIntegrity(hull.clone()));
-        app.init_resource::<SystemBlackboards>();
         // Spawn LocalShip entity with required components for publish_captain_blackboard.
         app.world_mut().spawn((
             crate::server_app::LocalShip,
@@ -1081,6 +1081,7 @@ mod tests {
             crate::ship_state::ShipViewMode::default(),
             ShipSystemControlSources::default(),
             crate::entity_spawner::EntityConsoleHull(hull),
+            crate::server_app::ShipSystemBlackboards::default(),
         ));
         app
     }
@@ -1106,7 +1107,7 @@ mod tests {
         { let cur = get_red_alert(&mut app); set_red_alert(&mut app, !cur); }
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert!(bb.red_alert);
         assert_eq!(bb.game_status, "RED ALERT — All hands to battlestations.");
     }
@@ -1125,7 +1126,7 @@ mod tests {
         }
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert!(bb.red_alert_auto);
         assert_eq!(
             bb.red_alert_system_id,
@@ -1146,7 +1147,7 @@ mod tests {
         }
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert!(
             bb.viewscreen_auto,
             "viewscreen_auto should be true when viewscreen is AI"
@@ -1162,7 +1163,7 @@ mod tests {
         let mut app = bb_test_app();
         app.update();
         assert!(
-            !captain_bb(&app).viewscreen_auto,
+            !captain_bb(&mut app).viewscreen_auto,
             "viewscreen_auto should default to false"
         );
     }
@@ -1173,7 +1174,7 @@ mod tests {
         apply_hull_damage(&mut app, 25.0);
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert!(
             (bb.hull_integrity_pct - 75.0).abs() < 1.0,
             "expected ~75% hull integrity, got {}",
@@ -1189,7 +1190,7 @@ mod tests {
         app.world_mut().insert_resource(ObjectiveManagerRes(mgr));
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert_eq!(bb.objectives.len(), 1);
         assert_eq!(bb.objectives[0].id, "obj-1");
         assert_eq!(bb.objectives[0].text, "Test objective");
@@ -1208,7 +1209,7 @@ mod tests {
             }
         }
         app.update();
-        assert_eq!(captain_bb(&app).view_direction, "");
+        assert_eq!(captain_bb(&mut app).view_direction, "");
     }
 
     // ── #574 objective filtering + priority boost tests ──────────────────────
@@ -1245,7 +1246,7 @@ mod tests {
             .insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert!(
             bb.objectives.is_empty(),
             "doctrine objective with zero score must be hidden from the captain panel"
@@ -1260,7 +1261,7 @@ mod tests {
             .insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert_eq!(
             bb.objectives.len(),
             1,
@@ -1279,7 +1280,7 @@ mod tests {
         app.world_mut().insert_resource(ObjectiveManagerRes(mgr));
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert_eq!(bb.objectives.len(), 1);
         assert_eq!(bb.objectives[0].source, ObjectiveSource::Mission);
     }
@@ -1294,7 +1295,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            captain_bb(&app).boosted_objective_id.as_deref(),
+            captain_bb(&mut app).boosted_objective_id.as_deref(),
             Some("destroy-hostiles"),
         );
     }
@@ -1312,7 +1313,7 @@ mod tests {
             });
         app.update();
 
-        let bb = captain_bb(&app);
+        let bb = captain_bb(&mut app);
         assert_eq!(
             bb.objectives.len(),
             1,

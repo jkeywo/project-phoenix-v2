@@ -245,7 +245,7 @@ fn publish_shields_blackboard(
         (&crate::entity_spawner::EntityUuid, &Transform),
         Without<crate::simulation::AsteroidUuid>,
     >,
-    mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
+    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     let Ok(shields) = shields_q.single() else {
         return;
@@ -315,10 +315,12 @@ fn publish_shields_blackboard(
         grid_status,
     };
 
-    blackboards.0.insert(
-        SystemId(crate::system_registry::SHIELDS_SYSTEM_ID.to_string()),
-        SystemBlackboard::Shields(bb),
-    );
+    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+        bbs.0.insert(
+            SystemId(crate::system_registry::SHIELDS_SYSTEM_ID.to_string()),
+            SystemBlackboard::Shields(bb),
+        );
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -350,7 +352,7 @@ mod tests {
     use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::{ClientMessage, Console, *};
-    use crate::server_app::SystemBlackboards;
+    use crate::server_app::{LocalShip, ShipSystemBlackboards};
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::CoordinationEnqueue;
     use crate::simulation::{
@@ -397,6 +399,7 @@ mod tests {
                 crate::simulation::Ship,
                 crate::server_app::LocalShip,
                 ShipShields(crate::shield::ShieldSystem::new(&config)),
+                crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
@@ -429,7 +432,6 @@ mod tests {
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
             .init_resource::<CoordEnqueueBox>()
-            .init_resource::<SystemBlackboards>()
             .add_plugins(ShipShieldsPlugin)
             .add_systems(PostUpdate, collect)
             .add_systems(PostUpdate, collect_coord);
@@ -504,8 +506,10 @@ mod tests {
 
     // ── Blackboard publish tests ─────────────────────────────────────────────
 
-    fn shields_bb(app: &App) -> ShieldsBlackboard {
-        let bbs = app.world().resource::<SystemBlackboards>();
+    fn shields_bb(app: &mut App) -> ShieldsBlackboard {
+        let mut q = app.world_mut().query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        // Safety: test always spawns exactly one LocalShip entity.
+        let bbs = q.single(app.world()).expect("no LocalShip with ShipSystemBlackboards");
         let key = SystemId(SHIELDS_SYSTEM_ID.to_string());
         let SystemBlackboard::Shields(bb) = bbs.0.get(&key).unwrap() else {
             panic!("expected Shields blackboard");
@@ -517,7 +521,7 @@ mod tests {
     fn publish_shields_blackboard_contains_hull_integrity() {
         let mut app = test_app();
         app.update();
-        assert!((shields_bb(&app).hull_integrity_pct - 100.0).abs() < f32::EPSILON);
+        assert!((shields_bb(&mut app).hull_integrity_pct - 100.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -535,6 +539,7 @@ mod tests {
                 crate::simulation::Ship,
                 crate::server_app::LocalShip,
                 ShipShields(crate::shield::ShieldSystem::new(&config)),
+                crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
@@ -561,10 +566,9 @@ mod tests {
             .init_resource::<LastBroadcastEntityPositions>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
-            .init_resource::<SystemBlackboards>()
             .add_plugins(ShipShieldsPlugin);
         app.update();
-        assert_eq!(shields_bb(&app).facings.len(), 4);
+        assert_eq!(shields_bb(&mut app).facings.len(), 4);
     }
 
     fn ship_e(app: &mut App) -> Entity {
@@ -582,7 +586,7 @@ mod tests {
             .0
             .set_focused_facing(Some(0));
         app.update();
-        assert!(shields_bb(&app).focused_facing.is_some());
+        assert!(shields_bb(&mut app).focused_facing.is_some());
     }
 
     #[test]
@@ -596,7 +600,7 @@ mod tests {
         drop(shields);
         drop(e);
         app.update();
-        assert_eq!(shields_bb(&app).focused_facing, None);
+        assert_eq!(shields_bb(&mut app).focused_facing, None);
     }
 
     #[test]
@@ -610,7 +614,7 @@ mod tests {
             .0
             .apply_damage(9999, 0.0);
         app.update();
-        assert_eq!(shields_bb(&app).grid_status, "EMITTER OFFLINE");
+        assert_eq!(shields_bb(&mut app).grid_status, "EMITTER OFFLINE");
     }
 
     #[test]
@@ -618,7 +622,7 @@ mod tests {
         let mut app = test_app();
         app.update();
         app.update();
-        assert!((shields_bb(&app).hull_integrity_pct - 100.0).abs() < f32::EPSILON);
+        assert!((shields_bb(&mut app).hull_integrity_pct - 100.0).abs() < f32::EPSILON);
     }
 
     // ── Coordination tests ──────────────────────────────────────────────────
@@ -637,6 +641,7 @@ mod tests {
                 crate::simulation::Ship,
                 crate::server_app::LocalShip,
                 ShipShields(crate::shield::ShieldSystem::new(&config)),
+                crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
@@ -669,7 +674,6 @@ mod tests {
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
             .init_resource::<CoordEnqueueBox>()
-            .init_resource::<SystemBlackboards>()
             .add_plugins(ShipShieldsPlugin)
             .add_systems(PostUpdate, collect)
             .add_systems(PostUpdate, collect_coord);

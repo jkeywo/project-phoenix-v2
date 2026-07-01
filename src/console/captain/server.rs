@@ -40,7 +40,8 @@ impl Plugin for CaptainPlugin {
 // ── Input handlers ───────────────────────────────────────────────────────────
 
 fn handle_toggle_red_alert(
-    ship_query: Query<&AdmittedCommands, With<Ship>>,
+    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
+    mut red_alert_q: Query<&mut crate::ship_state::ShipRedAlert, With<crate::server_app::LocalShip>>,
     mut ship: ResMut<ShipState>,
 ) {
     let Ok(admitted) = ship_query.single() else {
@@ -48,7 +49,11 @@ fn handle_toggle_red_alert(
     };
     for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
         if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
+            // Write to both global resource (backward compat) and per-entity component.
             ship.toggle_red_alert();
+            if let Ok(mut ra) = red_alert_q.single_mut() {
+                ra.0 = ship.red_alert();
+            }
         }
     }
 }
@@ -75,7 +80,8 @@ fn view_request_from_admitted(
 }
 
 fn handle_set_view(
-    ship_query: Query<&AdmittedCommands, With<Ship>>,
+    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
+    mut view_mode_q: Query<&mut crate::ship_state::ShipViewMode, With<crate::server_app::LocalShip>>,
     mut ship: ResMut<ShipState>,
 ) {
     let Ok(admitted) = ship_query.single() else {
@@ -83,7 +89,11 @@ fn handle_set_view(
     };
     for cmd in admitted.0.iter() {
         if let Some((source, mode)) = view_request_from_admitted(cmd) {
-            ship.request_view_mode_from(source, mode);
+            // Write to both global resource (backward compat) and per-entity component.
+            ship.request_view_mode_from(source.clone(), mode.clone());
+            if let Ok(mut vm) = view_mode_q.single_mut() {
+                vm.request_view_mode_from(source, mode);
+            }
         }
     }
 }
@@ -126,13 +136,14 @@ fn operate_captain_ai(
         &mut AdmittedCommands,
         &ShipSystemControlSources,
         Option<&crate::server_app::ShipSystemBlackboards>,
+        Option<&crate::ship_state::ShipRedAlert>,
     )>,
     activity: Res<RecentCombatActivity>,
 ) {
     let now = time.elapsed_secs();
     let ai = crate::ai::core::CaptainAi;
 
-    for (mut admitted, control_sources, blackboards_opt) in ship_query.iter_mut() {
+    for (mut admitted, control_sources, blackboards_opt, red_alert_opt) in ship_query.iter_mut() {
         let policy = control_sources
             .0
             .policy_for(&crate::system_registry::red_alert_system_id());
@@ -172,7 +183,12 @@ fn operate_captain_ai(
         };
 
         if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, last_weapon_fired) {
-            if should_be_red_alert != ship.red_alert() {
+            // Read red_alert from per-entity component when available,
+            // fall back to global ShipState for backward compat.
+            let current_red_alert = red_alert_opt
+                .map(|ra| ra.0)
+                .unwrap_or_else(|| ship.red_alert());
+            if should_be_red_alert != current_red_alert {
                 admitted.0.push(crate::messages::AdmittedCommand {
                     target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
                     payload: SystemControlPayload::ToggleRedAlert,

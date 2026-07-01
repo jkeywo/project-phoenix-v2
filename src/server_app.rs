@@ -608,12 +608,24 @@ fn publish_viewscreen_blackboard(
     boost: Option<Res<CaptainPriorityBoost>>,
     last_attacker: Option<Res<crate::weapons_plugin::LastShipAttacker>>,
     mut blackboards: ResMut<SystemBlackboards>,
+    mut ship_blackboards_q: Query<
+        (&mut ShipSystemBlackboards, Option<&crate::ship_state::ShipRedAlert>),
+        With<LocalShip>,
+    >,
 ) {
     use crate::messages::{SystemBlackboard, SystemId, ViewscreenBlackboard};
     use crate::objectives::WorldConditions;
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
-    let red_alert = ship.as_ref().map(|s| s.red_alert()).unwrap_or(false);
+    // Read red_alert from per-entity component when available (LocalShip entity),
+    // fall back to global ShipState for backward compat.
+    let entity_red_alert = ship_blackboards_q
+        .single()
+        .ok()
+        .and_then(|(_, ra)| ra.map(|r| r.0));
+    let red_alert = entity_red_alert
+        .unwrap_or_else(|| ship.as_ref().map(|s| s.red_alert()).unwrap_or(false));
+
     let hull_integrity_pct = if let Some(h) = &hull {
         let max = h.0.total_max();
         let cur = h.0.total_current();
@@ -651,10 +663,17 @@ fn publish_viewscreen_blackboard(
         scored_objectives,
     };
 
+    // Write to global resource (backward compat) and directly to the per-entity component.
     blackboards.0.insert(
         SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
-        SystemBlackboard::Viewscreen(bb),
+        SystemBlackboard::Viewscreen(bb.clone()),
     );
+    if let Ok((mut entity_bbs, _)) = ship_blackboards_q.single_mut() {
+        entity_bbs.0.insert(
+            SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
+            SystemBlackboard::Viewscreen(bb),
+        );
+    }
 }
 
 fn handle_set_sensors_target(

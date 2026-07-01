@@ -32,7 +32,7 @@ use crate::gui::{
 };
 use crate::lobby::WorldResource;
 use crate::messages::{GamePhase, ViewMode};
-use crate::ship_state::{ShipPhysics, ShipState};
+use crate::ship_state::ShipPhysics;
 
 // ── Marker component ──────────────────────────────────────────────────────────
 
@@ -239,12 +239,16 @@ fn spawn_viewscreen_radar_widgets(mut commands: Commands) {
 fn sync_server_radar_bridge(
     mut commands: Commands,
     world: Option<Res<WorldResource>>,
-    ship: Res<ShipState>,
+    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut widgets: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
 ) {
     let Some(world) = world else { return };
-    let Some(active) = view_mode_to_console_radar(&ship.view_mode) else {
+    let view_mode = view_mode_q
+        .single()
+        .map(|vm| vm.view_mode.clone())
+        .unwrap_or(crate::messages::ViewMode::Camera(crate::messages::ViewDirection::Fore));
+    let Some(active) = view_mode_to_console_radar(&view_mode) else {
         return;
     };
     let Some((widget, _, mut map)) = widgets.iter_mut().find(|(_, c, _)| **c == active) else {
@@ -267,12 +271,14 @@ fn sync_server_radar_bridge(
 // ── Update: toggle radar container visibility ─────────────────────────────────
 
 fn toggle_viewscreen_radar_widgets(
-    ship: Option<Res<ShipState>>,
+    view_mode_q: Option<Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>>,
     state: Res<State<GamePhase>>,
     mut containers: Query<(&RadarContainerMode, &mut Visibility)>,
 ) {
-    let Some(ship) = ship else { return };
-    if !ship.is_changed() && !state.is_changed() {
+    let view_mode = view_mode_q
+        .and_then(|q| q.single().ok().map(|vm| vm.view_mode.clone()))
+        .unwrap_or(crate::messages::ViewMode::Camera(crate::messages::ViewDirection::Fore));
+    if !state.is_changed() {
         return;
     }
 
@@ -280,7 +286,7 @@ fn toggle_viewscreen_radar_widgets(
 
     for (mode, mut vis) in containers.iter_mut() {
         *vis = if in_game {
-            match (mode, &ship.view_mode) {
+            match (mode, &view_mode) {
                 (RadarContainerMode::Helm, ViewMode::Radar) => Visibility::Visible,
                 (RadarContainerMode::Science, ViewMode::ScienceRadar | ViewMode::SensorsRadar) => {
                     Visibility::Visible

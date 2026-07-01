@@ -221,8 +221,7 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                 (Console::Helm, 25.0),
                 (Console::Tactical, 25.0),
                 (Console::Power, 25.0),

@@ -10,7 +10,7 @@ use crate::messages::{
     SystemId, TorpedoTubeClientConfig, TorpedoTubeState, WeaponsBlackboard,
 };
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::ship_state::{ShipPhysics, ShipState};
+use crate::ship_state::ShipPhysics;
 use crate::simulation::{
     AsteroidUuid, GameOverReason, Ship, ShipHullIntegrity, ShipShields, SimOutbox,
 };
@@ -977,7 +977,7 @@ fn handle_set_phaser_frequency(
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut ship: ResMut<ShipState>,
+    mut freq_q: Query<&mut crate::ship_state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>,
 ) {
     let Ok((ship_config, control_sources)) = ship_query.single() else {
         return;
@@ -989,7 +989,6 @@ fn handle_set_phaser_frequency(
         let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else {
             continue;
         };
-        // Only the Tactical holder may set phaser frequency (delegation removed in B4).
         if !tactical_policy.accept_human_input {
             continue;
         }
@@ -1000,7 +999,9 @@ fn handle_set_phaser_frequency(
         {
             continue;
         }
-        ship.phaser_frequency = frequency.clamp(0.0, 1.0);
+        if let Ok(mut freq) = freq_q.single_mut() {
+            freq.0 = frequency.clamp(0.0, 1.0);
+        }
     }
 }
 
@@ -2511,8 +2512,7 @@ station = "tactical"
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-        .insert_resource(ShipState::new())
-        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
             (Console::Helm, 25.0),
             (Console::Tactical, 25.0),
             (Console::Power, 25.0),
@@ -2588,9 +2588,17 @@ station = "tactical"
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             ShipPhysics::default(),
+            crate::ship_state::ShipPhaserFrequency::default(),
             bevy::prelude::Transform::default(),
         ));
         app
+    }
+
+    fn get_phaser_frequency(app: &mut App) -> f32 {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::ship_state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>();
+        q.single(app.world()).map(|f| f.0).unwrap_or(0.5)
     }
 
     fn set_ship_yaw(app: &mut App, yaw: f32) {
@@ -3872,7 +3880,7 @@ station = "tactical"
             ClientMessage::SetPhaserFrequency { frequency: 0.8 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 0.8).abs() < 1e-5,
             "Tactical holder should set phaser frequency to 0.8, got {freq}"
@@ -3890,7 +3898,7 @@ station = "tactical"
             ClientMessage::SetPhaserFrequency { frequency: 0.9 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 0.5).abs() < 1e-5,
             "Sensors holder must NOT change phaser frequency, got {freq}"
@@ -3907,7 +3915,7 @@ station = "tactical"
             ClientMessage::SetPhaserFrequency { frequency: 0.9 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 0.5).abs() < 1e-5,
             "Captain must NOT change phaser frequency, got {freq}"
@@ -3924,7 +3932,7 @@ station = "tactical"
             ClientMessage::SetPhaserFrequency { frequency: 1.5 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 1.0).abs() < 1e-5,
             "frequency above 1.0 should clamp to 1.0, got {freq}"
@@ -3936,7 +3944,7 @@ station = "tactical"
             ClientMessage::SetPhaserFrequency { frequency: -0.5 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 0.0).abs() < 1e-5,
             "frequency below 0.0 should clamp to 0.0, got {freq}"

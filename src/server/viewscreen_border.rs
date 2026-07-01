@@ -34,7 +34,7 @@ use crate::messages::{
 };
 use crate::server::renderer::GameCamera;
 use crate::server_app::GameOverReason;
-use crate::ship_state::{ShipPhysics, ShipState};
+use crate::ship_state::ShipPhysics;
 use crate::sim_sets::SimSet;
 use crate::simulation::ShipHullIntegrity;
 use crate::stations_config::ShipStations;
@@ -437,13 +437,13 @@ fn spawn_hud_state_entity(mut commands: Commands) {
 /// Compute the current HUD state from ship + hull resources. Reuses the exact
 /// formulas from the retired in-game HUD strip.
 fn compute_hud_state(
-    ship: &ShipState,
+    red_alert: bool,
     physics: &ShipPhysics,
     hull: &ShipHullIntegrity,
     phase: &GamePhase,
     game_over_reason: Option<&GameOverReason>,
 ) -> ViewscreenHudState {
-    let alert = ship.red_alert();
+    let alert = red_alert;
     let hull_pct = if hull.0.total_max() > 0.0 {
         (hull.0.total_current() / hull.0.total_max() * 100.0).clamp(0.0, 100.0)
     } else {
@@ -475,22 +475,18 @@ fn compute_hud_state(
 /// `ViewscreenHud` component only when it differs, so `Changed<ViewscreenHud>`
 /// fires only on actual change.
 fn recompute_hud_state(
-    ship: Option<Res<ShipState>>,
+    red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::simulation::LocalShip>>,
     hull: Option<Res<ShipHullIntegrity>>,
     phase: Option<Res<State<GamePhase>>>,
     game_over_reason: Option<Res<GameOverReason>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
-    let Some(ship) = ship else { return };
     let Some(hull) = hull else { return };
     let Some(phase) = phase else { return };
-    let physics = physics_q
-        .single()
-        .ok()
-        .copied()
-        .unwrap_or_default();
-    let next = compute_hud_state(&ship, &physics, &hull, phase.get(), game_over_reason.as_deref());
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
+    let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
+    let next = compute_hud_state(red_alert, &physics, &hull, phase.get(), game_over_reason.as_deref());
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
             hud.0 = next.clone();
@@ -501,22 +497,18 @@ fn recompute_hud_state(
 /// `OnEnter(GamePhase::GameOver)` system: push one final HUD state that
 /// carries `game_over_message` so the viewscreen overlay can display it.
 fn push_game_over_hud_state(
-    ship: Option<Res<ShipState>>,
+    red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::simulation::LocalShip>>,
     hull: Option<Res<ShipHullIntegrity>>,
     game_over_reason: Option<Res<GameOverReason>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
     mut writer: MessageWriter<HudStateChanged>,
 ) {
-    let Some(ship) = ship else { return };
     let Some(hull) = hull else { return };
-    let physics = physics_q
-        .single()
-        .ok()
-        .copied()
-        .unwrap_or_default();
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
+    let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
     let next = compute_hud_state(
-        &ship,
+        red_alert,
         &physics,
         &hull,
         &GamePhase::GameOver,
@@ -569,10 +561,9 @@ mod tests {
 
     #[test]
     fn compute_hud_state_nominal() {
-        let ship = ShipState::new();
         let physics = ShipPhysics::default();
         let hull = hull_at(100.0, 100.0);
-        let state = compute_hud_state(&ship, &physics, &hull, &GamePhase::InProgress, None);
+        let state = compute_hud_state(false, &physics, &hull, &GamePhase::InProgress, None);
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
         assert_eq!(state.condition, "NOMINAL");
@@ -582,14 +573,12 @@ mod tests {
 
     #[test]
     fn compute_hud_state_alert_and_partial_hull() {
-        let mut ship = ShipState::new();
-        ship.toggle_red_alert();
         let physics = ShipPhysics {
-            yaw: std::f32::consts::FRAC_PI_2, // right turn (clockwise) → East → bearing 090
+            yaw: std::f32::consts::FRAC_PI_2,
             ..Default::default()
         };
         let hull = hull_at(50.0, 100.0);
-        let state = compute_hud_state(&ship, &physics, &hull, &GamePhase::InProgress, None);
+        let state = compute_hud_state(true, &physics, &hull, &GamePhase::InProgress, None);
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
         assert_eq!(state.condition, "ALERT");
@@ -599,22 +588,20 @@ mod tests {
     #[test]
     fn compute_hud_state_game_over_ship_destroyed() {
         use crate::server_app::GameOverReason;
-        let ship = ShipState::new();
         let physics = ShipPhysics::default();
         let hull = hull_at(0.0, 100.0);
         let reason = GameOverReason(Some("All consoles destroyed".into()));
-        let state = compute_hud_state(&ship, &physics, &hull, &GamePhase::GameOver, Some(&reason));
+        let state = compute_hud_state(false, &physics, &hull, &GamePhase::GameOver, Some(&reason));
         assert_eq!(state.game_over_message.as_deref(), Some("Ship Destroyed"));
     }
 
     #[test]
     fn compute_hud_state_game_over_scenario_message() {
         use crate::server_app::GameOverReason;
-        let ship = ShipState::new();
         let physics = ShipPhysics::default();
         let hull = hull_at(50.0, 100.0);
         let reason = GameOverReason(Some("VICTORY: All enemies eliminated.".into()));
-        let state = compute_hud_state(&ship, &physics, &hull, &GamePhase::GameOver, Some(&reason));
+        let state = compute_hud_state(false, &physics, &hull, &GamePhase::GameOver, Some(&reason));
         assert_eq!(
             state.game_over_message.as_deref(),
             Some("VICTORY: All enemies eliminated.")

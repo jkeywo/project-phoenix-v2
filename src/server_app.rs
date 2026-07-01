@@ -14,7 +14,6 @@ use rand::SeedableRng as _;
 use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage};
 use crate::debug_overlay::{DamageLog, DamageLogEntry};
 use crate::shield::attacker_bearing_relative;
-use crate::ship_state::ShipState;
 use bevy_rapier3d::prelude::ReadRapierContext;
 // Re-export ShipPhysics so `crate::simulation::ShipPhysics` and
 // `crate::server_app::ShipPhysics` both resolve.
@@ -260,8 +259,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_plugins(crate::entity_star::StarRenderPlugin)
     .add_message::<AsteroidDestroyedVfx>()
-    .insert_resource(ShipState::new())
-    .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
         (Console::Helm, 25.0),
         (Console::Tactical, 25.0),
         (Console::Power, 25.0),
@@ -610,7 +608,6 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
 // -- Systems -------------------------------------------------------------------
 
 fn publish_viewscreen_blackboard(
-    ship: Option<Res<ShipState>>,
     hull: Option<Res<ShipHullIntegrity>>,
     activity: Option<Res<crate::ship::combat_activity::RecentCombatActivity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
@@ -626,14 +623,11 @@ fn publish_viewscreen_blackboard(
     use crate::objectives::WorldConditions;
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
-    // Read red_alert from per-entity component when available (LocalShip entity),
-    // fall back to global ShipState for backward compat.
     let entity_red_alert = ship_blackboards_q
         .single()
         .ok()
         .and_then(|(_, ra)| ra.map(|r| r.0));
-    let red_alert = entity_red_alert
-        .unwrap_or_else(|| ship.as_ref().map(|s| s.red_alert()).unwrap_or(false));
+    let red_alert = entity_red_alert.unwrap_or(false);
 
     let hull_integrity_pct = if let Some(h) = &hull {
         let max = h.0.total_max();
@@ -1813,6 +1807,7 @@ fn spawn_game_start_entities(
                 .insert(crate::sensors_plugin::SensorsTarget::default())
                 .insert(crate::ship_state::ShipRedAlert::default())
                 .insert(crate::ship_state::ShipViewMode::default())
+                .insert(crate::ship_state::ShipPhaserFrequency::default())
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
                 .insert(crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()))
                 .insert(crate::ship_plugin::LastHelmInput::default());
@@ -2533,8 +2528,7 @@ mod tests {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-        .insert_resource(ShipState::new())
-        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
             (Console::Helm, 25.0),
             (Console::Tactical, 25.0),
             (Console::Power, 25.0),
@@ -2622,11 +2616,39 @@ mod tests {
                 crate::messages::AdmittedCommands::default(),
                 ShipShields(ShieldSystem::default()),
                 ShipPhysicsComponent::default(),
+                crate::ship_state::ShipRedAlert::default(),
+                crate::ship_state::ShipViewMode::default(),
+                crate::ship_state::ShipPhaserFrequency::default(),
                 bevy::prelude::Transform::default(),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
         app
+    }
+
+    fn get_phaser_frequency(app: &mut App) -> f32 {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::ship_state::ShipPhaserFrequency, With<LocalShip>>();
+        q.single(app.world()).map(|f| f.0).unwrap_or(0.5)
+    }
+
+    fn get_view_mode(app: &mut App) -> crate::messages::ViewMode {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::ship_state::ShipViewMode, With<LocalShip>>();
+        q.single(app.world())
+            .map(|vm| vm.view_mode.clone())
+            .unwrap_or(crate::messages::ViewMode::Camera(crate::messages::ViewDirection::Fore))
+    }
+
+    fn set_ship_view_mode(app: &mut App, mode: crate::messages::ViewMode) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::ship_state::ShipViewMode, With<LocalShip>>();
+        if let Ok(mut vm) = q.single_mut(app.world_mut()) {
+            vm.view_mode = mode;
+        }
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
@@ -2884,7 +2906,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::ScienceRadar
         );
     }
@@ -2904,7 +2926,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::SensorsRadar
         );
     }
@@ -2925,7 +2947,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Fore)
         );
     }
@@ -2946,7 +2968,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::SystemChart
         );
     }
@@ -2967,7 +2989,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Fore)
         );
     }
@@ -2988,7 +3010,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Fore)
         );
     }
@@ -3009,7 +3031,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::NavigationChart
         );
     }
@@ -3030,7 +3052,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Fore)
         );
     }
@@ -3091,7 +3113,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Comms
         );
     }
@@ -3124,7 +3146,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Aft)
         );
     }
@@ -3145,7 +3167,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Fore)
         );
     }
@@ -3166,7 +3188,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Radar
         );
     }
@@ -3188,7 +3210,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Fore)
         );
     }
@@ -3209,7 +3231,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Fore)
         );
     }
@@ -5602,7 +5624,7 @@ mod tests {
             ClientMessage::SetPhaserFrequency { frequency: 0.8 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 0.8).abs() < 1e-5,
             "Tactical holder should set phaser frequency to 0.8, got {freq}"
@@ -5620,7 +5642,7 @@ mod tests {
             ClientMessage::SetPhaserFrequency { frequency: 0.9 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 0.5).abs() < 1e-5,
             "Sensors holder must NOT change phaser frequency, got {freq}"
@@ -5638,7 +5660,7 @@ mod tests {
             ClientMessage::SetPhaserFrequency { frequency: 0.9 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 0.5).abs() < 1e-5,
             "Captain must NOT change phaser frequency, got {freq}"
@@ -5656,7 +5678,7 @@ mod tests {
             ClientMessage::SetPhaserFrequency { frequency: 1.5 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 1.0).abs() < 1e-5,
             "frequency above 1.0 should clamp to 1.0, got {freq}"
@@ -5668,7 +5690,7 @@ mod tests {
             ClientMessage::SetPhaserFrequency { frequency: -0.5 },
         );
         tick(&mut app);
-        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        let freq = get_phaser_frequency(&mut app);
         assert!(
             (freq - 0.0).abs() < 1e-5,
             "frequency below 0.0 should clamp to 0.0, got {freq}"

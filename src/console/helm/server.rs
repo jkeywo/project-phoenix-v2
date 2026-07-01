@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 
-use crate::messages::{HelmBlackboard, SystemBlackboard, SystemId, ViewMode};
+use crate::messages::{HelmBlackboard, SystemBlackboard, SystemId};
 use crate::server_app::{ShipBoost, ShipImpulse, SystemBlackboards};
 use crate::ship_plugin::BoostConfigResource;
-use crate::ship_state::{ShipPhysics, ShipState};
+use crate::ship_state::ShipPhysics;
 use crate::system_registry::HELM_SYSTEM_ID;
 
 pub struct HelmPlugin;
@@ -22,7 +22,6 @@ impl Plugin for HelmPlugin {
 /// see fully-updated values. The component-change dirty-tracking is done
 /// globally by `broadcast_blackboard_updates` in `SimSet::Broadcast`.
 fn publish_helm_blackboard(
-    ship: Res<ShipState>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     impulse: Option<Res<ShipImpulse>>,
     boost: Option<Res<ShipBoost>>,
@@ -37,8 +36,7 @@ fn publish_helm_blackboard(
     let boost_enabled = boost_config.as_ref().map(|c| c.enabled).unwrap_or(false);
     let boost_battery = boost.as_ref().map(|b| b.0.battery).unwrap_or(0.0);
     let boost_active = boost.as_ref().map(|b| b.0.is_active()).unwrap_or(false);
-    let on_screen = matches!(ship.view_mode, ViewMode::Radar);
-    let _ = on_screen; // view mode is not raw sim truth; kept in SimSnapshot
+    // view_mode is not raw sim truth; helm blackboard omits it
 
     let bb = HelmBlackboard {
         yaw: physics.yaw,
@@ -67,8 +65,7 @@ mod tests {
 
     fn base_app() -> App {
         let mut app = App::new();
-        app.insert_resource(ShipState::new())
-            .insert_resource(ShipImpulse(ImpulseState::new()))
+        app            .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<SystemBlackboards>()
             .init_resource::<FrozenBlackboards>()
             .add_systems(Update, publish_helm_blackboard);
@@ -185,8 +182,7 @@ mod tests {
 
     fn app_with_snapshot() -> App {
         let mut app = App::new();
-        app.insert_resource(ShipState::new())
-            .insert_resource(ShipImpulse(ImpulseState::new()))
+        app            .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<SystemBlackboards>()
             .init_resource::<FrozenBlackboards>()
             // snapshot runs BEFORE publish so FrozenBlackboards lags by one tick

@@ -9,7 +9,6 @@ use crate::modifiers::power_system::{
     power_group_for_console, power_level_for_console, PowerConfig, PowerSystem,
 };
 use crate::ship_plugin::LastHelmInput;
-use crate::ship_state::ShipState;
 
 // ── Resources ──────────────────────────────────────────────────────────────────
 
@@ -242,7 +241,7 @@ pub fn tick_power_system(
 pub fn operate_power_ai(
     mut power_res: ResMut<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
-    ship: Res<ShipState>,
+    red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::server_app::LocalShip>>,
     last_helm: Option<Res<LastHelmInput>>,
     ai_config: Res<PowerAiConfigResource>,
     sessions: Option<Res<crate::lobby::Sessions>>,
@@ -266,7 +265,7 @@ pub fn operate_power_ai(
         }
     }
 
-    let red_alert = ship.red_alert();
+    let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
     let throttle = last_helm.map_or(0.0, |l| l.thrust);
 
     for (control_sources, mut power_comp) in ship_power_q.iter_mut() {
@@ -385,8 +384,7 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                 (Console::Helm, 25.0),
                 (Console::Tactical, 25.0),
                 (Console::Power, 25.0),
@@ -768,8 +766,7 @@ mod tests {
             .insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerAiConfigResource>()
-            .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(LastHelmInput::default())
+                        .insert_resource(LastHelmInput::default())
             .add_systems(Update, operate_power_ai);
 
         // Spawn a Ship entity with ShipPowerSystem component + AI power source.
@@ -781,6 +778,7 @@ mod tests {
             crate::ship_plugin::ShipSystemControlSources(resolver),
             crate::ship_plugin::ShipConfigComponent::default(),
             ShipPowerSystem(PowerSystem::default()),
+            crate::ship_state::ShipRedAlert::default(),
         ));
         app
     }
@@ -809,10 +807,8 @@ mod tests {
     fn ai_sets_weapons_to_three_on_red_alert_with_battery() {
         let mut app = ai_test_app();
         {
-            let mut ship = app
-                .world_mut()
-                .resource_mut::<crate::ship_state::ShipState>();
-            ship.toggle_red_alert();
+            let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
+            if let Ok(mut ra) = q.single_mut(app.world_mut()) { ra.toggle(); }
         }
         app.update();
         assert_eq!(app.world().resource::<ShipPowerSystem>().0.weapons, 3);
@@ -822,10 +818,8 @@ mod tests {
     fn ai_does_not_boost_weapons_when_battery_low() {
         let mut app = ai_test_app();
         {
-            let mut ship = app
-                .world_mut()
-                .resource_mut::<crate::ship_state::ShipState>();
-            ship.toggle_red_alert();
+            let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
+            if let Ok(mut ra) = q.single_mut(app.world_mut()) { ra.toggle(); }
         }
         // Set battery low on both the resource and the component.
         app.world_mut()

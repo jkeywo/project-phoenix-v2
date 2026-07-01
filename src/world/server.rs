@@ -7,7 +7,6 @@ use crate::comms_inbox::CommsInbox;
 use crate::lobby::{Sessions, Target, WorldResource};
 use crate::messages::{CommsContact, CommsMessage, Console, GamePhase, ServerMessage, ViewMode};
 use crate::objectives::ObjectiveManager;
-use crate::ship_state::ShipState;
 use crate::simulation::SimOutbox;
 use crate::world::content::{
     comms_template_states_from_world, evaluate_comms_templates, trigger_states_from_world,
@@ -1705,9 +1704,12 @@ fn handle_show_on_screen(
     ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
-    mut ship: ResMut<ShipState>,
+    mut view_mode_q: Query<&mut crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
 ) {
     let Ok(admitted) = ship_query.single() else {
+        return;
+    };
+    let Ok(mut vm) = view_mode_q.single_mut() else {
         return;
     };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
@@ -1717,17 +1719,17 @@ fn handle_show_on_screen(
         };
         if let Some(message_id) = show_message_id {
             if let Some(msg) = inbox.0.messages().into_iter().find(|m| &m.id == message_id) {
-                let already_on_screen = matches!(ship.view_mode, ViewMode::Comms)
+                let already_on_screen = matches!(vm.view_mode, ViewMode::Comms)
                     && on_screen
                         .0
                         .as_ref()
                         .is_some_and(|displayed| displayed.id == msg.id);
                 if already_on_screen {
                     on_screen.0 = None;
-                    ship.restore_captain_view();
+                    vm.restore_captain_view();
                 } else {
                     on_screen.0 = Some(msg.clone());
-                    ship.show_view_mode(ViewMode::Comms);
+                    vm.show_view_mode(ViewMode::Comms);
                 }
             }
         }
@@ -1774,13 +1776,17 @@ fn handle_comms_channel2(
 fn auto_clear_on_screen_message(
     mut on_screen: ResMut<OnScreenMessage>,
     inbox: Res<CommsInboxRes>,
-    ship: Res<ShipState>,
+    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
 ) {
     if on_screen.0.is_none() {
         return;
     }
+    let current_view = view_mode_q
+        .single()
+        .map(|vm| vm.view_mode.clone())
+        .unwrap_or(crate::messages::ViewMode::Camera(crate::messages::ViewDirection::Fore));
     // If the captain (or anyone) has switched away from Comms view, clear.
-    if !matches!(ship.view_mode, ViewMode::Comms) {
+    if !matches!(current_view, ViewMode::Comms) {
         on_screen.0 = None;
         return;
     }

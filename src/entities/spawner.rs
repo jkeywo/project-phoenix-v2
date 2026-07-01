@@ -309,9 +309,12 @@ pub fn spawn_entity(
             crate::sensors_plugin::SensorsTarget::default(),
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_state::ShipViewMode::default(),
+            crate::ship_state::ShipPhaserFrequency::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
-            crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
         ));
+        entity_commands.insert(
+            crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
+        );
         // All ship entities carry the Ship marker — player and NPC alike.
         // The LocalShip marker (not set here) is the viewscreen selector only.
         entity_commands.insert(crate::server_app::Ship);

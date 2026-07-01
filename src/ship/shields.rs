@@ -154,7 +154,7 @@ pub fn handle_shields_messages(
 /// AI target → consume; human → human → suppress).
 pub fn emit_shields_coordination(
     shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
-    ship: Res<crate::ship_state::ShipState>,
+    red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::server_app::LocalShip>>,
     mut coord_state: ResMut<ShieldsCoordinationState>,
     ai_config: Res<ShieldsAiConfigResource>,
     ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>,
@@ -166,7 +166,7 @@ pub fn emit_shields_coordination(
     let snapshots = shields.0.snapshot();
     coord_state.ensure_len(snapshots.len());
 
-    let red_alert = ship.red_alert();
+    let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
 
     let sender_origin = if let Ok(control_sources) = ship_query.single() {
         control_sources
@@ -404,6 +404,7 @@ mod tests {
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
+                crate::ship_state::ShipRedAlert::default(),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -412,8 +413,7 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-            .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                 (Console::Helm, 25.0),
                 (Console::Tactical, 25.0),
                 (Console::Power, 25.0),
@@ -549,8 +549,7 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-            .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                 (Console::Helm, 25.0),
                 (Console::Tactical, 25.0),
             ])))
@@ -645,6 +644,7 @@ mod tests {
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
+                crate::ship_state::ShipRedAlert::default(),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -653,8 +653,7 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-            .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                 (Console::Helm, 25.0),
                 (Console::Tactical, 25.0),
                 (Console::Power, 25.0),
@@ -804,10 +803,11 @@ mod tests {
             facing.hp = 60; // 60/100 = 0.6 >= 0.5 threshold
         }
 
-        // Activate red alert.
-        app.world_mut()
-            .resource_mut::<crate::ship_state::ShipState>()
-            .toggle_red_alert();
+        // Activate red alert via per-entity ShipRedAlert component.
+        {
+            let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
+            if let Ok(mut ra) = q.single_mut(app.world_mut()) { ra.toggle(); }
+        }
 
         // Mark down_notified so restore can fire.
         app.world_mut()

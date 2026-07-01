@@ -18,7 +18,7 @@ use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::region_shape::RegionShape;
 use crate::server::pfx::PfxPlugin;
-use crate::ship_state::{ShipPhysics, ShipState};
+use crate::ship_state::ShipPhysics;
 use crate::simulation::AsteroidDestroyedVfx;
 use crate::world::server::OnScreenMessage;
 
@@ -351,18 +351,18 @@ fn update_camera_aspect(
 
 fn toggle_cameras(
     state: Res<State<GamePhase>>,
-    ship: Res<ShipState>,
+    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
     mut game: Query<&mut Camera, With<GameCamera>>,
 ) {
-    if !state.is_changed() && !ship.is_changed() {
+    if !state.is_changed() {
         return;
     }
     let in_game = state.get() == &GamePhase::InProgress;
-    // The 3D GameCamera is active only when we're in a Camera or Comms view.
-    // Radar views are handled by the GenericRadarWidget UI pipeline
-    // (ServerViewscreenRadarPlugin), which renders through the always-active
-    // LobbyCamera (Camera2d, IsDefaultUiCamera).
-    let game_active = in_game && matches!(ship.view_mode, ViewMode::Camera(_) | ViewMode::Comms);
+    let view_mode = view_mode_q
+        .single()
+        .map(|vm| vm.view_mode.clone())
+        .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
+    let game_active = in_game && matches!(view_mode, ViewMode::Camera(_) | ViewMode::Comms);
 
     // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
     // in all phases so that UI nodes (FPS counter, radar widgets) continue to
@@ -393,7 +393,7 @@ fn update_view_screen_text(
 /// looking straight out. Ship is always behind the camera.
 /// Hull offset = 6.0 units (matches the ship's collision capsule radius).
 fn hull_camera(
-    ship: Res<ShipState>,
+    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
@@ -401,12 +401,14 @@ fn hull_camera(
         return;
     };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
+    let view_mode = view_mode_q
+        .single()
+        .map(|vm| vm.view_mode.clone())
+        .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
 
     // Direction vectors relative to ship heading (yaw=0 → ship faces -Z).
-    // fwd = (sin(yaw), 0, -cos(yaw)), port = left of heading, starboard = right.
-    // For ViewMode::Radar we still keep the camera at Fore so the 3D scene
     // remains coherent; the radar overlay is drawn separately (#45).
-    let direction = match &ship.view_mode {
+    let direction = match &view_mode {
         ViewMode::Camera(d) => d.clone(),
         ViewMode::Radar
         | ViewMode::ScienceRadar
@@ -440,12 +442,12 @@ fn hull_camera(
 }
 
 fn update_view_direction_label(
-    ship: Res<ShipState>,
+    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
     state: Res<State<GamePhase>>,
     mut label_query: Query<(&Children, &mut Visibility), With<ViewDirectionLabel>>,
     mut text_query: Query<&mut Text>,
 ) {
-    if !ship.is_changed() && !state.is_changed() {
+    if !state.is_changed() {
         return;
     }
     let Ok((children, mut vis)) = label_query.single_mut() else {
@@ -455,8 +457,12 @@ fn update_view_direction_label(
         *vis = Visibility::Hidden;
         return;
     }
+    let view_mode = view_mode_q
+        .single()
+        .map(|vm| vm.view_mode.clone())
+        .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
     *vis = Visibility::Visible;
-    let label = match &ship.view_mode {
+    let label = match &view_mode {
         ViewMode::Camera(ViewDirection::Fore) => "FORE",
         ViewMode::Camera(ViewDirection::Aft) => "AFT",
         ViewMode::Camera(ViewDirection::Port) => "PORT",

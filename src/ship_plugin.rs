@@ -925,7 +925,6 @@ mod tests {
     use crate::region_shape::RegionShape;
     use crate::regions::server::RegionPlugin;
     use crate::ship::rating;
-    use crate::ship_state::ShipState;
     use crate::simulation::LocalShip;
 
     fn test_app() -> App {
@@ -936,8 +935,7 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(crate::damage::ConsoleHull::from_config(
+                        .insert_resource(ShipHullIntegrity(crate::damage::ConsoleHull::from_config(
                 &[
                     (crate::messages::Console::Helm, 25.0),
                     (crate::messages::Console::Tactical, 25.0),

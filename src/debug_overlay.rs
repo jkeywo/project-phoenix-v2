@@ -416,7 +416,6 @@ fn update_entity_inspector(
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,
     >,
-    _ship_state: Res<crate::ship::state::ShipState>,
     _ship_hull: Res<crate::server_app::ShipHullIntegrity>,
     _ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
     _faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,

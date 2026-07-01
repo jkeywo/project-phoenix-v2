@@ -8,7 +8,6 @@ use crate::objectives::WorldConditions;
 use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::ship_state::ShipState;
 use crate::world::server::ObjectiveManagerRes;
 
 pub struct CaptainPlugin;
@@ -41,18 +40,16 @@ impl Plugin for CaptainPlugin {
 fn handle_toggle_red_alert(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut red_alert_q: Query<&mut crate::ship_state::ShipRedAlert, With<crate::server_app::LocalShip>>,
-    mut ship: ResMut<ShipState>,
 ) {
     let Ok(admitted) = ship_query.single() else {
         return;
     };
+    let Ok(mut ra) = red_alert_q.single_mut() else {
+        return;
+    };
     for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
         if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
-            // Write to both global resource (backward compat) and per-entity component.
-            ship.toggle_red_alert();
-            if let Ok(mut ra) = red_alert_q.single_mut() {
-                ra.0 = ship.red_alert();
-            }
+            ra.toggle();
         }
     }
 }
@@ -81,21 +78,20 @@ fn view_request_from_admitted(
 fn handle_set_view(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut view_mode_q: Query<&mut crate::ship_state::ShipViewMode, With<crate::server_app::LocalShip>>,
-    mut ship: ResMut<ShipState>,
 ) {
     let Ok(admitted) = ship_query.single() else {
         return;
     };
+    let Ok(mut vm) = view_mode_q.single_mut() else {
+        return;
+    };
     for cmd in admitted.0.iter() {
         if let Some((source, mode)) = view_request_from_admitted(cmd) {
-            // Write to both global resource (backward compat) and per-entity component.
-            ship.request_view_mode_from(source.clone(), mode.clone());
-            if let Ok(mut vm) = view_mode_q.single_mut() {
-                vm.request_view_mode_from(source, mode);
-            }
+            vm.request_view_mode_from(source, mode);
         }
     }
 }
+
 
 /// Toggle the captain's priority boost for a doctrine objective.
 /// Sending the same id twice clears the boost.
@@ -130,7 +126,6 @@ fn handle_set_objective_priority(
 /// global path for backward compat with tests).
 fn operate_captain_ai(
     time: Res<Time>,
-    ship: Res<ShipState>,
     mut ship_query: Query<(
         &mut AdmittedCommands,
         &ShipSystemControlSources,
@@ -171,7 +166,6 @@ fn operate_captain_ai(
                 ),
             }
         } else {
-            // No blackboard yet — use global RecentCombatActivity.
             (
                 most_recent(
                     activity.last_damage_taken,
@@ -182,11 +176,7 @@ fn operate_captain_ai(
         };
 
         if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, last_weapon_fired) {
-            // Read red_alert from per-entity component when available,
-            // fall back to global ShipState for backward compat.
-            let current_red_alert = red_alert_opt
-                .map(|ra| ra.0)
-                .unwrap_or_else(|| ship.red_alert());
+            let current_red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
             if should_be_red_alert != current_red_alert {
                 admitted.0.push(crate::messages::AdmittedCommand {
                     target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
@@ -210,33 +200,43 @@ fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
 // ── Blackboard publish ───────────────────────────────────────────────────────
 
 fn publish_captain_blackboard(
-    ship: Res<ShipState>,
     hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
-    ship_query: Query<&ShipSystemControlSources, With<crate::server_app::LocalShip>>,
+    ship_query: Query<
+        (
+            &ShipSystemControlSources,
+            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship_state::ShipViewMode>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
-    let red_alert = ship.red_alert();
+    let (control_sources, red_alert_comp, view_mode_comp) = ship_query
+        .single()
+        .map(|(cs, ra, vm)| (Some(cs), ra, vm))
+        .unwrap_or((None, None, None));
+
+    let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
+    let view_mode = view_mode_comp
+        .map(|vm| vm.view_mode.clone())
+        .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
+
     let hull_fraction = hull
         .as_ref()
         .map(|h| {
             let max = h.0.total_max();
-            if max > 0.0 {
-                h.0.total_current() / max
-            } else {
-                1.0
-            }
+            if max > 0.0 { h.0.total_current() / max } else { 1.0 }
         })
         .unwrap_or(1.0);
-    let control_sources = ship_query.single().ok();
     let red_alert_auto = control_sources.is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::red_alert_system_id()) == ControlSource::Ai
     });
     let viewscreen_auto = control_sources.is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::viewscreen_system_id()) == ControlSource::Ai
     });
-    let view_direction = match &ship.view_mode {
+    let view_direction = match &view_mode {
         ViewMode::Camera(ViewDirection::Fore) => "Fore",
         ViewMode::Camera(ViewDirection::Port) => "Port",
         ViewMode::Camera(ViewDirection::Starboard) => "Starboard",
@@ -245,13 +245,7 @@ fn publish_captain_blackboard(
     }
     .to_string();
 
-    // Score objectives to determine which doctrine ones are currently relevant.
-    // Mission objectives are always shown; doctrine objectives are hidden when
-    // their utility score is zero (conditions not met).
-    let conditions = WorldConditions {
-        red_alert,
-        hull_fraction,
-    };
+    let conditions = WorldConditions { red_alert, hull_fraction };
     let captain_boost = boost.as_ref().and_then(|b| {
         b.boosted_id
             .as_deref()
@@ -295,7 +289,7 @@ fn publish_captain_blackboard(
         viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
         viewscreen_auto,
         view_direction,
-        view_mode: ship.view_mode.clone(),
+        view_mode,
         objectives: objectives_snap,
         hull_integrity_pct,
         game_status,
@@ -337,8 +331,7 @@ mod tests {
             .add_plugins(crate::server_app::AdmissionPlugin)
             .init_resource::<Outbox>()
             .init_resource::<SystemBlackboards>()
-            .insert_resource(ShipState::new())
-            .add_systems(PostUpdate, collect);
+                        .add_systems(PostUpdate, collect);
         app.world_mut().spawn((
             Ship,
             LocalShip,
@@ -347,10 +340,38 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
+            crate::ship_state::ShipRedAlert::default(),
+            crate::ship_state::ShipViewMode::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
         ));
         // Tests that read AdmittedCommands as a resource need it inserted.
         app.insert_resource(crate::messages::AdmittedCommands::default());
         app
+    }
+
+    fn get_red_alert(app: &mut App) -> bool {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::ship_state::ShipRedAlert, With<LocalShip>>();
+        q.single(app.world()).map(|ra| ra.0).unwrap_or(false)
+    }
+
+    fn get_view_mode(app: &mut App) -> ViewMode {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::ship_state::ShipViewMode, With<LocalShip>>();
+        q.single(app.world())
+            .map(|vm| vm.view_mode.clone())
+            .unwrap_or(ViewMode::Camera(ViewDirection::Fore))
+    }
+
+    fn set_red_alert(app: &mut App, red: bool) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::ship_state::ShipRedAlert, With<LocalShip>>();
+        if let Ok(mut ra) = q.single_mut(app.world_mut()) {
+            ra.0 = red;
+        }
     }
 
     fn captain_bb(app: &App) -> CaptainBlackboard {
@@ -446,7 +467,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<ShipState>().red_alert());
+        assert!(get_red_alert(&mut app));
     }
 
     #[test]
@@ -471,7 +492,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(!app.world().resource::<ShipState>().red_alert());
+        assert!(!get_red_alert(&mut app));
     }
 
     #[test]
@@ -487,7 +508,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<ShipState>().red_alert());
+        assert!(get_red_alert(&mut app));
     }
 
     #[test]
@@ -503,7 +524,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<ShipState>().red_alert());
+        assert!(get_red_alert(&mut app));
     }
 
     #[test]
@@ -533,7 +554,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(!app.world().resource::<ShipState>().red_alert());
+        assert!(!get_red_alert(&mut app));
     }
 
     #[test]
@@ -549,7 +570,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(!app.world().resource::<ShipState>().red_alert());
+        assert!(!get_red_alert(&mut app));
     }
 
     #[test]
@@ -569,7 +590,7 @@ mod tests {
         );
         tick(&mut app);
         assert!(
-            !app.world().resource::<ShipState>().red_alert(),
+            !get_red_alert(&mut app),
             "unauthorized command must have no effect"
         );
         assert!(
@@ -636,7 +657,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(!app.world().resource::<ShipState>().red_alert());
+        assert!(!get_red_alert(&mut app));
     }
 
     #[test]
@@ -652,7 +673,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<ShipState>().red_alert());
+        assert!(get_red_alert(&mut app));
         push(
             &mut app,
             "captain",
@@ -662,7 +683,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(!app.world().resource::<ShipState>().red_alert());
+        assert!(!get_red_alert(&mut app));
     }
 
     // ── SetView tests ───────────────────────────────────────────────────────
@@ -701,7 +722,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Starboard)
         );
     }
@@ -731,7 +752,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Fore)
         );
     }
@@ -752,7 +773,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Aft)
         );
     }
@@ -816,7 +837,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Radar
         );
         push(
@@ -831,7 +852,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Camera(ViewDirection::Aft)
         );
     }
@@ -869,7 +890,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Radar
         );
     }
@@ -906,7 +927,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Radar
         );
     }
@@ -933,7 +954,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
+            get_view_mode(&mut app),
             ViewMode::Radar
         );
     }
@@ -955,7 +976,7 @@ mod tests {
             .last_damage_taken = Some(0.0);
         tick(&mut app);
         assert!(
-            app.world().resource::<ShipState>().red_alert(),
+            get_red_alert(&mut app),
             "AI should activate red alert when damage was recent"
         );
     }
@@ -965,10 +986,8 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
         // Put ship in red alert
-        app.world_mut()
-            .resource_mut::<ShipState>()
-            .toggle_red_alert();
-        assert!(app.world().resource::<ShipState>().red_alert());
+        { let cur = get_red_alert(&mut app); set_red_alert(&mut app, !cur); }
+        assert!(get_red_alert(&mut app));
         // Set captain to AI mode with no recent activity
         set_control_source(
             &mut app,
@@ -978,7 +997,7 @@ mod tests {
         // No recent damage or weapons fire — activity is default (None)
         tick(&mut app);
         assert!(
-            !app.world().resource::<ShipState>().red_alert(),
+            !get_red_alert(&mut app),
             "AI should deactivate red alert when no recent combat activity"
         );
     }
@@ -993,7 +1012,7 @@ mod tests {
         tick(&mut app);
         // Human-controlled: AI system should not fire
         assert!(
-            !app.world().resource::<ShipState>().red_alert(),
+            !get_red_alert(&mut app),
             "AI system must not fire when captain is human-controlled"
         );
     }
@@ -1014,7 +1033,7 @@ mod tests {
         tick(&mut app);
 
         assert!(
-            app.world().resource::<ShipState>().red_alert(),
+            get_red_alert(&mut app),
             "AI should activate red alert when hostile fire targets the ship"
         );
     }
@@ -1035,7 +1054,7 @@ mod tests {
         tick(&mut app);
 
         assert!(
-            !app.world().resource::<ShipState>().red_alert(),
+            !get_red_alert(&mut app),
             "AI must only operate red alert when the red-alert system is automated"
         );
     }
@@ -1048,25 +1067,29 @@ mod tests {
     use crate::server_app::ShipHullIntegrity;
     use crate::world::server::ObjectiveManagerRes;
 
-    /// Minimal app: just publish_captain_blackboard + ShipState + SystemBlackboards.
+    /// Minimal app: just publish_captain_blackboard + per-entity components + SystemBlackboards.
     fn bb_test_app() -> App {
         let mut app = App::new();
         app.add_systems(Update, publish_captain_blackboard);
-        app.insert_resource(ShipState::new());
         app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
             Console::CaptainChair,
             100.0,
         )])));
         app.init_resource::<SystemBlackboards>();
+        // Spawn LocalShip entity with required components for publish_captain_blackboard.
+        app.world_mut().spawn((
+            crate::server_app::LocalShip,
+            crate::ship_state::ShipRedAlert::default(),
+            crate::ship_state::ShipViewMode::default(),
+            ShipSystemControlSources::default(),
+        ));
         app
     }
 
     #[test]
     fn publish_captain_blackboard_reflects_red_alert() {
         let mut app = bb_test_app();
-        app.world_mut()
-            .resource_mut::<ShipState>()
-            .toggle_red_alert();
+        { let cur = get_red_alert(&mut app); set_red_alert(&mut app, !cur); }
         app.update();
 
         let bb = captain_bb(&app);
@@ -1077,13 +1100,15 @@ mod tests {
     #[test]
     fn publish_captain_blackboard_marks_ai_red_alert_auto() {
         let mut app = bb_test_app();
-        let mut cs = ShipSystemControlSources::default();
-        cs.0.set(
-            crate::system_registry::red_alert_system_id(),
-            ControlSource::Ai,
-        );
-        app.world_mut()
-            .spawn((Ship, LocalShip, ShipConfigComponent::default(), cs));
+        // Set the LocalShip entity's ShipSystemControlSources to AI for red-alert.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemControlSources, With<LocalShip>>();
+            if let Ok(mut cs) = q.single_mut(app.world_mut()) {
+                cs.0.set(crate::system_registry::red_alert_system_id(), ControlSource::Ai);
+            }
+        }
         app.update();
 
         let bb = captain_bb(&app);
@@ -1097,13 +1122,14 @@ mod tests {
     #[test]
     fn publish_captain_blackboard_marks_ai_viewscreen_auto() {
         let mut app = bb_test_app();
-        let mut cs = ShipSystemControlSources::default();
-        cs.0.set(
-            crate::system_registry::viewscreen_system_id(),
-            ControlSource::Ai,
-        );
-        app.world_mut()
-            .spawn((Ship, LocalShip, ShipConfigComponent::default(), cs));
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemControlSources, With<LocalShip>>();
+            if let Ok(mut cs) = q.single_mut(app.world_mut()) {
+                cs.0.set(crate::system_registry::viewscreen_system_id(), ControlSource::Ai);
+            }
+        }
         app.update();
 
         let bb = captain_bb(&app);
@@ -1162,7 +1188,15 @@ mod tests {
     #[test]
     fn publish_captain_blackboard_clears_direction_for_non_camera_view() {
         let mut app = bb_test_app();
-        app.world_mut().resource_mut::<ShipState>().view_mode = ViewMode::Radar;
+        // Set view mode via per-entity component
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::ship_state::ShipViewMode, With<LocalShip>>();
+            if let Ok(mut vm) = q.single_mut(app.world_mut()) {
+                vm.view_mode = ViewMode::Radar;
+            }
+        }
         app.update();
         assert_eq!(captain_bb(&app).view_direction, "");
     }
@@ -1211,9 +1245,7 @@ mod tests {
     #[test]
     fn doctrine_objective_shown_in_captain_bb_when_score_positive() {
         let mut app = bb_test_app();
-        app.world_mut()
-            .resource_mut::<ShipState>()
-            .toggle_red_alert();
+        { let cur = get_red_alert(&mut app); set_red_alert(&mut app, !cur); }
         app.world_mut()
             .insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
         app.update();
@@ -1370,7 +1402,7 @@ mod tests {
 
         tick(&mut app);
         assert!(
-            app.world().resource::<ShipState>().red_alert(),
+            get_red_alert(&mut app),
             "AI should activate red alert when last_damage_taken_secs is set in viewscreen blackboard"
         );
     }

@@ -206,8 +206,7 @@ mod tests {
         sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull,
         LastBroadcastShields, ShipHullIntegrity, ShipImpulse,
     };
-    use crate::ship_state::ShipState;
-
+    
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
@@ -260,8 +259,7 @@ mod tests {
                     .in_set(crate::sim_sets::SimSet::PublishAggregate),
             )
             .init_resource::<Outbox>()
-            .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
+                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
                 Console::Navigation,
                 25.0,
             )])))

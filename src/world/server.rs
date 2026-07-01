@@ -1740,7 +1740,7 @@ fn handle_show_on_screen(
 fn handle_comms_channel2(
     mut reader: MessageReader<CommsChannel2Event>,
     mut inbox: ResMut<CommsInboxRes>,
-    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
+    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::LocalShip>>,
 ) {
     let policy = if let Ok(control_sources) = ship_query.single() {
         control_sources

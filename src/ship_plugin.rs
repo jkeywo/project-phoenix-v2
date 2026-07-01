@@ -27,7 +27,7 @@ use crate::server_app::LocalShip;
 #[derive(Resource)]
 struct HelmInputTimer(Timer);
 
-#[derive(Resource, Component, Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct LastHelmInput {
     pub thrust: f32,
     pub steering: f32,
@@ -186,7 +186,6 @@ impl Plugin for ShipPlugin {
             1.0 / 30.0,
             TimerMode::Repeating,
         )))
-        .init_resource::<LastHelmInput>()
         .init_resource::<ImpulseConfigResource>()
         .init_resource::<BoostConfigResource>()
         .init_resource::<ShipBoost>()
@@ -226,11 +225,14 @@ fn process_helm_inputs(
     mut timer: ResMut<HelmInputTimer>,
     ship_query: Query<(&AdmittedCommands, &ShipSystemControlSources), With<LocalShip>>,
     mut physics_query: Query<&mut ShipPhysics, With<LocalShip>>,
-    mut last_input: ResMut<LastHelmInput>,
+    mut last_input_q: Query<&mut LastHelmInput, With<LocalShip>>,
     modifiers: Res<ShipModifiers>,
     drive: HelmDriveParams,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
+    let Ok(mut last_input) = last_input_q.single_mut() else {
+        return;
+    };
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
     // last cached helm input so a stale steering/thrust value can't
     // resurface the moment impulse cancels or the autopilot disengages.
@@ -348,7 +350,7 @@ fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy 
 #[allow(clippy::too_many_arguments)]
 fn operate_helm_ai(
     time: Res<Time>,
-    mut last_input: ResMut<LastHelmInput>,
+    mut local_ship_input: Query<&mut LastHelmInput, With<LocalShip>>,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
@@ -451,7 +453,9 @@ fn operate_helm_ai(
         if !has_helm_objective {
             // No objectives → zero out intent (decelerate to stop).
             if is_local {
-                *last_input = LastHelmInput::default();
+                if let Ok(mut li) = local_ship_input.single_mut() {
+                    *li = LastHelmInput::default();
+                }
             }
             continue;
         }
@@ -518,7 +522,9 @@ fn operate_helm_ai(
         // For the player ship: also write LastHelmInput so process_helm_inputs
         // sees the AI-driven intent (though it will re-apply physics anyway).
         if is_local {
-            *last_input = LastHelmInput { thrust, steering };
+            if let Ok(mut li) = local_ship_input.single_mut() {
+                *li = LastHelmInput { thrust, steering };
+            }
         }
     }
 }
@@ -676,7 +682,7 @@ fn tick_boost(
     time: Res<Time>,
     mut boost: ResMut<ShipBoost>,
     config: Res<BoostConfigResource>,
-    last_input: Res<LastHelmInput>,
+    last_input_q: Query<&LastHelmInput, With<LocalShip>>,
     sessions: Res<Sessions>,
     impulse: Res<ShipImpulse>,
     ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<LocalShip>>,
@@ -687,6 +693,7 @@ fn tick_boost(
     if !config.enabled {
         return;
     }
+    let last_input = last_input_q.single().copied().unwrap_or_default();
     let policy = helm_control_policy(&control_sources);
     let has_helm = sessions
         .0
@@ -972,6 +979,7 @@ mod tests {
             crate::entity_spawner::EntityConsoleHull(
                 crate::damage::ConsoleHull::from_config(hull_config),
             ),
+            LastHelmInput::default(),
         ));
         app
     }
@@ -989,6 +997,23 @@ mod tests {
             .unwrap()
             .0
             .apply_damage(amount, &mut rng);
+    }
+
+    fn get_last_helm_input(app: &mut App) -> LastHelmInput {
+        app.world_mut()
+            .query_filtered::<&LastHelmInput, With<LocalShip>>()
+            .single(app.world())
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn set_last_helm_input(app: &mut App, val: LastHelmInput) {
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().entity_mut(ship).insert(val);
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
@@ -1114,7 +1139,7 @@ mod tests {
         tick_twice(&mut app);
 
         assert_eq!(
-            *app.world().resource::<LastHelmInput>(),
+            get_last_helm_input(&mut app),
             LastHelmInput {
                 thrust: 1.0,
                 steering: 0.25
@@ -1131,7 +1156,7 @@ mod tests {
         tick_twice(&mut app);
 
         assert_eq!(
-            *app.world().resource::<LastHelmInput>(),
+            get_last_helm_input(&mut app),
             LastHelmInput {
                 thrust: 0.0,
                 steering: 0.0
@@ -1162,7 +1187,7 @@ mod tests {
         // Human input must be ignored when policy is AI; no AiControllerComponent
         // on the player ship yet, so LastHelmInput stays at default.
         assert_eq!(
-            *app.world().resource::<LastHelmInput>(),
+            get_last_helm_input(&mut app),
             LastHelmInput::default()
         );
     }
@@ -1175,7 +1200,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            *app.world().resource::<LastHelmInput>(),
+            get_last_helm_input(&mut app),
             LastHelmInput::default()
         );
         assert_eq!(get_ship_physics(&mut app).forward_speed, 0.0);
@@ -1717,9 +1742,7 @@ mod tests {
             boost.0.toggle();
         }
         {
-            let mut last_input = app.world_mut().resource_mut::<LastHelmInput>();
-            last_input.thrust = 1.0;
-            last_input.steering = 1.0;
+            set_last_helm_input(&mut app, LastHelmInput { thrust: 1.0, steering: 1.0 });
         }
 
         tick(&mut app);
@@ -1894,7 +1917,7 @@ mod tests {
             ImpulsePhase::Charging,
             "impulse should be charging after StartImpulseCharge"
         );
-        let last = app.world().resource::<LastHelmInput>();
+        let last = get_last_helm_input(&mut app);
         assert_eq!(
             (last.thrust, last.steering),
             (0.0, 0.0),
@@ -2277,7 +2300,7 @@ station = "helm"
 
         tick(&mut app);
 
-        let last = *app.world().resource::<LastHelmInput>();
+        let last = get_last_helm_input(&mut app);
         assert!(
             last.thrust > 0.0,
             "AI helm must apply positive thrust toward Reach anchor; got {last:?}"
@@ -2297,7 +2320,7 @@ station = "helm"
 
         tick(&mut app);
 
-        let last = *app.world().resource::<LastHelmInput>();
+        let last = get_last_helm_input(&mut app);
         assert!(
             last.thrust > 0.0,
             "AI helm must apply positive thrust toward Patrol anchor; got {last:?}"
@@ -2324,7 +2347,7 @@ station = "helm"
 
         tick(&mut app);
 
-        let last = *app.world().resource::<LastHelmInput>();
+        let last = get_last_helm_input(&mut app);
         assert!(
             last.thrust > 0.0,
             "AI helm must pursue named Destroy objective target; got {last:?}"
@@ -2344,7 +2367,7 @@ station = "helm"
 
         tick(&mut app);
 
-        let last = *app.world().resource::<LastHelmInput>();
+        let last = get_last_helm_input(&mut app);
         assert_eq!(
             last,
             LastHelmInput::default(),
@@ -2385,7 +2408,7 @@ station = "helm"
         tick(&mut app);
 
         // operate_helm_ai: unresolved Destroy target → zero thrust remains.
-        let last = *app.world().resource::<LastHelmInput>();
+        let last = get_last_helm_input(&mut app);
         assert_eq!(
             last,
             LastHelmInput::default(),
@@ -2590,7 +2613,7 @@ station = "helm"
 
         tick(&mut app);
 
-        let last = *app.world().resource::<LastHelmInput>();
+        let last = get_last_helm_input(&mut app);
         // The Destroy directive targets an entity at (80, 0). Full operate_helm
         // should produce non-zero thrust to pursue it.
         assert!(

@@ -242,7 +242,7 @@ pub fn operate_power_ai(
     mut power_res: ResMut<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
     red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::server_app::LocalShip>>,
-    last_helm: Option<Res<LastHelmInput>>,
+    last_helm_q: Query<&LastHelmInput, With<crate::server_app::LocalShip>>,
     ai_config: Res<PowerAiConfigResource>,
     sessions: Option<Res<crate::lobby::Sessions>>,
     ship_comp_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>,
@@ -266,7 +266,7 @@ pub fn operate_power_ai(
     }
 
     let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
-    let throttle = last_helm.map_or(0.0, |l| l.thrust);
+    let throttle = last_helm_q.single().map(|l| l.thrust).unwrap_or(0.0);
 
     for (control_sources, mut power_comp) in ship_power_q.iter_mut() {
         let policy = control_sources
@@ -766,7 +766,6 @@ mod tests {
             .insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerAiConfigResource>()
-                        .insert_resource(LastHelmInput::default())
             .add_systems(Update, operate_power_ai);
 
         // Spawn a Ship entity with ShipPowerSystem component + AI power source.
@@ -779,6 +778,7 @@ mod tests {
             crate::ship_plugin::ShipConfigComponent::default(),
             ShipPowerSystem(PowerSystem::default()),
             crate::ship_state::ShipRedAlert::default(),
+            LastHelmInput::default(),
         ));
         app
     }
@@ -786,10 +786,14 @@ mod tests {
     #[test]
     fn ai_sets_helm_to_three_when_high_throttle_and_battery_ok() {
         let mut app = ai_test_app();
-        app.insert_resource(LastHelmInput {
-            thrust: 0.9,
-            steering: 0.0,
-        });
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(LastHelmInput { thrust: 0.9, steering: 0.0 });
         // battery_pct = 100/100 = 1.0 >= 0.75 floor
         app.update();
         assert_eq!(app.world().resource::<ShipPowerSystem>().0.helm, 3);

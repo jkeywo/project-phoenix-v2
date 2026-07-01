@@ -9,7 +9,7 @@ use crate::messages::{GamePhase, ModifierSlot, ServerMessage};
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
 use crate::server_app::SimOutbox;
-use crate::ship_state::ShipState;
+use crate::ship_state::ShipPhysics;
 use crate::simulation::GameOverReason;
 use crate::simulation::{LocalShip, ShipHullIntegrity, ShipImpulse};
 
@@ -65,14 +65,15 @@ pub(crate) fn update_region_membership(
     mut membership: ResMut<RegionMembership>,
     region_query: Query<(Entity, &Transform, &RegionShapeSection)>,
     uuid_query: Query<&EntityUuid>,
-    ship_state: Res<ShipState>,
+    physics_q: Query<&ShipPhysics, With<LocalShip>>,
     ship_query: Query<Entity, With<LocalShip>>,
 ) {
     let Ok(ship_entity) = ship_query.single() else {
         return;
     };
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
 
-    let ship_pos = glam::Vec3::new(ship_state.x, 0.0, ship_state.z);
+    let ship_pos = glam::Vec3::new(physics.x, 0.0, physics.z);
 
     // Cache UUIDs for all current region entities (survives despawn)
     for (entity, _, _) in region_query.iter() {
@@ -252,7 +253,7 @@ pub(crate) fn handle_slow_zone_speed_clamp(
     trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
     modifiers: Res<ShipModifiers>,
-    mut ship: ResMut<ShipState>,
+    mut ship_query: Query<&mut ShipPhysics, With<crate::simulation::Ship>>,
 ) {
     let ev = trigger.event();
     let Ok(effects) = region_query.get(ev.region_entity) else {
@@ -267,8 +268,10 @@ pub(crate) fn handle_slow_zone_speed_clamp(
     }
     let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
     let effective_max = base_max * modifiers.get(&ModifierSlot::MaxSpeed);
-    if ship.forward_speed.abs() > effective_max {
-        ship.forward_speed = ship.forward_speed.signum() * effective_max;
+    if let Ok(mut physics) = ship_query.single_mut() {
+        if physics.forward_speed.abs() > effective_max {
+            physics.forward_speed = physics.forward_speed.signum() * effective_max;
+        }
     }
 }
 
@@ -291,10 +294,10 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(RegionPlugin)
-            .insert_resource(ShipState::new())
             .insert_resource(ShipModifiers::new());
-        // Spawn the ship entity
-        app.world_mut().spawn((LocalShip, Transform::default()));
+        // Spawn the ship entity with ShipPhysics so region systems can query it.
+        app.world_mut()
+            .spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
         app
     }
 
@@ -350,9 +353,12 @@ mod tests {
     }
 
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
-        let mut ship = app.world_mut().resource_mut::<ShipState>();
-        ship.x = x;
-        ship.z = z;
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::ship_state::ShipPhysics, With<LocalShip>>();
+        let mut physics = q.single_mut(app.world_mut()).expect("expected LocalShip with ShipPhysics");
+        physics.x = x;
+        physics.z = z;
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Entry tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -502,7 +508,6 @@ mod tests {
         // Manually control time — no TimePlugin. Bevy 0.18 Time is generic;
         // we insert Time<()> ourselves and use advance_by() before each update.
         app.insert_resource(Time::<()>::default());
-        app.insert_resource(ShipState::new());
         app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
             (crate::messages::Console::Helm, 25.0),
             (crate::messages::Console::Tactical, 25.0),
@@ -513,7 +518,9 @@ mod tests {
         use crate::shield::{ShieldConfig, ShieldSystem};
         app.world_mut().spawn((
             LocalShip,
+            crate::simulation::Ship,
             Transform::default(),
+            crate::ship_state::ShipPhysics::default(),
             crate::simulation::ShipShields(ShieldSystem::new(&ShieldConfig::default())),
         ));
         app
@@ -523,10 +530,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(RegionPlugin);
         app.insert_resource(Time::<()>::default());
-        app.insert_resource(ShipState::new());
         app.insert_resource(ShipImpulse(ImpulseState::new()));
         app.insert_resource(ShipModifiers::new());
-        app.world_mut().spawn((LocalShip, Transform::default()));
+        app.world_mut().spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
         app
     }
 
@@ -870,9 +876,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
-            .insert_resource(Time::<()>::default())
-            .insert_resource(ShipState::new());
-        app.world_mut().spawn((LocalShip, Transform::default()));
+            .insert_resource(Time::<()>::default());
+        app.world_mut().spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
         app
     }
 
@@ -1007,9 +1012,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
-            .insert_resource(Time::<()>::default())
-            .insert_resource(ShipState::new());
-        app.world_mut().spawn((LocalShip, Transform::default()));
+            .insert_resource(Time::<()>::default());
+        app.world_mut().spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
         app
     }
 
@@ -1121,6 +1125,21 @@ mod tests {
         check_modifier(&app, ModifierSlot::MaxYawRate, 1.0);
     }
 
+    fn get_ship_physics(app: &mut App) -> crate::ship_state::ShipPhysics {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::ship_state::ShipPhysics, With<LocalShip>>();
+        q.single(app.world()).expect("expected LocalShip with ShipPhysics").clone()
+    }
+
+    fn set_physics(app: &mut App, f: impl FnOnce(&mut crate::ship_state::ShipPhysics)) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::ship_state::ShipPhysics, With<LocalShip>>();
+        let mut p = q.single_mut(app.world_mut()).expect("expected LocalShip with ShipPhysics");
+        f(&mut p);
+    }
+
     /// RED 5: entry clamps forward_speed to new effective max
     #[test]
     fn entering_slow_zone_clamps_forward_speed() {
@@ -1128,22 +1147,18 @@ mod tests {
         spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
         // Set ship speed above the clamped limit
-        {
-            let mut ship = app.world_mut().resource_mut::<ShipState>();
-            ship.forward_speed = 50.0;
-            ship.x = 10.0; // inside region
-        }
+        set_physics(&mut app, |p| { p.forward_speed = 50.0; p.x = 10.0; });
 
         tick_with_dt(&mut app, 0.016);
 
         // After clamping: base max speed = 25.0, modifier = 0.6667, effective max = 16.667
-        let ship = app.world().resource::<ShipState>();
         let expected_clamped = ShipPhysicsConfig::new().max_speed * (1.0 / 1.5);
+        let physics = get_ship_physics(&mut app);
         assert!(
-            (ship.forward_speed - expected_clamped).abs() < 0.001,
+            (physics.forward_speed - expected_clamped).abs() < 0.001,
             "expected forward_speed clamped to ~{}, got {}",
             expected_clamped,
-            ship.forward_speed
+            physics.forward_speed
         );
     }
 
@@ -1153,20 +1168,16 @@ mod tests {
         let mut app = slow_zone_test_app();
         spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
-        {
-            let mut ship = app.world_mut().resource_mut::<ShipState>();
-            ship.forward_speed = 5.0;
-            ship.x = 10.0; // inside region
-        }
+        set_physics(&mut app, |p| { p.forward_speed = 5.0; p.x = 10.0; });
 
         tick_with_dt(&mut app, 0.016);
 
         // 5.0 is already below effective max (16.667), should remain 5.0
-        let ship = app.world().resource::<ShipState>();
+        let physics = get_ship_physics(&mut app);
         assert!(
-            (ship.forward_speed - 5.0).abs() < 0.001,
+            (physics.forward_speed - 5.0).abs() < 0.001,
             "forward_speed should remain 5.0, got {}",
-            ship.forward_speed
+            physics.forward_speed
         );
     }
 
@@ -1193,21 +1204,17 @@ mod tests {
         let mut app = slow_zone_test_app();
         let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
-        // Start with 50 speed, enter Ã¢â€ â€™ clamped to ~16.667
-        {
-            let mut ship = app.world_mut().resource_mut::<ShipState>();
-            ship.forward_speed = 50.0;
-            ship.x = 10.0; // inside region
-        }
+        // Start with 50 speed, enter → clamped to ~16.667
+        set_physics(&mut app, |p| { p.forward_speed = 50.0; p.x = 10.0; });
 
         tick_with_dt(&mut app, 0.016);
 
         // Confirm speed was clamped
-        let ship = app.world().resource::<ShipState>();
+        let physics = get_ship_physics(&mut app);
         assert!(
-            (ship.forward_speed - 16.667).abs() < 0.001,
+            (physics.forward_speed - 16.667).abs() < 0.001,
             "speed should be clamped to ~16.667, got {}",
-            ship.forward_speed
+            physics.forward_speed
         );
 
         // Exit the region
@@ -1215,11 +1222,11 @@ mod tests {
         tick_with_dt(&mut app, 0.016);
 
         // Speed should REMAIN clamped (not restored to 50)
-        let ship = app.world().resource::<ShipState>();
+        let physics = get_ship_physics(&mut app);
         assert!(
-            (ship.forward_speed - 16.667).abs() < 0.001,
+            (physics.forward_speed - 16.667).abs() < 0.001,
             "speed should remain clamped after exit (not restored), got {}",
-            ship.forward_speed
+            physics.forward_speed
         );
     }
 
@@ -1232,9 +1239,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
-            .insert_resource(Time::<()>::default())
-            .insert_resource(ShipState::new());
-        app.world_mut().spawn((LocalShip, Transform::default()));
+            .insert_resource(Time::<()>::default());
+        app.world_mut().spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
         app
     }
 

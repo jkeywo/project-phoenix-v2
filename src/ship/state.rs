@@ -1,6 +1,29 @@
 use crate::messages::{ViewDirection, ViewMode};
 use crate::ship::viewscreen::{source_system_for_view_mode, ViewscreenArbiter, ViewscreenRequest};
-use bevy::prelude::Resource;
+use bevy::prelude::{Component, Resource};
+
+/// Per-entity physics state component for every ship entity (player and NPC).
+///
+/// Replaces the `x`, `z`, `yaw`, `forward_speed`, and `roll` fields that were
+/// previously on the singleton `ShipState` resource. Both the player ship and
+/// NPC ships carry this component; the physics tick reads/writes it uniformly.
+///
+/// Derives both `Component` (production use on entities) and `Resource`
+/// (retained so that existing test helpers that call `insert_resource` continue
+/// to compile during the migration window).
+#[derive(Component, Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShipPhysics {
+    /// X position in world space.
+    pub x: f32,
+    /// Z position in world space.
+    pub z: f32,
+    /// Yaw angle in radians (0 = facing negative Z).
+    pub yaw: f32,
+    /// Current forward speed (positive = forward, negative = reverse).
+    pub forward_speed: f32,
+    /// Current visual banking roll angle in radians (leans into turns).
+    pub roll: f32,
+}
 
 #[derive(Resource)]
 pub struct ShipState {
@@ -8,15 +31,6 @@ pub struct ShipState {
     pub view_mode: ViewMode,
     captain_view_direction: ViewDirection,
     viewscreen: ViewscreenArbiter,
-    /// Ship position (x, z)
-    pub x: f32,
-    pub z: f32,
-    /// Yaw angle in radians (0 = facing negative Z)
-    pub yaw: f32,
-    /// Current forward speed
-    pub forward_speed: f32,
-    /// Current visual banking roll angle in radians (leans into turns).
-    pub roll: f32,
     /// Current phaser emitter frequency (0.0–1.0). Changed by `SetPhaserFrequency`.
     pub phaser_frequency: f32,
 }
@@ -34,11 +48,6 @@ impl ShipState {
             view_mode: ViewMode::Camera(ViewDirection::Fore),
             captain_view_direction: ViewDirection::Fore,
             viewscreen: ViewscreenArbiter::new(),
-            x: 0.0,
-            z: 0.0,
-            yaw: 0.0,
-            forward_speed: 0.0,
-            roll: 0.0,
             phaser_frequency: 0.5,
         }
     }

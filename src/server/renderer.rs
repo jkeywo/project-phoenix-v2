@@ -18,7 +18,7 @@ use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::region_shape::RegionShape;
 use crate::server::pfx::PfxPlugin;
-use crate::ship_state::ShipState;
+use crate::ship_state::{ShipPhysics, ShipState};
 use crate::simulation::AsteroidDestroyedVfx;
 use crate::world::server::OnScreenMessage;
 
@@ -394,11 +394,13 @@ fn update_view_screen_text(
 /// Hull offset = 6.0 units (matches the ship's collision capsule radius).
 fn hull_camera(
     ship: Res<ShipState>,
+    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
     let Ok(mut transform) = cam_query.single_mut() else {
         return;
     };
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
 
     // Direction vectors relative to ship heading (yaw=0 → ship faces -Z).
     // fwd = (sin(yaw), 0, -cos(yaw)), port = left of heading, starboard = right.
@@ -414,25 +416,25 @@ fn hull_camera(
         | ViewMode::Comms => ViewDirection::Fore,
     };
     let offset_dir = match direction {
-        ViewDirection::Fore => Vec3::new(ship.yaw.sin(), 0.0, -ship.yaw.cos()),
-        ViewDirection::Aft => Vec3::new(-ship.yaw.sin(), 0.0, ship.yaw.cos()),
-        ViewDirection::Port => Vec3::new(-ship.yaw.cos(), 0.0, -ship.yaw.sin()),
-        ViewDirection::Starboard => Vec3::new(ship.yaw.cos(), 0.0, ship.yaw.sin()),
+        ViewDirection::Fore => Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos()),
+        ViewDirection::Aft => Vec3::new(-physics.yaw.sin(), 0.0, physics.yaw.cos()),
+        ViewDirection::Port => Vec3::new(-physics.yaw.cos(), 0.0, -physics.yaw.sin()),
+        ViewDirection::Starboard => Vec3::new(physics.yaw.cos(), 0.0, physics.yaw.sin()),
     };
 
     const HULL_RADIUS: f32 = 6.0;
     const LOOK_DIST: f32 = 100.0;
 
     transform.translation = Vec3::new(
-        ship.x + offset_dir.x * HULL_RADIUS,
+        physics.x + offset_dir.x * HULL_RADIUS,
         0.0,
-        ship.z + offset_dir.z * HULL_RADIUS,
+        physics.z + offset_dir.z * HULL_RADIUS,
     );
 
     let look_target = Vec3::new(
-        ship.x + offset_dir.x * LOOK_DIST,
+        physics.x + offset_dir.x * LOOK_DIST,
         0.0,
-        ship.z + offset_dir.z * LOOK_DIST,
+        physics.z + offset_dir.z * LOOK_DIST,
     );
     transform.look_at(look_target, Vec3::Y);
 }

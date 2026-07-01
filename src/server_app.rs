@@ -16,6 +16,9 @@ use crate::debug_overlay::{DamageLog, DamageLogEntry};
 use crate::shield::attacker_bearing_relative;
 use crate::ship_state::ShipState;
 use bevy_rapier3d::prelude::ReadRapierContext;
+// Re-export ShipPhysics so `crate::simulation::ShipPhysics` and
+// `crate::server_app::ShipPhysics` both resolve.
+pub use crate::ship_state::ShipPhysics as ShipPhysicsComponent;
 
 use crate::entity_spawner::{
     AsteroidFieldSection, BehaviourSection, EntityId, EntityName, EntityTagsSection, EntityUuid,
@@ -707,7 +710,7 @@ fn handle_collisions(
         (&Transform, &AsteroidUuid, Option<&AsteroidShieldPierce>),
         With<Asteroid>,
     >,
-    mut ship: ResMut<ShipState>,
+    mut physics_q: Query<&mut ShipPhysicsComponent, With<Ship>>,
     mut impulse: ResMut<ShipImpulse>,
     mut hull: ResMut<ShipHullIntegrity>,
     mut cooldown: ResMut<CollisionCooldown>,
@@ -728,6 +731,9 @@ fn handle_collisions(
     let Ok(mut shields) = shields_q.single_mut() else {
         return;
     };
+    let Ok(mut physics) = physics_q.single_mut() else {
+        return;
+    };
 
     let contact = ctx.contact_pairs_with(ship_entity).next().and_then(|pair| {
         if pair.collider1() == Some(ship_entity) {
@@ -742,8 +748,8 @@ fn handle_collisions(
             return;
         }
         impulse.0.cancel_charge();
-        let speed_at_impact = ship.forward_speed;
-        ship.forward_speed = -0.5 * speed_at_impact;
+        let speed_at_impact = physics.forward_speed;
+        physics.forward_speed = -0.5 * speed_at_impact;
         let damage = collision_damage(speed_at_impact) as f32
             * modifiers.get(&ModifierSlot::HullDamageTaken);
 
@@ -753,9 +759,9 @@ fn handle_collisions(
                     attacker_bearing_relative(
                         t.translation.x,
                         t.translation.z,
-                        ship.x,
-                        ship.z,
-                        ship.yaw,
+                        physics.x,
+                        physics.z,
+                        physics.yaw,
                     )
                 })
             })
@@ -1629,7 +1635,6 @@ fn setup_world(
 fn spawn_game_start_entities(
     mut commands: Commands,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    mut ship_state: ResMut<crate::ship_state::ShipState>,
     mut pending_ship_config: Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
     sessions: Option<Res<crate::lobby::Sessions>>,
     mut has_spawned: Local<bool>,
@@ -1731,14 +1736,14 @@ fn spawn_game_start_entities(
                 .insert(crate::ship_plugin::ActiveStationRatings::default())
                 .insert(crate::ship_plugin::CoordinationQueue::default())
                 .insert(crate::messages::AdmittedCommands::default())
+                .insert(ShipPhysicsComponent {
+                    x: pos.x,
+                    z: pos.z,
+                    ..Default::default()
+                })
+                .insert(crate::ai_plugin::ShipAiMemory::default())
                 .remove::<crate::entity_spawner::EntityConsoleHull>();
             ship_spawned = true;
-
-            // Seed authoritative ship position from the world TOML so that
-            // `sync_ship_position` (ShipState → Transform) doesn't snap the
-            // ship back to (0,0) on the first Physics tick.
-            ship_state.x = pos.x;
-            ship_state.z = pos.z;
 
             // Ship-specific resource setup
             if let Some(hc) = &config.hull {
@@ -2537,6 +2542,8 @@ mod tests {
                 crate::ship_plugin::CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
                 ShipShields(ShieldSystem::default()),
+                ShipPhysicsComponent::default(),
+                bevy::prelude::Transform::default(),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -2573,6 +2580,14 @@ mod tests {
             .tube_mut(tube)
             .expect("test tube should exist")
             .load_state = crate::torpedo::TubeLoadState::Loaded;
+    }
+
+    fn set_ship_yaw(app: &mut App, yaw: f32) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipPhysicsComponent, With<crate::simulation::Ship>>();
+        let mut p = q.single_mut(app.world_mut()).expect("expected Ship with ShipPhysics");
+        p.yaw = yaw;
     }
 
     fn start_game(app: &mut App) {
@@ -3775,8 +3790,8 @@ mod tests {
         let mut app = test_app();
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
-        // Now rotate ship so the asteroid is behind it (yaw = Ï€ â†' facing +Z, asteroid at (0,-20) is behind).
-        app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
+        // Now rotate ship so the asteroid is behind it (yaw = π → facing +Z, asteroid at (0,-20) is behind).
+        set_ship_yaw(&mut app, std::f32::consts::PI);
 
         let out = tick(&mut app);
 
@@ -3859,7 +3874,7 @@ mod tests {
         let _ = tick(&mut app);
 
         // Now sever by rotating ship.
-        app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
+        set_ship_yaw(&mut app, std::f32::consts::PI);
         let _ = tick(&mut app);
 
         let hp = app

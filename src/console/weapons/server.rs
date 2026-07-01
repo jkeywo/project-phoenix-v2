@@ -10,7 +10,7 @@ use crate::messages::{
     SystemId, TorpedoTubeClientConfig, TorpedoTubeState, WeaponsBlackboard,
 };
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::ship_state::ShipState;
+use crate::ship_state::{ShipPhysics, ShipState};
 use crate::simulation::{
     AsteroidUuid, GameOverReason, Ship, ShipHullIntegrity, ShipShields, SimOutbox,
 };
@@ -313,8 +313,7 @@ fn live_entity_xz(
 }
 
 fn handle_set_target(
-    ship_query: Query<&AdmittedCommands, With<Ship>>,
-    ship: Res<ShipState>,
+    ship_query: Query<(&AdmittedCommands, &ShipPhysics), With<Ship>>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
@@ -322,7 +321,7 @@ fn handle_set_target(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Ok((admitted, physics)) = ship_query.single() else {
         return;
     };
     for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
@@ -337,8 +336,8 @@ fn handle_set_target(
         let locked = match live_pos {
             None => false,
             Some((x, z)) => {
-                let dx = x - ship.x;
-                let dz = z - ship.z;
+                let dx = x - physics.x;
+                let dz = z - physics.z;
                 dx * dx + dz * dz <= effective_weapons_range * effective_weapons_range
             }
         };
@@ -390,7 +389,7 @@ fn handle_fire_phaser(
         ),
         With<crate::simulation::Ship>,
     >,
-    ship: Res<ShipState>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
     weapons_target: Res<WeaponsTarget>,
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
@@ -403,6 +402,7 @@ fn handle_fire_phaser(
     let Ok((ship_config, control_sources)) = ship_query.single() else {
         return;
     };
+    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -433,9 +433,9 @@ fn handle_fire_phaser(
             crate::radar::is_fire_ready_with_range(
                 tx,
                 tz,
-                ship.x,
-                ship.z,
-                ship.yaw,
+                physics.x,
+                physics.z,
+                physics.yaw,
                 effective_phaser_range,
             )
         } else {
@@ -449,8 +449,8 @@ fn handle_fire_phaser(
                     let effective_bank_range =
                         bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
                     let (rx, ry) =
-                        crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
-                    let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
+                        crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
+                    let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
                         <= effective_bank_range * effective_bank_range;
                     range_ok
                         && crate::weapons::phaser::in_arc(
@@ -510,7 +510,7 @@ fn tick_phaser_auto_fire(
     cooldown: Res<PhaserCooldown>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     combat_config: Res<PhaserCombatConfigResource>,
-    ship: Res<ShipState>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
     sessions: Option<Res<Sessions>>,
     ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
@@ -535,6 +535,7 @@ fn tick_phaser_auto_fire(
     let Some((tx, tz)) = live_entity_xz(target_uuid, &asteroid_q, &entity_q) else {
         return;
     };
+    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
 
     use crate::entity_config::PhaserCombatConfig;
 
@@ -545,9 +546,9 @@ fn tick_phaser_auto_fire(
         let ready = crate::radar::is_fire_ready_with_range(
             tx,
             tz,
-            ship.x,
-            ship.z,
-            ship.yaw,
+            physics.x,
+            physics.z,
+            physics.yaw,
             effective_range,
         );
         if ready && !cooldown.is_bank_active("") {
@@ -567,8 +568,8 @@ fn tick_phaser_auto_fire(
             };
             let effective_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
             let range_ok =
-                (tx - ship.x).powi(2) + (tz - ship.z).powi(2) <= effective_range * effective_range;
-            let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
+                (tx - physics.x).powi(2) + (tz - physics.z).powi(2) <= effective_range * effective_range;
+            let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
             let arc_ok = crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
             if range_ok && arc_ok {
                 Some(b.id.clone())
@@ -635,7 +636,7 @@ fn handle_fire_phaser_npc(
     >,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     player_ship_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), With<Ship>>,
-    ship_state: Option<Res<crate::ship_state::ShipState>>,
+    ship_physics_q: Query<&ShipPhysics, With<Ship>>,
     mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
     mut last_attacker: ResMut<LastShipAttacker>,
     mut hull_resource: Option<ResMut<ShipHullIntegrity>>,
@@ -808,7 +809,7 @@ fn handle_fire_phaser_npc(
                             .iter()
                             .find(|(u, _, _)| u.to_string() == target_uuid_str)
                         {
-                            let ship_yaw = ship_state.as_ref().map(|s| s.yaw).unwrap_or(0.0);
+                            let ship_yaw = ship_physics_q.single().ok().map(|p| p.yaw).unwrap_or(0.0);
                             let bearing = crate::shield::attacker_bearing_relative(
                                 npc_x, npc_z, *tx, *tz, ship_yaw,
                             );
@@ -1076,7 +1077,7 @@ fn handle_fire_torpedo(
         ),
         With<crate::simulation::Ship>,
     >,
-    ship: Res<ShipState>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
@@ -1086,6 +1087,7 @@ fn handle_fire_torpedo(
     let Ok((ship_config, control_sources)) = ship_query.single() else {
         return;
     };
+    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
     let policy = control_sources
         .0
         .policy_for(&crate::system_registry::tactical_system_id());
@@ -1105,7 +1107,7 @@ fn handle_fire_torpedo(
             .tube(tube.as_str())
             .map(|t| t.facing_deg.to_radians())
             .unwrap_or(0.0);
-        let launch_heading = ship.yaw + tube_facing_rad;
+        let launch_heading = physics.yaw + tube_facing_rad;
         let source_uuid = player_ship_q.single().map(|u| u.0.clone()).ok();
         // Use the server-side locked target as the authoritative homing UUID.
         // Fall back to whatever the client sent in case there's no server lock.
@@ -1114,8 +1116,8 @@ fn handle_fire_torpedo(
         match torpedo_sys.0.launch(
             tube.as_str(),
             uuid,
-            ship.x,
-            ship.z,
+            physics.x,
+            physics.z,
             launch_heading,
             homing_uuid,
             source_uuid,
@@ -1129,8 +1131,8 @@ fn handle_fire_torpedo(
                     ServerMessage::TorpedoLaunched {
                         uuid: launched_uuid,
                         tube: tube.clone(),
-                        x: ship.x,
-                        z: ship.z,
+                        x: physics.x,
+                        z: physics.z,
                         heading: launch_heading,
                     },
                 ));
@@ -1406,7 +1408,7 @@ fn tick_active_beam(
     time: Res<Time>,
     mut beam: ResMut<ActiveBeam>,
     mut cooldown: ResMut<PhaserCooldown>,
-    ship: Res<ShipState>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
     mut world: ResMut<WorldResource>,
     mut hull_query: Query<(
         Entity,
@@ -1428,6 +1430,7 @@ fn tick_active_beam(
 ) {
     let dt = time.delta_secs();
     cooldown.tick(dt);
+    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
 
     let Some(target_uuid) = beam.target_uuid.clone() else {
         return;
@@ -1465,9 +1468,9 @@ fn tick_active_beam(
         crate::radar::is_fire_ready_with_range(
             tx,
             tz,
-            ship.x,
-            ship.z,
-            ship.yaw,
+            physics.x,
+            physics.z,
+            physics.yaw,
             effective_phaser_range,
         )
     } else {
@@ -1480,8 +1483,8 @@ fn tick_active_beam(
                 };
                 let effective_bank_range =
                     bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-                let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
-                let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
+                let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
+                let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
                     <= effective_bank_range * effective_bank_range;
                 range_ok
                     && crate::weapons::phaser::in_arc(
@@ -1670,7 +1673,7 @@ fn operate_tactical_ai(
         ),
     >,
     sessions: Res<Sessions>,
-    ship: Res<ShipState>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
     mut weapons_target: ResMut<WeaponsTarget>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
@@ -1691,6 +1694,7 @@ fn operate_tactical_ai(
     let Ok((ship_config, _control_sources, active_ratings)) = ship_query.single() else {
         return;
     };
+    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
 
     // Always set weapons_target from Destroy objectives regardless of control
     // source. This lets both human and AI Tactical operators benefit from
@@ -1741,10 +1745,10 @@ fn operate_tactical_ai(
                 });
 
             if let Some((tx, tz)) = target_xz {
-                let dx = tx - ship.x;
-                let dz = tz - ship.z;
+                let dx = tx - physics.x;
+                let dz = tz - physics.z;
                 let world_bearing = dx.atan2(-dz);
-                let bearing = world_bearing - ship.yaw;
+                let bearing = world_bearing - physics.yaw;
 
                 let ts = &torpedo_sys.0;
                 let tubes: Vec<crate::console_ai::TubeSummary> = ts
@@ -1774,13 +1778,13 @@ fn operate_tactical_ai(
                         .tube(tube_id.as_str())
                         .map(|t| t.facing_deg.to_radians())
                         .unwrap_or(0.0);
-                    let launch_heading = ship.yaw + tube_facing_rad;
+                    let launch_heading = physics.yaw + tube_facing_rad;
                     use crate::torpedo::LaunchResult;
                     match torpedo_sys.0.launch(
                         tube_id.as_str(),
                         torpedo_uuid,
-                        ship.x,
-                        ship.z,
+                        physics.x,
+                        physics.z,
                         launch_heading,
                         Some(target_uuid.clone()),
                         source_uuid.clone(),
@@ -1793,8 +1797,8 @@ fn operate_tactical_ai(
                                 ServerMessage::TorpedoLaunched {
                                     uuid: launched_uuid,
                                     tube: tube_id,
-                                    x: ship.x,
-                                    z: ship.z,
+                                    x: physics.x,
+                                    z: physics.z,
                                     heading: launch_heading,
                                 },
                             ));
@@ -1876,8 +1880,12 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             // Extract all resource values as owned copies/clones so we can
             // release the immutable borrows before calling world.query_filtered.
             let (ship_x, ship_z, ship_yaw) = {
-                let s = world.resource::<ShipState>();
-                (s.x, s.z, s.yaw)
+                let mut q = world.query_filtered::<&ShipPhysics, With<crate::simulation::Ship>>();
+                q.single(world)
+                    .ok()
+                    .copied()
+                    .map(|p| (p.x, p.z, p.yaw))
+                    .unwrap_or((0.0, 0.0, 0.0))
             };
             let target_uuid: Option<String> = world.resource::<WeaponsTarget>().0.clone();
             let (beam_active, active_beam_bank) = {
@@ -2085,7 +2093,7 @@ fn publish_weapons_blackboard(
     phaser_mode: Res<CurrentPhaserMode>,
     torpedo_sys: Res<TorpedoSystemResource>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    ship: Res<ShipState>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     world_res: Res<WorldResource>,
     entity_name_q: Query<(
@@ -2097,6 +2105,7 @@ fn publish_weapons_blackboard(
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     use crate::system_registry::TACTICAL_SYSTEM_ID;
+    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
 
     let target_uuid = weapons_target.0.clone();
     let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
@@ -2121,9 +2130,9 @@ fn publish_weapons_blackboard(
             Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
                 tx,
                 tz,
-                ship.x,
-                ship.z,
-                ship.yaw,
+                physics.x,
+                physics.z,
+                physics.yaw,
                 effective_range,
             ),
         };
@@ -2150,8 +2159,8 @@ fn publish_weapons_blackboard(
                         };
                         let effective_bank_range = bank_base_range * radar_range_mult;
                         let (rx, ry) =
-                            crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
-                        let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
+                            crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
+                        let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
                             <= effective_bank_range * effective_bank_range;
                         range_ok
                             && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
@@ -2221,9 +2230,9 @@ fn publish_weapons_blackboard(
                 &uuid_comp.0,
                 transform.translation.x,
                 transform.translation.z,
-                ship.x,
-                ship.z,
-                ship.yaw,
+                physics.x,
+                physics.z,
+                physics.yaw,
                 effective_tactical_range,
                 meta,
                 &shows,
@@ -2238,9 +2247,9 @@ fn publish_weapons_blackboard(
                 &uuid_comp.0,
                 transform.translation.x,
                 transform.translation.z,
-                ship.x,
-                ship.z,
-                ship.yaw,
+                physics.x,
+                physics.z,
+                physics.yaw,
                 effective_tactical_range,
                 meta,
                 &shows,
@@ -2577,8 +2586,18 @@ station = "tactical"
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
+            ShipPhysics::default(),
+            bevy::prelude::Transform::default(),
         ));
         app
+    }
+
+    fn set_ship_yaw(app: &mut App, yaw: f32) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipPhysics, With<crate::simulation::Ship>>();
+        let mut p = q.single_mut(app.world_mut()).expect("expected Ship with ShipPhysics");
+        p.yaw = yaw;
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
@@ -3095,7 +3114,7 @@ station = "tactical"
 
         // Rotate 180° so the target moves to starboard beam (bearing +90°),
         // which is outside the port bank's arc.
-        app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
+        set_ship_yaw(&mut app, std::f32::consts::PI);
 
         let out = tick(&mut app);
 
@@ -3178,7 +3197,7 @@ station = "tactical"
         let _ = tick(&mut app);
 
         // Rotate 180° — target moves to starboard beam, outside port bank's arc.
-        app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
+        set_ship_yaw(&mut app, std::f32::consts::PI);
         let _ = tick(&mut app);
 
         let hp = app
@@ -3614,7 +3633,13 @@ station = "tactical"
         ));
 
         // Move the ship inside the field-anchor's "radius" (300 < 350).
-        app.world_mut().resource_mut::<ShipState>().x = 280.0;
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipPhysics, With<crate::simulation::Ship>>();
+            let mut p = q.single_mut(app.world_mut()).expect("Ship with ShipPhysics");
+            p.x = 280.0;
+        }
         load_tube_now(&mut app, "fore_port");
 
         push(

@@ -18,7 +18,7 @@ use crate::ship::coordination;
 use crate::ship::coordination::{CoordinationLagQueue, QueuedCoordination};
 use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
-use crate::ship_state::ShipState;
+use crate::ship_state::ShipPhysics;
 use crate::simulation::{Ship, ShipBoost, ShipHullIntegrity, ShipImpulse};
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Resources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -197,12 +197,9 @@ impl Plugin for ShipPlugin {
                 operate_helm_ai
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel),
-                player_ship_helm_ai
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(operate_helm_ai),
                 process_helm_inputs
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(player_ship_helm_ai),
+                    .after(operate_helm_ai),
                 detect_player_ship_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
@@ -226,8 +223,8 @@ impl Plugin for ShipPlugin {
 fn process_helm_inputs(
     time: Res<Time>,
     mut timer: ResMut<HelmInputTimer>,
-    ship_query: Query<&AdmittedCommands, With<Ship>>,
-    mut ship: ResMut<ShipState>,
+    ship_query: Query<(&AdmittedCommands, &ShipSystemControlSources), With<Ship>>,
+    mut physics_query: Query<&mut ShipPhysics, With<Ship>>,
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
     drive: HelmDriveParams,
@@ -245,7 +242,10 @@ fn process_helm_inputs(
         *prev_phase = Some(current_phase);
     }
 
-    let Ok(admitted) = ship_query.single() else {
+    let Ok((admitted, _)) = ship_query.single() else {
+        return;
+    };
+    let Ok(mut physics) = physics_query.single_mut() else {
         return;
     };
 
@@ -261,10 +261,10 @@ fn process_helm_inputs(
     }
     let dt = timer.0.duration().as_secs_f32();
     let state = ShipPhysicsState {
-        x: ship.x,
-        z: ship.z,
-        yaw: ship.yaw,
-        forward_speed: ship.forward_speed,
+        x: physics.x,
+        z: physics.z,
+        yaw: physics.yaw,
+        forward_speed: physics.forward_speed,
     };
     let impulse_active = drive.impulse.0.is_active();
     let input = if impulse_active {
@@ -307,10 +307,10 @@ fn process_helm_inputs(
     }
     let result = compute_physics(state, input, dt, &config);
 
-    ship.x = result.x;
-    ship.z = result.z;
-    ship.yaw = result.yaw;
-    ship.forward_speed = result.forward_speed;
+    physics.x = result.x;
+    physics.z = result.z;
+    physics.yaw = result.yaw;
+    physics.forward_speed = result.forward_speed;
 
     // Visual banking: lerp roll toward target based on steering
     let max_bank_rad = drive.bank_config.max_bank_deg.to_radians();
@@ -320,7 +320,7 @@ fn process_helm_inputs(
         -input.steering * max_bank_rad
     };
     let lerp_factor = (drive.bank_config.bank_lerp_rate * dt).min(1.0);
-    ship.roll = ship.roll + (target_roll - ship.roll) * lerp_factor;
+    physics.roll = physics.roll + (target_roll - physics.roll) * lerp_factor;
 }
 
 fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy {
@@ -329,56 +329,169 @@ fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy 
         .policy_for(&crate::system_registry::helm_system_id())
 }
 
-/// Per-kind AI plugin for helm. Runs after the AI tick so `last_helm_intent`
-/// is fresh.
+/// Unified per-entity helm AI. Runs after the AI tick so `last_helm_intent`
+/// is fresh for NPC ships.
 ///
-/// Two paths:
-/// - Player ship (no `AiControllerComponent`): writes `LastHelmInput` when Backfill.
-/// - NPC ships (`AiControllerComponent` present): applies physics directly to their
-///   `Transform`, keeping NPC motion fully per-entity and out of `server.rs`.
+/// For every ship entity where the helm system is `ControlSource::Ai`:
+///  - Reads `ShipSystemBlackboards` viewscreen entry for scored objectives.
+///  - Builds a `WorldView` from `WorldSnapshot` (all other entities for avoidance),
+///    falling back to a direct ECS query when `WorldSnapshot` is absent (tests).
+///  - Calls `operate_helm(memory, ...)` and writes the result to `ShipPhysics`.
+///  - For `LocalShip` entities: also writes to `LastHelmInput` so
+///    `process_helm_inputs` applies the correct physics this tick.
+///  - For NPC ships with `AiControllerComponent`: also updates `last_helm_intent`
+///    for backward compatibility until `tick_ai_controllers` is retired (#595).
+///
+/// This replaces both the old player-ship-only `player_ship_helm_ai` and the NPC
+/// helm path in `tick_ai_controllers`.
+#[allow(clippy::too_many_arguments)]
 fn operate_helm_ai(
     time: Res<Time>,
     mut last_input: ResMut<LastHelmInput>,
-    player_ships: Query<
+    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    entity_fallback_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &Transform,
+        Option<&crate::entities::spawner::EntityName>,
+        Option<&crate::entities::spawner::FactionComponent>,
+        Option<&crate::entities::spawner::EntityConsoleHull>,
+        Option<&crate::entities::spawner::ColliderSection>,
+    )>,
+    mut ships: Query<(
+        Entity,
         &ShipSystemControlSources,
-        (
-            With<Ship>,
-            Without<crate::ai::server::AiControllerComponent>,
-        ),
-    >,
-    mut npc_ships: Query<
-        (
-            &mut Transform,
-            &mut crate::ai::server::AiControllerComponent,
-            &ShipSystemControlSources,
-            Option<&crate::entities::spawner::HelmConsoleSection>,
-        ),
-        With<crate::ai::server::AiControllerComponent>,
-    >,
+        &mut ShipPhysics,
+        &mut crate::ai_plugin::ShipAiMemory,
+        &crate::server_app::ShipSystemBlackboards,
+        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::entities::spawner::FactionComponent>,
+        Option<&crate::entities::spawner::ColliderSection>,
+        Option<&crate::entities::spawner::HelmConsoleSection>,
+        Option<&mut crate::ai::server::AiControllerComponent>,
+        Has<crate::server_app::LocalShip>,
+    )>,
 ) {
-    // Player ship Backfill path: when helm is AI-controlled but there is no
-    // behaviour tree to generate intent, hold the ship at zero thrust/steering
-    // so it decelerates to a stop rather than keeping the last human input.
-    for sources in &player_ships {
-        let policy = helm_control_policy(sources);
-        if !policy.operate_ai {
-            continue;
-        }
-        *last_input = LastHelmInput {
-            thrust: 0.0,
-            steering: 0.0,
-        };
-    }
-
-    // NPC ship path: translate `last_helm_intent` into physics on the entity's
-    // own Transform. `server.rs` only writes intent; no physics lives there.
     let dt = time.delta_secs();
-    for (mut transform, mut ctrl, sources, helm_section) in &mut npc_ships {
+    let anchors = world_config
+        .as_ref()
+        .map(|wc| wc.anchors.clone())
+        .unwrap_or_default();
+    let runtime_ref = runtime.as_deref();
+
+    // Snapshot world entities for avoidance (read-only pass before mutating ships).
+    // Use WorldSnapshot when available (production); fall back to inline query (tests).
+    let snapshot_entities: Vec<crate::ai::AiWorldEntity> =
+        if let Some(ws) = world_snapshot.as_ref() {
+            ws.entities.clone()
+        } else {
+            // Fallback path for tests that don't register AiPlugin.
+            entity_fallback_q
+                .iter()
+                .map(|(uuid, transform, name, faction, hull, collider)| {
+                    let runtime_name = runtime_ref.and_then(|rt| {
+                        rt.name_to_uuid.iter().find_map(|(n, mapped)| {
+                            (mapped == &uuid.0).then(|| n.clone())
+                        })
+                    });
+                    let hull_fraction = hull.and_then(|h| {
+                        let max = h.0.total_max();
+                        (max > 0.0).then(|| h.0.total_current() / max)
+                    });
+                    crate::ai::AiWorldEntity {
+                        uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
+                        name: runtime_name.or_else(|| name.map(|n| n.0.clone())),
+                        position: [
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z,
+                        ],
+                        faction: faction.map(|f| f.0),
+                        hull_fraction,
+                        yaw: Some(transform.rotation.to_euler(EulerRot::YXZ).0),
+                        radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+                        ..Default::default()
+                    }
+                })
+                .collect()
+        };
+
+    for (
+        _entity,
+        sources,
+        mut physics,
+        mut ai_memory,
+        blackboards,
+        entity_uuid,
+        faction,
+        collider,
+        helm_section,
+        mut ai_ctrl,
+        is_local,
+    ) in ships.iter_mut()
+    {
         let policy = helm_control_policy(sources);
         if !policy.operate_ai {
             continue;
         }
-        let (thrust, steering) = ctrl.last_helm_intent.unwrap_or((0.0, 0.0));
+
+        // ── Read scored objectives from this entity's viewscreen blackboard ──
+        let scored: Vec<crate::messages::ScoredObjective> = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+            _ => vec![],
+        };
+
+        let has_helm_objective = scored
+            .iter()
+            .any(|o| o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm));
+
+        if !has_helm_objective {
+            // No objectives → zero out intent (decelerate to stop).
+            if is_local {
+                *last_input = LastHelmInput::default();
+            }
+            if let Some(ref mut ctrl) = ai_ctrl {
+                ctrl.last_helm_intent = Some((0.0, 0.0));
+            }
+            continue;
+        }
+
+        // ── Build WorldView (exclude self) ───────────────────────────────────
+        let self_uuid_str = entity_uuid.map(|u| u.0.as_str()).unwrap_or("");
+        let entities: Vec<crate::ai::AiWorldEntity> = snapshot_entities
+            .iter()
+            .filter(|e| e.uuid.to_string() != self_uuid_str)
+            .cloned()
+            .collect();
+
+        let world_view = crate::ai::WorldView {
+            entity_pos: [physics.x, 0.0, physics.z],
+            entity_yaw: physics.yaw,
+            anchors: anchors.clone(),
+            entities,
+            self_faction: faction.map(|f| f.0),
+            self_radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+            ..crate::ai::WorldView::default()
+        };
+
+        let (thrust, steering) = crate::ai::operate_helm(
+            &mut ai_memory.0,
+            &world_view,
+            &scored,
+            &[],
+            &anchors,
+            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            physics.forward_speed,
+            &crate::faction::FactionRegistry::default(),
+        );
+
+        // ── Apply physics ────────────────────────────────────────────────────
         let physics_config = helm_section
             .map(|hc| ShipPhysicsConfig {
                 max_speed: hc.0.max_speed,
@@ -388,159 +501,37 @@ fn operate_helm_ai(
                 max_yaw_rate: hc.0.max_yaw_rate,
             })
             .unwrap_or_else(ShipPhysicsConfig::new);
-        let pos = transform.translation;
-        let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+
         let result = compute_physics(
             ShipPhysicsState {
-                x: pos.x,
-                z: pos.z,
-                yaw,
-                forward_speed: ctrl.forward_speed,
+                x: physics.x,
+                z: physics.z,
+                yaw: physics.yaw,
+                forward_speed: physics.forward_speed,
             },
             ShipPhysicsInput { thrust, steering },
             dt,
             &physics_config,
         );
-        transform.translation.x = result.x;
-        transform.translation.z = result.z;
-        let max_bank_rad = helm_section
-            .map(|h| h.0.max_bank_deg.to_radians())
-            .unwrap_or(0.0);
-        let current_roll = transform.rotation.to_euler(EulerRot::YXZ).2;
-        let target_roll = -steering * max_bank_rad;
-        let lerp_factor = (5.0_f32 * dt).min(1.0);
-        let new_roll = current_roll + (target_roll - current_roll) * lerp_factor;
-        transform.rotation = Quat::from_euler(EulerRot::YXZ, result.yaw, 0.0, new_roll);
-        ctrl.forward_speed = result.forward_speed;
+
+        physics.x = result.x;
+        physics.z = result.z;
+        physics.yaw = result.yaw;
+        physics.forward_speed = result.forward_speed;
+
+        // For the player ship: also write LastHelmInput so process_helm_inputs
+        // sees the AI-driven intent (though it will re-apply physics anyway).
+        if is_local {
+            *last_input = LastHelmInput { thrust, steering };
+        }
+
+        // For NPC ships: keep AiControllerComponent.last_helm_intent in sync
+        // for backward compatibility until tick_ai_controllers is retired (#595).
+        if let Some(ref mut ctrl) = ai_ctrl {
+            ctrl.last_helm_intent = Some((thrust, steering));
+            ctrl.forward_speed = result.forward_speed;
+        }
     }
-}
-
-/// Drive the player ship toward its top-scoring Reach mission objective.
-///
-/// Runs after `operate_helm_ai` (which writes the Backfill zero-stop) and
-/// before `process_helm_inputs` (which applies `LastHelmInput` to physics).
-/// When a Reach objective is active, overwrites the Backfill stop with
-/// real thrust/steering from `operate_helm`.
-fn player_ship_helm_ai(
-    ship: Res<ShipState>,
-    mut last_input: ResMut<LastHelmInput>,
-    mut memory: Option<ResMut<crate::server_app::PlayerAiMemory>>,
-    blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
-    world_config: Option<Res<crate::world::config::WorldConfig>>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    player_ships: Query<
-        (
-            &ShipSystemControlSources,
-            Option<&crate::entity_spawner::EntityUuid>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::entities::spawner::ColliderSection>,
-        ),
-        (
-            With<Ship>,
-            Without<crate::ai::server::AiControllerComponent>,
-        ),
-    >,
-    entity_q: Query<
-        (
-            &crate::entity_spawner::EntityUuid,
-            &Transform,
-            Option<&crate::entities::spawner::EntityName>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::entities::spawner::EntityConsoleHull>,
-            Option<&crate::entities::spawner::ColliderSection>,
-        ),
-        Without<Ship>,
-    >,
-) {
-    let Ok((sources, player_uuid, player_faction, player_collider)) = player_ships.single() else {
-        return;
-    };
-    if !helm_control_policy(sources).operate_ai {
-        return;
-    }
-
-    let Some(blackboards) = blackboards else {
-        return;
-    };
-    let scored: Vec<crate::messages::ScoredObjective> = match blackboards
-        .0
-        .get(&crate::system_registry::viewscreen_system_id())
-    {
-        Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
-        _ => return,
-    };
-
-    let has_helm_objective = scored
-        .iter()
-        .any(|o| o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm));
-    if !has_helm_objective {
-        return;
-    }
-
-    let anchors = world_config
-        .as_ref()
-        .map(|wc| wc.anchors.clone())
-        .unwrap_or_default();
-    let runtime = runtime.as_deref();
-    let player_uuid = player_uuid.map(|u| u.0.as_str());
-    let entities = entity_q
-        .iter()
-        .filter(|(uuid, _, _, _, _, _)| Some(uuid.0.as_str()) != player_uuid)
-        .map(|(uuid, transform, name, faction, hull, collider)| {
-            let runtime_name = runtime.and_then(|rt| {
-                rt.name_to_uuid
-                    .iter()
-                    .find_map(|(name, mapped_uuid)| (mapped_uuid == &uuid.0).then(|| name.clone()))
-            });
-            let hull_fraction = hull.and_then(|h| {
-                let max = h.0.total_max();
-                (max > 0.0).then(|| h.0.total_current() / max)
-            });
-            crate::ai::AiWorldEntity {
-                uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
-                name: runtime_name.or_else(|| name.map(|n| n.0.clone())),
-                position: [
-                    transform.translation.x,
-                    transform.translation.y,
-                    transform.translation.z,
-                ],
-                faction: faction.map(|f| f.0),
-                hull_fraction,
-                yaw: Some(transform.rotation.to_euler(EulerRot::YXZ).0),
-                radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
-                ..Default::default()
-            }
-        })
-        .collect();
-
-    let world_view = crate::ai::WorldView {
-        entity_pos: [ship.x, 0.0, ship.z],
-        entity_yaw: ship.yaw,
-        anchors: anchors.clone(),
-        entities,
-        self_faction: player_faction.map(|f| f.0),
-        self_radius: player_collider.map(|c| c.0.radius).unwrap_or(0.0),
-        ..crate::ai::WorldView::default()
-    };
-
-    let (thrust, steering) = if let Some(mem) = memory.as_mut() {
-        crate::ai::operate_helm(
-            &mut mem.0,
-            &world_view,
-            &scored,
-            &[],
-            &anchors,
-            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
-            crate::ai::AVOIDANCE_BUFFER,
-            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
-            ship.forward_speed,
-            &crate::faction::FactionRegistry::default(),
-        )
-    } else {
-        (0.0, 0.0)
-    };
-
-    *last_input = LastHelmInput { thrust, steering };
 }
 
 /// Mark Reach objectives complete once the player ship arrives within
@@ -549,19 +540,18 @@ fn player_ship_helm_ai(
 /// Runs in `Broadcast` (after `PublishAggregate` so `scored_objectives` is
 /// fresh) and only when the helm system is AI-controlled.
 fn detect_player_ship_objective_completion(
-    ship: Res<ShipState>,
     blackboards: Option<Res<crate::server_app::SystemBlackboards>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
     player_ships: Query<
-        &ShipSystemControlSources,
+        (&ShipSystemControlSources, &ShipPhysics),
         (
             With<Ship>,
             Without<crate::ai::server::AiControllerComponent>,
         ),
     >,
 ) {
-    let Ok(sources) = player_ships.single() else {
+    let Ok((sources, physics)) = player_ships.single() else {
         return;
     };
     if !helm_control_policy(sources).operate_ai {
@@ -598,22 +588,22 @@ fn detect_player_ship_objective_completion(
         let Some(&target) = anchors.get(anchor.as_str()) else {
             continue;
         };
-        let dx = target[0] - ship.x;
-        let dz = target[2] - ship.z;
+        let dx = target[0] - physics.x;
+        let dz = target[2] - physics.z;
         if (dx * dx + dz * dz).sqrt() < crate::ai::WAYPOINT_ARRIVAL_RADIUS {
             objectives.0.complete(&obj.snapshot.id);
         }
     }
 }
 
-fn sync_ship_position(ship: Res<ShipState>, mut ship_query: Query<&mut Transform, With<Ship>>) {
-    let Ok(mut transform) = ship_query.single_mut() else {
-        return;
-    };
-
-    transform.translation.x = ship.x;
-    transform.translation.z = ship.z;
-    transform.rotation = Quat::from_euler(EulerRot::YXZ, ship.yaw, 0.0, ship.roll);
+fn sync_ship_position(
+    mut ship_query: Query<(&ShipPhysics, &mut Transform)>,
+) {
+    for (physics, mut transform) in ship_query.iter_mut() {
+        transform.translation.x = physics.x;
+        transform.translation.z = physics.z;
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, physics.yaw, 0.0, physics.roll);
+    }
 }
 
 pub fn handle_impulse_messages(
@@ -979,11 +969,14 @@ mod tests {
             Ship,
             LocalShip,
             Transform::default(),
+            ShipPhysics::default(),
             ShipConfigComponent::default(),
             ShipSystemControlSources::default(),
             ActiveStationRatings::default(),
             CoordinationQueue::default(),
             crate::messages::AdmittedCommands::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::ai_plugin::ShipAiMemory::default(),
         ));
         app
     }
@@ -1055,6 +1048,23 @@ mod tests {
         }
     }
 
+    fn get_ship_physics(app: &mut App) -> ShipPhysics {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<Ship>>();
+        q.single(app.world())
+            .expect("expected Ship entity with ShipPhysics")
+            .clone()
+    }
+
+    fn set_ship_physics(app: &mut App, physics: ShipPhysics) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipPhysics, With<Ship>>();
+        let mut p = q.single_mut(app.world_mut()).expect("expected Ship with ShipPhysics");
+        *p = physics;
+    }
+
     fn get_ship_control_sources(app: &mut App) -> ShipSystemControlSources {
         let mut q = app
             .world_mut()
@@ -1100,7 +1110,7 @@ mod tests {
                 steering: 0.25
             }
         );
-        assert!(app.world().resource::<ShipState>().forward_speed > 0.0);
+        assert!(get_ship_physics(&mut app).forward_speed > 0.0);
     }
 
     #[test]
@@ -1117,7 +1127,7 @@ mod tests {
                 steering: 0.0
             }
         );
-        assert_eq!(app.world().resource::<ShipState>().forward_speed, 0.0);
+        assert_eq!(get_ship_physics(&mut app).forward_speed, 0.0);
     }
 
     #[test]
@@ -1158,7 +1168,7 @@ mod tests {
             *app.world().resource::<LastHelmInput>(),
             LastHelmInput::default()
         );
-        assert_eq!(app.world().resource::<ShipState>().forward_speed, 0.0);
+        assert_eq!(get_ship_physics(&mut app).forward_speed, 0.0);
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Impulse Drive / Damage Cancellation tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -1505,19 +1515,19 @@ mod tests {
         );
         tick(&mut app);
 
-        let ship = app.world().resource::<ShipState>();
+        let physics = get_ship_physics(&mut app);
         // With 5x boost, expect ≈1.39; without boost ≈0.28. Require >=1.0 to
         // clearly distinguish the boosted path.
         assert!(
-            ship.forward_speed >= 1.0,
+            physics.forward_speed >= 1.0,
             "active impulse should autopilot with boosted accel; got forward_speed={}",
-            ship.forward_speed
+            physics.forward_speed
         );
         // Steering must be ignored — yaw should be essentially unchanged.
         assert!(
-            ship.yaw.abs() < 1e-3,
+            physics.yaw.abs() < 1e-3,
             "active impulse must zero steering; got yaw={}",
-            ship.yaw
+            physics.yaw
         );
     }
 
@@ -1548,13 +1558,13 @@ mod tests {
         );
         tick(&mut app);
 
-        let ship = app.world().resource::<ShipState>();
+        let physics = get_ship_physics(&mut app);
         // Base accel ≈ 8.33, dt = 1/30 → expected ≈ 0.28. Cap at 2.0 to
         // catch any accidental boost.
         assert!(
-            ship.forward_speed < 2.0,
+            physics.forward_speed < 2.0,
             "idle impulse must not boost accel; got forward_speed={}",
-            ship.forward_speed
+            physics.forward_speed
         );
     }
 
@@ -1581,14 +1591,14 @@ mod tests {
         }
         tick(&mut app);
 
-        let ship = app.world().resource::<ShipState>();
+        let physics = get_ship_physics(&mut app);
         // Const is 5.0 → expect ≈ 1.39/tick (dt=1/30). Without the fallback,
         // forward_speed would be ~0 (0× accel during impulse).
         assert!(
-            ship.forward_speed >= 1.0,
+            physics.forward_speed >= 1.0,
             "zero acceleration_multiplier must fall back to const; \
              got forward_speed={}",
-            ship.forward_speed
+            physics.forward_speed
         );
     }
 
@@ -1624,7 +1634,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        let boosted = app.world().resource::<ShipState>().forward_speed;
+        let boosted = get_ship_physics(&mut app).forward_speed;
 
         // Baseline: identical run with boost left disabled.
         let mut base = test_app();
@@ -1641,7 +1651,7 @@ mod tests {
             },
         );
         tick(&mut base);
-        let baseline = base.world().resource::<ShipState>().forward_speed;
+        let baseline = get_ship_physics(&mut base).forward_speed;
 
         assert!(baseline > 0.0, "baseline should move; got {baseline}");
         assert!(
@@ -1670,7 +1680,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        let boosted_yaw = app.world().resource::<ShipState>().yaw;
+        let boosted_yaw = get_ship_physics(&mut app).yaw;
 
         let mut base = test_app();
         start_game_with_helm_and_science(&mut base);
@@ -1686,7 +1696,7 @@ mod tests {
             },
         );
         tick(&mut base);
-        let baseline_yaw = base.world().resource::<ShipState>().yaw;
+        let baseline_yaw = get_ship_physics(&mut base).yaw;
 
         assert!(
             baseline_yaw > 0.0,
@@ -1898,7 +1908,7 @@ mod tests {
 
         // Snapshot yaw, then cancel and tick once. With the bug, the
         // post-cancel tick replays steering=1.0 and yaw changes.
-        let yaw_before = app.world().resource::<ShipState>().yaw;
+        let yaw_before = get_ship_physics(&mut app).yaw;
         push(
             &mut app,
             "helm",
@@ -1908,7 +1918,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        let yaw_after = app.world().resource::<ShipState>().yaw;
+        let yaw_after = get_ship_physics(&mut app).yaw;
         assert!(
             (yaw_after - yaw_before).abs() < 1e-3,
             "post-cancel tick must not autopilot a phantom turn; \
@@ -2225,6 +2235,26 @@ station = "helm"
         bbs
     }
 
+    fn set_ship_blackboard_objectives(
+        app: &mut App,
+        objectives: Vec<crate::messages::ScoredObjective>,
+    ) {
+        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        let mut vb = ViewscreenBlackboard::default();
+        vb.scored_objectives = objectives;
+        let entry = (
+            crate::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(vb),
+        );
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::server_app::ShipSystemBlackboards, With<Ship>>();
+        let mut bbs = q
+            .single_mut(app.world_mut())
+            .expect("expected Ship with ShipSystemBlackboards");
+        bbs.0.insert(entry.0, entry.1);
+    }
+
     fn viewscreen_with_reach(anchor: &str, score: f32) -> crate::server_app::SystemBlackboards {
         viewscreen_with_objectives(vec![reach_scored_objective(anchor, score)])
     }
@@ -2240,9 +2270,11 @@ station = "helm"
         let mut app = test_app();
         // Place anchor 100 units ahead (positive X) — ship starts at origin.
         let anchor = "station-alpha";
-        app.insert_resource(viewscreen_with_reach(anchor, 10.0));
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![reach_scored_objective(anchor, 10.0)],
+        );
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
-        app.insert_resource(crate::server_app::PlayerAiMemory::default());
         set_helm_control_source(&mut app, ControlSource::Ai);
 
         tick(&mut app);
@@ -2258,12 +2290,11 @@ station = "helm"
     fn player_ship_helm_ai_patrols_from_viewscreen_objective() {
         let mut app = test_app();
         let anchor = "starbase_patrol_east";
-        app.insert_resource(viewscreen_with_objectives(vec![patrol_scored_objective(
-            vec![anchor],
-            20.0,
-        )]));
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![patrol_scored_objective(vec![anchor], 20.0)],
+        );
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
-        app.insert_resource(crate::server_app::PlayerAiMemory::default());
         set_helm_control_source(&mut app, ControlSource::Ai);
 
         tick(&mut app);
@@ -2287,10 +2318,10 @@ station = "helm"
         let mut runtime = crate::world::server::WorldContentRuntime::default();
         runtime.name_to_uuid.insert("wave_1".into(), target_uuid);
         app.insert_resource(runtime);
-        app.insert_resource(viewscreen_with_objectives(vec![destroy_scored_objective(
-            "wave_1", 80.0,
-        )]));
-        app.insert_resource(crate::server_app::PlayerAiMemory::default());
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![destroy_scored_objective("wave_1", 80.0)],
+        );
         set_helm_control_source(&mut app, ControlSource::Ai);
 
         tick(&mut app);
@@ -2306,9 +2337,11 @@ station = "helm"
     fn player_ship_helm_ai_does_nothing_when_helm_human() {
         let mut app = test_app();
         let anchor = "station-alpha";
-        app.insert_resource(viewscreen_with_reach(anchor, 10.0));
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![reach_scored_objective(anchor, 10.0)],
+        );
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
-        app.insert_resource(crate::server_app::PlayerAiMemory::default());
         // helm stays Human (default)
 
         tick(&mut app);
@@ -2327,39 +2360,33 @@ station = "helm"
         // Blackboard has a Destroy directive, but no live entity resolves to it.
         use crate::messages::{
             AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
-            SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
+            SystemAffinity,
         };
-        use crate::server_app::SystemBlackboards;
-        let mut bbs = SystemBlackboards::default();
-        let mut vb = ViewscreenBlackboard::default();
-        vb.scored_objectives = vec![ScoredObjective {
-            id: "destroy-pirates".into(),
-            score: 5.0,
-            directive: AiDirective::Destroy {
-                target: "pirate".into(),
-            },
-            source: ObjectiveSource::Mission,
-            relevance: vec![SystemAffinity::Helm],
-            snapshot: ObjectiveSnapshot {
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![ScoredObjective {
                 id: "destroy-pirates".into(),
-                text: "Destroy pirates".into(),
-                mandatory: true,
-                status: ObjectiveStatus::Active,
-                targets: vec![],
+                score: 5.0,
+                directive: AiDirective::Destroy {
+                    target: "pirate".into(),
+                },
                 source: ObjectiveSource::Mission,
-            },
-        }];
-        bbs.0.insert(
-            crate::system_registry::viewscreen_system_id(),
-            SystemBlackboard::Viewscreen(vb),
+                relevance: vec![SystemAffinity::Helm],
+                snapshot: ObjectiveSnapshot {
+                    id: "destroy-pirates".into(),
+                    text: "Destroy pirates".into(),
+                    mandatory: true,
+                    status: ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: ObjectiveSource::Mission,
+                },
+            }],
         );
-        app.insert_resource(bbs);
-        app.insert_resource(crate::server_app::PlayerAiMemory::default());
         set_helm_control_source(&mut app, ControlSource::Ai);
 
         tick(&mut app);
 
-        // `operate_helm_ai` wrote zero; unresolved Destroy target leaves it there.
+        // operate_helm_ai: unresolved Destroy target → zero thrust remains.
         let last = *app.world().resource::<LastHelmInput>();
         assert_eq!(
             last,
@@ -2377,9 +2404,9 @@ station = "helm"
         let mut app = test_app();
         let anchor = "dock-alpha";
         // Anchor at origin — ship also starts at origin, so distance == 0.
+        // detect_player_ship_objective_completion reads from SystemBlackboards (resource).
         app.insert_resource(viewscreen_with_reach(anchor, 8.0));
         app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
-        app.insert_resource(crate::server_app::PlayerAiMemory::default());
         set_helm_control_source(&mut app, ControlSource::Ai);
 
         let mut mgr = ObjectiveManager::new();
@@ -2422,7 +2449,6 @@ station = "helm"
         // Anchor 500 units away — ship starts at origin.
         app.insert_resource(viewscreen_with_reach(anchor, 8.0));
         app.insert_resource(world_config_with_anchor(anchor, [500.0, 0.0, 0.0]));
-        app.insert_resource(crate::server_app::PlayerAiMemory::default());
         set_helm_control_source(&mut app, ControlSource::Ai);
 
         let mut mgr = ObjectiveManager::new();
@@ -2464,7 +2490,6 @@ station = "helm"
         let anchor = "dock-beta";
         app.insert_resource(viewscreen_with_reach(anchor, 8.0));
         app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
-        app.insert_resource(crate::server_app::PlayerAiMemory::default());
         // helm stays Human — completion system must not fire
 
         let mut mgr = ObjectiveManager::new();
@@ -2543,6 +2568,39 @@ station = "helm"
         assert!(
             !policy.accept_human_input,
             "Backfill player helm must not accept human input"
+        );
+    }
+
+    // (c) Player ship Backfill runs full operate_helm (avoidance + doctrine).
+    // Verifies that the player ship on Backfill uses the same unified operate_helm_ai
+    // loop as NPC ships — not a Reach-only stub — satisfying issue #587 AC.
+    #[test]
+    fn player_ship_backfill_runs_full_operate_helm_with_objectives() {
+        let mut app = test_app();
+        // Give the ship a Destroy objective (non-Reach) pointing at an entity.
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+            crate::entities::spawner::EntityName("enemy_fighter".into()),
+            Transform::from_xyz(80.0, 0.0, 0.0),
+        ));
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![destroy_scored_objective("enemy_fighter", 60.0)],
+        );
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        let last = *app.world().resource::<LastHelmInput>();
+        // The Destroy directive targets an entity at (80, 0). Full operate_helm
+        // should produce non-zero thrust to pursue it.
+        assert!(
+            last.thrust > 0.0 || last.steering.abs() > 0.0,
+            "player ship Backfill must run full operate_helm (non-Reach); \
+             got thrust={}, steering={}",
+            last.thrust,
+            last.steering
         );
     }
 }

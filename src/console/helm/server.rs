@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::messages::{HelmBlackboard, SystemBlackboard, SystemId, ViewMode};
 use crate::server_app::{ShipBoost, ShipImpulse, SystemBlackboards};
 use crate::ship_plugin::BoostConfigResource;
-use crate::ship_state::ShipState;
+use crate::ship_state::{ShipPhysics, ShipState};
 use crate::system_registry::HELM_SYSTEM_ID;
 
 pub struct HelmPlugin;
@@ -23,11 +23,13 @@ impl Plugin for HelmPlugin {
 /// globally by `broadcast_blackboard_updates` in `SimSet::Broadcast`.
 fn publish_helm_blackboard(
     ship: Res<ShipState>,
+    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     impulse: Option<Res<ShipImpulse>>,
     boost: Option<Res<ShipBoost>>,
     boost_config: Option<Res<BoostConfigResource>>,
     mut blackboards: ResMut<SystemBlackboards>,
 ) {
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
     let impulse_charge = impulse
         .as_ref()
         .map(|imp| imp.0.charge_progress)
@@ -39,10 +41,10 @@ fn publish_helm_blackboard(
     let _ = on_screen; // view mode is not raw sim truth; kept in SimSnapshot
 
     let bb = HelmBlackboard {
-        yaw: ship.yaw,
-        forward_speed: ship.forward_speed,
-        x: ship.x,
-        z: ship.z,
+        yaw: physics.yaw,
+        forward_speed: physics.forward_speed,
+        x: physics.x,
+        z: physics.z,
         impulse_charge,
         boost_battery,
         boost_active,
@@ -70,6 +72,11 @@ mod tests {
             .init_resource::<SystemBlackboards>()
             .init_resource::<FrozenBlackboards>()
             .add_systems(Update, publish_helm_blackboard);
+        // Spawn a LocalShip entity with ShipPhysics so the system can query it.
+        app.world_mut().spawn((
+            crate::simulation::LocalShip,
+            ShipPhysics::default(),
+        ));
         app
     }
 
@@ -92,11 +99,14 @@ mod tests {
     fn publish_reflects_ship_position_and_yaw() {
         let mut app = base_app();
         {
-            let mut ship = app.world_mut().resource_mut::<ShipState>();
-            ship.x = 100.0;
-            ship.z = -200.0;
-            ship.yaw = std::f32::consts::FRAC_PI_4;
-            ship.forward_speed = 50.0;
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipPhysics, With<crate::simulation::LocalShip>>();
+            let mut physics = q.single_mut(app.world_mut()).unwrap();
+            physics.x = 100.0;
+            physics.z = -200.0;
+            physics.yaw = std::f32::consts::FRAC_PI_4;
+            physics.forward_speed = 50.0;
         }
         app.update();
 
@@ -188,7 +198,19 @@ mod tests {
                 )
                     .chain(),
             );
+        app.world_mut().spawn((
+            crate::simulation::LocalShip,
+            ShipPhysics::default(),
+        ));
         app
+    }
+
+    fn set_physics_yaw(app: &mut App, yaw: f32) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipPhysics, With<crate::simulation::LocalShip>>();
+        let mut physics = q.single_mut(app.world_mut()).unwrap();
+        physics.yaw = yaw;
     }
 
     #[test]
@@ -196,7 +218,7 @@ mod tests {
         let mut app = app_with_snapshot();
 
         // Tick 1: ship at yaw=1.0
-        app.world_mut().resource_mut::<ShipState>().yaw = 1.0;
+        set_physics_yaw(&mut app, 1.0);
         app.update();
 
         // After tick 1: SystemBlackboards has yaw=1.0;
@@ -214,7 +236,7 @@ mod tests {
         }
 
         // Tick 2: ship moves to yaw=2.0
-        app.world_mut().resource_mut::<ShipState>().yaw = 2.0;
+        set_physics_yaw(&mut app, 2.0);
         app.update();
 
         // FrozenBlackboards (snapshotted before tick 2's publish) should have yaw=1.0

@@ -278,12 +278,31 @@ pub fn spawn_entity(
                 crate::ship::control_source::ControlSource::Ai,
             );
         }
+        // Seed ShipPhysics from the spawn position so the per-entity helm loop
+        // starts with the correct initial state rather than (0, 0).
+        let ship_physics = crate::ship_state::ShipPhysics {
+            x: position.x,
+            z: position.z,
+            yaw: {
+                let rot = bevy::math::Quat::from_euler(
+                    bevy::math::EulerRot::YXZ,
+                    0.0,
+                    0.0,
+                    0.0,
+                );
+                let _ = rot;
+                0.0 // initial yaw; updated each tick by operate_helm_ai
+            },
+            ..Default::default()
+        };
         entity_commands.insert((
             ship_config,
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ShipSystemControlSources(resolver),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
+            ship_physics,
+            crate::ai_plugin::ShipAiMemory::default(),
         ));
     }
 

@@ -253,6 +253,7 @@ fn update_entity_inspector(
         bevy::ecs::query::Without<crate::server_app::Asteroid>,
     >,
     ship_state: Res<crate::ship::state::ShipState>,
+    ship_physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::server_app::LocalShip>>,
     ship_hull: Res<crate::server_app::ShipHullIntegrity>,
     ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
     faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
@@ -260,8 +261,9 @@ fn update_entity_inspector(
     let Ok(ship_shields) = ship_shields_q.single() else {
         return;
     };
-    let player_x = ship_state.x;
-    let player_z = ship_state.z;
+    let ship_phys = ship_physics_q.single().ok().copied().unwrap_or_default();
+    let player_x = ship_phys.x;
+    let player_z = ship_phys.z;
 
     let mut out = String::from("ENTITY INSPECTOR\n");
     out.push_str("────────────────────────────────────────────────────────────\n");

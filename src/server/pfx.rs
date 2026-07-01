@@ -10,7 +10,7 @@ use crate::entity_config::{EnginePfxConfig, PhaserBankConfig, PhaserCombatConfig
 use crate::entity_spawner::{EntityUuid, HelmConsoleSection, WeaponsConsoleSection};
 use crate::messages::GamePhase;
 use crate::model_rig::ModelMarkers;
-use crate::ship_state::ShipState;
+use crate::ship_state::ShipPhysics;
 use crate::simulation::{
     ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, Ship,
     TorpedoSystemResource,
@@ -127,7 +127,7 @@ struct EngineTrailState {
 }
 
 fn sync_phaser_beams(
-    ship: Res<ShipState>,
+    physics_q: Query<&ShipPhysics, With<LocalShip>>,
     beam: Res<ActiveBeam>,
     render_cfg: Res<PhaserRenderConfig>,
     combat_cfg: Res<PhaserCombatConfigResource>,
@@ -165,6 +165,7 @@ fn sync_phaser_beams(
     mut glow_q: Query<&mut Transform, (With<BeamContactGlow>, Without<BeamBody>)>,
 ) {
     let mut live_keys = HashSet::new();
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
 
     if let Some(target_uuid) = &beam.target_uuid {
         let key = format!(
@@ -179,7 +180,7 @@ fn sync_phaser_beams(
         );
         if let Some((start, end, color)) = resolve_player_beam(
             target_uuid,
-            &ship,
+            &physics,
             &beam,
             &render_cfg,
             &combat_cfg.0,
@@ -230,7 +231,7 @@ fn sync_phaser_beams(
         );
         let Some(target_pos) = target_position(
             &target_uuid,
-            &ship,
+            &physics,
             player_ship_uuid.as_deref(),
             target_point_index,
             &asteroid_q,
@@ -285,7 +286,7 @@ fn sync_phaser_beams(
 
 fn resolve_player_beam(
     target_uuid: &str,
-    ship: &ShipState,
+    physics: &ShipPhysics,
     beam: &ActiveBeam,
     render_cfg: &PhaserRenderConfig,
     combat_cfg: &PhaserCombatConfig,
@@ -309,7 +310,7 @@ fn resolve_player_beam(
 ) -> Option<(Vec3, Vec3, [f32; 4])> {
     let target_pos = target_position(
         target_uuid,
-        ship,
+        physics,
         None,
         target_point_index,
         asteroid_q,
@@ -332,11 +333,11 @@ fn resolve_player_beam(
     let origin = if let Ok((transform, markers, _)) = player_ship_q.single() {
         bank_config
             .and_then(|b| marker_origin(transform, markers, b.marker.as_deref()))
-            .unwrap_or_else(|| player_bank_fallback_origin(ship, bank_config))
+            .unwrap_or_else(|| player_bank_fallback_origin(physics, bank_config))
     } else {
-        player_bank_fallback_origin(ship, bank_config)
+        player_bank_fallback_origin(physics, bank_config)
     };
-    let range_origin = Vec3::new(ship.x, BEAM_Y_OFFSET, ship.z);
+    let range_origin = Vec3::new(physics.x, BEAM_Y_OFFSET, physics.z);
     let end = clamp_endpoint(origin, target_pos, range_origin, range);
     Some((origin, end, color))
 }
@@ -480,7 +481,7 @@ fn sync_torpedo_pfx(
 
 fn spawn_engine_trails(
     time: Res<Time>,
-    ship: Res<ShipState>,
+    physics_q: Query<&ShipPhysics, With<LocalShip>>,
     mut state: ResMut<EngineTrailState>,
     player_q: Query<
         (
@@ -497,22 +498,23 @@ fn spawn_engine_trails(
             Option<&ModelMarkers>,
             Option<&HelmConsoleSection>,
             Option<&EntityUuid>,
-            &AiControllerComponent,
+            &ShipPhysics,
         ),
-        Without<Ship>,
+        (With<AiControllerComponent>, Without<Ship>),
     >,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_secs();
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
 
     if let Ok((transform, markers, helm, uuid)) = player_q.single() {
         let key_base = uuid
             .map(|u| format!("engine:{}", u.0))
             .unwrap_or_else(|| "engine:player".to_string());
         let max_speed = helm.map(|h| h.0.max_speed).unwrap_or(12.5).max(0.1);
-        let normalized = (ship.forward_speed / max_speed).clamp(0.0, 1.0);
+        let normalized = (physics.forward_speed / max_speed).clamp(0.0, 1.0);
         let cfg = helm.and_then(|h| h.0.engine_pfx.as_ref());
         let settings = EnginePfxSettings::from_config(cfg);
         update_engine_trail(
@@ -530,13 +532,13 @@ fn spawn_engine_trails(
         );
     }
 
-    for (transform, markers, helm, uuid, ai) in npc_q.iter() {
+    for (transform, markers, helm, uuid, npc_physics) in npc_q.iter() {
         let Some(uuid) = uuid else {
             continue;
         };
         let key_base = format!("engine:{}", uuid.0);
         let max_speed = helm.map(|h| h.0.max_speed).unwrap_or(12.5).max(0.1);
-        let normalized = (ai.forward_speed / max_speed).clamp(0.0, 1.0);
+        let normalized = (npc_physics.forward_speed / max_speed).clamp(0.0, 1.0);
         let cfg = helm.and_then(|h| h.0.engine_pfx.as_ref());
         let settings = EnginePfxSettings::from_config(cfg);
         update_engine_trail(
@@ -935,7 +937,7 @@ fn target_point_count(
 
 fn target_position(
     uuid: &str,
-    ship: &ShipState,
+    physics: &ShipPhysics,
     player_ship_uuid: Option<&str>,
     target_point_index: Option<usize>,
     asteroid_q: &Query<
@@ -961,7 +963,7 @@ fn target_position(
                 return Some(point);
             }
         }
-        return Some(Vec3::new(ship.x, 0.0, ship.z));
+        return Some(Vec3::new(physics.x, 0.0, physics.z));
     }
     asteroid_q
         .iter()
@@ -1009,10 +1011,10 @@ fn marker_emitter(
     (direction.length_squared() > 1e-6).then_some((origin, direction.normalize()))
 }
 
-fn player_bank_fallback_origin(ship: &ShipState, bank: Option<&PhaserBankConfig>) -> Vec3 {
-    let center = Vec3::new(ship.x, BEAM_Y_OFFSET, ship.z);
-    let forward = Vec3::new(ship.yaw.sin(), 0.0, -ship.yaw.cos());
-    let right = Vec3::new(ship.yaw.cos(), 0.0, ship.yaw.sin());
+fn player_bank_fallback_origin(physics: &ShipPhysics, bank: Option<&PhaserBankConfig>) -> Vec3 {
+    let center = Vec3::new(physics.x, BEAM_Y_OFFSET, physics.z);
+    let forward = Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos());
+    let right = Vec3::new(physics.yaw.cos(), 0.0, physics.yaw.sin());
     let Some(bank) = bank else {
         return center;
     };

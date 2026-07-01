@@ -32,7 +32,7 @@ use crate::gui::{
 };
 use crate::lobby::WorldResource;
 use crate::messages::{GamePhase, ViewMode};
-use crate::ship_state::ShipState;
+use crate::ship_state::{ShipPhysics, ShipState};
 
 // ── Marker component ──────────────────────────────────────────────────────────
 
@@ -240,6 +240,7 @@ fn sync_server_radar_bridge(
     mut commands: Commands,
     world: Option<Res<WorldResource>>,
     ship: Res<ShipState>,
+    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut widgets: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
 ) {
     let Some(world) = world else { return };
@@ -249,14 +250,15 @@ fn sync_server_radar_bridge(
     let Some((widget, _, mut map)) = widgets.iter_mut().find(|(_, c, _)| **c == active) else {
         return;
     };
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
     bridge_sim_to_radar(
         &mut commands,
         widget,
         &mut map,
         RadarCenterPose {
-            x: ship.x,
-            z: ship.z,
-            yaw: ship.yaw,
+            x: physics.x,
+            z: physics.z,
+            yaw: physics.yaw,
         },
         &world.0.entities,
     );

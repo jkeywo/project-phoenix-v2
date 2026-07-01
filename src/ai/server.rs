@@ -115,6 +115,17 @@ impl AiTokenRegistry {
 
 // ── AiControllerComponent ─────────────────────────────────────────────────────
 
+/// Per-entity AI memory component. Carries helm steering state (waypoint cursor,
+/// target, last attacker) across ticks for both the player ship and NPC ships.
+///
+/// The player ship gets this component inserted at spawn. NPC ships get it when
+/// `attach_controllers_on_spawn` runs (alongside `AiControllerComponent`).
+/// `operate_helm_ai` reads/writes this component exclusively; `AiControllerComponent`
+/// continues to carry a redundant copy in `memory` for backward compat with
+/// `tick_ai_controllers` until that function is retired in issue #595.
+#[derive(Component, Default, Clone, Debug)]
+pub struct ShipAiMemory(pub AiMemory);
+
 /// Marker component wrapping per-entity `AiMemory` (private reasoning state).
 /// Also carries the entity UUID so the despawn handler can unregister
 /// the synthetic token without querying a potentially-absent UUID component.
@@ -252,11 +263,12 @@ fn build_world_snapshot(
         Option<&crate::entity_spawner::EntityConsoleHull>,
         Option<&crate::entity_spawner::ColliderSection>,
         Option<&AiControllerComponent>,
+        Option<&crate::ship_state::ShipPhysics>,
     )>,
 ) {
     snapshot.entities = query
         .iter()
-        .map(|(uuid, transform, name, faction, hull, collider, ai)| {
+        .map(|(uuid, transform, name, faction, hull, collider, ai, physics)| {
             let hull_fraction = hull
                 .map(|h| {
                     let max = h.0.total_max();
@@ -267,7 +279,13 @@ fn build_world_snapshot(
                     }
                 });
             let radius = collider.map(|c| c.0.radius).unwrap_or(0.0);
-            let forward_speed = ai.map(|a| a.forward_speed).unwrap_or(0.0);
+            // Prefer ShipPhysics.forward_speed (authoritative for all ships after #587);
+            // fall back to AiControllerComponent.forward_speed for entities that haven't
+            // been migrated yet.
+            let forward_speed = physics
+                .map(|p| p.forward_speed)
+                .or_else(|| ai.map(|a| a.forward_speed))
+                .unwrap_or(0.0);
             crate::ai::AiWorldEntity {
                 uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
                 name: name.as_ref().map(|n| n.0.clone()),

@@ -235,7 +235,7 @@ pub fn emit_shields_coordination(
 fn publish_shields_blackboard(
     shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
     hull: Res<crate::simulation::ShipHullIntegrity>,
-    ship: Res<crate::ship_state::ShipState>,
+    physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>,
     weapons_target: Option<Res<crate::weapons_plugin::WeaponsTarget>>,
     asteroid_q: Query<
         (&crate::simulation::AsteroidUuid, &Transform),
@@ -250,6 +250,7 @@ fn publish_shields_blackboard(
     let Ok(shields) = shields_q.single() else {
         return;
     };
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
     let facings: Vec<ShieldFacingStatus> = shields
         .0
         .snapshot()
@@ -297,10 +298,10 @@ fn publish_shields_blackboard(
                     .find(|(u, _)| u.0 == *uuid)
                     .map(|(_, t)| (t.translation.x, t.translation.z))
             })?;
-        let dx = live.0 - ship.x;
-        let dz = live.1 - ship.z;
+        let dx = live.0 - physics.x;
+        let dz = live.1 - physics.z;
         let bearing_rad =
-            (dz.atan2(dx) - ship.yaw + std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
+            (dz.atan2(dx) - physics.yaw + std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
         Some(bearing_rad.to_degrees())
     });
 

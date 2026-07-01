@@ -28,7 +28,7 @@ use crate::entity_spawner::{AsteroidFieldSection, MeshSection};
 use crate::lobby::Target;
 use crate::lobby::WorldResource;
 use crate::messages::{EntitySnapshot, ServerMessage};
-use crate::ship_state::ShipState;
+use crate::ship_state::ShipPhysics;
 use crate::simulation::SimOutbox;
 
 pub use crate::entity_spawner::EntityConsoleHull;
@@ -256,7 +256,7 @@ pub fn check_destroyed_asteroids(
 /// drive multiple concurrent ring buffers off the same player position.
 pub fn update_asteroid_window(
     mut commands: Commands,
-    ship: Res<ShipState>,
+    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut fields: Query<(
         Entity,
         &AsteroidFieldSection,
@@ -268,6 +268,7 @@ pub fn update_asteroid_window(
     mut entity_map: ResMut<AsteroidEntityMap>,
     mut outbox: ResMut<SimOutbox>,
 ) {
+    let physics = physics_q.single().ok().copied().unwrap_or_default();
     for (field_entity, section, mut window, mut player_grid, field_index) in fields.iter_mut() {
         let field = &section.0;
         let grid = match &field.grid {
@@ -277,8 +278,8 @@ pub fn update_asteroid_window(
         let field_idx = field_index.0;
 
         let (gx, gz) = compute_player_grid_cell(
-            ship.x - field.anchor_offset[0],
-            ship.z - field.anchor_offset[2],
+            physics.x - field.anchor_offset[0],
+            physics.z - field.anchor_offset[2],
             grid.resolution,
         );
 
@@ -886,7 +887,12 @@ mod tests {
         app.init_resource::<SimOutbox>();
         app.init_resource::<AsteroidEntityMap>();
         app.init_resource::<WorldResource>();
-        app.insert_resource(ShipState::new());
+        // Spawn a LocalShip entity with ShipPhysics so update_asteroid_window can query it.
+        app.world_mut().spawn((
+            crate::simulation::LocalShip,
+            bevy::prelude::Transform::default(),
+            crate::ship_state::ShipPhysics::default(),
+        ));
         // (#475) Multi-field refactor: AsteroidWindow + PlayerGridPosition
         // are per-field components, attached by `attach_field_components`
         // to each `AsteroidFieldSection` entity. The systems are chained
@@ -925,6 +931,15 @@ mod tests {
             anchor_offset: window.anchor_offset,
             needs_init: window.needs_init,
         }
+    }
+
+    fn set_ship_pos(app: &mut App, x: f32, z: f32) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>();
+        let mut p = q.single_mut(app.world_mut()).expect("expected LocalShip with ShipPhysics");
+        p.x = x;
+        p.z = z;
     }
 
     fn grid(resolution: f32) -> GridConfig {
@@ -1099,11 +1114,7 @@ shield_pierce = 0.4
             random_rotation: None,
         };
         // Anchor the player on the belt so the spawn window covers it.
-        {
-            let mut ship = app.world_mut().resource_mut::<ShipState>();
-            ship.x = 150.0;
-            ship.z = 0.0;
-        }
+        set_ship_pos(&mut app, 150.0, 0.0);
         app.world_mut()
             .spawn((AsteroidFieldSection(f), Transform::default()));
         app.update();
@@ -1127,11 +1138,7 @@ shield_pierce = 0.4
         assert!(count > 0, "no asteroids spawned — test set-up is wrong");
 
         // Move the player far away → full rebuild should clear them.
-        {
-            let mut ship = app.world_mut().resource_mut::<ShipState>();
-            ship.x = 10_000.0;
-            ship.z = 10_000.0;
-        }
+        set_ship_pos(&mut app, 10_000.0, 10_000.0);
         app.update();
         let mut q = app.world_mut().query::<&Asteroid>();
         let remaining = q.iter(app.world()).count();
@@ -1199,11 +1206,7 @@ shield_pierce = 0.4
 
         // Position the player between the two annuli so both spawn windows
         // overlap their respective belts.
-        {
-            let mut ship = app.world_mut().resource_mut::<ShipState>();
-            ship.x = 250.0;
-            ship.z = 0.0;
-        }
+        set_ship_pos(&mut app, 250.0, 0.0);
         app.world_mut()
             .spawn((AsteroidFieldSection(inner), Transform::default()));
         app.world_mut()

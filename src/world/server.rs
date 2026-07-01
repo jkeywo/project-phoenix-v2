@@ -7343,7 +7343,6 @@ condition = "on_world_loaded"
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(RegionPlugin)
-            .insert_resource(ShipState::new())
             .insert_resource(crate::modifiers::ShipModifiers::new())
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
@@ -7361,6 +7360,7 @@ condition = "on_world_loaded"
             Ship,
             crate::simulation::LocalShip,
             Transform::default(),
+            crate::ship_state::ShipPhysics::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
         ));
@@ -7408,9 +7408,16 @@ condition = "on_world_loaded"
     }
 
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
-        let mut ship = app.world_mut().resource_mut::<ShipState>();
-        ship.x = x;
-        ship.z = z;
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>();
+        if let Ok(mut p) = q.single_mut(app.world_mut()) {
+            p.x = x;
+            p.z = z;
+        } else {
+            // Fallback: the world test_app may not have a LocalShip entity yet.
+            // No-op; world tests that call set_ship_pos must ensure a LocalShip entity exists.
+        }
     }
 
     fn install_region_trigger(

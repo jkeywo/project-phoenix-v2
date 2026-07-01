@@ -129,8 +129,10 @@ struct EngineTrailState {
 fn sync_phaser_beams(
     physics_q: Query<&ShipPhysics, With<LocalShip>>,
     beam: Res<ActiveBeam>,
-    render_cfg: Res<PhaserRenderConfig>,
-    combat_cfg: Res<PhaserCombatConfigResource>,
+    render_cfg_q: Query<&PhaserRenderConfig, With<LocalShip>>,
+    render_cfg_res: Res<PhaserRenderConfig>,
+    combat_cfg_q: Query<&PhaserCombatConfigResource, With<LocalShip>>,
+    combat_cfg_res: Res<PhaserCombatConfigResource>,
     asteroid_q: Query<
         (&AsteroidUuid, &Transform),
         (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>),
@@ -166,6 +168,25 @@ fn sync_phaser_beams(
 ) {
     let mut live_keys = HashSet::new();
     let physics = physics_q.single().ok().copied().unwrap_or_default();
+    // Prefer per-entity component; fall back to global resource.
+    let render_cfg_default;
+    let render_cfg: &PhaserRenderConfig = match render_cfg_q.single() {
+        Ok(c) => c,
+        Err(_) => {
+            render_cfg_default = PhaserRenderConfig::default();
+            &render_cfg_default
+        }
+    };
+    let _ = render_cfg_res; // suppress unused-variable warning; resource kept for compat
+    let combat_cfg_default;
+    let combat_cfg: &PhaserCombatConfigResource = match combat_cfg_q.single() {
+        Ok(c) => c,
+        Err(_) => {
+            combat_cfg_default = PhaserCombatConfigResource::default();
+            &combat_cfg_default
+        }
+    };
+    let _ = combat_cfg_res; // suppress unused-variable warning; resource kept for compat
 
     if let Some(target_uuid) = &beam.target_uuid {
         let key = format!(
@@ -182,7 +203,7 @@ fn sync_phaser_beams(
             target_uuid,
             &physics,
             &beam,
-            &render_cfg,
+            render_cfg,
             &combat_cfg.0,
             &asteroid_q,
             &entity_q,
@@ -398,14 +419,18 @@ fn upsert_beam(
 }
 
 fn sync_torpedo_pfx(
-    torpedo_sys: Option<Res<TorpedoSystemResource>>,
+    torpedo_sys_q: Query<&TorpedoSystemResource, With<LocalShip>>,
+    torpedo_sys_res: Option<Res<TorpedoSystemResource>>,
     mut state: ResMut<TorpedoPfxState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut transforms: Query<&mut Transform, With<TorpedoBody>>,
 ) {
-    let Some(torpedo_sys) = torpedo_sys else {
+    // Prefer per-entity component; fall back to global resource (old path).
+    let torpedo_sys_ref: Option<&TorpedoSystemResource> = torpedo_sys_q.single().ok()
+        .or_else(|| torpedo_sys_res.as_deref());
+    let Some(torpedo_sys) = torpedo_sys_ref else {
         return;
     };
 

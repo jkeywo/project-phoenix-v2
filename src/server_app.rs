@@ -1830,10 +1830,13 @@ fn spawn_game_start_entities(
                         }
                     })
                     .unwrap_or(40.0);
-                commands.insert_resource(PhaserRenderConfig {
+                let render_cfg = PhaserRenderConfig {
                     beam_color,
                     beam_range,
-                });
+                };
+                // Insert as per-entity component AND global resource (dual-write migration).
+                commands.entity(spawned).insert(render_cfg.clone());
+                commands.insert_resource(render_cfg);
 
                 // Player phaser combat tuning — overrides the default
                 // PhaserCombatConfig that WeaponsPlugin installed. The
@@ -1842,21 +1845,28 @@ fn spawn_game_start_entities(
                 // `cooldown_secs`; before this slice those were only
                 // honoured by the NPC phaser path. Now the player path
                 // also reads them via the PhaserCombatConfig resource.
-                commands.insert_resource(crate::weapons_plugin::PhaserCombatConfigResource(
+                let combat_cfg = crate::weapons_plugin::PhaserCombatConfigResource(
                     crate::entity_config::PhaserCombatConfig::from_weapons_console(wc),
-                ));
+                );
+                // Insert as per-entity component AND global resource (dual-write migration).
+                commands.entity(spawned).insert(combat_cfg.clone());
+                commands.insert_resource(combat_cfg);
+            } else {
+                // No [weapons_console] block — insert defaults so the entity-component
+                // path always finds a value on the LocalShip entity.
+                commands
+                    .entity(spawned)
+                    .insert(crate::weapons_plugin::PhaserCombatConfigResource::default());
+                commands
+                    .entity(spawned)
+                    .insert(PhaserRenderConfig::default());
             }
 
-            // [torpedoes] block — overrides the default TorpedoSystemResource
-            // that `WeaponsPlugin` initialised. Absent block keeps defaults
-            // (so NPC ships without `[torpedoes]` are unaffected).
-            //
-            // TODO: NPC ships that declare their own `[torpedoes]` block will
-            // parse it (it lands in `EntityConfig.torpedoes`) but it is
-            // silently ignored here because this override lives inside the
-            // "first ship entity == player ship" branch. When per-entity NPC
-            // torpedo systems land, lift this into `entity_spawner::spawn_entity`
-            // as a per-entity component instead of a single shared resource.
+            // [torpedoes] block — builds the TorpedoSystem from TOML config.
+            // Inserted as per-entity component AND global resource (dual-write
+            // migration). NPC ships with a [torpedoes] block will get their own
+            // TorpedoSystemResource component via entity_spawner when that lands;
+            // for now only the player ship uses torpedoes.
             if let Some(tc) = &config.torpedoes {
                 let runtime_config = tc.to_runtime();
                 let torpedo_system = if !tc.tubes.is_empty() {
@@ -1864,8 +1874,10 @@ fn spawn_game_start_entities(
                 } else {
                     crate::torpedo::TorpedoSystem::new(runtime_config)
                 };
-                commands
-                    .insert_resource(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
+                let torpedo_res = crate::weapons_plugin::TorpedoSystemResource(torpedo_system);
+                // Insert as per-entity component AND global resource (dual-write migration).
+                commands.insert_resource(torpedo_res.clone());
+                commands.entity(spawned).insert(torpedo_res);
             }
 
             if let Some(pc) = &config.power {
@@ -2574,6 +2586,14 @@ mod tests {
                 ])),
             ))
             .id();
+        // Insert per-entity weapon configs as a separate insert (Bundle limit).
+        app.world_mut().entity_mut(ship).insert((
+            crate::weapons_plugin::TorpedoSystemResource(
+                crate::torpedo::TorpedoSystem::new(crate::torpedo::TorpedoConfig::default())
+            ),
+            crate::weapons_plugin::PhaserCombatConfigResource::default(),
+            PhaserRenderConfig::default(),
+        ));
         app.insert_resource(ShipEntity(ship));
         app
     }
@@ -2642,12 +2662,22 @@ mod tests {
     }
 
     fn load_tube_now(app: &mut App, tube: &str) {
-        app.world_mut()
-            .resource_mut::<TorpedoSystemResource>()
-            .0
-            .tube_mut(tube)
-            .expect("test tube should exist")
-            .load_state = crate::torpedo::TubeLoadState::Loaded;
+        // Systems prefer the per-entity component over the resource; update component.
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut TorpedoSystemResource, With<LocalShip>>();
+        if let Ok(mut ts) = q.single_mut(app.world_mut()) {
+            ts.0.tube_mut(tube)
+                .expect("test tube should exist")
+                .load_state = crate::torpedo::TubeLoadState::Loaded;
+        } else {
+            app.world_mut()
+                .resource_mut::<TorpedoSystemResource>()
+                .0
+                .tube_mut(tube)
+                .expect("test tube should exist")
+                .load_state = crate::torpedo::TubeLoadState::Loaded;
+        }
     }
 
     fn set_ship_yaw(app: &mut App, yaw: f32) {

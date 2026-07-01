@@ -134,7 +134,10 @@ impl Default for CurrentPhaserMode {
 /// Rendering config for the phaser beam (colour, max range).
 /// Populated from ship entity TOML during world setup; defaults are used if
 /// the TOML is absent.
-#[derive(Resource, Clone, Debug)]
+///
+/// Derives both `Resource` (existing player-ship singleton path) and
+/// `Component` (per-entity path, PR 5 unification).
+#[derive(Resource, Component, Clone, Debug)]
 pub struct PhaserRenderConfig {
     /// RGBA beam colour in 0.0–1.0.
     pub beam_color: [f32; 4],
@@ -152,7 +155,10 @@ impl Default for PhaserRenderConfig {
 }
 
 /// Wraps the pure-Rust torpedo system so it can be used as a Bevy resource.
-#[derive(Resource)]
+///
+/// Derives both `Resource` (existing player-ship singleton path) and
+/// `Component` (per-entity path, PR 5 unification).
+#[derive(Resource, Component, Clone)]
 pub struct TorpedoSystemResource(pub TorpedoSystem);
 
 /// Bevy resource holding the player-ship phaser combat tuning
@@ -163,7 +169,10 @@ pub struct TorpedoSystemResource(pub TorpedoSystem);
 /// `spawn_game_start_entities` from the player ship's `[weapons_console]`
 /// block. Read by `handle_fire_phaser`, `tick_active_beam`, and the
 /// `weapons_update_broadcaster` to drive player phaser behaviour.
-#[derive(Resource, Default)]
+///
+/// Derives both `Resource` (existing player-ship singleton path) and
+/// `Component` (per-entity path, PR 5 unification).
+#[derive(Resource, Component, Default, Clone)]
 pub struct PhaserCombatConfigResource(pub crate::entity_config::PhaserCombatConfig);
 
 /// Bevy message fired (with world-space position) when an asteroid is destroyed
@@ -404,13 +413,22 @@ fn handle_fire_phaser(
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
-    combat_config: Res<PhaserCombatConfigResource>,
+    combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
     _outbox: ResMut<SimOutbox>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     let Ok((ship_config, control_sources)) = ship_query.single() else {
         return;
+    };
+    // Per-entity component path (preferred). Fallback: use the default config.
+    let combat_config_default;
+    let combat_config: &PhaserCombatConfigResource = match combat_config_q.single() {
+        Ok(c) => c,
+        Err(_) => {
+            combat_config_default = PhaserCombatConfigResource::default();
+            &combat_config_default
+        }
     };
     let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
     let policy = control_sources
@@ -519,7 +537,7 @@ fn tick_phaser_auto_fire(
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
-    combat_config: Res<PhaserCombatConfigResource>,
+    combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     sessions: Option<Res<Sessions>>,
     ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>,
@@ -539,6 +557,15 @@ fn tick_phaser_auto_fire(
     if beam.target_uuid.is_some() {
         return;
     }
+    // Per-entity component path (preferred). Fallback: use the default config.
+    let combat_config_default;
+    let combat_config: &PhaserCombatConfigResource = match combat_config_q.single() {
+        Ok(c) => c,
+        Err(_) => {
+            combat_config_default = PhaserCombatConfigResource::default();
+            &combat_config_default
+        }
+    };
     let Some(target_uuid) = &weapons_target.0 else {
         return;
     };
@@ -1006,7 +1033,8 @@ fn handle_load_tube(
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
     let Ok((ship_config, control_sources)) = ship_query.single() else {
         return;
@@ -1024,7 +1052,12 @@ fn handle_load_tube(
         if !tactical_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
-        torpedo_sys.0.start_load(tube.as_str());
+        // Prefer per-entity component; fall back to global resource for test compat.
+        if let Ok(mut ts) = torpedo_sys_q.single_mut() {
+            ts.0.start_load(tube.as_str());
+        } else {
+            torpedo_sys_res.0.start_load(tube.as_str());
+        }
     }
 }
 
@@ -1038,7 +1071,8 @@ fn handle_unload_tube(
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
     let Ok((ship_config, control_sources)) = ship_query.single() else {
         return;
@@ -1056,7 +1090,12 @@ fn handle_unload_tube(
         if !tactical_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
-        torpedo_sys.0.start_unload(tube.as_str());
+        // Prefer per-entity component; fall back to global resource for test compat.
+        if let Ok(mut ts) = torpedo_sys_q.single_mut() {
+            ts.0.start_unload(tube.as_str());
+        } else {
+            torpedo_sys_res.0.start_unload(tube.as_str());
+        }
     }
 }
 
@@ -1071,7 +1110,8 @@ fn handle_fire_torpedo(
         With<crate::server_app::LocalShip>,
     >,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
-    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
     weapons_target: Res<WeaponsTarget>,
@@ -1095,29 +1135,44 @@ fn handle_fire_torpedo(
             continue;
         }
         let uuid = uuid::Uuid::new_v4().to_string();
-        let tube_facing_rad = torpedo_sys
-            .0
-            .tube(tube.as_str())
-            .map(|t| t.facing_deg.to_radians())
-            .unwrap_or(0.0);
+        // Prefer per-entity component; fall back to global resource for test compat.
+        let has_comp = torpedo_sys_q.single().is_ok();
+        let tube_facing_rad = if has_comp {
+            torpedo_sys_q.single().ok().and_then(|ts| ts.0.tube(tube.as_str()).map(|t| t.facing_deg.to_radians())).unwrap_or(0.0)
+        } else {
+            torpedo_sys_res.0.tube(tube.as_str()).map(|t| t.facing_deg.to_radians()).unwrap_or(0.0)
+        };
         let launch_heading = physics.yaw + tube_facing_rad;
         let source_uuid = player_ship_q.single().map(|u| u.0.clone()).ok();
         // Use the server-side locked target as the authoritative homing UUID.
         // Fall back to whatever the client sent in case there's no server lock.
         let homing_uuid = weapons_target.0.clone().or_else(|| target_uuid.clone());
         use crate::torpedo::LaunchResult;
-        match torpedo_sys.0.launch(
-            tube.as_str(),
-            uuid,
-            physics.x,
-            physics.z,
-            launch_heading,
-            homing_uuid,
-            source_uuid,
-        ) {
-            LaunchResult::Launched {
+        let result = if has_comp {
+            torpedo_sys_q.single_mut().ok().map(|mut ts| ts.0.launch(
+                tube.as_str(),
+                uuid.clone(),
+                physics.x,
+                physics.z,
+                launch_heading,
+                homing_uuid.clone(),
+                source_uuid.clone(),
+            ))
+        } else {
+            Some(torpedo_sys_res.0.launch(
+                tube.as_str(),
+                uuid.clone(),
+                physics.x,
+                physics.z,
+                launch_heading,
+                homing_uuid.clone(),
+                source_uuid.clone(),
+            ))
+        };
+        match result {
+            Some(LaunchResult::Launched {
                 uuid: launched_uuid,
-            } => {
+            }) => {
                 weapon_fired.0 = true;
                 outbox.0.push((
                     Target::All,
@@ -1130,8 +1185,10 @@ fn handle_fire_torpedo(
                     },
                 ));
             }
-            LaunchResult::TubeNotLoaded | LaunchResult::NoTorpedoes | LaunchResult::UnknownTube => {
-            }
+            Some(LaunchResult::TubeNotLoaded)
+            | Some(LaunchResult::NoTorpedoes)
+            | Some(LaunchResult::UnknownTube)
+            | None => {}
         }
     }
 }
@@ -1155,7 +1212,8 @@ pub fn drain_power_for_active_beam(
 }
 
 fn tick_torpedo_system(
-    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut world: ResMut<WorldResource>,
     time: Res<Time>,
     mut outbox: ResMut<SimOutbox>,
@@ -1189,8 +1247,16 @@ fn tick_torpedo_system(
     mut weapons_target: ResMut<WeaponsTarget>,
 ) {
     let dt = time.delta_secs();
+    // Prefer per-entity component; fall back to global resource for test compat.
+    // Only one of the two borrows is active at runtime; we shadow `torpedo_sys`
+    // in both branches so the rest of the function body is unchanged.
+    let mut torpedo_sys_comp_opt = torpedo_sys_q.single_mut().ok();
+    let torpedo_sys: &mut TorpedoSystemResource = match torpedo_sys_comp_opt {
+        Some(ref mut c) => &mut **c,
+        None => &mut *torpedo_sys_res,
+    };
 
-    // UUIDs of virtual (non-hittable) entities G�� anchors / regions. Used to
+    // UUIDs of virtual (non-hittable) entities G— anchors / regions. Used to
     // exclude them from the detonation target list below.
     let virtual_uuids: std::collections::HashSet<String> =
         virtual_entity_q.iter().map(|u| u.0.clone()).collect();
@@ -1413,7 +1479,7 @@ fn tick_active_beam(
     )>,
     mut commands: Commands,
     modifiers: Res<crate::modifiers::ShipModifiers>,
-    combat_config: Res<PhaserCombatConfigResource>,
+    combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
@@ -1425,12 +1491,20 @@ fn tick_active_beam(
     let dt = time.delta_secs();
     cooldown.tick(dt);
     let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
+    // Per-entity component path (preferred). Fallback: use the default config.
+    let combat_config_default;
+    let combat_config: &PhaserCombatConfigResource = match combat_config_q.single() {
+        Ok(c) => c,
+        Err(_) => {
+            combat_config_default = PhaserCombatConfigResource::default();
+            &combat_config_default
+        }
+    };
 
     let Some(target_uuid) = beam.target_uuid.clone() else {
         return;
     };
     let active_bank = beam.bank.clone().unwrap_or_default();
-
     use crate::entity_config::PhaserCombatConfig;
     let active_bank_cfg = combat_config.0.bank_by_id(&active_bank);
     let active_bank_cooldown_secs_early = active_bank_cfg
@@ -1670,7 +1744,8 @@ fn operate_tactical_ai(
     sessions: Res<Sessions>,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     mut weapons_target: ResMut<WeaponsTarget>,
-    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, (With<crate::server_app::LocalShip>, Without<crate::ai::server::AiControllerComponent>)>,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
@@ -1745,22 +1820,32 @@ fn operate_tactical_ai(
                 let world_bearing = dx.atan2(-dz);
                 let bearing = world_bearing - physics.yaw;
 
-                let ts = &torpedo_sys.0;
-                let tubes: Vec<crate::console_ai::TubeSummary> = ts
-                    .tubes
-                    .iter()
-                    .map(|tube| crate::console_ai::TubeSummary {
+                // Prefer per-entity component; fall back to global resource for test compat.
+                let has_comp = torpedo_sys_q.single().is_ok();
+                let tubes: Vec<crate::console_ai::TubeSummary> = if has_comp {
+                    torpedo_sys_q.single().ok().map(|ts| ts.0.tubes.iter().map(|tube| crate::console_ai::TubeSummary {
                         id: tube.id.clone(),
                         loaded: tube.is_loaded(),
                         in_arc: tube.is_in_arc(bearing),
-                    })
-                    .collect();
+                    }).collect()).unwrap_or_default()
+                } else {
+                    torpedo_sys_res.0.tubes.iter().map(|tube| crate::console_ai::TubeSummary {
+                        id: tube.id.clone(),
+                        loaded: tube.is_loaded(),
+                        in_arc: tube.is_in_arc(bearing),
+                    }).collect()
+                };
+                let magazine = if has_comp {
+                    torpedo_sys_q.single().ok().map(|ts| ts.0.torpedoes_remaining).unwrap_or(0)
+                } else {
+                    torpedo_sys_res.0.torpedoes_remaining
+                };
 
                 let input = crate::console_ai::TorpedoAiInput {
                     target_locked: true,
                     target_shields: 0,
                     tubes,
-                    magazine: ts.torpedoes_remaining,
+                    magazine,
                 };
 
                 let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
@@ -1768,25 +1853,38 @@ fn operate_tactical_ai(
 
                 for tube_id in tubes_to_fire {
                     let torpedo_uuid = uuid::Uuid::new_v4().to_string();
-                    let tube_facing_rad = torpedo_sys
-                        .0
-                        .tube(tube_id.as_str())
-                        .map(|t| t.facing_deg.to_radians())
-                        .unwrap_or(0.0);
+                    let tube_facing_rad = if has_comp {
+                        torpedo_sys_q.single().ok().and_then(|ts| ts.0.tube(tube_id.as_str()).map(|t| t.facing_deg.to_radians())).unwrap_or(0.0)
+                    } else {
+                        torpedo_sys_res.0.tube(tube_id.as_str()).map(|t| t.facing_deg.to_radians()).unwrap_or(0.0)
+                    };
                     let launch_heading = physics.yaw + tube_facing_rad;
                     use crate::torpedo::LaunchResult;
-                    match torpedo_sys.0.launch(
-                        tube_id.as_str(),
-                        torpedo_uuid,
-                        physics.x,
-                        physics.z,
-                        launch_heading,
-                        Some(target_uuid.clone()),
-                        source_uuid.clone(),
-                    ) {
-                        LaunchResult::Launched {
+                    let result = if has_comp {
+                        torpedo_sys_q.single_mut().ok().map(|mut ts| ts.0.launch(
+                            tube_id.as_str(),
+                            torpedo_uuid.clone(),
+                            physics.x,
+                            physics.z,
+                            launch_heading,
+                            Some(target_uuid.clone()),
+                            source_uuid.clone(),
+                        ))
+                    } else {
+                        Some(torpedo_sys_res.0.launch(
+                            tube_id.as_str(),
+                            torpedo_uuid.clone(),
+                            physics.x,
+                            physics.z,
+                            launch_heading,
+                            Some(target_uuid.clone()),
+                            source_uuid.clone(),
+                        ))
+                    };
+                    match result {
+                        Some(LaunchResult::Launched {
                             uuid: launched_uuid,
-                        } => {
+                        }) => {
                             outbox.0.push((
                                 Target::All,
                                 ServerMessage::TorpedoLaunched {
@@ -1798,9 +1896,10 @@ fn operate_tactical_ai(
                                 },
                             ));
                         }
-                        LaunchResult::TubeNotLoaded
-                        | LaunchResult::NoTorpedoes
-                        | LaunchResult::UnknownTube => {}
+                        Some(LaunchResult::TubeNotLoaded)
+                        | Some(LaunchResult::NoTorpedoes)
+                        | Some(LaunchResult::UnknownTube)
+                        | None => {}
                     }
                 }
             }
@@ -1892,10 +1991,10 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 cd.per_bank.clone()
             };
             let tubes: Vec<TorpedoTubeState> = {
-                let ts = &world.resource::<TorpedoSystemResource>().0;
-                ts.tubes
-                    .iter()
-                    .map(|t| {
+                // Prefer per-entity component on LocalShip; fall back to global resource.
+                let ts_opt = {
+                    let mut q = world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+                    q.single(world).ok().map(|ts| ts.0.tubes.iter().map(|t| {
                         let remaining = match &t.load_state {
                             crate::torpedo::TubeLoadState::Loading { remaining, .. }
                             | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => {
@@ -1911,20 +2010,48 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                             progress: t.load_state.progress(),
                             load_time: t.load_time,
                         }
-                    })
-                    .collect()
+                    }).collect::<Vec<_>>())
+                };
+                if let Some(tubes) = ts_opt {
+                    tubes
+                } else {
+                    let ts = &world.resource::<TorpedoSystemResource>().0;
+                    ts.tubes
+                        .iter()
+                        .map(|t| {
+                            let remaining = match &t.load_state {
+                                crate::torpedo::TubeLoadState::Loading { remaining, .. }
+                                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => {
+                                    *remaining
+                                }
+                                _ => 0.0,
+                            };
+                            TorpedoTubeState {
+                                id: t.id.clone(),
+                                loaded: t.is_loaded(),
+                                reload_secs: remaining,
+                                state: t.load_state.label().to_string(),
+                                progress: t.load_state.progress(),
+                                load_time: t.load_time,
+                            }
+                        })
+                        .collect()
+                }
             };
-            let torpedo_count = world
-                .resource::<TorpedoSystemResource>()
-                .0
-                .torpedoes_remaining;
+            let torpedo_count = {
+                let mut q = world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+                q.single(world).ok().map(|ts| ts.0.torpedoes_remaining)
+                    .unwrap_or_else(|| world.resource::<TorpedoSystemResource>().0.torpedoes_remaining)
+            };
             let radar_range_mult = world
                 .resource::<crate::modifiers::ShipModifiers>()
                 .get(&ModifierSlot::RadarRange);
             let phaser_mode = world.resource::<CurrentPhaserMode>().0;
             let banks_config = {
-                let cc = world.resource::<PhaserCombatConfigResource>();
-                cc.0.banks.clone()
+                // Prefer per-entity component on LocalShip; fall back to global resource.
+                let mut q = world.query_filtered::<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
+                q.single(world).ok().map(|cc| cc.0.banks.clone())
+                    .unwrap_or_else(|| world.resource::<PhaserCombatConfigResource>().0.banks.clone())
             };
 
             // Query live ECS Transform for the target — WorldResource is a
@@ -2084,9 +2211,9 @@ fn publish_weapons_blackboard(
     weapons_target: Res<WeaponsTarget>,
     beam: Res<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
-    combat_config: Res<PhaserCombatConfigResource>,
+    combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
     phaser_mode: Res<CurrentPhaserMode>,
-    torpedo_sys: Res<TorpedoSystemResource>,
+    torpedo_sys_q: Query<&TorpedoSystemResource, With<crate::server_app::LocalShip>>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
@@ -2101,6 +2228,23 @@ fn publish_weapons_blackboard(
 ) {
     use crate::system_registry::TACTICAL_SYSTEM_ID;
     let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
+    // Per-entity component path (preferred). Fallback: use the default config.
+    let combat_config_default;
+    let combat_config: &PhaserCombatConfigResource = match combat_config_q.single() {
+        Ok(c) => c,
+        Err(_) => {
+            combat_config_default = PhaserCombatConfigResource::default();
+            &combat_config_default
+        }
+    };
+    let torpedo_sys_default;
+    let torpedo_sys: &TorpedoSystemResource = match torpedo_sys_q.single() {
+        Ok(t) => t,
+        Err(_) => {
+            torpedo_sys_default = TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default()));
+            &torpedo_sys_default
+        }
+    };
 
     let target_uuid = weapons_target.0.clone();
     let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
@@ -2592,6 +2736,41 @@ station = "tactical"
                 (Console::Shields, 25.0),
             ])),
             crate::server_app::ShipSystemBlackboards::default(),
+            // Insert per-entity weapon configs so component-path queries succeed.
+            // These are overridden by individual tests via insert_resource for the
+            // PhaserCombatConfigResource; we keep both in sync here.
+            TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
+            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                banks: vec![
+                    crate::entity_config::PhaserBankConfig {
+                        id: "port".into(),
+                        facing_deg: -90.0,
+                        fire_arc_deg: 270.0,
+                        auto_arc_deg: 240.0,
+                        beam_range: 0.0,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 6.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    },
+                    crate::entity_config::PhaserBankConfig {
+                        id: "starboard".into(),
+                        facing_deg: 90.0,
+                        fire_arc_deg: 270.0,
+                        auto_arc_deg: 240.0,
+                        beam_range: 0.0,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 6.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    },
+                ],
+            }),
+            PhaserRenderConfig::default(),
         ));
         app
     }
@@ -2632,12 +2811,23 @@ station = "tactical"
     }
 
     fn load_tube_now(app: &mut App, tube: &str) {
-        app.world_mut()
-            .resource_mut::<TorpedoSystemResource>()
-            .0
-            .tube_mut(tube)
-            .expect("test tube should exist")
-            .load_state = crate::torpedo::TubeLoadState::Loaded;
+        // The systems now prefer the per-entity component over the resource.
+        // Update both to keep them in sync.
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+        if let Ok(mut ts) = q.single_mut(app.world_mut()) {
+            ts.0.tube_mut(tube)
+                .expect("test tube should exist")
+                .load_state = crate::torpedo::TubeLoadState::Loaded;
+        } else {
+            app.world_mut()
+                .resource_mut::<TorpedoSystemResource>()
+                .0
+                .tube_mut(tube)
+                .expect("test tube should exist")
+                .load_state = crate::torpedo::TubeLoadState::Loaded;
+        }
     }
 
     fn start_game(app: &mut App) {
@@ -3667,12 +3857,12 @@ station = "tactical"
         tick(&mut app);
         tick(&mut app);
 
-        let in_flight_len = app
-            .world()
-            .resource::<TorpedoSystemResource>()
-            .0
-            .in_flight
-            .len();
+        let in_flight_len = {
+            // Systems prefer the per-entity component; read from it for assertion.
+            let mut q = app.world_mut().query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+            q.single(app.world()).ok().map(|ts| ts.0.in_flight.len())
+                .unwrap_or_else(|| app.world().resource::<TorpedoSystemResource>().0.in_flight.len())
+        };
         assert_eq!(
             in_flight_len, 1,
             "torpedo should still be in flight after ticking — the asteroid \
@@ -4441,8 +4631,8 @@ station = "tactical"
             .total_current();
 
         // Directly inject a torpedo already adjacent to the player ship so it
-        // detonates on the next tick. We write straight into TorpedoSystemResource
-        // so we don't need to go through the load/fire pipeline.
+        // detonates on the next tick. We write into both the per-entity component
+        // and the resource to stay in sync.
         let torpedo = Torpedo {
             uuid: "test-torp-1".into(),
             x: 1.0, // 1 m away from player at origin — within detonation_radius
@@ -4453,6 +4643,13 @@ station = "tactical"
             source_uuid: None, // no source → no self-detonation exclusion
             shield_pierce: 0.0, // no pierce → all damage goes to shields first
         };
+        // Write to the per-entity component (preferred by systems) and resource.
+        {
+            let mut q = app.world_mut().query_filtered::<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+            if let Ok(mut ts) = q.single_mut(app.world_mut()) {
+                ts.0.in_flight.push(torpedo.clone());
+            }
+        }
         app.world_mut()
             .resource_mut::<TorpedoSystemResource>()
             .0

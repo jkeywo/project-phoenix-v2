@@ -8,7 +8,7 @@ updated: 2026-07-01
 
 ## Status
 
-**Substantially complete** — all major resource-to-component migrations done. One dual-write bridge (`ShipHullIntegrity` ↔ `EntityConsoleHull`) remains.
+**Substantially complete** (W1–W5 done). Full simulation parity continues under [PRD #597](./prd-597-ship-parity.md).
 
 ## Problem
 

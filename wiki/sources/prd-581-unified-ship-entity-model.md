@@ -8,7 +8,7 @@ updated: 2026-07-01
 
 ## Status
 
-**In progress** — core structural work done; some dual-write bridges remain.
+**Substantially complete** — all major resource-to-component migrations done. One dual-write bridge (`ShipHullIntegrity` ↔ `EntityConsoleHull`) remains.
 
 ## Problem
 
@@ -25,36 +25,28 @@ Unify player and NPC ships into one ECS entity model. `LocalShip` is the sole vi
 - **`Ship` marker on all ships**: player ship has `Ship` + `LocalShip`; NPC ships have `Ship` only. `LocalShip` is the rendering/networking gate.
 - **`ShipPhysics` component**: on all ship entities; position/motion fields removed from `ShipState`. `sync_ship_position` syncs all `ShipPhysics` to `Transform`.
 - **`AdmittedCommands` per-entity**: inserted on all ships; `admit_system_commands` routes `ai:` tokens to owning entity via `AiTokenRegistry`.
-- **`ShipSystemBlackboards` per-entity**: `publish_viewscreen_blackboard`, `publish_power_blackboard`, `publish_shields_blackboard`, `publish_sensors_blackboard`, `publish_navigation_blackboard`, and `publish_comms_blackboard` all write directly to the component; `broadcast_blackboard_updates` reads from it.
-- **`tick_ai_controllers` deleted**: replaced by `register_npc_tokens_on_spawn` (token registration) and `process_attacker_this_tick` (attacker tracking).
-- **`AiControllerComponent` empty marker**: all fields removed; kept as a query filter marker for NPC entities.
+- **`ShipSystemBlackboards` per-entity (W3 complete)**: all 10 `publish_*_blackboard` systems (helm, captain, repair, weapons, power, shields, sensors, navigation, comms, viewscreen) write directly to the component on the `LocalShip` entity. `SystemBlackboards`, `FrozenBlackboards` resources and `dual_publish_blackboards`, `snapshot_blackboards` systems deleted. `broadcast_blackboard_updates` reads from `ShipSystemBlackboards` component. `LastBroadcastBlackboards` kept as broadcaster change-cache.
+- **`ShipState` resource deleted (W1 complete)**: all readers migrated to per-entity `ShipRedAlert`, `ShipViewMode`, `ShipPhaserFrequency` components.
+- **`LastHelmInput` per-entity only (W4 complete)**: `Resource` derive removed; `process_helm_inputs`, `operate_helm_ai`, `tick_boost`, `operate_power_ai` all read/write via `Query<&LastHelmInput, With<LocalShip>>`.
+- **`EntityConsoleHull` is primary hull store (W2 complete)**: all production systems read/write hull HP via `EntityConsoleHull` on `LocalShip`. `ShipHullIntegrity` resource and its bridge systems still exist but are no longer the production path.
+- **`With<Ship>` → `With<LocalShip>` in world/server.rs (W5 complete)**: `handle_comms_channel2` fixed; all single-entity ship handlers now use `With<LocalShip>`.
+- **`tick_ai_controllers` deleted**: replaced by `register_npc_tokens_on_spawn` and `process_attacker_this_tick`.
+- **`AiControllerComponent` empty marker**: kept as query filter marker for NPC entities.
 - **`attach_controllers_on_spawn` deleted**: replaced by `register_npc_tokens_on_spawn`.
 - **`ShipAiMemory(pub AiMemory)` per-entity**: wraps `AiMemory`; inserted on all ships.
-- **`operate_helm_ai` unified**: single per-entity loop covering player (Backfill) and NPC helm; reads `WorldSnapshot` for avoidance; `player_ship_helm_ai` (Reach-only stub) deleted.
-- **`handle_fire_phaser_npc` deleted**: replaced by `handle_npc_beam_fire` (activation) + `tick_npc_beams` (damage), both using per-entity `ActiveBeam`/`PhaserCooldown`.
-- **All console `operate_*_ai` loops**: cover all `ShipSystemControlSources` entities (no `With<Ship>` filter).
-- **Console handlers use `With<LocalShip>`**: `handle_toggle_red_alert`, `handle_set_view`, `handle_dispatch_repair_team`, `process_helm_inputs`, `handle_impulse_messages`, `handle_boost_messages`, `handle_sensors_messages`, `handle_set_phaser_frequency`, `operate_tactical_ai`, and most weapon handlers.
-- **`ShipRedAlert` + `ShipViewMode` per-entity**: inserted at spawn; `handle_toggle_red_alert` and `handle_set_view` dual-write to both global `ShipState` and per-entity component.
-- **`EntityConsoleHull` on player ship**: player ship entity keeps `EntityConsoleHull` (not removed at spawn); hull dual-write bridge (`sync_player_hull_to_resource`, `sync_resource_hull_to_entity`) keeps it in sync with `ShipHullIntegrity` resource.
-- **`LastHelmInput` derives `Component`**: inserted on player ship entity; still dual-derives `Resource`.
-- **`NavigationWaypoint`, `SensorsTarget`, `ShipRepairTeams`, `ShipPowerSystem`, `WeaponsTarget`, `ActiveBeam`, `PhaserCooldown`**: all dual-derive `Component` + `Resource`; inserted on all ship entities at spawn.
+- **`operate_helm_ai` unified**: single per-entity loop covering player (Backfill) and NPC helm.
+- **`handle_fire_phaser_npc` deleted**: replaced by `handle_npc_beam_fire` + `tick_npc_beams`.
+- **All console `operate_*_ai` loops**: cover all `ShipSystemControlSources` entities.
+- **Console handlers use `With<LocalShip>`**: all single-entity ship query handlers corrected.
 
-### Dual-Write Bridges (Migration In Progress)
+### Dual-Write Bridges (Remaining)
 
-- `SystemBlackboards` global resource → `ShipSystemBlackboards` component: `dual_publish_blackboards` still copies global → component for the remaining publishers not yet migrated (only `publish_viewscreen_blackboard` was pre-migrated; power/shields/sensors/navigation/comms now write directly). Will be removed once all `publish_*_blackboard` functions write directly to per-entity.
-- `ShipHullIntegrity` resource ↔ `EntityConsoleHull` component: two sync systems keep them in sync; `ShipHullIntegrity` still read by ~20 systems.
-- `ShipState` (red_alert, view_mode, phaser_frequency): still a global Resource; per-entity `ShipRedAlert`/`ShipViewMode` are secondary writes.
-- `LastHelmInput`: still primarily used as Resource; Component derive added but not yet used as per-entity in production.
+- `ShipHullIntegrity` resource ↔ `EntityConsoleHull` component: `sync_player_hull_to_resource` / `sync_resource_hull_to_entity` still run. `ShipHullIntegrity` is kept because some smoke tests and the legacy bridge systems reference it. Can be deleted once verified smoke tests don't rely on the resource.
 
 ### Remaining Work
 
-- Delete `ShipState` resource (migrate remaining readers to per-entity `ShipRedAlert`, `ShipViewMode`, phaser_frequency component).
-- Delete `ShipHullIntegrity` resource (migrate all readers to `EntityConsoleHull` on `LocalShip`).
-- Delete `SystemBlackboards` / `FrozenBlackboards` / `LastBroadcastBlackboards` global resources (migrate all `publish_*_blackboard` functions to write directly to `ShipSystemBlackboards`).
-- `LastHelmInput`: make per-entity only; remove Resource derive.
-- Fix remaining `With<Ship>` in `world/server.rs` handlers (`handle_hail`, `handle_respond_to_message`, etc.) — these use `.single()` and should be `With<LocalShip>`.
-- Remove `dual_publish_blackboards` once all publishers write directly to per-entity component.
-- Remove `AiMemory` struct once `ShipAiMemory` fields have fully migrated to viewscreen blackboard.
+- Delete `ShipHullIntegrity` resource once smoke tests (Playwright) confirm they don't rely on it. The dual-write bridge and resource definition can then be removed.
+- Remove `AiMemory` struct once `ShipAiMemory` fields have fully migrated to viewscreen blackboard (out of scope for PRD #581 core).
 
 ## Key Decisions
 

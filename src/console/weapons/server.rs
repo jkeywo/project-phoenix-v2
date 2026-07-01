@@ -397,9 +397,9 @@ fn handle_fire_phaser(
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
-    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     weapons_target: Res<WeaponsTarget>,
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
@@ -520,9 +520,9 @@ fn tick_phaser_auto_fire(
     cooldown: Res<PhaserCooldown>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     combat_config: Res<PhaserCombatConfigResource>,
-    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     sessions: Option<Res<Sessions>>,
-    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
@@ -975,7 +975,7 @@ fn handle_set_phaser_frequency(
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
     mut ship: ResMut<ShipState>,
 ) {
@@ -1012,7 +1012,7 @@ fn handle_load_tube(
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
 ) {
@@ -1044,7 +1044,7 @@ fn handle_unload_tube(
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
 ) {
@@ -1076,9 +1076,9 @@ fn handle_fire_torpedo(
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
-    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
@@ -1409,7 +1409,7 @@ fn tick_active_beam(
     time: Res<Time>,
     mut beam: ResMut<ActiveBeam>,
     mut cooldown: ResMut<PhaserCooldown>,
-    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     mut world: ResMut<WorldResource>,
     mut hull_query: Query<(
         Entity,
@@ -1669,12 +1669,12 @@ fn operate_tactical_ai(
             &crate::ship_plugin::ActiveStationRatings,
         ),
         (
-            With<crate::simulation::Ship>,
+            With<crate::server_app::LocalShip>,
             Without<crate::ai::server::AiControllerComponent>,
         ),
     >,
     sessions: Res<Sessions>,
-    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     mut weapons_target: ResMut<WeaponsTarget>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
@@ -1881,7 +1881,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             // Extract all resource values as owned copies/clones so we can
             // release the immutable borrows before calling world.query_filtered.
             let (ship_x, ship_z, ship_yaw) = {
-                let mut q = world.query_filtered::<&ShipPhysics, With<crate::simulation::Ship>>();
+                let mut q = world.query_filtered::<&ShipPhysics, With<crate::server_app::LocalShip>>();
                 q.single(world)
                     .ok()
                     .copied()
@@ -2094,7 +2094,7 @@ fn publish_weapons_blackboard(
     phaser_mode: Res<CurrentPhaserMode>,
     torpedo_sys: Res<TorpedoSystemResource>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    ship_physics_q: Query<&ShipPhysics, With<crate::simulation::Ship>>,
+    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     world_res: Res<WorldResource>,
     entity_name_q: Query<(
@@ -2596,7 +2596,7 @@ station = "tactical"
     fn set_ship_yaw(app: &mut App, yaw: f32) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut ShipPhysics, With<crate::simulation::Ship>>();
+            .query_filtered::<&mut ShipPhysics, With<crate::server_app::LocalShip>>();
         let mut p = q.single_mut(app.world_mut()).expect("expected Ship with ShipPhysics");
         p.yaw = yaw;
     }
@@ -3637,7 +3637,7 @@ station = "tactical"
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut ShipPhysics, With<crate::simulation::Ship>>();
+                .query_filtered::<&mut ShipPhysics, With<crate::server_app::LocalShip>>();
             let mut p = q.single_mut(app.world_mut()).expect("Ship with ShipPhysics");
             p.x = 280.0;
         }
@@ -4999,7 +4999,7 @@ station = "tactical"
     ) {
         let world = app.world_mut();
         let mut q =
-            world.query_filtered::<&mut ShipSystemControlSources, With<crate::simulation::Ship>>();
+            world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
         for mut cs in q.iter_mut(world) {
             cs.0.set(crate::system_registry::tactical_system_id(), source);
         }
@@ -5119,7 +5119,7 @@ station = "tactical"
         let rating = rating.to_string();
         let world = app.world_mut();
         let mut q = world
-            .query_filtered::<&mut crate::ship_plugin::ActiveStationRatings, With<crate::simulation::Ship>>();
+            .query_filtered::<&mut crate::ship_plugin::ActiveStationRatings, With<crate::server_app::LocalShip>>();
         for mut ratings in q.iter_mut(world) {
             ratings.0.insert(
                 crate::messages::StationId("tactical".into()),

@@ -87,7 +87,7 @@ impl NavigationWaypoint {
 }
 
 fn handle_navigation_waypoint(
-    ship_query: Query<&AdmittedCommands, With<crate::simulation::Ship>>,
+    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut waypoint: ResMut<NavigationWaypoint>,
 ) {
     let Ok(admitted) = ship_query.single() else {
@@ -669,7 +669,7 @@ mod tests {
         start_game_with_navigation(&mut app);
 
         {
-            let mut q = app.world_mut().query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>();
+            let mut q = app.world_mut().query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>();
             for mut cs in q.iter_mut(app.world_mut()) {
                 cs.0.set(
                     crate::ship::system_registry::navigation_system_id(),

@@ -20,6 +20,7 @@ use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{Ship, ShipBoost, ShipHullIntegrity, ShipImpulse};
+use crate::server_app::LocalShip;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Resources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -223,8 +224,8 @@ impl Plugin for ShipPlugin {
 fn process_helm_inputs(
     time: Res<Time>,
     mut timer: ResMut<HelmInputTimer>,
-    ship_query: Query<(&AdmittedCommands, &ShipSystemControlSources), With<Ship>>,
-    mut physics_query: Query<&mut ShipPhysics, With<Ship>>,
+    ship_query: Query<(&AdmittedCommands, &ShipSystemControlSources), With<LocalShip>>,
+    mut physics_query: Query<&mut ShipPhysics, With<LocalShip>>,
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
     drive: HelmDriveParams,
@@ -533,10 +534,7 @@ fn detect_player_ship_objective_completion(
     objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
     player_ships: Query<
         (&ShipSystemControlSources, &ShipPhysics),
-        (
-            With<Ship>,
-            Without<crate::ai::server::AiControllerComponent>,
-        ),
+        With<crate::server_app::LocalShip>,
     >,
 ) {
     let Ok((sources, physics)) = player_ships.single() else {
@@ -595,13 +593,13 @@ fn sync_ship_position(
 }
 
 pub fn handle_impulse_messages(
-    ship_ac_query: Query<&AdmittedCommands, With<Ship>>,
+    ship_ac_query: Query<&AdmittedCommands, With<LocalShip>>,
     mut impulse: ResMut<ShipImpulse>,
     hull: Res<ShipHullIntegrity>,
     mut last_hull_hp: Local<f32>,
     membership: Option<Res<RegionMembership>>,
     region_query: Query<&RegionEffectsSection>,
-    ship_query: Query<Entity, With<Ship>>,
+    ship_query: Query<Entity, With<LocalShip>>,
 ) {
     let Ok(admitted) = ship_ac_query.single() else {
         return;
@@ -642,7 +640,7 @@ fn tick_impulse(
 /// Toggle the boost drive in response to Helm boost controls. No-op when
 /// the feature is disabled.
 pub fn handle_boost_messages(
-    ship_query: Query<&AdmittedCommands, With<Ship>>,
+    ship_query: Query<&AdmittedCommands, With<LocalShip>>,
     mut boost: ResMut<ShipBoost>,
     config: Res<BoostConfigResource>,
 ) {
@@ -680,7 +678,7 @@ fn tick_boost(
     last_input: Res<LastHelmInput>,
     sessions: Res<Sessions>,
     impulse: Res<ShipImpulse>,
-    ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<Ship>>,
+    ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<LocalShip>>,
 ) {
     let Ok((ship_config, control_sources)) = ship_components.single() else {
         return;
@@ -712,7 +710,7 @@ fn tick_boost(
 fn is_inside_blocks_impulse(
     membership: &Option<Res<RegionMembership>>,
     region_query: &Query<&RegionEffectsSection>,
-    ship_query: &Query<Entity, With<Ship>>,
+    ship_query: &Query<Entity, With<LocalShip>>,
 ) -> bool {
     let Some(membership) = membership else {
         return false;

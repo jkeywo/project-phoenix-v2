@@ -171,7 +171,7 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 /// targeting the power system ID with a `SetPower` payload, and calls
 /// `PowerSystem::increase` / `decrease` to reach the requested level.
 pub fn handle_power_messages(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::Ship>>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut power: ResMut<ShipPowerSystem>,
 ) {
     let Ok(admitted) = ship_query.single() else {
@@ -246,13 +246,13 @@ pub fn operate_power_ai(
     last_helm: Option<Res<LastHelmInput>>,
     ai_config: Res<PowerAiConfigResource>,
     sessions: Option<Res<crate::lobby::Sessions>>,
-    ship_comp_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
+    ship_comp_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>,
     mut ship_power_q: Query<
         (
             &crate::ship_plugin::ShipSystemControlSources,
             &mut ShipPowerSystem,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
 ) {
     // Yield to any human Power console holder (player ship only).
@@ -835,7 +835,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::Ship>>();
+                .query_filtered::<&mut ShipPowerSystem, With<crate::server_app::LocalShip>>();
             let mut ps = q.single_mut(app.world_mut()).unwrap();
             ps.0.battery_charge = 30.0;
         }

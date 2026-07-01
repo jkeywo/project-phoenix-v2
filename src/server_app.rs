@@ -679,7 +679,7 @@ fn publish_viewscreen_blackboard(
 fn handle_set_sensors_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<Ship>>,
+    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
 ) {
     let Ok(ship_config) = ship_query.single() else {
@@ -719,12 +719,12 @@ fn handle_set_sensors_target(
 fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
-    ship_query: Query<Entity, With<Ship>>,
+    ship_query: Query<Entity, With<LocalShip>>,
     asteroid_query: Query<
         (&Transform, &AsteroidUuid, Option<&AsteroidShieldPierce>),
         With<Asteroid>,
     >,
-    mut physics_q: Query<&mut ShipPhysicsComponent, With<Ship>>,
+    mut physics_q: Query<&mut ShipPhysicsComponent, With<LocalShip>>,
     mut impulse: ResMut<ShipImpulse>,
     mut hull: ResMut<ShipHullIntegrity>,
     mut cooldown: ResMut<CollisionCooldown>,
@@ -1061,7 +1061,7 @@ fn admit_system_commands(
             &crate::ship_plugin::ShipSystemControlSources,
             &mut crate::messages::AdmittedCommands,
         ),
-        With<Ship>,
+        With<LocalShip>,
     >,
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,

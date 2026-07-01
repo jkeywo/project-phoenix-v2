@@ -9,7 +9,6 @@ use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipState;
-use crate::simulation::Ship;
 use crate::world::server::ObjectiveManagerRes;
 
 pub struct CaptainPlugin;
@@ -101,7 +100,7 @@ fn handle_set_view(
 /// Toggle the captain's priority boost for a doctrine objective.
 /// Sending the same id twice clears the boost.
 fn handle_set_objective_priority(
-    ship_query: Query<&AdmittedCommands, With<Ship>>,
+    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     boost: Option<ResMut<crate::server_app::CaptainPriorityBoost>>,
 ) {
     let Some(mut boost) = boost else { return };
@@ -215,7 +214,7 @@ fn publish_captain_blackboard(
     hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
-    ship_query: Query<&ShipSystemControlSources, With<Ship>>,
+    ship_query: Query<&ShipSystemControlSources, With<crate::server_app::LocalShip>>,
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     let red_alert = ship.red_alert();
@@ -386,7 +385,7 @@ mod tests {
     ) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+            .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
         let mut cs = q.single_mut(app.world_mut()).unwrap();
         cs.0.set(system_id, source);
     }
@@ -1357,7 +1356,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<bevy::prelude::Entity, With<Ship>>();
+                .query_filtered::<bevy::prelude::Entity, With<crate::server_app::LocalShip>>();
             let ship_ent = q.single(app.world()).unwrap();
             app.world_mut().entity_mut(ship_ent).insert(entity_bbs);
         }

@@ -157,7 +157,7 @@ pub fn emit_shields_coordination(
     ship: Res<crate::ship_state::ShipState>,
     mut coord_state: ResMut<ShieldsCoordinationState>,
     ai_config: Res<ShieldsAiConfigResource>,
-    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
+    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
     let Ok(shields) = shields_q.single() else {
@@ -329,7 +329,7 @@ fn publish_shields_blackboard(
 /// implemented yet — this is a compile-verified stub that will be filled in
 /// when the Shields AI controller is designed.
 fn operate_shields_ai(
-    ships: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
+    ships: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>,
 ) {
     for sources in &ships {
         let policy = sources

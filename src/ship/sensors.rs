@@ -66,9 +66,9 @@ pub fn handle_sensors_messages(
             &crate::messages::AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
-    mut sensors_q: Query<&mut SensorsTarget, With<crate::simulation::Ship>>,
+    mut sensors_q: Query<&mut SensorsTarget, With<crate::server_app::LocalShip>>,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
     mut sensors_target: ResMut<SensorsTarget>,
 ) {
@@ -111,7 +111,7 @@ pub fn handle_sensors_messages(
 pub fn tick_sensors_frequency_hint(
     weapons_target: Res<WeaponsTarget>,
     mut state: ResMut<SensorsFrequencyState>,
-    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>,
+    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
     let current_target = match &weapons_target.0 {
@@ -183,7 +183,7 @@ pub fn publish_sensors_blackboard(
 pub fn operate_sensors_ai(
     ships: Query<
         &crate::ship_plugin::ShipSystemControlSources,
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
 ) {
     for sources in &ships {

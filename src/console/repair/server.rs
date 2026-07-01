@@ -83,7 +83,7 @@ pub fn handle_dispatch_repair_team(
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::LocalShip>,
     >,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
@@ -538,7 +538,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut ShipSystemControlSources, With<crate::simulation::Ship>>();
+                .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
             for mut cs in q.iter_mut(app.world_mut()) {
                 cs.0.set(
                     crate::ship::system_registry::repair_system_id(),

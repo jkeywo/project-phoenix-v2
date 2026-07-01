@@ -102,19 +102,12 @@ pub struct EntityTarget(pub crate::entity_target::TargetSection);
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
-/// Single-facing NPC shield component (#471).
+/// Single-facing NPC shield component (legacy, kept for test compatibility).
 ///
-/// Attached when the entity TOML has a top-level `[shields]` block (see
-/// `EntityShieldConfig`). The damage pipeline routes incoming shots
-/// through `split_damage_for_pierce`: the absorbed portion lands here,
-/// pierced portion bypasses straight to hull. Regen ticks each frame
-/// while `!broken && current_hp < max_hp`.
-///
-/// **Permanent break semantics:** once `current_hp` reaches `0.0`, the
-/// shield is latched broken (`broken = true`) and never recovers - all
-/// subsequent damage skips the shield routing and goes straight to hull
-/// regardless of the attacker's `shield_pierce`. Regen is suppressed
-/// while broken.
+/// All new spawn paths use `ShipShields` (the same multi-facing component
+/// used by the player ship). This struct remains so that existing unit tests
+/// that construct it directly continue to compile; it is no longer inserted
+/// by `spawn_entity`.
 ///
 /// Distinct from the player ship's four-quadrant `ShipShields` resource,
 /// which carries a multi-facing `ShieldSystem` with offline timers.
@@ -355,12 +348,20 @@ pub fn spawn_entity(
         entity_commands.insert(crate::comms::CommsRange(comms.range));
     }
 
-    // Shields (#471) - single-facing NPC shield. Attach BEFORE the hull
-    // block: the hull block has an early-return for the empty-hull case,
-    // so anything after it could be skipped. Placing the shield insert
-    // here ensures `[shields]` is always honoured.
+    // Shields — translate the [shields] config block into a ShipShields
+    // component (the same type the player ship uses). NPC ships default to
+    // num_facings=1 (omnidirectional) with offline-timer recovery.
+    // Placed BEFORE the hull block: the hull block has an early-return for
+    // the empty-hull case, so anything after it could be skipped.
     if let Some(shields_cfg) = &config.shields {
-        entity_commands.insert(EntityShield::from_config(shields_cfg));
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
+        let shield_system = ShieldSystem::new(&ShieldConfig {
+            num_facings: shields_cfg.num_facings,
+            max_hp: shields_cfg.max_hp.round() as i32,
+            regen_per_sec: shields_cfg.regen_per_sec,
+            offline_duration: shields_cfg.offline_duration,
+        });
+        entity_commands.insert(crate::ship::shields::ShipShields(shield_system));
     }
 
     // Hull â€” attach an EntityConsoleHull component if the config has hull data.
@@ -405,6 +406,8 @@ mod tests {
         let cfg = EntityShieldConfig {
             max_hp: 60.0,
             regen_per_sec: 1.0,
+            num_facings: 1,
+            offline_duration: 10.0,
         };
         let shield = EntityShield::from_config(&cfg);
         assert_eq!(shield.current_hp, 60.0);
@@ -1190,7 +1193,7 @@ mod tests {
         );
     }
 
-    // ── EntityShield spawner attachment tests (#471) ────────────────────────
+    // ── ShipShields spawner attachment tests ────────────────────────────────
 
     #[test]
     fn spawn_entity_with_shields_block_attaches_entity_shield() {
@@ -1206,14 +1209,16 @@ regen_per_sec = 1.5
         let config = EntityConfig::from_toml(toml).expect("toml must parse");
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
-        let shield = app
+        let shields = app
             .world()
-            .get::<EntityShield>(spawned)
-            .expect("entity with [shields] block must have EntityShield component");
-        assert_eq!(shield.max_hp, 30.0);
-        assert_eq!(shield.current_hp, 30.0);
-        assert_eq!(shield.regen_per_sec, 1.5);
-        assert!(!shield.broken);
+            .get::<crate::ship::shields::ShipShields>(spawned)
+            .expect("entity with [shields] block must have ShipShields component");
+        // Defaults: num_facings=1, offline_duration=10.0
+        assert_eq!(shields.0.facings.len(), 1);
+        assert_eq!(shields.0.facings[0].max_hp, 30); // rounds 30.0 → 30
+        assert_eq!(shields.0.facings[0].hp, 30);
+        assert_eq!(shields.0.facings[0].regen_per_sec, 1.5);
+        assert!(shields.0.facings[0].is_online());
     }
 
     #[test]
@@ -1227,8 +1232,8 @@ hull_integrity = 60.0
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         assert!(
-            app.world().get::<EntityShield>(spawned).is_none(),
-            "entity without [shields] block must not have EntityShield"
+            app.world().get::<crate::ship::shields::ShipShields>(spawned).is_none(),
+            "entity without [shields] block must not have ShipShields"
         );
     }
 
@@ -1242,6 +1247,8 @@ max_hp = 50.0
         let shields = config.shields.expect("shields block must be present");
         assert_eq!(shields.max_hp, 50.0);
         assert_eq!(shields.regen_per_sec, 0.0, "regen defaults to 0");
+        assert_eq!(shields.num_facings, 1, "num_facings defaults to 1");
+        assert_eq!(shields.offline_duration, 10.0, "offline_duration defaults to 10.0");
     }
 
     #[test]

@@ -1037,26 +1037,38 @@ pub struct SensorsConsoleConfig {
     pub long_range_radar: crate::radar_config::RadarConfig,
 }
 
-/// Single-facing NPC shield config (#471). Loaded from a top-level
-/// `[shields]` block on an entity TOML and translated to an
-/// `EntityShield` component at spawn time.
+fn default_shield_facings() -> usize {
+    1
+}
+
+fn default_shield_offline_duration() -> f32 {
+    10.0
+}
+
+/// Shield config for any entity (NPC or player-class). Loaded from a top-level
+/// `[shields]` block on an entity TOML and translated to a `ShipShields`
+/// component at spawn time.
 ///
-/// This is **independent** of `ShieldsBaseConfig` (which lives under
-/// `[shields_console.base]` and feeds the player ship's four-quadrant
-/// `ShieldSystem`). The NPC model is deliberately simpler:
-/// - one facing
-/// - `f32` HP (matches the rest of the NPC damage pipeline which is `f32`)
-/// - no `offline_duration`: once depleted, the shield is permanently
-///   broken for the rest of the engagement (regen will not restart).
+/// NPC ships default to `num_facings = 1` (single omnidirectional arc) and
+/// `offline_duration = 10.0` s (matching the player shield offline timer).
+/// The player ship uses its own `[shields_console.base]` path and does not
+/// go through `EntityShieldConfig`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EntityShieldConfig {
-    /// Maximum shield HP. Required.
+    /// Maximum shield HP per facing. Required.
     pub max_hp: f32,
-    /// HP regenerated per second while not broken and below `max_hp`.
+    /// HP regenerated per second while online and below `max_hp`.
     /// Defaults to `0.0` (no regen) when omitted.
     #[serde(default)]
     pub regen_per_sec: f32,
+    /// Number of shield facings. Defaults to `1` (omnidirectional).
+    #[serde(default = "default_shield_facings")]
+    pub num_facings: usize,
+    /// How long (seconds) a facing stays offline after HP hits 0.
+    /// Defaults to `10.0` s.
+    #[serde(default = "default_shield_offline_duration")]
+    pub offline_duration: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -1079,13 +1091,11 @@ pub struct EntityConfig {
     pub navigation_console: Option<NavigationConsoleConfig>,
     /// Shields console focus config.
     pub shields_console: Option<ShieldsConsoleConfig>,
-    /// Single-facing NPC shield section (#471). When present the entity
-    /// gains an `EntityShield` component; incoming damage is routed through
-    /// `split_damage_for_pierce` then through the shield before falling
-    /// through to hull. Permanently breaks at 0 HP — no offline/regen
-    /// recovery once depleted. **This is the NPC-side shield model and is
-    /// orthogonal to the player ship's `shields_console` four-quadrant
-    /// system.**
+    /// Shield section for this entity. When present the entity gains a
+    /// `ShipShields` component with `num_facings` facings (default 1 for NPCs).
+    /// Incoming damage routes through `split_damage_for_pierce` then through
+    /// the shield before falling through to hull. Uses the same offline-timer
+    /// recovery model as the player ship's four-quadrant shield system.
     #[serde(default)]
     pub shields: Option<EntityShieldConfig>,
     /// Torpedo system config (player ship and any NPC ship with torpedoes).

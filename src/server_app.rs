@@ -387,7 +387,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let mut q = world.query::<(
                 &AsteroidUuid,
                 Option<&crate::entity_spawner::EntityConsoleHull>,
-                Option<&crate::entity_spawner::EntityShield>,
+                Option<&crate::ship::shields::ShipShields>,
             )>();
             q.iter(world)
                 .filter_map(|(uuid, hull_comp, shield_comp)| {
@@ -399,7 +399,11 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                             1.0
                         }
                     });
-                    let shield_fraction = shield_comp.map(|s| s.fraction());
+                    let shield_fraction = shield_comp.map(|s| {
+                        let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
+                        let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
+                        if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
+                    });
                     // Omit entry entirely when there is nothing to update.
                     if hull_fraction.is_none() && shield_fraction.is_none() {
                         return None;
@@ -427,7 +431,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 &Transform,
                 &EntityUuid,
                 Option<&crate::entity_spawner::EntityConsoleHull>,
-                Option<&crate::entity_spawner::EntityShield>,
+                Option<&crate::ship::shields::ShipShields>,
             ), Without<Asteroid>>();
             q.iter(world)
                 .map(|(transform, uuid, hull_comp, shield_comp)| {
@@ -439,7 +443,11 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                             1.0
                         }
                     });
-                    let shield_fraction = shield_comp.map(|s| s.fraction());
+                    let shield_fraction = shield_comp.map(|s| {
+                        let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
+                        let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
+                        if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
+                    });
                     let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
                     (
                         uuid.0.clone(),
@@ -1276,7 +1284,7 @@ fn reconcile_runtime_entities(
             Option<&AsteroidFieldSection>,
             Option<&crate::entity_spawner::EntityConsoleHull>,
             Option<&crate::entity_spawner::EntityTarget>,
-            Option<&crate::entity_spawner::EntityShield>,
+            Option<&crate::ship::shields::ShipShields>,
         ),
         Without<Asteroid>,
     >,
@@ -1341,7 +1349,11 @@ fn reconcile_runtime_entities(
                         1.0
                     }
                 });
-                let shield_fraction = shield_comp.map(|s| s.fraction());
+                let shield_fraction = shield_comp.map(|s| {
+                    let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
+                    let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
+                    if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
+                });
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
@@ -1442,7 +1454,11 @@ fn reconcile_runtime_entities(
                         1.0
                     }
                 });
-                let shield_fraction = shield_comp.map(|s| s.fraction());
+                let shield_fraction = shield_comp.map(|s| {
+                    let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
+                    let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
+                    if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
+                });
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),

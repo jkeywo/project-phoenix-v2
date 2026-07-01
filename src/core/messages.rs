@@ -688,10 +688,9 @@ pub struct EntitySnapshot {
     pub yaw: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hull_fraction: Option<f32>,
-    /// Single-facing NPC shield fraction (#471). `Some(current/max)` for
-    /// entities with an `EntityShield` component, `None` otherwise. A
-    /// broken shield reads as `Some(0.0)` (the `EntityShield::fraction`
-    /// helper clamps broken to zero so the bar visibly empties without
+    /// Shield fraction for this entity. `Some(current/max)` for entities with
+    /// a `ShipShields` component, `None` otherwise. An offline shield reads as
+    /// `Some(0.0)` (all facings offline; the bar visually empties without
     /// a separate "broken" wire field).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shield_fraction: Option<f32>,
@@ -805,8 +804,8 @@ pub struct EntityStateSnapshot {
     pub yaw: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hull_fraction: Option<f32>,
-    /// Single-facing NPC shield fraction (#471). Present for entities with
-    /// an `EntityShield` component; mirrors `EntitySnapshot.shield_fraction`
+    /// Shield fraction for this entity. Present for entities with
+    /// a `ShipShields` component; mirrors `EntitySnapshot.shield_fraction`
     /// for live-tick updates so the Sensors panel can re-render the shield
     /// bar each frame without re-receiving the full snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]

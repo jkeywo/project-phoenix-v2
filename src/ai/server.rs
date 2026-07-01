@@ -341,6 +341,7 @@ fn aggregate_npc_doctrine_blackboards(
             hull_integrity_pct: hull_fraction * 100.0,
             last_damage_taken_secs: None,
             last_weapon_fired_secs: None,
+            last_attacker_uuid: None,
             scored_objectives: scored,
         };
         blackboards.0.insert(

@@ -613,6 +613,7 @@ fn publish_viewscreen_blackboard(
     activity: Option<Res<crate::ship::combat_activity::RecentCombatActivity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
+    last_attacker: Option<Res<crate::weapons_plugin::LastShipAttacker>>,
     mut blackboards: ResMut<SystemBlackboards>,
 ) {
     use crate::messages::{SystemBlackboard, SystemId, ViewscreenBlackboard};
@@ -653,6 +654,7 @@ fn publish_viewscreen_blackboard(
         hull_integrity_pct,
         last_damage_taken_secs,
         last_weapon_fired_secs,
+        last_attacker_uuid: last_attacker.as_ref().and_then(|la| la.0.clone()),
         scored_objectives,
     };
 
@@ -1746,6 +1748,8 @@ fn spawn_game_start_entities(
                 .insert(crate::weapons_plugin::ActiveBeam::default())
                 .insert(crate::weapons_plugin::PhaserCooldown::default())
                 .insert(crate::sensors_plugin::SensorsTarget::default())
+                .insert(crate::ship_state::ShipRedAlert::default())
+                .insert(crate::ship_state::ShipViewMode::default())
                 .remove::<crate::entity_spawner::EntityConsoleHull>();
             ship_spawned = true;
 

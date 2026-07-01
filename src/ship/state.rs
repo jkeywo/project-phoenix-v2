@@ -25,6 +25,70 @@ pub struct ShipPhysics {
     pub roll: f32,
 }
 
+/// Per-entity red-alert state for every ship entity (player and NPC).
+///
+/// Replaces the `red_alert` field that was previously on the singleton
+/// `ShipState` resource. Added in issue #591.
+#[derive(Component, Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShipRedAlert(pub bool);
+
+impl ShipRedAlert {
+    pub fn toggle(&mut self) {
+        self.0 = !self.0;
+    }
+}
+
+/// Per-entity viewscreen mode state for every ship entity (player and NPC).
+///
+/// Replaces the `view_mode` field that was previously on the singleton
+/// `ShipState` resource. Added in issue #591.
+#[derive(Component, Resource, Clone, Debug, PartialEq)]
+pub struct ShipViewMode {
+    pub view_mode: ViewMode,
+    captain_view_direction: ViewDirection,
+    pub viewscreen: ViewscreenArbiter,
+}
+
+impl Default for ShipViewMode {
+    fn default() -> Self {
+        Self {
+            view_mode: ViewMode::Camera(ViewDirection::Fore),
+            captain_view_direction: ViewDirection::Fore,
+            viewscreen: ViewscreenArbiter::new(),
+        }
+    }
+}
+
+impl ShipViewMode {
+    pub fn request_view_mode(&mut self, mode: ViewMode) {
+        let requester = source_system_for_view_mode(&mode);
+        self.request_view_mode_from(requester, mode);
+    }
+
+    pub fn request_view_mode_from(&mut self, requester: crate::messages::SystemId, mode: ViewMode) {
+        let resolution = self
+            .viewscreen
+            .request_channel_2(ViewscreenRequest { requester, mode });
+        self.view_mode = resolution.mode;
+        self.captain_view_direction = self.viewscreen.captain_view_direction();
+    }
+
+    pub fn show_view_mode(&mut self, mode: ViewMode) {
+        let requester = source_system_for_view_mode(&mode);
+        let resolution = self
+            .viewscreen
+            .show_channel_2(ViewscreenRequest { requester, mode });
+        self.view_mode = resolution.mode;
+        self.captain_view_direction = self.viewscreen.captain_view_direction();
+    }
+
+    pub fn restore_captain_view(&mut self) {
+        let resolution = self.viewscreen.restore_captain_view();
+        self.view_mode = resolution.mode;
+        self.captain_view_direction = self.viewscreen.captain_view_direction();
+    }
+}
+
 #[derive(Resource)]
 pub struct ShipState {
     red_alert: bool,

@@ -113,35 +113,72 @@ fn handle_set_objective_priority(
 /// and emit `ToggleRedAlert` into `AdmittedCommands` when the desired state
 /// differs from the current state. Runs before `handle_toggle_red_alert` so
 /// the command is visible to the handler in the same tick.
+///
+/// After issue #591: loops over all ship entities (player and NPC) where the
+/// Captain system is `ControlSource::Ai`, reading combat timers from that
+/// entity's `ShipSystemBlackboards` viewscreen entry. No longer reads from the
+/// global `RecentCombatActivity` resource (kept only for the player-ship
+/// global path for backward compat with tests).
 fn operate_captain_ai(
     time: Res<Time>,
     ship: Res<ShipState>,
-    mut ship_query: Query<(&mut AdmittedCommands, &ShipSystemControlSources), With<Ship>>,
+    mut ship_query: Query<(
+        &mut AdmittedCommands,
+        &ShipSystemControlSources,
+        Option<&crate::server_app::ShipSystemBlackboards>,
+    )>,
     activity: Res<RecentCombatActivity>,
 ) {
-    let Ok((mut admitted, control_sources)) = ship_query.single_mut() else {
-        return;
-    };
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::red_alert_system_id());
-    if !policy.operate_ai {
-        return;
-    }
-
     let now = time.elapsed_secs();
     let ai = crate::ai::core::CaptainAi;
-    let last_under_attack =
-        most_recent(activity.last_damage_taken, activity.last_hostile_fire_taken);
-    if let Some(should_be_red_alert) =
-        ai.operate(now, last_under_attack, activity.last_weapon_fired)
-    {
-        if should_be_red_alert != ship.red_alert() {
-            admitted.0.push(crate::messages::AdmittedCommand {
-                target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
-                payload: SystemControlPayload::ToggleRedAlert,
-                response_token: None,
-            });
+
+    for (mut admitted, control_sources, blackboards_opt) in ship_query.iter_mut() {
+        let policy = control_sources
+            .0
+            .policy_for(&crate::system_registry::red_alert_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+
+        // Read combat activity from the entity's viewscreen blackboard when available.
+        // Falls back to global RecentCombatActivity for the player ship.
+        let (last_under_attack, last_weapon_fired) = if let Some(blackboards) = blackboards_opt {
+            match blackboards
+                .0
+                .get(&crate::system_registry::viewscreen_system_id())
+            {
+                Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
+                    let lda = bb.last_damage_taken_secs;
+                    let lwf = bb.last_weapon_fired_secs;
+                    (most_recent(lda, lda), lwf)
+                }
+                _ => (
+                    most_recent(
+                        activity.last_damage_taken,
+                        activity.last_hostile_fire_taken,
+                    ),
+                    activity.last_weapon_fired,
+                ),
+            }
+        } else {
+            // No blackboard yet — use global RecentCombatActivity.
+            (
+                most_recent(
+                    activity.last_damage_taken,
+                    activity.last_hostile_fire_taken,
+                ),
+                activity.last_weapon_fired,
+            )
+        };
+
+        if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, last_weapon_fired) {
+            if should_be_red_alert != ship.red_alert() {
+                admitted.0.push(crate::messages::AdmittedCommand {
+                    target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
+                    payload: SystemControlPayload::ToggleRedAlert,
+                    response_token: None,
+                });
+            }
         }
     }
 }
@@ -1278,6 +1315,48 @@ mod tests {
                 .boosted_id,
             None,
             "sending the same id again should clear the boost"
+        );
+    }
+
+    /// Verifies that operate_captain_ai reads combat state from the per-entity
+    /// `ShipSystemBlackboards` viewscreen entry (issue #591 AC).
+    #[test]
+    fn operate_captain_ai_activates_red_alert_when_attacker_in_blackboard() {
+        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        use crate::server_app::ShipSystemBlackboards;
+
+        // Build using the standard test_app but inject ShipSystemBlackboards
+        // before starting.
+        let mut app = test_app();
+
+        // Add ShipSystemBlackboards to the Ship entity.
+        let mut vb = ViewscreenBlackboard::default();
+        vb.last_damage_taken_secs = Some(0.0); // very recent
+        vb.last_attacker_uuid = Some("attacker-uuid".into());
+        let mut entity_bbs = ShipSystemBlackboards::default();
+        entity_bbs.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(vb),
+        );
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<bevy::prelude::Entity, With<Ship>>();
+            let ship_ent = q.single(app.world()).unwrap();
+            app.world_mut().entity_mut(ship_ent).insert(entity_bbs);
+        }
+
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+
+        tick(&mut app);
+        assert!(
+            app.world().resource::<ShipState>().red_alert(),
+            "AI should activate red alert when last_damage_taken_secs is set in viewscreen blackboard"
         );
     }
 }

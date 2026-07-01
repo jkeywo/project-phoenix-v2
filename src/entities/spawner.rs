@@ -307,6 +307,8 @@ pub fn spawn_entity(
             crate::weapons_plugin::ActiveBeam::default(),
             crate::weapons_plugin::PhaserCooldown::default(),
             crate::sensors_plugin::SensorsTarget::default(),
+            crate::ship_state::ShipRedAlert::default(),
+            crate::ship_state::ShipViewMode::default(),
         ));
     }
 

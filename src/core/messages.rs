@@ -1689,6 +1689,11 @@ pub struct ViewscreenBlackboard {
     /// Elapsed-seconds timestamp when a weapon was last fired, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_weapon_fired_secs: Option<f32>,
+    /// UUID of the last entity that damaged this ship, if any.
+    /// Written by the damage-application path when any ship takes damage.
+    /// Captain AI reads this to trigger red-alert when under attack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attacker_uuid: Option<String>,
     /// Utility-scored objective pool, computed by the phase-1b aggregator from
     /// the active `ObjectiveManager` + current world conditions (issue #571).
     /// Per-system AI reads this to select the top directive it can serve.

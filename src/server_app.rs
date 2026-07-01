@@ -1772,9 +1772,12 @@ fn spawn_game_start_entities(
                     .filter(|&n| n > 0)
                     .unwrap_or(2);
                 let timings = repair.map(|rc| rc.to_runtime()).unwrap_or_default();
-                commands.insert_resource(ShipRepairTeams(
+                let teams = ShipRepairTeams(
                     crate::repair_teams::RepairTeams::new_with_timings(team_count, timings),
-                ));
+                );
+                // Insert as per-entity component AND global resource (dual-write migration).
+                commands.entity(spawned).insert(teams.clone());
+                commands.insert_resource(teams);
             } else {
                 commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                     (Console::Helm, 25.0),

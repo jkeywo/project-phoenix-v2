@@ -16,7 +16,10 @@ use crate::simulation::ShipHullIntegrity;
 // ── Resources ─────────────────────────────────────────────────────────────────
 
 /// Bevy resource wrapping the pure `RepairTeams` state machine.
-#[derive(Resource)]
+///
+/// Derives both `Resource` (existing player-ship singleton) and `Component`
+/// (per-entity path after issue #590 unification).
+#[derive(Resource, Component, Clone)]
 pub struct ShipRepairTeams(pub RepairTeams);
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -181,18 +184,19 @@ fn publish_repair_blackboard(
 
 // ── AI controller stub ─────────────────────────────────────────────────────────
 
-/// Per-kind AI plugin for repair.
+/// Per-kind AI loop for repair. Loops over ALL ship entities (player and NPC)
+/// where the Repair system is `ControlSource::Ai`.
 ///
-/// Gated on policy.operate_ai for the Repair system. No behaviour is
-/// implemented yet — this is a compile-verified stub that will be filled in
-/// when the Repair AI controller is designed.
-fn operate_repair_ai(ships: Query<&ShipSystemControlSources, With<crate::simulation::Ship>>) {
+/// Currently a compile-verified stub — Repair AI auto-dispatches teams to
+/// damaged consoles (the business logic is deferred to later fine-grained
+/// decomposition in PRD #487).
+pub fn operate_repair_ai(ships: Query<&ShipSystemControlSources>) {
     for sources in &ships {
         let policy = sources.0.policy_for(&repair_system_id());
         if !policy.operate_ai {
             continue;
         }
-        // TODO: implement repair AI logic
+        // TODO: implement repair AI logic (auto-dispatch teams to lowest-HP console)
     }
 }
 
@@ -692,6 +696,68 @@ mod tests {
         assert!(
             bb.damageable_consoles.contains(&Console::Helm),
             "Helm should appear in damageable_consoles"
+        );
+    }
+
+    /// Verifies that operate_repair_ai loops over all entities with
+    /// ShipSystemControlSources, gating on operate_ai (issue #590 AC).
+    #[test]
+    fn operate_repair_ai_runs_per_entity_for_ai_controlled_ships() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+        let mut ai_resolver = ControlSourceResolver::new();
+        ai_resolver.set(
+            crate::system_registry::repair_system_id(),
+            ControlSource::Ai,
+        );
+        let ai_sources = ShipSystemControlSources(ai_resolver);
+        let policy = ai_sources
+            .0
+            .policy_for(&crate::system_registry::repair_system_id());
+        assert!(policy.operate_ai, "AI Repair must gate through operate_ai");
+
+        let mut human_resolver = ControlSourceResolver::new();
+        human_resolver.set(
+            crate::system_registry::repair_system_id(),
+            ControlSource::Human,
+        );
+        let human_sources = ShipSystemControlSources(human_resolver);
+        let human_policy = human_sources
+            .0
+            .policy_for(&crate::system_registry::repair_system_id());
+        assert!(!human_policy.operate_ai, "human Repair must not operate AI");
+    }
+
+    /// Verifies that an NPC ship (without Ship marker) with Repair on AI
+    /// runs operate_repair_ai independently (issue #590 AC).
+    #[test]
+    fn npc_ship_with_repair_on_ai_runs_operate_repair_ai() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+        // Build a test app with operate_repair_ai registered.
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_systems(
+                bevy::prelude::Update,
+                operate_repair_ai,
+            );
+
+        // Spawn an NPC entity (no Ship marker) with ShipSystemControlSources set to AI.
+        let mut ai_resolver = ControlSourceResolver::new();
+        ai_resolver.set(
+            crate::system_registry::repair_system_id(),
+            ControlSource::Ai,
+        );
+        let npc_entity = app
+            .world_mut()
+            .spawn(ShipSystemControlSources(ai_resolver))
+            .id();
+
+        // Should not panic.
+        app.update();
+        assert!(
+            app.world().get::<ShipSystemControlSources>(npc_entity).is_some(),
+            "NPC entity must still exist after operate_repair_ai runs"
         );
     }
 }

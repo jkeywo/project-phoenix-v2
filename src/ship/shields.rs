@@ -329,7 +329,7 @@ fn publish_shields_blackboard(
 /// implemented yet — this is a compile-verified stub that will be filled in
 /// when the Shields AI controller is designed.
 fn operate_shields_ai(
-    ships: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>,
+    ships: Query<&crate::ship_plugin::ShipSystemControlSources>,
 ) {
     for sources in &ships {
         let policy = sources

@@ -716,7 +716,7 @@ fn mark_comms_dirty_on_game_start(
 /// Evaluates matching `on_hailed` comms templates for the target entity,
 /// injects new messages into the inbox, and records active dialogues.
 fn handle_hail(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<Ship>>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
 ) {
@@ -1046,7 +1046,7 @@ fn strip_parent_prefix(name: &str) -> &str {
 /// Records the chosen response on the inbox message, fires any associated
 /// trigger actions, and advances the dialogue to the follow-up node if present.
 fn handle_respond_to_message(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<Ship>>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
@@ -1681,7 +1681,7 @@ fn handle_respond_to_message(
 
 /// Handle `ClearComms` from Comms console holders.
 fn handle_clear_comms(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<Ship>>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
     let Ok(admitted) = ship_query.single() else {
@@ -1702,7 +1702,7 @@ fn handle_clear_comms(
 /// Looks up the message in the inbox, stores it in `OnScreenMessage`, and
 /// pushes `ViewMode::Comms` so the viewscreen switches to the comms overlay.
 fn handle_show_on_screen(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<Ship>>,
+    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
     mut ship: ResMut<ShipState>,

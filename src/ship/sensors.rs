@@ -181,10 +181,7 @@ pub fn publish_sensors_blackboard(
 /// (Sensors is purely advisory: the AI auto-suggests scan targets to Tactical
 /// via the coordination bus in `tick_sensors_frequency_hint`).
 pub fn operate_sensors_ai(
-    ships: Query<
-        &crate::ship_plugin::ShipSystemControlSources,
-        With<crate::server_app::LocalShip>,
-    >,
+    ships: Query<&crate::ship_plugin::ShipSystemControlSources>,
 ) {
     for sources in &ships {
         let policy = sources

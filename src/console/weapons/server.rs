@@ -323,7 +323,7 @@ fn live_entity_xz(
 }
 
 fn handle_set_target(
-    ship_query: Query<(&AdmittedCommands, &ShipPhysics), With<Ship>>,
+    ship_query: Query<(&AdmittedCommands, &ShipPhysics), With<crate::server_app::LocalShip>>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
@@ -954,7 +954,7 @@ fn tick_npc_beams(
     }
 }
 fn handle_set_phaser_mode(
-    ship_query: Query<&AdmittedCommands, With<Ship>>,
+    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
     let Ok(admitted) = ship_query.single() else {

@@ -312,6 +312,9 @@ pub fn spawn_entity(
             crate::navigation_plugin::NavigationWaypoint::default(),
             crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
         ));
+        // All ship entities carry the Ship marker — player and NPC alike.
+        // The LocalShip marker (not set here) is the viewscreen selector only.
+        entity_commands.insert(crate::server_app::Ship);
     }
 
     // Tags â€” mirror TOML tags onto the entity for snapshot builders.
@@ -1302,8 +1305,9 @@ max_hp = 50.0
     // ── #573: NPC all-AI roster ───────────────────────────────────────────────
 
     /// NPC ships spawned with a [behaviour] block must have every registered
-    /// system set to ControlSource::Ai. This ensures that NPC helm/weapons
-    /// operate functions run for all systems.
+    /// NPC ships now carry the `Ship` marker (same as player ships).
+    /// The `LocalShip` marker is the selector for the viewscreen entity.
+    /// All registered systems must be set to `ControlSource::Ai`.
     #[test]
     fn npc_ship_spawn_gives_all_ai_roster_and_no_ship_marker() {
         use crate::entity_config::{BehaviourConfig, DoctrineObjective, EntityConfig};
@@ -1338,10 +1342,10 @@ max_hp = 50.0
         );
         app.world_mut().flush();
 
-        // NPC ship must NOT carry Ship marker (reserved for player ship)
+        // NPC ship MUST carry Ship marker (same as player ship after #581 unification)
         assert!(
-            app.world().get::<Ship>(entity).is_none(),
-            "NPC ship must NOT carry Ship marker (reserved for player ship)"
+            app.world().get::<Ship>(entity).is_some(),
+            "NPC ship must carry Ship marker (same as player ship after PRD #581)"
         );
 
         // All registered systems must be AI-controlled

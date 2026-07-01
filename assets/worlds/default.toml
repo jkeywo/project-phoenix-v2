@@ -26,11 +26,6 @@ starbase_alpha = [1000.0, 0.0, 0.0]
 patrol_alpha   = [600.0, 0.0, -600.0]
 patrol_beta    = [500.0, 0.0, -300.0]
 patrol_gamma   = [200.0, 0.0, -600.0]
-# Guard patrol route around Starbase Alpha — used by the Backfill helm AI.
-guard_alpha    = [1000.0, 0.0,  200.0]
-guard_beta     = [1200.0, 0.0,    0.0]
-guard_gamma    = [1000.0, 0.0, -200.0]
-guard_delta    = [ 800.0, 0.0,    0.0]
 
 # ── Static map entities ───────────────────────────────────────────────────────
 
@@ -85,23 +80,6 @@ name          = "raider_alpha"
 transform     = { anchor = "patrol_alpha" }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
-
-# Standing patrol order around Starbase Alpha. Added immediately on world load
-# so the Backfill helm AI has a Helm-relevant objective and the ship moves.
-# Priority 30 — lower than Destroy (35) so engage directives outrank guard duty.
-[[trigger]]
-condition = "on_world_loaded"
-
-  [[trigger.action]]
-  type              = "add_objective"
-  id                = "obj-guard-starbase"
-  text              = "Guard Starbase Alpha."
-  mandatory         = true
-  source            = "mission"
-  base_priority     = 30.0
-  directive_kind    = "Patrol"
-  directive_anchors = ["guard_alpha", "guard_beta", "guard_gamma", "guard_delta"]
-  directive_loop    = true
 
 [[trigger]]
 condition = "on_destroyed"

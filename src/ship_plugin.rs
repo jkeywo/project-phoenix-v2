@@ -27,7 +27,7 @@ use crate::server_app::LocalShip;
 #[derive(Resource)]
 struct HelmInputTimer(Timer);
 
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Resource, Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct LastHelmInput {
     pub thrust: f32,
     pub steering: f32,

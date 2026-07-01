@@ -363,6 +363,15 @@ pub fn add_simulation_plugins(app: &mut App) {
         crate::modifier_coordination::translate_impulse_modifiers
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
+    // Hull dual-write bridge: keep EntityConsoleHull ↔ ShipHullIntegrity in sync.
+    .add_systems(
+        Update,
+        (
+            sync_player_hull_to_resource,
+            sync_resource_hull_to_entity,
+        )
+            .in_set(crate::sim_sets::SimSet::Modifiers),
+    )
     .add_systems(
         Update,
         (
@@ -981,6 +990,48 @@ pub fn dual_publish_blackboards(
         return;
     };
     component.0 = blackboards.0.clone();
+}
+
+/// Sync bridge: copies the player ship's `EntityConsoleHull` component into
+/// the global `ShipHullIntegrity` resource each tick. Runs after `SimSet::Damage`
+/// so that damage applied to `EntityConsoleHull` (e.g. by `tick_active_beam`) is
+/// reflected in `ShipHullIntegrity` before any system reads it.
+///
+/// This is the dual-write bridge for PRD #581 Gap D. Once all readers of
+/// `ShipHullIntegrity` have been migrated to query `EntityConsoleHull` directly,
+/// this system and `ShipHullIntegrity` can be deleted.
+pub fn sync_player_hull_to_resource(
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
+    mut hull_res: Option<ResMut<ShipHullIntegrity>>,
+) {
+    let Ok(hull_comp) = hull_q.single() else { return };
+    let Some(ref mut res) = hull_res else { return };
+    // Only copy if they differ (avoids change-detection noise).
+    if res.0.total_current() != hull_comp.0.total_current()
+        || res.0.total_max() != hull_comp.0.total_max()
+    {
+        res.0 = hull_comp.0.clone();
+    }
+}
+
+/// Sync bridge: copies `ShipHullIntegrity` resource into the player ship's
+/// `EntityConsoleHull` component when damage was applied via the resource path
+/// (e.g. `handle_collisions`). Runs after `SimSet::Damage`.
+///
+/// Together with `sync_player_hull_to_resource` this ensures both stores stay
+/// in sync regardless of which path damaged the hull this tick.
+pub fn sync_resource_hull_to_entity(
+    hull_res: Option<Res<ShipHullIntegrity>>,
+    mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
+) {
+    let Some(res) = hull_res else { return };
+    if !res.is_changed() { return };
+    let Ok(mut hull_comp) = hull_q.single_mut() else { return };
+    if hull_comp.0.total_current() != res.0.total_current()
+        || hull_comp.0.total_max() != res.0.total_max()
+    {
+        hull_comp.0 = res.0.clone();
+    }
 }
 
 /// Emit `BlackboardUpdate` for any system whose blackboard has changed since
@@ -1764,7 +1815,10 @@ fn spawn_game_start_entities(
                 .insert(crate::ship_state::ShipViewMode::default())
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
                 .insert(crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()))
-                .remove::<crate::entity_spawner::EntityConsoleHull>();
+                .insert(crate::ship_plugin::LastHelmInput::default());
+                // EntityConsoleHull is kept on the player ship entity (not removed)
+                // so it serves as the per-entity hull component alongside the
+                // ShipHullIntegrity global resource (dual-write migration for #581 Gap D).
             ship_spawned = true;
 
             // Ship-specific resource setup

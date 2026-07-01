@@ -310,9 +310,11 @@ fn build_world_snapshot(
         .collect();
 }
 
-/// Score each NPC entity's doctrine and write `scored_objectives` into its
-/// `ShipSystemBlackboards` viewscreen entry.
-fn aggregate_npc_doctrine_blackboards(
+/// Score each entity's doctrine and write `scored_objectives` into its
+/// `ShipSystemBlackboards` viewscreen entry. Covers all ships that carry a
+/// `BehaviourSection` — both NPC ships and any future player-ship variant that
+/// opts into doctrine-based AI.
+fn aggregate_doctrine_blackboards(
     mut query: Query<(
         &BehaviourSection,
         &crate::entity_spawner::EntityConsoleHull,
@@ -372,7 +374,7 @@ impl Plugin for AiPlugin {
         );
         app.add_systems(
             Update,
-            aggregate_npc_doctrine_blackboards
+            aggregate_doctrine_blackboards
                 .in_set(crate::sim_sets::SimSet::PublishAggregate),
         );
         app.add_systems(
@@ -1229,6 +1231,76 @@ mod tests {
     fn read_faction_registry_system(reg: Res<FactionRegistryResource>) {
         // Just accessing it is enough — the test verifies the resource exists.
         let _ = &reg.0;
+    }
+
+    // ── aggregate_doctrine_blackboards ────────────────────────────────────────
+
+    /// `aggregate_doctrine_blackboards` must write a `ViewscreenBlackboard` with
+    /// at least one `ScoredObjective` carrying `SystemAffinity::Helm` for an
+    /// entity whose `BehaviourSection` contains a `Patrol` doctrine entry.
+    /// This is the gate that `operate_helm_ai` checks; without it the ship stays
+    /// still even when Backfill AI is active.
+    #[test]
+    fn aggregate_doctrine_blackboards_writes_scored_helm_objective() {
+        use crate::damage::ConsoleHull;
+        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
+        use crate::entity_spawner::EntityConsoleHull;
+        use crate::messages::{Console, SystemAffinity};
+        use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
+
+        let mut app = build_test_app();
+
+        let behaviour = BehaviourConfig {
+            doctrine: vec![DoctrineObjective {
+                id: "patrol-test".into(),
+                text: "Patrol test route".into(),
+                directive_kind: Some("Patrol".into()),
+                base_priority: 30.0,
+                directive_loop: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let hull = EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]));
+
+        app.world_mut().spawn((
+            BehaviourSection(behaviour),
+            hull,
+            ShipSystemBlackboards::default(),
+        ));
+
+        app.update();
+
+        let mut q = app
+            .world_mut()
+            .query::<&ShipSystemBlackboards>();
+        let bb = q
+            .iter(app.world())
+            .next()
+            .expect("entity must have ShipSystemBlackboards");
+
+        let viewscreen = bb
+            .0
+            .get(&crate::messages::SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
+            .expect("viewscreen entry must be present after aggregate_doctrine_blackboards");
+
+        let scored = match viewscreen {
+            crate::messages::SystemBlackboard::Viewscreen(v) => &v.scored_objectives,
+            _ => panic!("expected Viewscreen blackboard"),
+        };
+
+        assert!(
+            !scored.is_empty(),
+            "scored_objectives must not be empty for a Patrol doctrine entity"
+        );
+        assert!(
+            scored
+                .iter()
+                .any(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm)),
+            "at least one scored objective must carry SystemAffinity::Helm"
+        );
     }
 
     #[test]

@@ -2825,7 +2825,7 @@ entity    = "raider"
     fn parse_world_default_toml_loads_triggers_and_comms() {
         let toml = include_str!("../../assets/worlds/default.toml");
         let cfg = parse_world(toml).expect("default.toml must parse");
-        assert_eq!(cfg.triggers.len(), 2, "default.toml has 2 [[trigger]]s");
+        assert_eq!(cfg.triggers.len(), 3, "default.toml has 3 [[trigger]]s (on_world_loaded guard patrol + on_destroyed raider + on_attacked raider)");
         assert_eq!(cfg.comms.len(), 3, "default.toml has 3 [[comms]] templates");
     }
 

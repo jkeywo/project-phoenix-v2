@@ -96,6 +96,28 @@ impl Default for ShipConfigComponent {
     }
 }
 
+/// Minimal `ShipConfig` for NPC ship entities. Contains only the systems
+/// that NPC AI code looks up by ID, all marked `ai_only = true` with no
+/// station ownership. This prevents NPC ships from inheriting the player
+/// ship's station/system configuration.
+pub fn npc_ship_config() -> ShipConfigComponent {
+    use crate::ship::config::SystemInstanceConfig;
+    ShipConfigComponent(ShipConfig {
+        stations: vec![],
+        systems: vec![SystemInstanceConfig {
+            id: crate::ship::system_registry::helm_system_id(),
+            kind: crate::ship::system_registry::HELM_KIND.to_string(),
+            station: None,
+            ai_only: true,
+            power_group: None,
+            marker: None,
+            config: None,
+        }],
+        power_groups: std::collections::HashMap::new(),
+        coordination_lag_secs: 0.0,
+    })
+}
+
 /// Runtime ship physics config, loaded from `[helm_console]` in the entity TOML.
 /// When absent, `ShipPhysicsConfig::new()` defaults are used.
 #[derive(Resource, Clone)]

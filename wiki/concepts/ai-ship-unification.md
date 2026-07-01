@@ -67,7 +67,7 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 
 | System | File | Status |
 |--------|------|--------|
-| `operate_helm_ai` | `src/ship_plugin.rs` | ✅ Full (applies NPC Transform physics) |
+| `operate_helm_ai` | `src/ship_plugin.rs` | ✅ Full (applies NPC Transform physics; takes `FactionRegistryResource` for hostile detection) |
 | `operate_tactical_ai` | `src/console/weapons/server.rs` | ✅ Player-ship path; NPC via tokens |
 | `operate_captain_ai` | `src/console/captain/server.rs` | ✅ |
 | `operate_power_ai` | `src/ship/power.rs` | Stub |

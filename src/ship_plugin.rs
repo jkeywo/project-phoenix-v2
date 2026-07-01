@@ -2601,4 +2601,116 @@ station = "helm"
             last.steering
         );
     }
+
+    // (d) NPC helm finds nearest hostile via the loaded FactionRegistry.
+    //
+    // Regression guard for the #587 regression where `operate_helm_ai` was
+    // passing `FactionRegistry::default()` (empty) instead of the live
+    // `FactionRegistryResource`. With an empty registry `find_nearest_hostile`
+    // never finds anyone, so NPC ships with `Destroy { target: "" }` doctrine
+    // sat stationary even when enemies were present (combat_test.toml).
+    //
+    // Drives `operate_helm` (the pure core function) with a real vs empty
+    // registry to confirm the fix works and documents the regression shape.
+    #[test]
+    fn npc_helm_finds_hostile_via_faction_registry() {
+        use crate::faction::{FactionConfig, FactionRegistry};
+        use crate::messages::{
+            AiDirective, ObjectiveSource, ObjectiveSnapshot, ObjectiveStatus, ScoredObjective,
+            SystemAffinity,
+        };
+
+        let fed_uuid =
+            uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
+        let harrow_uuid =
+            uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap();
+        let target_uuid = uuid::Uuid::new_v4();
+
+        // Registry: Harrow lists Federation as an enemy (matches combat_test.toml
+        // `add_faction_enemy { faction = "Harrow", enemy = "Federation" }`).
+        let mut registry = FactionRegistry::new();
+        registry.insert(FactionConfig {
+            uuid: harrow_uuid,
+            name: "Harrow".into(),
+            enemies: vec![fed_uuid],
+        });
+        registry.insert(FactionConfig {
+            uuid: fed_uuid,
+            name: "Federation".into(),
+            enemies: vec![],
+        });
+
+        // Doctrine pool matching pirate_raider.toml: `Destroy { target: "" }`
+        // scored 35. With no explicit target, helm_destroy falls through to
+        // `find_nearest_hostile` which consults the registry.
+        let scored_pool = vec![ScoredObjective {
+            id: "destroy-hostiles".into(),
+            score: 35.0,
+            directive: AiDirective::Destroy { target: String::new() },
+            source: ObjectiveSource::Doctrine,
+            relevance: vec![SystemAffinity::Helm, SystemAffinity::Weapons],
+            snapshot: ObjectiveSnapshot {
+                id: "destroy-hostiles".into(),
+                text: "Engage and destroy hostile ships".into(),
+                mandatory: false,
+                status: ObjectiveStatus::Active,
+                targets: vec![],
+                source: ObjectiveSource::Doctrine,
+            },
+        }];
+
+        // World view: NPC Harrow ship at origin, Federation target 100 units away.
+        let world_view = crate::ai::WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_faction: Some(harrow_uuid),
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: target_uuid,
+                faction: Some(fed_uuid),
+                position: [100.0, 0.0, 0.0],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        // With the real registry: Harrow finds and pursues the Federation target.
+        let (thrust, _) = crate::ai::operate_helm(
+            &mut crate::ai::AiMemory::default(),
+            &world_view,
+            &scored_pool,
+            &[],
+            &Default::default(),
+            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &registry,
+        );
+        assert!(
+            thrust > 0.0,
+            "With real FactionRegistry, NPC must produce non-zero thrust toward hostile; \
+             got thrust={}",
+            thrust
+        );
+
+        // With an empty registry (the pre-fix regression): no target found, zero thrust.
+        let (thrust_empty, _) = crate::ai::operate_helm(
+            &mut crate::ai::AiMemory::default(),
+            &world_view,
+            &scored_pool,
+            &[],
+            &Default::default(),
+            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &FactionRegistry::default(),
+        );
+        assert_eq!(
+            thrust_empty, 0.0,
+            "Empty FactionRegistry (regression) must produce zero thrust; got {}",
+            thrust_empty
+        );
+    }
 }
+

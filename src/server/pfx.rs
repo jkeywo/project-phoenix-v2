@@ -500,7 +500,7 @@ fn spawn_engine_trails(
             Option<&EntityUuid>,
             &ShipPhysics,
         ),
-        (With<AiControllerComponent>, Without<Ship>),
+        (With<AiControllerComponent>, Without<LocalShip>),
     >,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,

@@ -191,7 +191,7 @@ pub struct BeamEndedEvent {
 fn on_beam_started(
     trigger: On<BeamStartedEvent>,
     mut outbox: ResMut<SimOutbox>,
-    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::LocalShip>>,
     mut weapon_fired: ResMut<crate::server_app::WeaponFiredThisTick>,
 ) {
     weapon_fired.0 = true;
@@ -213,7 +213,7 @@ fn on_beam_started(
 fn on_beam_ended(
     trigger: On<BeamEndedEvent>,
     mut outbox: ResMut<SimOutbox>,
-    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::LocalShip>>,
 ) {
     let ev = trigger.event();
     let source_uuid = player_ship_q
@@ -634,8 +634,11 @@ fn handle_npc_beam_fire(
         With<AiControllerComponent>,
     >,
     mut beam_query: Query<&mut ActiveBeam, With<AiControllerComponent>>,
-    player_ship_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), With<Ship>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    entity_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &Transform,
+        bevy::ecs::query::Has<crate::server_app::LocalShip>,
+    ), Without<AsteroidUuid>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
     mut last_attacker: ResMut<LastShipAttacker>,
@@ -685,11 +688,10 @@ fn handle_npc_beam_fire(
             .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
 
         // Find target position for range check.
-        let target_pos = player_ship_q
+        let target_pos = entity_q
             .iter()
-            .find(|(u, _)| u.0 == t_uuid.to_string())
-            .map(|(_, t)| (t.translation.x, t.translation.z))
-            .or_else(|| entity_q.iter().find(|(u, _)| u.0 == t_uuid.to_string()).map(|(_, t)| (t.translation.x, t.translation.z)))
+            .find(|(u, _, _)| u.0 == t_uuid.to_string())
+            .map(|(_, t, _)| (t.translation.x, t.translation.z))
             .or_else(|| asteroid_q.iter().find(|(u, _)| u.0 == t_uuid.to_string()).map(|(_, t)| (t.translation.x, t.translation.z)));
 
         let Some((tx, tz)) = target_pos else {
@@ -714,7 +716,13 @@ fn handle_npc_beam_fire(
                 beam.damage_accumulator = 0.0;
                 beam.bank = Some(first_bank.as_ref().map(|b| b.id.clone()).unwrap_or_default());
 
-                if player_ship_q.iter().any(|(u, _)| u.0 == t_uuid.to_string()) {
+                // Mark the player ship as attacked only when the target is the LocalShip.
+                let is_player_target = entity_q
+                    .iter()
+                    .find(|(u, _, _)| u.0 == t_uuid.to_string())
+                    .map(|(_, _, is_local)| is_local)
+                    .unwrap_or(false);
+                if is_player_target {
                     ship_attacked.0 = true;
                     last_attacker.0 = Some(npc_uuid.0.clone());
                 }
@@ -747,21 +755,23 @@ fn tick_npc_beams(
         ),
         With<AiControllerComponent>,
     >,
+    // All non-asteroid entities that can be damaged — NPCs, stations, player ship.
+    // Has<LocalShip> lets us identify the player ship; Option<&ShipShields> carries
+    // the player's quad-shield; Option<&EntityShield> carries the NPC single-shield.
     mut hull_query: Query<
         (
             Entity,
             &crate::entity_spawner::EntityUuid,
             &Transform,
+            Option<&ShipPhysics>,
             &mut EntityConsoleHull,
             Option<&mut crate::entity_spawner::EntityShield>,
+            Option<&mut ShipShields>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
-        (Without<AiControllerComponent>, Without<crate::server_app::LocalShip>),
+        Without<AiControllerComponent>,
     >,
-    player_ship_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), With<Ship>>,
-    ship_physics_q: Query<&ShipPhysics, With<Ship>>,
     mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
-    mut player_hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
-    mut player_shields_q: Query<&mut ShipShields, With<crate::server_app::LocalShip>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
@@ -771,18 +781,15 @@ fn tick_npc_beams(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
 ) {
     let dt = time.delta_secs();
-    let player_physics = ship_physics_q.single().ok().copied().unwrap_or_default();
 
-    // Snapshot target positions (read-only before mutable hull_query iteration).
-    let mut target_positions: Vec<(String, f32, f32)> = hull_query
+    // Snapshot target positions + yaw (read-only before mutable hull_query iteration).
+    // Include yaw so bearing calculation uses the target ship's orientation.
+    let mut target_positions: Vec<(String, f32, f32, f32)> = hull_query
         .iter()
-        .map(|(_, uid, t, _, _)| (uid.0.clone(), t.translation.x, t.translation.z))
+        .map(|(_, uid, t, physics_opt, _, _, _, _)| (uid.0.clone(), t.translation.x, t.translation.z, physics_opt.map(|p| p.yaw).unwrap_or(0.0)))
         .collect();
-    for (uid, t) in player_ship_q.iter() {
-        target_positions.push((uid.0.clone(), t.translation.x, t.translation.z));
-    }
     for (au, t) in asteroid_q.iter() {
-        target_positions.push((au.0.clone(), t.translation.x, t.translation.z));
+        target_positions.push((au.0.clone(), t.translation.x, t.translation.z, 0.0));
     }
 
     for (_npc_uuid, npc_physics, mut beam, mut cooldown, weapons_section) in npc_beam_q.iter_mut() {
@@ -811,133 +818,121 @@ fn tick_npc_beams(
         let damage = beam.damage_accumulator.floor();
         beam.damage_accumulator -= damage;
 
-        let is_player_target = player_ship_q.iter().any(|(u, _)| u.0 == target_uuid);
+        // Determine whether the target is the player ship — used to set ShipAttackedThisTick.
+        let is_player_target = hull_query
+            .iter()
+            .any(|(_, u, _, _, _, _, _, is_local)| u.0 == target_uuid && is_local);
         if is_player_target {
             ship_attacked.0 = true;
         }
 
         if damage >= 1.0 {
-            if is_player_target {
-                // Damage the player ship via global hull/shields resources.
-                let attacker_pos = target_positions
-                    .iter()
-                    .find(|(u, _, _)| *u == target_uuid)
-                    .map(|(_, x, z)| (*x, *z));
-                if let Some((px, pz)) = attacker_pos {
-                    let bearing = crate::shield::attacker_bearing_relative(
-                        npc_physics.x,
-                        npc_physics.z,
-                        px,
-                        pz,
-                        player_physics.yaw,
-                    );
-                    let (pierced, absorbed) =
-                        crate::damage::split_damage_for_pierce(damage, shield_pierce);
-                    let mut hull_amount = pierced;
-                    let mut shield_amount = 0.0f32;
-                    if absorbed > 0.0 {
-                        if let Ok(mut shields) = player_shields_q.single_mut() {
+            // Unified damage routing for any target in hull_query (NPC, player, station).
+            let mut target_destroyed = false;
+            let mut is_asteroid_target = false;
+            let target_pos_and_yaw = target_positions
+                .iter()
+                .find(|(u, _, _, _)| *u == target_uuid)
+                .map(|(_, x, z, yaw)| (*x, *z, *yaw));
+
+            for (entity, entity_uuid, _, target_physics_opt, mut hull_comp, mut npc_shield_comp, mut ship_shields_comp, is_local) in hull_query.iter_mut() {
+                if entity_uuid.0 != target_uuid {
+                    continue;
+                }
+                let (pierced, absorbed) = crate::damage::split_damage_for_pierce(damage, shield_pierce);
+                let mut hull_amount = pierced;
+                let mut shield_amount = 0.0f32;
+
+                if absorbed > 0.0 {
+                    // Player ship: use ShipShields (multi-quadrant, bearing-based).
+                    if is_local {
+                        if let Some(ref mut shields) = ship_shields_comp {
+                            let target_yaw = target_pos_and_yaw.map(|(_, _, y)| y).unwrap_or_else(|| target_physics_opt.map(|p| p.yaw).unwrap_or(0.0));
+                            let bearing = if let Some((tx, tz, _)) = target_pos_and_yaw {
+                                crate::shield::attacker_bearing_relative(
+                                    npc_physics.x, npc_physics.z, tx, tz, target_yaw,
+                                )
+                            } else { 0.0 };
                             let leak = crate::damage::apply_damage_with_shields(
-                                absorbed.round() as i32,
-                                bearing,
-                                &mut shields.0,
+                                absorbed.round() as i32, bearing, &mut shields.0,
                             );
                             shield_amount = (absorbed - leak as f32).max(0.0);
                             hull_amount += leak as f32;
                         } else {
                             hull_amount += absorbed;
                         }
-                    }
-                    if hull_amount > 0.0 {
-                        if let Ok(mut hull_comp) = player_hull_q.single_mut() {
-                            let mut rng = rand::rng();
-                            let (hull_applied, ship_destroyed) =
-                                crate::damage::apply_hull_damage(&mut hull_comp.0, hull_amount, &mut rng);
-                            if let Some(ref mut ob) = outbox {
-                                ob.0.push((
-                                    Target::All,
-                                    ServerMessage::DamageTaken {
-                                        hull: hull_applied,
-                                        shield: shield_amount,
-                                    },
-                                ));
-                            }
-                            if ship_destroyed {
-                                if let Some(ref mut ob) = outbox {
-                                    ob.0.push((Target::All, ServerMessage::ShipDestroyed));
-                                }
-                                if let Some(ref mut gs) = next_state {
-                                    gs.set(GamePhase::GameOver);
-                                }
-                                if let Some(ref mut reason) = game_over_reason {
-                                    if reason.0.is_none() {
-                                        reason.0 = Some("Ship destroyed".into());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Damage an NPC or asteroid target via EntityConsoleHull.
-                let mut target_destroyed = false;
-                let mut is_asteroid_target = false;
-                for (entity, entity_uuid, _, mut hull_comp, mut shield_comp) in hull_query.iter_mut() {
-                    let uuid_matches = entity_uuid.0 == target_uuid;
-                    if !uuid_matches {
-                        continue;
-                    }
-                    let damage_to_hull: f32 = if let Some(ref mut shield) = shield_comp {
+                    } else if let Some(ref mut shield) = npc_shield_comp {
+                        // NPC ship: single-facing EntityShield.
                         if shield.broken {
-                            damage
+                            hull_amount += absorbed;
                         } else {
-                            let (pierced, absorbed) =
-                                crate::damage::split_damage_for_pierce(damage, shield_pierce);
                             let leak = shield.apply_damage(absorbed);
-                            pierced + leak
+                            shield_amount = (absorbed - leak).max(0.0);
+                            hull_amount += leak;
                         }
                     } else {
-                        damage
-                    };
-                    if damage_to_hull > 0.0 {
-                        let mut rng = rand::rng();
-                        hull_comp.0.apply_damage(damage_to_hull, &mut rng);
+                        hull_amount += absorbed;
                     }
-                    if hull_comp.0.is_destroyed() {
+                }
+
+                if hull_amount > 0.0 {
+                    let mut rng = rand::rng();
+                    let (hull_applied, ship_destroyed) =
+                        crate::damage::apply_hull_damage(&mut hull_comp.0, hull_amount, &mut rng);
+                    if is_local {
+                        if let Some(ref mut ob) = outbox {
+                            ob.0.push((
+                                Target::All,
+                                ServerMessage::DamageTaken {
+                                    hull: hull_applied,
+                                    shield: shield_amount,
+                                },
+                            ));
+                        }
+                        if ship_destroyed {
+                            if let Some(ref mut ob) = outbox {
+                                ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                            }
+                            if let Some(ref mut gs) = next_state {
+                                gs.set(GamePhase::GameOver);
+                            }
+                            if let Some(ref mut reason) = game_over_reason {
+                                if reason.0.is_none() {
+                                    reason.0 = Some("Ship destroyed".into());
+                                }
+                            }
+                        }
+                    } else if ship_destroyed {
                         commands.entity(entity).try_despawn();
                         target_destroyed = true;
-                        // asteroids also carry EntityConsoleHull but not EntityUuid (they have AsteroidUuid)
-                        // So anything in hull_query Without<AiControllerComponent> could be NPC or asteroid.
-                        // We distinguish by checking if AsteroidUuid is present (but hull_query doesn't have it).
-                        // Use world to check:
                         is_asteroid_target = world.0.entities.iter().any(|e| e.uuid == target_uuid && e.uuid.starts_with("asteroid:"));
                     }
-                    break;
                 }
-                if target_destroyed {
-                    world.0.entities.retain(|a| a.uuid != target_uuid);
-                    if is_asteroid_target {
-                        let pos = target_positions.iter().find(|(u, _, _)| *u == target_uuid).map(|(_, x, z)| (*x, *z)).unwrap_or((0.0, 0.0));
-                        vfx_events.write(AsteroidDestroyedVfx { x: pos.0, z: pos.1 });
-                        if let Some(ref mut ob) = outbox {
-                            ob.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
-                        }
-                    } else {
-                        destroyed_events.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: target_uuid.clone() });
-                        if let Some(ref mut ob) = outbox {
-                            ob.0.push((Target::All, ServerMessage::EntityDespawned { uuid: target_uuid.clone() }));
-                        }
+                break;
+            }
+            if target_destroyed {
+                world.0.entities.retain(|a| a.uuid != target_uuid);
+                if is_asteroid_target {
+                    let pos = target_positions.iter().find(|(u, _, _, _)| *u == target_uuid).map(|(_, x, z, _)| (*x, *z)).unwrap_or((0.0, 0.0));
+                    vfx_events.write(AsteroidDestroyedVfx { x: pos.0, z: pos.1 });
+                    if let Some(ref mut ob) = outbox {
+                        ob.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
                     }
-                    beam.target_uuid = None;
-                    beam.remaining_secs = 0.0;
-                    beam.damage_accumulator = 0.0;
-                    cooldown.start_bank(&bank_id, cooldown_secs);
-                    commands.trigger(BeamEndedEvent {
-                        bank: bank_id.clone(),
-                        target_uuid,
-                    });
-                    continue;
+                } else {
+                    destroyed_events.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: target_uuid.clone() });
+                    if let Some(ref mut ob) = outbox {
+                        ob.0.push((Target::All, ServerMessage::EntityDespawned { uuid: target_uuid.clone() }));
+                    }
                 }
+                beam.target_uuid = None;
+                beam.remaining_secs = 0.0;
+                beam.damage_accumulator = 0.0;
+                cooldown.start_bank(&bank_id, cooldown_secs);
+                commands.trigger(BeamEndedEvent {
+                    bank: bank_id.clone(),
+                    target_uuid,
+                });
+                continue;
             }
         }
 
@@ -4571,7 +4566,118 @@ station = "tactical"
     }
 
     #[test]
+    fn npc_beam_tick_damages_npc_target_not_player() {
+        // Regression test for PRD #597 PR-1: NPC-vs-NPC beam damage.
+        // Before the fix, tick_npc_beams hull_query had Without<LocalShip> so
+        // NPCs couldn't damage other NPCs — damage was silently lost.
+        use crate::ai_plugin::AiTokenRegistry;
+        use crate::entity_spawner::EntityConsoleHull;
+        use crate::server_app::ShipAttackedThisTick;
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+        app.init_resource::<crate::simulation::GameOverReason>();
+
+        let shooter_uuid = "10000000-0000-0000-0000-000000000001";
+        let npc_target_uuid = "20000000-0000-0000-0000-000000000002";
+
+        // Spawn NPC shooter with AiControllerComponent.
+        let (shooter_entity, npc_target_entity) =
+            setup_npc_shooter(&mut app, shooter_uuid, npc_target_uuid, 0.0, -10.0);
+        // Also add ShipPhysics to the target so it can appear in hull_query.
+        app.world_mut().entity_mut(npc_target_entity).insert(ShipPhysics::default());
+
+        // Activate beam on the shooter.
+        {
+            let mut beam = app.world_mut().get_mut::<ActiveBeam>(shooter_entity).unwrap();
+            beam.target_uuid = Some(npc_target_uuid.to_string());
+            beam.remaining_secs = 10.0;
+        }
+
+        let hp_before = app
+            .world()
+            .get::<EntityConsoleHull>(npc_target_entity)
+            .unwrap()
+            .0
+            .total_current();
+
+        for _ in 0..10 {
+            app.update();
+        }
+
+        let hp_after = app
+            .world()
+            .get::<EntityConsoleHull>(npc_target_entity)
+            .unwrap()
+            .0
+            .total_current();
+
+        assert!(
+            hp_after < hp_before,
+            "NPC beam must damage NPC target hull (before={hp_before}, after={hp_after})"
+        );
+        // Player ship must NOT have been marked as attacked.
+        assert!(
+            !app.world().resource::<ShipAttackedThisTick>().0,
+            "NPC-vs-NPC beam must not set ShipAttackedThisTick"
+        );
+    }
+
+    #[test]
+    fn on_beam_started_emits_correct_source_uuid_with_multiple_ships() {
+        // Regression test for PRD #597 PR-1: on_beam_started used With<Ship>.single()
+        // which panics when multiple ships exist. After fix it uses With<LocalShip>.
+        use crate::entity_spawner::EntityUuid;
+        use crate::server_app::WeaponFiredThisTick;
+
+        let mut app = test_app();
+        let player_uuid_str = "aaaaaaaa-0000-0000-0000-000000000001";
+        let npc_uuid_str = "bbbbbbbb-0000-0000-0000-000000000002";
+
+        // Add EntityUuid to the existing LocalShip entity (spawned by test_app).
+        let player_entity = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(player_entity)
+            .insert(EntityUuid(player_uuid_str.to_string()));
+
+        // Spawn a second NPC ship (non-LocalShip, has Ship marker).
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            EntityUuid(npc_uuid_str.to_string()),
+            ShipPhysics::default(),
+            Transform::default(),
+        ));
+
+        // Trigger BeamStartedEvent — the observer on_beam_started should emit
+        // source_uuid = player_uuid_str, not empty.
+        app.world_mut().trigger(super::BeamStartedEvent {
+            bank: "port".to_string(),
+            target_uuid: "some-target".to_string(),
+        });
+        app.update();
+
+        // Find the BeamStarted message in the SimOutbox.
+        let outbox = app.world().resource::<crate::simulation::SimOutbox>();
+        let beam_started = outbox.0.iter().find(|(_, msg)| {
+            matches!(msg, crate::messages::ServerMessage::BeamStarted { .. })
+        });
+        let Some((_, crate::messages::ServerMessage::BeamStarted { source_uuid, .. })) = beam_started else {
+            panic!("expected BeamStarted message in outbox");
+        };
+        assert_eq!(
+            source_uuid, player_uuid_str,
+            "on_beam_started must emit the LocalShip UUID as source_uuid, not {:?}",
+            source_uuid
+        );
+    }
+
+    #[test]
     fn npc_beam_tick_applies_damage_to_player_ship_through_shields() {
+
         // When the beam target is the player ship (has Ship marker), damage
         // must route through shields → hull component, not just EntityConsoleHull directly.
         use crate::ai_plugin::AiTokenRegistry;

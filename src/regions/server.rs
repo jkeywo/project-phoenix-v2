@@ -179,7 +179,7 @@ fn apply_damage_zone_damage(
                         // No LocalShip with ShipShields (e.g. test app); treat absorbed as hull.
                         hull_amount += absorbed;
                     }
-                }
+    }
 
                 let mut rng = rand::rngs::SmallRng::from_os_rng();
                 let (hull_applied, ship_destroyed) = if hull_amount > 0.0 {
@@ -253,7 +253,7 @@ pub(crate) fn handle_slow_zone_speed_clamp(
     trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
     modifiers: Res<ShipModifiers>,
-    mut ship_query: Query<&mut ShipPhysics, With<crate::simulation::Ship>>,
+    mut ship_query: Query<&mut ShipPhysics>,
 ) {
     let ev = trigger.event();
     let Ok(effects) = region_query.get(ev.region_entity) else {
@@ -268,7 +268,8 @@ pub(crate) fn handle_slow_zone_speed_clamp(
     }
     let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
     let effective_max = base_max * modifiers.get(&ModifierSlot::MaxSpeed);
-    if let Ok(mut physics) = ship_query.single_mut() {
+    // Apply to the specific entity that entered the region, not all ships.
+    if let Ok(mut physics) = ship_query.get_mut(ev.subject) {
         if physics.forward_speed.abs() > effective_max {
             physics.forward_speed = physics.forward_speed.signum() * effective_max;
         }
@@ -1219,6 +1220,39 @@ mod tests {
             physics.forward_speed
         );
     }
+
+    #[test]
+    fn slow_zone_still_clamps_player_when_npcs_exist() {
+        // Regression test for PRD #597 PR-1: handle_slow_zone_speed_clamp used
+        // ship_query.single_mut() on With<Ship>. With NPCs having Ship marker,
+        // single_mut() returns Err and the clamp silently no-ops for the player.
+        // After fix: uses trigger.event().subject so the entering entity is always clamped.
+        use crate::ship_state::ShipPhysics;
+
+        let mut app = slow_zone_test_app();
+
+        // Give the LocalShip high speed and place it inside the upcoming slow zone.
+        set_physics(&mut app, |p| { p.forward_speed = 50.0; p.x = 10.0; });
+
+        // Spawn a second NPC ship (now has Ship marker). Before the fix this made
+        // single_mut() return Err and the player would not be clamped.
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            Transform::from_xyz(200.0, 0.0, 0.0), // outside the zone
+            ShipPhysics { forward_speed: 50.0, ..Default::default() },
+        ));
+
+        // Spawn slow zone around origin — the LocalShip is inside.
+        let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
+        tick_with_dt(&mut app, 0.016);
+
+        let player_speed = get_ship_physics(&mut app).forward_speed;
+        assert!(
+            player_speed < 50.0,
+            "Player entering slow zone must still be clamped even when NPC ships exist (got {player_speed})"
+        );
+    }
+
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Flag effect tests (CommsJam / SensorBlind) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 

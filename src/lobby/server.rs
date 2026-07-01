@@ -279,7 +279,7 @@ pub fn process_lobby(
             &mut ShipSystemControlSources,
             &mut ActiveStationRatings,
         ),
-        With<Ship>,
+        With<crate::server_app::LocalShip>,
     >,
 ) {
     // During the Lobby phase this system owns the inbound queue and handles
@@ -339,8 +339,8 @@ pub fn process_lobby(
         .cloned()
         .collect();
     for ev in events {
-        if let Some((ship_config, mut control_sources, mut active_ratings)) =
-            ship_query.iter_mut().next()
+        if let Ok((ship_config, mut control_sources, mut active_ratings)) =
+            ship_query.single_mut()
         {
             let ratings_snapshot = active_ratings.0.clone();
             let result = lobby_handler::process_message(
@@ -399,7 +399,7 @@ fn handle_disconnect(
             &mut ShipSystemControlSources,
             &mut ActiveStationRatings,
         ),
-        With<Ship>,
+        With<crate::server_app::LocalShip>,
     >,
     stations: Option<Res<ShipStations>>,
 ) {
@@ -409,7 +409,7 @@ fn handle_disconnect(
         // Apply Backfill rating to the disconnecting player's station so the
         // ship keeps operating without a human at the console.
         // ship_query may return Err if the Ship entity hasn't spawned yet.
-        if let Some((cfg, mut cs, mut active_ratings)) = ship_query.iter_mut().next() {
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
             let ratings_snapshot = active_ratings.0.clone();
             let result = lobby_handler::process_disconnect_with_stations(
                 &ev.token,

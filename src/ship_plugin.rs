@@ -750,7 +750,7 @@ pub fn handle_station_rating_change(
             &mut ShipSystemControlSources,
             &mut ActiveStationRatings,
         ),
-        With<Ship>,
+        With<LocalShip>,
     >,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
 ) {
@@ -789,7 +789,7 @@ pub fn handle_station_rating_change(
 }
 
 pub fn handle_coordination_enqueue(
-    mut ship_components: Query<(&ShipConfigComponent, &mut CoordinationQueue), With<Ship>>,
+    mut ship_components: Query<(&ShipConfigComponent, &mut CoordinationQueue), With<LocalShip>>,
     mut events: MessageReader<CoordinationEnqueue>,
     mut inbound: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
@@ -841,7 +841,7 @@ pub fn process_coordination_lag(
             &ShipSystemControlSources,
             &mut CoordinationQueue,
         ),
-        With<Ship>,
+        With<LocalShip>,
     >,
     sessions: Res<Sessions>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,

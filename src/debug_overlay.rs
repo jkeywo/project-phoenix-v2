@@ -195,16 +195,16 @@ fn write_entity_debug_state(
         &crate::ai::server::AiControllerComponent,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
+        Option<&crate::ai::server::ShipAiMemory>,
     )>,
 ) {
     let count = entities.iter().count();
     let mut out = format!("ENTITY BEHAVIOR ({} entities)\n", count);
-    for (i, (ai, transform, name)) in entities.iter().enumerate() {
+    for (i, (_ai, transform, name, memory)) in entities.iter().enumerate() {
         let label = name.map(|n| n.0.as_str()).unwrap_or("<unnamed>");
         let p = transform.translation;
-        let target_str = ai
-            .memory
-            .target
+        let target_str = memory
+            .and_then(|m| m.0.target)
             .map(|u| u.to_string())
             .unwrap_or_else(|| "none".to_string());
         out.push_str(&format!(
@@ -227,6 +227,7 @@ fn write_entity_debug_state(
         &crate::ai::server::AiControllerComponent,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
+        Option<&crate::ai::server::ShipAiMemory>,
     )>,
 ) {
 }
@@ -247,7 +248,7 @@ fn update_entity_inspector(
             Option<&crate::entities::spawner::EntityConsoleHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
-            Option<&crate::ai::server::AiControllerComponent>,
+            Option<&crate::ai::server::ShipAiMemory>,
             &crate::entities::spawner::EntityTagsSection,
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,
@@ -388,7 +389,7 @@ fn update_entity_inspector(
             out.push_str(&format!(
                 "    ai: target={}\n",
                 ai_ctrl
-                    .memory
+                    .0
                     .target
                     .map(|u| u.to_string())
                     .unwrap_or_else(|| "none".to_string())
@@ -410,7 +411,7 @@ fn update_entity_inspector(
             Option<&crate::entities::spawner::EntityConsoleHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
-            Option<&crate::ai::server::AiControllerComponent>,
+            Option<&crate::ai::server::ShipAiMemory>,
             &crate::entities::spawner::EntityTagsSection,
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,

@@ -36,7 +36,6 @@ use crate::server::renderer::GameCamera;
 use crate::server_app::GameOverReason;
 use crate::ship_state::ShipPhysics;
 use crate::sim_sets::SimSet;
-use crate::simulation::ShipHullIntegrity;
 use crate::stations_config::ShipStations;
 
 // ── Shield flash constants ────────────────────────────────────────────
@@ -439,13 +438,14 @@ fn spawn_hud_state_entity(mut commands: Commands) {
 fn compute_hud_state(
     red_alert: bool,
     physics: &ShipPhysics,
-    hull: &ShipHullIntegrity,
+    hull_current: f32,
+    hull_max: f32,
     phase: &GamePhase,
     game_over_reason: Option<&GameOverReason>,
 ) -> ViewscreenHudState {
     let alert = red_alert;
-    let hull_pct = if hull.0.total_max() > 0.0 {
-        (hull.0.total_current() / hull.0.total_max() * 100.0).clamp(0.0, 100.0)
+    let hull_pct = if hull_max > 0.0 {
+        (hull_current / hull_max * 100.0).clamp(0.0, 100.0)
     } else {
         0.0
     };
@@ -476,17 +476,19 @@ fn compute_hud_state(
 /// fires only on actual change.
 fn recompute_hud_state(
     red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::simulation::LocalShip>>,
-    hull: Option<Res<ShipHullIntegrity>>,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::simulation::LocalShip>>,
     phase: Option<Res<State<GamePhase>>>,
     game_over_reason: Option<Res<GameOverReason>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
-    let Some(hull) = hull else { return };
     let Some(phase) = phase else { return };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
     let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
-    let next = compute_hud_state(red_alert, &physics, &hull, phase.get(), game_over_reason.as_deref());
+    let (hull_current, hull_max) = hull_q.single()
+        .map(|h| (h.0.total_current(), h.0.total_max()))
+        .unwrap_or((100.0, 100.0));
+    let next = compute_hud_state(red_alert, &physics, hull_current, hull_max, phase.get(), game_over_reason.as_deref());
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
             hud.0 = next.clone();
@@ -494,23 +496,25 @@ fn recompute_hud_state(
     }
 }
 
-/// `OnEnter(GamePhase::GameOver)` system: push one final HUD state that
-/// carries `game_over_message` so the viewscreen overlay can display it.
+/// `OnEnter(GamePhase::GameOver)` system: push one final HUD state.
 fn push_game_over_hud_state(
     red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::simulation::LocalShip>>,
-    hull: Option<Res<ShipHullIntegrity>>,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::simulation::LocalShip>>,
     game_over_reason: Option<Res<GameOverReason>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
     mut writer: MessageWriter<HudStateChanged>,
 ) {
-    let Some(hull) = hull else { return };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
     let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
+    let (hull_current, hull_max) = hull_q.single()
+        .map(|h| (h.0.total_current(), h.0.total_max()))
+        .unwrap_or((100.0, 100.0));
     let next = compute_hud_state(
         red_alert,
         &physics,
-        &hull,
+        hull_current,
+        hull_max,
         &GamePhase::GameOver,
         game_over_reason.as_deref(),
     );
@@ -545,25 +549,12 @@ fn push_hud_state(
 mod tests {
     use super::*;
 
-    use crate::damage::ConsoleHull;
-    use crate::messages::Console;
-
     // ── compute_hud_state ────────────────────────────────────────────
-
-    fn hull_at(current: f32, max: f32) -> ShipHullIntegrity {
-        // ConsoleHull built from a single console so total_current/total_max
-        // are exactly the values we want; apply damage to lower current.
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, max)]);
-        let mut rng = rand::rng();
-        hull.apply_damage(max - current, &mut rng);
-        ShipHullIntegrity(hull)
-    }
 
     #[test]
     fn compute_hud_state_nominal() {
         let physics = ShipPhysics::default();
-        let hull = hull_at(100.0, 100.0);
-        let state = compute_hud_state(false, &physics, &hull, &GamePhase::InProgress, None);
+        let state = compute_hud_state(false, &physics, 100.0, 100.0, &GamePhase::InProgress, None);
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
         assert_eq!(state.condition, "NOMINAL");
@@ -577,8 +568,7 @@ mod tests {
             yaw: std::f32::consts::FRAC_PI_2,
             ..Default::default()
         };
-        let hull = hull_at(50.0, 100.0);
-        let state = compute_hud_state(true, &physics, &hull, &GamePhase::InProgress, None);
+        let state = compute_hud_state(true, &physics, 50.0, 100.0, &GamePhase::InProgress, None);
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
         assert_eq!(state.condition, "ALERT");
@@ -589,9 +579,8 @@ mod tests {
     fn compute_hud_state_game_over_ship_destroyed() {
         use crate::server_app::GameOverReason;
         let physics = ShipPhysics::default();
-        let hull = hull_at(0.0, 100.0);
         let reason = GameOverReason(Some("All consoles destroyed".into()));
-        let state = compute_hud_state(false, &physics, &hull, &GamePhase::GameOver, Some(&reason));
+        let state = compute_hud_state(false, &physics, 0.0, 100.0, &GamePhase::GameOver, Some(&reason));
         assert_eq!(state.game_over_message.as_deref(), Some("Ship Destroyed"));
     }
 
@@ -599,9 +588,8 @@ mod tests {
     fn compute_hud_state_game_over_scenario_message() {
         use crate::server_app::GameOverReason;
         let physics = ShipPhysics::default();
-        let hull = hull_at(50.0, 100.0);
         let reason = GameOverReason(Some("VICTORY: All enemies eliminated.".into()));
-        let state = compute_hud_state(false, &physics, &hull, &GamePhase::GameOver, Some(&reason));
+        let state = compute_hud_state(false, &physics, 50.0, 100.0, &GamePhase::GameOver, Some(&reason));
         assert_eq!(
             state.game_over_message.as_deref(),
             Some("VICTORY: All enemies eliminated.")

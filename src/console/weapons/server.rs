@@ -12,7 +12,7 @@ use crate::messages::{
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{
-    AsteroidUuid, GameOverReason, Ship, ShipHullIntegrity, ShipShields, SimOutbox,
+    AsteroidUuid, GameOverReason, Ship, ShipShields, SimOutbox,
 };
 use crate::torpedo::{TorpedoConfig, TorpedoSystem};
 
@@ -755,12 +755,12 @@ fn tick_npc_beams(
             &mut EntityConsoleHull,
             Option<&mut crate::entity_spawner::EntityShield>,
         ),
-        Without<AiControllerComponent>,
+        (Without<AiControllerComponent>, Without<crate::server_app::LocalShip>),
     >,
     player_ship_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), With<Ship>>,
     ship_physics_q: Query<&ShipPhysics, With<Ship>>,
     mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
-    mut hull_resource: Option<ResMut<ShipHullIntegrity>>,
+    mut player_hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
     mut player_shields_q: Query<&mut ShipShields, With<crate::server_app::LocalShip>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
@@ -849,10 +849,10 @@ fn tick_npc_beams(
                         }
                     }
                     if hull_amount > 0.0 {
-                        if let Some(ref mut hull) = hull_resource {
+                        if let Ok(mut hull_comp) = player_hull_q.single_mut() {
                             let mut rng = rand::rng();
                             let (hull_applied, ship_destroyed) =
-                                crate::damage::apply_hull_damage(&mut hull.0, hull_amount, &mut rng);
+                                crate::damage::apply_hull_damage(&mut hull_comp.0, hull_amount, &mut rng);
                             if let Some(ref mut ob) = outbox {
                                 ob.0.push((
                                     Target::All,
@@ -2444,9 +2444,10 @@ mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
+    use crate::server_app::ShipHullIntegrity;
     use crate::messages::*;
     use crate::modifiers::ShipModifiers;
-    use crate::simulation::{ShipHullIntegrity, ShipImpulse, SimOutbox};
+    use crate::simulation::{ShipImpulse, SimOutbox};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -2590,6 +2591,12 @@ station = "tactical"
             ShipPhysics::default(),
             crate::ship_state::ShipPhaserFrequency::default(),
             bevy::prelude::Transform::default(),
+            crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])),
         ));
         app
     }
@@ -4564,7 +4571,7 @@ station = "tactical"
     #[test]
     fn npc_beam_tick_applies_damage_to_player_ship_through_shields() {
         // When the beam target is the player ship (has Ship marker), damage
-        // must route through shields → hull resource, not EntityConsoleHull.
+        // must route through shields → hull component, not just EntityConsoleHull directly.
         use crate::ai_plugin::AiTokenRegistry;
         use crate::entity_spawner::EntityUuid;
         use crate::server_app::{LocalShip, Ship, ShipAttackedThisTick};
@@ -4590,25 +4597,16 @@ station = "tactical"
         let player_uuid = "00000000-0000-0000-0000-000000000011";
         let player_uuid_parsed = uuid::Uuid::parse_str(player_uuid).unwrap();
 
-        // Spawn the player ship entity with Ship marker, EntityUuid, EntityConsoleHull.
-        let _player_entity = app
+        // Add EntityUuid and position to the existing LocalShip entity (already spawned by test_app).
+        let player_entity = app
             .world_mut()
-            .spawn((
-                EntityUuid(player_uuid.to_string()),
-                Ship,
-                LocalShip,
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                    &[
-                        (Console::Helm, 25.0),
-                        (Console::Tactical, 25.0),
-                        (Console::Power, 25.0),
-                        (Console::Shields, 25.0),
-                    ],
-                )),
-                Transform::from_xyz(0.0, 0.0, -10.0),
-                ShipPhysics::default(),
-            ))
-            .id();
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().entity_mut(player_entity).insert((
+            EntityUuid(player_uuid.to_string()),
+            Transform::from_xyz(0.0, 0.0, -10.0),
+        ));
 
         // Spawn NPC entity using the new per-entity beam components.
         let npc_entity = {
@@ -4638,7 +4636,9 @@ station = "tactical"
 
         let hull_before = app
             .world()
-            .resource::<ShipHullIntegrity>()
+            .entity(player_entity)
+            .get::<crate::entity_spawner::EntityConsoleHull>()
+            .unwrap()
             .0
             .total_current();
         let shields_sum_before: i32 = app
@@ -4666,7 +4666,9 @@ station = "tactical"
 
         let hull_after = app
             .world()
-            .resource::<ShipHullIntegrity>()
+            .entity(player_entity)
+            .get::<crate::entity_spawner::EntityConsoleHull>()
+            .unwrap()
             .0
             .total_current();
         let shields_sum_after: i32 = app

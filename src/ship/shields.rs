@@ -234,7 +234,7 @@ pub fn emit_shields_coordination(
 
 fn publish_shields_blackboard(
     shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
-    hull: Res<crate::simulation::ShipHullIntegrity>,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
     physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>,
     weapons_target: Option<Res<crate::weapons_plugin::WeaponsTarget>>,
     asteroid_q: Query<
@@ -265,8 +265,10 @@ fn publish_shields_blackboard(
         })
         .collect();
 
-    let total_hp = hull.0.total_max();
-    let total_current = hull.0.total_current();
+    let (total_hp, total_current) = hull_q
+        .single()
+        .map(|h| (h.0.total_max(), h.0.total_current()))
+        .unwrap_or((100.0, 100.0));
     let hull_integrity_pct = if total_hp > 0.0 {
         ((total_current / total_hp) * 100.0).clamp(0.0, 100.0)
     } else {

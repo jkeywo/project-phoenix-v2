@@ -11,7 +11,7 @@ use crate::region_effects::RegionEffectKind;
 use crate::server_app::SimOutbox;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::GameOverReason;
-use crate::simulation::{LocalShip, ShipHullIntegrity, ShipImpulse};
+use crate::simulation::{LocalShip, ShipImpulse};
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -129,14 +129,14 @@ fn apply_damage_zone_damage(
     membership: Res<RegionMembership>,
     region_query: Query<(&RegionEffectsSection, Option<&EntityUuid>)>,
     ship_query: Query<Entity, With<LocalShip>>,
-    hull: Option<ResMut<ShipHullIntegrity>>,
+    mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
     mut player_shields: Query<&mut crate::simulation::ShipShields, With<crate::server_app::LocalShip>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
     mut damage_log: Option<ResMut<DamageLog>>,
 ) {
-    let Some(mut hull) = hull else {
+    let Ok(mut hull) = hull_q.single_mut() else {
         return;
     };
 
@@ -280,6 +280,7 @@ mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
     use crate::entity_config::EntityConfig;
+    use crate::server_app::ShipHullIntegrity;
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_CHARGE_DURATION};
     use crate::messages::ModifierSlot;
@@ -287,7 +288,7 @@ mod tests {
     use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
     use crate::region_shape::RegionShape;
     use crate::ship_physics::ShipPhysicsConfig;
-    use crate::simulation::{ShipHullIntegrity, ShipImpulse};
+    use crate::simulation::{ShipImpulse};
 
     /// Build a minimal Bevy app with the region plugin.
     fn test_app() -> App {
@@ -502,26 +503,39 @@ mod tests {
     use crate::region_effects::{DamageZoneEffect, RegionEffectsConfig as EffectsCfg};
     use std::time::Duration;
 
+    fn ship_hull_hp(app: &mut App) -> f32 {
+        let hull = app
+            .world_mut()
+            .query_filtered::<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .total_current();
+        hull
+    }
+
     fn damage_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(RegionPlugin);
         // Manually control time — no TimePlugin. Bevy 0.18 Time is generic;
         // we insert Time<()> ourselves and use advance_by() before each update.
         app.insert_resource(Time::<()>::default());
-        app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+        use crate::shield::{ShieldConfig, ShieldSystem};
+        let hull_config = &[
             (crate::messages::Console::Helm, 25.0),
             (crate::messages::Console::Tactical, 25.0),
             (crate::messages::Console::Power, 25.0),
             (crate::messages::Console::Shields, 25.0),
-        ])));
+        ];
+        app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(hull_config)));
         app.insert_resource(ShipModifiers::new());
-        use crate::shield::{ShieldConfig, ShieldSystem};
         app.world_mut().spawn((
             LocalShip,
             crate::simulation::Ship,
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
             crate::simulation::ShipShields(ShieldSystem::new(&ShieldConfig::default())),
+            crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(hull_config)),
         ));
         app
     }
@@ -638,11 +652,7 @@ mod tests {
         spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 50.0);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app
-            .world()
-            .resource::<ShipHullIntegrity>()
-            .0
-            .total_current();
+        let hull_hp = ship_hull_hp(&mut app);
         assert!(
             (hull_hp - 95.0).abs() < 1e-6,
             "hull should be ~95 after 0.1s at 50 dps, got {}",
@@ -659,11 +669,7 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app
-            .world()
-            .resource::<ShipHullIntegrity>()
-            .0
-            .total_current();
+        let hull_hp = ship_hull_hp(&mut app);
         assert!(
             (hull_hp - 100.0).abs() < 1e-6,
             "hull should remain at 100 when outside damage zone, got {}",
@@ -687,11 +693,7 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
 
         // Hull should have taken damage (bypassing shields)
-        let hull_hp = app
-            .world()
-            .resource::<ShipHullIntegrity>()
-            .0
-            .total_current();
+        let hull_hp = ship_hull_hp(&mut app);
         assert!(
             (hull_hp - 95.0).abs() < 1e-6,
             "hull should be ~95 (damage bypassed shields), got {}",
@@ -721,11 +723,7 @@ mod tests {
         spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 100.0, 0.3);
         tick_with_dt(&mut app, 1.0);
 
-        let hull_hp = app
-            .world()
-            .resource::<ShipHullIntegrity>()
-            .0
-            .total_current();
+        let hull_hp = ship_hull_hp(&mut app);
         assert!(
             (hull_hp - 70.0).abs() < 0.5,
             "hull should be ~70 after 30 pierced damage on 100hp, got {}",
@@ -757,11 +755,7 @@ mod tests {
         spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 50.0, 0.0);
         tick_with_dt(&mut app, 1.0);
 
-        let hull_hp = app
-            .world()
-            .resource::<ShipHullIntegrity>()
-            .0
-            .total_current();
+        let hull_hp = ship_hull_hp(&mut app);
         assert!(
             (hull_hp - 100.0).abs() < 1e-6,
             "hull should be untouched at zero pierce, got {}",
@@ -788,11 +782,7 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app
-            .world()
-            .resource::<ShipHullIntegrity>()
-            .0
-            .total_current();
+        let hull_hp = ship_hull_hp(&mut app);
         assert!(
             (hull_hp - 99.1).abs() < 0.001,
             "hull should be ~99.1 after 0.3s at 3 dps, got {}",

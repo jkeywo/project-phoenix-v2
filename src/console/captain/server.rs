@@ -200,7 +200,7 @@ fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
 // ── Blackboard publish ───────────────────────────────────────────────────────
 
 fn publish_captain_blackboard(
-    hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
     ship_query: Query<
@@ -223,8 +223,8 @@ fn publish_captain_blackboard(
         .map(|vm| vm.view_mode.clone())
         .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
 
-    let hull_fraction = hull
-        .as_ref()
+    let hull_fraction = hull_q
+        .single()
         .map(|h| {
             let max = h.0.total_max();
             if max > 0.0 { h.0.total_current() / max } else { 1.0 }
@@ -263,8 +263,8 @@ fn publish_captain_blackboard(
         })
         .unwrap_or_default();
 
-    let hull_integrity_pct = hull
-        .as_ref()
+    let hull_integrity_pct = hull_q
+        .single()
         .map(|h| {
             let max_hp = h.0.total_max();
             if max_hp > 0.0 {
@@ -1071,10 +1071,8 @@ mod tests {
     fn bb_test_app() -> App {
         let mut app = App::new();
         app.add_systems(Update, publish_captain_blackboard);
-        app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
-            Console::CaptainChair,
-            100.0,
-        )])));
+        let hull = ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+        app.insert_resource(ShipHullIntegrity(hull.clone()));
         app.init_resource::<SystemBlackboards>();
         // Spawn LocalShip entity with required components for publish_captain_blackboard.
         app.world_mut().spawn((
@@ -1082,8 +1080,24 @@ mod tests {
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_state::ShipViewMode::default(),
             ShipSystemControlSources::default(),
+            crate::entity_spawner::EntityConsoleHull(hull),
         ));
         app
+    }
+
+    fn apply_hull_damage(app: &mut App, amount: f32) {
+        let mut rng = rand::rng();
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .unwrap()
+            .0
+            .apply_damage(amount, &mut rng);
     }
 
     #[test]
@@ -1156,11 +1170,7 @@ mod tests {
     #[test]
     fn publish_captain_blackboard_reflects_hull_integrity() {
         let mut app = bb_test_app();
-        {
-            let mut hull = app.world_mut().resource_mut::<ShipHullIntegrity>();
-            let mut rng = rand::rng();
-            hull.0.apply_damage(25.0, &mut rng);
-        }
+        apply_hull_damage(&mut app, 25.0);
         app.update();
 
         let bb = captain_bb(&app);

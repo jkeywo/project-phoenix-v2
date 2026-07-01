@@ -11,7 +11,6 @@ use crate::modifiers::ShipModifiers;
 use crate::repair_teams::RepairTeams;
 use crate::ship::system_registry::{repair_system_id, REPAIR_SYSTEM_ID};
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::simulation::ShipHullIntegrity;
 
 // ── Resources ─────────────────────────────────────────────────────────────────
 
@@ -136,36 +135,42 @@ pub fn handle_dispatch_repair_team(
 pub fn tick_repair_teams(
     time: Res<Time>,
     mut teams: ResMut<ShipRepairTeams>,
-    mut hull: ResMut<ShipHullIntegrity>,
+    mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
     modifiers: Res<ShipModifiers>,
 ) {
     let dt = time.delta_secs();
     let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
-    teams.0.tick(dt * repair_mult, &mut hull.0);
+    if let Ok(mut hull) = hull_q.single_mut() {
+        teams.0.tick(dt * repair_mult, &mut hull.0);
+    }
 }
 
 // ── Blackboard publish ─────────────────────────────────────────────────────────
 
 fn publish_repair_blackboard(
     teams: Res<ShipRepairTeams>,
-    hull: Res<ShipHullIntegrity>,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
     mut blackboards: ResMut<crate::server_app::SystemBlackboards>,
 ) {
     let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
-    let console_hull: Vec<ConsoleHullStatus> = hull
-        .0
-        .entries()
-        .iter()
-        .map(|(c, cur, max)| ConsoleHullStatus {
-            console: c.clone(),
-            current: *cur,
-            max_hp: *max,
+    let hull_ref = hull_q.single().ok();
+    let console_hull: Vec<ConsoleHullStatus> = hull_ref
+        .map(|h| {
+            h.0.entries()
+                .iter()
+                .map(|(c, cur, max)| ConsoleHullStatus {
+                    console: c.clone(),
+                    current: *cur,
+                    max_hp: *max,
+                })
+                .collect()
         })
-        .collect();
+        .unwrap_or_default();
 
-    let damageable_consoles: Vec<Console> =
-        hull.0.entries().iter().map(|(c, _, _)| c.clone()).collect();
+    let damageable_consoles: Vec<Console> = hull_ref
+        .map(|h| h.0.entries().iter().map(|(c, _, _)| c.clone()).collect())
+        .unwrap_or_default();
 
     let bb = RepairBlackboard {
         teams: team_slots,
@@ -205,6 +210,7 @@ mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
+    use crate::server_app::ShipHullIntegrity;
     use crate::messages::*;
     use crate::server_app::SystemBlackboards;
     use crate::shield::ShieldSystem;
@@ -260,6 +266,13 @@ mod tests {
         .add_plugins(repair_state_broadcaster())
         .add_systems(PostUpdate, collect);
         // Spawn the player ship entity so handle_dispatch_repair_team can query it.
+        let hull_config = &[
+            (Console::Helm, 25.0_f32),
+            (Console::Tactical, 25.0),
+            (Console::Power, 25.0),
+            (Console::Shields, 25.0),
+            (Console::Core, 50.0),
+        ];
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,
@@ -268,6 +281,7 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
+            crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(hull_config)),
         ));
         app
     }

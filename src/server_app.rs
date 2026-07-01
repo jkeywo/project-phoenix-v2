@@ -525,21 +525,19 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 
         // ── Emit ConsoleHullUpdate only when hull HP changed.
         {
-            let hull = world.resource::<ShipHullIntegrity>();
-            let current_hull: Vec<crate::messages::ConsoleHullStatus> = hull
-                .0
-                .entries()
-                .iter()
-                .map(|(c, cur, max)| crate::messages::ConsoleHullStatus {
+            let hull_current: Vec<crate::messages::ConsoleHullStatus> = world
+                .query_filtered::<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>()
+                .single(world)
+                .map(|h| h.0.entries().iter().map(|(c, cur, max)| crate::messages::ConsoleHullStatus {
                     console: c.clone(),
                     current: *cur,
                     max_hp: *max,
-                })
-                .collect();
-            let hull_changed = world.resource::<LastBroadcastHull>().0 != current_hull;
+                }).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let hull_changed = world.resource::<LastBroadcastHull>().0 != hull_current;
             if hull_changed {
-                let entries = current_hull.clone();
-                world.resource_mut::<LastBroadcastHull>().0 = current_hull;
+                let entries = hull_current.clone();
+                world.resource_mut::<LastBroadcastHull>().0 = hull_current;
                 world
                     .resource_mut::<SimOutbox>()
                     .0
@@ -608,7 +606,7 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
 // -- Systems -------------------------------------------------------------------
 
 fn publish_viewscreen_blackboard(
-    hull: Option<Res<ShipHullIntegrity>>,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
     activity: Option<Res<crate::ship::combat_activity::RecentCombatActivity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
@@ -629,17 +627,14 @@ fn publish_viewscreen_blackboard(
         .and_then(|(_, ra)| ra.map(|r| r.0));
     let red_alert = entity_red_alert.unwrap_or(false);
 
-    let hull_integrity_pct = if let Some(h) = &hull {
-        let max = h.0.total_max();
-        let cur = h.0.total_current();
-        if max > 0.0 {
-            (cur / max * 100.0).clamp(0.0, 100.0)
-        } else {
-            100.0
-        }
-    } else {
-        100.0
-    };
+    let hull_integrity_pct = hull_q
+        .single()
+        .map(|h| {
+            let max = h.0.total_max();
+            let cur = h.0.total_current();
+            if max > 0.0 { (cur / max * 100.0).clamp(0.0, 100.0) } else { 100.0 }
+        })
+        .unwrap_or(100.0);
     let last_damage_taken_secs = activity.as_ref().and_then(|a| a.last_damage_taken);
     let last_weapon_fired_secs = activity.as_ref().and_then(|a| a.last_weapon_fired);
 
@@ -729,7 +724,7 @@ fn handle_collisions(
     >,
     mut physics_q: Query<&mut ShipPhysicsComponent, With<LocalShip>>,
     mut impulse: ResMut<ShipImpulse>,
-    mut hull: ResMut<ShipHullIntegrity>,
+    mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
     mut cooldown: ResMut<CollisionCooldown>,
     modifiers: Res<ShipModifiers>,
     mut shields_q: Query<&mut ShipShields, With<LocalShip>>,
@@ -746,6 +741,9 @@ fn handle_collisions(
         return;
     };
     let Ok(mut shields) = shields_q.single_mut() else {
+        return;
+    };
+    let Ok(mut hull_comp) = hull_q.single_mut() else {
         return;
     };
     let Ok(mut physics) = physics_q.single_mut() else {
@@ -829,7 +827,7 @@ fn handle_collisions(
 
         if total_hull > 0.0 {
             let rng = &mut rand::rngs::SmallRng::from_os_rng();
-            let (hull_applied, ship_destroyed) = apply_hull_damage(&mut hull.0, total_hull, rng);
+            let (hull_applied, ship_destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
             outbox.0.push((
                 Target::All,
                 ServerMessage::DamageTaken {
@@ -2620,10 +2618,31 @@ mod tests {
                 crate::ship_state::ShipViewMode::default(),
                 crate::ship_state::ShipPhaserFrequency::default(),
                 bevy::prelude::Transform::default(),
+                crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(&[
+                    (Console::Helm, 25.0),
+                    (Console::Tactical, 25.0),
+                    (Console::Power, 25.0),
+                    (Console::Shields, 25.0),
+                ])),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
         app
+    }
+
+    fn apply_hull_damage(app: &mut App, amount: f32) {
+        let mut rng = rand::rng();
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .unwrap()
+            .0
+            .apply_damage(amount, &mut rng);
     }
 
     fn get_phaser_frequency(app: &mut App) -> f32 {
@@ -3362,14 +3381,8 @@ mod tests {
         // Consume the initial ConsoleHullUpdate so LastBroadcastHull is seeded.
         let _ = tick(&mut app);
 
-        // Directly apply damage to the resource (simulates collision at ~half speed).
-        {
-            let mut rng = rand::rng();
-            app.world_mut()
-                .resource_mut::<ShipHullIntegrity>()
-                .0
-                .apply_damage(10.0, &mut rng);
-        }
+        // Directly apply damage to the EntityConsoleHull component (simulates collision at ~half speed).
+        apply_hull_damage(&mut app, 10.0);
 
         let out = tick(&mut app);
         let entries = out
@@ -4956,14 +4969,8 @@ mod tests {
             "with 0.5Ã— modifier, damage should be 50"
         );
 
-        // Verify the hull loses only the scaled amount by triggering damage through the resource.
-        {
-            let mut rng = rand::rng();
-            app.world_mut()
-                .resource_mut::<ShipHullIntegrity>()
-                .0
-                .apply_damage(scaled_damage, &mut rng);
-        }
+        // Verify the hull loses only the scaled amount by triggering damage through the component.
+        apply_hull_damage(&mut app, scaled_damage);
         let out = tick(&mut app);
         let entries = out
             .iter()

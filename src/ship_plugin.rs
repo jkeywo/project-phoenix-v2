@@ -19,7 +19,7 @@ use crate::ship::coordination::{CoordinationLagQueue, QueuedCoordination};
 use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipPhysics;
-use crate::simulation::{Ship, ShipBoost, ShipHullIntegrity, ShipImpulse};
+use crate::simulation::{Ship, ShipBoost, ShipImpulse};
 use crate::server_app::LocalShip;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Resources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -595,7 +595,7 @@ fn sync_ship_position(
 pub fn handle_impulse_messages(
     ship_ac_query: Query<&AdmittedCommands, With<LocalShip>>,
     mut impulse: ResMut<ShipImpulse>,
-    hull: Res<ShipHullIntegrity>,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
     mut last_hull_hp: Local<f32>,
     membership: Option<Res<RegionMembership>>,
     region_query: Query<&RegionEffectsSection>,
@@ -604,11 +604,12 @@ pub fn handle_impulse_messages(
     let Ok(admitted) = ship_ac_query.single() else {
         return;
     };
-    if *last_hull_hp == 0.0 && (hull.0.total_current() - hull.0.total_max()).abs() < 1e-6 {
-        *last_hull_hp = hull.0.total_max();
+    let hull_total = hull_q.single().map(|h| (h.0.total_current(), h.0.total_max())).unwrap_or((100.0, 100.0));
+    if *last_hull_hp == 0.0 && (hull_total.0 - hull_total.1).abs() < 1e-6 {
+        *last_hull_hp = hull_total.1;
     }
 
-    let current_hp = hull.0.total_current();
+    let current_hp = hull_total.0;
     if current_hp < *last_hull_hp {
         impulse.0.cancel_charge();
     }
@@ -915,6 +916,7 @@ mod tests {
     use super::*;
     use crate::control_source::ControlSource;
     use crate::entity_config::EntityConfig;
+    use crate::server_app::ShipHullIntegrity;
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::lobby::LobbyPlugin;
@@ -949,6 +951,12 @@ mod tests {
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
+        let hull_config = &[
+            (crate::messages::Console::Helm, 25.0_f32),
+            (crate::messages::Console::Tactical, 25.0),
+            (crate::messages::Console::Power, 25.0),
+            (crate::messages::Console::Shields, 25.0),
+        ];
         app.world_mut().spawn((
             Ship,
             LocalShip,
@@ -961,8 +969,26 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ai_plugin::ShipAiMemory::default(),
+            crate::entity_spawner::EntityConsoleHull(
+                crate::damage::ConsoleHull::from_config(hull_config),
+            ),
         ));
         app
+    }
+
+    fn apply_hull_damage(app: &mut App, amount: f32) {
+        let mut rng = rand::rng();
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .unwrap()
+            .0
+            .apply_damage(amount, &mut rng);
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
@@ -1178,13 +1204,7 @@ mod tests {
             "impulse should be charging after StartImpulseCharge"
         );
 
-        {
-            let mut rng = rand::rng();
-            app.world_mut()
-                .resource_mut::<ShipHullIntegrity>()
-                .0
-                .apply_damage(10.0, &mut rng);
-        }
+        apply_hull_damage(&mut app, 10.0);
         tick(&mut app);
 
         assert_eq!(
@@ -1209,13 +1229,7 @@ mod tests {
             "impulse should be active before damage"
         );
 
-        {
-            let mut rng = rand::rng();
-            app.world_mut()
-                .resource_mut::<ShipHullIntegrity>()
-                .0
-                .apply_damage(10.0, &mut rng);
-        }
+        apply_hull_damage(&mut app, 10.0);
         tick(&mut app);
 
         assert_eq!(

@@ -18,7 +18,7 @@ pub struct RecentCombatActivity {
 /// Runs in `SimSet::Broadcast`.
 pub fn update_combat_activity(
     time: Res<Time>,
-    hull: Option<Res<crate::server_app::ShipHullIntegrity>>,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
     mut attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
     mut weapon_fired: ResMut<crate::server_app::WeaponFiredThisTick>,
     mut activity: ResMut<RecentCombatActivity>,
@@ -26,12 +26,12 @@ pub fn update_combat_activity(
     let now = time.elapsed_secs();
 
     // Check for hull decrease.
-    if let Some(hull) = hull {
-        let current_hull = hull.0.total_current();
+    if let Ok(hull_comp) = hull_q.single() {
+        let current_hull = hull_comp.0.total_current();
         let previous_hull = if activity.prev_hull > 0.0 {
             activity.prev_hull
         } else {
-            hull.0.total_max()
+            hull_comp.0.total_max()
         };
         if current_hull < previous_hull {
             activity.last_damage_taken = Some(now);
@@ -61,11 +61,15 @@ mod tests {
     fn app_with_hull(hull: ConsoleHull) -> App {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
-            .insert_resource(ShipHullIntegrity(hull))
+            .insert_resource(ShipHullIntegrity(hull.clone()))
             .init_resource::<ShipAttackedThisTick>()
             .init_resource::<WeaponFiredThisTick>()
             .init_resource::<RecentCombatActivity>()
             .add_systems(Update, update_combat_activity);
+        app.world_mut().spawn((
+            crate::server_app::LocalShip,
+            crate::entity_spawner::EntityConsoleHull(hull),
+        ));
         app
     }
 

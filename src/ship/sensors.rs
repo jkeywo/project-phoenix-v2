@@ -17,7 +17,10 @@ const PLACEHOLDER_SHIELD_FREQUENCY: f32 = 0.5;
 /// The currently selected science target on the Sensors console. `None` means
 /// no target is selected. Broadcast to all clients via SensorsBlackboard so
 /// every radar can render a blue science-target marker.
-#[derive(Resource, Default)]
+///
+/// Derives both `Resource` (existing player-ship singleton) and `Component`
+/// (per-entity path after issue #589 unification).
+#[derive(Resource, Component, Default, Clone, Debug)]
 pub struct SensorsTarget(pub Option<String>);
 
 /// Tracks the last frequency value sent for a given target so we avoid
@@ -41,6 +44,7 @@ impl Plugin for ShipSensorsPlugin {
                 Update,
                 (
                     handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
+                    operate_sensors_ai.in_set(crate::sim_sets::SimSet::Input),
                     tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
                     publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
@@ -58,9 +62,13 @@ impl Plugin for ShipSensorsPlugin {
 pub fn handle_sensors_messages(
     sessions: Res<Sessions>,
     ship_query: Query<
-        (&crate::messages::AdmittedCommands, &crate::ship_plugin::ShipConfigComponent),
+        (
+            &crate::messages::AdmittedCommands,
+            &crate::ship_plugin::ShipConfigComponent,
+        ),
         With<crate::simulation::Ship>,
     >,
+    mut sensors_q: Query<&mut SensorsTarget, With<crate::simulation::Ship>>,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
     mut sensors_target: ResMut<SensorsTarget>,
 ) {
@@ -73,8 +81,11 @@ pub fn handle_sensors_messages(
             continue;
         };
 
-        // Store so it's broadcast via SensorsBlackboard to all clients.
+        // Write to global resource (backward compat) and per-entity component.
         sensors_target.0 = Some(uuid.clone());
+        if let Ok(mut entity_target) = sensors_q.single_mut() {
+            entity_target.0 = Some(uuid.clone());
+        }
 
         // Route the suggestion to whoever currently holds the Tactical console.
         let Some(tactical_token) = sessions
@@ -162,6 +173,30 @@ pub fn publish_sensors_blackboard(
     );
 }
 
+/// Per-entity AI loop for the Sensors system. Loops over all ship entities
+/// where the Sensors system is `ControlSource::Ai`.
+///
+/// Currently a compile-verified stub — Sensors AI logic is deferred since
+/// the sensor AI produces no active decisions in the current game design
+/// (Sensors is purely advisory: the AI auto-suggests scan targets to Tactical
+/// via the coordination bus in `tick_sensors_frequency_hint`).
+pub fn operate_sensors_ai(
+    ships: Query<
+        &crate::ship_plugin::ShipSystemControlSources,
+        With<crate::simulation::Ship>,
+    >,
+) {
+    for sources in &ships {
+        let policy = sources
+            .0
+            .policy_for(&crate::system_registry::sensors_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        // TODO: implement sensors AI logic (target suggestion, scan selection)
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -212,6 +247,7 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
+            SensorsTarget::default(),
         ));
         app
     }
@@ -408,5 +444,37 @@ mod tests {
             state_before, state_after,
             "state should not change when target is unchanged"
         );
+    }
+
+    /// Verifies that operate_sensors_ai skips entities where Sensors is Human,
+    /// and runs (without panic) for entities where Sensors is Ai (issue #589 AC).
+    #[test]
+    fn operate_sensors_ai_runs_per_entity_for_ai_controlled_ships() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+        // Human-controlled: operate_sensors_ai must do nothing.
+        let mut human_resolver = ControlSourceResolver::new();
+        human_resolver.set(
+            crate::system_registry::sensors_system_id(),
+            ControlSource::Human,
+        );
+        let human_sources =
+            crate::ship_plugin::ShipSystemControlSources(human_resolver);
+        let human_policy = human_sources
+            .0
+            .policy_for(&crate::system_registry::sensors_system_id());
+        assert!(!human_policy.operate_ai, "human Sensors should not operate AI");
+
+        // AI-controlled: operate_sensors_ai must gate and proceed.
+        let mut ai_resolver = ControlSourceResolver::new();
+        ai_resolver.set(
+            crate::system_registry::sensors_system_id(),
+            ControlSource::Ai,
+        );
+        let ai_sources = crate::ship_plugin::ShipSystemControlSources(ai_resolver);
+        let ai_policy = ai_sources
+            .0
+            .policy_for(&crate::system_registry::sensors_system_id());
+        assert!(ai_policy.operate_ai, "AI Sensors must gate through operate_ai");
     }
 }

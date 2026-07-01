@@ -306,6 +306,7 @@ pub fn spawn_entity(
             crate::weapons_plugin::WeaponsTarget::default(),
             crate::weapons_plugin::ActiveBeam::default(),
             crate::weapons_plugin::PhaserCooldown::default(),
+            crate::sensors_plugin::SensorsTarget::default(),
         ));
     }
 

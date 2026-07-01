@@ -1745,6 +1745,7 @@ fn spawn_game_start_entities(
                 .insert(crate::weapons_plugin::WeaponsTarget::default())
                 .insert(crate::weapons_plugin::ActiveBeam::default())
                 .insert(crate::weapons_plugin::PhaserCooldown::default())
+                .insert(crate::sensors_plugin::SensorsTarget::default())
                 .remove::<crate::entity_spawner::EntityConsoleHull>();
             ship_spawned = true;
 

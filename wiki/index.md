@@ -134,6 +134,7 @@ Open (planned work):
 - **[Issue #440 — Lobby Integration + Phase Toggle](./sources/issue-440-html-lobby-phase-toggle.md)** — Shipped. Lobby merged into `client.html` as `#lobby-ui`; `gui/phase-toggle.js` pure function drives section visibility (treats `GameOver` as in-game).
 - **[Issue #441 — Tab Bar + Content Switching](./sources/issue-441-html-tab-bar-content-switching.md)** — Shipped. `gui/tab-bar.js` + `gui/content-switcher.js` pure modules; `#console-tab-bar` strip in the bezel safe zone (portrait top / landscape left, initials at 5+ in portrait); `setActiveConsole()` consolidates the three call sites.
 - **[Issue #442 — Bevy Cleanup (lobby + tab bar + bezel)](./sources/issue-442-bevy-cleanup.md)** — Shipped. Final slice of #438; deletes the Bevy lobby UI, embedded tab bar widget, and phone bezel frame from `src/client/{app,console_shell,phone_border/framing}.rs` (~2700 → ~900 lines). `ConsoleShell::spawn` signature preserved so the nine per-console panels compile unchanged; `PhoneAssets` + `DeviceOrientation` retained.
+- **[Issues #587-596 — PRD #581 Unified Ship Entity Model](./sources/prd-581-unified-ship-entity-model.md)** — Shipped. `ShipPhysics` component on all ships; `operate_helm_ai` unified loop; `handle_fire_phaser_npc` deleted; per-entity components for WeaponsTarget/ActiveBeam/PhaserCooldown/SensorsTarget/ShipRepairTeams/NavigationWaypoint/ShipPowerSystem/ShipRedAlert/ShipViewMode; `tick_ai_controllers` and `AiControllerComponent` fields retired; `operate_*_ai` per-entity loops for all 9 systems.
 
 ### Design drafts (`docs/`)
 

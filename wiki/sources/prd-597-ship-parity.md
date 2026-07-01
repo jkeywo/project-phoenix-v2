@@ -26,7 +26,7 @@ Eliminate every divergence in 10 sequential PRs. After all 10: a ship is a ship.
 
 | PR | Title | Status |
 |---|---|---|
-| PR 1 | Fix critical `With<Ship>` regressions | In progress |
+| PR 1 | Fix critical `With<Ship>` regressions | **Done** (commit ebc0022) |
 | PR 2 | Unified `ShipShields` (configurable `num_facings`) | Pending |
 | PR 3 | Per-entity `ShipConfigComponent` from each TOML | Pending |
 | PR 4 | Physics/impulse/boost/bank config → per-entity | Pending |

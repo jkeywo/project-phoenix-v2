@@ -1890,7 +1890,7 @@
             state.weaponsFireReady = false;
           }
           pushWeaponsConsoleState();
-          return;
+          break;
         }
         case 'BlackboardUpdate': {
           // simState.apply() already wrote blackboards[systemId] = bb.data above.
@@ -1938,7 +1938,7 @@
           if (updatedSystems.has('repair'))     pushRepairConsoleState();
           if (updatedSystems.has('comms'))      pushCommsConsoleState();
           if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
-          return;
+          break;
         }
         case 'WeaponsUpdate': {
           // Save full bank/tube/torpedo/mode state for the iframe console.
@@ -1967,31 +1967,31 @@
             state.weaponsFireReady = false;
           }
           pushWeaponsConsoleState();
-          return;
+          break;
         }
         case 'BeamStarted': {
           state.weaponsFiring = true;
           pushWeaponsConsoleState();
-          return;
+          break;
         }
         case 'BeamEnded': {
           state.weaponsFiring = false;
           pushWeaponsConsoleState();
-          return;
+          break;
         }
         case 'ConsoleHullUpdate': {
           state.consoleHull = window.simState
             ? window.simState.consoleHull
             : (msg.data.entries || []);
           pushRepairConsoleState();
-          return;
+          break;
         }
         case 'RepairState': {
           state.repairTeams = window.simState
             ? window.simState.repairTeams
             : (msg.data.teams || []);
           pushRepairConsoleState();
-          return;
+          break;
         }
         case 'PowerState': {
           const { helm, weapons, sensors, battery_charge, locked } = msg.data;
@@ -2001,7 +2001,7 @@
           if (typeof battery_charge === 'number') state.powerBattery = battery_charge;
           state.powerLocked = !!locked;
           pushPowerConsoleState();
-          return;
+          break;
         }
         case 'ShieldStatus': {
           state.shieldFacings = (msg.data.facings || []).map(f => ({
@@ -2016,7 +2016,7 @@
           const focused = state.shieldFacings.find(f => f.is_focused);
           state.shieldFocusedFacing = focused ? focused.label : null;
           pushShieldsConsoleState();
-          return;
+          break;
         }
         case 'AsteroidDestroyed': {
           const { uuid } = msg.data;
@@ -2034,7 +2034,7 @@
           pushWeaponsConsoleState();
           pushHelmConsoleState();
           pushSensorsConsoleState();
-          return;
+          break;
         }
         case 'EntityDespawned': {
           const { uuid } = msg.data;
@@ -2052,7 +2052,7 @@
           pushWeaponsConsoleState();
           pushHelmConsoleState();
           pushSensorsConsoleState();
-          return;
+          break;
         }
         case 'DamageTaken': {
           const { hull } = msg.data;
@@ -2080,7 +2080,7 @@
             state.commsContacts = msg.data.contacts || [];
           }
           pushCommsConsoleState();
-          return;
+          break;
         }
         case 'ShipDestroyed':
           state.shipDestroyed = true;

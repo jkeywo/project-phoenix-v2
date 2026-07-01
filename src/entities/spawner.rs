@@ -310,6 +310,7 @@ pub fn spawn_entity(
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_state::ShipViewMode::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
+            crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
         ));
     }
 

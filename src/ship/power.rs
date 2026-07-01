@@ -14,7 +14,10 @@ use crate::ship_state::ShipState;
 // ── Resources ──────────────────────────────────────────────────────────────────
 
 /// Wraps the pure-Rust power system so it can be used as a Bevy resource.
-#[derive(Resource)]
+///
+/// Derives both `Resource` (existing player-ship singleton) and `Component`
+/// (per-entity path after issue #594 unification).
+#[derive(Resource, Component, Clone)]
 pub struct ShipPowerSystem(pub PowerSystem);
 
 /// Wraps the power config for the ship's power system.
@@ -231,17 +234,29 @@ pub fn tick_power_system(
 ///
 /// PowerSystem has no shields field; shields_battery_floor is reserved for
 /// future extension but produces no action today.
+///
+/// After issue #594: loops over ALL ship entities where the Power system is
+/// `ControlSource::Ai`, reading and writing the per-entity `ShipPowerSystem`
+/// component. Also writes the global `ShipPowerSystem` resource (dual-write
+/// migration backward compat for the player ship broadcaster).
 pub fn operate_power_ai(
-    mut power: ResMut<ShipPowerSystem>,
+    mut power_res: ResMut<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
     ship: Res<ShipState>,
     last_helm: Option<Res<LastHelmInput>>,
     ai_config: Res<PowerAiConfigResource>,
     sessions: Option<Res<crate::lobby::Sessions>>,
-    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
+    ship_comp_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::Ship>>,
+    mut ship_power_q: Query<
+        (
+            &crate::ship_plugin::ShipSystemControlSources,
+            &mut ShipPowerSystem,
+        ),
+        With<crate::simulation::Ship>,
+    >,
 ) {
-    // Yield to any human Power console holder.
-    if let (Some(sessions), Ok(ship_config)) = (sessions, ship_query.single()) {
+    // Yield to any human Power console holder (player ship only).
+    if let (Some(sessions), Ok(ship_config)) = (&sessions, ship_comp_query.single()) {
         if sessions
             .0
             .console_holder(&Console::Power, &ship_config.0)
@@ -251,37 +266,49 @@ pub fn operate_power_ai(
         }
     }
 
-    let battery_pct = power.0.battery_charge / config.0.capacity;
     let red_alert = ship.red_alert();
     let throttle = last_helm.map_or(0.0, |l| l.thrust);
 
-    // Weapons: boost on red alert when battery allows.
-    if red_alert && battery_pct >= ai_config.weapons_battery_floor {
-        power.0.weapons = 3;
+    for (control_sources, mut power_comp) in ship_power_q.iter_mut() {
+        let policy = control_sources
+            .0
+            .policy_for(&crate::system_registry::power_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+
+        let battery_pct = power_comp.0.battery_charge / config.0.capacity;
+
+        // Weapons: boost on red alert when battery allows.
+        if red_alert && battery_pct >= ai_config.weapons_battery_floor {
+            power_comp.0.weapons = 3;
+        }
+
+        // Helm: scale with throttle demand and battery availability.
+        if throttle > ai_config.helm_throttle_threshold && battery_pct >= ai_config.helm_battery_floor {
+            power_comp.0.helm = 3;
+        } else if throttle == 0.0 {
+            power_comp.0.helm = 1;
+            if !red_alert || battery_pct < ai_config.weapons_battery_floor {
+                power_comp.0.weapons = 2;
+            }
+        } else {
+            power_comp.0.helm = 2;
+            if !red_alert || battery_pct < ai_config.weapons_battery_floor {
+                power_comp.0.weapons = 2;
+            }
+        }
+
+        // Clamp all fields to [1, 4].
+        power_comp.0.helm = power_comp.0.helm.clamp(1, 4);
+        power_comp.0.weapons = power_comp.0.weapons.clamp(1, 4);
+        power_comp.0.sensors = power_comp.0.sensors.clamp(1, 4);
     }
 
-    // Helm: scale with throttle demand and battery availability.
-    if throttle > ai_config.helm_throttle_threshold && battery_pct >= ai_config.helm_battery_floor {
-        power.0.helm = 3;
-    } else if throttle == 0.0 {
-        power.0.helm = 1;
-        // Give weapons headroom from the freed helm allocation when not moving and
-        // not already boosted by red-alert.
-        if !red_alert || battery_pct < ai_config.weapons_battery_floor {
-            power.0.weapons = 2;
-        }
-    } else {
-        power.0.helm = 2;
-        if !red_alert || battery_pct < ai_config.weapons_battery_floor {
-            power.0.weapons = 2;
-        }
+    // Sync the global resource with the player ship's component (dual-write).
+    if let Ok((_, power_comp)) = ship_power_q.single() {
+        power_res.0 = power_comp.0.clone();
     }
-
-    // Clamp all fields to [1, 4] as a safety net (PowerSystem::increase/decrease
-    // normally enforces this, but direct assignment bypasses those guards).
-    power.0.helm = power.0.helm.clamp(1, 4);
-    power.0.weapons = power.0.weapons.clamp(1, 4);
-    power.0.sensors = power.0.sensors.clamp(1, 4);
 }
 
 // ── Blackboard publish (issue #561) ──────────────────────────────────────────
@@ -735,6 +762,7 @@ mod tests {
     // ── operate_power_ai tests ──────────────────────────────────────────────
 
     fn ai_test_app() -> App {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .insert_resource(ShipPowerSystem(PowerSystem::default()))
@@ -743,6 +771,17 @@ mod tests {
             .insert_resource(crate::ship_state::ShipState::new())
             .insert_resource(LastHelmInput::default())
             .add_systems(Update, operate_power_ai);
+
+        // Spawn a Ship entity with ShipPowerSystem component + AI power source.
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(crate::system_registry::power_system_id(), ControlSource::Ai);
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            crate::simulation::LocalShip,
+            crate::ship_plugin::ShipSystemControlSources(resolver),
+            crate::ship_plugin::ShipConfigComponent::default(),
+            ShipPowerSystem(PowerSystem::default()),
+        ));
         app
     }
 
@@ -788,10 +827,18 @@ mod tests {
                 .resource_mut::<crate::ship_state::ShipState>();
             ship.toggle_red_alert();
         }
+        // Set battery low on both the resource and the component.
         app.world_mut()
             .resource_mut::<ShipPowerSystem>()
             .0
             .battery_charge = 30.0; // pct=0.3 < 0.5 floor
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::Ship>>();
+            let mut ps = q.single_mut(app.world_mut()).unwrap();
+            ps.0.battery_charge = 30.0;
+        }
         app.update();
         // weapons should not be 3 — battery below floor
         assert_ne!(

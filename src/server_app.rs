@@ -1751,6 +1751,7 @@ fn spawn_game_start_entities(
                 .insert(crate::ship_state::ShipRedAlert::default())
                 .insert(crate::ship_state::ShipViewMode::default())
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
+                .insert(crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()))
                 .remove::<crate::entity_spawner::EntityConsoleHull>();
             ship_spawned = true;
 

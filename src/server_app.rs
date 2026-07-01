@@ -1750,6 +1750,7 @@ fn spawn_game_start_entities(
                 .insert(crate::sensors_plugin::SensorsTarget::default())
                 .insert(crate::ship_state::ShipRedAlert::default())
                 .insert(crate::ship_state::ShipViewMode::default())
+                .insert(crate::navigation_plugin::NavigationWaypoint::default())
                 .remove::<crate::entity_spawner::EntityConsoleHull>();
             ship_spawned = true;
 

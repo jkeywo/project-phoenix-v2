@@ -309,6 +309,7 @@ pub fn spawn_entity(
             crate::sensors_plugin::SensorsTarget::default(),
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_state::ShipViewMode::default(),
+            crate::navigation_plugin::NavigationWaypoint::default(),
         ));
     }
 

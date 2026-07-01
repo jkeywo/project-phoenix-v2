@@ -40,7 +40,10 @@ impl Plugin for NavigationPlugin {
 /// Stores either a free position chosen by tap-to-place, or an entity-anchored
 /// waypoint that follows the named entity's transform until the entity
 /// despawns.
-#[derive(Resource, Default, Clone, Debug, PartialEq)]
+///
+/// Derives both `Resource` (existing player-ship singleton) and `Component`
+/// (per-entity path after issue #592 unification).
+#[derive(Resource, Component, Default, Clone, Debug, PartialEq)]
 pub struct NavigationWaypoint(pub Option<WaypointMode>);
 
 /// Storage variant of the navigation waypoint.
@@ -174,22 +177,22 @@ fn publish_navigation_blackboard(
 
 // ── AI controller stub ─────────────────────────────────────────────────────────
 
-/// Per-kind AI plugin for navigation.
+/// Per-entity AI loop for navigation. Loops over ALL ship entities (player and NPC)
+/// where the Navigation system is `ControlSource::Ai`.
 ///
-/// Gated on policy.operate_ai for the Navigation system. No behaviour is
-/// implemented yet — this is a compile-verified stub that will be filled in
-/// when the Navigation AI controller is designed.
-fn operate_navigation_ai(
-    ships: Query<(&crate::ship_plugin::ShipSystemControlSources,), With<crate::simulation::Ship>>,
+/// Currently a compile-verified stub — Navigation AI sets waypoints based on
+/// doctrine objectives (deferred to later fine-grained decomposition).
+pub fn operate_navigation_ai(
+    ships: Query<&crate::ship_plugin::ShipSystemControlSources>,
 ) {
-    for (sources,) in &ships {
+    for sources in &ships {
         let policy = sources
             .0
             .policy_for(&crate::system_registry::navigation_system_id());
         if !policy.operate_ai {
             continue;
         }
-        // TODO: implement navigation AI logic
+        // TODO: implement navigation AI logic (set waypoints from doctrine objectives)
     }
 }
 
@@ -798,5 +801,35 @@ mod tests {
         );
         tick(&mut app);
         assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
+    }
+
+    /// Verifies operate_navigation_ai runs per-entity for AI-controlled ships (issue #592 AC).
+    #[test]
+    fn operate_navigation_ai_per_entity_ai_gate() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+        use crate::ship_plugin::ShipSystemControlSources;
+
+        let mut ai_resolver = ControlSourceResolver::new();
+        ai_resolver.set(
+            crate::system_registry::navigation_system_id(),
+            ControlSource::Ai,
+        );
+        let ai_sources = ShipSystemControlSources(ai_resolver);
+        let policy = ai_sources
+            .0
+            .policy_for(&crate::system_registry::navigation_system_id());
+        assert!(policy.operate_ai, "AI Navigation must gate through operate_ai");
+
+        // Human-controlled navigation must not operate AI.
+        let mut human_resolver = ControlSourceResolver::new();
+        human_resolver.set(
+            crate::system_registry::navigation_system_id(),
+            ControlSource::Human,
+        );
+        let human_sources = ShipSystemControlSources(human_resolver);
+        let human_policy = human_sources
+            .0
+            .policy_for(&crate::system_registry::navigation_system_id());
+        assert!(!human_policy.operate_ai, "Human Navigation must not operate AI");
     }
 }

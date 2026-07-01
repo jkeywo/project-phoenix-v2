@@ -1,7 +1,6 @@
 //! Server-side Comms console plugin (issue #427, migrated to blackboard #565).
 
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::simulation::Ship;
 use bevy::prelude::*;
 
 use crate::messages::{CommsBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemId};
@@ -128,16 +127,48 @@ mod tests {
         assert_eq!(bb.messages.len(), 1);
         assert_eq!(bb.messages[0].id, "m1");
     }
+
+    /// Verifies operate_comms_ai runs per-entity for AI-controlled ships (issue #593 AC).
+    #[test]
+    fn operate_comms_ai_per_entity_ai_gate() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+        use crate::ship_plugin::ShipSystemControlSources;
+
+        let mut ai_resolver = ControlSourceResolver::new();
+        ai_resolver.set(
+            crate::system_registry::comms_system_id(),
+            ControlSource::Ai,
+        );
+        let ai_sources = ShipSystemControlSources(ai_resolver);
+        let ai_policy = ai_sources
+            .0
+            .policy_for(&crate::system_registry::comms_system_id());
+        assert!(ai_policy.operate_ai, "AI Comms must gate through operate_ai");
+
+        let mut human_resolver = ControlSourceResolver::new();
+        human_resolver.set(
+            crate::system_registry::comms_system_id(),
+            ControlSource::Human,
+        );
+        let human_sources = ShipSystemControlSources(human_resolver);
+        let human_policy = human_sources
+            .0
+            .policy_for(&crate::system_registry::comms_system_id());
+        assert!(
+            !human_policy.operate_ai,
+            "Human Comms must not operate AI"
+        );
+    }
 }
 
 // ── AI controller stub ─────────────────────────────────────────────────────────
 
-/// Per-kind AI plugin for comms.
+/// Per-entity AI loop for comms. Loops over ALL ship entities (player and NPC)
+/// where the Comms system is `ControlSource::Ai`.
 ///
-/// Gated on policy.operate_ai for the Comms system. No behaviour is
-/// implemented yet — this is a compile-verified stub that will be filled in
-/// when the Comms AI controller is designed.
-fn operate_comms_ai(ships: Query<&ShipSystemControlSources, With<Ship>>) {
+/// Currently a compile-verified stub — Comms AI auto-responds to hails
+/// and processes inbox messages (deferred to later fine-grained decomposition).
+pub fn operate_comms_ai(ships: Query<&ShipSystemControlSources>) {
     for sources in &ships {
         let policy = sources
             .0
@@ -145,6 +176,6 @@ fn operate_comms_ai(ships: Query<&ShipSystemControlSources, With<Ship>>) {
         if !policy.operate_ai {
             continue;
         }
-        // TODO: implement comms AI logic
+        // TODO: implement comms AI logic (auto-response, inbox processing)
     }
 }

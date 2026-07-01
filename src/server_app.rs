@@ -1922,9 +1922,11 @@ fn spawn_game_start_entities(
                         deceleration: hc.deceleration,
                         max_yaw_rate: hc.max_yaw_rate,
                     });
-            commands.insert_resource(crate::ship_plugin::ShipPhysicsConfigResource(
+            let physics_cfg_resource = crate::ship_plugin::ShipPhysicsConfigResource(
                 physics_cfg.unwrap_or(crate::ship_physics::ShipPhysicsConfig::new()),
-            ));
+            );
+            commands.insert_resource(physics_cfg_resource.clone());
+            commands.entity(spawned).insert(physics_cfg_resource);
 
             // Impulse config from [helm_console] TOML, or default
             let impulse_cfg =
@@ -1935,8 +1937,10 @@ fn spawn_game_start_entities(
                         charge_duration: hc.impulse_charge_duration,
                         speed_multiplier: hc.impulse_speed_multiplier,
                         acceleration_multiplier: hc.impulse_acceleration_multiplier,
-                    });
-            commands.insert_resource(impulse_cfg.unwrap_or_default());
+                    })
+                    .unwrap_or_default();
+            commands.insert_resource(impulse_cfg.clone());
+            commands.entity(spawned).insert(impulse_cfg);
 
             // Boost config from [helm_console.boost] TOML. Absent table ⇒
             // feature disabled (default resource has `enabled: false`).
@@ -1950,8 +1954,10 @@ fn spawn_game_start_entities(
                     steering_multiplier: b.steering_multiplier,
                     active_duration: b.active_duration,
                     recharge_duration: b.recharge_duration,
-                });
-            commands.insert_resource(boost_cfg.unwrap_or_default());
+                })
+                .unwrap_or_default();
+            commands.insert_resource(boost_cfg.clone());
+            commands.entity(spawned).insert(boost_cfg);
 
             // Bank config from [helm_console] TOML, or default
             let bank_cfg =
@@ -1961,8 +1967,10 @@ fn spawn_game_start_entities(
                     .map(|hc| crate::ship_plugin::BankConfigResource {
                         max_bank_deg: hc.max_bank_deg,
                         bank_lerp_rate: hc.bank_lerp_rate,
-                    });
-            commands.insert_resource(bank_cfg.unwrap_or_default());
+                    })
+                    .unwrap_or_default();
+            commands.insert_resource(bank_cfg.clone());
+            commands.entity(spawned).insert(bank_cfg);
         }
     }
 

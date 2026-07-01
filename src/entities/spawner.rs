@@ -339,8 +339,45 @@ pub fn spawn_entity(
     }
 
     // HelmConsole - attach a HelmConsoleSection so the AI tick can read movement params.
+    // Also insert the four drive-config Components (PR 4 — PRD #597) so NPC ships
+    // participate in the per-entity config model alongside the player ship.
     if let Some(hc) = &config.helm_console {
         entity_commands.insert(HelmConsoleSection(hc.clone()));
+
+        // Physics config
+        entity_commands.insert(crate::ship_plugin::ShipPhysicsConfigResource(
+            crate::ship_physics::ShipPhysicsConfig {
+                max_speed: hc.max_speed,
+                max_reverse_speed: hc.max_reverse_speed,
+                acceleration: hc.acceleration,
+                deceleration: hc.deceleration,
+                max_yaw_rate: hc.max_yaw_rate,
+            },
+        ));
+        // Impulse config
+        entity_commands.insert(crate::ship_plugin::ImpulseConfigResource {
+            charge_duration: hc.impulse_charge_duration,
+            speed_multiplier: hc.impulse_speed_multiplier,
+            acceleration_multiplier: hc.impulse_acceleration_multiplier,
+        });
+        // Boost config (disabled when [helm_console.boost] is absent)
+        let boost_cfg = hc
+            .boost
+            .as_ref()
+            .map(|b| crate::ship_plugin::BoostConfigResource {
+                enabled: true,
+                multiplier: b.multiplier,
+                steering_multiplier: b.steering_multiplier,
+                active_duration: b.active_duration,
+                recharge_duration: b.recharge_duration,
+            })
+            .unwrap_or_default();
+        entity_commands.insert(boost_cfg);
+        // Bank config
+        entity_commands.insert(crate::ship_plugin::BankConfigResource {
+            max_bank_deg: hc.max_bank_deg,
+            bank_lerp_rate: hc.bank_lerp_rate,
+        });
     }
 
     // Comms range - attach CommsRange component when [comms] is present.

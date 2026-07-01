@@ -22,17 +22,22 @@ impl Plugin for HelmPlugin {
 /// see fully-updated values. The component-change dirty-tracking is done
 /// globally by `broadcast_blackboard_updates` in `SimSet::Broadcast`.
 fn publish_helm_blackboard(
-    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
+    physics_q: Query<
+        (&ShipPhysics, Option<&BoostConfigResource>),
+        With<crate::simulation::LocalShip>,
+    >,
     impulse: Option<Res<ShipImpulse>>,
     boost: Option<Res<ShipBoost>>,
-    boost_config: Option<Res<BoostConfigResource>>,
+    boost_config_res: Option<Res<BoostConfigResource>>,
     mut ship_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::simulation::LocalShip>>,
 ) {
-    let physics = physics_q.single().ok().copied().unwrap_or_default();
+    let (physics, entity_boost_cfg) = physics_q.single().ok().map(|(p, c)| (*p, c.cloned())).unwrap_or_default();
     let impulse_charge = impulse
         .as_ref()
         .map(|imp| imp.0.charge_progress)
         .unwrap_or(0.0);
+    // Per-entity component takes priority over the Resource fallback.
+    let boost_config = entity_boost_cfg.or_else(|| boost_config_res.as_deref().cloned());
     let boost_enabled = boost_config.as_ref().map(|c| c.enabled).unwrap_or(false);
     let boost_battery = boost.as_ref().map(|b| b.0.battery).unwrap_or(0.0);
     let boost_active = boost.as_ref().map(|b| b.0.is_active()).unwrap_or(false);

@@ -207,15 +207,18 @@ pub fn apply_impulse_to(
 pub fn translate_impulse_modifiers(
     impulse: Res<ShipImpulse>,
     mut modifiers: ResMut<ShipModifiers>,
+    // Per-entity component takes priority over the Resource fallback (PR 4).
+    impulse_cfg_q: Query<&ImpulseConfigResource, With<crate::server_app::LocalShip>>,
     impulse_config: Option<Res<ImpulseConfigResource>>,
     mut prev_phase: Local<Option<ImpulsePhase>>,
 ) {
     let current = impulse.0.phase;
     if Some(current) != *prev_phase {
         *prev_phase = Some(current);
-        let speed_multiplier = impulse_config
-            .as_deref()
+        let speed_multiplier = impulse_cfg_q
+            .single()
             .map(|c| c.speed_multiplier)
+            .or_else(|_| impulse_config.as_deref().map(|c| c.speed_multiplier).ok_or(()))
             .unwrap_or(IMPULSE_SPEED_MULTIPLIER);
         apply_impulse_to(&mut modifiers, &impulse.0, speed_multiplier);
     }

@@ -120,12 +120,16 @@ pub fn npc_ship_config() -> ShipConfigComponent {
 
 /// Runtime ship physics config, loaded from `[helm_console]` in the entity TOML.
 /// When absent, `ShipPhysicsConfig::new()` defaults are used.
-#[derive(Resource, Clone)]
+/// Dual-derives `Resource` (for tests + global fallback) and `Component`
+/// (per-entity component on each ship — PR 4 migration, see PRD #597).
+#[derive(Resource, Component, Clone)]
 pub struct ShipPhysicsConfigResource(pub crate::ship_physics::ShipPhysicsConfig);
 
 /// Runtime impulse drive config, loaded from `[helm_console]` in the entity TOML.
 /// Charge duration and speed multiplier can be overridden per ship.
-#[derive(Resource, Clone)]
+/// Dual-derives `Resource` (for tests + global fallback) and `Component`
+/// (per-entity component on each ship — PR 4 migration, see PRD #597).
+#[derive(Resource, Component, Clone)]
 pub struct ImpulseConfigResource {
     pub charge_duration: f32,
     pub speed_multiplier: f32,
@@ -145,7 +149,9 @@ impl Default for ImpulseConfigResource {
 /// Runtime boost drive config, loaded from `[helm_console.boost]` in the entity
 /// TOML. `enabled` is false (the default) when the TOML omits the table, which
 /// disables the feature entirely.
-#[derive(Resource, Clone)]
+/// Dual-derives `Resource` (for tests + global fallback) and `Component`
+/// (per-entity component on each ship — PR 4 migration, see PRD #597).
+#[derive(Resource, Component, Clone)]
 pub struct BoostConfigResource {
     pub enabled: bool,
     pub multiplier: f32,
@@ -167,7 +173,9 @@ impl Default for BoostConfigResource {
 }
 
 /// Runtime banking config, loaded from `[helm_console] max_bank_deg` in the entity TOML.
-#[derive(Resource, Clone)]
+/// Dual-derives `Resource` (for tests + global fallback) and `Component`
+/// (per-entity component on each ship — PR 4 migration, see PRD #597).
+#[derive(Resource, Component, Clone)]
 pub struct BankConfigResource {
     pub max_bank_deg: f32,
     pub bank_lerp_rate: f32,
@@ -190,16 +198,67 @@ pub const BANK_LERP_RATE: f32 = 5.0;
 
 pub struct ShipPlugin;
 
-/// Physics and drive config resources bundled so `process_helm_inputs` stays
+/// Physics and drive config components bundled so `process_helm_inputs` stays
 /// under Bevy's 16-parameter system-function limit.
+///
+/// PR 4 (PRD #597): configs are now per-entity Components on each ship entity.
+/// The Resource variants are kept as fallbacks for test environments that still
+/// use `insert_resource` without inserting a LocalShip entity with components.
 #[derive(SystemParam)]
-struct HelmDriveParams<'w> {
-    ship_physics_config: Option<Res<'w, ShipPhysicsConfigResource>>,
+struct HelmDriveParams<'w, 's> {
+    /// Per-entity drive configs on the LocalShip entity (PR 4 primary path).
+    config_q: Query<
+        'w,
+        's,
+        (
+            Option<&'static ShipPhysicsConfigResource>,
+            Option<&'static ImpulseConfigResource>,
+            Option<&'static BoostConfigResource>,
+            Option<&'static BankConfigResource>,
+        ),
+        With<LocalShip>,
+    >,
+    /// Resource fallbacks (legacy path; used by tests that insert_resource
+    /// without spawning a ship entity with the component).
+    physics_cfg_res: Option<Res<'w, ShipPhysicsConfigResource>>,
+    impulse_cfg_res: Option<Res<'w, ImpulseConfigResource>>,
+    boost_cfg_res: Option<Res<'w, BoostConfigResource>>,
+    bank_cfg_res: Option<Res<'w, BankConfigResource>>,
+    /// Impulse and boost drive state (still global Resources; per-entity in PR 6/7).
     impulse: Res<'w, ShipImpulse>,
-    impulse_config: Res<'w, ImpulseConfigResource>,
     boost: Res<'w, ShipBoost>,
-    boost_config: Res<'w, BoostConfigResource>,
-    bank_config: Res<'w, BankConfigResource>,
+}
+
+impl HelmDriveParams<'_, '_> {
+    /// Effective impulse config: per-entity component takes priority over Resource.
+    fn impulse_cfg(&self) -> ImpulseConfigResource {
+        let entity = self.config_q.single().ok().and_then(|(_, ic, _, _)| ic.cloned());
+        entity
+            .or_else(|| self.impulse_cfg_res.as_deref().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Effective boost config: per-entity component takes priority over Resource.
+    fn boost_cfg(&self) -> BoostConfigResource {
+        let entity = self.config_q.single().ok().and_then(|(_, _, bc, _)| bc.cloned());
+        entity
+            .or_else(|| self.boost_cfg_res.as_deref().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Effective bank config: per-entity component takes priority over Resource.
+    fn bank_cfg(&self) -> BankConfigResource {
+        let entity = self.config_q.single().ok().and_then(|(_, _, _, bk)| bk.cloned());
+        entity
+            .or_else(|| self.bank_cfg_res.as_deref().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Effective physics config: per-entity component takes priority over Resource.
+    fn physics_cfg(&self) -> Option<ShipPhysicsConfigResource> {
+        let entity = self.config_q.single().ok().and_then(|(pc, _, _, _)| pc.cloned());
+        entity.or_else(|| self.physics_cfg_res.as_deref().cloned())
+    }
 }
 
 impl Plugin for ShipPlugin {
@@ -278,6 +337,14 @@ fn process_helm_inputs(
         return;
     }
 
+    // Read per-entity config components from the LocalShip entity.
+    // Falls back to Resources when the component is absent (test environments
+    // that don't insert a LocalShip entity with drive config components).
+    let impulse_cfg = drive.impulse_cfg();
+    let boost_cfg = drive.boost_cfg();
+    let bank_cfg = drive.bank_cfg();
+    let physics_cfg = drive.physics_cfg();
+
     for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
         if let SystemControlPayload::HelmInput { thrust, steering } = &cmd.payload {
             last_input.thrust = *thrust;
@@ -304,8 +371,8 @@ fn process_helm_inputs(
             steering: last_input.steering,
         }
     };
-    let mut config = match drive.ship_physics_config.as_deref() {
-        Some(cfg) => cfg.0,
+    let mut config = match physics_cfg {
+        Some(ref cfg) => cfg.0,
         None => ShipPhysicsConfig::new(),
     };
     config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
@@ -315,8 +382,8 @@ fn process_helm_inputs(
         // Mirror `ship/impulse.rs::apply_to_physics`: a non-positive
         // multiplier (e.g. an unset TOML field defaulting to 0) falls
         // back to the const instead of nuking acceleration entirely.
-        let mult = if drive.impulse_config.acceleration_multiplier > 0.0 {
-            drive.impulse_config.acceleration_multiplier
+        let mult = if impulse_cfg.acceleration_multiplier > 0.0 {
+            impulse_cfg.acceleration_multiplier
         } else {
             crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
         };
@@ -324,11 +391,11 @@ fn process_helm_inputs(
     }
     // Boost drive: while engaged, multiply max speed and acceleration. Only
     // applies when the ship's TOML enabled the feature.
-    if drive.boost_config.enabled && drive.boost.0.is_active() {
-        config.max_speed *= drive.boost_config.multiplier;
-        config.max_reverse_speed *= drive.boost_config.multiplier;
-        config.acceleration *= drive.boost_config.multiplier;
-        config.max_yaw_rate *= drive.boost_config.steering_multiplier;
+    if boost_cfg.enabled && drive.boost.0.is_active() {
+        config.max_speed *= boost_cfg.multiplier;
+        config.max_reverse_speed *= boost_cfg.multiplier;
+        config.acceleration *= boost_cfg.multiplier;
+        config.max_yaw_rate *= boost_cfg.steering_multiplier;
     }
     let result = compute_physics(state, input, dt, &config);
 
@@ -338,13 +405,13 @@ fn process_helm_inputs(
     physics.forward_speed = result.forward_speed;
 
     // Visual banking: lerp roll toward target based on steering
-    let max_bank_rad = drive.bank_config.max_bank_deg.to_radians();
+    let max_bank_rad = bank_cfg.max_bank_deg.to_radians();
     let target_roll = if impulse_active {
         0.0
     } else {
         -input.steering * max_bank_rad
     };
-    let lerp_factor = (drive.bank_config.bank_lerp_rate * dt).min(1.0);
+    let lerp_factor = (bank_cfg.bank_lerp_rate * dt).min(1.0);
     physics.roll = physics.roll + (target_roll - physics.roll) * lerp_factor;
 }
 
@@ -657,22 +724,34 @@ pub fn handle_impulse_messages(
 fn tick_impulse(
     time: Res<Time>,
     mut impulse: ResMut<ShipImpulse>,
-    config: Res<ImpulseConfigResource>,
+    // Per-entity component takes priority; Resource is the fallback.
+    config_q: Query<&ImpulseConfigResource, With<LocalShip>>,
+    config_res: Option<Res<ImpulseConfigResource>>,
 ) {
-    impulse.0.tick(time.delta_secs(), config.charge_duration);
+    let charge_duration = config_q
+        .single()
+        .map(|c| c.charge_duration)
+        .or_else(|_| config_res.as_deref().map(|c| c.charge_duration).ok_or(()))
+        .unwrap_or(crate::impulse::IMPULSE_CHARGE_DURATION);
+    impulse.0.tick(time.delta_secs(), charge_duration);
 }
 
 /// Toggle the boost drive in response to Helm boost controls. No-op when
 /// the feature is disabled.
 pub fn handle_boost_messages(
-    ship_query: Query<&AdmittedCommands, With<LocalShip>>,
+    ship_query: Query<(&AdmittedCommands, Option<&BoostConfigResource>), With<LocalShip>>,
     mut boost: ResMut<ShipBoost>,
-    config: Res<BoostConfigResource>,
+    config_res: Option<Res<BoostConfigResource>>,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Ok((admitted, entity_cfg)) = ship_query.single() else {
         return;
     };
-    if !config.enabled {
+    // Per-entity component takes priority over the Resource fallback.
+    let enabled = entity_cfg
+        .map(|c| c.enabled)
+        .or_else(|| config_res.as_deref().map(|c| c.enabled))
+        .unwrap_or(false);
+    if !enabled {
         return;
     }
     for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
@@ -699,7 +778,9 @@ fn normalized_boost_drain_factor(thrust: f32, steering: f32) -> f32 {
 fn tick_boost(
     time: Res<Time>,
     mut boost: ResMut<ShipBoost>,
-    config: Res<BoostConfigResource>,
+    // Per-entity component takes priority; Resource is the fallback.
+    boost_cfg_q: Query<Option<&BoostConfigResource>, With<LocalShip>>,
+    boost_cfg_res: Option<Res<BoostConfigResource>>,
     last_input_q: Query<&LastHelmInput, With<LocalShip>>,
     sessions: Res<Sessions>,
     impulse: Res<ShipImpulse>,
@@ -708,6 +789,11 @@ fn tick_boost(
     let Ok((ship_config, control_sources)) = ship_components.single() else {
         return;
     };
+    // Per-entity component takes priority over the Resource fallback.
+    let entity_cfg = boost_cfg_q.single().ok().flatten().cloned();
+    let config = entity_cfg
+        .or_else(|| boost_cfg_res.as_deref().cloned())
+        .unwrap_or_default();
     if !config.enabled {
         return;
     }

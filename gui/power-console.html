@@ -267,6 +267,7 @@
           <span id="status-pool">— POOL</span>
           <span class="sep" id="status-locked-sep" style="display:none;">·</span>
           <span id="status-locked" style="display:none; color:var(--fire-bright);">LOCKED</span>
+          <span class="auto-badge" id="power-auto-badge" hidden>AUTO</span>
         </div>
 
         <!-- Main content -->
@@ -319,6 +320,7 @@
 
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
     /* ── Constants ─────────────────────────────────────────────── */
     var MIN_LEVEL  = 1;
     var MAX_LEVEL  = 4;     /* per-console max — overridden per entry */
@@ -438,6 +440,9 @@
       if (ft) ft.textContent = 'POWER · ' + total + '/' + totalMax + ' POOL · BAT ' + Math.round(batPct * 100) + '%' + (locked ? ' · LOCKED' : '');
 
       renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+
+      // AUTO badge: show when power station is AI-controlled (Backfill rating).
+      setAutoState(null, document.getElementById('power-auto-badge'), !!s.power_auto);
     }
 
     /* Build a power row DOM element for a console */

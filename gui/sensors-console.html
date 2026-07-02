@@ -362,6 +362,7 @@
               <span class="led cyan"></span>
               <span class="label">ON SCREEN</span>
             </button>
+            <span class="auto-badge" id="sensors-auto-badge" hidden>AUTO</span>
             <button class="btn danger" id="btn-cancel-impulse"
                     type="button" style="display:none">
               <span class="btn-bg"></span>
@@ -831,7 +832,13 @@
   </script>
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
-    var _c = initConsole({ name: 'Sensors', render: function(s) { _apply(s); renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val'); } });
+    import { setAutoState } from './console-ui.js';
+    var _c = initConsole({ name: 'Sensors', render: function(s) {
+      _apply(s);
+      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+      // AUTO badge: show when sensors station is AI-controlled (Backfill rating).
+      setAutoState(document.getElementById('btn-on-screen'), document.getElementById('sensors-auto-badge'), !!s.sensors_auto);
+    } });
     window._sendSensorsAction = function(action, payload) { _c.sendAction(action, payload); };
   </script>
 

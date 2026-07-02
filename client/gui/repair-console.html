@@ -291,6 +291,7 @@
           <span>REPAIR ONLINE</span>
           <span class="sep">·</span>
           <span id="status-active">— TEAMS</span>
+          <span class="auto-badge" id="repair-auto-badge" hidden>AUTO</span>
         </div>
 
         <!-- Repair teams -->
@@ -310,6 +311,7 @@
 
   <script type="module">
     import { initConsole } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
 
     /* ── Constants ─────────────────────────────────────────────── */
     var NAMES    = ['ALPHA', 'BETA', 'GAMMA', 'DELTA', 'EPSILON', 'ZETA'];
@@ -432,6 +434,9 @@
       _setTxt('footer-ticker-right', Math.round(pct * 100) + '% HULL · ' + active + '/' + teams.length + ' ACTIVE');
       _setTxt('footer-ticker',
         'REPAIR · ' + active + ' TEAM' + (active !== 1 ? 'S' : '') + ' ACTIVE · ' + Math.round(pct * 100) + '% HULL');
+
+      // AUTO badge: show when repair station is AI-controlled (Backfill rating).
+      setAutoState(null, document.getElementById('repair-auto-badge'), !!s.repair_auto);
     }
 
     /* ── Build a team card DOM element ──────────────────────────── */

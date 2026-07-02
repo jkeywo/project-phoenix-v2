@@ -1497,8 +1497,31 @@
       } else {
         senderEl.textContent = label;
       }
-      titleEl.textContent = payload.title || payload.type || 'Advisory';
-      bodyEl.textContent = payload.body || '';
+
+      // Normalise payload variants to { title, body }
+      let title, body;
+      if (payload.type === 'Advisory') {
+        title = label || 'Advisory';
+        body = payload.data?.message || payload.message || '';
+      } else if (payload.type === 'Alert') {
+        title = payload.data?.title || payload.title || 'Alert';
+        body = payload.data?.body || payload.body || '';
+      } else if (payload.type === 'FrequencyHint') {
+        title = 'Frequency Hint';
+        body = 'Tune to: ' + (payload.data?.frequency ?? payload.frequency ?? '?');
+      } else if (payload.type === 'ShieldFacingDown') {
+        title = (payload.data?.label || payload.label || 'Shield') + ' Offline';
+        body = '';
+      } else if (payload.type === 'ShieldFacingRestored') {
+        title = (payload.data?.label || payload.label || 'Shield') + ' Restored';
+        body = '';
+      } else {
+        title = payload.type || 'Advisory';
+        body = '';
+      }
+
+      titleEl.textContent = title;
+      bodyEl.textContent = body;
       el.style.display = 'block';
       if (coordinationPopupTimer) clearTimeout(coordinationPopupTimer);
       coordinationPopupTimer = setTimeout(dismissCoordinationPopup, 8000);

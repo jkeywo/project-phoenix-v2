@@ -409,6 +409,7 @@ export function buildWeaponsConsoleState(state) {
     phaser_arcs:   mappedPhaserArcs,
     torpedo_arcs:  torpedoArcs,
     own_hull:      ownHull('Tactical', state),
+    tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
   });
 }
 
@@ -521,6 +522,7 @@ export function buildHelmConsoleState(state) {
     boost_enabled:           !!boostEnabled,
     boost_battery:           boostBattery,
     boost_active:            !!boostActive,
+    helm_auto:               state.stationRatings?.['helm'] === 'Backfill',
   });
 }
 
@@ -536,6 +538,7 @@ export function buildRepairConsoleState(state) {
       console_hull:         bb.console_hull         ?? [],
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
       damageable_consoles:  bb.damageable_consoles  ?? [],
+      repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
     });
   }
   // Legacy fallback.
@@ -544,6 +547,7 @@ export function buildRepairConsoleState(state) {
     console_hull:         state.consoleHull || [],
     travel_duration_secs: 5.0,
     damageable_consoles:  (state.consoleHull || []).map(h => h.console),
+    repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
   });
 }
 
@@ -567,6 +571,7 @@ export function buildPowerConsoleState(state) {
       battery_max:    bb.battery_max    ?? 100,
       locked:         bb.locked         || false,
       own_hull:       ownHull('Power', state),
+      power_auto:     state.stationRatings?.['power'] === 'Backfill',
     });
   }
   // Legacy fallback: PowerState message fields.
@@ -577,6 +582,7 @@ export function buildPowerConsoleState(state) {
     battery_charge: state.powerBattery || 0,
     locked:         state.powerLocked  || false,
     own_hull:       ownHull('Power', state),
+    power_auto:     state.stationRatings?.['power'] === 'Backfill',
   });
 }
 
@@ -594,6 +600,7 @@ export function buildShieldsConsoleState(state) {
       target_bearing:     bb.target_bearing     ?? null,
       grid_status:        bb.grid_status        ?? 'GRID NOMINAL',
       own_hull: ownHull('Shields', state),
+      shields_auto: state.stationRatings?.['shields'] === 'Backfill',
     });
   }
   // Legacy fallback: read from ShieldStatus broadcast fields.
@@ -614,6 +621,7 @@ export function buildShieldsConsoleState(state) {
     grid_status:        (state.shieldFacings && state.shieldFacings.length > 0)
                           ? 'GRID NOMINAL' : 'GRID OFFLINE',
     own_hull: ownHull('Shields', state),
+    shields_auto: state.stationRatings?.['shields'] === 'Backfill',
   });
 }
 
@@ -728,6 +736,7 @@ export function buildSensorsConsoleState(state) {
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
     own_hull: ownHull('Sensors', state),
+    sensors_auto: state.stationRatings?.['sensors'] === 'Backfill',
   });
 }
 
@@ -744,6 +753,7 @@ export function buildCommsConsoleState(state) {
       contacts:   bb.contacts   ?? [],
       on_screen:  state.currentView === 'Comms',
       own_hull:   ownHull('Comms', state),
+      comms_auto: state.stationRatings?.['comms'] === 'Backfill',
     });
   }
   // Legacy fallback.
@@ -752,6 +762,7 @@ export function buildCommsConsoleState(state) {
     contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
     own_hull:  ownHull('Comms', state),
+    comms_auto: state.stationRatings?.['comms'] === 'Backfill',
   });
 }
 
@@ -857,6 +868,7 @@ export function buildNavigationConsoleState(state) {
     on_screen:               onScreen,
     radar_range:             range,
     regions:                 state.regions || buildRadarRegions(navEntities, state.objectives),
+    navigation_auto:         state.stationRatings?.['navigation'] === 'Backfill',
   });
 }
 

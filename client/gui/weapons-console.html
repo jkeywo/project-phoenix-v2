@@ -724,6 +724,7 @@
                     <span class="led fire"></span>
                     <span class="label">FIRE PHASERS</span>
                   </button>
+                  <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
                   <div class="mini-toggle phaser-mode-toggle" id="phaser-mode-toggle" data-hideable="phaser_mode_selector">
                     <div class="opt" id="mode-man">MAN</div>
                     <div class="opt active" id="mode-auto">AUTO</div>
@@ -754,6 +755,7 @@
 
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
 
     // ── State ────────────────────────────────────────────────────────────
     var _selectedBank  = 'fore';
@@ -1137,6 +1139,9 @@
 
       // ── Damage bar ───────────────────────────────────────────────────
       renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+
+      // AUTO badge: show when tactical station is AI-controlled (Backfill rating).
+      setAutoState(document.getElementById('fire-phaser'), document.getElementById('tactical-auto-badge'), !!s.tactical_auto);
     }
 
     // ── Outbound actions ──────────────────────────────────────────────────

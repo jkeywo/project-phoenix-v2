@@ -236,6 +236,7 @@
           <div><span class="k">FOCUS</span> <span class="v" id="focus-display">OMNI</span></div>
           <div><span class="k">STATUS</span> <span class="v" id="grid-status">GRID NOMINAL</span></div>
         </div>
+        <span class="auto-badge" id="shields-auto-badge" hidden>AUTO</span>
       </div>
 
       <!-- MAIN STAGE -->
@@ -662,7 +663,12 @@
   </script>
   <script type="module">
     import { initConsole } from './console-core.js';
-    var _c = initConsole({ name: 'Shields', render: function(s) { _apply(s); } });
+    import { setAutoState } from './console-ui.js';
+    var _c = initConsole({ name: 'Shields', render: function(s) {
+      _apply(s);
+      // AUTO badge: show when shields station is AI-controlled (Backfill rating).
+      setAutoState(null, document.getElementById('shields-auto-badge'), !!s.shields_auto);
+    } });
     window._sendShieldAction = function(action, payload) { _c.sendAction(action, payload); };
   </script>
   <script>

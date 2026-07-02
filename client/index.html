@@ -948,9 +948,13 @@
     }
 
     function send(type, data) {
-      if (!conn || !conn.open) return;
+      if (!conn || !conn.open) {
+        console.warn('[client] send dropped — conn:', conn, 'open:', conn && conn.open, 'type:', type);
+        return;
+      }
       if (!NO_CLICK.has(type)) playClick();
       const msg = data !== undefined ? { type, data } : { type };
+      console.log('[client] send →', JSON.stringify(msg));
       conn.send(JSON.stringify(msg));
     }
 
@@ -1293,7 +1297,7 @@
       state.stations = defs.map(def => {
         const defConsoles = def.consoles || [];
         const holder = state.players.find(p =>
-          consolesOf(p, state.shipStations).some(c => defConsoles.includes(c))
+          p.connected && consolesOf(p, state.shipStations).some(c => defConsoles.includes(c))
         );
         return {
           name: def.name || '',
@@ -1800,6 +1804,7 @@
           rebuildStations();
           break;
         case 'StationAssigned': {
+          console.log('[client] StationAssigned received:', JSON.stringify(msg.data));
           if (window.lobbyState) {
             state.players = window.lobbyState.players;
           } else {

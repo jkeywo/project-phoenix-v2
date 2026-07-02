@@ -101,3 +101,15 @@ directive_kind = "Destroy"
 base_priority  = 35.0
 target_speed   = 0.9
 maintain_range = 25.0
+
+
+# Ship systems (all AI-controlled - no human consoles)
+[[system]]
+id = "helm"
+kind = "helm"
+ai_only = true
+
+[[system]]
+id = "tactical"
+kind = "tactical"
+ai_only = true

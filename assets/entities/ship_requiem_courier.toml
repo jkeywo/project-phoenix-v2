@@ -56,3 +56,10 @@ directive_kind = "Reach"
 directive_anchors = ["destination"]
 base_priority    = 30.0
 target_speed     = 0.8
+
+
+# Ship systems (helm only - courier has no weapons)
+[[system]]
+id = "helm"
+kind = "helm"
+ai_only = true

@@ -334,7 +334,8 @@ fn live_entity_xz(
 fn handle_set_target(
     ship_query: Query<(&AdmittedCommands, &ShipPhysics), With<crate::server_app::LocalShip>>,
     mut weapons_target: ResMut<WeaponsTarget>,
-    modifiers: Res<crate::modifiers::ShipModifiers>,
+    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
+    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     mut outbox: ResMut<SimOutbox>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
@@ -342,6 +343,18 @@ fn handle_set_target(
 ) {
     let Ok((admitted, physics)) = ship_query.single() else {
         return;
+    };
+    // Per-entity modifiers component takes priority; fall back to Resource.
+    let default_modifiers;
+    let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
+        Ok(m) => m,
+        Err(_) => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = crate::modifiers::ShipModifiers::new();
+                &default_modifiers
+            }
+        },
     };
     for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
         let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
@@ -412,7 +425,8 @@ fn handle_fire_phaser(
     weapons_target: Res<WeaponsTarget>,
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
-    modifiers: Res<crate::modifiers::ShipModifiers>,
+    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
+    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
     _outbox: ResMut<SimOutbox>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
@@ -429,6 +443,18 @@ fn handle_fire_phaser(
             combat_config_default = PhaserCombatConfigResource::default();
             &combat_config_default
         }
+    };
+    // Per-entity ShipModifiers component takes priority; fall back to Resource.
+    let default_modifiers;
+    let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
+        Ok(m) => m,
+        Err(_) => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = crate::modifiers::ShipModifiers::new();
+                &default_modifiers
+            }
+        },
     };
     let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
     let policy = control_sources
@@ -536,7 +562,8 @@ fn tick_phaser_auto_fire(
     weapons_target: Res<WeaponsTarget>,
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
-    modifiers: Res<crate::modifiers::ShipModifiers>,
+    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
+    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     sessions: Option<Res<Sessions>>,
@@ -565,6 +592,18 @@ fn tick_phaser_auto_fire(
             combat_config_default = PhaserCombatConfigResource::default();
             &combat_config_default
         }
+    };
+    // Per-entity ShipModifiers component takes priority; fall back to Resource.
+    let default_modifiers;
+    let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
+        Ok(m) => m,
+        Err(_) => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = crate::modifiers::ShipModifiers::new();
+                &default_modifiers
+            }
+        },
     };
     let Some(target_uuid) = &weapons_target.0 else {
         return;
@@ -1470,8 +1509,14 @@ fn tick_active_beam(
         Option<&mut crate::ship::shields::ShipShields>,
     )>,
     mut commands: Commands,
-    modifiers: Res<crate::modifiers::ShipModifiers>,
-    combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
+    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
+    local_ship_q: Query<
+        (
+            Option<&PhaserCombatConfigResource>,
+            Option<&crate::modifiers::ShipModifiers>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut outbox: ResMut<SimOutbox>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
@@ -1483,14 +1528,27 @@ fn tick_active_beam(
     let dt = time.delta_secs();
     cooldown.tick(dt);
     let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
+    let local_view = local_ship_q.single().ok();
     // Per-entity component path (preferred). Fallback: use the default config.
     let combat_config_default;
-    let combat_config: &PhaserCombatConfigResource = match combat_config_q.single() {
-        Ok(c) => c,
-        Err(_) => {
+    let combat_config: &PhaserCombatConfigResource = match local_view.and_then(|(c, _)| c) {
+        Some(c) => c,
+        None => {
             combat_config_default = PhaserCombatConfigResource::default();
             &combat_config_default
         }
+    };
+    // Per-entity ShipModifiers component takes priority; fall back to Resource.
+    let default_modifiers;
+    let modifiers: &crate::modifiers::ShipModifiers = match local_view.and_then(|(_, m)| m) {
+        Some(m) => m,
+        None => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = crate::modifiers::ShipModifiers::new();
+                &default_modifiers
+            }
+        },
     };
 
     let Some(target_uuid) = beam.target_uuid.clone() else {
@@ -2172,7 +2230,8 @@ fn publish_weapons_blackboard(
     torpedo_sys_q: Query<&TorpedoSystemResource, With<crate::server_app::LocalShip>>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
-    modifiers: Res<crate::modifiers::ShipModifiers>,
+    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
+    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     world_res: Res<WorldResource>,
     entity_name_q: Query<(
         &crate::entity_spawner::EntityUuid,
@@ -2192,6 +2251,18 @@ fn publish_weapons_blackboard(
             combat_config_default = PhaserCombatConfigResource::default();
             &combat_config_default
         }
+    };
+    // Per-entity ShipModifiers component takes priority; fall back to Resource.
+    let default_modifiers;
+    let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
+        Ok(m) => m,
+        Err(_) => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = crate::modifiers::ShipModifiers::new();
+                &default_modifiers
+            }
+        },
     };
     let torpedo_sys_default;
     let torpedo_sys: &TorpedoSystemResource = match torpedo_sys_q.single() {

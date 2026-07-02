@@ -1,6 +1,6 @@
 use crate::flag_kind::FlagKind;
 pub use crate::messages::{ModifierSlot, ModifierSource};
-use bevy::prelude::Resource;
+use bevy::prelude::{Component, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -107,7 +107,11 @@ pub enum ModifierEvent {
 /// - if `sum < 0`  → multiplier = `1.0 / (1.0 + |sum|)`
 ///
 /// Cache formula per int slot: straight sum of all active bonuses.
-#[derive(Resource, Clone, Debug)]
+///
+/// Dual-derives `Resource` (legacy global fallback used by some tests and by
+/// the coordinator until PR 7 completes) and `Component` (per-entity storage
+/// on each ship — PR 6 migration, see PRD #597).
+#[derive(Resource, Component, Clone, Debug)]
 pub struct ShipModifiers {
     /// Sparse table: `(source, slot) → bonus`.
     table: HashMap<(ModifierSource, ModifierSlot), f32>,

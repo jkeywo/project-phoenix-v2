@@ -320,6 +320,26 @@ pub fn spawn_entity(
         entity_commands.insert(
             crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
         );
+        // ShipModifiers as per-entity component (PR 6 — PRD #597). Every ship
+        // gets an empty modifier cache; region entry, power translators, and
+        // impulse translators all write to this per-entity component (they will
+        // in later PRs; today the coordinator still writes the global resource
+        // and this component starts empty).
+        entity_commands.insert(crate::modifiers::ShipModifiers::new());
+        // Per-entity ShipRepairTeams — only insert when the entity TOML declares
+        // a [repair] block. Absent block means the ship has no repair teams
+        // (the default behaviour for NPCs today).
+        if let Some(repair_cfg) = &config.repair {
+            let team_count = if repair_cfg.repair_team_count > 0 {
+                repair_cfg.repair_team_count as usize
+            } else {
+                2
+            };
+            let timings = repair_cfg.to_runtime();
+            entity_commands.insert(crate::console::repair::server::ShipRepairTeams(
+                crate::repair_teams::RepairTeams::new_with_timings(team_count, timings),
+            ));
+        }
         // All ship entities carry the Ship marker — player and NPC alike.
         // The LocalShip marker (not set here) is the viewscreen selector only.
         entity_commands.insert(crate::server_app::Ship);

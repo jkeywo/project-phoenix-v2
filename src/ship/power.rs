@@ -20,13 +20,19 @@ use crate::ship_plugin::LastHelmInput;
 pub struct ShipPowerSystem(pub PowerSystem);
 
 /// Wraps the power config for the ship's power system.
-#[derive(Resource, Default)]
+///
+/// Dual-derives `Resource` (legacy global fallback used by tests) and
+/// `Component` (per-entity storage on each ship — PR 6 migration, see PRD #597).
+#[derive(Resource, Component, Default, Clone)]
 pub struct PowerConfigResource(pub PowerConfig);
 
 /// Per-console power multiplier configuration: `[f32; 4]` indexed by level-1
 /// (index 0 = level 1, index 3 = level 4). Defaults give `[-0.5, 0.0, 0.25, 0.5]`
 /// for every console unless overridden in the ship TOML.
-#[derive(Resource, Clone, Debug)]
+///
+/// Dual-derives `Resource` (legacy global fallback used by tests) and
+/// `Component` (per-entity storage on each ship — PR 6 migration, see PRD #597).
+#[derive(Resource, Component, Clone, Debug)]
 pub struct PowerMultiplierResource {
     pub multipliers: std::collections::HashMap<Console, [f32; 4]>,
 }
@@ -51,7 +57,10 @@ impl Default for PowerMultiplierResource {
 /// Loaded from `[power.ai]` in the ship entity TOML and inserted as a resource
 /// at startup by the entity spawner. The fields mirror the `[power.ai]` TOML
 /// keys; defaults are used when the section is absent.
-#[derive(Resource, Clone, Debug)]
+///
+/// Dual-derives `Resource` (legacy global fallback used by tests) and
+/// `Component` (per-entity storage on each ship — PR 6 migration, see PRD #597).
+#[derive(Resource, Component, Clone, Debug)]
 pub struct PowerAiConfigResource {
     /// Minimum battery charge fraction (0.0–1.0) before the AI boosts weapons power.
     pub weapons_battery_floor: f32,
@@ -145,12 +154,27 @@ impl Plugin for ShipPowerPlugin {
 /// Broadcasts `PowerState` at 10 Hz to the `Power` console holder only.
 /// This is the canonical registration; it is added by [`ShipPowerPlugin`]
 /// and also by the test harness in `test_app()`.
+///
+/// After PR 6 (PRD #597): prefers the per-entity `ShipPowerSystem` component
+/// on the LocalShip entity, falling back to the global `ShipPowerSystem`
+/// resource for test harnesses that only insert the Resource form.
 pub fn power_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
         Audience::Holding(Console::Power),
         Cadence::Hz(10.0),
         |world: &mut World| {
-            let power = world.resource::<ShipPowerSystem>();
+            // Prefer per-entity component on the LocalShip; fall back to the
+            // global Resource for tests that only initialise the Resource.
+            let mut q = world
+                .query_filtered::<&ShipPowerSystem, With<crate::server_app::LocalShip>>();
+            let power_snapshot = q.iter(world).next().cloned().or_else(|| {
+                world
+                    .get_resource::<ShipPowerSystem>()
+                    .cloned()
+            });
+            let Some(power) = power_snapshot else {
+                return vec![];
+            };
             vec![ServerMessage::PowerState {
                 helm: power.0.helm,
                 weapons: power.0.weapons,
@@ -169,28 +193,71 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 /// Validates: sender holds `Console::Power`. Reads `ControlSystem` messages
 /// targeting the power system ID with a `SetPower` payload, and calls
 /// `PowerSystem::increase` / `decrease` to reach the requested level.
+///
+/// After PR 6 (PRD #597): mutates the per-entity `ShipPowerSystem` component
+/// on the LocalShip entity when present, otherwise the global `ShipPowerSystem`
+/// resource. When both are present, dual-writes so legacy readers stay in sync.
 pub fn handle_power_messages(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
-    mut power: ResMut<ShipPowerSystem>,
+    mut ship_query: Query<
+        (&crate::messages::AdmittedCommands, Option<&mut ShipPowerSystem>),
+        With<crate::server_app::LocalShip>,
+    >,
+    power_res: Option<ResMut<ShipPowerSystem>>,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Ok((admitted, mut power_comp)) = ship_query.single_mut() else {
         return;
     };
+    let mut power_res = power_res;
+    // Collect commands into a batch first so we can dispatch to whichever
+    // backing store (component vs resource) is available.
+    #[derive(Clone)]
+    enum PowerCmd {
+        SetGroup(crate::messages::PowerGroupId, u8),
+        SetConsole(Console, u8),
+    }
+    let mut pending: Vec<PowerCmd> = Vec::new();
     for cmd in admitted.for_target(crate::system_registry::POWER_SYSTEM_ID) {
         match &cmd.payload {
             crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
-                if let Err(err) = power.0.set_group_allocation(group, *level) {
-                    warn!("[power] ignored power allocation: {err:?}");
-                }
+                pending.push(PowerCmd::SetGroup(group.clone(), *level));
             }
             crate::messages::SystemControlPayload::SetPower {
                 target: console,
                 level,
             } => {
-                power.0.set_console_allocation(console.clone(), *level);
+                pending.push(PowerCmd::SetConsole(console.clone(), *level));
             }
             _ => {}
         }
+    }
+    if pending.is_empty() {
+        return;
+    }
+    for cmd in pending {
+        match cmd {
+            PowerCmd::SetGroup(group, level) => {
+                if let Some(pc) = power_comp.as_deref_mut() {
+                    if let Err(err) = pc.0.set_group_allocation(&group, level) {
+                        warn!("[power] ignored power allocation: {err:?}");
+                    }
+                } else if let Some(pr) = power_res.as_deref_mut() {
+                    if let Err(err) = pr.0.set_group_allocation(&group, level) {
+                        warn!("[power] ignored power allocation: {err:?}");
+                    }
+                }
+            }
+            PowerCmd::SetConsole(console, level) => {
+                if let Some(pc) = power_comp.as_deref_mut() {
+                    pc.0.set_console_allocation(console.clone(), level);
+                } else if let Some(pr) = power_res.as_deref_mut() {
+                    pr.0.set_console_allocation(console, level);
+                }
+            }
+        }
+    }
+    // Dual-write: keep the Resource in sync with the Component when both exist.
+    if let (Some(pc), Some(pr)) = (power_comp.as_deref(), power_res.as_deref_mut()) {
+        pr.0 = pc.0.clone();
     }
 }
 
@@ -198,29 +265,118 @@ pub fn handle_power_messages(
 ///
 /// Invariant-gated: no control-state check. Runs in `SimSet::Modifiers`,
 /// after physics ticks have emitted their inter-system messages.
+///
+/// After PR 6 (PRD #597): mutates the per-entity `ShipPowerSystem` component
+/// on the LocalShip entity when present, otherwise the global Resource.
+/// Dual-writes to the Resource when both are present.
 pub fn handle_power_inter_system(
     queue: Res<InterSystemQueue>,
-    mut power: ResMut<ShipPowerSystem>,
-    config: Res<PowerConfigResource>,
+    mut ship_q: Query<
+        (Option<&mut ShipPowerSystem>, Option<&PowerConfigResource>),
+        With<crate::server_app::LocalShip>,
+    >,
+    power_res: Option<ResMut<ShipPowerSystem>>,
+    config_res: Option<Res<PowerConfigResource>>,
 ) {
+    let Ok((mut power_comp, cfg_comp)) = ship_q.single_mut() else {
+        // Resource-only fallback for tests without a LocalShip entity.
+        let mut power_res = power_res;
+        let cfg_default;
+        let config: &PowerConfigResource = match config_res.as_deref() {
+            Some(c) => c,
+            None => {
+                cfg_default = PowerConfigResource::default();
+                &cfg_default
+            }
+        };
+        if let Some(pr) = power_res.as_deref_mut() {
+            for msg in queue.for_target(crate::system_registry::POWER_SYSTEM_ID) {
+                match &msg.payload {
+                    InterSystemPayload::DrainWeaponsBattery { amount } => {
+                        pr.0.battery_charge =
+                            (pr.0.battery_charge - amount).clamp(0.0, config.0.capacity);
+                    }
+                }
+            }
+        }
+        return;
+    };
+    let cfg_default;
+    let config: &PowerConfigResource = match cfg_comp {
+        Some(c) => c,
+        None => match config_res.as_deref() {
+            Some(c) => c,
+            None => {
+                cfg_default = PowerConfigResource::default();
+                &cfg_default
+            }
+        },
+    };
+    let mut power_res = power_res;
+    let mut applied_any = false;
     for msg in queue.for_target(crate::system_registry::POWER_SYSTEM_ID) {
         match &msg.payload {
             InterSystemPayload::DrainWeaponsBattery { amount } => {
-                power.0.battery_charge =
-                    (power.0.battery_charge - amount).clamp(0.0, config.0.capacity);
+                if let Some(pc) = power_comp.as_deref_mut() {
+                    pc.0.battery_charge =
+                        (pc.0.battery_charge - amount).clamp(0.0, config.0.capacity);
+                    applied_any = true;
+                } else if let Some(pr) = power_res.as_deref_mut() {
+                    pr.0.battery_charge =
+                        (pr.0.battery_charge - amount).clamp(0.0, config.0.capacity);
+                    applied_any = true;
+                }
             }
+        }
+    }
+    if applied_any {
+        if let (Some(pc), Some(pr)) = (power_comp.as_deref(), power_res.as_deref_mut()) {
+            pr.0 = pc.0.clone();
         }
     }
 }
 
 /// Tick the power system battery charge each frame.
+///
+/// After PR 6 (PRD #597): iterates ALL ship entities with a `ShipPowerSystem`
+/// component so NPC ships tick their own power. Uses the per-entity
+/// `PowerConfigResource` component when present, else the global Resource
+/// fallback, so NPC ships without a `[power]` block still tick with defaults.
+/// The Resource fallback path is retained for test environments that only
+/// insert the resource without a ship entity.
 pub fn tick_power_system(
     time: Res<Time>,
-    mut power: ResMut<ShipPowerSystem>,
-    config: Res<PowerConfigResource>,
+    mut power_res: Option<ResMut<ShipPowerSystem>>,
+    config_res: Option<Res<PowerConfigResource>>,
+    mut ships: Query<
+        (&mut ShipPowerSystem, Option<&PowerConfigResource>),
+        With<crate::server_app::Ship>,
+    >,
 ) {
     let dt = time.delta_secs();
-    power.0.tick(dt, &config.0);
+    let mut ticked_any = false;
+    for (mut power, config_comp) in ships.iter_mut() {
+        let cfg_default;
+        let cfg: &PowerConfigResource = match config_comp {
+            Some(c) => c,
+            None => match config_res.as_deref() {
+                Some(c) => c,
+                None => {
+                    cfg_default = PowerConfigResource::default();
+                    &cfg_default
+                }
+            },
+        };
+        power.0.tick(dt, &cfg.0);
+        ticked_any = true;
+    }
+    // Fallback: no ship entity with the component (test environments that only
+    // insert the Resource form). Tick the Resource directly.
+    if !ticked_any {
+        if let (Some(power), Some(config)) = (power_res.as_deref_mut(), config_res.as_deref()) {
+            power.0.tick(dt, &config.0);
+        }
+    }
 }
 
 /// AI controller for the power console.
@@ -234,41 +390,84 @@ pub fn tick_power_system(
 /// PowerSystem has no shields field; shields_battery_floor is reserved for
 /// future extension but produces no action today.
 ///
-/// After issue #594: loops over ALL ship entities where the Power system is
-/// `ControlSource::Ai`, reading and writing the per-entity `ShipPowerSystem`
-/// component. Also writes the global `ShipPowerSystem` resource (dual-write
-/// migration backward compat for the player ship broadcaster).
+/// After PR 6 (PRD #597): iterates ALL ship entities where the Power system is
+/// `ControlSource::Ai`. Each ship reads its own `ShipRedAlert`,
+/// `LastHelmInput`, and `PowerConfigResource`/`PowerAiConfigResource`
+/// components (all default when absent). NPCs and the player ship follow the
+/// same code path — the only differentiators are the per-station control
+/// sources and the components on each entity.
+///
+/// The global `ShipPowerSystem` resource is still dual-written from the
+/// LocalShip entity's component so the legacy Resource-based broadcasters
+/// keep working during the migration.
 pub fn operate_power_ai(
-    mut power_res: ResMut<ShipPowerSystem>,
-    config: Res<PowerConfigResource>,
-    red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::server_app::LocalShip>>,
-    last_helm_q: Query<&LastHelmInput, With<crate::server_app::LocalShip>>,
-    ai_config: Res<PowerAiConfigResource>,
+    mut power_res: Option<ResMut<ShipPowerSystem>>,
+    ai_config_res: Option<Res<PowerAiConfigResource>>,
+    config_res: Option<Res<PowerConfigResource>>,
     sessions: Option<Res<crate::lobby::Sessions>>,
     ship_comp_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>,
     mut ship_power_q: Query<
         (
+            Entity,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut ShipPowerSystem,
+            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&LastHelmInput>,
+            Option<&PowerConfigResource>,
+            Option<&PowerAiConfigResource>,
+            Has<crate::server_app::LocalShip>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
 ) {
-    // Yield to any human Power console holder (player ship only).
-    if let (Some(sessions), Ok(ship_config)) = (&sessions, ship_comp_query.single()) {
-        if sessions
+    // Yield to any human Power console holder on the player ship. NPC ships
+    // have no human console holders, so they always run the AI branch when
+    // their Power system is under AI control.
+    let human_holds_player_power = if let (Some(sessions), Ok(ship_config)) =
+        (&sessions, ship_comp_query.single())
+    {
+        sessions
             .0
             .console_holder(&Console::Power, &ship_config.0)
             .is_some()
-        {
-            return;
+    } else {
+        false
+    };
+
+    let ai_cfg_default;
+    let ai_cfg_fallback: &PowerAiConfigResource = match ai_config_res.as_deref() {
+        Some(c) => c,
+        None => {
+            ai_cfg_default = PowerAiConfigResource::default();
+            &ai_cfg_default
         }
-    }
+    };
+    let cfg_default;
+    let cfg_fallback: &PowerConfigResource = match config_res.as_deref() {
+        Some(c) => c,
+        None => {
+            cfg_default = PowerConfigResource::default();
+            &cfg_default
+        }
+    };
 
-    let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
-    let throttle = last_helm_q.single().map(|l| l.thrust).unwrap_or(0.0);
-
-    for (control_sources, mut power_comp) in ship_power_q.iter_mut() {
+    let mut player_power: Option<crate::modifiers::power_system::PowerSystem> = None;
+    for (
+        _entity,
+        control_sources,
+        mut power_comp,
+        red_alert_comp,
+        last_helm_comp,
+        cfg_comp,
+        ai_cfg_comp,
+        is_local,
+    ) in ship_power_q.iter_mut()
+    {
+        // Skip the player ship when a human is at the Power console; NPCs
+        // never have a human holder so this only ever skips the player ship.
+        if is_local && human_holds_player_power {
+            continue;
+        }
         let policy = control_sources
             .0
             .policy_for(&crate::system_registry::power_system_id());
@@ -276,24 +475,29 @@ pub fn operate_power_ai(
             continue;
         }
 
-        let battery_pct = power_comp.0.battery_charge / config.0.capacity;
+        let cfg: &PowerConfigResource = cfg_comp.unwrap_or(cfg_fallback);
+        let ai_cfg: &PowerAiConfigResource = ai_cfg_comp.unwrap_or(ai_cfg_fallback);
+        let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
+        let throttle = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
+
+        let battery_pct = power_comp.0.battery_charge / cfg.0.capacity;
 
         // Weapons: boost on red alert when battery allows.
-        if red_alert && battery_pct >= ai_config.weapons_battery_floor {
+        if red_alert && battery_pct >= ai_cfg.weapons_battery_floor {
             power_comp.0.weapons = 3;
         }
 
         // Helm: scale with throttle demand and battery availability.
-        if throttle > ai_config.helm_throttle_threshold && battery_pct >= ai_config.helm_battery_floor {
+        if throttle > ai_cfg.helm_throttle_threshold && battery_pct >= ai_cfg.helm_battery_floor {
             power_comp.0.helm = 3;
         } else if throttle == 0.0 {
             power_comp.0.helm = 1;
-            if !red_alert || battery_pct < ai_config.weapons_battery_floor {
+            if !red_alert || battery_pct < ai_cfg.weapons_battery_floor {
                 power_comp.0.weapons = 2;
             }
         } else {
             power_comp.0.helm = 2;
-            if !red_alert || battery_pct < ai_config.weapons_battery_floor {
+            if !red_alert || battery_pct < ai_cfg.weapons_battery_floor {
                 power_comp.0.weapons = 2;
             }
         }
@@ -302,23 +506,71 @@ pub fn operate_power_ai(
         power_comp.0.helm = power_comp.0.helm.clamp(1, 4);
         power_comp.0.weapons = power_comp.0.weapons.clamp(1, 4);
         power_comp.0.sensors = power_comp.0.sensors.clamp(1, 4);
+
+        if is_local {
+            player_power = Some(power_comp.0.clone());
+        }
     }
 
     // Sync the global resource with the player ship's component (dual-write).
-    if let Ok((_, power_comp)) = ship_power_q.single() {
-        power_res.0 = power_comp.0.clone();
+    if let (Some(power_res), Some(player_power)) = (power_res.as_deref_mut(), player_power) {
+        power_res.0 = player_power;
     }
 }
 
 // ── Blackboard publish (issue #561) ──────────────────────────────────────────
 
 fn publish_power_blackboard(
-    power: Res<ShipPowerSystem>,
-    config: Res<PowerConfigResource>,
-    multipliers: Res<PowerMultiplierResource>,
+    power_res: Option<Res<ShipPowerSystem>>,
+    config_res: Option<Res<PowerConfigResource>>,
+    multipliers_res: Option<Res<PowerMultiplierResource>>,
+    ship_q: Query<
+        (
+            &ShipPowerSystem,
+            Option<&PowerConfigResource>,
+            Option<&PowerMultiplierResource>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     use crate::system_registry::POWER_SYSTEM_ID;
+
+    // Prefer per-entity components on LocalShip; fall back to global Resources.
+    let entity_view = ship_q.single().ok();
+    let power_default;
+    let power: &ShipPowerSystem = match entity_view.map(|(p, _, _)| p) {
+        Some(p) => p,
+        None => match power_res.as_deref() {
+            Some(p) => p,
+            None => {
+                power_default = ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default());
+                &power_default
+            }
+        },
+    };
+    let config_default;
+    let config: &PowerConfigResource = match entity_view.and_then(|(_, c, _)| c) {
+        Some(c) => c,
+        None => match config_res.as_deref() {
+            Some(c) => c,
+            None => {
+                config_default = PowerConfigResource::default();
+                &config_default
+            }
+        },
+    };
+    let multipliers_default;
+    let multipliers: &PowerMultiplierResource = match entity_view.and_then(|(_, _, m)| m) {
+        Some(m) => m,
+        None => match multipliers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                multipliers_default = PowerMultiplierResource::default();
+                &multipliers_default
+            }
+        },
+    };
 
     let entries: Vec<PowerConsoleEntry> = POWER_CONSOLE_ORDER
         .iter()
@@ -409,6 +661,9 @@ mod tests {
             .add_plugins(crate::simulation::sim_state_broadcaster())
             .add_systems(PostUpdate, collect);
         // Spawn the player ship entity so handle_power_messages can query it.
+        // Note: no ShipPowerSystem/PowerConfig* components are attached — the
+        // tests mutate the Resource forms and expect those to be observed by
+        // the systems (which fall back to Resource when the Component is absent).
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,

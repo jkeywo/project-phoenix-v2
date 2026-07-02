@@ -252,7 +252,8 @@ fn handle_blocks_impulse_region_enter(
 pub(crate) fn handle_slow_zone_speed_clamp(
     trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
-    modifiers: Res<ShipModifiers>,
+    modifiers_res: Option<Res<ShipModifiers>>,
+    modifiers_q: Query<&ShipModifiers>,
     mut ship_query: Query<&mut ShipPhysics>,
 ) {
     let ev = trigger.event();
@@ -267,6 +268,21 @@ pub(crate) fn handle_slow_zone_speed_clamp(
         return;
     }
     let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
+    // Per-entity component on the subject takes priority; fall back to the
+    // legacy global Resource, and finally to a fresh default cache (1.0 mult).
+    // After PR 6 (PRD #597), NPCs entering slow zones read their own modifier
+    // cache once region membership tracks NPCs (PR 9).
+    let default_modifiers;
+    let modifiers: &ShipModifiers = match modifiers_q.get(ev.subject) {
+        Ok(m) => m,
+        Err(_) => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = ShipModifiers::new();
+                &default_modifiers
+            }
+        },
+    };
     let effective_max = base_max * modifiers.get(&ModifierSlot::MaxSpeed);
     // Apply to the specific entity that entered the region, not all ships.
     if let Ok(mut physics) = ship_query.get_mut(ev.subject) {

@@ -47,13 +47,28 @@ impl Plugin for RepairPlugin {
 ///
 /// Broadcasts `RepairState` at 10 Hz to the `Repair` console holder only.
 /// Registered by [`RepairPlugin`].
+///
+/// After PR 6 (PRD #597): prefers the per-entity `ShipRepairTeams` component
+/// on the LocalShip entity, falling back to the global Resource for tests.
 pub fn repair_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
         Audience::Holding(Console::Repair),
         Cadence::Hz(10.0),
         |world: &mut World| {
-            let teams = world.resource::<ShipRepairTeams>();
-            let slots = teams.0.slots().to_vec();
+            let mut q = world
+                .query_filtered::<&ShipRepairTeams, With<crate::server_app::LocalShip>>();
+            let slots = q
+                .iter(world)
+                .next()
+                .map(|t| t.0.slots().to_vec())
+                .or_else(|| {
+                    world
+                        .get_resource::<ShipRepairTeams>()
+                        .map(|t| t.0.slots().to_vec())
+                });
+            let Some(slots) = slots else {
+                return vec![];
+            };
             vec![ServerMessage::RepairState { teams: slots }]
         },
     )
@@ -73,22 +88,34 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 ///
 /// `RepairTarget::Core` dispatches to `Console::Core`, the repair bucket for
 /// ownerless ship-wide systems.
+///
+/// After PR 6 (PRD #597): prefers the per-entity `ShipRepairTeams` component
+/// on the LocalShip entity; falls back to the global `ShipRepairTeams` resource
+/// for tests. Dual-writes to the Resource so legacy Resource-based readers
+/// stay in sync.
 pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<
+    mut ship_query: Query<
         (
             &AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
+            Option<&mut ShipRepairTeams>,
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut teams: ResMut<ShipRepairTeams>,
+    teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Ok((admitted, ship_config, control_sources)) = ship_query.single() else {
+    let Ok((admitted, ship_config, control_sources, mut teams_comp)) = ship_query.single_mut()
+    else {
         return;
     };
+    let mut teams_res = teams_res;
+
+    // Collect all dispatches into a batch first, then apply once — avoids the
+    // closure-captures-borrow tangle when routing between Component and Resource.
+    let mut pending: Vec<(usize, Console)> = Vec::new();
 
     // ── ControlSystem path (authority already checked at admission) ────────
     for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
@@ -106,7 +133,7 @@ pub fn handle_dispatch_repair_team(
                 }
                 RepairTarget::Core => Console::Core,
             };
-            teams.0.dispatch(*team_idx as usize, console);
+            pending.push((*team_idx as usize, console));
         }
     }
 
@@ -114,50 +141,117 @@ pub fn handle_dispatch_repair_team(
     let policy = control_sources.0.policy_for(&repair_system_id());
     if !policy.accept_human_input {
         for _ in reader.read() {}
+    } else if let Some(repair_token) = sessions.0.console_holder(&Console::Repair, &ship_config.0) {
+        for ev in reader.read() {
+            let ClientMessage::DispatchRepairTeam { team_idx, console } = &ev.msg else {
+                continue;
+            };
+            if ev.token.as_str() != repair_token {
+                continue;
+            }
+            pending.push((*team_idx as usize, console.clone()));
+        }
+    } else {
+        for _ in reader.read() {}
+    }
+
+    if pending.is_empty() {
         return;
     }
-    let Some(repair_token) = sessions.0.console_holder(&Console::Repair, &ship_config.0) else {
-        for _ in reader.read() {}
-        return;
-    };
-    for ev in reader.read() {
-        let ClientMessage::DispatchRepairTeam { team_idx, console } = &ev.msg else {
-            continue;
-        };
-        if ev.token.as_str() != repair_token {
-            continue;
+
+    // Apply to whichever backing store is available; dual-write when both.
+    for (idx, console) in pending {
+        if let Some(t) = teams_comp.as_deref_mut() {
+            t.0.dispatch(idx, console.clone());
         }
-        teams.0.dispatch(*team_idx as usize, console.clone());
+        if let Some(r) = teams_res.as_deref_mut() {
+            r.0.dispatch(idx, console);
+        }
+    }
+    // Keep Resource in sync with per-entity component (Resource is dual-written
+    // above; but if only the Component was updated we snapshot the Component
+    // into the Resource so legacy Resource-based readers see the latest state).
+    if let (Some(t), Some(r)) = (teams_comp.as_deref(), teams_res.as_deref_mut()) {
+        r.0 = t.0.clone();
     }
 }
 
 /// Tick repair teams each frame: advance timers and apply HP restoration.
+///
+/// After PR 6 (PRD #597): prefers the per-entity `ShipRepairTeams` and
+/// `ShipModifiers` components on the LocalShip entity; falls back to the
+/// global Resources for tests. Dual-writes to the `ShipRepairTeams` resource.
 pub fn tick_repair_teams(
     time: Res<Time>,
-    mut teams: ResMut<ShipRepairTeams>,
-    mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
-    modifiers: Res<ShipModifiers>,
+    mut teams_res: Option<ResMut<ShipRepairTeams>>,
+    modifiers_res: Option<Res<ShipModifiers>>,
+    mut ship_q: Query<
+        (
+            Option<&mut ShipRepairTeams>,
+            Option<&ShipModifiers>,
+            &mut crate::entity_spawner::EntityConsoleHull,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let dt = time.delta_secs();
+    let Ok((mut teams_comp, modifiers_comp, mut hull)) = ship_q.single_mut() else {
+        return;
+    };
+    let default_modifiers;
+    let modifiers: &ShipModifiers = match modifiers_comp {
+        Some(m) => m,
+        None => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = ShipModifiers::new();
+                &default_modifiers
+            }
+        },
+    };
     let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
-    if let Ok(mut hull) = hull_q.single_mut() {
-        teams.0.tick(dt * repair_mult, &mut hull.0);
+    if let Some(t) = teams_comp.as_deref_mut() {
+        t.0.tick(dt * repair_mult, &mut hull.0);
+        if let Some(r) = teams_res.as_deref_mut() {
+            r.0 = t.0.clone();
+        }
+    } else if let Some(r) = teams_res.as_deref_mut() {
+        r.0.tick(dt * repair_mult, &mut hull.0);
     }
 }
 
 // ── Blackboard publish ─────────────────────────────────────────────────────────
 
 fn publish_repair_blackboard(
-    teams: Res<ShipRepairTeams>,
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
+    teams_res: Option<Res<ShipRepairTeams>>,
+    ship_q: Query<
+        (
+            Option<&ShipRepairTeams>,
+            &crate::entity_spawner::EntityConsoleHull,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut blackboards_q: Query<
         &mut crate::server_app::ShipSystemBlackboards,
         With<crate::server_app::LocalShip>,
     >,
 ) {
+    // Prefer per-entity component on LocalShip; fall back to global Resource.
+    let entity_view = ship_q.single().ok();
+    let default_teams;
+    let teams: &ShipRepairTeams = match entity_view.and_then(|(t, _)| t) {
+        Some(t) => t,
+        None => match teams_res.as_deref() {
+            Some(t) => t,
+            None => {
+                default_teams = ShipRepairTeams(crate::repair_teams::RepairTeams::default());
+                &default_teams
+            }
+        },
+    };
+    let hull_ref = entity_view.map(|(_, h)| h);
     let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
-    let hull_ref = hull_q.single().ok();
     let console_hull: Vec<ConsoleHullStatus> = hull_ref
         .map(|h| {
             h.0.entries()

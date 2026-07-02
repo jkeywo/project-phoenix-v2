@@ -6,6 +6,12 @@ title: RepairPlugin
 
 Extracted from `simulation.rs` as part of the simulation split series (issue [#250](https://github.com/jkeywo/project-phoenix-v2/issues/250)).
 
+## Per-entity migration (PRD #597 PR 6)
+
+After PR 6 of PRD #597 (2026-07-02), `ShipRepairTeams` derives both `Resource` and `Component`. The player ship carries a per-entity `ShipRepairTeams` component seeded from its TOML `[repair]` block. NPC ships also get a `ShipRepairTeams` component when their entity TOML declares a `[repair]` block (skipped otherwise).
+
+`tick_repair_teams`, `handle_dispatch_repair_team`, `publish_repair_blackboard`, and `repair_state_broadcaster` stay LocalShip-scoped (repair is a player mechanic today), but prefer the per-entity component on LocalShip with a Resource fallback for tests. Both the Component and the Resource are dual-written to keep legacy Resource-based readers in sync.
+
 ## Ownership
 
 `RepairPlugin` owns all breakdown-queue and repair-team state and message handling for the Repair console.

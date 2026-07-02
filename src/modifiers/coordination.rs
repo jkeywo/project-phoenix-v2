@@ -46,17 +46,73 @@ impl Plugin for ModifierCoordinationPlugin {
 /// The system is registered by `SimulationPlugin` (not by
 /// `ModifierCoordinationPlugin`) so it can be chained after the power‑handling
 /// systems with explicit `.after()` ordering.
+///
+/// After PR 6 (PRD #597): prefers per-entity `ShipPowerSystem`,
+/// `PowerMultiplierResource`, and `ShipModifiers` components on the LocalShip
+/// entity. Falls back to the global Resources for tests that don't spawn the
+/// LocalShip entity with these components. Both the per-entity component and
+/// the Resource are updated (dual-write) so legacy readers stay in sync.
 pub fn translate_power_modifiers(
-    power: Res<ShipPowerSystem>,
-    mult_cfg: Option<Res<PowerMultiplierResource>>,
-    mut modifiers: ResMut<ShipModifiers>,
+    power_res: Option<Res<ShipPowerSystem>>,
+    mult_res: Option<Res<PowerMultiplierResource>>,
+    modifiers_res: Option<ResMut<ShipModifiers>>,
+    mut local_ship_q: Query<
+        (
+            Option<&ShipPowerSystem>,
+            Option<&PowerMultiplierResource>,
+            Option<&mut ShipModifiers>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
-    let Some(mult_cfg) = mult_cfg else { return };
-    apply_power_modifiers_from_read_state(
-        &mut modifiers,
-        &power.0.read_state(),
-        &mult_cfg.multipliers,
-    );
+    // Resolve the read state (power + multipliers). Prefer per-entity
+    // components on LocalShip; fall back to Resources.
+    let (power_read_state, multipliers_map) = {
+        // Read-only pass — collect the read state up-front so the later
+        // mutable borrow on ShipModifiers doesn't conflict.
+        let view = local_ship_q.single().ok();
+        let read_state = match view.and_then(|(p, _, _)| p) {
+            Some(p) => p.0.read_state(),
+            None => match power_res.as_deref() {
+                Some(p) => p.0.read_state(),
+                None => return,
+            },
+        };
+        let default_mult;
+        let mult: &PowerMultiplierResource = match view.and_then(|(_, m, _)| m) {
+            Some(m) => m,
+            None => match mult_res.as_deref() {
+                Some(m) => m,
+                None => {
+                    default_mult = PowerMultiplierResource::default();
+                    &default_mult
+                }
+            },
+        };
+        (read_state, mult.multipliers.clone())
+    };
+
+    // Extract modifiers destination. Prefer per-entity component; fall back to
+    // Resource. When both are present, dual-write.
+    let mut modifiers_res = modifiers_res;
+    let mut view = local_ship_q.single_mut().ok();
+    match view.as_mut().and_then(|(_, _, m)| m.as_mut()) {
+        Some(mods_comp) => {
+            apply_power_modifiers_from_read_state(mods_comp, &power_read_state, &multipliers_map);
+            if let Some(mods_res) = modifiers_res.as_deref_mut() {
+                *mods_res = (**mods_comp).clone();
+            }
+        }
+        None => {
+            if let Some(mut mods_res) = modifiers_res {
+                apply_power_modifiers_from_read_state(
+                    &mut mods_res,
+                    &power_read_state,
+                    &multipliers_map,
+                );
+            }
+        }
+    }
 }
 
 /// Apply power-level modifiers to `modifiers` based on the current `PowerSystem`
@@ -204,12 +260,16 @@ pub fn apply_impulse_to(
 /// to the modifier table on transitions, avoiding redundant events.
 ///
 /// This is the single routing point for impulse-side modifier writes.
+///
+/// After PR 6 (PRD #597): prefers the per-entity `ShipModifiers` component on
+/// the LocalShip entity, dual-writing to the global Resource when both exist.
 pub fn translate_impulse_modifiers(
     impulse: Res<ShipImpulse>,
-    mut modifiers: ResMut<ShipModifiers>,
+    modifiers_res: Option<ResMut<ShipModifiers>>,
     // Per-entity component takes priority over the Resource fallback (PR 4).
     impulse_cfg_q: Query<&ImpulseConfigResource, With<crate::server_app::LocalShip>>,
     impulse_config: Option<Res<ImpulseConfigResource>>,
+    mut modifiers_q: Query<&mut ShipModifiers, With<crate::server_app::LocalShip>>,
     mut prev_phase: Local<Option<ImpulsePhase>>,
 ) {
     let current = impulse.0.phase;
@@ -220,15 +280,33 @@ pub fn translate_impulse_modifiers(
             .map(|c| c.speed_multiplier)
             .or_else(|_| impulse_config.as_deref().map(|c| c.speed_multiplier).ok_or(()))
             .unwrap_or(IMPULSE_SPEED_MULTIPLIER);
-        apply_impulse_to(&mut modifiers, &impulse.0, speed_multiplier);
+        let mut modifiers_res = modifiers_res;
+        match modifiers_q.single_mut() {
+            Ok(mut mods_comp) => {
+                apply_impulse_to(&mut mods_comp, &impulse.0, speed_multiplier);
+                if let Some(mods_res) = modifiers_res.as_deref_mut() {
+                    *mods_res = mods_comp.clone();
+                }
+            }
+            Err(_) => {
+                if let Some(mut mods_res) = modifiers_res {
+                    apply_impulse_to(&mut mods_res, &impulse.0, speed_multiplier);
+                }
+            }
+        }
     }
 }
 
 /// Observer: applies region effects to `ShipModifiers` when the ship enters a region.
+///
+/// After PR 6 (PRD #597): applies to the subject entity's per-entity
+/// `ShipModifiers` component when present; falls back to the global Resource
+/// (dual-writing when both exist).
 fn on_region_entered(
     trigger: On<RegionEntered>,
     region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
-    mut modifiers: ResMut<ShipModifiers>,
+    modifiers_res: Option<ResMut<ShipModifiers>>,
+    mut modifiers_q: Query<&mut ShipModifiers>,
 ) {
     let ev = trigger.event();
     let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
@@ -238,14 +316,32 @@ fn on_region_entered(
         Ok(u) => u,
         Err(_) => return,
     };
-    apply_region_effects(&mut modifiers, uuid, &effects.0);
+    let mut modifiers_res = modifiers_res;
+    match modifiers_q.get_mut(ev.subject) {
+        Ok(mut mods_comp) => {
+            apply_region_effects(&mut mods_comp, uuid, &effects.0);
+            if let Some(mods_res) = modifiers_res.as_deref_mut() {
+                *mods_res = mods_comp.clone();
+            }
+        }
+        Err(_) => {
+            if let Some(mut mods_res) = modifiers_res {
+                apply_region_effects(&mut mods_res, uuid, &effects.0);
+            }
+        }
+    }
 }
 
 /// Observer: clears region effects from `ShipModifiers` when the ship exits a region.
+///
+/// After PR 6 (PRD #597): clears from the subject entity's per-entity
+/// `ShipModifiers` component when present; falls back to the global Resource
+/// (dual-writing when both exist).
 fn on_region_exited(
     trigger: On<RegionExited>,
     membership: Res<RegionMembership>,
-    mut modifiers: ResMut<ShipModifiers>,
+    modifiers_res: Option<ResMut<ShipModifiers>>,
+    mut modifiers_q: Query<&mut ShipModifiers>,
 ) {
     let ev = trigger.event();
     let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
@@ -256,7 +352,21 @@ fn on_region_exited(
         Ok(u) => u,
         Err(_) => return,
     };
-    modifiers.clear_source(&ModifierSource::RegionEffect { uuid });
+    let source = ModifierSource::RegionEffect { uuid };
+    let mut modifiers_res = modifiers_res;
+    match modifiers_q.get_mut(ev.subject) {
+        Ok(mut mods_comp) => {
+            mods_comp.clear_source(&source);
+            if let Some(mods_res) = modifiers_res.as_deref_mut() {
+                *mods_res = mods_comp.clone();
+            }
+        }
+        Err(_) => {
+            if let Some(mut mods_res) = modifiers_res {
+                mods_res.clear_source(&source);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

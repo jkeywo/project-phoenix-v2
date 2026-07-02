@@ -285,10 +285,24 @@ fn process_helm_inputs(
     ship_query: Query<(&AdmittedCommands, &ShipSystemControlSources), With<LocalShip>>,
     mut physics_query: Query<&mut ShipPhysics, With<LocalShip>>,
     mut last_input_q: Query<&mut LastHelmInput, With<LocalShip>>,
-    modifiers: Res<ShipModifiers>,
+    modifiers_q: Query<&ShipModifiers, With<LocalShip>>,
+    modifiers_res: Option<Res<ShipModifiers>>,
     drive: HelmDriveParams,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
+    // Prefer per-entity ShipModifiers component on LocalShip; fall back to
+    // the global Resource for tests that only insert the Resource form.
+    let default_modifiers;
+    let modifiers: &ShipModifiers = match modifiers_q.single() {
+        Ok(m) => m,
+        Err(_) => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = ShipModifiers::new();
+                &default_modifiers
+            }
+        },
+    };
     let Ok(mut last_input) = last_input_q.single_mut() else {
         return;
     };

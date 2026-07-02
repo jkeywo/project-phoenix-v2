@@ -31,7 +31,7 @@ Eliminate every divergence in 10 sequential PRs. After all 10: a ship is a ship.
 | PR 3 | Per-entity `ShipConfigComponent` from each TOML | Pending |
 | PR 4 | Physics/impulse/boost/bank config → per-entity | **Done** (2026-07-01) |
 | PR 5 | Weapons/torpedo/phaser config → per-entity | **Done** (2026-07-02) |
-| PR 6 | Power/modifier/repair state → per-entity only | Pending |
+| PR 6 | Power/modifier/repair state → per-entity only | **Done** (2026-07-02) |
 | PR 7 | Weapons/sensors/navigation state → per-entity; unified beam system | Pending |
 | PR 8 | Collision handling for all ships | Pending |
 | PR 9 | Region effects for all ships | Pending |

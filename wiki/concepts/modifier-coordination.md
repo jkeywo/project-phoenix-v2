@@ -3,6 +3,35 @@
 Single owner of the `ShipModifiers` lifecycle and a translator system for each
 modifier source. All writes to `ShipModifiers` flow through this module.
 
+## Per-entity migration (PRD #597 PR 6)
+
+After PR 6 of PRD #597 (2026-07-02), `ShipModifiers` also derives `Component`
+alongside `Resource`. Every ship entity (player and NPC alike) carries a
+per-entity `ShipModifiers` component; the global Resource is kept as a
+backward-compat fallback and is dual-written by the translators/observers when
+both the Component and the Resource are present.
+
+Read patterns:
+
+- Systems scoped to `With<LocalShip>` prefer the per-entity component on the
+  LocalShip entity and fall back to `Res<ShipModifiers>`.
+- `handle_slow_zone_speed_clamp` reads the SUBJECT entity's `ShipModifiers`
+  component (so NPCs entering slow zones will be affected by their own
+  modifier cache once region membership tracks NPCs in PR 9).
+- `modifier_events_broadcaster` drains `pending_events` from the LocalShip
+  component with a Resource fallback.
+
+Write patterns (translators):
+
+- `translate_power_modifiers` reads per-entity power/multipliers on LocalShip
+  first, writes to LocalShip's `ShipModifiers` component, then dual-writes the
+  Resource.
+- `translate_impulse_modifiers` writes to LocalShip's `ShipModifiers`
+  component, dual-writes the Resource.
+- `on_region_entered` / `on_region_exited` observers write to the subject
+  entity's `ShipModifiers` component; when the subject is LocalShip they also
+  dual-write the global Resource.
+
 ## Coordinator's role
 
 `ModifierCoordinationPlugin` (`src/modifiers/coordination.rs:24`) is the sole

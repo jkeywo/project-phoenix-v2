@@ -534,12 +534,29 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 /// Uses `Cadence::OnEvent` so the producer is called every frame regardless of
 /// any Hz timer; an empty drain produces no outbound messages.
 /// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
+///
+/// After PR 6 (PRD #597): prefers the per-entity `ShipModifiers` component on
+/// the LocalShip entity, falling back to the global Resource for tests that
+/// only insert the Resource form.
 pub fn modifier_events_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(Audience::All, Cadence::OnEvent, |world: &mut World| {
         use crate::modifiers::ModifierEvent;
-        let events: Vec<_> = {
-            let mut modifiers = world.resource_mut::<crate::modifiers::ShipModifiers>();
-            std::mem::take(&mut modifiers.pending_events)
+        // Prefer draining from the per-entity component on LocalShip; fall
+        // back to the global Resource when the entity is absent.
+        let events: Vec<ModifierEvent> = {
+            let mut q = world.query_filtered::<
+                &mut crate::modifiers::ShipModifiers,
+                With<LocalShip>,
+            >();
+            if let Some(mut mods_comp) = q.iter_mut(world).next() {
+                std::mem::take(&mut mods_comp.pending_events)
+            } else if let Some(mut mods_res) =
+                world.get_resource_mut::<crate::modifiers::ShipModifiers>()
+            {
+                std::mem::take(&mut mods_res.pending_events)
+            } else {
+                Vec::new()
+            }
         };
         events
             .into_iter()
@@ -697,7 +714,8 @@ fn handle_collisions(
     mut impulse: ResMut<ShipImpulse>,
     mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
     mut cooldown: ResMut<CollisionCooldown>,
-    modifiers: Res<ShipModifiers>,
+    modifiers_q: Query<&ShipModifiers, With<LocalShip>>,
+    modifiers_res: Option<Res<ShipModifiers>>,
     mut shields_q: Query<&mut ShipShields, With<LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
     mut next_state: ResMut<NextState<GamePhase>>,
@@ -719,6 +737,18 @@ fn handle_collisions(
     };
     let Ok(mut physics) = physics_q.single_mut() else {
         return;
+    };
+    // Per-entity ShipModifiers component takes priority; fall back to Resource.
+    let default_modifiers;
+    let modifiers: &ShipModifiers = match modifiers_q.single() {
+        Ok(m) => m,
+        Err(_) => match modifiers_res.as_deref() {
+            Some(m) => m,
+            None => {
+                default_modifiers = ShipModifiers::new();
+                &default_modifiers
+            }
+        },
     };
 
     let contact = ctx.contact_pairs_with(ship_entity).next().and_then(|pair| {
@@ -1750,7 +1780,11 @@ fn spawn_game_start_entities(
                 .insert(crate::ship_state::ShipPhaserFrequency::default())
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
                 .insert(crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()))
-                .insert(crate::ship_plugin::LastHelmInput::default());
+                .insert(crate::ship_plugin::LastHelmInput::default())
+                // ShipModifiers as per-entity component (PR 6 — PRD #597). The
+                // legacy Resource form is still initialised by ModifierCoordinationPlugin
+                // and dual-written to by observers/translators until PR 7 completes.
+                .insert(crate::modifiers::ShipModifiers::new());
                 // EntityConsoleHull is kept on the player ship entity (not removed)
                 // so it serves as the per-entity hull component alongside the
                 // ShipHullIntegrity global resource (dual-write migration for #581 Gap D).
@@ -1881,18 +1915,24 @@ fn spawn_game_start_entities(
             }
 
             if let Some(pc) = &config.power {
-                commands.insert_resource(PowerConfigResource(crate::power_system::PowerConfig {
+                let power_config = PowerConfigResource(crate::power_system::PowerConfig {
                     capacity: pc.capacity,
                     rates: pc.rates,
                     emergency_threshold: pc.emergency_threshold,
-                }));
+                });
+                // Insert as per-entity component AND global resource (dual-write migration — PR 6).
+                commands.entity(spawned).insert(power_config.clone());
+                commands.insert_resource(power_config);
                 if let Some(ai) = &pc.ai {
-                    commands.insert_resource(PowerAiConfigResource {
+                    let ai_cfg = PowerAiConfigResource {
                         weapons_battery_floor: ai.weapons_battery_floor,
                         shields_battery_floor: ai.shields_battery_floor,
                         helm_battery_floor: ai.helm_battery_floor,
                         helm_throttle_threshold: ai.helm_throttle_threshold,
-                    });
+                    };
+                    // Insert as per-entity component AND global resource (dual-write migration — PR 6).
+                    commands.entity(spawned).insert(ai_cfg.clone());
+                    commands.insert_resource(ai_cfg);
                 }
             }
 
@@ -1920,7 +1960,9 @@ fn spawn_game_start_entities(
                     multipliers.insert(Console::Sensors, pm);
                 }
             }
-            commands.insert_resource(PowerMultiplierResource { multipliers });
+            commands.insert_resource(PowerMultiplierResource { multipliers: multipliers.clone() });
+            // Insert as per-entity component AND global resource (dual-write migration — PR 6).
+            commands.entity(spawned).insert(PowerMultiplierResource { multipliers });
 
             // Ship physics config from [helm_console] TOML, or default
             let physics_cfg =
@@ -2587,6 +2629,11 @@ mod tests {
             ))
             .id();
         // Insert per-entity weapon configs as a separate insert (Bundle limit).
+        // Note: no ShipPowerSystem/PowerConfig* per-entity components are
+        // attached here — this test uses the Resource forms (installed by
+        // ShipPowerPlugin) so `resource_mut::<ShipPowerSystem>` mutations in
+        // tests are observed by the systems (which fall back to Resource when
+        // the Component is absent — PR 6, PRD #597).
         app.world_mut().entity_mut(ship).insert((
             crate::weapons_plugin::TorpedoSystemResource(
                 crate::torpedo::TorpedoSystem::new(crate::torpedo::TorpedoConfig::default())

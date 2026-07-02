@@ -28,7 +28,7 @@ Eliminate every divergence in 10 sequential PRs. After all 10: a ship is a ship.
 |---|---|---|
 | PR 1 | Fix critical `With<Ship>` regressions | **Done** (commit ebc0022) |
 | PR 2 | Unified `ShipShields` (configurable `num_facings`) | **Done** |
-| PR 3 | Per-entity `ShipConfigComponent` from each TOML | Pending |
+| PR 3 | Per-entity `ShipConfigComponent` from each TOML | **Done** (commit 13c64c7, redo of f7bea89 revert) |
 | PR 4 | Physics/impulse/boost/bank config → per-entity | **Done** (2026-07-01) |
 | PR 5 | Weapons/torpedo/phaser config → per-entity | **Done** (2026-07-02) |
 | PR 6 | Power/modifier/repair state → per-entity only | **Done** (2026-07-02) |
@@ -122,10 +122,12 @@ Verification:
 
 ## Key Decisions
 
-- Per-entity components are the sole source of truth. All `#[derive(Resource, Component)]` dual-derives eliminated by end of PR 7.
-- Each ship reads its own config from its TOML. No global config Resources.
+- Per-entity Components are the source of truth for ship state; production readers query the LocalShip entity's Component (with Resource fallback used only for legacy test paths). Where a type is a pure per-entity Component with no Resource: `WeaponsTarget`, `ActiveBeam`, `PhaserCooldown`, `LastShipAttacker`, `SensorsTarget`, `NavigationWaypoint`, `RecentCombatActivity`, `WeaponFiredThisTick`, `ShipAttackedThisTick`, `CollisionCooldown`. Types still carrying `#[derive(Resource, Component)]` for backward compatibility with test scaffolding: `ShipModifiers`, `ShipRepairTeams`, `ShipPowerSystem`, `PowerConfigResource`, `PowerAiConfigResource`, `PowerMultiplierResource`, `PhaserCombatConfigResource`, `PhaserRenderConfig`, `TorpedoSystemResource`, `ShipPhysicsConfigResource`, `ImpulseConfigResource`, `BoostConfigResource`, `BankConfigResource`. Collapsing these to pure Component is a future cleanup.
+- Each ship reads its own config from its TOML — including `[[station]]` and `[[system]]` blocks. No NPC-specific config helpers.
 - `ShipShields` wraps the existing `ShieldSystem` (already supports configurable `num_facings`). `EntityShield` deleted in PR 2.
 - Fog-of-war (NPC AI sensor range filtering) is out of scope for this PRD.
+- `ShipImpulse` remains a player-only global Resource; NPCs do not have an impulse drive mechanic today.
+- Beam-tick unification (`tick_active_beam` + `tick_npc_beams` → single `tick_beams`) is deferred; two TODOs in `src/console/weapons/server.rs` mark the follow-up.
 
 ## Cross-references
 

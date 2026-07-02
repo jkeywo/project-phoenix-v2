@@ -443,22 +443,32 @@
       friendly: '#4ec870',
       neutral:  '#7a90c0',
     };
+    const FALLBACK_BLIP_COLOR = '#a8b0c0';
     const TARGET_COL = {
       'tactical-target': '#ff3344',
       'science-target':  '#3399ff',
     };
 
-    // Icon cache: same naming convention as radar-widget.js.
-    // "star" → "assets/radar_icons/Icon-Star.png", etc.
+    // Icon cache: same naming convention and path as radar-widget.js.
+    // "star" -> "../assets/radar_icons/Icon-Star.png", etc.
     const _navIcons = {};
     function getNavIcon(name) {
       if (!name || typeof Image === 'undefined') return null;
       if (_navIcons[name]) return _navIcons[name];
       const stem = name.charAt(0).toUpperCase() + name.slice(1);
       const img = new Image();
-      img.src = 'assets/radar_icons/Icon-' + stem + '.png';
+      img.onload = draw;
+      img.src = '../assets/radar_icons/Icon-' + stem + '.png';
       _navIcons[name] = img;
       return img;
+    }
+
+    function rgbCss(c) {
+      if (!Array.isArray(c) || c.length < 3) return null;
+      const r = Math.round(c[0] * 255);
+      const g = Math.round(c[1] * 255);
+      const b = Math.round(c[2] * 255);
+      return 'rgb(' + r + ',' + g + ',' + b + ')';
     }
 
     function regionColor(region, alpha) {
@@ -520,7 +530,8 @@
         const px = toSX(e.x), py = toSY(e.y);
         if (px < -40 || px > W+40 || py < -40 || py > H+40) return;
 
-        const col = ENT_COL[e.stance] || ENT_COL.neutral;
+        const authoredCol = rgbCss(e.color);
+        const col = authoredCol || ENT_COL[e.stance] || ENT_COL.neutral;
         const sel = e.id === _selectedId;
         const sz  = Math.max(0.7, Math.min(1.6, zoom * 5));
         const r   = 6 * sz;
@@ -578,23 +589,22 @@
           ctx.arc(0, 0, r + 4, 0, Math.PI * 2);
           ctx.stroke();
         } else {
-          const icon = getNavIcon(e.kind);
+          const icon = getNavIcon(e.icon || e.kind);
           if (icon && icon.complete && icon.naturalWidth > 0) {
-            // Draw PNG icon (same convention as radar-widget.js)
             ctx.beginPath();
             ctx.arc(0, 0, r, 0, Math.PI * 2);
             ctx.clip();
             ctx.drawImage(icon, -r, -r, r * 2, r * 2);
-            // Colour tint at 30% opacity
-            ctx.globalCompositeOperation = 'source-atop';
-            ctx.globalAlpha = 0.3;
-            ctx.fillStyle = col;
-            ctx.fillRect(-r, -r, r * 2, r * 2);
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.globalAlpha = 1;
+            if (authoredCol) {
+              ctx.globalCompositeOperation = 'source-atop';
+              ctx.globalAlpha = 0.3;
+              ctx.fillStyle = authoredCol;
+              ctx.fillRect(-r, -r, r * 2, r * 2);
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.globalAlpha = 1;
+            }
           } else {
-            // Fallback dot while icon loads (or for unrecognised kinds)
-            ctx.fillStyle = col;
+            ctx.fillStyle = authoredCol || FALLBACK_BLIP_COLOR;
             ctx.beginPath();
             ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2);
             ctx.fill();
@@ -909,12 +919,13 @@
           id: blip.uuid,
           name: blip.name || 'UNKNOWN',
           kind: blip.kind || 'asteroid',
+          icon: blip.icon || blip.kind || null,
           x: blip.world_x !== undefined ? blip.world_x : 0,
           y: blip.world_z !== undefined ? blip.world_z : 0,
           stance: blip.stance || 'neutral',
           faction: blip.faction || null,
           objective_target: !!blip.objective_target,
-          colour: blip.color || null,
+          color: blip.color || null,
           ship_class: blip.ship_class || null,
           hull_pct: blip.hull_pct !== undefined ? blip.hull_pct : null,
         });

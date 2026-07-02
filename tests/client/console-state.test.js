@@ -1043,14 +1043,15 @@ describe('buildNavigationConsoleState', () => {
       navChartShows: ['station'],
       objectives: [{ id: 'obj-1', text: 'Find zone', mandatory: true, status: 'Active', targets: ['Patrol Zone'] }],
       asteroids: [
-        { uuid: 'beacon-1', name: 'Patrol Zone', x: 100, z: 0, tags: ['objective_marker'], radar_icon: 'waypoint' },
-        { uuid: 'beacon-2', name: 'Quiet Zone', x: 200, z: 0, tags: ['objective_marker'], radar_icon: 'waypoint' },
+        { uuid: 'beacon-1', name: 'Patrol Zone', x: 100, z: 0, tags: ['objective_marker'], radar_icon: 'station' },
+        { uuid: 'beacon-2', name: 'Quiet Zone', x: 200, z: 0, tags: ['objective_marker'], radar_icon: 'station' },
       ],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
     expect(blips.map(b => b.uuid)).toEqual(['beacon-1']);
     expect(blips[0].objective_target).toBe(true);
-    expect(blips[0].kind).toBe('waypoint');
+    expect(blips[0].kind).toBe('station');
+    expect(blips[0].icon).toBe('station');
   });
 
   it('emits region overlays for active objective regions', () => {

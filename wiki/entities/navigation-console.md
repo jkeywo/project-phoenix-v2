@@ -3,7 +3,7 @@ title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
 sources: [gui/navigation-console.html, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/core/messages.rs, src/server_app.rs, assets/entities/player_ship.toml]
-updated: 2026-06-19
+updated: 2026-07-02
 ---
 
 # Navigation Console
@@ -31,8 +31,15 @@ Configured per-ship via `[navigation_console.system_chart]` in
   `planet`, `star`, `region`).
 
 The blip pipeline runs through `buildNavigationConsoleState` in
-`gui/console-state.js:529-596`. Asteroids and ships are intentionally
+`gui/console-state.js:784`. Asteroids and ships are intentionally
 excluded from the system chart so it reads as a strategic overview.
+
+The full-screen canvas renderer in `gui/navigation-console.html` uses the
+same radar icon contract as the shared `RadarWidget`: each blip's authored
+`icon` value is preferred over `kind`, assets resolve from
+`../assets/radar_icons/Icon-*.png`, and authored RGB `color` values are
+used for tint/fallback dots. Objective targets stay as gold rings layered
+around the blip; they do not replace the authored radar icon.
 
 ## Selection
 

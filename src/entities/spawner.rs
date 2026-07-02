@@ -322,6 +322,60 @@ pub fn spawn_entity(
         entity_commands.insert(
             crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
         );
+        // Per-entity power config (PRD #597 gap-4 closure). NPCs without a
+        // `[power]` TOML block get `PowerConfigResource::default()` /
+        // `PowerAiConfigResource::default()` so `translate_power_modifiers`,
+        // `operate_power_ai`, and `tick_power_system` can iterate every ship
+        // uniformly (`With<Ship>`) without an `is_npc` fork. When the TOML
+        // supplies `[power]` / `[power.ai]`, those values seed the components.
+        let power_config = match &config.power {
+            Some(pc) => crate::power_plugin::PowerConfigResource(
+                crate::modifiers::power_system::PowerConfig {
+                    capacity: pc.capacity,
+                    rates: pc.rates,
+                    emergency_threshold: pc.emergency_threshold,
+                },
+            ),
+            None => crate::power_plugin::PowerConfigResource::default(),
+        };
+        entity_commands.insert(power_config);
+        let power_ai_config = match config.power.as_ref().and_then(|pc| pc.ai.as_ref()) {
+            Some(ai) => crate::power_plugin::PowerAiConfigResource {
+                weapons_battery_floor: ai.weapons_battery_floor,
+                shields_battery_floor: ai.shields_battery_floor,
+                helm_battery_floor: ai.helm_battery_floor,
+                helm_throttle_threshold: ai.helm_throttle_threshold,
+            },
+            None => crate::power_plugin::PowerAiConfigResource::default(),
+        };
+        entity_commands.insert(power_ai_config);
+        // Per-entity power multipliers. Seeded from any per-console TOML
+        // `power_multipliers` blocks (helm_console/weapons_console/sensors_console)
+        // and otherwise defaulted so NPC ships still get MaxSpeed / PhaserDamage
+        // / RadarRange bonuses translated by `translate_power_modifiers`.
+        let defaults = [-0.5f32, 0.0, 0.25, 0.5];
+        let mut multipliers: std::collections::HashMap<crate::messages::Console, [f32; 4]> =
+            std::collections::HashMap::from([
+                (crate::messages::Console::Helm, defaults),
+                (crate::messages::Console::Tactical, defaults),
+                (crate::messages::Console::Sensors, defaults),
+            ]);
+        if let Some(hc) = &config.helm_console {
+            if let Some(pm) = hc.power_multipliers {
+                multipliers.insert(crate::messages::Console::Helm, pm);
+            }
+        }
+        if let Some(wc) = &config.weapons_console {
+            if let Some(pm) = wc.power_multipliers {
+                multipliers.insert(crate::messages::Console::Tactical, pm);
+            }
+        }
+        if let Some(sc) = &config.sensors_console {
+            if let Some(pm) = sc.power_multipliers {
+                multipliers.insert(crate::messages::Console::Sensors, pm);
+            }
+        }
+        entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
         // ShipModifiers as per-entity component (PR 6 — PRD #597). Every ship
         // gets an empty modifier cache; region entry, power translators, and
         // impulse translators all write to this per-entity component (they will
@@ -410,6 +464,20 @@ pub fn spawn_entity(
             crate::weapons_plugin::PhaserRenderConfig::default()
         };
         entity_commands.insert(render_config);
+    }
+
+    // Torpedoes — attach a `TorpedoSystemResource` component when the entity
+    // TOML has a `[torpedoes]` block. Mirrors the player-ship insertion in
+    // `server_app.rs::spawn_game_start_entities` — NPCs and the player ship
+    // now use the same per-entity component (PRD #597 gap-3 closure).
+    if let Some(tc) = &config.torpedoes {
+        let runtime_config = tc.to_runtime();
+        let torpedo_system = if !tc.tubes.is_empty() {
+            crate::torpedo::TorpedoSystem::from_configs(&tc.tubes, runtime_config)
+        } else {
+            crate::torpedo::TorpedoSystem::new(runtime_config)
+        };
+        entity_commands.insert(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
     }
 
     // HelmConsole - attach a HelmConsoleSection so the AI tick can read movement params.

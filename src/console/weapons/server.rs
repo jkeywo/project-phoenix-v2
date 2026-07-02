@@ -1447,61 +1447,126 @@ fn handle_unload_tube(
     }
 }
 
+/// Unified `FireTorpedo` handler for every ship (player + NPC).
+///
+/// Iterates `InboundMessage::FireTorpedo` events and resolves each to a
+/// shooter ship entity by token:
+/// - `"ai:<uuid>"` tokens are resolved through [`AiTokenRegistry`] to the
+///   registered NPC entity.
+/// - Human network tokens and `LOCAL_CONSOLE_TOKEN` route to the `LocalShip`,
+///   gated by [`tactical_authorized`] (holds the Tactical console or is the
+///   local operator).
+///
+/// After resolution the same per-ship code path runs for both: use the
+/// shooter's own `TorpedoSystemResource` component (falling back to the
+/// global `TorpedoSystemResource` resource only when no ship carries the
+/// component — legacy test paths).
+///
+/// After PRD #597 gap-3 closure: NPC ships with a `[torpedoes]` TOML block
+/// now spawn with their own `TorpedoSystemResource` (see
+/// `src/entities/spawner.rs`) and can fire torpedoes via the same code path
+/// as the player ship.
+#[allow(clippy::too_many_arguments)]
 fn handle_fire_torpedo(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<
+    ai_registry: Option<Res<AiTokenRegistry>>,
+    localship_q: Query<
         (
+            Entity,
             &crate::ship_plugin::ShipConfigComponent,
-            &ShipSystemControlSources,
         ),
         With<crate::server_app::LocalShip>,
     >,
-    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
-    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    // Per-ship state read for every candidate shooter (player + NPC).
+    mut ship_q: Query<
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &ShipPhysics,
+            Option<&WeaponsTarget>,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&mut TorpedoSystemResource>,
+            Option<&mut crate::server_app::WeaponFiredThisTick>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
-    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::LocalShip>>,
-    weapons_target_q: Query<&WeaponsTarget, With<crate::server_app::LocalShip>>,
-    mut weapon_fired_q: Query<
-        &mut crate::server_app::WeaponFiredThisTick,
-        With<crate::server_app::LocalShip>,
-    >,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
-        return;
-    };
-    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::tactical_system_id());
-    let weapons_target = weapons_target_q.single().ok();
-    // Prefer per-entity component; fall back to global resource for test compat.
-    // Only one of the two borrows is active at runtime; we shadow `torpedo_sys`
-    // so the rest of the function body treats it uniformly.
-    let mut torpedo_sys_comp_opt = torpedo_sys_q.single_mut().ok();
-    let torpedo_sys: &mut crate::torpedo::TorpedoSystem = match torpedo_sys_comp_opt {
-        Some(ref mut c) => &mut c.0,
-        None => &mut torpedo_sys_res.0,
-    };
+    // Snapshot LocalShip identity for human-token routing. `None` when the
+    // test/plugin harness has no player ship spawned.
+    let local_ship: Option<(Entity, &crate::ship_plugin::ShipConfigComponent)> =
+        localship_q.single().ok().map(|(e, cfg)| (e, cfg));
+
     for ev in reader.read() {
         let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else {
             continue;
         };
-        if !policy.accept_human_input {
+
+        // ── Resolve the shooter ship entity ─────────────────────────────────
+        let shooter_entity: Entity = if ev.token.starts_with("ai:") {
+            match ai_registry
+                .as_deref()
+                .and_then(|r| r.bevy_entity_for_token(&ev.token))
+            {
+                Some(e) => e,
+                None => continue,
+            }
+        } else {
+            match local_ship {
+                Some((e, cfg)) if tactical_authorized(&sessions, cfg, &ev.token) => e,
+                _ => continue,
+            }
+        };
+
+        // ── Pull per-ship state for the resolved shooter ────────────────────
+        let Ok((
+            _entity,
+            control_sources,
+            physics,
+            weapons_target_opt,
+            source_uuid_opt,
+            torpedo_sys_comp,
+            weapon_fired_comp,
+        )) = ship_q.get_mut(shooter_entity)
+        else {
+            continue;
+        };
+
+        // Authorize per the shooter's own ControlSource: human tokens need
+        // `accept_human_input`; `ai:` tokens need `operate_ai`.
+        let policy = control_sources
+            .0
+            .policy_for(&crate::system_registry::tactical_system_id());
+        let is_ai_token = ev.token.starts_with("ai:");
+        let authorized = if is_ai_token {
+            policy.operate_ai
+        } else {
+            policy.accept_human_input
+        };
+        if !authorized {
             continue;
         }
-        if !tactical_authorized(&sessions, ship_config, &ev.token) {
-            continue;
-        }
+
+        // Per-entity `TorpedoSystemResource` first; fall back to the global
+        // Resource so legacy tests that only insert the Resource still work.
+        // Only the LocalShip should ever fall through to the global — NPC
+        // ships that lack the component simply have no torpedo tubes.
+        let mut torpedo_sys_comp = torpedo_sys_comp;
+        let torpedo_sys: &mut crate::torpedo::TorpedoSystem = match torpedo_sys_comp.as_deref_mut() {
+            Some(c) => &mut c.0,
+            None => &mut torpedo_sys_res.0,
+        };
+
         let uuid = uuid::Uuid::new_v4().to_string();
         let tube_facing_rad = torpedo_sys
             .tube(tube.as_str())
             .map(|t| t.facing_deg.to_radians())
             .unwrap_or(0.0);
         let launch_heading = physics.yaw + tube_facing_rad;
-        let source_uuid = player_ship_q.single().map(|u| u.0.clone()).ok();
-        let homing_uuid = weapons_target
+        let source_uuid = source_uuid_opt.map(|u| u.0.clone());
+        let homing_uuid = weapons_target_opt
             .and_then(|wt| wt.0.clone())
             .or_else(|| target_uuid.clone());
         use crate::torpedo::LaunchResult;
@@ -1518,7 +1583,7 @@ fn handle_fire_torpedo(
             LaunchResult::Launched {
                 uuid: launched_uuid,
             } => {
-                if let Ok(mut wf) = weapon_fired_q.single_mut() {
+                if let Some(mut wf) = weapon_fired_comp {
                     wf.0 = true;
                 }
                 outbox.0.push((
@@ -1562,7 +1627,7 @@ pub fn drain_power_for_active_beam(
 }
 
 fn tick_torpedo_system(
-    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::Ship>>,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut world: ResMut<WorldResource>,
     time: Res<Time>,
@@ -1598,20 +1663,14 @@ fn tick_torpedo_system(
 ) {
     let dt = time.delta_secs();
     let mut weapons_target_opt = weapons_target_q.single_mut().ok();
-    // Prefer per-entity component; fall back to global resource for test compat.
-    // Only one of the two borrows is active at runtime; we shadow `torpedo_sys`
-    // in both branches so the rest of the function body is unchanged.
-    let mut torpedo_sys_comp_opt = torpedo_sys_q.single_mut().ok();
-    let torpedo_sys: &mut TorpedoSystemResource = match torpedo_sys_comp_opt {
-        Some(ref mut c) => &mut **c,
-        None => &mut *torpedo_sys_res,
-    };
 
-    // UUIDs of virtual (non-hittable) entities G— anchors / regions. Used to
+    // ── Build shared world snapshots up-front (used by every ship's tick) ───
+
+    // UUIDs of virtual (non-hittable) entities — anchors / regions. Used to
     // exclude them from the detonation target list below.
     let virtual_uuids: std::collections::HashSet<String> =
         virtual_entity_q.iter().map(|u| u.0.clone()).collect();
-    // World snapshot also carries virtual entities G�� recognise them by the
+    // World snapshot also carries virtual entities — recognise them by the
     // shape field (`Some("torus" | "sphere" | "box")` marks a region or
     // asteroid-field anchor). The live ECS filter above is the source of
     // truth when the entity is present; this catches snapshot-only entries.
@@ -1640,20 +1699,13 @@ fn tick_torpedo_system(
         }
         map
     };
-    let result = torpedo_sys.0.tick(dt, &target_positions);
-    for expired_uuid in result.expired {
-        outbox.0.push((
-            Target::All,
-            ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
-        ));
-    }
 
-    // Proximity detonation. Use live positions for the target list.
+    // Proximity detonation target list (uuid, x, z, radius). Built once and
+    // shared across every ship's `find_detonation_hits` call.
     let targets: Vec<(String, f32, f32, f32)> = {
         let mut map: std::collections::HashMap<String, (f32, f32, f32)> =
             std::collections::HashMap::new();
         for (u, t) in asteroid_q.iter() {
-            // Look up radius from WorldResource (AsteroidUuid has no radius field).
             let radius = world
                 .0
                 .entities
@@ -1676,7 +1728,6 @@ fn tick_torpedo_system(
                 .unwrap_or(0.0);
             map.insert(u.0.clone(), (t.translation.x, t.translation.z, radius));
         }
-        // Fill remaining from WorldResource snapshot (entities not currently in ECS).
         for e in world.0.entities.iter() {
             if virtual_uuids.contains(&e.uuid) || virtual_snapshot_uuids.contains(&e.uuid) {
                 continue;
@@ -1688,19 +1739,84 @@ fn tick_torpedo_system(
             .map(|(uuid, (x, z, r))| (uuid, x, z, r))
             .collect()
     };
-    let hits = torpedo_sys.0.find_detonation_hits(&targets);
-    for (torpedo_uuid, target_uuid) in hits {
-        // `handle_collision_full` returns the structured detonation
-        // (`damage_hull` always pierces; `damage_shields` is the
-        // shield-eligible portion to be split via `shield_pierce`).
-        let Some(detonation) = torpedo_sys.0.handle_collision_full(&torpedo_uuid) else {
-            continue;
-        };
-        outbox.0.push((
-            Target::All,
-            ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid },
-        ));
 
+    // ── Phase 1: tick every ship's TorpedoSystem + collect detonation events ──
+    //
+    // Iterate all ships (`With<Ship>`) with a `TorpedoSystemResource`
+    // component — player + NPC. Each ship ticks its own tubes, expires its
+    // own torpedoes, and produces its own detonation-hit list.
+    //
+    // The Resource fallback runs only when NO Ship entity carries the
+    // component; this preserves the legacy Resource-only test paths.
+    #[derive(Clone, Debug)]
+    struct Detonation {
+        target_uuid: String,
+        damage_hull: i32,
+        damage_shields: i32,
+        shield_pierce: f32,
+    }
+    let mut detonations: Vec<Detonation> = Vec::new();
+    let mut any_ship_component = false;
+
+    for mut torpedo_sys in torpedo_sys_q.iter_mut() {
+        any_ship_component = true;
+        let result = torpedo_sys.0.tick(dt, &target_positions);
+        for expired_uuid in result.expired {
+            outbox.0.push((
+                Target::All,
+                ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
+            ));
+        }
+        let hits = torpedo_sys.0.find_detonation_hits(&targets);
+        for (torpedo_uuid, target_uuid) in hits {
+            let Some(det) = torpedo_sys.0.handle_collision_full(&torpedo_uuid) else {
+                continue;
+            };
+            outbox.0.push((
+                Target::All,
+                ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid },
+            ));
+            detonations.push(Detonation {
+                target_uuid,
+                damage_hull: det.damage_hull,
+                damage_shields: det.damage_shields,
+                shield_pierce: det.shield_pierce,
+            });
+        }
+    }
+
+    // Resource-only fallback: tests that only insert the global
+    // `TorpedoSystemResource` (no Ship entity carrying it) still work.
+    if !any_ship_component {
+        let result = torpedo_sys_res.0.tick(dt, &target_positions);
+        for expired_uuid in result.expired {
+            outbox.0.push((
+                Target::All,
+                ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
+            ));
+        }
+        let hits = torpedo_sys_res.0.find_detonation_hits(&targets);
+        for (torpedo_uuid, target_uuid) in hits {
+            let Some(det) = torpedo_sys_res.0.handle_collision_full(&torpedo_uuid) else {
+                continue;
+            };
+            outbox.0.push((
+                Target::All,
+                ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid },
+            ));
+            detonations.push(Detonation {
+                target_uuid,
+                damage_hull: det.damage_hull,
+                damage_shields: det.damage_shields,
+                shield_pierce: det.shield_pierce,
+            });
+        }
+    }
+
+    // ── Phase 2: apply detonations to hulls / shields ───────────────────────
+
+    for det in detonations {
+        let target_uuid = det.target_uuid;
         let mut asteroid_destroyed = false;
         let mut npc_destroyed = false;
         let mut hit_x = 0.0_f32;
@@ -1721,8 +1837,8 @@ fn tick_torpedo_system(
             // component, with overflow leaking to hull. Hull damage
             // (always-pierces) goes straight to hull. Asteroids carry no
             // shield so the shielded path is a no-op for them.
-            let mut hull_damage = detonation.damage_hull as f32;
-            let shield_eligible = detonation.damage_shields as f32;
+            let mut hull_damage = det.damage_hull as f32;
+            let shield_eligible = det.damage_shields as f32;
             if shield_eligible > 0.0 {
                 if let Some(ref mut shields) = shield_comp {
                     let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
@@ -1731,7 +1847,7 @@ fn tick_torpedo_system(
                     } else {
                         let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
                             shield_eligible,
-                            detonation.shield_pierce,
+                            det.shield_pierce,
                         );
                         let leak = shields.0.apply_damage(absorbed.round() as i32, 0.0);
                         hull_damage += pierced + leak as f32;
@@ -3729,6 +3845,136 @@ station = "tactical"
         assert!(
             out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")),
             "expected TorpedoLaunched broadcast after Tactical fires torpedo"
+        );
+    }
+
+    /// Regression test for PRD #597 gap-3: an NPC ship spawned with a
+    /// `[torpedoes]` TOML block must carry its own `TorpedoSystemResource`
+    /// component, and firing from it via the `ai:<uuid>` token path must
+    /// launch a torpedo. Two subchecks:
+    ///
+    /// 1. Direct wiring: `TorpedoSystem::launch()` called on the NPC's own
+    ///    component successfully returns `Launched` (i.e. the tubes are
+    ///    populated and `torpedoes_remaining > 0`).
+    /// 2. End-to-end message routing: an `ai:<uuid>` `FireTorpedo` message
+    ///    arriving through `InboundMessage` reaches the NPC's tubes and
+    ///    emits a `TorpedoLaunched` broadcast, drawing from the NPC's own
+    ///    per-entity tube state — the player-ship `TorpedoSystemResource`
+    ///    resource is left untouched.
+    ///
+    /// NPC AI does not currently emit `FireTorpedo` messages autonomously;
+    /// verifying that pipeline is future work (see PRD #487 fine-grained
+    /// tactical decomposition). This test covers the wiring.
+    #[test]
+    fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
+        use crate::ai_plugin::AiTokenRegistry;
+        use crate::entity_spawner::EntityUuid;
+        use crate::torpedo::LaunchResult;
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+
+        let npc_uuid = "cc000000-0000-0000-0000-000000000001";
+
+        // Simulate what `src/entities/spawner.rs` does for an NPC with
+        // `[torpedoes]`: attach a `TorpedoSystemResource` component built
+        // from the runtime config, with default tubes (fore_port, fore_starboard, aft).
+        let torpedo_config = TorpedoConfig::default();
+        let npc_torpedo_sys = crate::torpedo::TorpedoSystem::new(torpedo_config);
+        let mut npc_ai_sources = crate::ship::control_source::ControlSourceResolver::new();
+        npc_ai_sources.set(
+            crate::system_registry::tactical_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid(npc_uuid.to_string()),
+                crate::ship_plugin::ShipSystemControlSources(npc_ai_sources),
+                ShipPhysics::default(),
+                WeaponsTarget::default(),
+                TorpedoSystemResource(npc_torpedo_sys),
+                crate::server_app::WeaponFiredThisTick::default(),
+                bevy::prelude::Transform::default(),
+            ))
+            .id();
+        {
+            let mut reg = app.world_mut().resource_mut::<AiTokenRegistry>();
+            reg.register_with_entity(npc_uuid, npc_entity);
+        }
+
+        // Subcheck 1: direct wiring — the NPC's own component has functional
+        // tubes and `.launch()` succeeds when the tube is loaded.
+        {
+            let mut ts = app
+                .world_mut()
+                .get_mut::<TorpedoSystemResource>(npc_entity)
+                .expect("NPC must have TorpedoSystemResource component");
+            ts.0.tube_mut("fore_port")
+                .expect("default TorpedoSystem must expose fore_port tube")
+                .load_state = crate::torpedo::TubeLoadState::Loaded;
+            let result = ts.0.launch(
+                "fore_port",
+                "direct-launch-uuid".to_string(),
+                0.0,
+                0.0,
+                0.0,
+                None,
+                Some(npc_uuid.to_string()),
+            );
+            assert!(
+                matches!(result, LaunchResult::Launched { .. }),
+                "direct TorpedoSystem::launch on NPC's own component must succeed, got {result:?}"
+            );
+        }
+
+        // Reload the tube for the end-to-end path (previous launch consumed it).
+        {
+            let mut ts = app
+                .world_mut()
+                .get_mut::<TorpedoSystemResource>(npc_entity)
+                .unwrap();
+            ts.0.tube_mut("fore_port").unwrap().load_state =
+                crate::torpedo::TubeLoadState::Loaded;
+            ts.0.in_flight.clear();
+        }
+
+        // Subcheck 2: end-to-end message routing.
+        // Snapshot the player-ship (resource) torpedo count to prove the NPC's
+        // fire draws from its own component, not from the shared Resource.
+        let player_torpedoes_before = app
+            .world()
+            .resource::<TorpedoSystemResource>()
+            .0
+            .torpedoes_remaining;
+
+        let ai_token = format!("ai:{}", npc_uuid);
+        push(
+            &mut app,
+            &ai_token,
+            ClientMessage::FireTorpedo {
+                tube: "fore_port".to_string(),
+                target_uuid: None,
+            },
+        );
+        let out = tick(&mut app);
+
+        assert!(
+            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")),
+            "NPC should broadcast TorpedoLaunched after ai:<uuid> FireTorpedo message"
+        );
+
+        // The player-ship Resource must NOT have been drained.
+        let player_torpedoes_after = app
+            .world()
+            .resource::<TorpedoSystemResource>()
+            .0
+            .torpedoes_remaining;
+        assert_eq!(
+            player_torpedoes_before, player_torpedoes_after,
+            "NPC fire must draw from its own per-entity TorpedoSystemResource, \
+             leaving the global (player-ship) Resource untouched"
         );
     }
 

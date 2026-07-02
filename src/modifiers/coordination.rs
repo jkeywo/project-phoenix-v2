@@ -37,81 +37,109 @@ impl Plugin for ModifierCoordinationPlugin {
 
 /// Power → modifier translator system.
 ///
-/// Reads the current `ShipPowerSystem` and `PowerMultiplierResource` each
-/// frame and writes the corresponding power-level modifiers into
-/// `ShipModifiers`.  This is the single routing point for power-side modifier
-/// writes — `handle_power_messages` and `tick_power_system` in simulation.rs
-/// no longer touch `ShipModifiers` directly.
+/// Iterates every ship (`With<Ship>`) — player + NPC — and writes each
+/// ship's own power-level modifiers into its own `ShipModifiers` component.
+/// This is the single routing point for power-side modifier writes;
+/// `handle_power_messages` and `tick_power_system` no longer touch
+/// `ShipModifiers` directly.
 ///
 /// The system is registered by `SimulationPlugin` (not by
 /// `ModifierCoordinationPlugin`) so it can be chained after the power‑handling
 /// systems with explicit `.after()` ordering.
 ///
-/// After PR 6 (PRD #597): prefers per-entity `ShipPowerSystem`,
-/// `PowerMultiplierResource`, and `ShipModifiers` components on the LocalShip
-/// entity. Falls back to the global Resources for tests that don't spawn the
-/// LocalShip entity with these components. Both the per-entity component and
-/// the Resource are updated (dual-write) so legacy readers stay in sync.
+/// After PRD #597 gap-4 closure: iterates all ships (player + NPC), using each
+/// ship's per-entity `ShipPowerSystem`, `PowerMultiplierResource`, and
+/// `ShipModifiers` components. NPCs are equipped with these components at
+/// spawn (see `src/entities/spawner.rs`), so their power settings translate
+/// into MaxSpeed / PhaserDamage / RadarRange modifiers via the same code
+/// path as the player ship. When the LocalShip carries its own components,
+/// the global `ShipModifiers` resource is dual-written so legacy
+/// Resource-based readers stay in sync.
+///
+/// Legacy Resource fallback: test fixtures that spawn a `LocalShip` without
+/// per-entity power/modifier components still work — the fallback path reads
+/// the global `ShipPowerSystem` + `PowerMultiplierResource` resources and
+/// writes to the global `ShipModifiers` resource.
 pub fn translate_power_modifiers(
     power_res: Option<Res<ShipPowerSystem>>,
     mult_res: Option<Res<PowerMultiplierResource>>,
     modifiers_res: Option<ResMut<ShipModifiers>>,
-    mut local_ship_q: Query<
+    mut ships_q: Query<
         (
             Option<&ShipPowerSystem>,
             Option<&PowerMultiplierResource>,
             Option<&mut ShipModifiers>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
 ) {
-    // Resolve the read state (power + multipliers). Prefer per-entity
-    // components on LocalShip; fall back to Resources.
-    let (power_read_state, multipliers_map) = {
-        // Read-only pass — collect the read state up-front so the later
-        // mutable borrow on ShipModifiers doesn't conflict.
-        let view = local_ship_q.single().ok();
-        let read_state = match view.and_then(|(p, _, _)| p) {
-            Some(p) => p.0.read_state(),
-            None => match power_res.as_deref() {
-                Some(p) => p.0.read_state(),
-                None => return,
-            },
+    let mut modifiers_res = modifiers_res;
+    let mut any_ship_had_component = false;
+    let mut local_mods_snapshot: Option<ShipModifiers> = None;
+
+    for (power_comp, mult_comp, mods_comp, is_local) in ships_q.iter_mut() {
+        // Only translate for ships that carry the per-entity power state.
+        // NPCs get ShipPowerSystem via the spawner unconditionally; the
+        // LocalShip has it via server_app spawn. Ships without it are
+        // legacy test fixtures — the Resource-fallback branch below handles
+        // those (only for LocalShip semantics).
+        let Some(power) = power_comp else {
+            continue;
         };
-        let default_mult;
-        let mult: &PowerMultiplierResource = match view.and_then(|(_, m, _)| m) {
+        any_ship_had_component = true;
+        let read_state = power.0.read_state();
+
+        let mult_default;
+        let mult: &PowerMultiplierResource = match mult_comp {
             Some(m) => m,
             None => match mult_res.as_deref() {
                 Some(m) => m,
                 None => {
-                    default_mult = PowerMultiplierResource::default();
-                    &default_mult
+                    mult_default = PowerMultiplierResource::default();
+                    &mult_default
                 }
             },
         };
-        (read_state, mult.multipliers.clone())
-    };
 
-    // Extract modifiers destination. Prefer per-entity component; fall back to
-    // Resource. When both are present, dual-write.
-    let mut modifiers_res = modifiers_res;
-    let mut view = local_ship_q.single_mut().ok();
-    match view.as_mut().and_then(|(_, _, m)| m.as_mut()) {
-        Some(mods_comp) => {
-            apply_power_modifiers_from_read_state(mods_comp, &power_read_state, &multipliers_map);
-            if let Some(mods_res) = modifiers_res.as_deref_mut() {
-                *mods_res = (**mods_comp).clone();
+        if let Some(mut mods) = mods_comp {
+            apply_power_modifiers_from_read_state(&mut mods, &read_state, &mult.multipliers);
+            if is_local {
+                local_mods_snapshot = Some(mods.clone());
             }
         }
+    }
+
+    // Dual-write: mirror the LocalShip's per-entity ShipModifiers into the
+    // global Resource so legacy Resource-based readers stay in sync.
+    if let (Some(local_mods), Some(mods_res)) =
+        (local_mods_snapshot, modifiers_res.as_deref_mut())
+    {
+        *mods_res = local_mods;
+        return;
+    }
+
+    // Resource-only fallback for tests that don't spawn any ship entity
+    // with a per-entity `ShipPowerSystem` component. Reads the global
+    // `ShipPowerSystem` + `PowerMultiplierResource` resources and writes
+    // the global `ShipModifiers` resource.
+    if any_ship_had_component {
+        return;
+    }
+    let Some(power) = power_res.as_deref() else {
+        return;
+    };
+    let read_state = power.0.read_state();
+    let mult_default;
+    let mult: &PowerMultiplierResource = match mult_res.as_deref() {
+        Some(m) => m,
         None => {
-            if let Some(mut mods_res) = modifiers_res {
-                apply_power_modifiers_from_read_state(
-                    &mut mods_res,
-                    &power_read_state,
-                    &multipliers_map,
-                );
-            }
+            mult_default = PowerMultiplierResource::default();
+            &mult_default
         }
+    };
+    if let Some(mut mods_res) = modifiers_res {
+        apply_power_modifiers_from_read_state(&mut mods_res, &read_state, &mult.multipliers);
     }
 }
 
@@ -706,6 +734,56 @@ mod tests {
         assert!(
             (max_speed - IMPULSE_SPEED_MULTIPLIER).abs() > 0.5,
             "MaxSpeed must not fall back to IMPULSE_SPEED_MULTIPLIER const"
+        );
+    }
+
+    /// Regression test for PRD #597 gap-4: NPC ships with per-entity
+    /// `ShipPowerSystem`, `PowerMultiplierResource`, and `ShipModifiers`
+    /// components must have their power settings translated into modifiers by
+    /// `translate_power_modifiers`, the same way the player ship does.
+    ///
+    /// Spawns an NPC ship (Ship marker, no LocalShip) with helm=3 and asserts
+    /// that after one tick the ship's own `ShipModifiers` component carries a
+    /// MaxSpeed bonus > 1.0.
+    #[test]
+    fn npc_ship_helm_power_translates_to_max_speed_modifier() {
+        use crate::modifiers::power_system::PowerSystem;
+        use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
+        use crate::server_app::Ship;
+
+        let mut app = App::new();
+        app.init_resource::<ShipModifiers>();
+
+        // Spawn an NPC ship (Ship marker, no LocalShip). Give it helm=3 and
+        // an explicit multipliers table so we can predict the bonus.
+        let mut power = PowerSystem::default();
+        power.helm = 3;
+        let mut mult = PowerMultiplierResource::default();
+        mult.multipliers
+            .insert(crate::messages::Console::Helm, [-0.5, 0.0, 1.0, 2.0]);
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                ShipPowerSystem(power),
+                mult,
+                ShipModifiers::new(),
+            ))
+            .id();
+
+        app.add_systems(Update, translate_power_modifiers);
+        app.update();
+
+        // The NPC's own per-entity ShipModifiers must reflect helm=3 → +1.0.
+        let mods_comp = app
+            .world()
+            .get::<ShipModifiers>(npc)
+            .expect("NPC must have ShipModifiers component");
+        let max_speed = mods_comp.get(&ModifierSlot::MaxSpeed);
+        assert!(
+            (max_speed - 2.0).abs() < 1e-6,
+            "NPC helm=3 should give MaxSpeed multiplier 2.0, got {max_speed}"
         );
     }
 }

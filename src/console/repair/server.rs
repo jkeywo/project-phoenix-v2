@@ -178,9 +178,13 @@ pub fn handle_dispatch_repair_team(
 
 /// Tick repair teams each frame: advance timers and apply HP restoration.
 ///
-/// After PR 6 (PRD #597): prefers the per-entity `ShipRepairTeams` and
-/// `ShipModifiers` components on the LocalShip entity; falls back to the
-/// global Resources for tests. Dual-writes to the `ShipRepairTeams` resource.
+/// After PRD #597 gap-5 closure: iterates every ship (`With<Ship>`) — player
+/// and NPC — so ships with a per-entity `ShipRepairTeams` component (spawned
+/// when their TOML declares a `[repair]` block) tick their own teams against
+/// their own `EntityConsoleHull`. Each ship applies its own
+/// `ShipModifiers.RepairRate` multiplier. The global `ShipRepairTeams`
+/// resource is dual-written from the LocalShip so legacy Resource-based
+/// readers (broadcasters, tests) stay in sync.
 pub fn tick_repair_teams(
     time: Res<Time>,
     mut teams_res: Option<ResMut<ShipRepairTeams>>,
@@ -190,33 +194,57 @@ pub fn tick_repair_teams(
             Option<&mut ShipRepairTeams>,
             Option<&ShipModifiers>,
             &mut crate::entity_spawner::EntityConsoleHull,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
 ) {
     let dt = time.delta_secs();
-    let Ok((mut teams_comp, modifiers_comp, mut hull)) = ship_q.single_mut() else {
-        return;
-    };
-    let default_modifiers;
-    let modifiers: &ShipModifiers = match modifiers_comp {
-        Some(m) => m,
-        None => match modifiers_res.as_deref() {
+    let default_modifiers = ShipModifiers::new();
+    let mut local_teams_snapshot: Option<crate::repair_teams::RepairTeams> = None;
+
+    for (teams_comp, modifiers_comp, mut hull, is_local) in ship_q.iter_mut() {
+        // Only tick ships that carry per-entity repair teams. NPCs get the
+        // component only when their TOML declares `[repair]`. Ships without
+        // it silently skip — matching the historical "no teams == no tick"
+        // behaviour.
+        let Some(mut teams) = teams_comp else {
+            continue;
+        };
+        let modifiers: &ShipModifiers = match modifiers_comp {
             Some(m) => m,
-            None => {
-                default_modifiers = ShipModifiers::new();
-                &default_modifiers
-            }
-        },
-    };
-    let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
-    if let Some(t) = teams_comp.as_deref_mut() {
-        t.0.tick(dt * repair_mult, &mut hull.0);
-        if let Some(r) = teams_res.as_deref_mut() {
-            r.0 = t.0.clone();
+            None => match modifiers_res.as_deref() {
+                Some(m) => m,
+                None => &default_modifiers,
+            },
+        };
+        let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
+        teams.0.tick(dt * repair_mult, &mut hull.0);
+        if is_local {
+            local_teams_snapshot = Some(teams.0.clone());
         }
-    } else if let Some(r) = teams_res.as_deref_mut() {
-        r.0.tick(dt * repair_mult, &mut hull.0);
+    }
+
+    // Dual-write: mirror the LocalShip's teams into the global Resource so
+    // legacy Resource-based readers stay in sync.
+    if let (Some(local_teams), Some(r)) = (local_teams_snapshot, teams_res.as_deref_mut()) {
+        r.0 = local_teams;
+        return;
+    }
+
+    // Resource-only fallback for tests that don't spawn a Ship entity with
+    // the per-entity `ShipRepairTeams` component. Ticks the global Resource
+    // against the LocalShip's hull only.
+    let mut hull_only_q = ship_q.iter_mut();
+    if let Some((_, _, mut hull, _)) = hull_only_q.find(|(_, _, _, is_local)| *is_local) {
+        if let Some(r) = teams_res.as_deref_mut() {
+            let modifiers = modifiers_res
+                .as_deref()
+                .cloned()
+                .unwrap_or_else(ShipModifiers::new);
+            let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
+            r.0.tick(dt * repair_mult, &mut hull.0);
+        }
     }
 }
 
@@ -288,19 +316,61 @@ fn publish_repair_blackboard(
 
 // ── AI controller stub ─────────────────────────────────────────────────────────
 
-/// Per-kind AI loop for repair. Loops over ALL ship entities (player and NPC)
-/// where the Repair system is `ControlSource::Ai`.
+/// Per-kind AI loop for repair. Iterates every ship (`With<Ship>`) whose
+/// Repair system is `ControlSource::Ai` and auto-dispatches any idle team to
+/// the most-damaged console on that ship's hull.
 ///
-/// Currently a compile-verified stub — Repair AI auto-dispatches teams to
-/// damaged consoles (the business logic is deferred to later fine-grained
-/// decomposition in PRD #487).
-pub fn operate_repair_ai(ships: Query<&ShipSystemControlSources>) {
-    for sources in &ships {
+/// The most-damaged console is the one with the largest absolute HP deficit
+/// (`max - current`) that is still > 0. Ties are broken by the entry order in
+/// `EntityConsoleHull`. Ships with no per-entity `ShipRepairTeams` component
+/// silently skip — an NPC without a `[repair]` block simply has no teams to
+/// dispatch.
+///
+/// After PRD #597 gap-5 closure: same code path for player Backfill AI and
+/// NPC AI. The only differentiator is `ShipSystemControlSources`
+/// (data-driven) and `LocalShip` marker.
+pub fn operate_repair_ai(
+    mut ships: Query<
+        (
+            &ShipSystemControlSources,
+            Option<&mut ShipRepairTeams>,
+            Option<&crate::entity_spawner::EntityConsoleHull>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (sources, teams_comp, hull_comp) in ships.iter_mut() {
         let policy = sources.0.policy_for(&repair_system_id());
         if !policy.operate_ai {
             continue;
         }
-        // TODO: implement repair AI logic (auto-dispatch teams to lowest-HP console)
+        // Need both a team roster and a hull to make any decision.
+        let (Some(mut teams), Some(hull)) = (teams_comp, hull_comp) else {
+            continue;
+        };
+        // Pick the console with the largest current HP deficit (max - cur > 0).
+        // Ties broken by entry order (first-declared wins).
+        let target: Option<Console> = hull
+            .0
+            .entries()
+            .iter()
+            .filter(|(_, cur, max)| max - cur > 0.0)
+            .max_by(|(_, a_cur, a_max), (_, b_cur, b_max)| {
+                let a_deficit = a_max - a_cur;
+                let b_deficit = b_max - b_cur;
+                a_deficit
+                    .partial_cmp(&b_deficit)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(c, _, _)| c.clone());
+        let Some(target) = target else {
+            continue;
+        };
+        // Dispatch every idle team to the target. Reuses the same
+        // `RepairTeams::dispatch` entry point that the human console uses.
+        while let Some(idx) = teams.0.lowest_free_team() {
+            teams.0.dispatch(idx, target.clone());
+        }
     }
 }
 
@@ -866,4 +936,100 @@ mod tests {
             "NPC entity must still exist after operate_repair_ai runs"
         );
     }
+
+    /// Regression test for PRD #597 gap-5: an NPC ship that carries a per-entity
+    /// `[repair]` block (ShipRepairTeams + EntityConsoleHull) must have its
+    /// teams ticked by `tick_repair_teams` AND auto-dispatched by
+    /// `operate_repair_ai`, and the resulting HP restoration must land on its
+    /// own hull — no LocalShip marker involved.
+    ///
+    /// Sequence: spawn NPC ship (Ship marker only, no LocalShip) with hull
+    /// damaged well below max, register both AI + tick systems, run enough
+    /// simulated time for a team to travel + start repairing, assert the
+    /// NPC hull's total_current has increased.
+    #[test]
+    fn npc_ship_with_repair_teams_regenerates_hull_over_time() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(1000),
+        ));
+        app.add_systems(Update, (operate_repair_ai, tick_repair_teams).chain());
+
+        // NPC ship: Ship marker, AI-controlled Repair, damaged hull.
+        // Damage the hull by 40 HP so total_current == 60 (max = 100).
+        let mut ai_resolver = ControlSourceResolver::new();
+        ai_resolver.set(repair_system_id(), ControlSource::Ai);
+        let mut hull = crate::damage::ConsoleHull::from_config(&[(Console::Helm, 100.0_f32)]);
+        let mut rng = rand::rng();
+        hull.apply_damage(40.0, &mut rng);
+        let hp_before = hull.total_current();
+        assert!(
+            (hp_before - 60.0).abs() < 1e-3,
+            "test fixture: hull should have 60 HP after 40 damage, got {hp_before}"
+        );
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                ShipSystemControlSources(ai_resolver),
+                ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
+                crate::entity_spawner::EntityConsoleHull(hull),
+            ))
+            .id();
+
+        // Warm-up tick so TimePlugin registers a delta.
+        app.update();
+        // After warm-up, operate_repair_ai should have dispatched at least
+        // one team. If it didn't, the wiring is wrong — fail loudly with a
+        // useful diagnostic before spending 20 more ticks.
+        {
+            let teams = app
+                .world()
+                .get::<ShipRepairTeams>(npc)
+                .expect("NPC must have ShipRepairTeams");
+            let any_dispatched = teams
+                .0
+                .slots()
+                .iter()
+                .any(|s| !matches!(s, crate::messages::TeamSlot::Idle));
+            assert!(
+                any_dispatched,
+                "operate_repair_ai should have dispatched at least one team after \
+                 warm-up, got {:?}",
+                teams.0.slots()
+            );
+        }
+        // Bevy's `TimeUpdateStrategy::ManualDuration` first-tick warm-up
+        // ends up producing a smaller-than-configured `delta_secs` (roughly
+        // 250 ms/tick observed under 1000 ms configuration). 200 iterations
+        // is comfortably more than enough to cover the 5 s travel + several
+        // seconds of repair at 0.5 HP/s.
+        for _ in 0..200 {
+            app.update();
+        }
+        let teams_dbg = app
+            .world()
+            .get::<ShipRepairTeams>(npc)
+            .expect("teams")
+            .0
+            .slots()
+            .to_vec();
+
+        let hull_after = app
+            .world()
+            .get::<crate::entity_spawner::EntityConsoleHull>(npc)
+            .expect("NPC must still have hull component");
+        let hp_after = hull_after.0.total_current();
+        assert!(
+            hp_after > hp_before,
+            "NPC hull HP must increase after operate_repair_ai + tick_repair_teams \
+             (before={hp_before}, after={hp_after}, teams={teams_dbg:?})"
+        );
+    }
 }
+
+

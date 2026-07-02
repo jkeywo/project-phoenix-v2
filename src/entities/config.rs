@@ -286,6 +286,11 @@ pub struct ConsoleHullEntry {
     /// Defaults to `0.25` (below 25 % → Disabled).
     #[serde(default = "default_disabled_threshold_pct")]
     pub disabled_threshold_pct: f32,
+    /// Performance reduction applied when the console is in the `Damaged` or
+    /// `Disabled` tier (fraction, e.g. `0.15` = 15 % reduction).
+    /// Defaults to `0.15`.
+    #[serde(default = "default_debuff_magnitude")]
+    pub debuff_magnitude: f32,
 }
 
 fn default_damaged_threshold_pct() -> f32 {
@@ -294,6 +299,10 @@ fn default_damaged_threshold_pct() -> f32 {
 
 fn default_disabled_threshold_pct() -> f32 {
     0.25
+}
+
+fn default_debuff_magnitude() -> f32 {
+    0.15
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

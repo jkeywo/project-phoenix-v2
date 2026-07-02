@@ -520,6 +520,7 @@ pub fn spawn_entity(
                     crate::damage::ConsoleTierConfig {
                         damaged_threshold_pct: e.damaged_threshold_pct,
                         disabled_threshold_pct: e.disabled_threshold_pct,
+                        debuff_magnitude: e.debuff_magnitude,
                     },
                 ))
                 .collect();

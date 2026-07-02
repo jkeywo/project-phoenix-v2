@@ -68,6 +68,11 @@ pub struct ConsoleHullStatus {
     pub max_hp: f32,
     /// Derived damage tier for this console.
     pub tier: crate::damage::DamageTier,
+    /// Active debuff magnitude for this console (0.0 when Operational or
+    /// Destroyed, tier_config.debuff_magnitude when Damaged or Disabled).
+    /// Clients can use this to render a debuff indicator on the repair panel.
+    #[serde(default)]
+    pub debuff_magnitude: f32,
 }
 
 /// A serialisable snapshot of a single shield facing for broadcasting.

@@ -504,6 +504,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     current: *cur,
                     max_hp: *max,
                     tier: h.0.tier_for(c.clone()),
+                    debuff_magnitude: h.0.debuff_magnitude_for(c.clone()),
                 }).collect::<Vec<_>>())
                 .unwrap_or_default();
             let hull_changed = world.resource::<LastBroadcastHull>().0 != hull_current;

@@ -38,6 +38,11 @@ pub struct ConsoleTierConfig {
     /// HP fraction below which the console enters the `Disabled` tier.
     /// Default: `0.25` (below 25 % → Disabled).
     pub disabled_threshold_pct: f32,
+    /// Performance reduction applied when the console is in the `Damaged` or
+    /// `Disabled` tier (e.g. `0.15` = 15 % reduction). Sourced from
+    /// `debuff_magnitude` in the `[[hull.console_hull]]` TOML block.
+    /// Default: `0.15`.
+    pub debuff_magnitude: f32,
 }
 
 impl Default for ConsoleTierConfig {
@@ -45,6 +50,7 @@ impl Default for ConsoleTierConfig {
         Self {
             damaged_threshold_pct: 0.75,
             disabled_threshold_pct: 0.25,
+            debuff_magnitude: 0.15,
         }
     }
 }
@@ -274,6 +280,25 @@ impl ConsoleHull {
             }
         }
         None
+    }
+
+    /// Return the active debuff magnitude for the given console.
+    ///
+    /// - `Operational` or `Destroyed` → `0.0` (fully operational or fully offline;
+    ///   no partial debuff applies).
+    /// - `Damaged` or `Disabled` → `tier_config.debuff_magnitude` from the
+    ///   per-console TOML configuration.
+    ///
+    /// Returns `0.0` for consoles not tracked by this hull.
+    pub fn debuff_magnitude_for(&self, console: Console) -> f32 {
+        let idx = self.entries.iter().position(|(c, _, _)| *c == console);
+        let Some(idx) = idx else {
+            return 0.0;
+        };
+        match self.tier_for(console) {
+            DamageTier::Operational | DamageTier::Destroyed => 0.0,
+            DamageTier::Damaged | DamageTier::Disabled => self.tier_configs[idx].debuff_magnitude,
+        }
     }
 
     /// Returns `true` if the given console is at its maximum HP (or not tracked).
@@ -674,6 +699,7 @@ mod tests {
         let cfg = ConsoleTierConfig {
             damaged_threshold_pct: 0.50,
             disabled_threshold_pct: 0.10,
+            debuff_magnitude: 0.15,
         };
         let mut hull = ConsoleHull::from_config_with_tiers(&[(Console::Helm, 100.0, cfg)]);
         let mut rng = rand::rng();
@@ -729,5 +755,65 @@ mod tests {
         // Fully repaired → Operational.
         hull.restore(Console::Helm, 100.0);
         assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+    }
+
+    // ── debuff_magnitude_for tests ────────────────────────────────────────────
+
+    #[test]
+    fn debuff_magnitude_for_operational_console_returns_zero() {
+        // Full HP → Operational → no debuff.
+        let hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        assert!(
+            (hull.debuff_magnitude_for(Console::Helm) - 0.0).abs() < 1e-6,
+            "Operational console should have 0.0 debuff magnitude"
+        );
+    }
+
+    #[test]
+    fn debuff_magnitude_for_damaged_console_returns_config_value() {
+        // 50% HP → Damaged tier → returns tier_config.debuff_magnitude (default 0.15).
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut rng = rand::rng();
+        hull.apply_damage(100.0, &mut rng);
+        hull.restore(Console::Helm, 50.0); // 50% < 75% threshold → Damaged
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+        let debuff = hull.debuff_magnitude_for(Console::Helm);
+        assert!(
+            (debuff - 0.15).abs() < 1e-6,
+            "Damaged console should return default debuff_magnitude 0.15, got {debuff}"
+        );
+    }
+
+    #[test]
+    fn debuff_magnitude_for_damaged_console_respects_custom_config() {
+        // Custom debuff_magnitude of 0.30 in tier config.
+        let cfg = ConsoleTierConfig {
+            damaged_threshold_pct: 0.75,
+            disabled_threshold_pct: 0.25,
+            debuff_magnitude: 0.30,
+        };
+        let mut hull = ConsoleHull::from_config_with_tiers(&[(Console::Helm, 100.0, cfg)]);
+        let mut rng = rand::rng();
+        hull.apply_damage(100.0, &mut rng);
+        hull.restore(Console::Helm, 50.0); // 50% → Damaged
+        let debuff = hull.debuff_magnitude_for(Console::Helm);
+        assert!(
+            (debuff - 0.30).abs() < 1e-6,
+            "Damaged console should return custom debuff_magnitude 0.30, got {debuff}"
+        );
+    }
+
+    #[test]
+    fn debuff_magnitude_for_destroyed_console_returns_zero() {
+        // 0 HP → Destroyed → no partial debuff (fully offline).
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut rng = rand::rng();
+        hull.apply_damage(100.0, &mut rng);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Destroyed);
+        let debuff = hull.debuff_magnitude_for(Console::Helm);
+        assert!(
+            (debuff - 0.0).abs() < 1e-6,
+            "Destroyed console should have 0.0 debuff magnitude, got {debuff}"
+        );
     }
 }

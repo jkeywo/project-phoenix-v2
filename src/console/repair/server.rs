@@ -289,6 +289,7 @@ fn publish_repair_blackboard(
                     current: *cur,
                     max_hp: *max,
                     tier: h.0.tier_for(c.clone()),
+                    debuff_magnitude: h.0.debuff_magnitude_for(c.clone()),
                 })
                 .collect()
         })
@@ -351,11 +352,15 @@ pub fn operate_repair_ai(
         };
         // Pick the console with the largest current HP deficit (max - cur > 0).
         // Ties broken by entry order (first-declared wins).
+        // Destroyed consoles (hp == 0) are skipped — they are unrepairable.
         let target: Option<Console> = hull
             .0
             .entries()
             .iter()
-            .filter(|(_, cur, max)| max - cur > 0.0)
+            .filter(|(c, cur, max)| {
+                max - cur > 0.0
+                    && hull.0.tier_for((*c).clone()) != crate::damage::DamageTier::Destroyed
+            })
             .max_by(|(_, a_cur, a_max), (_, b_cur, b_max)| {
                 let a_deficit = a_max - a_cur;
                 let b_deficit = b_max - b_cur;

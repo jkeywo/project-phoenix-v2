@@ -145,7 +145,8 @@ impl RepairTeams {
                     if *elapsed >= travel_duration {
                         let console = console.clone();
                         let is_full = hull.is_at_max(&console);
-                        if is_full {
+                        let is_destroyed = hull.tier_for(console.clone()) == crate::damage::DamageTier::Destroyed;
+                        if is_full || is_destroyed {
                             *slot = TeamSlot::Returning {
                                 remaining: 0.0,
                                 queued: None,
@@ -156,6 +157,15 @@ impl RepairTeams {
                     }
                 }
                 TeamSlot::Repairing { console } => {
+                    // Do not repair a Destroyed console — the latch is
+                    // unrepairable by a repair team alone.
+                    if hull.tier_for(console.clone()) == crate::damage::DamageTier::Destroyed {
+                        *slot = TeamSlot::Returning {
+                            remaining: travel_duration,
+                            queued: None,
+                        };
+                        continue;
+                    }
                     let hp_to_restore = dt * repair_rate;
                     hull.restore(console.clone(), hp_to_restore);
                     if hull.is_at_max(console) {
@@ -317,15 +327,15 @@ mod tests {
     #[test]
     fn repairing_restores_hp_at_correct_rate() {
         let mut teams = RepairTeams::new(1);
-        let mut hull = hull_damaged(0.0); // 0 HP
+        let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed)
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull); // travel
-                                    // Now repairing; restore for 2s should give 1 HP
+                                    // Now repairing; restore for 2s should give 1 more HP (0.5 HP/s)
         teams.tick(2.0, &mut hull);
         let hp = hull.current_for(Console::Helm).unwrap();
         assert!(
-            (hp - 1.0).abs() < 1e-4,
-            "expected 1 HP after 2s repair, got {hp}"
+            (hp - 2.0).abs() < 1e-4,
+            "expected 2 HP after 2s repair starting from 1 HP, got {hp}"
         );
     }
 
@@ -369,14 +379,14 @@ mod tests {
     #[test]
     fn full_lifecycle_travel_repair_return_idle() {
         let mut teams = RepairTeams::new(1);
-        let mut hull = hull_damaged(0.0); // fully damaged
+        let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed — repairable)
         teams.dispatch(0, Console::Helm);
 
         // Travelling
         teams.tick(5.0, &mut hull);
         assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
 
-        // Repairing until full (25 HP at 0.5 HP/s = 50s)
+        // Repairing until full (24 HP remaining at 0.5 HP/s = 48s)
         teams.tick(50.0, &mut hull);
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
 
@@ -503,7 +513,7 @@ mod tests {
     #[test]
     fn redirect_while_repairing_sets_returning_with_travel_duration() {
         let mut teams = RepairTeams::new(1);
-        let mut hull = hull_damaged(0.0);
+        let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed — repairable)
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull); // travel → Repairing
         assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
@@ -516,7 +526,7 @@ mod tests {
     #[test]
     fn recall_while_repairing_sets_returning_no_queue() {
         let mut teams = RepairTeams::new(1);
-        let mut hull = hull_damaged(0.0);
+        let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed — repairable)
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull); // travel → Repairing
         teams.dispatch(0, Console::Helm); // recall
@@ -529,12 +539,12 @@ mod tests {
     #[test]
     fn partial_hp_restored_before_recall_is_preserved() {
         let mut teams = RepairTeams::new(1);
-        let mut hull = hull_damaged(0.0); // 0 HP
+        let mut hull = hull_damaged(1.0); // 1 HP (Disabled, not Destroyed — repairable)
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull); // travel → Repairing
-        teams.tick(2.0, &mut hull); // restore 1 HP
+        teams.tick(2.0, &mut hull); // restore 1 HP (0.5 HP/s * 2s = 1 HP → now 2 HP)
         let hp_before_recall = hull.current_for(Console::Helm).unwrap();
-        assert!((hp_before_recall - 1.0).abs() < 1e-4);
+        assert!((hp_before_recall - 2.0).abs() < 1e-4, "expected 2 HP before recall, got {hp_before_recall}");
         teams.dispatch(0, Console::Helm); // recall
                                           // HP should not have changed
         let hp_after_recall = hull.current_for(Console::Helm).unwrap();
@@ -576,6 +586,42 @@ mod tests {
         assert!(
             matches!(&teams.slots()[1], TeamSlot::Idle),
             "team 1 should be unaffected"
+        );
+    }
+
+    // ── Destroyed latch tests ─────────────────────────────────────────────────
+
+    /// A repair team dispatched to a Destroyed console (hp == 0) must NOT
+    /// restore any HP — the Destroyed latch is unrepairable.
+    #[test]
+    fn destroyed_console_is_not_repaired_by_repair_tick() {
+        let mut teams = RepairTeams::new(1);
+        // Build a hull with Helm at 0 HP (Destroyed).
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 25.0)]);
+        let mut rng = rand::rng();
+        hull.apply_damage(1000.0, &mut rng); // wipe to 0
+        assert_eq!(
+            hull.tier_for(Console::Helm),
+            crate::damage::DamageTier::Destroyed,
+            "precondition: Helm must be Destroyed"
+        );
+        let hp_before = hull.current_for(Console::Helm).unwrap();
+        assert!((hp_before - 0.0).abs() < 1e-6, "precondition: 0 HP");
+
+        teams.dispatch(0, Console::Helm);
+        // Travel to console.
+        teams.tick(5.0, &mut hull);
+        // Team should not enter Repairing — it should bounce directly to Returning.
+        assert!(
+            !matches!(&teams.slots()[0], TeamSlot::Repairing { .. }),
+            "team should not enter Repairing state for a Destroyed console"
+        );
+        // Simulate several seconds of what would have been repair time.
+        teams.tick(10.0, &mut hull);
+        let hp_after = hull.current_for(Console::Helm).unwrap();
+        assert!(
+            (hp_after - 0.0).abs() < 1e-6,
+            "Destroyed console HP must remain 0 after repair tick (got {hp_after})"
         );
     }
 }

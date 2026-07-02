@@ -564,6 +564,7 @@ fn setup_fallback_world(mut commands: Commands, _world: ResMut<WorldResource>) {
         mesh: None,
         star: None,
         light: Vec::new(),
+        ship_config: None,
     };
     let ship_uuid = crate::entity_loader::assign_uuid();
     let ship_entity = crate::entity_spawner::spawn_entity(
@@ -7371,6 +7372,7 @@ condition = "on_world_loaded"
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: None,
@@ -7649,6 +7651,7 @@ condition = "on_world_loaded"
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["npc".into()],
             shape: None,
             effects: None,

@@ -263,7 +263,19 @@ pub fn spawn_entity(
             crate::server_app::ShipSystemBlackboards::default(),
         ));
 
-        let ship_config = crate::ship_plugin::ShipConfigComponent::default();
+        // Build the ship's ShipConfigComponent from its own TOML [[station]]/
+        // [[system]]/[power_groups] blocks, parsed the same way player_ship.toml
+        // is parsed. If the entity TOML declared none, this is a truly empty
+        // config (no stations, no systems) — the loop below simply sets nothing.
+        let ship_config = match &config.ship_config {
+            Some(sc) => crate::ship_plugin::ShipConfigComponent(sc.clone()),
+            None => crate::ship_plugin::ShipConfigComponent(crate::ship::config::ShipConfig {
+                stations: vec![],
+                systems: vec![],
+                power_groups: std::collections::HashMap::new(),
+                coordination_lag_secs: 0.0,
+            }),
+        };
         let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
         for system in &ship_config.0.systems {
             resolver.set(
@@ -586,6 +598,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             hull: None,
             collider: None,
@@ -627,6 +640,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             hull: None,
             collider: None,
@@ -665,6 +679,7 @@ mod tests {
         let config = EntityConfig {
             name: Some("Sun".to_string()),
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             hull: None,
             collider: None,
@@ -708,6 +723,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             hull: None,
             collider: None,
@@ -749,6 +765,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             collider: Some(ColliderConfig {
                 shape: ColliderShape::Ball,
@@ -834,6 +851,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            ship_config: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -854,6 +872,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["field".to_string()],
             asteroid_field: Some(AsteroidFieldConfig {
                 inner_radius: 100.0,
@@ -912,6 +931,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             appearance: Some(AppearanceConfig {
                 colour: "#ff0000".to_string(),
@@ -995,6 +1015,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string(), "nebula".to_string()],
             shape: Some(RegionShape::Sphere { radius: 150.0 }),
             effects: Some(crate::region_effects::RegionEffectsConfig {
@@ -1053,6 +1074,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius: 100.0 }),
             effects: None,
@@ -1101,6 +1123,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             faction: Some(faction_id),
             hull: None,
@@ -1173,6 +1196,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
                 hull_integrity: 60.0,
@@ -1296,6 +1320,7 @@ max_hp = 50.0
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
                 hull_integrity: 200.0,
@@ -1417,5 +1442,67 @@ max_hp = 50.0
                 sys.id.0
             );
         }
+    }
+
+    #[test]
+    fn npc_ship_gets_shipconfig_from_its_own_toml_stations_and_systems() {
+        // Regression test for PRD #597 PR-3 (correct redo): NPC ship TOMLs with
+        // [[system]] blocks must produce a ShipConfigComponent containing those
+        // systems — not the player ship's config, and not an empty config.
+        use crate::entity_config::EntityConfig;
+        use bevy::prelude::*;
+
+        let toml = r#"
+tags = ["ship", "npc"]
+
+[collider]
+shape = "Capsule"
+radius = 2.0
+length = 4.0
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "test-doctrine"
+text = "Test"
+directive_kind = "Destroy"
+base_priority = 1.0
+
+[[system]]
+id = "helm"
+kind = "helm"
+ai_only = true
+
+[[system]]
+id = "tactical"
+kind = "tactical"
+ai_only = true
+"#;
+        let config = EntityConfig::from_toml(toml).expect("toml must parse");
+        assert!(config.ship_config.is_some(), "EntityConfig.ship_config must be populated from [[system]] blocks");
+        let sc = config.ship_config.as_ref().unwrap();
+        assert_eq!(sc.systems.len(), 2, "expected two systems (helm, tactical)");
+        assert_eq!(sc.stations.len(), 0, "NPCs have no stations");
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        let mut cmds = app.world_mut().commands();
+        let entity = spawn_entity(
+            &mut cmds,
+            &config,
+            bevy::math::Vec3::ZERO,
+            "npc-shipconfig-test".into(),
+            None,
+        );
+        app.world_mut().flush();
+
+        let comp = app
+            .world()
+            .get::<crate::ship_plugin::ShipConfigComponent>(entity)
+            .expect("NPC ship must have ShipConfigComponent");
+        assert_eq!(comp.0.systems.len(), 2, "spawned NPC entity carries its two declared systems");
+        let system_ids: Vec<&str> = comp.0.systems.iter().map(|s| s.id.0.as_str()).collect();
+        assert!(system_ids.contains(&"helm"), "helm system must be present");
+        assert!(system_ids.contains(&"tactical"), "tactical system must be present");
     }
 }

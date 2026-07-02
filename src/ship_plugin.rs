@@ -1489,6 +1489,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(RegionEffectsConfig {

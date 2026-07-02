@@ -1132,21 +1132,55 @@ pub struct EntityConfig {
     /// Renderer light sources attached to this entity.
     #[serde(default)]
     pub light: Vec<LightConfig>,
+    /// Ship stations/systems/power_groups block, populated by parsing the same
+    /// `[[station]]` / `[[system]]` / `[power_groups.*]` TOML blocks that
+    /// `player_ship.toml` uses. Every ship-like entity (player + NPCs) reads
+    /// its `ShipConfig` from this field via the same code path — no
+    /// entity-type-specific branches.
+    #[serde(skip)]
+    pub ship_config: Option<crate::ship::config::ShipConfig>,
 }
 
 impl EntityConfig {
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
         let mut value: toml::Value = toml::from_str(s)?;
-        if let Some(table) = value.as_table_mut() {
-            // These sections are parsed from player_ship.toml by other owners
-            // (stations_config / ship::config); strip them so deny_unknown_fields
-            // doesn't reject ship templates.
+        // Extract the ship-config sections BEFORE stripping so we can parse
+        // them via ShipConfig::from_toml (the same path player_ship.toml uses).
+        let ship_config_toml = if let Some(table) = value.as_table_mut() {
+            let has_station = table.contains_key("station");
+            let has_system = table.contains_key("system");
+            let has_power_groups = table.contains_key("power_groups");
+            let out = if has_station || has_system || has_power_groups {
+                let mut ship_table = toml::value::Table::new();
+                if let Some(v) = table.get("station").cloned() { ship_table.insert("station".to_string(), v); }
+                if let Some(v) = table.get("system").cloned() { ship_table.insert("system".to_string(), v); }
+                if let Some(v) = table.get("power_groups").cloned() { ship_table.insert("power_groups".to_string(), v); }
+                Some(toml::Value::Table(ship_table))
+            } else {
+                None
+            };
+            // Now strip so deny_unknown_fields doesn't reject.
             table.remove("stations");
             table.remove("station");
             table.remove("system");
             table.remove("power_groups");
-        }
+            out
+        } else {
+            None
+        };
         let mut config: EntityConfig = value.try_into()?;
+
+        // Parse the ship_config sub-block via the shared ShipConfig code path.
+        if let Some(ship_toml_value) = ship_config_toml {
+            let ship_toml_str = toml::to_string(&ship_toml_value)
+                .map_err(|e| serde::de::Error::custom(format!("ship_config re-serialise failed: {e}")))?;
+            let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
+                .map_err(|e| serde::de::Error::custom(format!("system registry init failed: {e:?}")))?;
+            let kinds: Vec<&str> = registry.kinds().collect();
+            let ship_config = crate::ship::config::parse_and_validate(&ship_toml_str, &kinds)
+                .map_err(|e| serde::de::Error::custom(format!("ship_config validation failed: {e:?}")))?;
+            config.ship_config = Some(ship_config);
+        }
 
         // Validation: region entity with effects but no shape is an error.
         if let Some(ref effects) = config.effects {

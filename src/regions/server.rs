@@ -310,6 +310,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(shape),
             effects: None,
@@ -562,6 +563,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -611,6 +613,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -883,6 +886,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1021,6 +1025,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1274,6 +1279,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1313,6 +1319,7 @@ mod tests {
             name: None,
             star: None,
             light: Vec::new(),
+            ship_config: None,
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {

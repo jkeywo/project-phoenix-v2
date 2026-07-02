@@ -4,9 +4,9 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShipConfig {
-    #[serde(rename = "station")]
+    #[serde(default, rename = "station")]
     pub stations: Vec<StationConfig>,
-    #[serde(rename = "system")]
+    #[serde(default, rename = "system")]
     pub systems: Vec<SystemInstanceConfig>,
     #[serde(default)]
     pub power_groups: HashMap<PowerGroupId, PowerGroupConfig>,
@@ -248,9 +248,9 @@ pub fn validate(
     config: &ShipConfig,
     registered_system_kinds: &[&str],
 ) -> Result<(), ShipConfigError> {
-    if config.stations.is_empty() {
-        return Err(ShipConfigError::EmptyStations);
-    }
+    // Empty stations is legitimate: NPC ships have no human consoles. Every
+    // system on such a config must be `ai_only = true` (enforced below via the
+    // OwnerlessSystemWithoutAiOnly check, since no station can own them).
     if config.systems.is_empty() {
         return Err(ShipConfigError::EmptySystems);
     }

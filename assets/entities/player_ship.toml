@@ -48,6 +48,20 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.10
 
+[[hull.console_hull]]
+console = "HelmEnginePort"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.console_hull]]
+console = "HelmEngineStarboard"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
@@ -364,6 +378,36 @@ power_group = "ops"
 [[system]]
 id = "helm"
 kind = "helm"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-joystick"
+kind = "helm_joystick"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-engine-port"
+kind = "helm_engine"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-engine-starboard"
+kind = "helm_engine"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-radar"
+kind = "helm_radar"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
 station = "helm"
 power_group = "helm"
 

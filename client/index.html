@@ -464,6 +464,7 @@
       color: #d8dde2;
       font-family: 'Chakra Petch', system-ui, sans-serif;
       -webkit-user-select: none; user-select: none;
+      pointer-events: auto;
     }
     /* Ship header */
     #lobby-header { display: flex; align-items: center; justify-content: space-between;
@@ -948,13 +949,9 @@
     }
 
     function send(type, data) {
-      if (!conn || !conn.open) {
-        console.warn('[client] send dropped — conn:', conn, 'open:', conn && conn.open, 'type:', type);
-        return;
-      }
+      if (!conn || !conn.open) return;
       if (!NO_CLICK.has(type)) playClick();
       const msg = data !== undefined ? { type, data } : { type };
-      console.log('[client] send →', JSON.stringify(msg));
       conn.send(JSON.stringify(msg));
     }
 
@@ -1804,7 +1801,6 @@
           rebuildStations();
           break;
         case 'StationAssigned': {
-          console.log('[client] StationAssigned received:', JSON.stringify(msg.data));
           if (window.lobbyState) {
             state.players = window.lobbyState.players;
           } else {
@@ -1966,6 +1962,10 @@
           if (updatedSystems.has('repair'))     pushRepairConsoleState();
           if (updatedSystems.has('comms'))      pushCommsConsoleState();
           if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
+          // Same guard as SimState: don't re-render the lobby at 10 Hz while
+          // spectating — it rebuilds the station list every frame, destroying
+          // button listeners before a click can register.
+          if (!myConsoles(state).length) return;
           break;
         }
         case 'WeaponsUpdate': {

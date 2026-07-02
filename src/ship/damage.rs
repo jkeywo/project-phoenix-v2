@@ -1,6 +1,53 @@
 use crate::messages::Console;
 use crate::shield::ShieldSystem;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
+
+// ── DamageTier ────────────────────────────────────────────────────────────────
+
+/// HP-derived damage tier for a single console.
+///
+/// Tiers are computed from `current_hp / max_hp` against configurable
+/// thresholds, except `Destroyed` which latches at exactly 0 HP.
+///
+/// | Tier        | Condition                                  |
+/// |-------------|--------------------------------------------|
+/// | Operational | `current / max >= damaged_threshold_pct`   |
+/// | Damaged     | `disabled_threshold_pct <= ratio < damaged_threshold_pct` |
+/// | Disabled    | `0 < ratio < disabled_threshold_pct`       |
+/// | Destroyed   | `current == 0`                             |
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DamageTier {
+    Operational,
+    Damaged,
+    Disabled,
+    /// HP reached exactly 0. Unrepairable until `restore()` is called.
+    Destroyed,
+}
+
+// ── ConsoleTierConfig ─────────────────────────────────────────────────────────
+
+/// Per-console threshold configuration for damage tier derivation.
+///
+/// Fields are HP-fraction values in `[0.0, 1.0]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConsoleTierConfig {
+    /// HP fraction below which the console enters the `Damaged` tier.
+    /// Default: `0.75` (below 75 % → Damaged).
+    pub damaged_threshold_pct: f32,
+    /// HP fraction below which the console enters the `Disabled` tier.
+    /// Default: `0.25` (below 25 % → Disabled).
+    pub disabled_threshold_pct: f32,
+}
+
+impl Default for ConsoleTierConfig {
+    fn default() -> Self {
+        Self {
+            damaged_threshold_pct: 0.75,
+            disabled_threshold_pct: 0.25,
+        }
+    }
+}
 
 /// Apply `amount` of damage from bearing `bearing_relative` (radians) to the
 /// ship, routing it through `shields` first. Returns the amount of hull damage
@@ -67,22 +114,68 @@ pub fn collision_damage(forward_speed: f32) -> i32 {
 
 /// Per-console hull tracker.
 ///
-/// Stores `(console, current_hp, max_hp)` entries. Damage is distributed
-/// randomly across consoles that still have HP, spilling to further random
-/// consoles when a console reaches 0. Repair targets a specific console.
+/// Stores `(console, current_hp, max_hp)` entries plus per-console tier
+/// thresholds. Damage is distributed randomly across consoles that still have
+/// HP, spilling to further random consoles when a console reaches 0. Repair
+/// targets a specific console.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConsoleHull {
     entries: Vec<(Console, f32, f32)>,
+    /// Parallel vec of tier thresholds, one entry per `entries` element.
+    tier_configs: Vec<ConsoleTierConfig>,
 }
 
 impl ConsoleHull {
-    /// Build from a list of `(console, max_hp)` pairs. All consoles start at full HP.
+    /// Build from a list of `(console, max_hp)` pairs using default tier
+    /// thresholds. All consoles start at full HP.
     pub fn from_config(config: &[(Console, f32)]) -> Self {
         Self {
             entries: config
                 .iter()
                 .map(|(c, max)| (c.clone(), *max, *max))
                 .collect(),
+            tier_configs: config.iter().map(|_| ConsoleTierConfig::default()).collect(),
+        }
+    }
+
+    /// Build from a list of `(console, max_hp, tier_config)` triples.
+    /// All consoles start at full HP.
+    pub fn from_config_with_tiers(config: &[(Console, f32, ConsoleTierConfig)]) -> Self {
+        Self {
+            entries: config
+                .iter()
+                .map(|(c, max, _)| (c.clone(), *max, *max))
+                .collect(),
+            tier_configs: config.iter().map(|(_, _, tc)| *tc).collect(),
+        }
+    }
+
+    /// Return the `DamageTier` for the given console.
+    ///
+    /// - `Destroyed`: `current == 0`
+    /// - `Disabled`: `current/max < disabled_threshold_pct`
+    /// - `Damaged`: `current/max < damaged_threshold_pct`
+    /// - `Operational`: otherwise
+    ///
+    /// Returns `Operational` for consoles not tracked by this hull.
+    pub fn tier_for(&self, console: Console) -> DamageTier {
+        let idx = self.entries.iter().position(|(c, _, _)| *c == console);
+        let Some(idx) = idx else {
+            return DamageTier::Operational;
+        };
+        let (_, cur, max) = self.entries[idx];
+        let tier_cfg = &self.tier_configs[idx];
+
+        if cur == 0.0 {
+            return DamageTier::Destroyed;
+        }
+        let ratio = if max > 0.0 { cur / max } else { 0.0 };
+        if ratio < tier_cfg.disabled_threshold_pct {
+            DamageTier::Disabled
+        } else if ratio < tier_cfg.damaged_threshold_pct {
+            DamageTier::Damaged
+        } else {
+            DamageTier::Operational
         }
     }
 
@@ -536,5 +629,105 @@ mod tests {
         let before = hull.total_current();
         hull.restore(Console::Navigation, 10.0); // not in the map
         assert!(near(hull.total_current(), before));
+    }
+
+    // ── DamageTier tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn tier_is_operational_at_full_hp() {
+        let hull = ConsoleHull::from_config(&[(Console::Helm, 25.0)]);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+    }
+
+    #[test]
+    fn tier_is_damaged_below_damaged_threshold() {
+        // Default damaged_threshold = 0.75. 74% of 100 → Damaged.
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut rng = rand::rng();
+        // Directly set HP to 74 by restoring after wiping.
+        hull.apply_damage(100.0, &mut rng); // wipe to 0
+        hull.restore(Console::Helm, 74.0);  // 74/100 = 0.74 < 0.75 → Damaged
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+    }
+
+    #[test]
+    fn tier_is_disabled_below_disabled_threshold() {
+        // Default disabled_threshold = 0.25. 24% of 100 → Disabled.
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut rng = rand::rng();
+        hull.apply_damage(100.0, &mut rng); // wipe to 0
+        hull.restore(Console::Helm, 24.0);  // 24/100 = 0.24 < 0.25 → Disabled
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Disabled);
+    }
+
+    #[test]
+    fn tier_is_destroyed_at_zero_hp() {
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 25.0)]);
+        let mut rng = rand::rng();
+        hull.apply_damage(100.0, &mut rng);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Destroyed);
+    }
+
+    #[test]
+    fn tier_thresholds_are_configurable() {
+        // Custom: damaged at 50%, disabled at 10%.
+        let cfg = ConsoleTierConfig {
+            damaged_threshold_pct: 0.50,
+            disabled_threshold_pct: 0.10,
+        };
+        let mut hull = ConsoleHull::from_config_with_tiers(&[(Console::Helm, 100.0, cfg)]);
+        let mut rng = rand::rng();
+
+        // 60% → still Operational (above 50% threshold).
+        hull.apply_damage(100.0, &mut rng);
+        hull.restore(Console::Helm, 60.0);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+
+        // 40% → Damaged (below 50%, above 10%).
+        hull.apply_damage(100.0, &mut rng);
+        hull.restore(Console::Helm, 40.0);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+
+        // 9% → Disabled (below 10%).
+        hull.apply_damage(100.0, &mut rng);
+        hull.restore(Console::Helm, 9.0);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Disabled);
+    }
+
+    #[test]
+    fn tier_transitions_correctly_with_damage() {
+        // Track the tier as the console takes progressive damage.
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut rng = rand::rng();
+
+        // Full HP → Operational.
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+
+        // 80% → still Operational (default damaged_threshold = 0.75).
+        hull.apply_damage(100.0, &mut rng);
+        hull.restore(Console::Helm, 80.0);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+
+        // 50% → Damaged.
+        hull.apply_damage(100.0, &mut rng);
+        hull.restore(Console::Helm, 50.0);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+
+        // 10% → Disabled (below 0.25).
+        hull.apply_damage(100.0, &mut rng);
+        hull.restore(Console::Helm, 10.0);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Disabled);
+
+        // 0% → Destroyed.
+        hull.apply_damage(100.0, &mut rng);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Destroyed);
+
+        // Repaired back to 50% → Damaged again (tier latches only at 0).
+        hull.restore(Console::Helm, 50.0);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+
+        // Fully repaired → Operational.
+        hull.restore(Console::Helm, 100.0);
+        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
     }
 }

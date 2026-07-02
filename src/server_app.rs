@@ -503,6 +503,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     console: c.clone(),
                     current: *cur,
                     max_hp: *max,
+                    tier: h.0.tier_for(c.clone()),
                 }).collect::<Vec<_>>())
                 .unwrap_or_default();
             let hull_changed = world.resource::<LastBroadcastHull>().0 != hull_current;
@@ -724,10 +725,10 @@ fn handle_collisions(
             Option<&ShipModifiers>,
             Option<&EntityUuid>,
             Has<LocalShip>,
+            Option<&mut ShipImpulse>,
         ),
         With<Ship>,
     >,
-    mut impulse: ResMut<ShipImpulse>,
     modifiers_res: Option<Res<ShipModifiers>>,
     mut outbox: ResMut<SimOutbox>,
     mut next_state: ResMut<NextState<GamePhase>>,
@@ -742,10 +743,8 @@ fn handle_collisions(
     let Ok(ctx) = context.single() else { return };
 
     // Iterate every ship (player + NPCs) uniformly. Per-entity CollisionCooldown,
-    // ShipModifiers, ShipShields, EntityConsoleHull. Player-only side effects
-    // (impulse cancel, damage messages, GameOver, debug log) are gated on
-    // `is_local` — that's the LocalShip semantic distinction, not an
-    // NPC-vs-player special case.
+    // ShipModifiers, ShipShields, EntityConsoleHull, ShipImpulse. Player-only side
+    // effects (damage messages, GameOver, debug log) are gated on `is_local`.
     for (
         ship_entity,
         mut physics,
@@ -755,6 +754,7 @@ fn handle_collisions(
         modifiers_comp,
         ship_uuid,
         is_local,
+        mut impulse_opt,
     ) in ship_query.iter_mut()
     {
         cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
@@ -788,9 +788,8 @@ fn handle_collisions(
             continue;
         }
 
-        // Player-only: impulse charge cancel (ShipImpulse is a player-only
-        // Resource; NPCs run their impulse elsewhere in later PRs).
-        if is_local {
+        // Cancel impulse charge on any ship that takes a collision hit.
+        if let Some(ref mut impulse) = impulse_opt {
             impulse.0.cancel_charge();
         }
 
@@ -6154,3 +6153,4 @@ mod tests {
         );
     }
 }
+

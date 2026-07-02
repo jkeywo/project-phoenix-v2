@@ -66,6 +66,8 @@ pub struct ConsoleHullStatus {
     pub console: Console,
     pub current: f32,
     pub max_hp: f32,
+    /// Derived damage tier for this console.
+    pub tier: crate::damage::DamageTier,
 }
 
 /// A serialisable snapshot of a single shield facing for broadcasting.

@@ -1,11 +1,16 @@
 use crate::messages::SystemId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ControlSource {
     #[default]
     Human,
     Ai,
+    /// Explicit offline marker. A system with this source behaves as if it were
+    /// in the `offline_systems` set: both `accept_human_input` and `operate_ai`
+    /// return `false`. Set by the station-rating system when a rating marks a
+    /// system as explicitly offline (distinct from damage-driven offline).
+    Offline,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,16 +21,35 @@ pub struct ControlTickPolicy {
 }
 
 pub fn control_tick_policy(source: ControlSource) -> ControlTickPolicy {
-    ControlTickPolicy {
-        accept_human_input: source == ControlSource::Human,
-        operate_ai: source == ControlSource::Ai,
-        coordinate: true,
+    match source {
+        ControlSource::Human => ControlTickPolicy {
+            accept_human_input: true,
+            operate_ai: false,
+            coordinate: true,
+        },
+        ControlSource::Ai => ControlTickPolicy {
+            accept_human_input: false,
+            operate_ai: true,
+            coordinate: true,
+        },
+        ControlSource::Offline => ControlTickPolicy {
+            accept_human_input: false,
+            operate_ai: false,
+            coordinate: false,
+        },
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ControlSourceResolver {
     sources: HashMap<SystemId, ControlSource>,
+    /// Systems that are offline due to damage (Disabled/Destroyed tier).
+    ///
+    /// When a system is in this set, `policy_for` returns the offline policy
+    /// regardless of the `ControlSource` value in `sources`. The set is managed
+    /// externally (by `sync_console_damage_tiers`) and is additive: damage
+    /// overrides the station rating until the console is repaired.
+    pub offline_systems: HashSet<SystemId>,
 }
 
 impl ControlSourceResolver {
@@ -41,7 +65,14 @@ impl ControlSourceResolver {
         self.sources.get(system_id).copied().unwrap_or_default()
     }
 
+    /// Return the effective `ControlTickPolicy` for `system_id`.
+    ///
+    /// If the system is in `offline_systems` (damage-driven), the offline policy
+    /// is returned unconditionally, overriding any `ControlSource` value.
     pub fn policy_for(&self, system_id: &SystemId) -> ControlTickPolicy {
+        if self.offline_systems.contains(system_id) {
+            return control_tick_policy(ControlSource::Offline);
+        }
         control_tick_policy(self.source_for(system_id))
     }
 
@@ -103,6 +134,75 @@ mod tests {
             ControlTickPolicy {
                 accept_human_input: false,
                 operate_ai: true,
+                coordinate: true,
+            }
+        );
+    }
+
+    #[test]
+    fn offline_returns_false_false_false_policy() {
+        assert_eq!(
+            control_tick_policy(ControlSource::Offline),
+            ControlTickPolicy {
+                accept_human_input: false,
+                operate_ai: false,
+                coordinate: false,
+            }
+        );
+    }
+
+    #[test]
+    fn offline_systems_gate_overrides_human_and_ai() {
+        let mut resolver = ControlSourceResolver::new();
+        let helm = SystemId("helm".into());
+        let tactical = SystemId("tactical".into());
+
+        // helm is Human-controlled, tactical is Ai-controlled.
+        resolver.set(helm.clone(), ControlSource::Human);
+        resolver.set(tactical.clone(), ControlSource::Ai);
+
+        // Mark both as offline via damage.
+        resolver.offline_systems.insert(helm.clone());
+        resolver.offline_systems.insert(tactical.clone());
+
+        // Both must return the offline policy, regardless of ControlSource.
+        let offline_policy = ControlTickPolicy {
+            accept_human_input: false,
+            operate_ai: false,
+            coordinate: false,
+        };
+        assert_eq!(resolver.policy_for(&helm), offline_policy);
+        assert_eq!(resolver.policy_for(&tactical), offline_policy);
+    }
+
+    #[test]
+    fn restore_from_offline_set_restores_original_policy() {
+        let mut resolver = ControlSourceResolver::new();
+        let helm = SystemId("helm".into());
+
+        // Human-controlled, then marked offline.
+        resolver.set(helm.clone(), ControlSource::Human);
+        resolver.offline_systems.insert(helm.clone());
+
+        // Offline.
+        assert_eq!(
+            resolver.policy_for(&helm),
+            ControlTickPolicy {
+                accept_human_input: false,
+                operate_ai: false,
+                coordinate: false,
+            }
+        );
+
+        // Repair: remove from offline set.
+        resolver.offline_systems.remove(&helm);
+
+        // Human policy restored.
+        assert_eq!(
+            resolver.policy_for(&helm),
+            ControlTickPolicy {
+                accept_human_input: true,
+                operate_ai: false,
                 coordinate: true,
             }
         );

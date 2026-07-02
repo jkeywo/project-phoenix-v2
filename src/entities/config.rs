@@ -278,6 +278,22 @@ pub struct ConsoleHullEntry {
     pub console: crate::messages::Console,
     /// Maximum (and starting) HP for this console.
     pub max_hp: f32,
+    /// HP fraction below which the console enters the `Damaged` tier.
+    /// Defaults to `0.75` (below 75 % → Damaged).
+    #[serde(default = "default_damaged_threshold_pct")]
+    pub damaged_threshold_pct: f32,
+    /// HP fraction below which the console enters the `Disabled` tier.
+    /// Defaults to `0.25` (below 25 % → Disabled).
+    #[serde(default = "default_disabled_threshold_pct")]
+    pub disabled_threshold_pct: f32,
+}
+
+fn default_damaged_threshold_pct() -> f32 {
+    0.75
+}
+
+fn default_disabled_threshold_pct() -> f32 {
+    0.25
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

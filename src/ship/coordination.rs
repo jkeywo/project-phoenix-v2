@@ -16,7 +16,8 @@ pub enum DeliverAction {
 /// Route a coordination message based on sender origin and target control source.
 ///
 /// Delivery-time matrix:
-///   target AI         → Consume
+///   target AI         → Consume (AI drains silently)
+///   target Offline    → Consume (no one to receive it)
 ///   target Human + sender AI     → Popup
 ///   target Human + sender Human  → Suppress
 pub fn route_coordination(
@@ -24,9 +25,9 @@ pub fn route_coordination(
     target_control: ControlSource,
 ) -> DeliverAction {
     match (target_control, sender_origin) {
-        (ControlSource::Ai, _) => DeliverAction::Consume,
+        (ControlSource::Ai, _) | (ControlSource::Offline, _) => DeliverAction::Consume,
         (ControlSource::Human, ControlSource::Ai) => DeliverAction::Popup,
-        (ControlSource::Human, ControlSource::Human) => DeliverAction::Suppress,
+        (ControlSource::Human, ControlSource::Human) | (ControlSource::Human, ControlSource::Offline) => DeliverAction::Suppress,
     }
 }
 

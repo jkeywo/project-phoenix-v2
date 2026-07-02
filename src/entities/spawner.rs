@@ -511,12 +511,19 @@ pub fn spawn_entity(
     if let Some(hull) = &config.hull {
         let console_hull = if !hull.console_hull.is_empty() {
             // Explicit per-console entries (player ship path).
-            let entries: Vec<(crate::messages::Console, f32)> = hull
+            let entries: Vec<(crate::messages::Console, f32, crate::damage::ConsoleTierConfig)> = hull
                 .console_hull
                 .iter()
-                .map(|e| (e.console.clone(), e.max_hp))
+                .map(|e| (
+                    e.console.clone(),
+                    e.max_hp,
+                    crate::damage::ConsoleTierConfig {
+                        damaged_threshold_pct: e.damaged_threshold_pct,
+                        disabled_threshold_pct: e.disabled_threshold_pct,
+                    },
+                ))
                 .collect();
-            crate::damage::ConsoleHull::from_config(&entries)
+            crate::damage::ConsoleHull::from_config_with_tiers(&entries)
         } else if hull.hull_integrity > 0.0 {
             crate::damage::ConsoleHull::from_config(&[(
                 crate::messages::Console::CaptainChair,
@@ -1452,3 +1459,4 @@ ai_only = true
         assert!(system_ids.contains(&"tactical"), "tactical system must be present");
     }
 }
+

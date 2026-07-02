@@ -288,6 +288,7 @@ fn publish_repair_blackboard(
                     console: c.clone(),
                     current: *cur,
                     max_hp: *max,
+                    tier: h.0.tier_for(c.clone()),
                 })
                 .collect()
         })

@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::control_source::{ControlSourceResolver, ControlTickPolicy};
+use crate::damage::DamageTier;
 use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{
@@ -279,6 +280,7 @@ impl Plugin for ShipPlugin {
                 handle_coordination_enqueue.in_set(crate::sim_sets::SimSet::Input),
                 handle_coordination_messages.in_set(crate::sim_sets::SimSet::Input),
                 process_coordination_lag.in_set(crate::sim_sets::SimSet::Modifiers),
+                sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
             )
                 .after(crate::lobby::process_lobby),
         );
@@ -1056,6 +1058,46 @@ pub fn handle_coordination_messages(mut reader: MessageReader<InboundMessage>) {
         let ClientMessage::SendCoordination { .. } = &msg.msg else {
             continue;
         };
+    }
+}
+
+// ── Damage-tier → control gate sync ──────────────────────────────────────────
+
+/// Bevy system that synchronises `ControlSourceResolver.offline_systems` with
+/// the current damage tiers of each console in the ship hull.
+///
+/// Runs in `SimSet::Damage` (after hull damage is applied). For every ship that
+/// carries both `EntityConsoleHull` and `ShipSystemControlSources`:
+///
+/// - Consoles in `Disabled` or `Destroyed` tier: their corresponding `SystemId`
+///   is added to `offline_systems`.
+/// - Consoles in `Operational` or `Damaged` tier: their corresponding
+///   `SystemId` is removed from `offline_systems` (restoring normal gating).
+///
+/// The `SystemId` for a console is derived from `Console::station_console_id()`,
+/// which matches the `id` field of the `[[system]]` entries in the TOML.
+pub fn sync_console_damage_tiers(
+    mut ships: Query<(
+        &crate::entity_spawner::EntityConsoleHull,
+        &mut ShipSystemControlSources,
+    )>,
+) {
+    for (hull_component, mut control_sources) in ships.iter_mut() {
+        let hull = &hull_component.0;
+        for (console, _cur, _max) in hull.entries() {
+            let system_id = crate::messages::SystemId(
+                console.station_console_id().to_string(),
+            );
+            let tier = hull.tier_for(console.clone());
+            match tier {
+                DamageTier::Disabled | DamageTier::Destroyed => {
+                    control_sources.0.offline_systems.insert(system_id);
+                }
+                DamageTier::Operational | DamageTier::Damaged => {
+                    control_sources.0.offline_systems.remove(&system_id);
+                }
+            }
+        }
     }
 }
 
@@ -2844,6 +2886,104 @@ station = "helm"
             thrust_empty, 0.0,
             "Empty FactionRegistry (regression) must produce zero thrust; got {}",
             thrust_empty
+        );
+    }
+
+    // ── sync_console_damage_tiers integration tests ───────────────────────────
+
+    /// Helper: get the policy for a system from the ship's ControlSourceResolver.
+    fn get_policy(app: &mut App, system_id: &str) -> ControlTickPolicy {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemControlSources, With<Ship>>();
+        let sources = q.single(app.world()).expect("Ship with ShipSystemControlSources");
+        sources.0.policy_for(&crate::messages::SystemId(system_id.into()))
+    }
+
+    fn set_console_hp(app: &mut App, console: crate::messages::Console, hp: f32) {
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let mut binding = app.world_mut().entity_mut(ship);
+        let mut hull_component = binding
+            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .unwrap();
+        // Wipe then restore to exact HP.
+        hull_component.0.apply_damage(1_000_000.0, &mut rand::rng());
+        hull_component.0.restore(console, hp);
+    }
+
+    #[test]
+    fn disabled_console_gates_human_and_ai_input() {
+        let mut app = test_app();
+        // Helm console max_hp = 25. Disabled threshold = 25 % = 6.25 HP.
+        // Set Helm to 5 HP (below disabled threshold) → Disabled tier.
+        set_console_hp(&mut app, crate::messages::Console::Helm, 5.0);
+        tick(&mut app);
+
+        let policy = get_policy(&mut app, "helm");
+        assert!(
+            !policy.accept_human_input,
+            "Disabled console must not accept human input"
+        );
+        assert!(
+            !policy.operate_ai,
+            "Disabled console must not operate AI"
+        );
+    }
+
+    #[test]
+    fn destroyed_console_gates_human_and_ai_input() {
+        let mut app = test_app();
+        // Wipe helm to 0 HP → Destroyed tier.
+        set_console_hp(&mut app, crate::messages::Console::Helm, 0.0);
+        tick(&mut app);
+
+        let policy = get_policy(&mut app, "helm");
+        assert!(
+            !policy.accept_human_input,
+            "Destroyed console must not accept human input"
+        );
+        assert!(
+            !policy.operate_ai,
+            "Destroyed console must not operate AI"
+        );
+    }
+
+    #[test]
+    fn restored_console_re_enables_input() {
+        let mut app = test_app();
+        // First disable helm.
+        set_console_hp(&mut app, crate::messages::Console::Helm, 5.0);
+        tick(&mut app);
+        // Verify it is gated.
+        assert!(!get_policy(&mut app, "helm").accept_human_input);
+
+        // Now restore to operational HP.
+        set_console_hp(&mut app, crate::messages::Console::Helm, 25.0);
+        tick(&mut app);
+
+        let policy = get_policy(&mut app, "helm");
+        assert!(
+            policy.accept_human_input,
+            "Restored console must accept human input again"
+        );
+    }
+
+    #[test]
+    fn damaged_tier_does_not_gate_input() {
+        let mut app = test_app();
+        // Helm at 50% = 12.5 HP → Damaged tier (25 % < 50 % < 75 %).
+        // Damaged tier must NOT block input — only Disabled and Destroyed do.
+        set_console_hp(&mut app, crate::messages::Console::Helm, 12.5);
+        tick(&mut app);
+
+        let policy = get_policy(&mut app, "helm");
+        assert!(
+            policy.accept_human_input,
+            "Damaged (but not Disabled) console must still accept human input"
         );
     }
 }

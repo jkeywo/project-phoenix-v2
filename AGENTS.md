@@ -196,6 +196,7 @@ See `wiki/concepts/testing-strategy.md` for the full file-by-file breakdown.
 8. **PeerJS cloud broker.** Not self-hosted (deferred post-PoC).
 9. **Pure modules are Bevy-free.** `lobby/handler`, `radar`, `ship/damage`, `modifiers/breakdown`, `lobby/client_panel`, `client_sim`, `client_comms`, `console/helm/joystick` have no Bevy imports — fully unit-testable on native, shared between server and client.
 10. **Station ownership is authoritative.** `Player.station: Option<StationId>` is the ownership field; console tabs and authorization derive held consoles from the station and `ShipConfig`.
+11. **No hardcoded gameplay values.** All gameplay data (stats, icons, colours, sizes, behaviours) comes from TOML config, loaded into entities/components and sent over the network where the client needs it. The only acceptable hardcoded values are: (a) defaults applied while parsing a TOML file (`unwrap_or(...)`-style fallbacks), and (b) client-side placeholders shown while waiting for authoritative data from the server. If a value could plausibly be tuned by a designer, it belongs in TOML — never inline it "for now", and never add a hardcoded branch that can override what the config says.
 
 ---
 

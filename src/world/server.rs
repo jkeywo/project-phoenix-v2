@@ -2652,6 +2652,16 @@ fn handle_ai_events(
 
                         let uuid = crate::entity_loader::assign_uuid();
                         let pos_vec = Vec3::new(pos_arr[0], pos_arr[1], pos_arr[2]);
+                        // Patch the entity name with the trigger's `name` field so that the
+                        // spawned ECS entity gets EntityName("wave_1") (not the template's
+                        // display name like "Harrow Destroyer"). This mirrors what
+                        // `spawn_world_entities` does for static `[[entity]]` entries and is
+                        // required for `resolve_objective_target` to match Destroy directives
+                        // by the scenario name (e.g. `target = "wave_1"`).
+                        let mut entity_config = entity_config;
+                        if !name.is_empty() {
+                            entity_config.name = Some(name.clone());
+                        }
                         let spawned = crate::entity_spawner::spawn_entity(
                             &mut commands,
                             &entity_config,
@@ -8951,6 +8961,71 @@ size_max = 2.0
         );
         let fired = app.world().resource::<WorldContentRuntime>().trigger_states[0].fired;
         assert!(!fired, "trigger must not be marked fired");
+    }
+
+    /// SpawnEntity action stamps the trigger `name` onto the spawned entity as
+    /// its `EntityName` component.  This is required for `resolve_objective_target`
+    /// to match a `AiDirective::Destroy { target: "wave_1" }` against
+    /// `AiWorldEntity::name` in `WorldSnapshot` — if the component kept the
+    /// template display name ("Harrow Destroyer") the Backfill AI would never
+    /// resolve the Destroy target and the ship would stay on its Patrol forever.
+    #[test]
+    fn spawn_entity_action_stamps_trigger_name_as_entity_name() {
+        use crate::entities::spawner::{EntityName, EntityUuid};
+
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.world_loaded_at_secs = Some(0.0);
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnTimer { after_secs: 0.0 },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "wave_1".to_string(),
+                        anchor: None,
+                        position: Some([50.0, 0.0, 50.0]),
+                        rotation: None,
+                        scale: None,
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: std::collections::HashSet::new(),
+            }];
+        }
+
+        app.update();
+        app.update();
+
+        // Find the spawned entity by UUID and confirm its EntityName is "wave_1".
+        let uuid = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("wave_1")
+            .cloned()
+            .expect("SpawnEntity must register name_to_uuid for wave_1");
+
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, Option<&EntityName>)>();
+        let entity_name = q
+            .iter(app.world())
+            .find_map(|(eu, name)| (eu.0 == uuid).then(|| name.map(|n| n.0.clone())));
+
+        assert!(
+            entity_name.is_some(),
+            "spawned entity with UUID for 'wave_1' must exist in ECS"
+        );
+        assert_eq!(
+            entity_name.unwrap().as_deref(),
+            Some("wave_1"),
+            "EntityName must be the trigger name 'wave_1', not the template display name"
+        );
     }
 
     // -- PRD #397 fix 2: comms-response action dispatch parity ----------------

@@ -329,7 +329,7 @@ fn process_helm_inputs(
         *prev_phase = Some(current_phase);
     }
 
-    let Some((admitted, _)) = ship_query.iter().next() else {
+    let Some((admitted, sources)) = ship_query.iter().next() else {
         return;
     };
     let Some(mut physics) = physics_query.iter_mut().next() else {
@@ -337,6 +337,16 @@ fn process_helm_inputs(
     };
 
     if !timer.0.tick(time.delta()).just_finished() {
+        return;
+    }
+
+    // When helm is under AI control (Backfill), `operate_helm_ai` has already
+    // integrated physics this frame.  Running `compute_physics` here a second
+    // time with a *different* dt (the 30 Hz timer duration) would double-move
+    // the player ship relative to NPC ships driven only by `operate_helm_ai`.
+    // Skip the physics integration; the AI-written LastHelmInput is still
+    // preserved so the SimState broadcast reflects the correct intent.
+    if helm_control_policy(sources).operate_ai {
         return;
     }
 
@@ -3027,6 +3037,50 @@ station = "helm"
         assert!(
             policy.accept_human_input,
             "Damaged (but not Disabled) console must still accept human input"
+        );
+    }
+
+    /// When helm is under AI control (`operate_ai = true`), `process_helm_inputs`
+    /// must NOT apply a second physics integration step.
+    ///
+    /// `operate_helm_ai` already runs `compute_physics` and writes the result
+    /// into `ShipPhysics` every Bevy frame.  If `process_helm_inputs` then runs
+    /// `compute_physics` again using the updated state as its starting point
+    /// (with a *different* fixed dt of 1/30 s), the player ship ends up moving
+    /// ~3× faster than intended relative to NPC ships that are only driven by
+    /// `operate_helm_ai`.
+    ///
+    /// Regression guard: set helm to AI, write a non-zero intent into
+    /// `LastHelmInput`, tick the app, and assert that `ShipPhysics.x` does NOT
+    /// advance by more than one single `operate_helm_ai` step.
+    #[test]
+    fn process_helm_inputs_skips_physics_when_helm_is_ai_controlled() {
+        let mut app = test_app();
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        // Set a non-zero last input so that if process_helm_inputs incorrectly
+        // runs compute_physics it will produce a non-trivial displacement.
+        set_last_helm_input(&mut app, LastHelmInput { thrust: 1.0, steering: 0.0 });
+
+        // Snapshot physics before the tick.
+        let before = get_ship_physics(&mut app);
+
+        tick(&mut app);
+
+        let after = get_ship_physics(&mut app);
+
+        // operate_helm_ai has no objectives in this test (blackboard empty), so
+        // it zeros out LastHelmInput and skips to `continue` — physics stays put.
+        // If process_helm_inputs fired anyway it would have used the stale
+        // thrust=1.0 from before the tick and moved the ship.
+        assert_eq!(
+            after.x, before.x,
+            "ShipPhysics.x must not advance when helm is AI-controlled: \
+             process_helm_inputs must skip physics integration"
+        );
+        assert_eq!(
+            after.forward_speed, before.forward_speed,
+            "forward_speed must not change when process_helm_inputs skips physics"
         );
     }
 }

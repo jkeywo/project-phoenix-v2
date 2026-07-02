@@ -915,12 +915,10 @@
       // Also disable any currently-visible response buttons.
       var isAuto = !!s.comms_auto;
       setAutoState(null, document.getElementById('comms-auto-badge'), isAuto);
-      if (isAuto) {
-        document.querySelectorAll('.response-btn').forEach(function(btn) {
-          btn.disabled = true;
-          btn.classList.add('readonly');
-        });
-      }
+      document.querySelectorAll('.response-btn').forEach(function(btn) {
+        btn.disabled = isAuto;
+        btn.classList.toggle('readonly', isAuto);
+      });
     } });
     window._sendCommsAction = function(action, payload) { _c.sendAction(action, payload); };
   </script>

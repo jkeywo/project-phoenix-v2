@@ -1122,3 +1122,111 @@ describe('buildNavigationConsoleState', () => {
     expect(out.radar_range).toBe(800);
   });
 });
+
+// ── auto fields ───────────────────────────────────────────────────────────────
+
+describe('auto fields', () => {
+  // helm_auto
+  it('helm_auto is true when stationRatings.helm === Backfill', () => {
+    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } })).helm_auto).toBe(true);
+  });
+
+  it('helm_auto is false when stationRatings.helm is a different rating', () => {
+    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Full' } })).helm_auto).toBe(false);
+  });
+
+  it('helm_auto is false when stationRatings is absent', () => {
+    expect(parse(buildHelmConsoleState(EMPTY)).helm_auto).toBe(false);
+  });
+
+  // tactical_auto
+  it('tactical_auto is true when stationRatings.tactical === Backfill', () => {
+    expect(parse(buildWeaponsConsoleState({ stationRatings: { tactical: 'Backfill' } })).tactical_auto).toBe(true);
+  });
+
+  it('tactical_auto is false when stationRatings.tactical is a different rating', () => {
+    expect(parse(buildWeaponsConsoleState({ stationRatings: { tactical: 'Full' } })).tactical_auto).toBe(false);
+  });
+
+  it('tactical_auto is false when stationRatings is absent', () => {
+    expect(parse(buildWeaponsConsoleState(EMPTY)).tactical_auto).toBe(false);
+  });
+
+  // repair_auto
+  it('repair_auto is true when stationRatings.repair === Backfill', () => {
+    expect(parse(buildRepairConsoleState({ stationRatings: { repair: 'Backfill' } })).repair_auto).toBe(true);
+  });
+
+  it('repair_auto is false when stationRatings.repair is a different rating', () => {
+    expect(parse(buildRepairConsoleState({ stationRatings: { repair: 'Full' } })).repair_auto).toBe(false);
+  });
+
+  it('repair_auto is false when stationRatings is absent', () => {
+    expect(parse(buildRepairConsoleState(EMPTY)).repair_auto).toBe(false);
+  });
+
+  // power_auto
+  it('power_auto is true when stationRatings.power === Backfill', () => {
+    expect(parse(buildPowerConsoleState({ stationRatings: { power: 'Backfill' } })).power_auto).toBe(true);
+  });
+
+  it('power_auto is false when stationRatings.power is a different rating', () => {
+    expect(parse(buildPowerConsoleState({ stationRatings: { power: 'Full' } })).power_auto).toBe(false);
+  });
+
+  it('power_auto is false when stationRatings is absent', () => {
+    expect(parse(buildPowerConsoleState(EMPTY)).power_auto).toBe(false);
+  });
+
+  // shields_auto
+  it('shields_auto is true when stationRatings.shields === Backfill', () => {
+    expect(parse(buildShieldsConsoleState({ stationRatings: { shields: 'Backfill' } })).shields_auto).toBe(true);
+  });
+
+  it('shields_auto is false when stationRatings.shields is a different rating', () => {
+    expect(parse(buildShieldsConsoleState({ stationRatings: { shields: 'Full' } })).shields_auto).toBe(false);
+  });
+
+  it('shields_auto is false when stationRatings is absent', () => {
+    expect(parse(buildShieldsConsoleState(EMPTY)).shields_auto).toBe(false);
+  });
+
+  // sensors_auto
+  it('sensors_auto is true when stationRatings.sensors === Backfill', () => {
+    expect(parse(buildSensorsConsoleState({ stationRatings: { sensors: 'Backfill' } })).sensors_auto).toBe(true);
+  });
+
+  it('sensors_auto is false when stationRatings.sensors is a different rating', () => {
+    expect(parse(buildSensorsConsoleState({ stationRatings: { sensors: 'Full' } })).sensors_auto).toBe(false);
+  });
+
+  it('sensors_auto is false when stationRatings is absent', () => {
+    expect(parse(buildSensorsConsoleState(EMPTY)).sensors_auto).toBe(false);
+  });
+
+  // navigation_auto
+  it('navigation_auto is true when stationRatings.navigation === Backfill', () => {
+    expect(parse(buildNavigationConsoleState({ stationRatings: { navigation: 'Backfill' } })).navigation_auto).toBe(true);
+  });
+
+  it('navigation_auto is false when stationRatings.navigation is a different rating', () => {
+    expect(parse(buildNavigationConsoleState({ stationRatings: { navigation: 'Full' } })).navigation_auto).toBe(false);
+  });
+
+  it('navigation_auto is false when stationRatings is absent', () => {
+    expect(parse(buildNavigationConsoleState(EMPTY)).navigation_auto).toBe(false);
+  });
+
+  // comms_auto
+  it('comms_auto is true when stationRatings.comms === Backfill', () => {
+    expect(parse(buildCommsConsoleState({ stationRatings: { comms: 'Backfill' } })).comms_auto).toBe(true);
+  });
+
+  it('comms_auto is false when stationRatings.comms is a different rating', () => {
+    expect(parse(buildCommsConsoleState({ stationRatings: { comms: 'Full' } })).comms_auto).toBe(false);
+  });
+
+  it('comms_auto is false when stationRatings is absent', () => {
+    expect(parse(buildCommsConsoleState(EMPTY)).comms_auto).toBe(false);
+  });
+});

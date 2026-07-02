@@ -435,6 +435,7 @@ fn operate_helm_ai(
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     entity_fallback_q: Query<(
         &crate::entity_spawner::EntityUuid,
         &Transform,
@@ -453,6 +454,7 @@ fn operate_helm_ai(
         Option<&crate::entities::spawner::FactionComponent>,
         Option<&crate::entities::spawner::ColliderSection>,
         Option<&crate::entities::spawner::HelmConsoleSection>,
+        Option<&crate::entities::spawner::BehaviourSection>,
         Has<crate::server_app::LocalShip>,
     )>,
 ) {
@@ -510,6 +512,7 @@ fn operate_helm_ai(
         faction,
         collider,
         helm_section,
+        behaviour_section,
         is_local,
     ) in ships.iter_mut()
     {
@@ -563,13 +566,18 @@ fn operate_helm_ai(
             &mut ai_memory.0,
             &world_view,
             &scored,
-            &[],
+            behaviour_section
+                .map(|b| b.0.doctrine.as_slice())
+                .unwrap_or(&[]),
             &anchors,
             crate::ai::WAYPOINT_ARRIVAL_RADIUS,
             crate::ai::AVOIDANCE_BUFFER,
             crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
             physics.forward_speed,
-            &crate::faction::FactionRegistry::default(),
+            faction_registry
+                .as_deref()
+                .map(|r| &r.0)
+                .unwrap_or(&crate::faction::FactionRegistry::default()),
         );
 
         // ── Apply physics ────────────────────────────────────────────────────

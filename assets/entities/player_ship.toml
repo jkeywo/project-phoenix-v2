@@ -18,24 +18,35 @@ console = "Helm"
 max_hp = 25
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
 
 [[hull.console_hull]]
 console = "Tactical"
 max_hp = 25
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
 
 [[hull.console_hull]]
 console = "Power"
 max_hp = 25
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
 
 [[hull.console_hull]]
 console = "Shields"
 max_hp = 25
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.console_hull]]
+console = "Core"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.10
 
 [repair]
 repair_team_count = 2

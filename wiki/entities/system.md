@@ -1,9 +1,9 @@
 ---
 title: System
 type: entity
-tags: [system, systemid, control-source, ai, wire-protocol]
-sources: [src/ship/config.rs, src/ship/system_registry.rs, src/ship_plugin.rs, assets/entities/player_ship.toml]
-updated: 2026-06-23
+tags: [system, systemid, control-source, ai, wire-protocol, damage-tier]
+sources: [src/ship/config.rs, src/ship/system_registry.rs, src/ship_plugin.rs, src/ship/damage.rs, src/ship/control_source.rs, assets/entities/player_ship.toml]
+updated: 2026-07-02
 ---
 
 # System
@@ -51,17 +51,54 @@ system owned by that station.
 
 ## ControlSource and ShipSystemControlSources
 
-`ShipSystemControlSources` (a `HashMap<SystemId, ControlSource>` Bevy resource)
-maps each system to its current operator: `Human` or `Ai`.
+`ShipSystemControlSources` (a `HashMap<SystemId, ControlSource>` Bevy component)
+maps each system to its current operator: `Human`, `Ai`, or `Offline`.
 
-`ControlSource` exposes two gates used by handler systems:
+`ControlSource` exposes three gates used by handler systems:
 
-| Gate | Human | Ai |
-|---|---|---|
-| `accept_human_input` | `true` | `false` |
-| `operate_ai` | `false` | `true` |
+| Gate | Human | Ai | Offline |
+|---|---|---|---|
+| `accept_human_input` | `true` | `false` | `false` |
+| `operate_ai` | `false` | `true` | `false` |
+| `coordinate` | `true` | `true` | `false` |
 
-Both gates are `false` when the system is offline (damaged / powered down).
+Both `accept_human_input` and `operate_ai` are `false` when the system is
+offline (Disabled or Destroyed tier due to damage, or powered down).
+
+### offline_systems override
+
+`ControlSourceResolver` also carries `offline_systems: HashSet<SystemId>`.
+When a system is in this set, `policy_for` returns the offline policy
+**regardless** of the `ControlSource` value in `sources`. This allows
+damage-driven gating to override the station rating without mutating the
+rating itself.
+
+The `sync_console_damage_tiers` Bevy system (runs in `SimSet::Damage`,
+`src/ship_plugin.rs`) updates `offline_systems` every tick:
+
+- `Disabled` or `Destroyed` console → `SystemId` added to `offline_systems`
+- `Operational` or `Damaged` console → `SystemId` removed
+
+## DamageTier (issue #507)
+
+Each `ConsoleHull` entry carries configurable HP-fraction thresholds that map
+HP to a `DamageTier` (`src/ship/damage.rs`):
+
+| Tier | Condition |
+|---|---|
+| `Operational` | `current / max >= damaged_threshold_pct` |
+| `Damaged` | `disabled_threshold_pct <= ratio < damaged_threshold_pct` |
+| `Disabled` | `0 < ratio < disabled_threshold_pct` |
+| `Destroyed` | `current == 0` |
+
+Default thresholds (TOML `[[hull.console_hull]]`): `damaged_threshold_pct = 0.75`,
+`disabled_threshold_pct = 0.25`. Overridable per console.
+
+`tier_for(console)` is the public API on `ConsoleHull`. The tier is also
+included in `ConsoleHullStatus.tier` on the wire so clients can render tier
+badges.
+
+## ActiveStationRatings
 
 `ActiveStationRatings` (`HashMap<StationId, String>`) holds the current rating
 name for each station. When a rating change arrives, the handler resolves the
@@ -86,3 +123,4 @@ Current coarse kinds: `captain`, `red_alert`, `helm`, `tactical`, `repair`,
 - [Issue #518](../sources/issue-540-config-migration-docs.md) — B1–B6 migration
 - [PRD #487](../sources/prd-487-station-console-system-redesign.md) — architecture context
 - [Coarse-system migration](../concepts/coarse-system-migration.md)
+- [Issue #507](https://github.com/jkeywo/project-phoenix-v2/issues/507) — Per-system damage tiers

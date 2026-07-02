@@ -332,6 +332,7 @@
           <span id="footer-status">COMMS ONLINE</span>
           <span class="sep">·</span>
           <span id="footer-inbox-count" style="color:var(--ink-faint);">0 MESSAGES</span>
+          <span class="auto-badge" id="comms-auto-badge" hidden>AUTO</span>
           <span style="flex:1"></span>
           <span id="footer-contacts" style="color:var(--ink-faint);">0 CONTACTS</span>
         </footer>
@@ -905,10 +906,21 @@
   </script>
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
     var _c = initConsole({ name: 'Comms', render: function(s) {
       _state = s;
       _render(s);
       renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+      // AUTO badge: show when comms station is AI-controlled (Backfill rating).
+      // Also disable any currently-visible response buttons.
+      var isAuto = !!s.comms_auto;
+      setAutoState(null, document.getElementById('comms-auto-badge'), isAuto);
+      if (isAuto) {
+        document.querySelectorAll('.response-btn').forEach(function(btn) {
+          btn.disabled = true;
+          btn.classList.add('readonly');
+        });
+      }
     } });
     window._sendCommsAction = function(action, payload) { _c.sendAction(action, payload); };
   </script>

@@ -282,6 +282,7 @@
         <span class="led amber"></span>
         <span class="label">SET WAYPOINT</span>
       </button>
+      <span class="auto-badge" id="navigation-auto-badge" hidden>AUTO</span>
       <button class="btn tactical" id="btn-clear-waypoint" type="button">
         <span class="btn-bg"></span>
         <span class="led amber"></span>
@@ -300,6 +301,7 @@
 
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
 
     const canvas = document.getElementById('map-canvas');
     const ctx    = canvas.getContext('2d');
@@ -963,6 +965,9 @@
 
       const wpData = document.getElementById('waypoint-data');
       if (wpData) wpData.textContent = JSON.stringify(s.waypoint || null);
+
+      // AUTO badge: show when navigation station is AI-controlled (Backfill rating).
+      setAutoState(document.getElementById('btn-set-waypoint'), document.getElementById('navigation-auto-badge'), !!s.navigation_auto);
     }
 
     document.getElementById('btn-on-screen').addEventListener('click', () => {

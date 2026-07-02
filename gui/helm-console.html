@@ -503,6 +503,7 @@
                 <span class="label">IMPULSE</span>
               </button>
             </div>
+            <span class="auto-badge" id="helm-auto-badge" hidden>AUTO</span>
             <div class="boost-control" id="boost-control" style="display:none;">
               <button id="boost-btn" class="btn" type="button">
                 <span class="btn-bg"></span>
@@ -534,6 +535,7 @@
 
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
 
     var _state         = null;
     var _radarWidget   = null;
@@ -645,6 +647,10 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
       }
 
       renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+
+      // AUTO badge: show when helm station is AI-controlled (Backfill rating).
+      // The joystick is not a <button> so we only manage the badge + impulse btn.
+      setAutoState(document.getElementById('impulse-btn'), document.getElementById('helm-auto-badge'), !!s.helm_auto);
     }
 
     var _stickValue = { x: 0, y: 0 };

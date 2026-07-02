@@ -1187,7 +1187,12 @@ fn console_for_system(target: &crate::messages::SystemId) -> Option<Console> {
     use crate::system_registry::*;
     match target.0.as_str() {
         CAPTAIN_SYSTEM_ID | RED_ALERT_SYSTEM_ID => Some(Console::CaptainChair),
-        HELM_SYSTEM_ID => Some(Console::Helm),
+        HELM_SYSTEM_ID
+        | HELM_JOYSTICK_SYSTEM_ID
+        | HELM_ENGINE_PORT_SYSTEM_ID
+        | HELM_ENGINE_STARBOARD_SYSTEM_ID
+        | HELM_RADAR_SYSTEM_ID
+        | HELM_IMPULSE_SYSTEM_ID => Some(Console::Helm),
         TACTICAL_SYSTEM_ID => Some(Console::Tactical),
         POWER_SYSTEM_ID => Some(Console::Power),
         SENSORS_SYSTEM_ID => Some(Console::Sensors),

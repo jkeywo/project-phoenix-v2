@@ -403,7 +403,7 @@ power_group = "helm"
 id = "helm-radar"
 kind = "helm_radar"
 station = "helm"
-power_group = "sensors"
+power_group = "helm"
 
 [[system]]
 id = "helm-impulse"

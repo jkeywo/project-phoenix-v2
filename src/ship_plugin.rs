@@ -778,6 +778,20 @@ fn operate_helm_engine_ai(
     mut inter_system: ResMut<InterSystemQueue>,
 ) {
     for (sources, last_input) in ships.iter() {
+        // `publish_joystick_to_engines` already covers the normal case where
+        // the joystick system is operable (human or AI). This system only
+        // needs to push engine messages when the joystick itself is offline
+        // (e.g. joystick damaged/disabled) but an individual engine is still
+        // AI-controlled. This prevents a double-push on every Backfill tick.
+        let joystick_policy = sources
+            .0
+            .policy_for(&crate::system_registry::helm_joystick_system_id());
+        let joystick_publishing = joystick_policy.accept_human_input || joystick_policy.operate_ai;
+        if joystick_publishing {
+            // `publish_joystick_to_engines` will cover both engines this tick.
+            continue;
+        }
+
         let port_policy = sources
             .0
             .policy_for(&crate::system_registry::helm_engine_port_system_id());
@@ -785,10 +799,7 @@ fn operate_helm_engine_ai(
             .0
             .policy_for(&crate::system_registry::helm_engine_starboard_system_id());
 
-        // If an engine is AI-controlled we push its joystick state the same
-        // way as `publish_joystick_to_engines` does for human input, so the
-        // blackboard publisher sees a consistent value regardless of who is
-        // driving.
+        // Joystick is offline; push for any engine that is still AI-operable.
         if port_policy.operate_ai {
             inter_system.0.push(InterSystemMsg {
                 target: crate::system_registry::helm_engine_port_system_id(),

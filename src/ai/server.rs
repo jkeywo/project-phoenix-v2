@@ -21,6 +21,48 @@ pub fn anchors_from_world_config(
 use crate::ai::AiMemory;
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
 
+/// Repeating 10 Hz timer that gates `build_world_snapshot` and
+/// `aggregate_doctrine_blackboards`.  Both systems only need to run at the
+/// same cadence as the AI tick and the SimState broadcast — running them every
+/// Bevy frame (60 Hz) multiplies their cost 6× with no benefit.
+#[derive(Resource)]
+pub struct AiSnapshotTimer(pub Timer);
+
+impl Default for AiSnapshotTimer {
+    fn default() -> Self {
+        Self(Timer::from_seconds(0.1, TimerMode::Repeating))
+    }
+}
+
+/// Boolean latch set each frame by `tick_ai_snapshot_timer`.
+/// `run_if` conditions must use read-only params, so the timer is advanced
+/// by a dedicated system that writes this flag, which the condition then reads.
+/// Initialises to `true` so the very first update always gets a snapshot
+/// (before the timer has had a chance to fire).
+#[derive(Resource)]
+pub struct AiSnapshotReady(pub bool);
+
+/// Advance the `AiSnapshotTimer` and set `AiSnapshotReady`.
+/// Runs unconditionally in `SimSet::Physics` before `AiTickLabel`.
+/// Only writes `true` when the timer fires; on frames where it doesn't fire
+/// the flag is explicitly cleared so the gated systems skip their work.
+fn tick_ai_snapshot_timer(
+    time: Res<Time>,
+    mut timer: ResMut<AiSnapshotTimer>,
+    mut ready: ResMut<AiSnapshotReady>,
+) {
+    if timer.0.tick(time.delta()).just_finished() {
+        ready.0 = true;
+    } else {
+        ready.0 = false;
+    }
+}
+
+/// Read-only run condition: fires only when `AiSnapshotReady` is true.
+fn ai_snapshot_ready(ready: Res<AiSnapshotReady>) -> bool {
+    ready.0
+}
+
 // ── AiTokenRegistry ───────────────────────────────────────────────────────────
 
 /// Maps entity UUID → synthetic token string (`"ai:<uuid>"`).
@@ -304,16 +346,30 @@ impl Plugin for AiPlugin {
         app.add_message::<AiEntityAttacked>();
         app.add_message::<AiEntityDestroyed>();
         app.init_resource::<WorldSnapshot>();
+        app.init_resource::<AiSnapshotTimer>();
+        app.insert_resource(AiSnapshotReady(true));
+        // The snapshot systems run first (consuming AiSnapshotReady), then the
+        // timer system resets / arms the flag for the next frame.
+        // Explicit `.after()` ordering ensures the flag is consumed before it is
+        // written, even when the SimSet chain is not configured (e.g. in unit tests).
+        app.add_systems(
+            Update,
+            tick_ai_snapshot_timer
+                .after(build_world_snapshot)
+                .after(aggregate_doctrine_blackboards),
+        );
         app.add_systems(
             Update,
             build_world_snapshot
                 .in_set(crate::sim_sets::SimSet::Physics)
-                .before(crate::sim_sets::AiTickLabel),
+                .before(crate::sim_sets::AiTickLabel)
+                .run_if(ai_snapshot_ready),
         );
         app.add_systems(
             Update,
             aggregate_doctrine_blackboards
-                .in_set(crate::sim_sets::SimSet::PublishAggregate),
+                .in_set(crate::sim_sets::SimSet::PublishAggregate)
+                .run_if(ai_snapshot_ready),
         );
         app.add_systems(
             Update,

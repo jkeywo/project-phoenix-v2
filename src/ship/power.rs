@@ -662,6 +662,7 @@ mod tests {
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()

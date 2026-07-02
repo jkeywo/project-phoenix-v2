@@ -262,6 +262,7 @@ mod tests {
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(crate::modifiers::ShipModifiers::new())
             .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .add_systems(PostUpdate, collect);

@@ -171,6 +171,15 @@ pub struct LastBroadcastEntityPositions(
     pub std::collections::HashMap<String, (bevy::math::Vec3, f32)>,
 );
 
+/// Last-broadcast health (hull_fraction, shield_fraction) for all entities.
+/// Keyed by UUID string. Used by the sim_state_broadcaster to skip sending
+/// health fields when they haven't changed since the last broadcast, reducing
+/// wire payload for stationary / undamaged NPCs.
+#[derive(Resource, Default)]
+pub struct LastBroadcastEntityHealth(
+    pub std::collections::HashMap<String, (Option<f32>, Option<f32>)>,
+);
+
 /// Last-broadcast per-console hull state. When the hull changes, a
 /// `ConsoleHullUpdate` event message is emitted and this cache is updated.
 #[derive(Resource, Default)]
@@ -266,6 +275,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .init_resource::<TrackedEntities>()
     .init_resource::<SimOutbox>()
     .init_resource::<LastBroadcastEntityPositions>()
+    .init_resource::<LastBroadcastEntityHealth>()
     .init_resource::<LastBroadcastHull>()
     .init_resource::<LastBroadcastShields>()
     .init_resource::<LastBroadcastBlackboards>()
@@ -378,7 +388,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
         // ── Asteroids: position/yaw never changes — omit from per-tick payload.
         // The client already has asteroid positions from WorldSetup/AsteroidSpawned.
-        let asteroid_states: Vec<crate::messages::EntityStateSnapshot> = {
+        // Health fields are delta-compressed: only emitted when changed since last tick.
+        type AsteroidRaw = (String, Option<f32>, Option<f32>);
+        let asteroid_raw: Vec<AsteroidRaw> = {
             let mut q = world.query::<(
                 &AsteroidUuid,
                 Option<&crate::entity_spawner::EntityConsoleHull>,
@@ -399,12 +411,28 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                         let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
                         if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
                     });
-                    // Omit entry entirely when there is nothing to update.
+                    // Skip entirely when there are no health components (unbreakable asteroids).
                     if hull_fraction.is_none() && shield_fraction.is_none() {
                         return None;
                     }
+                    Some((uuid.0.clone(), hull_fraction, shield_fraction))
+                })
+                .collect()
+        };
+        let asteroid_states: Vec<crate::messages::EntityStateSnapshot> = {
+            let mut health_cache = world.resource_mut::<LastBroadcastEntityHealth>();
+            asteroid_raw
+                .into_iter()
+                .filter_map(|(uuid, hull_fraction, shield_fraction)| {
+                    let prev = health_cache.0.get(&uuid).copied().unwrap_or((None, None));
+                    let hull_changed = hull_fraction != prev.0;
+                    let shield_changed = shield_fraction != prev.1;
+                    if !hull_changed && !shield_changed {
+                        return None;
+                    }
+                    health_cache.0.insert(uuid.clone(), (hull_fraction, shield_fraction));
                     Some(crate::messages::EntityStateSnapshot {
-                        uuid: uuid.0.clone(),
+                        uuid,
                         position: None,
                         yaw: None,
                         hull_fraction,
@@ -418,8 +446,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         };
 
         // ── Non-asteroid entities (NPCs, stations): collect raw data first so
-        // we can drop the ECS borrow before mutating the LastBroadcastEntityPositions
-        // resource.
+        // we can drop the ECS borrow before mutating the LastBroadcast* resources.
         type NpcRaw = (String, bevy::math::Vec3, f32, Option<f32>, Option<f32>);
         let npc_raw: Vec<NpcRaw> = {
             let mut q = world.query_filtered::<(
@@ -455,39 +482,60 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 .collect()
         };
 
-        // Compare against last-broadcast positions; only include position/yaw
-        // when the entity actually moved (delta > ~1 cm).
+        // Compare against last-broadcast positions and health; skip entities
+        // where nothing changed.  Position/yaw suppressed below ~1 cm movement;
+        // hull/shield suppressed when the f32 value is identical to last tick.
         const POS_THRESHOLD_SQ: f32 = 0.0001; // 0.01 world-unit radius
         const YAW_THRESHOLD: f32 = 0.001; // ~0.057 degrees
         let npc_states: Vec<crate::messages::EntityStateSnapshot> = {
-            let mut last = world.resource_mut::<LastBroadcastEntityPositions>();
-            npc_raw
-                .into_iter()
-                .map(|(uuid, pos, yaw, hull_fraction, shield_fraction)| {
-                    let moved = match last.0.get(&uuid) {
-                        Some(&(prev_pos, prev_yaw)) => {
-                            (pos - prev_pos).length_squared() > POS_THRESHOLD_SQ
-                                || (yaw - prev_yaw).abs() > YAW_THRESHOLD
+            // Borrow position cache, then health cache separately (both mut).
+            // Collect diffs first to avoid holding multiple mut borrows.
+            type NpcDiff = (String, Option<[f32; 3]>, Option<f32>, Option<f32>, Option<f32>);
+            let diffs: Vec<NpcDiff> = {
+                let mut pos_cache = world.resource_mut::<LastBroadcastEntityPositions>();
+                npc_raw
+                    .iter()
+                    .map(|(uuid, pos, yaw, hull_fraction, shield_fraction)| {
+                        let moved = match pos_cache.0.get(uuid) {
+                            Some(&(prev_pos, prev_yaw)) => {
+                                (*pos - prev_pos).length_squared() > POS_THRESHOLD_SQ
+                                    || (*yaw - prev_yaw).abs() > YAW_THRESHOLD
+                            }
+                            None => true,
+                        };
+                        if moved {
+                            pos_cache.0.insert(uuid.clone(), (*pos, *yaw));
                         }
-                        None => true,
-                    };
-                    if moved {
-                        last.0.insert(uuid.clone(), (pos, yaw));
+                        let out_pos = if moved { Some([pos.x, pos.y, pos.z]) } else { None };
+                        let out_yaw = if moved { Some(*yaw) } else { None };
+                        (uuid.clone(), out_pos, out_yaw, *hull_fraction, *shield_fraction)
+                    })
+                    .collect()
+            };
+            let mut health_cache = world.resource_mut::<LastBroadcastEntityHealth>();
+            diffs
+                .into_iter()
+                .filter_map(|(uuid, out_pos, out_yaw, hull_fraction, shield_fraction)| {
+                    let prev = health_cache.0.get(&uuid).copied().unwrap_or((None, None));
+                    let hull_changed = hull_fraction != prev.0;
+                    let shield_changed = shield_fraction != prev.1;
+                    // Skip the entity entirely when nothing at all changed.
+                    if out_pos.is_none() && out_yaw.is_none() && !hull_changed && !shield_changed {
+                        return None;
                     }
-                    crate::messages::EntityStateSnapshot {
+                    if hull_changed || shield_changed {
+                        health_cache.0.insert(uuid.clone(), (hull_fraction, shield_fraction));
+                    }
+                    Some(crate::messages::EntityStateSnapshot {
                         uuid,
-                        position: if moved {
-                            Some([pos.x, pos.y, pos.z])
-                        } else {
-                            None
-                        },
-                        yaw: if moved { Some(yaw) } else { None },
-                        hull_fraction,
-                        shield_fraction,
+                        position: out_pos,
+                        yaw: out_yaw,
+                        hull_fraction: if hull_changed { hull_fraction } else { None },
+                        shield_fraction: if shield_changed { shield_fraction } else { None },
                         flags: vec![],
                         shields: None,
                         warp_out_remaining_secs: None,
-                    }
+                    })
                 })
                 .collect()
         };
@@ -991,12 +1039,14 @@ fn reset_broadcast_caches_on_start(
     mut hull: ResMut<LastBroadcastHull>,
     mut shields: ResMut<LastBroadcastShields>,
     mut positions: ResMut<LastBroadcastEntityPositions>,
+    mut health: ResMut<LastBroadcastEntityHealth>,
     mut weapons: ResMut<LastWeaponsUpdate>,
     mut last_bb: ResMut<LastBroadcastBlackboards>,
 ) {
     *hull = LastBroadcastHull::default();
     *shields = LastBroadcastShields::default();
     *positions = LastBroadcastEntityPositions::default();
+    *health = LastBroadcastEntityHealth::default();
     *weapons = LastWeaponsUpdate::default();
     *last_bb = LastBroadcastBlackboards::default();
 }
@@ -2572,6 +2622,7 @@ mod tests {
         .init_resource::<WorldSetupBroadcast>()
         .init_resource::<SimOutbox>()
         .init_resource::<LastBroadcastEntityPositions>()
+        .init_resource::<LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
         .init_resource::<LastBroadcastShields>()
         .init_resource::<LastBroadcastBlackboards>()

@@ -292,7 +292,8 @@ pub fn apply_impulse_to(
 /// After PR 6 (PRD #597): prefers the per-entity `ShipModifiers` component on
 /// the LocalShip entity, dual-writing to the global Resource when both exist.
 pub fn translate_impulse_modifiers(
-    impulse: Res<ShipImpulse>,
+    impulse_q: Query<&ShipImpulse, With<crate::server_app::LocalShip>>,
+    impulse_res: Option<Res<ShipImpulse>>,
     modifiers_res: Option<ResMut<ShipModifiers>>,
     // Per-entity component takes priority over the Resource fallback (PR 4).
     impulse_cfg_q: Query<&ImpulseConfigResource, With<crate::server_app::LocalShip>>,
@@ -300,7 +301,17 @@ pub fn translate_impulse_modifiers(
     mut modifiers_q: Query<&mut ShipModifiers, With<crate::server_app::LocalShip>>,
     mut prev_phase: Local<Option<ImpulsePhase>>,
 ) {
-    let current = impulse.0.phase;
+    // Prefer per-entity Component on LocalShip; fall back to Resource for
+    // legacy test paths that still insert a global ShipImpulse.
+    let impulse_state = impulse_q
+        .single()
+        .ok()
+        .map(|i| i.0.clone())
+        .or_else(|| impulse_res.as_deref().map(|r| r.0.clone()));
+    let Some(impulse_state) = impulse_state else {
+        return;
+    };
+    let current = impulse_state.phase;
     if Some(current) != *prev_phase {
         *prev_phase = Some(current);
         let speed_multiplier = impulse_cfg_q
@@ -309,16 +320,16 @@ pub fn translate_impulse_modifiers(
             .or_else(|_| impulse_config.as_deref().map(|c| c.speed_multiplier).ok_or(()))
             .unwrap_or(IMPULSE_SPEED_MULTIPLIER);
         let mut modifiers_res = modifiers_res;
-        match modifiers_q.single_mut() {
-            Ok(mut mods_comp) => {
-                apply_impulse_to(&mut mods_comp, &impulse.0, speed_multiplier);
+        match modifiers_q.iter_mut().next() {
+            Some(mut mods_comp) => {
+                apply_impulse_to(&mut mods_comp, &impulse_state, speed_multiplier);
                 if let Some(mods_res) = modifiers_res.as_deref_mut() {
                     *mods_res = mods_comp.clone();
                 }
             }
-            Err(_) => {
+            None => {
                 if let Some(mut mods_res) = modifiers_res {
-                    apply_impulse_to(&mut mods_res, &impulse.0, speed_multiplier);
+                    apply_impulse_to(&mut mods_res, &impulse_state, speed_multiplier);
                 }
             }
         }
@@ -711,8 +722,15 @@ mod tests {
             impulse.is_active(),
             "test fixture: impulse should be active"
         );
-        app.insert_resource(ShipImpulse(impulse));
-
+        // Spawn a LocalShip carrying the impulse Component so
+        // `translate_impulse_modifiers` (which prefers the per-entity
+        // Component post ship-parity audit) can read it.
+        app.world_mut().spawn((
+            crate::simulation::LocalShip,
+            crate::simulation::Ship,
+            ShipImpulse(impulse),
+            ShipModifiers::new(),
+        ));
         // Configure a non-default speed multiplier (3.0 instead of 10.0).
         // The MaxSpeed modifier must reflect this — proving the system
         // reads the resource rather than the const fallback.

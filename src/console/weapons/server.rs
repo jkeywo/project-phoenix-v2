@@ -342,10 +342,10 @@ fn handle_set_target(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    let Ok((admitted, physics)) = ship_query.single() else {
+    let Some((admitted, physics)) = ship_query.iter().next() else {
         return;
     };
-    let Ok(mut weapons_target) = weapons_target_q.single_mut() else {
+    let Some(mut weapons_target) = weapons_target_q.iter_mut().next() else {
         return;
     };
     // Per-entity modifiers component takes priority; fall back to Resource.
@@ -1323,7 +1323,7 @@ fn handle_set_phaser_mode(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Some(admitted) = ship_query.iter().next() else {
         return;
     };
     for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
@@ -1345,7 +1345,7 @@ fn handle_set_phaser_frequency(
     >,
     mut freq_q: Query<&mut crate::ship_state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
+    let Some((ship_config, control_sources)) = ship_query.iter().next() else {
         return;
     };
     let tactical_policy = control_sources
@@ -1365,7 +1365,7 @@ fn handle_set_phaser_frequency(
         {
             continue;
         }
-        if let Ok(mut freq) = freq_q.single_mut() {
+        if let Some(mut freq) = freq_q.iter_mut().next() {
             freq.0 = frequency.clamp(0.0, 1.0);
         }
     }
@@ -1384,7 +1384,7 @@ fn handle_load_tube(
     mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
+    let Some((ship_config, control_sources)) = ship_query.iter().next() else {
         return;
     };
     let policy = control_sources
@@ -1401,7 +1401,7 @@ fn handle_load_tube(
             continue;
         }
         // Prefer per-entity component; fall back to global resource for test compat.
-        if let Ok(mut ts) = torpedo_sys_q.single_mut() {
+        if let Some(mut ts) = torpedo_sys_q.iter_mut().next() {
             ts.0.start_load(tube.as_str());
         } else {
             torpedo_sys_res.0.start_load(tube.as_str());
@@ -1422,7 +1422,7 @@ fn handle_unload_tube(
     mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
+    let Some((ship_config, control_sources)) = ship_query.iter().next() else {
         return;
     };
     let policy = control_sources
@@ -1439,7 +1439,7 @@ fn handle_unload_tube(
             continue;
         }
         // Prefer per-entity component; fall back to global resource for test compat.
-        if let Ok(mut ts) = torpedo_sys_q.single_mut() {
+        if let Some(mut ts) = torpedo_sys_q.iter_mut().next() {
             ts.0.start_unload(tube.as_str());
         } else {
             torpedo_sys_res.0.start_unload(tube.as_str());
@@ -1604,25 +1604,27 @@ fn handle_fire_torpedo(
     }
 }
 
-/// Drains the Power battery via the inter-system command channel while a
-/// phaser beam is active. Runs in `SimSet::Physics` (one phase before
-/// `tick_beams` in `SimSet::Damage`); the Power system consumes the drain in
-/// `SimSet::Modifiers`.
+/// Drains each ship's Power battery via the inter-system command channel
+/// while its own phaser beam is active. Runs in `SimSet::Physics` (one
+/// phase before `tick_beams` in `SimSet::Damage`); the Power system
+/// consumes the drain in `SimSet::Modifiers` per-entity via `source_entity`.
+///
+/// Iterates every ship so NPC beams drain their own power grid the same
+/// way the player's do.
 pub fn drain_power_for_active_beam(
-    beam_q: Query<&ActiveBeam, With<crate::server_app::LocalShip>>,
+    beam_q: Query<(Entity, &ActiveBeam), With<crate::server_app::Ship>>,
     time: Res<Time>,
     mut inter_system: ResMut<InterSystemQueue>,
 ) {
-    let Ok(beam) = beam_q.single() else {
-        return;
-    };
-    if beam.target_uuid.is_some() {
-        inter_system.0.push(InterSystemMsg {
-            target: crate::system_registry::power_system_id(),
-            payload: InterSystemPayload::DrainWeaponsBattery {
-                amount: PHASER_BATTERY_DRAIN_PER_SEC * time.delta_secs(),
-            },
-        });
+    let amount = PHASER_BATTERY_DRAIN_PER_SEC * time.delta_secs();
+    for (source_entity, beam) in beam_q.iter() {
+        if beam.target_uuid.is_some() {
+            inter_system.0.push(InterSystemMsg {
+                target: crate::system_registry::power_system_id(),
+                payload: InterSystemPayload::DrainWeaponsBattery { amount },
+                source_entity: Some(source_entity),
+            });
+        }
     }
 }
 
@@ -1818,7 +1820,7 @@ fn tick_torpedo_system(
     for det in detonations {
         let target_uuid = det.target_uuid;
         let mut asteroid_destroyed = false;
-        let mut npc_destroyed = false;
+        let mut non_local_ship_destroyed = false;
         let mut hit_x = 0.0_f32;
         let mut hit_z = 0.0_f32;
 
@@ -1865,9 +1867,9 @@ fn tick_torpedo_system(
                 if is_asteroid {
                     asteroid_destroyed = true;
                 } else {
-                    npc_destroyed = true;
+                    non_local_ship_destroyed = true;
                 }
-                // Use live position from whichever query matches (asteroid or NPC).
+                // Use live position from whichever query matches (asteroid or ship).
                 if is_asteroid {
                     if let Some((_, t)) = asteroid_q.iter().find(|(u, _)| u.0 == target_uuid) {
                         hit_x = t.translation.x;
@@ -1898,7 +1900,7 @@ fn tick_torpedo_system(
                     wt.0 = None;
                 }
             }
-        } else if npc_destroyed {
+        } else if non_local_ship_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
             destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
                 entity_uuid: target_uuid.clone(),
@@ -1924,31 +1926,33 @@ fn tick_torpedo_system(
 
 // ── Tactical AI controller ────────────────────────────────────────────────
 //
-// Runs only when the Tactical system's ControlSource is Ai.  Sub-regions
-// are separated by comment banners — each banner marks a future split point
-// when the coarse Tactical system is decomposed into fine-grained systems.
+// Runs for every ship whose Tactical system's ControlSource is Ai.
+// Sub-regions are separated by comment banners — each banner marks a
+// future split point when the coarse Tactical system is decomposed into
+// fine-grained systems.
 
 fn operate_tactical_ai(
-    ship_query: Query<
+    mut ship_query: Query<
         (
+            Entity,
+            &crate::entity_spawner::EntityUuid,
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
             &crate::ship_plugin::ActiveStationRatings,
             &LastShipAttacker,
+            &ShipPhysics,
+            &mut WeaponsTarget,
+            Option<&mut TorpedoSystemResource>,
+            &crate::server_app::ShipSystemBlackboards,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
     sessions: Res<Sessions>,
-    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
-    mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
-    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
-    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::LocalShip>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
-    ship_bbs_q: Query<&crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    npc_q: Query<
+    other_ships_q: Query<
         (
             &crate::entity_spawner::EntityUuid,
             &Transform,
@@ -1957,148 +1961,165 @@ fn operate_tactical_ai(
         Without<crate::simulation::Asteroid>,
     >,
 ) {
-    let Ok((ship_config, _control_sources, active_ratings, last_attacker)) = ship_query.single() else {
-        return;
-    };
-    let Ok(mut weapons_target) = weapons_target_q.single_mut() else {
-        return;
-    };
-    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
-
-    // Always set weapons_target from Destroy objectives regardless of control
-    // source. This lets both human and AI Tactical operators benefit from
-    // mission objective auto-targeting.
-    // When no Destroy objective is available (or its target entity can't be
-    // resolved), fall back to the last NPC that attacked the player ship.
-    let objective_target = match top_destroy_objective_target(ship_bbs_q.single().ok()) {
-        Some(target_name) if target_name.is_empty() => None,
-        Some(target_name) => resolve_objective_target_uuid(target_name, runtime.as_deref(), &npc_q),
-        None => None,
-    };
-    if let Some(uuid) = objective_target.or_else(|| last_attacker.0.clone()) {
-        weapons_target.0 = Some(uuid);
-    }
-
-    // ── TORPEDO AUTO-FIRE (future: split to torpedo_tube system) ─────────────
-    //
-    // When the station is claimed, gate on whether the active rating's
-    // ai_tuning has the torpedo_auto_fire rule. Unclaimed → unconditional.
+    let tactical_system = crate::system_registry::tactical_system_id();
     let tactical_station = crate::messages::StationId("tactical".into());
-    let auto_fire_enabled = match sessions
-        .0
-        .console_holder(&Console::Tactical, &ship_config.0)
+
+    for (
+        _entity,
+        ship_uuid,
+        ship_config,
+        control_sources,
+        active_ratings,
+        last_attacker,
+        physics,
+        mut weapons_target,
+        mut torpedo_sys_comp,
+        blackboards,
+    ) in ship_query.iter_mut()
     {
-        Some(_) => active_ratings.0.get(&tactical_station).is_some_and(|r| {
-            ship_config.0.has_ai_rule(
-                &tactical_station,
-                r,
-                crate::console_ai_plugin::AI_RULE_TORPEDO_AUTO_FIRE,
-            )
-        }),
-        None => true,
-    };
+        // Only run for ships whose Tactical system is AI-controlled.
+        // The player ship's Tactical may be human — skip in that case; the
+        // human operator drives via WeaponsTarget directly through the
+        // handle_set_target handler.
+        let policy = control_sources.0.policy_for(&tactical_system);
+        if !policy.operate_ai {
+            continue;
+        }
 
-    if auto_fire_enabled {
-        if let Some(target_uuid) = &weapons_target.0 {
-            // Look up live world position — WorldResource snapshot is stale for
-            // moving targets.
-            let target_xz = asteroid_q
-                .iter()
-                .find_map(|(u, t)| {
-                    (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
+        // Always set weapons_target from Destroy objectives regardless of
+        // control source. This lets both human and AI Tactical operators
+        // benefit from mission objective auto-targeting. When no Destroy
+        // objective is available (or its target entity can't be resolved),
+        // fall back to the last attacker.
+        let objective_target = match top_destroy_objective_target(Some(blackboards)) {
+            Some(target_name) if target_name.is_empty() => None,
+            Some(target_name) => {
+                resolve_objective_target_uuid(target_name, runtime.as_deref(), &other_ships_q)
+            }
+            None => None,
+        };
+        if let Some(uuid) = objective_target.or_else(|| last_attacker.0.clone()) {
+            weapons_target.0 = Some(uuid);
+        }
+
+        // ── TORPEDO AUTO-FIRE (future: split to torpedo_tube system) ─────
+        //
+        // When the station is claimed, gate on whether the active rating's
+        // ai_tuning has the torpedo_auto_fire rule. Unclaimed → unconditional.
+        let auto_fire_enabled = match sessions
+            .0
+            .console_holder(&Console::Tactical, &ship_config.0)
+        {
+            Some(_) => active_ratings.0.get(&tactical_station).is_some_and(|r| {
+                ship_config.0.has_ai_rule(
+                    &tactical_station,
+                    r,
+                    crate::console_ai_plugin::AI_RULE_TORPEDO_AUTO_FIRE,
+                )
+            }),
+            None => true,
+        };
+
+        if !auto_fire_enabled {
+            continue;
+        }
+        let Some(target_uuid) = weapons_target.0.clone() else {
+            continue;
+        };
+        // Look up live world position — WorldResource snapshot is stale for moving targets.
+        let target_xz = asteroid_q
+            .iter()
+            .find_map(|(u, t)| (u.0 == target_uuid).then_some((t.translation.x, t.translation.z)))
+            .or_else(|| {
+                other_ships_q.iter().find_map(|(u, t, _)| {
+                    (u.0 == target_uuid).then_some((t.translation.x, t.translation.z))
                 })
-                .or_else(|| {
-                    npc_q.iter().find_map(|(u, t, _)| {
-                        (u.0 == *target_uuid).then_some((t.translation.x, t.translation.z))
-                    })
-                });
+            });
+        let Some((tx, tz)) = target_xz else {
+            continue;
+        };
 
-            if let Some((tx, tz)) = target_xz {
-                let dx = tx - physics.x;
-                let dz = tz - physics.z;
-                let world_bearing = dx.atan2(-dz);
-                let bearing = world_bearing - physics.yaw;
+        let dx = tx - physics.x;
+        let dz = tz - physics.z;
+        let world_bearing = dx.atan2(-dz);
+        let bearing = world_bearing - physics.yaw;
 
-                // Prefer per-entity component; fall back to global resource for test compat.
-                // Resolve `&mut TorpedoSystem` once and use it uniformly below.
-                let mut torpedo_sys_comp_opt = torpedo_sys_q.single_mut().ok();
-                let torpedo_sys: &mut crate::torpedo::TorpedoSystem =
-                    match torpedo_sys_comp_opt {
-                        Some(ref mut c) => &mut c.0,
-                        None => &mut torpedo_sys_res.0,
-                    };
-                let tubes: Vec<crate::console_ai::TubeSummary> = torpedo_sys
-                    .tubes
-                    .iter()
-                    .map(|tube| crate::console_ai::TubeSummary {
-                        id: tube.id.clone(),
-                        loaded: tube.is_loaded(),
-                        in_arc: tube.is_in_arc(bearing),
-                    })
-                    .collect();
-                let magazine = torpedo_sys.torpedoes_remaining;
+        // Prefer per-entity component; fall back to global resource for
+        // legacy test paths that only set up the Resource.
+        let torpedo_sys: &mut crate::torpedo::TorpedoSystem = match torpedo_sys_comp.as_mut() {
+            Some(c) => &mut c.0,
+            None => &mut torpedo_sys_res.0,
+        };
+        let tubes: Vec<crate::console_ai::TubeSummary> = torpedo_sys
+            .tubes
+            .iter()
+            .map(|tube| crate::console_ai::TubeSummary {
+                id: tube.id.clone(),
+                loaded: tube.is_loaded(),
+                in_arc: tube.is_in_arc(bearing),
+            })
+            .collect();
+        let magazine = torpedo_sys.torpedoes_remaining;
 
-                let input = crate::console_ai::TorpedoAiInput {
-                    target_locked: true,
-                    target_shields: 0,
-                    tubes,
-                    magazine,
-                };
+        let input = crate::console_ai::TorpedoAiInput {
+            target_locked: true,
+            target_shields: 0,
+            tubes,
+            magazine,
+        };
 
-                let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
-                let source_uuid = player_ship_q.single().map(|u| u.0.clone()).ok();
+        let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
+        let source_uuid = Some(ship_uuid.0.clone());
 
-                for tube_id in tubes_to_fire {
-                    let torpedo_uuid = uuid::Uuid::new_v4().to_string();
-                    let tube_facing_rad = torpedo_sys
-                        .tube(tube_id.as_str())
-                        .map(|t| t.facing_deg.to_radians())
-                        .unwrap_or(0.0);
-                    let launch_heading = physics.yaw + tube_facing_rad;
-                    use crate::torpedo::LaunchResult;
-                    let result = torpedo_sys.launch(
-                        tube_id.as_str(),
-                        torpedo_uuid.clone(),
-                        physics.x,
-                        physics.z,
-                        launch_heading,
-                        Some(target_uuid.clone()),
-                        source_uuid.clone(),
-                    );
-                    match result {
-                        LaunchResult::Launched {
+        for tube_id in tubes_to_fire {
+            let torpedo_uuid = uuid::Uuid::new_v4().to_string();
+            let tube_facing_rad = torpedo_sys
+                .tube(tube_id.as_str())
+                .map(|t| t.facing_deg.to_radians())
+                .unwrap_or(0.0);
+            let launch_heading = physics.yaw + tube_facing_rad;
+            use crate::torpedo::LaunchResult;
+            let result = torpedo_sys.launch(
+                tube_id.as_str(),
+                torpedo_uuid.clone(),
+                physics.x,
+                physics.z,
+                launch_heading,
+                Some(target_uuid.clone()),
+                source_uuid.clone(),
+            );
+            match result {
+                LaunchResult::Launched {
+                    uuid: launched_uuid,
+                } => {
+                    outbox.0.push((
+                        Target::All,
+                        ServerMessage::TorpedoLaunched {
                             uuid: launched_uuid,
-                        } => {
-                            outbox.0.push((
-                                Target::All,
-                                ServerMessage::TorpedoLaunched {
-                                    uuid: launched_uuid,
-                                    tube: tube_id,
-                                    x: physics.x,
-                                    z: physics.z,
-                                    heading: launch_heading,
-                                },
-                            ));
-                        }
-                        LaunchResult::TubeNotLoaded
-                        | LaunchResult::NoTorpedoes
-                        | LaunchResult::UnknownTube => {}
-                    }
+                            tube: tube_id,
+                            x: physics.x,
+                            z: physics.z,
+                            heading: launch_heading,
+                        },
+                    ));
                 }
+                LaunchResult::TubeNotLoaded
+                | LaunchResult::NoTorpedoes
+                | LaunchResult::UnknownTube => {}
             }
         }
+
+        // ── PHASER AUTO-FIRE (future: split to phaser_bank system) ───────
+        //
+        // tick_phaser_auto_fire handles auto-mode phasers for both human and AI
+        // (phaser mode is a ship-level setting, not control-source specific).
+        // No additional AI logic needed at the coarse system level.
+
+        // ── FREQUENCY COORDINATION (future: split to channel-3 coordination) ─
+        //
+        // Science AI emits FrequencyHint when its preset grants auto_hint.
+        // The Tactical AI has no corresponding action at the coarse level.
     }
-
-    // ── PHASER AUTO-FIRE (future: split to phaser_bank system) ───────────────
-    //
-    // tick_phaser_auto_fire handles auto-mode phasers for both human and AI
-    // (phaser mode is a ship-level setting, not control-source specific).
-    // No additional AI logic needed at the coarse system level.
-
-    // ── FREQUENCY COORDINATION (future: split to channel-3 coordination) ─────
-    //
-    // Science AI emits FrequencyHint when its preset grants auto_hint.
-    // The Tactical AI has no corresponding action at the coarse level.
 }
 
 fn top_destroy_objective_target(
@@ -2128,7 +2149,7 @@ fn top_destroy_objective_target(
 fn resolve_objective_target_uuid(
     target_name: &str,
     runtime: Option<&crate::world::server::WorldContentRuntime>,
-    npc_q: &Query<
+    targetable_q: &Query<
         (
             &crate::entity_spawner::EntityUuid,
             &Transform,
@@ -2140,7 +2161,7 @@ fn resolve_objective_target_uuid(
     runtime
         .and_then(|rt| rt.name_to_uuid.get(target_name).cloned())
         .or_else(|| {
-            npc_q.iter().find_map(|(uuid, _, name)| {
+            targetable_q.iter().find_map(|(uuid, _, name)| {
                 (uuid.0 == target_name || name.is_some_and(|n| n.0 == target_name))
                     .then(|| uuid.0.clone())
             })
@@ -2932,6 +2953,7 @@ station = "tactical"
                 (Console::Shields, 25.0),
             ])),
             crate::server_app::ShipSystemBlackboards::default(),
+            crate::entity_spawner::EntityUuid("test-local-ship".to_string()),
         )).id();
         // Second insert to stay under Bevy's Bundle-tuple length limit.
         app.world_mut().entity_mut(ship).insert((
@@ -5420,16 +5442,24 @@ station = "tactical"
         app.init_resource::<AiTokenRegistry>();
         app.init_resource::<GameOverReason>();
 
-        // Insert shields so the shield-routing path is exercised.
+        // Insert shields on the LocalShip entity so the shield-routing
+        // path is exercised (ShipShields is pure per-entity Component
+        // post ship-parity audit).
         let shield_config = ShieldConfig {
             max_hp: 100,
             regen_per_sec: 0.0,
             num_facings: 4,
             ..Default::default()
         };
-        app.insert_resource(ShipShields(crate::shield::ShieldSystem::new(
-            &shield_config,
-        )));
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>();
+            let local = q.single(app.world()).unwrap();
+            app.world_mut()
+                .entity_mut(local)
+                .insert(ShipShields(crate::shield::ShieldSystem::new(&shield_config)));
+        }
 
         let npc_uuid = "00000000-0000-0000-0000-000000000010";
         let player_uuid = "00000000-0000-0000-0000-000000000011";
@@ -5480,14 +5510,18 @@ station = "tactical"
             .unwrap()
             .0
             .total_current();
-        let shields_sum_before: i32 = app
-            .world()
-            .resource::<ShipShields>()
-            .0
-            .facings
-            .iter()
-            .map(|f| f.hp)
-            .sum();
+        let shields_sum_before: i32 = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipShields, With<LocalShip>>();
+            q.single(app.world())
+                .expect("LocalShip must carry ShipShields")
+                .0
+                .facings
+                .iter()
+                .map(|f| f.hp)
+                .sum()
+        };
 
         // Activate the beam directly targeting the player ship.
         {
@@ -5510,14 +5544,18 @@ station = "tactical"
             .unwrap()
             .0
             .total_current();
-        let shields_sum_after: i32 = app
-            .world()
-            .resource::<ShipShields>()
-            .0
-            .facings
-            .iter()
-            .map(|f| f.hp)
-            .sum();
+        let shields_sum_after: i32 = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipShields, With<LocalShip>>();
+            q.single(app.world())
+                .expect("LocalShip must carry ShipShields")
+                .0
+                .facings
+                .iter()
+                .map(|f| f.hp)
+                .sum()
+        };
 
         let hull_lost = hull_before - hull_after;
         let shields_lost = shields_sum_before - shields_sum_after;
@@ -5687,7 +5725,7 @@ station = "tactical"
             ))
             .id();
 
-        // Tick 1: `register_npc_tokens_on_spawn` runs → AiControllerComponent marker +
+        // Tick 1: `register_ai_tokens_on_spawn` runs → AiControllerComponent marker +
         //         ShipAiMemory attached and token registered in AiTokenRegistry.
         app.update();
 

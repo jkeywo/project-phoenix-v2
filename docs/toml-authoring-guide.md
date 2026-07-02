@@ -50,7 +50,7 @@ normalised anchor table, the `[[entity]]` list, `[[trigger]]` blocks, and
 `src/server/bridge.rs`, which delegates to `entities::config_cache` to
 populate the `WORLD_CONFIG` thread-local. The Bevy startup chain
 (`insert_world_config_resource → spawn_world_entities → init_world_runtime
-→ setup_fallback_world`) consumes it. Asteroid-field and named `[[entity]]`
+→ load_extra_worlds`) consumes it. Asteroid-field and named `[[entity]]`
 instances spawn via `world::server::spawn_world_entities`; anonymous
 non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 

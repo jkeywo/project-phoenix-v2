@@ -26,21 +26,33 @@ fn publish_helm_blackboard(
         (&ShipPhysics, Option<&BoostConfigResource>),
         With<crate::simulation::LocalShip>,
     >,
-    impulse: Option<Res<ShipImpulse>>,
-    boost: Option<Res<ShipBoost>>,
+    impulse_q: Query<&ShipImpulse, With<crate::simulation::LocalShip>>,
+    impulse_res: Option<Res<ShipImpulse>>,
+    boost_q: Query<&ShipBoost, With<crate::simulation::LocalShip>>,
+    boost_res: Option<Res<ShipBoost>>,
     boost_config_res: Option<Res<BoostConfigResource>>,
     mut ship_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::simulation::LocalShip>>,
 ) {
     let (physics, entity_boost_cfg) = physics_q.single().ok().map(|(p, c)| (*p, c.cloned())).unwrap_or_default();
-    let impulse_charge = impulse
-        .as_ref()
-        .map(|imp| imp.0.charge_progress)
+    // Prefer per-entity Component on LocalShip; fall back to Resource for
+    // legacy test paths that still insert a global ShipImpulse.
+    let impulse_charge = impulse_q
+        .single()
+        .ok()
+        .map(|i| i.0.charge_progress)
+        .or_else(|| impulse_res.as_deref().map(|r| r.0.charge_progress))
         .unwrap_or(0.0);
     // Per-entity component takes priority over the Resource fallback.
     let boost_config = entity_boost_cfg.or_else(|| boost_config_res.as_deref().cloned());
     let boost_enabled = boost_config.as_ref().map(|c| c.enabled).unwrap_or(false);
-    let boost_battery = boost.as_ref().map(|b| b.0.battery).unwrap_or(0.0);
-    let boost_active = boost.as_ref().map(|b| b.0.is_active()).unwrap_or(false);
+    // Prefer per-entity ShipBoost on LocalShip; fall back to Resource.
+    let boost_state = boost_q
+        .single()
+        .ok()
+        .map(|b| b.0.clone())
+        .or_else(|| boost_res.as_deref().map(|r| r.0.clone()));
+    let boost_battery = boost_state.as_ref().map(|b| b.battery).unwrap_or(0.0);
+    let boost_active = boost_state.as_ref().map(|b| b.is_active()).unwrap_or(false);
     // view_mode is not raw sim truth; helm blackboard omits it
 
     let bb = HelmBlackboard {
@@ -54,7 +66,7 @@ fn publish_helm_blackboard(
         boost_enabled,
     };
 
-    if let Ok(mut bbs) = ship_q.single_mut() {
+    if let Some(mut bbs) = ship_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(HELM_SYSTEM_ID.to_string()),
             SystemBlackboard::Helm(bb),
@@ -72,13 +84,13 @@ mod tests {
 
     fn base_app() -> App {
         let mut app = App::new();
-        app            .insert_resource(ShipImpulse(ImpulseState::new()))
-            .add_systems(Update, publish_helm_blackboard);
+        app.add_systems(Update, publish_helm_blackboard);
         // Spawn a LocalShip entity with ShipPhysics and ShipSystemBlackboards so the system can query it.
         app.world_mut().spawn((
             crate::simulation::LocalShip,
             ShipPhysics::default(),
             ShipSystemBlackboards::default(),
+            ShipImpulse::default(),
         ));
         app
     }
@@ -140,7 +152,10 @@ mod tests {
     fn publish_reflects_impulse_charge() {
         let mut app = base_app();
         {
-            let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipImpulse, With<crate::simulation::LocalShip>>();
+            let mut imp = q.single_mut(app.world_mut()).expect("LocalShip must have ShipImpulse");
             imp.0.charge_progress = 0.5;
         }
         app.update();

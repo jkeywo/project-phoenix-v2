@@ -107,7 +107,7 @@ pub fn handle_dispatch_repair_team(
     >,
     teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Ok((admitted, ship_config, control_sources, mut teams_comp)) = ship_query.single_mut()
+    let Some((admitted, ship_config, control_sources, mut teams_comp)) = ship_query.iter_mut().next()
     else {
         return;
     };
@@ -304,7 +304,7 @@ fn publish_repair_blackboard(
         damageable_consoles,
     };
 
-    if let Ok(mut blackboards) = blackboards_q.single_mut() {
+    if let Some(mut blackboards) = blackboards_q.iter_mut().next() {
         blackboards.0.insert(
             SystemId(REPAIR_SYSTEM_ID.to_string()),
             SystemBlackboard::Repair(bb),
@@ -415,7 +415,6 @@ mod tests {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-        .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<crate::lobby::WorldResource>()
@@ -442,6 +441,7 @@ mod tests {
             crate::ship_plugin::CoordinationQueue::default(),
             crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(hull_config)),
             crate::server_app::ShipSystemBlackboards::default(),
+            ShipShields(ShieldSystem::default()),
         ));
         app
     }

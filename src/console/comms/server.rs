@@ -62,7 +62,7 @@ fn publish_comms_blackboard(
         contacts,
     };
 
-    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string()),
             SystemBlackboard::Comms(bb),

@@ -78,7 +78,17 @@ pub struct AsteroidShieldPierce(pub f32);
 struct SimBroadcastTimer(Timer);
 
 /// The ship's impulse drive state. Cancelled automatically when hull damage is taken.
-#[derive(Resource)]
+///
+/// Per-ship `Component` post ship-parity audit; every ship (player + NPC)
+/// carries its own impulse state. NPCs never charge impulse under current
+/// AI, but the state lives on the entity so future NPC helm behaviour can
+/// route through the same per-ship pathway.
+///
+/// Dual `Resource + Component` during the migration window: production
+/// readers query the per-ship Component on the LocalShip; the Resource
+/// form is kept only for legacy test scaffolds that call `insert_resource`.
+/// The Resource derive is scheduled for removal in a follow-up cleanup.
+#[derive(Resource, Component, Default)]
 pub struct ShipImpulse(pub ImpulseState);
 
 // ShipShields has moved to `crate::ship::shields` as a Component.
@@ -86,7 +96,12 @@ pub use crate::ship::shields::ShipShields;
 
 /// The ship's boost drive battery state. Toggle/partial-drain model; only
 /// active when the ship's TOML enables it (see `BoostConfigResource`).
-#[derive(Resource, Default)]
+///
+/// Dual `Resource + Component` during the ship-parity migration window:
+/// production readers query the per-ship Component on the LocalShip; the
+/// Resource form is kept for legacy test scaffolds. Both spawn paths
+/// insert a `ShipBoost::default()` Component on every ship.
+#[derive(Resource, Component, Default)]
 pub struct ShipBoost(pub crate::boost::BoostState);
 
 /// Per-ship marker set to `true` by phaser/torpedo fire systems when that
@@ -241,7 +256,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_plugins(crate::entity_star::StarRenderPlugin)
     .add_message::<AsteroidDestroyedVfx>()
-    .insert_resource(ShipImpulse(ImpulseState::new()))
     .insert_resource(ShipBoost(crate::boost::BoostState::new()))
     .init_resource::<CaptainPriorityBoost>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
@@ -645,7 +659,7 @@ fn publish_viewscreen_blackboard(
     };
 
     // Write directly to the per-entity component.
-    if let Ok((mut entity_bbs, _, _, _)) = ship_blackboards_q.single_mut() {
+    if let Some((mut entity_bbs, _, _, _)) = ship_blackboards_q.iter_mut().next() {
         entity_bbs.0.insert(
             SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
             SystemBlackboard::Viewscreen(bb),
@@ -659,7 +673,7 @@ fn handle_set_sensors_target(
     ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    let Ok(ship_config) = ship_query.single() else {
+    let Some(ship_config) = ship_query.iter().next() else {
         return;
     };
     for ev in reader.read() {
@@ -916,7 +930,7 @@ fn broadcast_shield_status(
     ), With<LocalShip>>,
     mut last: ResMut<LastBroadcastShields>,
 ) {
-    let Ok((shields, ship_config)) = ship_query.single() else {
+    let Some((shields, ship_config)) = ship_query.iter().next() else {
         return;
     };
     if !timer.0.tick(time.delta()).just_finished() {
@@ -996,7 +1010,7 @@ pub fn broadcast_blackboard_updates(
     mut last: ResMut<LastBroadcastBlackboards>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    let Ok(bb) = ship_query.single() else {
+    let Some(bb) = ship_query.iter().next() else {
         return;
     };
     let updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = bb
@@ -1070,7 +1084,7 @@ fn admit_system_commands(
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
 ) {
-    let Ok((ship_entity, ship_config, control_sources, mut admitted)) = ship_query.single_mut()
+    let Some((ship_entity, ship_config, control_sources, mut admitted)) = ship_query.iter_mut().next()
     else {
         return;
     };
@@ -1278,7 +1292,7 @@ fn snapshot_from_entity_config(
     // Initial shield fraction (#471). When the entity has a `[shields]`
     // block, seed the snapshot at full HP. Per-tick updates flow through
     // `EntityStateSnapshot.shield_fraction` from `sim_state_broadcaster`.
-    if config.shields.is_some() {
+    if config.shields_console.is_some() {
         snapshot.shield_fraction = Some(1.0);
     }
 
@@ -1583,8 +1597,8 @@ fn reconcile_runtime_entities(
 //   * spawning *anonymous* immediate `[[entity]]` instances (e.g. stars,
 //     planets) that aren't asteroid fields and don't carry a `name`.
 //
-// When no `WorldConfig` is loaded (native unit tests, hardcoded fallback)
-// this is a no-op; `world::server::setup_fallback_world` covers that case.
+// When no `WorldConfig` is loaded (native unit tests only — production
+// always loads a world TOML via the WASM bridge) this is a no-op.
 fn setup_world(
     mut commands: Commands,
     mut world: ResMut<WorldResource>,
@@ -1778,6 +1792,18 @@ fn spawn_game_start_entities(
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
                 .insert(crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()))
                 .insert(crate::ship_plugin::LastHelmInput::default())
+                // Per-ship impulse drive state (audit follow-up). Every
+                // ship carries its own; NPC ships get one via the spawner
+                // too (both idle by default).
+                .insert(crate::server_app::ShipImpulse::default())
+                // Per-ship boost drive battery (audit follow-up). Every
+                // ship carries its own; NPC ships get one via the spawner
+                // (both empty by default).
+                .insert(crate::server_app::ShipBoost::default())
+                // Per-ship coordination bus state (audit follow-up). See
+                // `entities/spawner.rs` for details.
+                .insert(crate::ship::shields::ShieldsCoordinationState::default())
+                .insert(crate::ship::sensors::SensorsFrequencyState::default())
                 // Per-entity CollisionCooldown so player and NPC ships each
                 // have their own cooldown timer (PRD #597 PR-8).
                 .insert(CollisionCooldown::default())
@@ -1892,9 +1918,10 @@ fn spawn_game_start_entities(
 
             // [torpedoes] block — builds the TorpedoSystem from TOML config.
             // Inserted as per-entity component AND global resource (dual-write
-            // migration). NPC ships with a [torpedoes] block will get their own
-            // TorpedoSystemResource component via entity_spawner when that lands;
-            // for now only the player ship uses torpedoes.
+            // migration). NPC ships with a [torpedoes] block also get their own
+            // TorpedoSystemResource component via `entities::spawner::spawn_entity`
+            // (see #597 PR-3 and the audit follow-up); `tick_torpedo_system`
+            // iterates `With<Ship>` so both paths advance the same way.
             if let Some(tc) = &config.torpedoes {
                 let runtime_config = tc.to_runtime();
                 let torpedo_system = if !tc.tubes.is_empty() {
@@ -1908,27 +1935,37 @@ fn spawn_game_start_entities(
                 commands.entity(spawned).insert(torpedo_res);
             }
 
-            if let Some(pc) = &config.power {
-                let power_config = PowerConfigResource(crate::power_system::PowerConfig {
+            // Power config — unconditionally insert as per-entity Component
+            // so systems that iterate `With<Ship>` always see a value on
+            // the player ship (matching NPCs, which spawner.rs always
+            // inserts a defaulted `PowerConfigResource` for). Dual-writes
+            // the global Resource for legacy readers.
+            let power_config = if let Some(pc) = &config.power {
+                PowerConfigResource(crate::power_system::PowerConfig {
                     capacity: pc.capacity,
                     rates: pc.rates,
                     emergency_threshold: pc.emergency_threshold,
-                });
-                // Insert as per-entity component AND global resource (dual-write migration — PR 6).
-                commands.entity(spawned).insert(power_config.clone());
-                commands.insert_resource(power_config);
-                if let Some(ai) = &pc.ai {
-                    let ai_cfg = PowerAiConfigResource {
-                        weapons_battery_floor: ai.weapons_battery_floor,
-                        shields_battery_floor: ai.shields_battery_floor,
-                        helm_battery_floor: ai.helm_battery_floor,
-                        helm_throttle_threshold: ai.helm_throttle_threshold,
-                    };
-                    // Insert as per-entity component AND global resource (dual-write migration — PR 6).
-                    commands.entity(spawned).insert(ai_cfg.clone());
-                    commands.insert_resource(ai_cfg);
-                }
-            }
+                })
+            } else {
+                PowerConfigResource::default()
+            };
+            commands.entity(spawned).insert(power_config.clone());
+            commands.insert_resource(power_config);
+
+            // Power AI config — unconditionally insert as per-entity
+            // Component so `operate_power_ai` iterating `With<Ship>` sees
+            // a value on the player ship. Dual-writes the Resource.
+            let ai_cfg = match config.power.as_ref().and_then(|pc| pc.ai.as_ref()) {
+                Some(ai) => PowerAiConfigResource {
+                    weapons_battery_floor: ai.weapons_battery_floor,
+                    shields_battery_floor: ai.shields_battery_floor,
+                    helm_battery_floor: ai.helm_battery_floor,
+                    helm_throttle_threshold: ai.helm_throttle_threshold,
+                },
+                None => PowerAiConfigResource::default(),
+            };
+            commands.entity(spawned).insert(ai_cfg.clone());
+            commands.insert_resource(ai_cfg);
 
             // Power multipliers
             let defaults = [-0.5, 0.0, 0.25, 0.5];
@@ -2467,7 +2504,7 @@ fn face_player_lights(
     ship_query: Query<&GlobalTransform, With<LocalShip>>,
     mut light_query: Query<(&GlobalTransform, &mut Transform), With<FacePlayerLight>>,
 ) {
-    let Ok(ship_transform) = ship_query.single() else {
+    let Some(ship_transform) = ship_query.iter().next() else {
         return;
     };
     let player_pos = ship_transform.translation();

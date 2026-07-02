@@ -1,6 +1,6 @@
 use crate::messages::{ViewDirection, ViewMode};
 use crate::ship::viewscreen::{source_system_for_view_mode, ViewscreenArbiter, ViewscreenRequest};
-use bevy::prelude::{Component, Resource};
+use bevy::prelude::Component;
 
 /// Per-entity physics state component for every ship entity (player and NPC).
 ///
@@ -8,10 +8,10 @@ use bevy::prelude::{Component, Resource};
 /// previously on the singleton `ShipState` resource. Both the player ship and
 /// NPC ships carry this component; the physics tick reads/writes it uniformly.
 ///
-/// Derives both `Component` (production use on entities) and `Resource`
-/// (retained so that existing test helpers that call `insert_resource` continue
-/// to compile during the migration window).
-#[derive(Component, Resource, Clone, Copy, Debug, Default, PartialEq)]
+/// Pure per-entity Component post ship-parity audit; the legacy `Resource`
+/// derive has been dropped since no production code reads a global
+/// `Res<ShipPhysics>`.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct ShipPhysics {
     /// X position in world space.
     pub x: f32,
@@ -29,7 +29,7 @@ pub struct ShipPhysics {
 ///
 /// Replaces the `red_alert` field that was previously on the singleton
 /// `ShipState` resource. Added in issue #591.
-#[derive(Component, Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ShipRedAlert(pub bool);
 
 impl ShipRedAlert {
@@ -42,7 +42,7 @@ impl ShipRedAlert {
 ///
 /// Replaces the `view_mode` field that was previously on the singleton
 /// `ShipState` resource. Added in issue #591.
-#[derive(Component, Resource, Clone, Debug, PartialEq)]
+#[derive(Component, Clone, Debug, PartialEq)]
 pub struct ShipViewMode {
     pub view_mode: ViewMode,
     captain_view_direction: ViewDirection,
@@ -93,7 +93,7 @@ impl ShipViewMode {
 ///
 /// Replaces the `phaser_frequency` field that was previously on the singleton
 /// `ShipState` resource.
-#[derive(Component, Resource, Clone, Copy, Debug, PartialEq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct ShipPhaserFrequency(pub f32);
 
 impl Default for ShipPhaserFrequency {

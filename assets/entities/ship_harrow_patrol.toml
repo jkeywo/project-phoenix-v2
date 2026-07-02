@@ -19,8 +19,9 @@ description = "Harrow Cruiser"
 [hull]
 hull_integrity = 120.0
 
-[shields]
-max_hp = 60.0
+[shields_console.base]
+num_facings = 1
+max_hp = 60
 regen_per_sec = 1.0
 
 [collider]

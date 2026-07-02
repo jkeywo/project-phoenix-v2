@@ -302,15 +302,19 @@ fn apply_damage_zone_damage(
 
 /// Cancels the ship's impulse drive (charging or active) when the ship enters
 /// a region with the `BlocksImpulse` effect.
+///
+/// Per-subject: writes to `ev.subject`'s own `ShipImpulse` component so an
+/// NPC entering a `BlocksImpulse` region cancels its own impulse (a no-op
+/// under current AI which never charges) without touching the player's.
 fn handle_blocks_impulse_region_enter(
     trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
-    impulse: Option<ResMut<ShipImpulse>>,
+    mut impulse_q: Query<&mut ShipImpulse>,
 ) {
-    let Some(mut impulse) = impulse else {
+    let ev = trigger.event();
+    let Ok(mut impulse) = impulse_q.get_mut(ev.subject) else {
         return;
     };
-    let ev = trigger.event();
     let Ok(effects) = region_query.get(ev.region_entity) else {
         return;
     };
@@ -416,7 +420,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -644,7 +647,13 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.insert_resource(ShipImpulse(ImpulseState::new()));
         app.insert_resource(ShipModifiers::new());
-        app.world_mut().spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
+        app.world_mut().spawn((
+            LocalShip,
+            crate::simulation::Ship,
+            Transform::default(),
+            crate::ship_state::ShipPhysics::default(),
+            ShipImpulse::default(),
+        ));
         app
     }
 
@@ -677,7 +686,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -730,7 +738,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -963,18 +970,43 @@ mod tests {
     // Ã¢â€â‚¬Ã¢â€â‚¬ BlocksImpulse tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     fn set_impulse_charging(app: &mut App) {
-        let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
-        imp.0.start_charge();
+        // Read/mutate the per-entity ShipImpulse on the LocalShip (component
+        // post ship-parity audit). Fallback to the Resource for legacy
+        // fixtures that only insert the Resource.
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipImpulse, With<LocalShip>>();
+        if let Ok(mut imp) = q.single_mut(app.world_mut()) {
+            imp.0.start_charge();
+        } else if let Some(mut imp) = app.world_mut().get_resource_mut::<ShipImpulse>() {
+            imp.0.start_charge();
+        }
     }
 
     fn set_impulse_active(app: &mut App) {
-        let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
-        imp.0.start_charge();
-        imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipImpulse, With<LocalShip>>();
+        if let Ok(mut imp) = q.single_mut(app.world_mut()) {
+            imp.0.start_charge();
+            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        } else if let Some(mut imp) = app.world_mut().get_resource_mut::<ShipImpulse>() {
+            imp.0.start_charge();
+            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        }
     }
 
-    fn assert_impulse_phase(app: &App, expected: ImpulsePhase) {
-        let phase = app.world().resource::<ShipImpulse>().0.phase;
+    fn assert_impulse_phase(app: &mut App, expected: ImpulsePhase) {
+        let phase = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipImpulse, With<LocalShip>>();
+            q.single(app.world())
+                .map(|i| i.0.phase)
+                .ok()
+                .or_else(|| app.world().get_resource::<ShipImpulse>().map(|r| r.0.phase))
+                .expect("ShipImpulse must exist as Component or Resource")
+        };
         assert_eq!(
             phase, expected,
             "expected impulse {:?}, got {:?}",
@@ -992,12 +1024,12 @@ mod tests {
         // Move ship inside the region
         set_ship_pos(&mut app, 80.0, 0.0);
         set_impulse_charging(&mut app);
-        assert_impulse_phase(&app, ImpulsePhase::Charging);
+        assert_impulse_phase(&mut app, ImpulsePhase::Charging);
 
         // Tick Ã¢â‚¬â€ should trigger RegionEntered and cancel impulse
         tick_with_dt(&mut app, 0.016);
 
-        assert_impulse_phase(&app, ImpulsePhase::Idle);
+        assert_impulse_phase(&mut app, ImpulsePhase::Idle);
     }
 
     #[test]
@@ -1010,11 +1042,11 @@ mod tests {
         // Move ship inside
         set_ship_pos(&mut app, 80.0, 0.0);
         set_impulse_active(&mut app);
-        assert_impulse_phase(&app, ImpulsePhase::Active);
+        assert_impulse_phase(&mut app, ImpulsePhase::Active);
 
         tick_with_dt(&mut app, 0.016);
 
-        assert_impulse_phase(&app, ImpulsePhase::Idle);
+        assert_impulse_phase(&mut app, ImpulsePhase::Idle);
     }
 
     #[test]
@@ -1027,7 +1059,39 @@ mod tests {
         set_impulse_charging(&mut app);
         tick_with_dt(&mut app, 0.016);
 
-        assert_impulse_phase(&app, ImpulsePhase::Charging);
+        assert_impulse_phase(&mut app, ImpulsePhase::Charging);
+    }
+
+    #[test]
+    fn npc_entering_blocks_impulse_region_does_not_cancel_players_impulse() {
+        // Regression for the audit-report bug where an NPC entering a
+        // BlocksImpulse region silently cancelled the player's impulse
+        // because the observer wrote to the global ShipImpulse Resource
+        // without a LocalShip gate.
+        let mut app = blocks_impulse_test_app();
+        let _region = spawn_blocks_impulse_region(&mut app, 100.0, 0.0, 50.0);
+        // Player at (0,0,0) — far outside the region at (100,0,0)r=50.
+        set_ship_pos(&mut app, 0.0, 0.0);
+        // Spawn an NPC ship at (80,0,0) — inside the region.
+        let _npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                Transform::default(),
+                crate::ship_state::ShipPhysics {
+                    x: 80.0,
+                    z: 0.0,
+                    ..Default::default()
+                },
+            ))
+            .id();
+        // Charge the player's impulse.
+        set_impulse_charging(&mut app);
+        assert_impulse_phase(&mut app, ImpulsePhase::Charging);
+        // Tick — NPC crosses into the region, RegionEntered fires with
+        // subject = NPC. The observer must NOT touch the player's impulse.
+        tick_with_dt(&mut app, 0.016);
+        assert_impulse_phase(&mut app, ImpulsePhase::Charging);
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Radar Dampening tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -1072,7 +1136,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -1212,7 +1275,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -1528,7 +1590,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -1568,7 +1629,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,

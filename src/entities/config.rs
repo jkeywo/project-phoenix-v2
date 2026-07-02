@@ -1037,40 +1037,6 @@ pub struct SensorsConsoleConfig {
     pub long_range_radar: crate::radar_config::RadarConfig,
 }
 
-fn default_shield_facings() -> usize {
-    1
-}
-
-fn default_shield_offline_duration() -> f32 {
-    10.0
-}
-
-/// Shield config for any entity (NPC or player-class). Loaded from a top-level
-/// `[shields]` block on an entity TOML and translated to a `ShipShields`
-/// component at spawn time.
-///
-/// NPC ships default to `num_facings = 1` (single omnidirectional arc) and
-/// `offline_duration = 10.0` s (matching the player shield offline timer).
-/// The player ship uses its own `[shields_console.base]` path and does not
-/// go through `EntityShieldConfig`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EntityShieldConfig {
-    /// Maximum shield HP per facing. Required.
-    pub max_hp: f32,
-    /// HP regenerated per second while online and below `max_hp`.
-    /// Defaults to `0.0` (no regen) when omitted.
-    #[serde(default)]
-    pub regen_per_sec: f32,
-    /// Number of shield facings. Defaults to `1` (omnidirectional).
-    #[serde(default = "default_shield_facings")]
-    pub num_facings: usize,
-    /// How long (seconds) a facing stays offline after HP hits 0.
-    /// Defaults to `10.0` s.
-    #[serde(default = "default_shield_offline_duration")]
-    pub offline_duration: f32,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct EntityConfig {
@@ -1089,15 +1055,12 @@ pub struct EntityConfig {
     pub power: Option<PowerConfigSection>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
-    /// Shields console focus config.
+    /// Unified shields config. Contains focus tuning at the top level and
+    /// `num_facings` / `max_hp` / `regen_per_sec` / `offline_duration` in
+    /// the nested `.base` sub-block. Every ship (player + NPC) reads this
+    /// section — the legacy `[shields]` block was removed as part of the
+    /// ship parity audit.
     pub shields_console: Option<ShieldsConsoleConfig>,
-    /// Shield section for this entity. When present the entity gains a
-    /// `ShipShields` component with `num_facings` facings (default 1 for NPCs).
-    /// Incoming damage routes through `split_damage_for_pierce` then through
-    /// the shield before falling through to hull. Uses the same offline-timer
-    /// recovery model as the player ship's four-quadrant shield system.
-    #[serde(default)]
-    pub shields: Option<EntityShieldConfig>,
     /// Torpedo system config (player ship and any NPC ship with torpedoes).
     pub torpedoes: Option<TorpedoesConfig>,
     /// Repair team timings (travel duration, repair rate).
@@ -2412,12 +2375,13 @@ base_priority = 35.0
         // (#474) Harrow Destroyer has a single-facing shield (#471).
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
-        let shields = config
-            .shields
+        let sc = config
+            .shields_console
             .as_ref()
-            .expect("pirate_raider must have a [shields] block");
-        assert!((shields.max_hp - 15.0).abs() < 1e-6);
-        assert!((shields.regen_per_sec - 0.5).abs() < 1e-6);
+            .expect("pirate_raider must have a [shields_console] block");
+        let base = sc.base.as_ref().expect("must have [shields_console.base]");
+        assert_eq!(base.max_hp, 15);
+        assert!((base.regen_per_sec - 0.5).abs() < 1e-6);
     }
 
     #[test]
@@ -2444,12 +2408,13 @@ base_priority = 35.0
             2,
             "cruiser must have port + starboard banks"
         );
-        let shields = config
-            .shields
+        let sc = config
+            .shields_console
             .as_ref()
-            .expect("cruiser must have [shields] (#474)");
-        assert!((shields.max_hp - 60.0).abs() < 1e-6);
-        assert!((shields.regen_per_sec - 1.0).abs() < 1e-6);
+            .expect("cruiser must have [shields_console] (#474)");
+        let base = sc.base.as_ref().expect("must have [shields_console.base]");
+        assert_eq!(base.max_hp, 60);
+        assert!((base.regen_per_sec - 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -2467,11 +2432,12 @@ base_priority = 35.0
         let bank = &wc.phaser_banks[0];
         assert!((bank.beam_damage_per_sec - 12.0).abs() < 1e-6);
         assert!((bank.beam_range - 75.0).abs() < 1e-6);
-        let shields = config
-            .shields
+        let sc = config
+            .shields_console
             .as_ref()
-            .expect("battleship must have [shields] (#474)");
-        assert!((shields.max_hp - 120.0).abs() < 1e-6);
+            .expect("battleship must have [shields_console] (#474)");
+        let base = sc.base.as_ref().expect("must have [shields_console.base]");
+        assert_eq!(base.max_hp, 120);
         let behaviour = config.behaviour.as_ref().expect("must have [behaviour]");
         let directive_kinds: Vec<Option<&str>> = behaviour
             .doctrine

@@ -251,6 +251,23 @@ pub fn spawn_entity(
             crate::ship_state::ShipPhaserFrequency::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
         ));
+        // Per-entity helm intent (audit follow-up). Every ship carries
+        // its own `LastHelmInput` so systems that iterate `With<Ship>`
+        // and read `Option<&LastHelmInput>` see a real value on NPCs
+        // instead of the `unwrap_or_default()` fallback. Notably
+        // `operate_power_ai` reads it to pin `power.helm` to idle when
+        // throttle is zero. Inserted separately because Bevy's tuple
+        // Bundle max is 15 elements.
+        entity_commands.insert(crate::ship_plugin::LastHelmInput::default());
+        // Per-ship coordination bus state (audit follow-up). Every ship
+        // tracks its own shields down/restore notification cycle and its
+        // own sensors→tactical frequency-hint dedupe state so the two
+        // coordination emitters (`emit_shields_coordination`,
+        // `tick_sensors_frequency_hint`) can iterate `With<Ship>` and
+        // route into each ship's own `CoordinationQueue` via
+        // `CoordinationEnqueue.source_entity`.
+        entity_commands.insert(crate::ship::shields::ShieldsCoordinationState::default());
+        entity_commands.insert(crate::ship::sensors::SensorsFrequencyState::default());
         entity_commands.insert(
             crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
         );
@@ -342,6 +359,15 @@ pub fn spawn_entity(
         entity_commands.insert(crate::server_app::WeaponFiredThisTick::default());
         entity_commands.insert(crate::server_app::ShipAttackedThisTick::default());
         entity_commands.insert(crate::weapons_plugin::LastShipAttacker::default());
+        // Per-ship impulse drive state (audit follow-up). NPCs carry an
+        // idle `ShipImpulse` so `handle_blocks_impulse_region_enter` can
+        // route per-subject and future NPC helm AI can toggle impulse
+        // through the same per-ship pathway the player uses.
+        entity_commands.insert(crate::server_app::ShipImpulse::default());
+        // Per-ship boost drive battery (audit follow-up). NPCs carry an
+        // empty `ShipBoost` so future NPC helm AI can engage boost through
+        // the same per-ship pathway the player uses.
+        entity_commands.insert(crate::server_app::ShipBoost::default());
     }
 
     // Tags â€” mirror TOML tags onto the entity for snapshot builders.
@@ -459,20 +485,24 @@ pub fn spawn_entity(
         entity_commands.insert(crate::comms::CommsRange(comms.range));
     }
 
-    // Shields — translate the [shields] config block into a ShipShields
-    // component (the same type the player ship uses). NPC ships default to
-    // num_facings=1 (omnidirectional) with offline-timer recovery.
-    // Placed BEFORE the hull block: the hull block has an early-return for
-    // the empty-hull case, so anything after it could be skipped.
-    if let Some(shields_cfg) = &config.shields {
-        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
-        let shield_system = ShieldSystem::new(&ShieldConfig {
-            num_facings: shields_cfg.num_facings,
-            max_hp: shields_cfg.max_hp.round() as i32,
-            regen_per_sec: shields_cfg.regen_per_sec,
-            offline_duration: shields_cfg.offline_duration,
-        });
-        entity_commands.insert(crate::ship::shields::ShipShields(shield_system));
+    // Shields — translate the [shields_console] config block into a
+    // ShipShields component with focus tuning. Uses the same code path
+    // the player ship uses in spawn_game_start_entities so both player
+    // and NPC ships read from one TOML section. Placed BEFORE the hull
+    // block: the hull block has an early-return for the empty-hull case,
+    // so anything after it could be skipped.
+    if let Some(sc) = &config.shields_console {
+        use crate::weapons::shield::{ShieldFocusConfig, ShieldSystem};
+        let shield_config = sc.base.as_ref().map(|b| b.to_runtime()).unwrap_or_default();
+        let mut shields = crate::ship::shields::ShipShields(ShieldSystem::new(&shield_config));
+        shields.0.focus_config = ShieldFocusConfig {
+            bonus_max_hp: sc.focus_bonus_max_hp,
+            bonus_regen: sc.focus_bonus_regen,
+            penalty_max_hp: sc.focus_penalty_max_hp,
+            penalty_regen: sc.focus_penalty_regen,
+            decay_rate: sc.focus_decay_rate,
+        };
+        entity_commands.insert(shields);
     }
 
     // Hull â€” attach an EntityConsoleHull component if the config has hull data.
@@ -554,7 +584,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: Some(crate::entity_config::CommsConfig { range: 8000.0 }),
@@ -596,7 +625,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -635,7 +663,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -679,7 +706,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -725,7 +751,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -781,7 +806,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -844,7 +868,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -891,7 +914,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -977,7 +999,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -1032,7 +1053,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -1080,7 +1100,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -1155,7 +1174,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -1200,14 +1218,15 @@ mod tests {
     // ── ShipShields spawner attachment tests ────────────────────────────────
 
     #[test]
-    fn spawn_entity_with_shields_block_attaches_entity_shield() {
+    fn spawn_entity_with_shields_console_block_attaches_ship_shields() {
         let mut app = test_app();
         let toml = r#"
 [hull]
 hull_integrity = 60.0
 
-[shields]
-max_hp = 30.0
+[shields_console.base]
+num_facings = 1
+max_hp = 30
 regen_per_sec = 1.5
 "#;
         let config = EntityConfig::from_toml(toml).expect("toml must parse");
@@ -1216,17 +1235,16 @@ regen_per_sec = 1.5
         let shields = app
             .world()
             .get::<crate::ship::shields::ShipShields>(spawned)
-            .expect("entity with [shields] block must have ShipShields component");
-        // Defaults: num_facings=1, offline_duration=10.0
+            .expect("entity with [shields_console] block must have ShipShields component");
         assert_eq!(shields.0.facings.len(), 1);
-        assert_eq!(shields.0.facings[0].max_hp, 30); // rounds 30.0 → 30
+        assert_eq!(shields.0.facings[0].max_hp, 30);
         assert_eq!(shields.0.facings[0].hp, 30);
         assert_eq!(shields.0.facings[0].regen_per_sec, 1.5);
         assert!(shields.0.facings[0].is_online());
     }
 
     #[test]
-    fn spawn_entity_without_shields_block_omits_entity_shield() {
+    fn spawn_entity_without_shields_console_block_omits_ship_shields() {
         let mut app = test_app();
         let toml = r#"
 [hull]
@@ -1237,22 +1255,8 @@ hull_integrity = 60.0
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         assert!(
             app.world().get::<crate::ship::shields::ShipShields>(spawned).is_none(),
-            "entity without [shields] block must not have ShipShields"
+            "entity without [shields_console] block must not have ShipShields"
         );
-    }
-
-    #[test]
-    fn entity_shield_config_parses_with_default_regen() {
-        let toml = r#"
-[shields]
-max_hp = 50.0
-"#;
-        let config = EntityConfig::from_toml(toml).expect("toml must parse");
-        let shields = config.shields.expect("shields block must be present");
-        assert_eq!(shields.max_hp, 50.0);
-        assert_eq!(shields.regen_per_sec, 0.0, "regen defaults to 0");
-        assert_eq!(shields.num_facings, 1, "num_facings defaults to 1");
-        assert_eq!(shields.offline_duration, 10.0, "offline_duration defaults to 10.0");
     }
 
     #[test]
@@ -1279,7 +1283,6 @@ max_hp = 50.0
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,

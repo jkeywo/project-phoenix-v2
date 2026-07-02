@@ -1570,7 +1570,11 @@ pub struct AdmittedCommand {
 
 /// Cleared and refilled each tick by `admit_system_commands` (runs before
 /// `SimSet::Input`). Handlers read from this instead of `InboundMessage`.
-#[derive(bevy::prelude::Component, bevy::prelude::Resource, Default)]
+///
+/// Pure per-ship Component post ship-parity audit; the legacy `Resource`
+/// derive has been dropped since no production code reads a global
+/// `Res<AdmittedCommands>`.
+#[derive(bevy::prelude::Component, Default)]
 pub struct AdmittedCommands(pub Vec<AdmittedCommand>);
 
 impl AdmittedCommands {
@@ -1598,10 +1602,17 @@ pub enum InterSystemPayload {
 
 /// An inter-system command: one system commanding another to mutate its own
 /// state this tick. See [`InterSystemPayload`] for invariants.
+///
+/// `source_entity` identifies which ship the message applies to so
+/// per-entity handlers (e.g. `handle_power_inter_system`) can route the
+/// mutation to the correct ship's per-entity state. `None` means "target
+/// the LocalShip" — used by legacy paths and tests that never spawned a
+/// specific ship.
 #[derive(Clone, Debug)]
 pub struct InterSystemMsg {
     pub target: SystemId,
     pub payload: InterSystemPayload,
+    pub source_entity: Option<bevy::prelude::Entity>,
 }
 
 /// Cleared at the start of each Simulate phase (before `SimSet::Input`) and

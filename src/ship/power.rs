@@ -199,65 +199,76 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 /// resource. When both are present, dual-writes so legacy readers stay in sync.
 pub fn handle_power_messages(
     mut ship_query: Query<
-        (&crate::messages::AdmittedCommands, Option<&mut ShipPowerSystem>),
-        With<crate::server_app::LocalShip>,
+        (
+            &crate::messages::AdmittedCommands,
+            Option<&mut ShipPowerSystem>,
+            Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
     >,
     power_res: Option<ResMut<ShipPowerSystem>>,
 ) {
-    let Ok((admitted, mut power_comp)) = ship_query.single_mut() else {
-        return;
-    };
-    let mut power_res = power_res;
-    // Collect commands into a batch first so we can dispatch to whichever
-    // backing store (component vs resource) is available.
     #[derive(Clone)]
     enum PowerCmd {
         SetGroup(crate::messages::PowerGroupId, u8),
         SetConsole(Console, u8),
     }
-    let mut pending: Vec<PowerCmd> = Vec::new();
-    for cmd in admitted.for_target(crate::system_registry::POWER_SYSTEM_ID) {
-        match &cmd.payload {
-            crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
-                pending.push(PowerCmd::SetGroup(group.clone(), *level));
+    let mut power_res = power_res;
+    // Iterate every ship (player + NPC) so both the player's Power console
+    // commands and the future NPC `operate_power_ai` writes into
+    // `AdmittedCommands` re-allocate that ship's own power grid.
+    for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
+        let mut pending: Vec<PowerCmd> = Vec::new();
+        for cmd in admitted.for_target(crate::system_registry::POWER_SYSTEM_ID) {
+            match &cmd.payload {
+                crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
+                    pending.push(PowerCmd::SetGroup(group.clone(), *level));
+                }
+                crate::messages::SystemControlPayload::SetPower {
+                    target: console,
+                    level,
+                } => {
+                    pending.push(PowerCmd::SetConsole(console.clone(), *level));
+                }
+                _ => {}
             }
-            crate::messages::SystemControlPayload::SetPower {
-                target: console,
-                level,
-            } => {
-                pending.push(PowerCmd::SetConsole(console.clone(), *level));
-            }
-            _ => {}
         }
-    }
-    if pending.is_empty() {
-        return;
-    }
-    for cmd in pending {
-        match cmd {
-            PowerCmd::SetGroup(group, level) => {
-                if let Some(pc) = power_comp.as_deref_mut() {
-                    if let Err(err) = pc.0.set_group_allocation(&group, level) {
-                        warn!("[power] ignored power allocation: {err:?}");
+        if pending.is_empty() {
+            continue;
+        }
+        for cmd in pending {
+            match cmd {
+                PowerCmd::SetGroup(group, level) => {
+                    if let Some(pc) = power_comp.as_deref_mut() {
+                        if let Err(err) = pc.0.set_group_allocation(&group, level) {
+                            warn!("[power] ignored power allocation: {err:?}");
+                        }
+                    } else if is_local {
+                        if let Some(pr) = power_res.as_deref_mut() {
+                            if let Err(err) = pr.0.set_group_allocation(&group, level) {
+                                warn!("[power] ignored power allocation: {err:?}");
+                            }
+                        }
                     }
-                } else if let Some(pr) = power_res.as_deref_mut() {
-                    if let Err(err) = pr.0.set_group_allocation(&group, level) {
-                        warn!("[power] ignored power allocation: {err:?}");
+                }
+                PowerCmd::SetConsole(console, level) => {
+                    if let Some(pc) = power_comp.as_deref_mut() {
+                        pc.0.set_console_allocation(console.clone(), level);
+                    } else if is_local {
+                        if let Some(pr) = power_res.as_deref_mut() {
+                            pr.0.set_console_allocation(console, level);
+                        }
                     }
                 }
             }
-            PowerCmd::SetConsole(console, level) => {
-                if let Some(pc) = power_comp.as_deref_mut() {
-                    pc.0.set_console_allocation(console.clone(), level);
-                } else if let Some(pr) = power_res.as_deref_mut() {
-                    pr.0.set_console_allocation(console, level);
-                }
+        }
+        // Dual-write: keep the Resource in sync with the LocalShip's
+        // Component when both exist (legacy Resource path for tests).
+        if is_local {
+            if let (Some(pc), Some(pr)) = (power_comp.as_deref(), power_res.as_deref_mut()) {
+                pr.0 = pc.0.clone();
             }
         }
-    }
-    // Dual-write: keep the Resource in sync with the Component when both exist.
-    if let (Some(pc), Some(pr)) = (power_comp.as_deref(), power_res.as_deref_mut()) {
-        pr.0 = pc.0.clone();
     }
 }
 
@@ -266,72 +277,81 @@ pub fn handle_power_messages(
 /// Invariant-gated: no control-state check. Runs in `SimSet::Modifiers`,
 /// after physics ticks have emitted their inter-system messages.
 ///
-/// After PR 6 (PRD #597): mutates the per-entity `ShipPowerSystem` component
-/// on the LocalShip entity when present, otherwise the global Resource.
-/// Dual-writes to the Resource when both are present.
+/// Routes by `source_entity` so every ship's own inter-system messages
+/// mutate that ship's own per-entity `ShipPowerSystem` component. Falls
+/// back to the LocalShip's Component (or the global Resource for legacy
+/// test paths) when `source_entity` is `None`.
 pub fn handle_power_inter_system(
     queue: Res<InterSystemQueue>,
     mut ship_q: Query<
-        (Option<&mut ShipPowerSystem>, Option<&PowerConfigResource>),
-        With<crate::server_app::LocalShip>,
+        (Entity, &mut ShipPowerSystem, Option<&PowerConfigResource>, Has<crate::server_app::LocalShip>),
+        With<crate::server_app::Ship>,
     >,
     power_res: Option<ResMut<ShipPowerSystem>>,
     config_res: Option<Res<PowerConfigResource>>,
 ) {
-    let Ok((mut power_comp, cfg_comp)) = ship_q.single_mut() else {
-        // Resource-only fallback for tests without a LocalShip entity.
-        let mut power_res = power_res;
-        let cfg_default;
-        let config: &PowerConfigResource = match config_res.as_deref() {
-            Some(c) => c,
-            None => {
-                cfg_default = PowerConfigResource::default();
-                &cfg_default
-            }
-        };
-        if let Some(pr) = power_res.as_deref_mut() {
-            for msg in queue.for_target(crate::system_registry::POWER_SYSTEM_ID) {
-                match &msg.payload {
-                    InterSystemPayload::DrainWeaponsBattery { amount } => {
-                        pr.0.battery_charge =
-                            (pr.0.battery_charge - amount).clamp(0.0, config.0.capacity);
-                    }
-                }
-            }
-        }
-        return;
-    };
-    let cfg_default;
-    let config: &PowerConfigResource = match cfg_comp {
-        Some(c) => c,
-        None => match config_res.as_deref() {
-            Some(c) => c,
-            None => {
-                cfg_default = PowerConfigResource::default();
-                &cfg_default
-            }
-        },
-    };
     let mut power_res = power_res;
-    let mut applied_any = false;
+    // Snapshot the LocalShip entity so `source_entity: None` (legacy path)
+    // resolves to the player. Collect per-entity references once so we can
+    // dispatch a mutable borrow per message inside the loop.
+    let local_ship_entity: Option<Entity> = ship_q
+        .iter()
+        .find_map(|(e, _, _, is_local)| if is_local { Some(e) } else { None });
+    let mut applied_local = false;
+
     for msg in queue.for_target(crate::system_registry::POWER_SYSTEM_ID) {
+        let target_entity = msg.source_entity.or(local_ship_entity);
         match &msg.payload {
             InterSystemPayload::DrainWeaponsBattery { amount } => {
-                if let Some(pc) = power_comp.as_deref_mut() {
-                    pc.0.battery_charge =
-                        (pc.0.battery_charge - amount).clamp(0.0, config.0.capacity);
-                    applied_any = true;
-                } else if let Some(pr) = power_res.as_deref_mut() {
+                if let Some(target) = target_entity {
+                    if let Ok((_, mut power_comp, cfg_comp, is_local)) =
+                        ship_q.get_mut(target)
+                    {
+                        let cfg_default;
+                        let config: &PowerConfigResource = match cfg_comp {
+                            Some(c) => c,
+                            None => match config_res.as_deref() {
+                                Some(c) => c,
+                                None => {
+                                    cfg_default = PowerConfigResource::default();
+                                    &cfg_default
+                                }
+                            },
+                        };
+                        power_comp.0.battery_charge =
+                            (power_comp.0.battery_charge - amount).clamp(0.0, config.0.capacity);
+                        if is_local {
+                            applied_local = true;
+                        }
+                        continue;
+                    }
+                }
+                // Resource-only fallback for tests without a Ship entity.
+                let cfg_default;
+                let config: &PowerConfigResource = match config_res.as_deref() {
+                    Some(c) => c,
+                    None => {
+                        cfg_default = PowerConfigResource::default();
+                        &cfg_default
+                    }
+                };
+                if let Some(pr) = power_res.as_deref_mut() {
                     pr.0.battery_charge =
                         (pr.0.battery_charge - amount).clamp(0.0, config.0.capacity);
-                    applied_any = true;
                 }
             }
         }
     }
-    if applied_any {
-        if let (Some(pc), Some(pr)) = (power_comp.as_deref(), power_res.as_deref_mut()) {
-            pr.0 = pc.0.clone();
+
+    // Dual-write: keep the Resource in sync with the LocalShip's Component
+    // when both exist (legacy Resource path for tests).
+    if applied_local {
+        if let Some(local) = local_ship_entity {
+            if let Ok((_, pc, _, _)) = ship_q.get(local) {
+                if let Some(pr) = power_res.as_deref_mut() {
+                    pr.0 = pc.0.clone();
+                }
+            }
         }
     }
 }
@@ -423,8 +443,8 @@ pub fn operate_power_ai(
     // Yield to any human Power console holder on the player ship. NPC ships
     // have no human console holders, so they always run the AI branch when
     // their Power system is under AI control.
-    let human_holds_player_power = if let (Some(sessions), Ok(ship_config)) =
-        (&sessions, ship_comp_query.single())
+    let human_holds_player_power = if let (Some(sessions), Some(ship_config)) =
+        (&sessions, ship_comp_query.iter().next())
     {
         sessions
             .0
@@ -597,7 +617,7 @@ fn publish_power_blackboard(
         locked: power.0.locked,
     };
 
-    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(POWER_SYSTEM_ID.to_string()),
             SystemBlackboard::Power(bb),
@@ -637,7 +657,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(ShipShields(ShieldSystem::default()))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())
             .init_resource::<crate::lobby::WorldResource>()
@@ -666,6 +685,7 @@ mod tests {
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
+            ShipShields(ShieldSystem::default()),
         ));
         app
     }

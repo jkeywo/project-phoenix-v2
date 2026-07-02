@@ -5,7 +5,6 @@ use crate::messages::{
     AdmittedCommands, Console, CoordinationPayload, ShieldFacingStatus, ShieldsBlackboard,
     SystemBlackboard, SystemControlPayload, SystemId, ViewDirection,
 };
-use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
 
 
@@ -13,11 +12,12 @@ use crate::ship_plugin::CoordinationEnqueue;
 
 /// The ship's shield system.
 ///
-/// Now a per-entity Component instead of a global Resource.  Derives both
-/// Component and Resource so that test code using `insert_resource` /
-/// `world.resource` continues to compile while production code treats it
-/// as a per-entity component.
-#[derive(Component, Resource)]
+/// Per-ship shield system — a `ShieldSystem` wrapped in a Component.
+///
+/// Pure per-ship Component post ship-parity audit; the legacy `Resource`
+/// derive has been dropped since no production code reads a global
+/// `Res<ShipShields>`.
+#[derive(Component)]
 pub struct ShipShields(pub crate::shield::ShieldSystem);
 
 // ── Resources ──────────────────────────────────────────────────────────────────
@@ -26,7 +26,11 @@ pub struct ShipShields(pub crate::shield::ShieldSystem);
 ///
 /// Loaded from `[shields.ai]` in the ship entity TOML. Defaults are used
 /// when the section is absent.
-#[derive(Resource, Clone, Debug)]
+///
+/// Dual `Resource + Component` post ship-parity audit: production reads
+/// use the Resource form (single ship-wide AI tuning), but the Component
+/// derive is available if NPC ships ever need per-ship AI tuning.
+#[derive(Resource, Component, Clone, Debug)]
 pub struct ShieldsAiConfigResource {
     /// HP fraction (0.0–1.0) at or above which a restored facing fires the
     /// `ShieldFacingRestored` coordination message to Helm.
@@ -45,7 +49,11 @@ impl Default for ShieldsAiConfigResource {
 ///
 /// Indexed by facing index (usize). Both flags reset when a facing comes back
 /// online so the down/restore cycle repeats on the next offline event.
-#[derive(Resource, Default)]
+///
+/// Per-ship Component so NPC ships' shields can emit their own advisories
+/// through their own `CoordinationQueue` without stepping on the player's
+/// shield-notification state.
+#[derive(Component, Default, Clone)]
 pub struct ShieldsCoordinationState {
     pub down_notified: Vec<bool>,
     pub restore_notified: Vec<bool>,
@@ -68,7 +76,6 @@ impl Plugin for ShipShieldsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<ShieldsAiConfigResource>()
-            .init_resource::<ShieldsCoordinationState>()
             .add_systems(
                 Update,
                 (
@@ -132,116 +139,114 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 
 // ── Systems ────────────────────────────────────────────────────────────────────
 
-/// Handle `SetShieldFocus` messages from the Shields console.
+/// Handle `SetShieldFocus` messages from every ship's Shields console.
 ///
-/// Validates: sender holds `Console::Shields`. Reads `ControlSystem` messages
-/// targeting the shields system ID with a `SetShieldFocus` payload, and calls
-/// `ShieldSystem::set_focused_facing`.
+/// Iterates every ship (player + NPC) so both the player's Shields console
+/// commands and the future NPC `operate_shields_ai` writes into
+/// `AdmittedCommands` flip each ship's own shield focus.
 pub fn handle_shields_messages(
-    ac_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
-    mut shields: Query<&mut ShipShields, With<crate::server_app::LocalShip>>,
+    mut ship_query: Query<
+        (&AdmittedCommands, &mut ShipShields),
+        With<crate::server_app::Ship>,
+    >,
 ) {
-    let Ok(admitted) = ac_query.single() else {
-        return;
-    };
-    let Ok(mut shields) = shields.single_mut() else {
-        return;
-    };
-    for cmd in admitted.for_target(crate::system_registry::SHIELDS_SYSTEM_ID) {
-        let SystemControlPayload::SetShieldFocus { facing } = &cmd.payload else {
-            continue;
-        };
-        let idx = facing.as_ref().map(|d| match d {
-            ViewDirection::Fore => 0,
-            ViewDirection::Port => 1,
-            ViewDirection::Aft => 2,
-            ViewDirection::Starboard => 3,
-        });
-        shields.0.set_focused_facing(idx);
+    for (admitted, mut shields) in ship_query.iter_mut() {
+        for cmd in admitted.for_target(crate::system_registry::SHIELDS_SYSTEM_ID) {
+            let SystemControlPayload::SetShieldFocus { facing } = &cmd.payload else {
+                continue;
+            };
+            let idx = facing.as_ref().map(|d| match d {
+                ViewDirection::Fore => 0,
+                ViewDirection::Port => 1,
+                ViewDirection::Aft => 2,
+                ViewDirection::Starboard => 3,
+            });
+            shields.0.set_focused_facing(idx);
+        }
     }
 }
 
-/// Emit `ShieldFacingDown` and `ShieldFacingRestored` coordination messages to Helm
-/// via the centralized `CoordinationEnqueue` channel (channel 3).
+/// Emit `ShieldFacingDown` and `ShieldFacingRestored` coordination messages
+/// per-ship via the centralized `CoordinationEnqueue` channel (channel 3).
 ///
-/// Previously these were pushed directly to `SimOutbox` as `CoordinationPopup`
-/// messages, bypassing the lag scheduler. Now they flow through
-/// `handle_coordination_enqueue` → `process_coordination_lag`, which applies
-/// the delivery-time routing matrix (human target + AI sender → popup;
-/// AI target → consume; human → human → suppress).
+/// Iterates every ship (player + NPC). Each `CoordinationEnqueue` stamps
+/// its source ship so `handle_coordination_enqueue` routes it into the
+/// correct ship's `CoordinationQueue` component.
 pub fn emit_shields_coordination(
-    shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
-    red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::server_app::LocalShip>>,
-    mut coord_state: ResMut<ShieldsCoordinationState>,
+    mut ship_q: Query<
+        (
+            Entity,
+            &ShipShields,
+            &crate::ship_state::ShipRedAlert,
+            &crate::ship_plugin::ShipSystemControlSources,
+            &mut ShieldsCoordinationState,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     ai_config: Res<ShieldsAiConfigResource>,
-    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    let Ok(shields) = shields_q.single() else {
-        return;
-    };
-    let snapshots = shields.0.snapshot();
-    coord_state.ensure_len(snapshots.len());
+    for (entity, shields, red_alert, control_sources, mut coord_state) in ship_q.iter_mut() {
+        let snapshots = shields.0.snapshot();
+        coord_state.ensure_len(snapshots.len());
 
-    let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
-
-    let sender_origin = if let Ok(control_sources) = ship_query.single() {
-        control_sources
+        let red_alert = red_alert.0;
+        let sender_origin = control_sources
             .0
-            .source_for(&crate::system_registry::shields_system_id())
-    } else {
-        ControlSource::Ai
-    };
+            .source_for(&crate::system_registry::shields_system_id());
 
-    for (i, snap) in snapshots.iter().enumerate() {
-        if !snap.online {
-            if !coord_state.down_notified[i] {
-                coord_state.down_notified[i] = true;
-                coord_state.restore_notified[i] = false;
+        for (i, snap) in snapshots.iter().enumerate() {
+            if !snap.online {
+                if !coord_state.down_notified[i] {
+                    coord_state.down_notified[i] = true;
+                    coord_state.restore_notified[i] = false;
 
-                let payload = CoordinationPayload::ShieldFacingDown {
-                    label: snap.label.clone(),
-                    offline_remaining: snap.offline_remaining,
-                };
-                writer.write(CoordinationEnqueue {
-                    sender_origin,
-                    target: crate::system_registry::helm_system_id(),
-                    payload,
-                    sender_label: "Shields".to_string(),
-                });
-            }
-        } else {
-            // Facing is online. Check for restore notification before clearing state.
-            if coord_state.down_notified[i]
-                && !coord_state.restore_notified[i]
-                && red_alert
-                && snap.max_hp > 0
-                && (snap.hp as f32 / snap.max_hp as f32) >= ai_config.restored_notify_pct
-            {
-                coord_state.restore_notified[i] = true;
+                    let payload = CoordinationPayload::ShieldFacingDown {
+                        label: snap.label.clone(),
+                        offline_remaining: snap.offline_remaining,
+                    };
+                    writer.write(CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin,
+                        target: crate::system_registry::helm_system_id(),
+                        payload,
+                        sender_label: "Shields".to_string(),
+                    });
+                }
+            } else {
+                // Facing is online. Check for restore notification before clearing state.
+                if coord_state.down_notified[i]
+                    && !coord_state.restore_notified[i]
+                    && red_alert
+                    && snap.max_hp > 0
+                    && (snap.hp as f32 / snap.max_hp as f32) >= ai_config.restored_notify_pct
+                {
+                    coord_state.restore_notified[i] = true;
 
-                let payload = CoordinationPayload::ShieldFacingRestored {
-                    label: snap.label.clone(),
-                };
-                writer.write(CoordinationEnqueue {
-                    sender_origin,
-                    target: crate::system_registry::helm_system_id(),
-                    payload,
-                    sender_label: "Shields".to_string(),
-                });
-            }
+                    let payload = CoordinationPayload::ShieldFacingRestored {
+                        label: snap.label.clone(),
+                    };
+                    writer.write(CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin,
+                        target: crate::system_registry::helm_system_id(),
+                        payload,
+                        sender_label: "Shields".to_string(),
+                    });
+                }
 
-            // Reset cycle state when facing returns to full online status so
-            // the next offline event starts fresh.
-            if coord_state.restore_notified[i] || !coord_state.down_notified[i] {
-                // Already clean — nothing to reset.
-            } else if snap.max_hp > 0
-                && (snap.hp as f32 / snap.max_hp as f32) >= ai_config.restored_notify_pct
-                && !red_alert
-            {
-                // Facing recovered but not on red alert; clear so next cycle works.
-                coord_state.down_notified[i] = false;
-                coord_state.restore_notified[i] = false;
+                // Reset cycle state when facing returns to full online status so
+                // the next offline event starts fresh.
+                if coord_state.restore_notified[i] || !coord_state.down_notified[i] {
+                    // Already clean — nothing to reset.
+                } else if snap.max_hp > 0
+                    && (snap.hp as f32 / snap.max_hp as f32) >= ai_config.restored_notify_pct
+                    && !red_alert
+                {
+                    // Facing recovered but not on red alert; clear so next cycle works.
+                    coord_state.down_notified[i] = false;
+                    coord_state.restore_notified[i] = false;
+                }
             }
         }
     }
@@ -264,7 +269,7 @@ fn publish_shields_blackboard(
     >,
     mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
-    let Ok(shields) = shields_q.single() else {
+    let Some(shields) = shields_q.iter().next() else {
         return;
     };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
@@ -332,7 +337,7 @@ fn publish_shields_blackboard(
         grid_status,
     };
 
-    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(crate::system_registry::SHIELDS_SYSTEM_ID.to_string()),
             SystemBlackboard::Shields(bb),
@@ -426,6 +431,7 @@ mod tests {
                 crate::ship_plugin::CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
                 crate::ship_state::ShipRedAlert::default(),
+                ShieldsCoordinationState::default(),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -658,6 +664,7 @@ mod tests {
                 crate::ship_plugin::CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
                 crate::ship_state::ShipRedAlert::default(),
+                ShieldsCoordinationState::default(),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -815,10 +822,19 @@ mod tests {
             if let Ok(mut ra) = q.single_mut(app.world_mut()) { ra.toggle(); }
         }
 
-        // Mark down_notified so restore can fire.
-        app.world_mut()
-            .resource_mut::<ShieldsCoordinationState>()
-            .down_notified[0] = true;
+        // Mark down_notified on the per-ship ShieldsCoordinationState so
+        // the restore branch can fire.
+        {
+            let se = ship_e(&mut app);
+            let mut e = app.world_mut().entity_mut(se);
+            let mut coord = e.get_mut::<ShieldsCoordinationState>().unwrap();
+            if coord.down_notified.is_empty() {
+                coord.down_notified.push(true);
+                coord.restore_notified.push(false);
+            } else {
+                coord.down_notified[0] = true;
+            }
+        }
 
         tick(&mut app);
         let coord_msgs = drain_coord(&mut app);
@@ -858,8 +874,16 @@ mod tests {
         }
 
         app.world_mut()
-            .resource_mut::<ShieldsCoordinationState>()
-            .down_notified[0] = true;
+            .entity_mut(se)
+            .get_mut::<ShieldsCoordinationState>()
+            .map(|mut coord| {
+                if coord.down_notified.is_empty() {
+                    coord.down_notified.push(true);
+                    coord.restore_notified.push(false);
+                } else {
+                    coord.down_notified[0] = true;
+                }
+            });
 
         // No red alert active.
         tick(&mut app);

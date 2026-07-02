@@ -4,7 +4,6 @@ use bevy::prelude::*;
 use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::ai_plugin::AiControllerComponent;
 use crate::beam_render;
 use crate::entity_config::{EnginePfxConfig, PhaserBankConfig};
 use crate::entity_spawner::{EntityUuid, HelmConsoleSection};
@@ -181,7 +180,7 @@ fn sync_phaser_beams(
             Without<BeamContactGlow>,
         ),
     >,
-    player_ship_q: Query<
+    local_ship_q: Query<
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
         (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
@@ -196,7 +195,7 @@ fn sync_phaser_beams(
 
     // LocalShip UUID is needed by `target_position` / `target_point_count` to
     // resolve beams that terminate on the player ship (NPC-fires-at-player).
-    let player_ship_uuid = player_ship_q
+    let local_ship_uuid = local_ship_q
         .single()
         .ok()
         .and_then(|(_, _, uuid)| uuid.map(|u| u.0.clone()));
@@ -239,20 +238,20 @@ fn sync_phaser_beams(
             &key,
             target_point_count(
                 &target_uuid,
-                player_ship_uuid.as_deref(),
+                local_ship_uuid.as_deref(),
                 &entity_q,
-                &player_ship_q,
+                &local_ship_q,
             ),
             &mut state,
         );
         let Some(target_pos) = target_position(
             &target_uuid,
             src_t,
-            player_ship_uuid.as_deref(),
+            local_ship_uuid.as_deref(),
             target_point_index,
             &asteroid_q,
             &entity_q,
-            &player_ship_q,
+            &local_ship_q,
         ) else {
             continue;
         };
@@ -359,24 +358,29 @@ fn upsert_beam(
     state.active.insert(key, BeamEntities { body, glow });
 }
 
+/// Renders every ship's in-flight torpedoes each frame.
+///
+/// Iterates `Query<..., With<Ship>>` so NPC torpedoes render alongside the
+/// player's. Torpedo UUIDs are globally unique (uuid::Uuid::new_v4), so
+/// merging in-flight lists across ships never collides on tracker keys.
 fn sync_torpedo_pfx(
-    torpedo_sys_q: Query<&TorpedoSystemResource, With<LocalShip>>,
-    torpedo_sys_res: Option<Res<TorpedoSystemResource>>,
+    ships_q: Query<&TorpedoSystemResource, With<crate::simulation::Ship>>,
     mut state: ResMut<TorpedoPfxState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut transforms: Query<&mut Transform, With<TorpedoBody>>,
 ) {
-    // Prefer per-entity component; fall back to global resource (old path).
-    let torpedo_sys_ref: Option<&TorpedoSystemResource> = torpedo_sys_q.single().ok()
-        .or_else(|| torpedo_sys_res.as_deref());
-    let Some(torpedo_sys) = torpedo_sys_ref else {
-        return;
-    };
+    // Collect (uuid, x, z) triples for every in-flight torpedo across every
+    // ship. A single flat list makes the diff-against-tracker trivial.
+    let mut all_in_flight: Vec<(String, f32, f32)> = Vec::new();
+    for torpedo_sys in ships_q.iter() {
+        for t in &torpedo_sys.0.in_flight {
+            all_in_flight.push((t.uuid.clone(), t.x, t.z));
+        }
+    }
 
-    let in_flight = &torpedo_sys.0.in_flight;
-    let live: HashSet<String> = in_flight.iter().map(|t| t.uuid.clone()).collect();
+    let live: HashSet<String> = all_in_flight.iter().map(|(u, _, _)| u.clone()).collect();
     let tracked: HashSet<String> = state.active.keys().cloned().collect();
     let (to_spawn, to_despawn) = diff_torpedo_sets(&live, &tracked);
 
@@ -393,8 +397,8 @@ fn sync_torpedo_pfx(
     }
 
     for uuid in to_spawn {
-        if let Some(t) = in_flight.iter().find(|t| t.uuid == uuid) {
-            let pos = Vec3::new(t.x, 0.1, t.z);
+        if let Some((_, x, z)) = all_in_flight.iter().find(|(u, _, _)| u == &uuid) {
+            let pos = Vec3::new(*x, 0.1, *z);
             let body = commands
                 .spawn((
                     PfxEntity,
@@ -421,9 +425,9 @@ fn sync_torpedo_pfx(
         }
     }
 
-    for t in in_flight {
-        let pos = Vec3::new(t.x, 0.1, t.z);
-        if let Some(entities) = state.active.get_mut(&t.uuid) {
+    for (uuid, x, z) in &all_in_flight {
+        let pos = Vec3::new(*x, 0.1, *z);
+        if let Some(entities) = state.active.get_mut(uuid) {
             if entities.last_pos.distance(pos) >= TORPEDO_TRAIL_MIN_DISTANCE {
                 spawn_trail_segment(
                     entities.last_pos,
@@ -445,66 +449,39 @@ fn sync_torpedo_pfx(
     }
 }
 
+/// Updates per-ship engine trail ribbons (mesh + material) each frame.
+///
+/// Iterates every ship (player + NPC) uniformly. The key-base string
+/// distinguishes ships by UUID; the LocalShip falls back to "engine:player"
+/// only if it somehow has no `EntityUuid` (defensive — normally it does).
 fn spawn_engine_trails(
     time: Res<Time>,
-    physics_q: Query<&ShipPhysics, With<LocalShip>>,
     mut state: ResMut<EngineTrailState>,
-    player_q: Query<
+    ships_q: Query<
         (
             &Transform,
-            Option<&ModelMarkers>,
-            Option<&HelmConsoleSection>,
-            Option<&EntityUuid>,
-        ),
-        With<LocalShip>,
-    >,
-    npc_q: Query<
-        (
-            &Transform,
-            Option<&ModelMarkers>,
-            Option<&HelmConsoleSection>,
-            Option<&EntityUuid>,
             &ShipPhysics,
+            Option<&ModelMarkers>,
+            Option<&HelmConsoleSection>,
+            Option<&EntityUuid>,
+            Has<LocalShip>,
         ),
-        (With<AiControllerComponent>, Without<LocalShip>),
+        With<crate::simulation::Ship>,
     >,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_secs();
-    let physics = physics_q.single().ok().copied().unwrap_or_default();
 
-    if let Ok((transform, markers, helm, uuid)) = player_q.single() {
-        let key_base = uuid
-            .map(|u| format!("engine:{}", u.0))
-            .unwrap_or_else(|| "engine:player".to_string());
+    for (transform, physics, markers, helm, uuid, is_local) in ships_q.iter() {
+        let key_base = match uuid {
+            Some(u) => format!("engine:{}", u.0),
+            None if is_local => "engine:player".to_string(),
+            None => continue, // NPC without a UUID has no stable trail key.
+        };
         let max_speed = helm.map(|h| h.0.max_speed).unwrap_or(12.5).max(0.1);
         let normalized = (physics.forward_speed / max_speed).clamp(0.0, 1.0);
-        let cfg = helm.and_then(|h| h.0.engine_pfx.as_ref());
-        let settings = EnginePfxSettings::from_config(cfg);
-        update_engine_trail(
-            &key_base,
-            transform,
-            markers,
-            cfg,
-            normalized,
-            dt,
-            &settings,
-            &mut state,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-        );
-    }
-
-    for (transform, markers, helm, uuid, npc_physics) in npc_q.iter() {
-        let Some(uuid) = uuid else {
-            continue;
-        };
-        let key_base = format!("engine:{}", uuid.0);
-        let max_speed = helm.map(|h| h.0.max_speed).unwrap_or(12.5).max(0.1);
-        let normalized = (npc_physics.forward_speed / max_speed).clamp(0.0, 1.0);
         let cfg = helm.and_then(|h| h.0.engine_pfx.as_ref());
         let settings = EnginePfxSettings::from_config(cfg);
         update_engine_trail(
@@ -871,7 +848,7 @@ fn choose_target_point_index(
 
 fn target_point_count(
     uuid: &str,
-    player_ship_uuid: Option<&str>,
+    local_ship_uuid: Option<&str>,
     entity_q: &Query<
         (&EntityUuid, &Transform, Option<&ModelMarkers>),
         (
@@ -880,13 +857,13 @@ fn target_point_count(
             Without<BeamContactGlow>,
         ),
     >,
-    player_ship_q: &Query<
+    local_ship_q: &Query<
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
         (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
 ) -> usize {
-    if player_ship_uuid == Some(uuid) {
-        return player_ship_q
+    if local_ship_uuid == Some(uuid) {
+        return local_ship_q
             .single()
             .ok()
             .and_then(|(_, markers, _)| markers.map(ModelMarkers::target_point_count))
@@ -904,7 +881,7 @@ fn target_point_count(
 fn target_position(
     uuid: &str,
     shooter_transform: &Transform,
-    player_ship_uuid: Option<&str>,
+    local_ship_uuid: Option<&str>,
     target_point_index: Option<usize>,
     asteroid_q: &Query<
         (&AsteroidUuid, &Transform),
@@ -918,18 +895,18 @@ fn target_position(
             Without<BeamContactGlow>,
         ),
     >,
-    player_ship_q: &Query<
+    local_ship_q: &Query<
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
         (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
 ) -> Option<Vec3> {
-    if player_ship_uuid == Some(uuid) {
-        if let Ok((transform, markers, _)) = player_ship_q.single() {
+    if local_ship_uuid == Some(uuid) {
+        if let Some((transform, markers, _)) = local_ship_q.iter().next() {
             if let Some(point) = target_point_position(transform, markers, target_point_index) {
                 return Some(point);
             }
         }
-        // Degenerate: player_ship_q.single() failed but shooter is the player
+        // Degenerate: local_ship_q had no match but shooter is the player
         // itself — return the shooter's transform position as a best-effort.
         return Some(shooter_transform.translation);
     }

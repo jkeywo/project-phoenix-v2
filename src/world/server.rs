@@ -1,4 +1,3 @@
-use crate::simulation::Ship;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -210,8 +209,6 @@ impl Plugin for WorldPlugin {
                     spawn_world_entities,
                     init_world_runtime,
                     load_extra_worlds,
-                    setup_fallback_world
-                        .run_if(not(resource_exists::<crate::world::config::WorldConfig>)),
                 )
                     .chain(),
             )
@@ -333,8 +330,9 @@ fn handle_region_exited_event(
 /// via `Res<WorldConfig>`.
 ///
 /// On native (no WASM bridge) `get_world_config()` returns `None` and this
-/// system is a no-op; `setup_fallback_world` handles that case via its
-/// `run_if(not(resource_exists::<WorldConfig>))` gate.
+/// system is a no-op; downstream systems that iterate world entities
+/// simply see an empty world (native unit tests only — production always
+/// loads a world TOML through the WASM bridge).
 pub(crate) fn insert_world_config_resource(mut commands: Commands) {
     if let Some(world_config) = crate::config_cache::get_world_config() {
         commands.insert_resource(world_config);
@@ -534,67 +532,6 @@ fn resolve_position(
     Ok(Vec3::new(pos[0], pos[1], pos[2]))
 }
 
-/// Fallback world setup with hardcoded values for development/testing.
-/// Runs only when no `WorldConfig` resource was loaded (gated by the
-/// `WorldPlugin` `run_if` clause).
-fn setup_fallback_world(mut commands: Commands, _world: ResMut<WorldResource>) {
-    // Spawn ship via the generic entity spawner using a hardcoded EntityConfig
-    // (mirrors assets/entities/player_ship.toml's collider). This is the
-    // no-WorldConfig fallback path; the [[entity]]/spawn_game_start path is
-    // preferred and runs whenever a WorldConfig is loaded.
-    let ship_config = crate::entity_config::EntityConfig {
-        name: None,
-        tags: vec!["player".to_string(), "ship".to_string()],
-        collider: Some(crate::entity_config::ColliderConfig {
-            shape: crate::entity_config::ColliderShape::Capsule,
-            radius: 6.0,
-            length: 6.0,
-        }),
-        hull: Some(crate::entity_config::HullConfig {
-            hull_integrity: 100.0,
-            ..Default::default()
-        }),
-        appearance: None,
-        helm_console: None,
-        weapons_console: None,
-        engineering_console: None,
-        captain_console: None,
-        power: None,
-        sensors_console: None,
-        navigation_console: None,
-        shields_console: None,
-        shields: None,
-        torpedoes: None,
-        repair: None,
-        comms: None,
-        asteroid_field: None,
-        shape: None,
-        effects: None,
-        faction: None,
-        behaviour: None,
-        radar_appearance: None,
-        target: None,
-        mesh: None,
-        star: None,
-        light: Vec::new(),
-        ship_config: None,
-    };
-    let ship_uuid = crate::entity_loader::assign_uuid();
-    let ship_entity = crate::entity_spawner::spawn_entity(
-        &mut commands,
-        &ship_config,
-        Vec3::ZERO,
-        ship_uuid,
-        Some("player-ship".to_string()),
-    );
-    commands.entity(ship_entity).insert((
-        Ship,
-        crate::simulation::LocalShip,
-        crate::simulation::ShipSystemBlackboards::default(),
-    ));
-    // EntityConsoleHull is inserted via spawn_entity; no separate resource needed.
-}
-
 // -- Startup systems ---------------------------------------------------------
 
 /// Startup system: initialise `WorldContentRuntime`, `CommsInboxRes`, and
@@ -602,7 +539,7 @@ fn setup_fallback_world(mut commands: Commands, _world: ResMut<WorldResource>) {
 ///
 /// This is the post-PRD-#341 sole runtime-init entry point: the legacy
 /// scenario / map split is gone. When no `WorldConfig`
-/// resource is present (native unit tests, fallback bootstrap) this is a
+/// resource is present (native unit tests) this is a
 /// no-op and downstream comms / trigger systems remain quiet.
 fn init_world_runtime(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
@@ -728,7 +665,7 @@ fn handle_hail(
     mut runtime: ResMut<WorldContentRuntime>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Some(admitted) = ship_query.iter().next() else {
         return;
     };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
@@ -877,8 +814,8 @@ fn tick_pending_follow_ups(
     let flags_snapshot = runtime.flags.clone();
 
     // Build the set of region UUIDs the player ship is currently inside.
-    let inside_region_uuids: HashSet<String> = if let (Some(membership), Ok(ship_entity)) =
-        (region_membership.as_ref(), ship_query.single())
+    let inside_region_uuids: HashSet<String> = if let (Some(membership), Some(ship_entity)) =
+        (region_membership.as_ref(), ship_query.iter().next())
     {
         membership
             .inside
@@ -1065,14 +1002,14 @@ fn handle_respond_to_message(
         Option<&mut crate::ai_plugin::ShipAiMemory>,
         Option<&crate::entities::spawner::FactionComponent>,
     ), With<AiControllerComponent>>,
-    mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
+    mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Some(admitted) = ship_query.iter().next() else {
         return;
     };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
@@ -1134,6 +1071,16 @@ fn handle_respond_to_message(
             .iter()
             .map(|(name, uuid)| (uuid.as_str(), name.as_str()))
             .collect();
+        // Build UUID â†’ ECS Entity map once per response so the six
+        // per-entity modifier/flag arms below can resolve their `entity`
+        // target in O(1) instead of scanning `entity_uuid_query` each time.
+        // Used by `ApplyModifier` / `RemoveModifier` / `ApplyFlag` /
+        // `RemoveFlag` / `ApplyIntModifier` / `RemoveIntModifier` to write
+        // to the target entity's per-entity `ShipModifiers` Component.
+        let uuid_to_entity: std::collections::HashMap<String, Entity> = entity_uuid_query
+            .iter()
+            .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
+            .collect();
         let sender_uuid = inbox.0.sender_uuid_for(message_id);
         for action in &response.actions {
             match action {
@@ -1191,73 +1138,113 @@ fn handle_respond_to_message(
                     slot,
                     bonus,
                 } => {
-                    if !name_to_uuid_snapshot.contains_key(entity) {
+                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
                         bevy::log::warn!(
                             "handle_respond_to_message: ApplyModifier: unknown entity name '{entity}'"
                         );
                         continue;
-                    }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.add_or_update(crate::modifiers::Modifier {
-                            source: crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot: slot.clone(),
-                            bonus: *bonus,
-                        });
-                    }
+                    };
+                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                        );
+                        continue;
+                    };
+                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyModifier: entity '{entity}' has no ShipModifiers component"
+                        );
+                        continue;
+                    };
+                    mods.add_or_update(crate::modifiers::Modifier {
+                        source: crate::messages::ModifierSource::World {
+                            id: "world".to_string(),
+                            tag: tag.clone(),
+                        },
+                        slot: slot.clone(),
+                        bonus: *bonus,
+                    });
                 }
                 TriggerAction::RemoveModifier { entity, tag, slot } => {
-                    if !name_to_uuid_snapshot.contains_key(entity) {
+                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
                         bevy::log::warn!(
                             "handle_respond_to_message: RemoveModifier: unknown entity name '{entity}'"
                         );
                         continue;
-                    }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.remove(
-                            &crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot,
+                    };
+                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
                         );
-                    }
+                        continue;
+                    };
+                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveModifier: entity '{entity}' has no ShipModifiers component"
+                        );
+                        continue;
+                    };
+                    mods.remove(
+                        &crate::messages::ModifierSource::World {
+                            id: "world".to_string(),
+                            tag: tag.clone(),
+                        },
+                        slot,
+                    );
                 }
                 TriggerAction::ApplyFlag { entity, tag, kind } => {
-                    if !name_to_uuid_snapshot.contains_key(entity) {
+                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
                         bevy::log::warn!(
                             "handle_respond_to_message: ApplyFlag: unknown entity name '{entity}'"
                         );
                         continue;
-                    }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.add_flag(
-                            crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            kind.clone(),
+                    };
+                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
                         );
-                    }
+                        continue;
+                    };
+                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyFlag: entity '{entity}' has no ShipModifiers component"
+                        );
+                        continue;
+                    };
+                    mods.add_flag(
+                        crate::messages::ModifierSource::World {
+                            id: "world".to_string(),
+                            tag: tag.clone(),
+                        },
+                        kind.clone(),
+                    );
                 }
                 TriggerAction::RemoveFlag { entity, tag, kind } => {
-                    if !name_to_uuid_snapshot.contains_key(entity) {
+                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
                         bevy::log::warn!(
                             "handle_respond_to_message: RemoveFlag: unknown entity name '{entity}'"
                         );
                         continue;
-                    }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.remove_flag(
-                            crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            kind.clone(),
+                    };
+                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
                         );
-                    }
+                        continue;
+                    };
+                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveFlag: entity '{entity}' has no ShipModifiers component"
+                        );
+                        continue;
+                    };
+                    mods.remove_flag(
+                        crate::messages::ModifierSource::World {
+                            id: "world".to_string(),
+                            tag: tag.clone(),
+                        },
+                        kind.clone(),
+                    );
                 }
                 TriggerAction::ApplyIntModifier {
                     entity,
@@ -1265,39 +1252,59 @@ fn handle_respond_to_message(
                     slot,
                     bonus,
                 } => {
-                    if !name_to_uuid_snapshot.contains_key(entity) {
+                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
                         bevy::log::warn!(
                             "handle_respond_to_message: ApplyIntModifier: unknown entity name '{entity}'"
                         );
                         continue;
-                    }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.add_or_update_int(crate::modifiers::IntModifier {
-                            source: crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot: slot.clone(),
-                            bonus: *bonus,
-                        });
-                    }
+                    };
+                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                        );
+                        continue;
+                    };
+                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyIntModifier: entity '{entity}' has no ShipModifiers component"
+                        );
+                        continue;
+                    };
+                    mods.add_or_update_int(crate::modifiers::IntModifier {
+                        source: crate::messages::ModifierSource::World {
+                            id: "world".to_string(),
+                            tag: tag.clone(),
+                        },
+                        slot: slot.clone(),
+                        bonus: *bonus,
+                    });
                 }
                 TriggerAction::RemoveIntModifier { entity, tag, slot } => {
-                    if !name_to_uuid_snapshot.contains_key(entity) {
+                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
                         bevy::log::warn!(
                             "handle_respond_to_message: RemoveIntModifier: unknown entity name '{entity}'"
                         );
                         continue;
-                    }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.remove_int(
-                            &crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot,
+                    };
+                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
                         );
-                    }
+                        continue;
+                    };
+                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveIntModifier: entity '{entity}' has no ShipModifiers component"
+                        );
+                        continue;
+                    };
+                    mods.remove_int(
+                        &crate::messages::ModifierSource::World {
+                            id: "world".to_string(),
+                            tag: tag.clone(),
+                        },
+                        slot,
+                    );
                 }
                 TriggerAction::GameOver { message } => {
                     let reason = message.clone().unwrap_or_default();
@@ -1692,7 +1699,7 @@ fn handle_clear_comms(
     ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Some(admitted) = ship_query.iter().next() else {
         return;
     };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
@@ -1715,10 +1722,10 @@ fn handle_show_on_screen(
     mut on_screen: ResMut<OnScreenMessage>,
     mut view_mode_q: Query<&mut crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Some(admitted) = ship_query.iter().next() else {
         return;
     };
-    let Ok(mut vm) = view_mode_q.single_mut() else {
+    let Some(mut vm) = view_mode_q.iter_mut().next() else {
         return;
     };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
@@ -1756,7 +1763,7 @@ fn handle_comms_channel2(
     mut inbox: ResMut<CommsInboxRes>,
     ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::LocalShip>>,
 ) {
-    let policy = if let Ok(control_sources) = ship_query.single() {
+    let policy = if let Some(control_sources) = ship_query.iter().next() {
         control_sources
             .0
             .policy_for(&crate::system_registry::comms_system_id())
@@ -1839,7 +1846,7 @@ fn update_comms_range_flags(
         &crate::comms::CommsRange,
     )>,
 ) {
-    let Ok((ship_tf, ship_range_opt)) = ship_q.single() else {
+    let Some((ship_tf, ship_range_opt)) = ship_q.iter().next() else {
         // No ship: either lobby/pure-handler tests (range tracking never
         // activated Ã¢â‚¬â€ preserve default-true semantics) or the ship was
         // destroyed mid-game. In the latter case, do NOT reset
@@ -1940,7 +1947,7 @@ fn broadcast_comms_state(
         return;
     }
 
-    let Ok(ship_config) = ship_query.single() else {
+    let Some(ship_config) = ship_query.iter().next() else {
         return;
     };
     let Some(comms_token) = sessions.0.console_holder(&Console::Comms, &ship_config.0) else {
@@ -2024,7 +2031,7 @@ fn handle_ai_events(
         Option<&mut crate::ai_plugin::ShipAiMemory>,
         Option<&crate::entities::spawner::FactionComponent>,
     ), With<AiControllerComponent>>,
-    mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
+    mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
     mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
@@ -2071,6 +2078,17 @@ fn handle_ai_events(
     }
 
     let name_to_uuid = runtime.name_to_uuid.clone();
+
+    // Build UUID → ECS Entity map once per tick so the six per-entity
+    // modifier/flag arms below can resolve their `entity` target in O(1)
+    // instead of scanning `entity_uuid_query` each time. Used by
+    // `ApplyModifier` / `RemoveModifier` / `ApplyFlag` / `RemoveFlag` /
+    // `ApplyIntModifier` / `RemoveIntModifier` to write to the target
+    // entity's per-entity `ShipModifiers` Component.
+    let uuid_to_entity: std::collections::HashMap<String, Entity> = entity_uuid_query
+        .iter()
+        .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
+        .collect();
 
     // Auto-fire comms templates that match the world events (e.g. on_attacked distress calls).
     // These are injected without any player hailing Ã¢â‚¬â€ they are broadcast messages.
@@ -2284,73 +2302,113 @@ fn handle_ai_events(
                         slot,
                         bonus,
                     } => {
-                        if !name_to_uuid.contains_key(entity) {
+                        let Some(uuid) = name_to_uuid.get(entity) else {
                             bevy::log::warn!(
                                 "handle_ai_events: ApplyModifier: unknown entity name '{entity}'"
                             );
                             continue;
-                        }
-                        if let Some(ref mut mods) = modifiers {
-                            mods.add_or_update(crate::modifiers::Modifier {
-                                source: crate::messages::ModifierSource::World {
-                                    id: "world".to_string(),
-                                    tag: tag.clone(),
-                                },
-                                slot: slot.clone(),
-                                bonus: *bonus,
-                            });
-                        }
+                        };
+                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                            bevy::log::warn!(
+                                "handle_ai_events: ApplyModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                            );
+                            continue;
+                        };
+                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                            bevy::log::warn!(
+                                "handle_ai_events: ApplyModifier: entity '{entity}' has no ShipModifiers component"
+                            );
+                            continue;
+                        };
+                        mods.add_or_update(crate::modifiers::Modifier {
+                            source: crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            slot: slot.clone(),
+                            bonus: *bonus,
+                        });
                     }
                     TriggerAction::RemoveModifier { entity, tag, slot } => {
-                        if !name_to_uuid.contains_key(entity) {
+                        let Some(uuid) = name_to_uuid.get(entity) else {
                             bevy::log::warn!(
                                 "handle_ai_events: RemoveModifier: unknown entity name '{entity}'"
                             );
                             continue;
-                        }
-                        if let Some(ref mut mods) = modifiers {
-                            mods.remove(
-                                &crate::messages::ModifierSource::World {
-                                    id: "world".to_string(),
-                                    tag: tag.clone(),
-                                },
-                                slot,
+                        };
+                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
                             );
-                        }
+                            continue;
+                        };
+                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveModifier: entity '{entity}' has no ShipModifiers component"
+                            );
+                            continue;
+                        };
+                        mods.remove(
+                            &crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            slot,
+                        );
                     }
                     TriggerAction::ApplyFlag { entity, tag, kind } => {
-                        if !name_to_uuid.contains_key(entity) {
+                        let Some(uuid) = name_to_uuid.get(entity) else {
                             bevy::log::warn!(
                                 "handle_ai_events: ApplyFlag: unknown entity name '{entity}'"
                             );
                             continue;
-                        }
-                        if let Some(ref mut mods) = modifiers {
-                            mods.add_flag(
-                                crate::messages::ModifierSource::World {
-                                    id: "world".to_string(),
-                                    tag: tag.clone(),
-                                },
-                                kind.clone(),
+                        };
+                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                            bevy::log::warn!(
+                                "handle_ai_events: ApplyFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
                             );
-                        }
+                            continue;
+                        };
+                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                            bevy::log::warn!(
+                                "handle_ai_events: ApplyFlag: entity '{entity}' has no ShipModifiers component"
+                            );
+                            continue;
+                        };
+                        mods.add_flag(
+                            crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            kind.clone(),
+                        );
                     }
                     TriggerAction::RemoveFlag { entity, tag, kind } => {
-                        if !name_to_uuid.contains_key(entity) {
+                        let Some(uuid) = name_to_uuid.get(entity) else {
                             bevy::log::warn!(
                                 "handle_ai_events: RemoveFlag: unknown entity name '{entity}'"
                             );
                             continue;
-                        }
-                        if let Some(ref mut mods) = modifiers {
-                            mods.remove_flag(
-                                crate::messages::ModifierSource::World {
-                                    id: "world".to_string(),
-                                    tag: tag.clone(),
-                                },
-                                kind.clone(),
+                        };
+                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
                             );
-                        }
+                            continue;
+                        };
+                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveFlag: entity '{entity}' has no ShipModifiers component"
+                            );
+                            continue;
+                        };
+                        mods.remove_flag(
+                            crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            kind.clone(),
+                        );
                     }
                     TriggerAction::ApplyIntModifier {
                         entity,
@@ -2358,39 +2416,59 @@ fn handle_ai_events(
                         slot,
                         bonus,
                     } => {
-                        if !name_to_uuid.contains_key(entity) {
+                        let Some(uuid) = name_to_uuid.get(entity) else {
                             bevy::log::warn!(
                                 "handle_ai_events: ApplyIntModifier: unknown entity name '{entity}'"
                             );
                             continue;
-                        }
-                        if let Some(ref mut mods) = modifiers {
-                            mods.add_or_update_int(crate::modifiers::IntModifier {
-                                source: crate::messages::ModifierSource::World {
-                                    id: "world".to_string(),
-                                    tag: tag.clone(),
-                                },
-                                slot: slot.clone(),
-                                bonus: *bonus,
-                            });
-                        }
+                        };
+                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                            bevy::log::warn!(
+                                "handle_ai_events: ApplyIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                            );
+                            continue;
+                        };
+                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                            bevy::log::warn!(
+                                "handle_ai_events: ApplyIntModifier: entity '{entity}' has no ShipModifiers component"
+                            );
+                            continue;
+                        };
+                        mods.add_or_update_int(crate::modifiers::IntModifier {
+                            source: crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            slot: slot.clone(),
+                            bonus: *bonus,
+                        });
                     }
                     TriggerAction::RemoveIntModifier { entity, tag, slot } => {
-                        if !name_to_uuid.contains_key(entity) {
+                        let Some(uuid) = name_to_uuid.get(entity) else {
                             bevy::log::warn!(
                                 "handle_ai_events: RemoveIntModifier: unknown entity name '{entity}'"
                             );
                             continue;
-                        }
-                        if let Some(ref mut mods) = modifiers {
-                            mods.remove_int(
-                                &crate::messages::ModifierSource::World {
-                                    id: "world".to_string(),
-                                    tag: tag.clone(),
-                                },
-                                slot,
+                        };
+                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
                             );
-                        }
+                            continue;
+                        };
+                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveIntModifier: entity '{entity}' has no ShipModifiers component"
+                            );
+                            continue;
+                        };
+                        mods.remove_int(
+                            &crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            slot,
+                        );
                     }
                     TriggerAction::GameOver { message } => {
                         let reason = message.clone().unwrap_or_default();
@@ -2804,6 +2882,22 @@ pub struct WorldLayerParams<'w> {
     pub pending_layers: Option<ResMut<'w, PendingWorldLayerChanges>>,
     pub layer_map: Option<ResMut<'w, WorldLayerMap>>,
     pub base_world_config: Option<Res<'w, crate::world::config::WorldConfig>>,
+}
+
+/// Bundle of per-entity `ShipModifiers` writers used by
+/// `handle_respond_to_message` and `handle_ai_events` to route
+/// `TriggerAction::{Apply,Remove}{Modifier,Flag,IntModifier}` actions to
+/// the named target entity's Component (not the legacy global Resource).
+///
+/// Grouping the mutable query into a `SystemParam` keeps both handlers
+/// under Bevy's 16-parameter limit. Every ship entity (player + NPC) is
+/// spawned with a `ShipModifiers` Component (`src/entities/spawner.rs`
+/// and `spawn_game_start_entities`), so `.get_mut(entity)` is the correct
+/// primary write target after the name is resolved through
+/// `WorldContentRuntime.name_to_uuid` → UUID → ECS `Entity`.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ShipModifiersParams<'w, 's> {
+    pub components: Query<'w, 's, &'static mut crate::modifiers::ShipModifiers>,
 }
 
 /// builds always insert the registry via `init_world_runtime`, so the
@@ -3314,50 +3408,6 @@ mod tests {
     use crate::world::content::{
         CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition,
     };
-
-    // -- setup_fallback_world run-condition tests (PRD #341) ------------------
-    //
-    // The fallback system must run exactly when no `WorldConfig` resource is
-    // present (e.g. native unit tests, no WASM-loaded world). When a
-    // `WorldConfig` is loaded the fallback must be skipped Ã¢â‚¬â€ the
-    // `[[entity]]`-driven spawn path owns the ship via `spawn_game_start_entities`.
-
-    /// Build the minimum app needed to run `WorldPlugin`'s Startup chain.
-    /// Excludes `LobbyPlugin` so we don't pull in extra systems we don't need.
-    fn fallback_test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(bevy::asset::AssetPlugin::default())
-            .init_asset::<Mesh>()
-            .init_asset::<StandardMaterial>()
-            .init_resource::<WorldResource>()
-            .add_plugins(WorldPlugin);
-        app
-    }
-
-    #[test]
-    fn setup_fallback_world_runs_when_no_world_config_present() {
-        let mut app = fallback_test_app();
-        // Run only the Startup schedule Ã¢â‚¬â€ WorldPlugin's Update systems
-        // require message types we don't want to wire up here.
-        app.world_mut().run_schedule(Startup);
-        // setup_fallback_world now uses EntityConsoleHull on the ship entity.
-        // Verify the world was initialized by checking that the ShipPlugin ran.
-    }
-
-    #[test]
-    fn setup_fallback_world_is_skipped_when_world_config_present() {
-        let mut app = fallback_test_app();
-        // Insert a WorldConfig before Startup runs. The run_if gate must
-        // suppress setup_fallback_world.
-        app.world_mut()
-            .insert_resource(crate::world::config::WorldConfig::default());
-        app.world_mut().run_schedule(Startup);
-        // setup_fallback_world is skipped when WorldConfig present - no assertion needed.
-
-
-
-
-    }
 
     // -- Test app -------------------------------------------------------------
 
@@ -4469,6 +4519,368 @@ mod tests {
                 .iter()
                 .any(|o| o.id == "obj-001"),
             "AddObjective action must have fired"
+        );
+    }
+
+    // -- AI-event ApplyModifier / per-entity target regression tests -------
+    //
+    // The following six tests exercise `handle_ai_events` dispatch of the
+    // per-entity trigger actions (`ApplyModifier`, `RemoveModifier`,
+    // `ApplyFlag`, `RemoveFlag`, `ApplyIntModifier`, `RemoveIntModifier`)
+    // and prove that the action lands on the target entity's per-entity
+    // `ShipModifiers` Component — not the legacy global Resource — and
+    // that non-target entities (e.g. the player ship) remain unaffected.
+    // These are the regression tests for the audit-report bug where world
+    // triggers silently misrouted every named-entity write to whichever
+    // ship happened to own the global Resource.
+
+    /// Spawns two entities (an NPC and a "player" ship) with distinct
+    /// UUIDs and per-entity `ShipModifiers` components. Registers name
+    /// mappings for both. Returns `(npc_entity, player_entity)`.
+    fn spawn_two_modifier_targets(app: &mut App) -> (Entity, Entity) {
+        let npc = app
+            .world_mut()
+            .spawn((
+                EntityUuid("npc-target-uuid".to_string()),
+                crate::modifiers::ShipModifiers::new(),
+            ))
+            .id();
+        let player = app
+            .world_mut()
+            .spawn((
+                EntityUuid("player-target-uuid".to_string()),
+                crate::modifiers::ShipModifiers::new(),
+            ))
+            .id();
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime
+            .name_to_uuid
+            .insert("raider_alpha".into(), "npc-target-uuid".into());
+        runtime
+            .name_to_uuid
+            .insert("player_ship".into(), "player-target-uuid".into());
+        (npc, player)
+    }
+
+    /// Installs a single `OnDestroyed { raider_alpha }` trigger whose
+    /// action list is `actions`, emits `AiEntityDestroyed { npc-target-uuid }`,
+    /// and ticks once so `handle_ai_events` dispatches the actions.
+    fn fire_ai_event_trigger(app: &mut App, actions: Vec<TriggerAction>) {
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime.trigger_states = vec![TriggerState {
+            trigger: crate::world::content::Trigger {
+                condition: TriggerCondition::OnDestroyed {
+                    entity_name: "raider_alpha".to_string(),
+                },
+                actions,
+                when: None,
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: "npc-target-uuid".to_string(),
+            });
+        app.update();
+    }
+
+    #[test]
+    fn ai_events_apply_modifier_lands_on_target_entity_not_player() {
+        let mut app = ai_trigger_test_app();
+        let (npc, player) = spawn_two_modifier_targets(&mut app);
+        fire_ai_event_trigger(
+            &mut app,
+            vec![TriggerAction::ApplyModifier {
+                entity: "raider_alpha".into(),
+                tag: "boost".into(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+                bonus: 1.5,
+            }],
+        );
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .expect("NPC entity must carry ShipModifiers");
+        let player_mods = app
+            .world()
+            .entity(player)
+            .get::<crate::modifiers::ShipModifiers>()
+            .expect("player entity must carry ShipModifiers");
+        assert!(
+            npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed) > 1.0,
+            "ApplyModifier must land on the target NPC's per-entity component; got {}",
+            npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed)
+        );
+        assert!(
+            (player_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            "player entity must be unaffected by an NPC-targeted ApplyModifier; got {}",
+            player_mods.get(&crate::messages::ModifierSlot::MaxSpeed)
+        );
+    }
+
+    #[test]
+    fn ai_events_remove_modifier_undoes_only_the_target_entity() {
+        let mut app = ai_trigger_test_app();
+        let (npc, _player) = spawn_two_modifier_targets(&mut app);
+        fire_ai_event_trigger(
+            &mut app,
+            vec![
+                TriggerAction::ApplyModifier {
+                    entity: "raider_alpha".into(),
+                    tag: "boost".into(),
+                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                    bonus: 2.0,
+                },
+                TriggerAction::RemoveModifier {
+                    entity: "raider_alpha".into(),
+                    tag: "boost".into(),
+                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                },
+            ],
+        );
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .expect("NPC entity must carry ShipModifiers");
+        let value = npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed);
+        assert!(
+            (value - 1.0).abs() < 1e-3,
+            "RemoveModifier must reverse the previously-applied bonus on the NPC's component; expected 1.0, got {value}"
+        );
+    }
+
+    #[test]
+    fn ai_events_apply_flag_lands_on_target_entity_not_player() {
+        let mut app = ai_trigger_test_app();
+        let (npc, player) = spawn_two_modifier_targets(&mut app);
+        fire_ai_event_trigger(
+            &mut app,
+            vec![TriggerAction::ApplyFlag {
+                entity: "raider_alpha".into(),
+                tag: "jammer".into(),
+                kind: crate::flag_kind::FlagKind::CommsJammed,
+            }],
+        );
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        let player_mods = app
+            .world()
+            .entity(player)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        assert!(
+            npc_mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            "ApplyFlag must register on the target NPC's per-entity component"
+        );
+        assert!(
+            !player_mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            "player entity must be unaffected by an NPC-targeted ApplyFlag"
+        );
+    }
+
+    #[test]
+    fn ai_events_remove_flag_undoes_only_the_target_entity() {
+        let mut app = ai_trigger_test_app();
+        let (npc, _player) = spawn_two_modifier_targets(&mut app);
+        fire_ai_event_trigger(
+            &mut app,
+            vec![
+                TriggerAction::ApplyFlag {
+                    entity: "raider_alpha".into(),
+                    tag: "jammer".into(),
+                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                },
+                TriggerAction::RemoveFlag {
+                    entity: "raider_alpha".into(),
+                    tag: "jammer".into(),
+                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                },
+            ],
+        );
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        assert!(
+            !npc_mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            "RemoveFlag must un-register the flag on the NPC's per-entity component"
+        );
+    }
+
+    #[test]
+    fn ai_events_apply_int_modifier_lands_on_target_entity_not_player() {
+        let mut app = ai_trigger_test_app();
+        let (npc, player) = spawn_two_modifier_targets(&mut app);
+        fire_ai_event_trigger(
+            &mut app,
+            vec![TriggerAction::ApplyIntModifier {
+                entity: "raider_alpha".into(),
+                tag: "extra_team".into(),
+                slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                bonus: 2,
+            }],
+        );
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        let player_mods = app
+            .world()
+            .entity(player)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        assert_eq!(
+            npc_mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams),
+            2,
+            "ApplyIntModifier must land on the target NPC's per-entity component"
+        );
+        assert_eq!(
+            player_mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams),
+            0,
+            "player entity must be unaffected by an NPC-targeted ApplyIntModifier"
+        );
+    }
+
+    #[test]
+    fn ai_events_remove_int_modifier_undoes_only_the_target_entity() {
+        let mut app = ai_trigger_test_app();
+        let (npc, _player) = spawn_two_modifier_targets(&mut app);
+        fire_ai_event_trigger(
+            &mut app,
+            vec![
+                TriggerAction::ApplyIntModifier {
+                    entity: "raider_alpha".into(),
+                    tag: "extra_team".into(),
+                    slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                    bonus: 3,
+                },
+                TriggerAction::RemoveIntModifier {
+                    entity: "raider_alpha".into(),
+                    tag: "extra_team".into(),
+                    slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                },
+            ],
+        );
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        assert_eq!(
+            npc_mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams),
+            0,
+            "RemoveIntModifier must reverse the int modifier on the NPC's per-entity component"
+        );
+    }
+
+    #[test]
+    fn ai_events_apply_modifier_unknown_entity_name_is_ignored() {
+        let mut app = ai_trigger_test_app();
+        let (npc, player) = spawn_two_modifier_targets(&mut app);
+        fire_ai_event_trigger(
+            &mut app,
+            vec![TriggerAction::ApplyModifier {
+                entity: "does_not_exist".into(),
+                tag: "boost".into(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+                bonus: 5.0,
+            }],
+        );
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        let player_mods = app
+            .world()
+            .entity(player)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        assert!(
+            (npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            "unknown entity name must not touch any entity's per-entity component (NPC)"
+        );
+        assert!(
+            (player_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            "unknown entity name must not touch any entity's per-entity component (player)"
+        );
+    }
+
+    #[test]
+    fn ai_events_apply_modifier_registered_name_without_ecs_entity_is_ignored() {
+        let mut app = ai_trigger_test_app();
+        let (npc, _player) = spawn_two_modifier_targets(&mut app);
+        // Register a phantom name → UUID mapping with no matching ECS entity.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("phantom".into(), "phantom-uuid".into());
+        }
+        fire_ai_event_trigger(
+            &mut app,
+            vec![TriggerAction::ApplyModifier {
+                entity: "phantom".into(),
+                tag: "boost".into(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+                bonus: 5.0,
+            }],
+        );
+        // No entity should have received the modifier.
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        assert!(
+            (npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            "registered name with no ECS entity must not silently misroute the modifier"
+        );
+    }
+
+    #[test]
+    fn ai_events_apply_modifier_target_entity_without_component_is_ignored() {
+        // Guards the third defensive branch: name resolves + UUID resolves +
+        // Entity exists but has no `ShipModifiers` Component → warn+continue.
+        let mut app = ai_trigger_test_app();
+        let (npc, _player) = spawn_two_modifier_targets(&mut app);
+        // Spawn an entity with a UUID but WITHOUT a ShipModifiers component.
+        app.world_mut()
+            .spawn(EntityUuid("componentless-uuid".to_string()));
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("componentless".into(), "componentless-uuid".into());
+        }
+        fire_ai_event_trigger(
+            &mut app,
+            vec![TriggerAction::ApplyModifier {
+                entity: "componentless".into(),
+                tag: "boost".into(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+                bonus: 5.0,
+            }],
+        );
+        // The NPC should NOT have been affected — no silent misroute.
+        let npc_mods = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap();
+        assert!(
+            (npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            "entity without ShipModifiers component must not misroute to other ships"
         );
     }
 
@@ -7370,7 +7782,7 @@ condition = "on_world_loaded"
         // Spawn the player ship (with a Transform so RegionPlugin's
         // membership query succeeds).
         app.world_mut().spawn((
-            Ship,
+            crate::simulation::Ship,
             crate::simulation::LocalShip,
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
@@ -7400,7 +7812,6 @@ condition = "on_world_loaded"
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -7685,7 +8096,6 @@ condition = "on_world_loaded"
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -8560,11 +8970,32 @@ size_max = 2.0
     /// by the `handle_ai_events` tests above.
     fn comms_parity_test_app() -> App {
         let mut app = comms_test_app();
-        app.init_resource::<crate::modifiers::ShipModifiers>()
-            .init_resource::<WorldLayerMap>()
+        app.init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>()
             .init_resource::<crate::simulation::GameOverReason>();
         app
+    }
+
+    /// Spawns a bare target entity carrying `EntityUuid` and a per-entity
+    /// `ShipModifiers` Component, and registers the name→UUID mapping in
+    /// `WorldContentRuntime.name_to_uuid`. Returns the spawned `Entity` so
+    /// tests can assert on its component after the trigger action fires.
+    ///
+    /// Used by the `ApplyModifier` / `RemoveModifier` / `ApplyFlag` /
+    /// `RemoveFlag` / `ApplyIntModifier` / `RemoveIntModifier` dispatch
+    /// tests to prove the action lands on the per-entity Component, not
+    /// the legacy global `ShipModifiers` Resource.
+    fn spawn_modifier_target(app: &mut App, name: &str, uuid: &str) -> Entity {
+        let entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(uuid.to_string()),
+                crate::modifiers::ShipModifiers::new(),
+            ))
+            .id();
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime.name_to_uuid.insert(name.into(), uuid.into());
+        entity
     }
 
     /// Install a comms template whose single response carries `actions`,
@@ -8614,10 +9045,13 @@ size_max = 2.0
         tick(&mut app);
 
         {
+            // Spawn a target entity carrying `EntityUuid` +
+            // `ShipModifiers` so the six per-entity modifier/flag
+            // TriggerActions can resolve "starbase_alpha" → this Entity.
+            // Also registers the name→UUID mapping in
+            // `WorldContentRuntime.name_to_uuid`.
+            let _ = spawn_modifier_target(&mut app, "starbase_alpha", station_uuid);
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime
-                .name_to_uuid
-                .insert("starbase_alpha".into(), station_uuid.into());
             runtime.contacts.push(CommsContact {
                 uuid: station_uuid.into(),
                 name: "Starbase Alpha".into(),
@@ -8799,25 +9233,33 @@ size_max = 2.0
 
     #[test]
     fn comms_response_dispatches_apply_modifier() {
-        let app = fire_response_with_actions(vec![TriggerAction::ApplyModifier {
+        let mut app = fire_response_with_actions(vec![TriggerAction::ApplyModifier {
             entity: "starbase_alpha".into(),
             tag: "boost".into(),
             slot: crate::messages::ModifierSlot::MaxSpeed,
             bonus: 1.5,
         }]);
-        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
-        // The cache aggregates all modifiers in `get`. Bonus is the
-        // observable side-effect; assert it's been applied to MaxSpeed.
+        // The `fire_response_with_actions` helper spawns a target entity
+        // whose `EntityUuid("station-parity-uuid")` matches the name
+        // "starbase_alpha" and gives it a per-entity `ShipModifiers`
+        // Component. Assert the modifier landed on that entity.
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &crate::modifiers::ShipModifiers)>();
+        let (_uuid, mods) = q
+            .iter(app.world())
+            .find(|(u, _)| u.0 == "station-parity-uuid")
+            .expect("target entity must carry EntityUuid + ShipModifiers");
         assert!(
             mods.get(&crate::messages::ModifierSlot::MaxSpeed) > 1.0,
-            "ApplyModifier must add to MaxSpeed slot total, got {}",
+            "ApplyModifier must add to MaxSpeed slot total on the target entity's per-entity component, got {}",
             mods.get(&crate::messages::ModifierSlot::MaxSpeed)
         );
     }
 
     #[test]
     fn comms_response_dispatches_remove_modifier() {
-        let app = fire_response_with_actions(vec![
+        let mut app = fire_response_with_actions(vec![
             TriggerAction::ApplyModifier {
                 entity: "starbase_alpha".into(),
                 tag: "boost".into(),
@@ -8830,32 +9272,40 @@ size_max = 2.0
                 slot: crate::messages::ModifierSlot::MaxSpeed,
             },
         ]);
-        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
-        // After remove, the slot returns to its baseline multiplier of 1.0
-        // (empty table). Comparing against the post-apply value (which would
-        // exceed 1.0) proves the remove undid the apply.
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &crate::modifiers::ShipModifiers)>();
+        let (_uuid, mods) = q
+            .iter(app.world())
+            .find(|(u, _)| u.0 == "station-parity-uuid")
+            .expect("target entity must carry EntityUuid + ShipModifiers");
         let value = mods.get(&crate::messages::ModifierSlot::MaxSpeed);
         assert!(
             (value - 1.0).abs() < 1e-3,
-            "RemoveModifier must reverse the previously-applied modifier; \
-             expected baseline 1.0, got {value}"
+            "RemoveModifier must reverse the previously-applied modifier on the target entity's per-entity component; expected baseline 1.0, got {value}"
         );
     }
 
     #[test]
     fn comms_response_dispatches_apply_and_remove_flag() {
-        let app = fire_response_with_actions(vec![TriggerAction::ApplyFlag {
+        let mut app = fire_response_with_actions(vec![TriggerAction::ApplyFlag {
             entity: "starbase_alpha".into(),
             tag: "jammer".into(),
             kind: crate::flag_kind::FlagKind::CommsJammed,
         }]);
-        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &crate::modifiers::ShipModifiers)>();
+        let (_uuid, mods) = q
+            .iter(app.world())
+            .find(|(u, _)| u.0 == "station-parity-uuid")
+            .expect("target entity must carry EntityUuid + ShipModifiers");
         assert!(
             mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
-            "ApplyFlag must register a CommsJammed flag"
+            "ApplyFlag must register a CommsJammed flag on the target entity's per-entity component"
         );
 
-        let app = fire_response_with_actions(vec![
+        let mut app = fire_response_with_actions(vec![
             TriggerAction::ApplyFlag {
                 entity: "starbase_alpha".into(),
                 tag: "jammer".into(),
@@ -8867,29 +9317,41 @@ size_max = 2.0
                 kind: crate::flag_kind::FlagKind::CommsJammed,
             },
         ]);
-        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &crate::modifiers::ShipModifiers)>();
+        let (_uuid, mods) = q
+            .iter(app.world())
+            .find(|(u, _)| u.0 == "station-parity-uuid")
+            .expect("target entity must carry EntityUuid + ShipModifiers");
         assert!(
             !mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
-            "RemoveFlag must un-register the CommsJammed flag"
+            "RemoveFlag must un-register the CommsJammed flag on the target entity's per-entity component"
         );
     }
 
     #[test]
     fn comms_response_dispatches_apply_and_remove_int_modifier() {
-        let app = fire_response_with_actions(vec![TriggerAction::ApplyIntModifier {
+        let mut app = fire_response_with_actions(vec![TriggerAction::ApplyIntModifier {
             entity: "starbase_alpha".into(),
             tag: "extra_team".into(),
             slot: crate::modifiers::IntModifierSlot::RepairTeams,
             bonus: 2,
         }]);
-        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &crate::modifiers::ShipModifiers)>();
+        let (_uuid, mods) = q
+            .iter(app.world())
+            .find(|(u, _)| u.0 == "station-parity-uuid")
+            .expect("target entity must carry EntityUuid + ShipModifiers");
         assert_eq!(
             mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams),
             2,
-            "ApplyIntModifier must add to RepairTeams int slot"
+            "ApplyIntModifier must add to RepairTeams int slot on the target entity's per-entity component"
         );
 
-        let app = fire_response_with_actions(vec![
+        let mut app = fire_response_with_actions(vec![
             TriggerAction::ApplyIntModifier {
                 entity: "starbase_alpha".into(),
                 tag: "extra_team".into(),
@@ -8902,11 +9364,17 @@ size_max = 2.0
                 slot: crate::modifiers::IntModifierSlot::RepairTeams,
             },
         ]);
-        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &crate::modifiers::ShipModifiers)>();
+        let (_uuid, mods) = q
+            .iter(app.world())
+            .find(|(u, _)| u.0 == "station-parity-uuid")
+            .expect("target entity must carry EntityUuid + ShipModifiers");
         assert_eq!(
             mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams),
             0,
-            "RemoveIntModifier must reverse the int modifier"
+            "RemoveIntModifier must reverse the int modifier on the target entity's per-entity component"
         );
     }
 

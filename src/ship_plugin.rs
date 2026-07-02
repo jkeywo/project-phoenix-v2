@@ -60,8 +60,16 @@ pub struct PendingShipConfig(pub ShipConfig);
 
 /// Server-side enqueue event for channel-3 coordination messages.
 /// AI controllers fire this to send delayed advisories to human operators.
+///
+/// `source_entity` identifies the ship the coordination belongs to. At
+/// delivery time, the message will be enqueued into that ship's own
+/// `CoordinationQueue` component and routed against that ship's
+/// `ShipSystemControlSources` + `ShipConfigComponent`. NPC ships (no
+/// `LocalShip` marker) drain silently — popups are only emitted for the
+/// LocalShip because that's the only ship with a human console holder.
 #[derive(Message, Clone, Debug)]
 pub struct CoordinationEnqueue {
+    pub source_entity: Entity,
     pub sender_origin: ControlSource,
     pub target: crate::messages::SystemId,
     pub payload: CoordinationPayload,
@@ -259,7 +267,7 @@ impl Plugin for ShipPlugin {
                 process_helm_inputs
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(operate_helm_ai),
-                detect_player_ship_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
+                detect_reached_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
                 sync_ship_position
@@ -303,7 +311,7 @@ fn process_helm_inputs(
             }
         },
     };
-    let Ok(mut last_input) = last_input_q.single_mut() else {
+    let Some(mut last_input) = last_input_q.iter_mut().next() else {
         return;
     };
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
@@ -318,10 +326,10 @@ fn process_helm_inputs(
         *prev_phase = Some(current_phase);
     }
 
-    let Ok((admitted, _)) = ship_query.single() else {
+    let Some((admitted, _)) = ship_query.iter().next() else {
         return;
     };
-    let Ok(mut physics) = physics_query.single_mut() else {
+    let Some(mut physics) = physics_query.iter_mut().next() else {
         return;
     };
 
@@ -537,7 +545,7 @@ fn operate_helm_ai(
         if !has_helm_objective {
             // No objectives → zero out intent (decelerate to stop).
             if is_local {
-                if let Ok(mut li) = local_ship_input.single_mut() {
+                if let Some(mut li) = local_ship_input.iter_mut().next() {
                     *li = LastHelmInput::default();
                 }
             }
@@ -611,64 +619,68 @@ fn operate_helm_ai(
         // For the player ship: also write LastHelmInput so process_helm_inputs
         // sees the AI-driven intent (though it will re-apply physics anyway).
         if is_local {
-            if let Ok(mut li) = local_ship_input.single_mut() {
+            if let Some(mut li) = local_ship_input.iter_mut().next() {
                 *li = LastHelmInput { thrust, steering };
             }
         }
     }
 }
 
-/// Mark Reach objectives complete once the player ship arrives within
+/// Mark Reach objectives complete once any ship arrives within
 /// `WAYPOINT_ARRIVAL_RADIUS` of the objective's anchor.
 ///
 /// Runs in `Broadcast` (after `PublishAggregate` so `scored_objectives` is
-/// fresh) and only when the helm system is AI-controlled.
-fn detect_player_ship_objective_completion(
+/// fresh) and only counts ships whose helm system is AI-controlled.
+/// Iterates every ship (player + NPC) so any ship pursuing a shared
+/// world Reach objective can complete it. The `ObjectiveManagerRes` is a
+/// single world-level resource, so multiple ships arriving at the same
+/// anchor complete the shared objective once (idempotent complete()).
+fn detect_reached_objective_completion(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
-    player_ships: Query<
+    ships: Query<
         (&ShipSystemControlSources, &ShipPhysics, &crate::server_app::ShipSystemBlackboards),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
 ) {
-    let Ok((sources, physics, blackboards)) = player_ships.single() else {
-        return;
-    };
-    if !helm_control_policy(sources).operate_ai {
-        return;
-    }
-
     let Some(mut objectives) = objectives else {
         return;
     };
-
-    let scored: Vec<crate::messages::ScoredObjective> = match blackboards
-        .0
-        .get(&crate::system_registry::viewscreen_system_id())
-    {
-        Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
-        _ => return,
-    };
-
     let anchors = world_config
         .as_ref()
         .map(|wc| wc.anchors.clone())
         .unwrap_or_default();
 
-    for obj in &scored {
-        if obj.score <= 0.0 {
+    for (sources, physics, blackboards) in ships.iter() {
+        if !helm_control_policy(sources).operate_ai {
             continue;
         }
-        let crate::messages::AiDirective::Reach { anchor } = &obj.directive else {
-            continue;
+
+        let scored: Vec<crate::messages::ScoredObjective> = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
+                bb.scored_objectives.clone()
+            }
+            _ => continue,
         };
-        let Some(&target) = anchors.get(anchor.as_str()) else {
-            continue;
-        };
-        let dx = target[0] - physics.x;
-        let dz = target[2] - physics.z;
-        if (dx * dx + dz * dz).sqrt() < crate::ai::WAYPOINT_ARRIVAL_RADIUS {
-            objectives.0.complete(&obj.snapshot.id);
+
+        for obj in &scored {
+            if obj.score <= 0.0 {
+                continue;
+            }
+            let crate::messages::AiDirective::Reach { anchor } = &obj.directive else {
+                continue;
+            };
+            let Some(&target) = anchors.get(anchor.as_str()) else {
+                continue;
+            };
+            let dx = target[0] - physics.x;
+            let dz = target[2] - physics.z;
+            if (dx * dx + dz * dz).sqrt() < crate::ai::WAYPOINT_ARRIVAL_RADIUS {
+                objectives.0.complete(&obj.snapshot.id);
+            }
         }
     }
 }
@@ -692,7 +704,7 @@ pub fn handle_impulse_messages(
     region_query: Query<&RegionEffectsSection>,
     ship_query: Query<Entity, With<LocalShip>>,
 ) {
-    let Ok(admitted) = ship_ac_query.single() else {
+    let Some(admitted) = ship_ac_query.iter().next() else {
         return;
     };
     let hull_total = hull_q.single().map(|h| (h.0.total_current(), h.0.total_max())).unwrap_or((100.0, 100.0));
@@ -743,7 +755,7 @@ pub fn handle_boost_messages(
     mut boost: ResMut<ShipBoost>,
     config_res: Option<Res<BoostConfigResource>>,
 ) {
-    let Ok((admitted, entity_cfg)) = ship_query.single() else {
+    let Some((admitted, entity_cfg)) = ship_query.iter().next() else {
         return;
     };
     // Per-entity component takes priority over the Resource fallback.
@@ -786,7 +798,7 @@ fn tick_boost(
     impulse: Res<ShipImpulse>,
     ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<LocalShip>>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_components.single() else {
+    let Some((ship_config, control_sources)) = ship_components.iter().next() else {
         return;
     };
     // Per-entity component takes priority over the Resource fallback.
@@ -827,7 +839,7 @@ fn is_inside_blocks_impulse(
     let Some(membership) = membership else {
         return false;
     };
-    let Ok(ship_entity) = ship_query.single() else {
+    let Some(ship_entity) = ship_query.iter().next() else {
         return false;
     };
     let Some(inside) = membership.inside.get(&ship_entity) else {
@@ -897,47 +909,66 @@ pub fn handle_station_rating_change(
 }
 
 pub fn handle_coordination_enqueue(
-    mut ship_components: Query<(&ShipConfigComponent, &mut CoordinationQueue), With<LocalShip>>,
+    mut ship_components: Query<
+        (Entity, &ShipConfigComponent, &mut CoordinationQueue),
+        With<crate::server_app::Ship>,
+    >,
+    local_ship_q: Query<Entity, With<LocalShip>>,
     mut events: MessageReader<CoordinationEnqueue>,
     mut inbound: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     time: Res<Time>,
 ) {
     let now = time.elapsed_secs();
-    let coord_events: Vec<_> = events.read().collect();
-    let inbound_msgs: Vec<_> = inbound.read().collect();
-    for (ship_config, mut queue) in ship_components.iter_mut() {
+    let coord_events: Vec<_> = events.read().cloned().collect();
+    let inbound_msgs: Vec<_> = inbound.read().cloned().collect();
+
+    // Route typed CoordinationEnqueue events to their source ship's queue.
+    for ev in &coord_events {
+        let Ok((_e, ship_config, mut queue)) = ship_components.get_mut(ev.source_entity) else {
+            // Source ship despawned or lacks a CoordinationQueue — silently drop.
+            continue;
+        };
         let lag = ship_config.0.coordination_lag_secs;
-        for ev in coord_events.iter() {
-            queue.0.enqueue(QueuedCoordination {
-                sender_origin: ev.sender_origin,
-                target: ev.target.clone(),
-                payload: ev.payload.clone(),
-                sender_label: ev.sender_label.clone(),
-                due_time: now + lag,
-            });
-        }
-        for msg in inbound_msgs.iter() {
-            let ClientMessage::SendCoordination { target, payload } = &msg.msg else {
-                continue;
-            };
-            let player = match sessions.0.players().iter().find(|p| p.token == msg.token) {
-                Some(p) => p,
-                None => continue,
-            };
-            let sender_origin = if player.station.is_none() {
-                ControlSource::Ai
-            } else {
-                ControlSource::Human
-            };
-            queue.0.enqueue(QueuedCoordination {
-                sender_origin,
-                target: target.clone(),
-                payload: payload.clone(),
-                sender_label: player.name.clone(),
-                due_time: now + lag,
-            });
-        }
+        queue.0.enqueue(QueuedCoordination {
+            sender_origin: ev.sender_origin,
+            target: ev.target.clone(),
+            payload: ev.payload.clone(),
+            sender_label: ev.sender_label.clone(),
+            due_time: now + lag,
+        });
+    }
+
+    // Route human `SendCoordination` messages to the LocalShip only.
+    // `SendCoordination` is always a ClientMessage from a human, always
+    // scoped to that human's own ship.
+    let Some(local_entity) = local_ship_q.iter().next() else {
+        return;
+    };
+    let Ok((_e, ship_config, mut queue)) = ship_components.get_mut(local_entity) else {
+        return;
+    };
+    let lag = ship_config.0.coordination_lag_secs;
+    for msg in &inbound_msgs {
+        let ClientMessage::SendCoordination { target, payload } = &msg.msg else {
+            continue;
+        };
+        let player = match sessions.0.players().iter().find(|p| p.token == msg.token) {
+            Some(p) => p,
+            None => continue,
+        };
+        let sender_origin = if player.station.is_none() {
+            ControlSource::Ai
+        } else {
+            ControlSource::Human
+        };
+        queue.0.enqueue(QueuedCoordination {
+            sender_origin,
+            target: target.clone(),
+            payload: payload.clone(),
+            sender_label: player.name.clone(),
+            due_time: now + lag,
+        });
     }
 }
 
@@ -948,14 +979,15 @@ pub fn process_coordination_lag(
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &mut CoordinationQueue,
+            Has<LocalShip>,
         ),
-        With<LocalShip>,
+        With<crate::server_app::Ship>,
     >,
     sessions: Res<Sessions>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
 ) {
     let now = time.elapsed_secs();
-    for (ship_config, control_sources, mut queue) in ship_components.iter_mut() {
+    for (ship_config, control_sources, mut queue, is_local) in ship_components.iter_mut() {
         let due = queue.0.due_messages(now);
         for msg in due {
             let target_control = control_sources.0.source_for(&msg.target);
@@ -965,6 +997,11 @@ pub fn process_coordination_lag(
                 coordination::DeliverAction::Consume => {}
                 coordination::DeliverAction::Suppress => {}
                 coordination::DeliverAction::Popup => {
+                    // Popups require a browser-connected console holder.
+                    // Only the LocalShip has one — NPCs drain silently.
+                    if !is_local {
+                        continue;
+                    }
                     let label = if msg.sender_label.is_empty() {
                         "AI".to_string()
                     } else {
@@ -1047,9 +1084,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(crate::simulation::ShipShields(
-                crate::shield::ShieldSystem::default(),
-            ))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
@@ -1075,6 +1109,7 @@ mod tests {
                 crate::damage::ConsoleHull::from_config(hull_config),
             ),
             LastHelmInput::default(),
+            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
         ));
         app
     }
@@ -1518,7 +1553,6 @@ mod tests {
             captain_console: None,
             power: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,
@@ -2502,7 +2536,7 @@ station = "helm"
         let mut app = test_app();
         let anchor = "dock-alpha";
         // Anchor at origin — ship also starts at origin, so distance == 0.
-        // detect_player_ship_objective_completion reads from ShipSystemBlackboards component.
+        // detect_reached_objective_completion reads from ShipSystemBlackboards component.
         set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 8.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
         set_helm_control_source(&mut app, ControlSource::Ai);

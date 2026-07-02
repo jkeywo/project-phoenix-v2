@@ -43,7 +43,9 @@ Run-once startup systems in `WorldPlugin`, chained in order (see `src/world/serv
 1. `insert_world_config_resource` (`src/world/server.rs:152`) — copies `WORLD_CONFIG` thread-local → `Res<WorldConfig>`
 2. `spawn_world_entities` — spawns all `[[entity]]` instances (asteroid-field and non-asteroid-field routed via `partition_immediate_entities`). Per-instance placement is resolved by `resolve_entity_position_with` (`src/world/config.rs:752`), which delegates to `TransformConfig::resolve` (`src/world/config.rs:48`) with precedence `relative_to+offset` > `anchor` > `position` > origin; `rotation` (XYZ Euler radians) and `scale` (default `[1, 1, 1]`) are applied from the same `transform = { ... }` table
 3. `init_world_runtime` — initialises `WorldContentRuntime`, `CommsInboxRes`, `ObjectiveManagerRes` from the loaded `WorldConfig`
-4. `setup_fallback_world` — gated by `run_if(not(resource_exists::<WorldConfig>))`; spawns the fallback player ship for native dev when no world TOML is loaded
+4. `load_extra_worlds` — loads any additional worlds declared in `WorldConfig.extra_worlds`
+
+Production always loads a world TOML via the WASM bridge; when no `WorldConfig` is present (native unit tests only), the startup chain is a no-op and the app boots with an empty world.
 
 The viewscreen space backdrop is no longer spawned by `WorldPlugin`: `RendererPlugin` attaches a Bevy `Skybox` to `GameCamera` and loads `assets/skybox/phoenix_space_cubemap.png` via `prepare_space_skybox_cubemap` (`src/server/renderer.rs:231`), replacing the old runtime star-sphere field.
 
@@ -117,7 +119,7 @@ Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/fa
 
 | File | Contents |
 |------|----------|
-| `src/world/server.rs` | `WorldPlugin`, `insert_world_config_resource`, `spawn_world_entities`, `init_world_runtime`, `setup_fallback_world`, comms/trigger/objective Bevy systems |
+| `src/world/server.rs` | `WorldPlugin`, `insert_world_config_resource`, `spawn_world_entities`, `init_world_runtime`, `load_extra_worlds`, comms/trigger/objective Bevy systems |
 | `src/world/config.rs` | Pure (Bevy-free): `WorldConfig`, `parse_world`, `entity_template_paths`, `partition_immediate_entities` |
 | `src/world/content.rs` | Pure (Bevy-free) runtime types: `TriggerState`, `CommsTemplateState`, `ActiveDialogue`, `FiredTrigger`, `FiredCommsTemplate`, `WorldEvent`, `evaluate_triggers`, `evaluate_comms_templates`, `process_response`, `trigger_states_from_world`, `comms_template_states_from_world`. Schema types re-exported from `world/config` |
 | `src/entities/config_cache.rs` | WASM-side storage: `wasm_load_world` (the real loader), `WORLD_CONFIG` thread-local, `get_world_config` |

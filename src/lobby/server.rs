@@ -29,6 +29,12 @@ pub struct Sessions(pub SessionManager);
 
 /// Bevy resource wrapping the per-ship client config sent in `Welcome`.
 /// Populated from the loaded ship TOML by `update_session_with_config`.
+///
+/// **Legitimately player-only.** This is the subset of ship config that
+/// the browser client needs (radar range, chart range, target radii, etc.).
+/// Only the LocalShip has a browser client, so a single Resource is
+/// sufficient — NPCs do not have consoles that need this data. The full
+/// per-ship config lives on the `ShipConfigComponent` per entity.
 #[derive(Resource, Default)]
 pub struct ShipClientConfigResource(pub ShipClientConfig);
 

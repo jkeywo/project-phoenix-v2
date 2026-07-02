@@ -19,8 +19,9 @@ description = "Harrow Battleship"
 [hull]
 hull_integrity = 280.0
 
-[shields]
-max_hp = 120.0
+[shields_console.base]
+num_facings = 1
+max_hp = 120
 regen_per_sec = 1.5
 
 [collider]

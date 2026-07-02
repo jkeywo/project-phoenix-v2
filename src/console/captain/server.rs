@@ -34,19 +34,24 @@ impl Plugin for CaptainPlugin {
 
 // ── Input handlers ───────────────────────────────────────────────────────────
 
+/// Applies `ToggleRedAlert` commands from every ship's own
+/// `AdmittedCommands` to that ship's own `ShipRedAlert`.
+///
+/// Iterates every ship (player + NPC) because `operate_captain_ai` writes
+/// `ToggleRedAlert` into each ship's own `AdmittedCommands` when its
+/// Captain system is AI-controlled. Without per-entity dispatch, NPC
+/// captain-AI red-alert toggles would be silently dropped.
 fn handle_toggle_red_alert(
-    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
-    mut red_alert_q: Query<&mut crate::ship_state::ShipRedAlert, With<crate::server_app::LocalShip>>,
+    mut ship_query: Query<
+        (&AdmittedCommands, &mut crate::ship_state::ShipRedAlert),
+        With<crate::server_app::Ship>,
+    >,
 ) {
-    let Ok(admitted) = ship_query.single() else {
-        return;
-    };
-    let Ok(mut ra) = red_alert_q.single_mut() else {
-        return;
-    };
-    for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
-        if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
-            ra.toggle();
+    for (admitted, mut ra) in ship_query.iter_mut() {
+        for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
+            if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
+                ra.toggle();
+            }
         }
     }
 }
@@ -76,10 +81,10 @@ fn handle_set_view(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut view_mode_q: Query<&mut crate::ship_state::ShipViewMode, With<crate::server_app::LocalShip>>,
 ) {
-    let Ok(admitted) = ship_query.single() else {
+    let Some(admitted) = ship_query.iter().next() else {
         return;
     };
-    let Ok(mut vm) = view_mode_q.single_mut() else {
+    let Some(mut vm) = view_mode_q.iter_mut().next() else {
         return;
     };
     for cmd in admitted.0.iter() {
@@ -97,7 +102,7 @@ fn handle_set_objective_priority(
     boost: Option<ResMut<crate::server_app::CaptainPriorityBoost>>,
 ) {
     let Some(mut boost) = boost else { return };
-    let Ok(admitted) = ship_query.single() else {
+    let Some(admitted) = ship_query.iter().next() else {
         return;
     };
     for cmd in admitted.for_target(crate::system_registry::CAPTAIN_SYSTEM_ID) {
@@ -268,7 +273,7 @@ fn publish_captain_blackboard(
         boosted_objective_id: boost.as_ref().and_then(|b| b.boosted_id.clone()),
     };
 
-    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(crate::system_registry::CAPTAIN_SYSTEM_ID.to_string()),
             SystemBlackboard::Captain(bb),
@@ -326,8 +331,6 @@ mod tests {
                 )]),
             ),
         ));
-        // Tests that read AdmittedCommands as a resource need it inserted.
-        app.insert_resource(crate::messages::AdmittedCommands::default());
         app
     }
 
@@ -576,11 +579,14 @@ mod tests {
             !get_red_alert(&mut app),
             "unauthorized command must have no effect"
         );
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
+        let admitted = q
+            .single(app.world())
+            .expect("LocalShip must carry AdmittedCommands");
         assert!(
-            app.world()
-                .resource::<crate::messages::AdmittedCommands>()
-                .0
-                .is_empty(),
+            admitted.0.is_empty(),
             "unauthorized command must be rejected by the admission gate (AdmittedCommands should be empty)"
         );
     }
@@ -618,11 +624,14 @@ mod tests {
             },
         );
         tick(&mut app);
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
+        let admitted = q
+            .single(app.world())
+            .expect("LocalShip must carry AdmittedCommands");
         assert!(
-            app.world()
-                .resource::<crate::messages::AdmittedCommands>()
-                .0
-                .is_empty(),
+            admitted.0.is_empty(),
             "NPC ai: token must be rejected by the admission gate"
         );
     }
@@ -1387,6 +1396,133 @@ mod tests {
         assert!(
             get_red_alert(&mut app),
             "AI should activate red alert when last_damage_taken is set on the ship's RecentCombatActivity"
+        );
+    }
+
+    // ── NPC red-alert parity regression (audit follow-up) ─────────────────
+    //
+    // Regression test for the audit-report bug: `operate_captain_ai` iterates
+    // every ship (player + NPC) and pushes `ToggleRedAlert` into each ship's
+    // own `AdmittedCommands`, but `handle_toggle_red_alert` previously read
+    // only the LocalShip's `AdmittedCommands`, so NPC red-alert toggles were
+    // silently dropped. This test spawns an NPC ship with AI-controlled
+    // red-alert, gives it recent combat activity, and asserts the NPC's own
+    // `ShipRedAlert` flips while the LocalShip's does not.
+
+    #[test]
+    fn npc_captain_ai_toggles_own_red_alert_via_admitted_commands() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Build an NPC ship with the same essential components as the
+        // LocalShip, but without the LocalShip marker. Set its red-alert
+        // system to AI control.
+        let npc_control_sources = {
+            let mut cs = ShipSystemControlSources::default();
+            cs.0.set(
+                crate::system_registry::red_alert_system_id(),
+                ControlSource::Ai,
+            );
+            cs
+        };
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                ShipConfigComponent::default(),
+                npc_control_sources,
+                crate::messages::AdmittedCommands::default(),
+                crate::ship_plugin::ActiveStationRatings::default(),
+                crate::ship_plugin::CoordinationQueue::default(),
+                crate::ship_state::ShipRedAlert::default(),
+                crate::ship_state::ShipViewMode::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                RecentCombatActivity {
+                    last_damage_taken: Some(0.0),
+                    ..Default::default()
+                },
+                crate::server_app::WeaponFiredThisTick::default(),
+                crate::server_app::ShipAttackedThisTick::default(),
+                crate::entity_spawner::EntityConsoleHull(
+                    crate::damage::ConsoleHull::from_config(&[(
+                        crate::messages::Console::CaptainChair,
+                        100.0,
+                    )]),
+                ),
+            ))
+            .id();
+
+        // Player red-alert is Human-controlled and has no combat activity —
+        // the AI must not toggle it.
+        tick(&mut app);
+
+        let npc_red_alert = app
+            .world()
+            .entity(npc)
+            .get::<crate::ship_state::ShipRedAlert>()
+            .expect("NPC must carry ShipRedAlert")
+            .0;
+        assert!(
+            npc_red_alert,
+            "operate_captain_ai should have activated the NPC's own red-alert (its AI is under combat)"
+        );
+        assert!(
+            !get_red_alert(&mut app),
+            "player's red-alert must be unaffected by NPC captain-AI toggle"
+        );
+    }
+
+    #[test]
+    fn handle_toggle_red_alert_applies_admitted_commands_per_entity() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Spawn an NPC ship without LocalShip; push a ToggleRedAlert
+        // directly into its AdmittedCommands (bypassing the AI to isolate
+        // the input-handler's per-entity dispatch).
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                crate::messages::AdmittedCommands(vec![crate::messages::AdmittedCommand {
+                    target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
+                    payload: SystemControlPayload::ToggleRedAlert,
+                    response_token: None,
+                }]),
+                crate::ship_plugin::ActiveStationRatings::default(),
+                crate::ship_plugin::CoordinationQueue::default(),
+                crate::ship_state::ShipRedAlert::default(),
+                crate::ship_state::ShipViewMode::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                RecentCombatActivity::default(),
+                crate::server_app::WeaponFiredThisTick::default(),
+                crate::server_app::ShipAttackedThisTick::default(),
+                crate::entity_spawner::EntityConsoleHull(
+                    crate::damage::ConsoleHull::from_config(&[(
+                        crate::messages::Console::CaptainChair,
+                        100.0,
+                    )]),
+                ),
+            ))
+            .id();
+
+        tick(&mut app);
+
+        let npc_red_alert = app
+            .world()
+            .entity(npc)
+            .get::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0;
+        assert!(
+            npc_red_alert,
+            "handle_toggle_red_alert must apply ToggleRedAlert from the NPC's own AdmittedCommands"
+        );
+        assert!(
+            !get_red_alert(&mut app),
+            "handle_toggle_red_alert must not touch the LocalShip when an NPC's AdmittedCommands drives the toggle"
         );
     }
 }

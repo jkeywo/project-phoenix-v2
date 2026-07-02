@@ -86,26 +86,24 @@ impl NavigationWaypoint {
 }
 
 fn handle_navigation_waypoint(
-    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
-    mut waypoint_q: Query<&mut NavigationWaypoint, With<crate::server_app::LocalShip>>,
+    mut ship_query: Query<
+        (&AdmittedCommands, &mut NavigationWaypoint),
+        With<crate::server_app::Ship>,
+    >,
 ) {
-    let Ok(admitted) = ship_query.single() else {
-        return;
-    };
-    let Ok(mut waypoint) = waypoint_q.single_mut() else {
-        return;
-    };
-    for cmd in admitted.for_target(NAVIGATION_SYSTEM_ID) {
-        match &cmd.payload {
-            SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
-                if x.is_finite() && z.is_finite() =>
-            {
-                waypoint.0 = Some(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
+    for (admitted, mut waypoint) in ship_query.iter_mut() {
+        for cmd in admitted.for_target(NAVIGATION_SYSTEM_ID) {
+            match &cmd.payload {
+                SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
+                    if x.is_finite() && z.is_finite() =>
+                {
+                    waypoint.0 = Some(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
+                }
+                SystemControlPayload::ClearNavigationWaypoint => {
+                    waypoint.0 = None;
+                }
+                _ => {}
             }
-            SystemControlPayload::ClearNavigationWaypoint => {
-                waypoint.0 = None;
-            }
-            _ => {}
         }
     }
 }
@@ -123,39 +121,39 @@ fn make_waypoint_mode(x: f32, z: f32, source_uuid: Option<&str>) -> WaypointMode
     }
 }
 
-/// Each tick, if the navigation waypoint is anchored to an entity, look up
-/// the entity's current `Transform` by `EntityUuid` and refresh the
-/// waypoint's stored coordinates. If no entity carries the anchored UUID,
-/// auto-clear the waypoint (per the despawn policy).
+/// Each tick, if any ship's navigation waypoint is anchored to an entity,
+/// look up the entity's current `Transform` by `EntityUuid` and refresh
+/// the waypoint's stored coordinates. If no entity carries the anchored
+/// UUID, auto-clear the waypoint (per the despawn policy). Iterates every
+/// ship so both player and NPC waypoints track their anchors.
 fn refresh_anchored_waypoint(
-    mut waypoint_q: Query<&mut NavigationWaypoint, With<crate::server_app::LocalShip>>,
+    mut waypoint_q: Query<&mut NavigationWaypoint, With<crate::server_app::Ship>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform)>,
 ) {
-    let Ok(mut waypoint) = waypoint_q.single_mut() else {
-        return;
-    };
-    let Some(WaypointMode::Anchored {
-        source_uuid,
-        last_x,
-        last_z,
-    }) = waypoint.0.as_mut()
-    else {
-        return;
-    };
+    for mut waypoint in waypoint_q.iter_mut() {
+        let Some(WaypointMode::Anchored {
+            source_uuid,
+            last_x,
+            last_z,
+        }) = waypoint.0.as_mut()
+        else {
+            continue;
+        };
 
-    let mut found = false;
-    for (uuid, transform) in entity_q.iter() {
-        if uuid.0 == *source_uuid {
-            *last_x = transform.translation.x;
-            *last_z = transform.translation.z;
-            found = true;
-            break;
+        let mut found = false;
+        for (uuid, transform) in entity_q.iter() {
+            if uuid.0 == *source_uuid {
+                *last_x = transform.translation.x;
+                *last_z = transform.translation.z;
+                found = true;
+                break;
+            }
         }
-    }
 
-    if !found {
-        // Parent entity has despawned (or never existed). Auto-clear.
-        waypoint.0 = None;
+        if !found {
+            // Parent entity has despawned (or never existed). Auto-clear.
+            waypoint.0 = None;
+        }
     }
 }
 
@@ -175,7 +173,7 @@ fn publish_navigation_blackboard(
         navigation_waypoint,
     };
 
-    if let Ok(mut bbs) = ship_bbs_q.single_mut() {
+    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(NAVIGATION_SYSTEM_ID.to_string()),
             SystemBlackboard::Navigation(bb),

@@ -121,7 +121,7 @@ pub struct ShipAiMemory(pub AiMemory);
 
 /// Empty marker component placed on NPC entities that carry a `BehaviourSection`.
 /// Used as a query filter in systems that target NPC ships specifically
-/// (e.g. phaser beam handling). Inserted by `register_npc_tokens_on_spawn`.
+/// (e.g. phaser beam handling). Inserted by `register_ai_tokens_on_spawn`.
 #[derive(Component, Default)]
 pub struct AiControllerComponent;
 
@@ -228,11 +228,11 @@ fn build_world_snapshot(
                     transform.translation.z,
                 ],
                 faction: faction.map(|f| f.0),
-                shields: None,
                 hull_fraction,
                 yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
                 radius,
                 forward_speed,
+                shields: None,
             }
         })
         .collect();
@@ -318,7 +318,7 @@ impl Plugin for AiPlugin {
         app.add_systems(
             Update,
             (
-                register_npc_tokens_on_spawn,
+                register_ai_tokens_on_spawn,
                 process_attacker_this_tick
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .in_set(crate::sim_sets::AiTickLabel),
@@ -333,7 +333,7 @@ impl Plugin for AiPlugin {
 /// Register a synthetic `ai:<uuid>` token for any entity with `BehaviourSection`
 /// that has not yet been registered, and attach the `AiControllerComponent` empty
 /// marker so legacy `With<AiControllerComponent>` query filters still work.
-fn register_npc_tokens_on_spawn(
+fn register_ai_tokens_on_spawn(
     mut commands: Commands,
     mut registry: ResMut<AiTokenRegistry>,
     query: Query<
@@ -362,7 +362,7 @@ fn register_npc_tokens_on_spawn(
 /// Replaces the attacker-tracking phase of the retired `tick_ai_controllers`.
 ///
 /// Only processes entities that already have `ShipAiMemory` (i.e., that have been
-/// through at least one `register_npc_tokens_on_spawn` tick). On the very first
+/// through at least one `register_ai_tokens_on_spawn` tick). On the very first
 /// frame of an entity's life the component arrives via deferred commands and will
 /// be processed on the following frame.
 fn process_attacker_this_tick(
@@ -590,7 +590,7 @@ mod tests {
             ))
             .id();
         app.update();
-        // After register_npc_tokens_on_spawn, ShipAiMemory is inserted with home_position.
+        // After register_ai_tokens_on_spawn, ShipAiMemory is inserted with home_position.
         let mem = app.world().get::<ShipAiMemory>(entity).unwrap();
         let home = mem.0.home_position;
         assert!((home[0] - 10.0).abs() < 0.001, "home x must be spawn x");
@@ -832,7 +832,6 @@ mod tests {
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
-            shields: None,
             torpedoes: None,
             repair: None,
             comms: None,

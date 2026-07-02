@@ -263,7 +263,7 @@ pub fn spawn_entity(
             crate::server_app::ShipSystemBlackboards::default(),
         ));
 
-        let ship_config = crate::ship_plugin::npc_ship_config();
+        let ship_config = crate::ship_plugin::ShipConfigComponent::default();
         let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
         for system in &ship_config.0.systems {
             resolver.set(

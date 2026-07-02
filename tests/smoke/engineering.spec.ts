@@ -61,14 +61,14 @@ test('Engineering player receives ConsoleHullUpdate after game start', async ({ 
   await engineer.close();
 });
 
-test('total hull starts at 120 in first ConsoleHullUpdate', async ({ context }) => {
+test('total hull starts at 150 in first ConsoleHullUpdate', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
   const msg = await engineer.waitForMessage('ConsoleHullUpdate', 2_000) as any;
   const hull = msg.data.entries;
   const total = hull.reduce((sum: number, e: any) => sum + e.current, 0);
 
-  expect(total).toBe(120);
+  expect(total).toBe(150);
 
   await captain.close();
   await engineer.close();

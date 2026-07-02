@@ -492,6 +492,65 @@ describe('buildHelmConsoleState', () => {
   });
 });
 
+describe('helm engine fields', () => {
+  // engine_port_thrust
+  it('engine_port_thrust is 0 when no blackboard present', () => {
+    expect(parse(buildHelmConsoleState(EMPTY)).engine_port_thrust).toBe(0);
+  });
+
+  it('engine_port_thrust reads from helm-engine-port blackboard thrust_fraction', () => {
+    const state = {
+      blackboards: { 'helm-engine-port': { thrust_fraction: 0.72 } },
+    };
+    expect(parse(buildHelmConsoleState(state)).engine_port_thrust).toBeCloseTo(0.72);
+  });
+
+  // engine_stbd_thrust
+  it('engine_stbd_thrust is 0 when no blackboard present', () => {
+    expect(parse(buildHelmConsoleState(EMPTY)).engine_stbd_thrust).toBe(0);
+  });
+
+  it('engine_stbd_thrust reads from helm-engine-starboard blackboard thrust_fraction', () => {
+    const state = {
+      blackboards: { 'helm-engine-starboard': { thrust_fraction: 0.55 } },
+    };
+    expect(parse(buildHelmConsoleState(state)).engine_stbd_thrust).toBeCloseTo(0.55);
+  });
+
+  // engine_port_auto — derived from coarse 'helm' station rating
+  it('engine_port_auto is true when stationRatings.helm === Backfill', () => {
+    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } })).engine_port_auto).toBe(true);
+  });
+
+  it('engine_port_auto is false when stationRatings.helm is a different rating', () => {
+    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Full' } })).engine_port_auto).toBe(false);
+  });
+
+  it('engine_port_auto is false when stationRatings is absent', () => {
+    expect(parse(buildHelmConsoleState(EMPTY)).engine_port_auto).toBe(false);
+  });
+
+  // engine_stbd_auto — derived from coarse 'helm' station rating
+  it('engine_stbd_auto is true when stationRatings.helm === Backfill', () => {
+    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } })).engine_stbd_auto).toBe(true);
+  });
+
+  it('engine_stbd_auto is false when stationRatings.helm is a different rating', () => {
+    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Full' } })).engine_stbd_auto).toBe(false);
+  });
+
+  it('engine_stbd_auto is false when stationRatings is absent', () => {
+    expect(parse(buildHelmConsoleState(EMPTY)).engine_stbd_auto).toBe(false);
+  });
+
+  // both AUTO badges light up together when helm goes to Backfill
+  it('engine_port_auto and engine_stbd_auto are both true together on Backfill', () => {
+    const s = parse(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } }));
+    expect(s.engine_port_auto).toBe(true);
+    expect(s.engine_stbd_auto).toBe(true);
+  });
+});
+
 describe('buildRepairConsoleState', () => {
   it('returns valid JSON', () => {
     expect(() => parse(buildRepairConsoleState(EMPTY))).not.toThrow();

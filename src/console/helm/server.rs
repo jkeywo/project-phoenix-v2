@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 
 use crate::damage::DamageTier;
-use crate::messages::{Console, HelmBlackboard, HelmEngineBlackboard, SystemBlackboard, SystemId};
+use crate::messages::{
+    Console, HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue,
+    SystemBlackboard, SystemId,
+};
 use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship_plugin::BoostConfigResource;
 use crate::ship_state::ShipPhysics;
@@ -41,6 +44,7 @@ fn publish_helm_blackboard(
         With<crate::simulation::LocalShip>,
     >,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
+    queue: Res<InterSystemQueue>,
     mut ship_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::simulation::LocalShip>>,
 ) {
     let (physics, entity_boost_cfg) = physics_q.single().ok().map(|(p, c)| (*p, c.cloned())).unwrap_or_default();
@@ -99,11 +103,23 @@ fn publish_helm_blackboard(
                 .map(|h| h.0.tier_for(engine_console))
                 .unwrap_or(DamageTier::Operational);
             let is_online = !matches!(tier, DamageTier::Disabled | DamageTier::Destroyed);
-            let thrust_fraction = if is_online {
-                last_input.thrust.abs()
-            } else {
-                0.0
-            };
+            // Prefer the JoystickState from the InterSystemQueue (written by
+            // `publish_joystick_to_engines` in SimSet::Physics, which runs
+            // before SimSet::Publish). Fall back to LastHelmInput if no
+            // channel-1 message targeted this engine this tick.
+            let last_input_thrust = last_input.thrust;
+            let joystick_thrust = queue.0.iter()
+                .filter(|m| m.target == system_id)
+                .filter_map(|m| {
+                    if let InterSystemPayload::JoystickState { thrust, .. } = &m.payload {
+                        Some(*thrust)
+                    } else {
+                        None
+                    }
+                })
+                .last()
+                .unwrap_or(last_input_thrust);
+            let thrust_fraction = if is_online { joystick_thrust.abs() } else { 0.0 };
             bbs.0.insert(
                 system_id,
                 SystemBlackboard::HelmEngine(HelmEngineBlackboard {
@@ -125,6 +141,8 @@ mod tests {
     fn base_app() -> App {
         let mut app = App::new();
         app.add_systems(Update, publish_helm_blackboard);
+        // Initialise InterSystemQueue so the system parameter is satisfied.
+        app.init_resource::<InterSystemQueue>();
         // Spawn a LocalShip entity with ShipPhysics and ShipSystemBlackboards so the system can query it.
         app.world_mut().spawn((
             crate::simulation::LocalShip,

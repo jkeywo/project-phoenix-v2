@@ -526,8 +526,8 @@ export function buildHelmConsoleState(state) {
     // Fine-system engine state (issue #511): read from per-system blackboards.
     engine_port_thrust:  (state.blackboards?.['helm-engine-port']?.thrust_fraction) ?? 0,
     engine_stbd_thrust:  (state.blackboards?.['helm-engine-starboard']?.thrust_fraction) ?? 0,
-    engine_port_auto:    state.stationRatings?.['helm-engine-port'] === 'Backfill',
-    engine_stbd_auto:    state.stationRatings?.['helm-engine-starboard'] === 'Backfill',
+    engine_port_auto:    state.stationRatings?.['helm'] === 'Backfill',
+    engine_stbd_auto:    state.stationRatings?.['helm'] === 'Backfill',
   });
 }
 

@@ -41,6 +41,13 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
 
+[[hull.console_hull]]
+console = "Core"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.10
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5

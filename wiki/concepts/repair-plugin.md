@@ -1,112 +1,109 @@
 ---
-title: RepairPlugin
+title: Repair Console — Server Plugin
 ---
 
-# RepairPlugin
+# Repair Console — Server Plugin
 
-Extracted from `simulation.rs` as part of the simulation split series (issue [#250](https://github.com/jkeywo/project-phoenix-v2/issues/250)).
+Server-side logic for the Repair console lives in `src/console/repair/server.rs`. It is registered as part of `SimulationPlugin` via `crate::console::repair::server::RepairServerPlugin`.
 
-## Per-entity migration (PRD #597 PR 6)
+## Overview
 
-After PR 6 of PRD #597 (2026-07-02), `ShipRepairTeams` derives both `Resource` and `Component`. The player ship carries a per-entity `ShipRepairTeams` component seeded from its TOML `[repair]` block. NPC ships also get a `ShipRepairTeams` component when their entity TOML declares a `[repair]` block (skipped otherwise).
+The current repair model is **direct team dispatch**: the Repair console operator selects a team (0–N) and a `RepairTarget` (a station or Core), and the server dispatches that team to repair all damaged systems owned by the target console. There is no shape-matching minigame — that was removed in an earlier refactor (PRD #272-era). The human UX is `gui/repair-console.html` sending `dispatch_repair_team` actions via `gui/action-map.js:136`.
 
-`tick_repair_teams`, `handle_dispatch_repair_team`, `publish_repair_blackboard`, and `repair_state_broadcaster` stay LocalShip-scoped (repair is a player mechanic today), but prefer the per-entity component on LocalShip with a Resource fallback for tests. Both the Component and the Resource are dual-written to keep legacy Resource-based readers in sync.
+## Key types
 
-## Ownership
-
-`RepairPlugin` owns all breakdown-queue and repair-team state and message handling for the Repair console.
-
-### Systems
-
-| System | Responsibility |
-|---|---|
-| `handle_repair` | Processes `Repair { shape }` from the Repair console holder; dispatches team on match, penalises team on mismatch or empty queue |
-| `tick_repair_teams` | Advances team progress each frame; restores hull HP for each completed team |
-| `broadcast_repair_icons` | Sends `ShowRepairIcon` / `ClearRepairIcon` deltas to console holders; picks one decoy from undamaged consoles |
-
-### Resources
-
-| Resource | Purpose |
-|---|---|
-| `ShipRepairTeams` | Wraps the pure-Rust `RepairTeams` state machine (three slots: Idle / Repairing / Cooldown) |
-| `BreakdownQueueResource` | Breakdown queue, cumulative-damage counter, and per-session RNG |
-| `RepairIconState` | Delta-tracking map from console to last-sent shape, plus decoy RNG |
-
-### Constants
-
-| Constant | Value | Used by |
+| Type | Location | Purpose |
 |---|---|---|
-| `REPAIR_TEAM_HP` | `10.0` | `tick_repair_teams` (HP restored per completed team) |
+| `RepairTeams` | `src/modifiers/repair_teams.rs` | Pure-Rust state machine: N slots of Idle / Travelling / Repairing / Cooldown |
+| `ShipRepairTeams` | `src/console/repair/server.rs` | Bevy `Resource` + `Component` wrapping `RepairTeams`; seeded from TOML `[repair]` block |
+| `RepairBlackboard` | `src/core/messages.rs:1653-1663` | Snapshot broadcast to the Repair console holder |
+| `RepairTarget` | `src/core/messages.rs:867-870` | `Station(StationId)` or `Core` |
 
-## Registration
+## Systems
+
+| System | SimSet | Responsibility |
+|---|---|---|
+| `handle_dispatch_repair_team` | `SimSet::Input` | Processes `ControlSystem { target: repair, payload: DispatchRepairTeam { team_idx, target } }` and legacy `ClientMessage::DispatchRepairTeam`; maps `RepairTarget::Station(id)` via `Console::from_console_id` and `RepairTarget::Core` via `Console::Core`, then calls `teams.dispatch(team_idx, console)` |
+| `tick_repair_teams` | `SimSet::Modifiers` | Advances team progress each frame; restores hull HP for completed teams |
+| `operate_repair_ai` | `SimSet::Input` | Runs AI-controlled repair dispatch when the repair station is in `Backfill` or `Ai` mode; iterates all entities with `ShipSystemControlSources` gated on `policy.operate_ai` |
+| `publish_repair_blackboard` | `SimSet::Broadcast` | Writes a `RepairBlackboard` into `ShipSystemBlackboards` for the repair system key |
+| `repair_state_broadcaster` | `PostUpdate` | Reads the blackboard and broadcasts `SystemBlackboard::Repair` to the console holder at 10 Hz |
+
+## RepairBlackboard
 
 ```rust
-.add_plugins(crate::repair_plugin::RepairPlugin)
+pub struct RepairBlackboard {
+    pub teams: Vec<TeamSlot>,
+    pub console_hull: Vec<ConsoleHullStatus>,
+    pub travel_duration_secs: f32,
+    pub damageable_consoles: Vec<Console>,
+}
 ```
 
-Registered as a sub-plugin of `SimulationPlugin` in `src/simulation.rs`. The module is declared in `src/lib.rs`.
+- `damageable_consoles` derives from `ConsoleHull.entries()` (`src/console/repair/server.rs:167`). Core appears in this list when `[[hull.console_hull]]` declares a `Core` entry in `player_ship.toml`.
+- `console_hull` is the per-console HP/tier snapshot sent to the client so the Repair screen can show live damage bars.
 
-## Broadcaster
+## TOML configuration
 
-`repair_state_broadcaster()` (defined in `repair_plugin.rs` and registered by `RepairPlugin`) reads:
-- `ShipRepairTeams` — for slot states (Repairing / Cooldown / Idle)
-- `BreakdownQueueResource` — for the current front-of-queue breakdown shape
-
-Produces `ServerMessage::RepairState` sent to the Repair console holder at 10 Hz.
-
-## Tests
-
-Tests live in `src/repair_plugin.rs` under `#[cfg(test)] mod tests`.
-
-| Test | Behaviour verified |
-|---|---|
-| `non_repair_sender_is_ignored` | Non-Repair holder pressing a shape is a no-op |
-| `correct_shape_dispatches_team_and_pops_queue` | Matching shape dispatches team 0 and empties the queue |
-| `wrong_shape_penalises_team_and_leaves_queue` | Wrong shape puts team 0 on cooldown, queue unchanged |
-| `all_busy_teams_ignore_further_presses` | When all three teams are occupied, presses are silently dropped |
-| `empty_queue_press_penalises_team` | Pressing when queue is empty penalises the lowest free team |
-| `repair_team_completion_restores_hp` | Completed team tick restores `REPAIR_TEAM_HP` hull points |
-| `repair_state_shows_in_progress` | `RepairState { in_progress: true }` broadcast after dispatch |
-| `repair_state_shows_penalty` | `RepairState { penalty: true }` broadcast after wrong-shape press |
-| `push_assigns_real_icon_to_damaged_console` | Damaged console holder receives `ShowRepairIcon` with correct shape |
-| `push_assigns_decoy_to_undamaged_console` | At least one undamaged console holder receives a decoy `ShowRepairIcon` |
-| `pop_clears_real_icon` | Queue pop triggers `ClearRepairIcon` to the previously damaged console holder |
-| `old_decoy_cleared_before_new_decoy_assigned` | Decoy replacement sends `ClearRepairIcon` to the old decoy holder |
-| `empty_queue_clears_all_icons` | Emptying the queue clears all icons and sends no `ShowRepairIcon` |
-| `no_undamaged_consoles_shows_no_decoy` | When all consoles are damaged, no extra decoy is added |
-
-## Repair timings configuration (TOML-driven)
-
-`RepairTeams` carries a `RepairTimings { travel_duration, repair_rate_hp_per_sec }`
-struct (see `src/modifiers/repair_teams.rs`) initialised from the `[repair]`
-block in `assets/entities/player_ship.toml`:
+Repair team parameters come from the `[repair]` block in `assets/entities/player_ship.toml`:
 
 ```toml
 [repair]
-travel_duration_secs = 5.0
+repair_team_count = 2
+travel_duration_secs = 5
 repair_rate_hp_per_sec = 0.5
 ```
 
-All fields use `serde(default)` and fall back to the same values as
-`RepairTimings::default()`. The override is applied during
-`spawn_game_start_entities` (`src/server_app.rs`) when the spawned ship's
-`EntityConfig` carries a `[repair]` block — absent block keeps defaults.
+Core hull is declared as a `[[hull.console_hull]]` entry:
 
-The same values are forwarded to clients via `ShipClientConfig` in the
-`Welcome` message (`repair_travel_secs`, `repair_rate_hp_per_sec`). The
-Repair panel reads them out of `LobbyState.ship_config` and derives its
-progress-bar durations (`max_hp / rate` for the per-console repair fill)
-rather than hardcoding them. Two drift-guard tests
-(`player_ship_toml_repair_block_matches_runtime_default_values` in
-`src/entities/config.rs` and
-`repair_teams_resource_reflects_player_ship_toml_repair_block` in
-`src/console/repair/server.rs`) fail if either the TOML values diverge
-from `RepairTimings::default()` or the TOML→runtime wiring breaks.
+```toml
+[[hull.console_hull]]
+console = "Core"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.10
+```
+
+## Per-entity migration (PRD #597 PR 6)
+
+`ShipRepairTeams` derives both `Resource` and `Component`. The player ship carries a per-entity `ShipRepairTeams` component seeded from its TOML `[repair]` block. NPC ships also get a `ShipRepairTeams` component when their entity TOML declares a `[repair]` block (skipped otherwise). `tick_repair_teams`, `handle_dispatch_repair_team`, `publish_repair_blackboard`, and `repair_state_broadcaster` stay LocalShip-scoped (repair is a player mechanic today), preferring the per-entity component on LocalShip with a Resource fallback for tests. Both the Component and the Resource are dual-written to keep legacy Resource-based readers in sync.
+
+## Dispatch path
+
+```
+gui/repair-console.html
+  → action-map.js:136  dispatch_repair_team({ team_idx, target })
+  → client.html JS: ControlSystem envelope
+  → wasm_receive_message / handle_dispatch_repair_team (src/console/repair/server.rs:77-133)
+  → RepairTeams.dispatch(team_idx, console)
+  → tick_repair_teams advances progress, restores hull HP on completion
+```
+
+## Tests
+
+Tests live in `src/console/repair/server.rs` under `#[cfg(test)] mod tests`.
+
+Notable tests:
+
+| Test | What it checks |
+|---|---|
+| `dispatch_repair_target_station_maps_helm` | `RepairTarget::Station("helm")` dispatches to `Console::Helm` |
+| `dispatch_repair_target_core_dispatches_to_core` | `RepairTarget::Core` dispatches team 0 to `Console::Core` |
+| `publish_repair_blackboard_contains_damageable_consoles` | `damageable_consoles` contains both `Console::Helm` and `Console::Core` |
+| `player_ship_toml_repair_block_matches_runtime_default_values` | Drift guard: TOML repair values match `RepairTimings::default()` |
+| `repair_teams_resource_reflects_player_ship_toml_repair_block` | Drift guard: TOML→runtime wiring for repair timings |
+
+Five additional tests were added by issue #526. See the source file for the full list.
 
 ## Sources
 
-- `src/repair_plugin.rs`
-- `src/simulation.rs` (pub use re-exports)
-- Issue [#250](https://github.com/jkeywo/project-phoenix-v2/issues/250)
+- `src/console/repair/server.rs`
+- `src/modifiers/repair_teams.rs`
+- `src/core/messages.rs` (RepairBlackboard, RepairTarget)
+- `assets/entities/player_ship.toml` ([repair] block, [[hull.console_hull]] Core entry)
+- `gui/repair-console.html`, `gui/action-map.js`
+- Issue [#508](https://github.com/jkeywo/project-phoenix-v2/issues/508)
+- Issue [#526](https://github.com/jkeywo/project-phoenix-v2/issues/526)
 - [Console Plugin Pattern](./console-plugin-pattern.md)
 - [Broadcaster Seam](./broadcaster-seam.md)

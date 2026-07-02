@@ -879,6 +879,10 @@ mod tests {
             bb.damageable_consoles.contains(&Console::Helm),
             "Helm should appear in damageable_consoles"
         );
+        assert!(
+            bb.damageable_consoles.contains(&Console::Core),
+            "Core should appear in damageable_consoles"
+        );
     }
 
     /// Verifies that operate_repair_ai loops over all entities with

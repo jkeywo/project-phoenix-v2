@@ -1,123 +1,70 @@
 ---
-title: RepairPanelPlugin
+title: Repair Console — Client Panel
 ---
 
-# RepairPanelPlugin
+# Repair Console — Client Panel
 
-Extracted from `client/app.rs` as part of the client split series (issue [#255](https://github.com/jkeywo/project-phoenix-v2/issues/255)).
+The Repair console client UI is `gui/repair-console.html`, a pure-HTML/JS panel. There is no client-side WASM component for the Repair console (the `client` Cargo feature was removed in #463).
 
-## Location
+## Overview
 
-`src/repair_panel.rs` — compiled under the `client` Cargo feature.
+The panel receives `RepairBlackboard` data from the server and renders:
 
-Re-exported as `crate::repair_panel::RepairPanelPlugin`.
+- A list of damageable consoles with their current HP/tier status (`console_hull` field).
+- Team slots showing Idle / Travelling / Repairing / Cooldown state with a progress bar.
+- Dispatch buttons: for each team, a set of repair-target buttons (station names + Core).
 
-## Ownership
+Clicking a dispatch button sends a `dispatch_repair_team` action via `gui/action-map.js:136`:
 
-`RepairPanelPlugin` owns all Repair console UI:
-
-- Breakdown label (shows current console + shape, or "All Systems Nominal")
-- Shape buttons row (SQUARE, TRIANGLE, CIRCLE — sends `Repair { shape }`)
-- Three team status rows with progress bars and text
-- Repair icon label update (`RefreshRepairIcon`) — shown on consoles that receive
-  `ShowRepairIcon` / `ClearRepairIcon` decoy messages
-- Panel visibility toggling (driven by `LobbyState` + `ActiveConsole`)
-
-Apply paths for `RepairState`, `ShowRepairIcon`, and `ClearRepairIcon` remain in
-`ClientSimState.apply()` in `client_sim.rs` since they update shared state used
-across multiple consoles.
-
-### Systems
-
-| System | Responsibility |
-|---|---|
-| `setup_repair_ui` | Spawns the full repair panel hierarchy under a `RepairPanel` root (hidden on spawn). One-shot; called at `Startup`. |
-| `toggle_repair_panel_visibility` | Shows/hides `RepairPanel` based on phase, console assignment, and active tab. Delegates the decision to pure `repair_panel_visible`. |
-| `refresh_repair_panel` | Updates breakdown label, shape button colours, team progress bars and status text from `ClientSimState`. Change-detected. |
-| `handle_repair_shape_button_press` | Emits `Repair { shape }` when a shape button is pressed. |
-| `refresh_repair_icon` | Updates `RepairIconLabel` text on any panel when `ClientSimState.repair_icon` changes. |
-
-### Pure helpers
-
-| Function | Signature | Testability |
-|---|---|---|
-| `repair_panel_visible(lobby, token, active) -> bool` | Pure, Bevy-free | Yes — 6 unit tests |
-
-### Visibility rules (`repair_panel_visible`)
-
-1. Game phase must be `InProgress`.
-2. Local player must hold `Console::Repair`.
-3. If the player holds **one console only**, show automatically (no tab override).
-4. If the player holds **multiple consoles**, show only when `ActiveConsole` is
-   explicitly set to `Repair`.
-
-### Marker components
-
-Defined in `repair_panel.rs` itself:
-
-| Component | Purpose |
-|---|---|
-| `RepairPanel` | Root node; visibility target. |
-| `RepairBreakdownLabel` | Shows the current breakdown (console + shape) or "All Systems Nominal". |
-| `RepairShapeButton(Shape)` | Shape selection button (carries the `Shape` it fires). |
-| `RepairShapeButtonRoot` | Container for the three shape buttons. |
-| `RepairTeamRow(usize)` | Team row container (index 0, 1, 2). |
-| `RepairTeamFill(usize)` | Progress bar fill node inside a team row. |
-| `RepairTeamStatusText(usize)` | Status text overlaid on a team row. |
-
-From `client/app.rs` (via `client_app` compat re-export):
-
-| Component | Purpose |
-|---|---|
-| `RepairButton` | Repair button on Helm and other panels (remains in `client/app.rs`). |
-| `RepairButtonLabel` | Label inside the `RepairButton`. |
-| `RepairIconLabel` | Shows the current repair icon shape on panels that receive decoy icons. |
-
-## Registration
-
-```rust
-.add_plugins(crate::repair_panel::RepairPanelPlugin)
+```js
+// action-map.js
+dispatchRepairTeam({ team_idx, target })
+// target is { Station: { id: "helm" } } or "Core"
 ```
 
-Registered by `wasm_client_init` in `src/client/bridge.rs`, directly after
-`WeaponsPanelPlugin`.
+This is wrapped into a `ControlSystem { target: repair, payload: DispatchRepairTeam { team_idx, target } }` wire message before transmission. The legacy `ClientMessage::DispatchRepairTeam` path is also retained.
 
-## What was removed from `client/app.rs`
+## Data flow (client side)
 
-As part of issue [#255](https://github.com/jkeywo/project-phoenix-v2/issues/255):
-
-- `RepairPanel`, `RepairBreakdownLabel`, `RepairShapeButton`, `RepairShapeButtonRoot`,
-  `RepairTeamRow`, `RepairTeamFill`, `RepairTeamStatusText` component definitions
-- `setup_repair_ui` function and its `Startup` registration
-- `toggle_repair_panel_visibility` system
-- `refresh_repair_panel` system
-- `handle_repair_shape_button_press` system
-- `refresh_repair_icon` system
-- `Shape` import from `messages` (was only used by repair-panel code)
-
-The `RepairButton`, `RepairButtonLabel`, and `RepairIconLabel` marker components remain
-in `client/app.rs` because `handle_repair_button_press` and `refresh_repair_button`
-still operate there (those systems handle the repair button on the Helm panel, not the
-Repair console panel).
-
-## Tests
-
-Tests live in `src/repair_panel.rs` under `#[cfg(test)]`. Run with:
-
-```bash
-cargo test --features client repair_panel
+```
+Server broadcasts RepairBlackboard (SystemBlackboard::Repair)
+  → client.html JS: handleMessage
+  → repair-console.html: onRepairBlackboard(bb)
+    → render team slots (bb.teams)
+    → render console hull bars (bb.console_hull)
+    → populate dispatch target buttons (bb.damageable_consoles)
 ```
 
-Coverage (6 tests):
+`damageable_consoles` drives which targets appear as buttons. Once Core is declared in `[[hull.console_hull]]` in `player_ship.toml`, `Console::Core` appears in `damageable_consoles` and a "Core" dispatch button is rendered.
 
-- `repair_panel_visible`: 6 cases — lobby phase hides panel, InProgress+Repair shows it,
-  non-repair player hidden, multi-console with Repair active shows, multi-console with
-  other active hides, multi-console with no active hides
+## RepairBlackboard fields used by the panel
+
+| Field | Purpose |
+|---|---|
+| `teams: Vec<TeamSlot>` | Team slot states — rendered as rows with progress bars |
+| `console_hull: Vec<ConsoleHullStatus>` | Per-console HP and tier — rendered as damage bars |
+| `travel_duration_secs: f32` | Used to scale progress bar animation duration |
+| `damageable_consoles: Vec<Console>` | Determines which dispatch target buttons to show |
+
+## No shape-matching minigame
+
+The old `RepairBreakdownLabel` / `RepairShapeButton(Shape)` UI existed in a previous WASM-based client architecture. Both the shape-button press handler and the breakdown queue display were removed when the shape-matching minigame was retired (PRD #272-era). The current UI has no shape buttons.
+
+The previous wiki entry described `RepairBreakdownLabel`, `RepairShapeButton(Shape)`, `RepairIconState`, and `BreakdownQueueResource` — these no longer exist.
+
+## Visibility
+
+The repair panel is shown when:
+
+1. The game phase is `InProgress`.
+2. The local player holds the `Repair` station (or `Core` as a repair target does not change panel ownership — the Repair console is still owned by the `repair` station holder).
 
 ## Sources
 
-- `src/repair_panel.rs`
-- `src/client/app.rs` (post-extraction)
-- `src/client/bridge.rs`
-- `src/client_sim.rs` (apply paths for RepairState, ShowRepairIcon, ClearRepairIcon remain here)
-- Issue [#255](https://github.com/jkeywo/project-phoenix-v2/issues/255)
+- `gui/repair-console.html`
+- `gui/action-map.js` (dispatch_repair_team action, line 136)
+- `client.html` (message routing, handleMessage)
+- `src/core/messages.rs` (RepairBlackboard, RepairTarget)
+- `src/console/repair/server.rs` (server-side publish)
+- Issue [#508](https://github.com/jkeywo/project-phoenix-v2/issues/508)
+- [Repair Console — Server Plugin](./repair-plugin.md)

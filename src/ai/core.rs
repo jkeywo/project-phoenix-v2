@@ -22,6 +22,11 @@ pub const PATROL_FULL_STEER_RAD: f32 = PI / 4.0;
 pub const AVOIDANCE_BUFFER: f32 = 5.0;
 /// Look-ahead horizon (seconds) for predictive collision avoidance.
 pub const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
+/// Proportional deceleration factor for approach: thrust begins ramping down
+/// when distance is within this multiple of the target stop-distance.
+/// At 1.5× the stop threshold the ship starts slowing; at the threshold it
+/// reaches zero thrust, preventing overshoot oscillation near targets.
+pub const APPROACH_DECEL_FACTOR: f32 = 1.5;
 
 // ── AiMemory ──────────────────────────────────────────────────────────────────
 
@@ -400,14 +405,15 @@ fn helm_destroy(
     }
 
     let effective_range = world_view.entity_weapons_range.unwrap_or(maintain_range);
-    let at_station = dist <= effective_range * 0.8;
+    let stop_dist = effective_range * 0.8;
+    let at_station = dist <= stop_dist;
 
     // When holding station, steer to face the target so the phaser forward-arc
     // gate passes. When approaching, steer toward the offset approach point.
     let dir = if at_station {
         [dx / dist, dz / dist]
     } else {
-        let approach_target = offset_approach_target(pos, target_pos, effective_range * 0.8);
+        let approach_target = offset_approach_target(pos, target_pos, stop_dist);
         let nav_dx = approach_target[0] - pos[0];
         let nav_dz = approach_target[2] - pos[2];
         let nav_dist = (nav_dx * nav_dx + nav_dz * nav_dz).sqrt();
@@ -438,7 +444,21 @@ fn helm_destroy(
     );
     let steering = (base_steer + avoidance).clamp(-1.0, 1.0);
 
-    let thrust = if at_station { 0.0 } else { target_speed };
+    // Proportional approach: ramp thrust down as the ship enters the decel
+    // zone (APPROACH_DECEL_FACTOR × stop_dist) so it arrives at stop_dist
+    // with near-zero speed, preventing the overshoot oscillation that causes
+    // juddery movement near the target.
+    let thrust = if at_station {
+        0.0
+    } else {
+        let decel_start = stop_dist * APPROACH_DECEL_FACTOR;
+        if dist < decel_start {
+            let t = (dist - stop_dist) / (decel_start - stop_dist);
+            target_speed * t.clamp(0.0, 1.0)
+        } else {
+            target_speed
+        }
+    };
     (thrust, steering)
 }
 
@@ -622,7 +642,17 @@ fn helm_navigate_to(
         PATROL_FULL_STEER_RAD,
     );
     let steering = (base_steer + avoidance).clamp(-1.0, 1.0);
-    (target_speed, steering)
+
+    // Proportional approach: ramp thrust down within APPROACH_DECEL_FACTOR ×
+    // arrival_radius so the ship doesn't overshoot and oscillate on arrival.
+    let decel_start = arrival_radius * APPROACH_DECEL_FACTOR;
+    let thrust = if dist < decel_start {
+        let t = (dist - arrival_radius) / (decel_start - arrival_radius);
+        target_speed * t.clamp(0.0, 1.0)
+    } else {
+        target_speed
+    };
+    (thrust, steering)
 }
 
 // ── operate_weapons ───────────────────────────────────────────────────────────
@@ -1144,6 +1174,162 @@ mod tests {
             Some(target_uuid),
             "memory.target must be set by Destroy path, not left None by Patrol"
         );
+    }
+
+    // ── helm_destroy proportional approach ────────────────────────────────
+
+    /// Build a minimal Destroy scored pool that targets `uuid` with
+    /// `target_speed` and `maintain_range` taken from matching doctrine.
+    fn destroy_pool_for(
+        target_name: &str,
+        target_speed: f32,
+        maintain_range: f32,
+    ) -> (Vec<crate::messages::ScoredObjective>, Vec<crate::entity_config::DoctrineObjective>) {
+        let pool = vec![crate::messages::ScoredObjective {
+            id: "destroy-target".into(),
+            score: 50.0,
+            directive: crate::messages::AiDirective::Destroy {
+                target: target_name.into(),
+            },
+            source: crate::messages::ObjectiveSource::Doctrine,
+            relevance: vec![
+                crate::messages::SystemAffinity::Helm,
+                crate::messages::SystemAffinity::Weapons,
+            ],
+            snapshot: crate::messages::ObjectiveSnapshot {
+                id: "destroy-target".into(),
+                text: "".into(),
+                mandatory: false,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![target_name.into()],
+                source: crate::messages::ObjectiveSource::Doctrine,
+            },
+        }];
+        let doctrine = vec![crate::entity_config::DoctrineObjective {
+            id: "destroy-target".into(),
+            text: "".into(),
+            directive_kind: Some("Destroy".into()),
+            target_speed,
+            maintain_range,
+            ..Default::default()
+        }];
+        (pool, doctrine)
+    }
+
+    #[test]
+    fn helm_destroy_full_thrust_far_from_target() {
+        // Ship is far beyond the decel zone — should emit full target_speed thrust.
+        let target_uuid = Uuid::new_v4();
+        let target_speed = 0.8_f32;
+        let maintain_range = 25.0_f32;
+        // stop_dist = 25 * 0.8 = 20; decel_start = 20 * 1.5 = 30; place at 100
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: target_uuid,
+                name: Some("enemy".into()),
+                position: [0.0, 0.0, -100.0],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut memory = AiMemory::default();
+        let (pool, doctrine) = destroy_pool_for("enemy", target_speed, maintain_range);
+        let (thrust, _) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+        );
+        assert!(
+            (thrust - target_speed).abs() < 1e-4,
+            "beyond decel zone: expected full thrust {target_speed}, got {thrust}"
+        );
+    }
+
+    #[test]
+    fn helm_destroy_reduced_thrust_inside_decel_zone() {
+        // Ship is halfway between decel_start and stop_dist — thrust should be
+        // roughly half of target_speed (proportional ramp).
+        let target_uuid = Uuid::new_v4();
+        let target_speed = 0.8_f32;
+        let maintain_range = 25.0_f32;
+        // stop_dist = 20, decel_start = 30; midpoint = 25
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: target_uuid,
+                name: Some("enemy".into()),
+                position: [0.0, 0.0, -25.0], // dist = 25
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut memory = AiMemory::default();
+        let (pool, doctrine) = destroy_pool_for("enemy", target_speed, maintain_range);
+        let (thrust, _) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+        );
+        // At dist=25, t = (25-20)/(30-20) = 0.5 → expected thrust = 0.4
+        let expected = target_speed * 0.5;
+        assert!(
+            (thrust - expected).abs() < 0.01,
+            "inside decel zone (midpoint): expected ~{expected}, got {thrust}"
+        );
+    }
+
+    #[test]
+    fn helm_destroy_zero_thrust_at_station() {
+        // Ship is inside stop_dist — thrust must be exactly 0.
+        let target_uuid = Uuid::new_v4();
+        let maintain_range = 25.0_f32;
+        // stop_dist = 20; place at 10 (inside)
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: target_uuid,
+                name: Some("enemy".into()),
+                position: [0.0, 0.0, -10.0], // dist = 10
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut memory = AiMemory::default();
+        let (pool, doctrine) = destroy_pool_for("enemy", 0.8, maintain_range);
+        let (thrust, _) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+        );
+        assert_eq!(thrust, 0.0, "inside stop_dist: thrust must be 0");
     }
 
     // ── operate_weapons ───────────────────────────────────────────────────

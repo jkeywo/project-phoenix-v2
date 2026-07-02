@@ -1,4 +1,3 @@
-use crate::damage::ConsoleHull;
 use crate::simulation::Ship;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};

@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
+use crate::ai_plugin::AiControllerComponent;
 use crate::beam_render;
 use crate::entity_config::{EnginePfxConfig, PhaserBankConfig, PhaserCombatConfig};
 use crate::entity_spawner::{EntityUuid, HelmConsoleSection, WeaponsConsoleSection};
@@ -154,10 +154,14 @@ fn sync_phaser_beams(
             &EntityUuid,
             &Transform,
             Option<&ModelMarkers>,
-            &EntityPhaserState,
+            &ActiveBeam,
             Option<&WeaponsConsoleSection>,
         ),
-        (Without<BeamBody>, Without<BeamContactGlow>),
+        (
+            With<AiControllerComponent>,
+            Without<BeamBody>,
+            Without<BeamContactGlow>,
+        ),
     >,
     mut state: ResMut<BeamPfxState>,
     mut commands: Commands,
@@ -233,14 +237,10 @@ fn sync_phaser_beams(
         .ok()
         .and_then(|(_, _, uuid)| uuid.map(|u| u.0.clone()));
 
-    for (src_uuid, src_t, src_markers, phaser, weapons) in npc_beam_q.iter() {
-        if !phaser.beam_active {
-            continue;
-        }
-        let Some(target_uuid) = phaser.beam_target else {
+    for (src_uuid, src_t, src_markers, beam, weapons) in npc_beam_q.iter() {
+        let Some(target_uuid) = beam.target_uuid.clone() else {
             continue;
         };
-        let target_uuid = target_uuid.to_string();
         let key = format!("npc:{}:{}", src_uuid.0, target_uuid);
         let target_point_index = choose_target_point_index(
             &key,

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::messages::{HelmBlackboard, SystemBlackboard, SystemId};
-use crate::server_app::{ShipBoost, ShipImpulse, ShipSystemBlackboards};
+use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship_plugin::BoostConfigResource;
 use crate::ship_state::ShipPhysics;
 use crate::system_registry::HELM_SYSTEM_ID;

@@ -207,12 +207,11 @@ pub fn operate_navigation_ai(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::{ClientMessage, Console, ServerMessage};
+    use crate::messages::{ClientMessage, ServerMessage};
     use crate::server_app::{
         sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull,
-        LastBroadcastShields, ShipHullIntegrity, ShipImpulse,
+        LastBroadcastShields, ShipImpulse,
     };
     
     #[derive(Resource, Default)]
@@ -262,10 +261,6 @@ mod tests {
                     .in_set(crate::sim_sets::SimSet::PublishAggregate),
             )
             .init_resource::<Outbox>()
-                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
-                Console::Navigation,
-                25.0,
-            )])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(crate::modifiers::ShipModifiers::new())
             .init_resource::<LastBroadcastEntityPositions>()

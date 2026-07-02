@@ -199,10 +199,9 @@ pub fn operate_sensors_ai(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
     use crate::messages::*;
-    use crate::simulation::{ShipHullIntegrity, ShipImpulse, SimOutbox};
+    use crate::simulation::{ShipImpulse, SimOutbox};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -221,12 +220,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-                (Console::Power, 25.0),
-                (Console::Shields, 25.0),
-            ])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()

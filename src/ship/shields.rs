@@ -366,14 +366,13 @@ fn operate_shields_ai(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::{ClientMessage, Console, *};
+    use crate::messages::{ClientMessage, *};
     use crate::server_app::{LocalShip, ShipSystemBlackboards};
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::CoordinationEnqueue;
     use crate::simulation::{
-        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
+        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields,
         ShipImpulse, ShipShields, SimOutbox,
     };
     use crate::system_registry::SHIELDS_SYSTEM_ID;
@@ -435,12 +434,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-                (Console::Power, 25.0),
-                (Console::Shields, 25.0),
-            ])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
@@ -573,10 +566,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-            ])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
@@ -677,12 +666,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-                (Console::Power, 25.0),
-                (Console::Shields, 25.0),
-            ])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()

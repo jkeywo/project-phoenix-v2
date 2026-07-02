@@ -373,7 +373,6 @@ mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
     use crate::entity_config::EntityConfig;
-    use crate::server_app::ShipHullIntegrity;
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_CHARGE_DURATION};
     use crate::messages::ModifierSlot;
@@ -627,7 +626,6 @@ mod tests {
             (crate::messages::Console::Power, 25.0),
             (crate::messages::Console::Shields, 25.0),
         ];
-        app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(hull_config)));
         app.insert_resource(ShipModifiers::new());
         app.world_mut().spawn((
             LocalShip,

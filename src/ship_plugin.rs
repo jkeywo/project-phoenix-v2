@@ -19,7 +19,7 @@ use crate::ship::coordination::{CoordinationLagQueue, QueuedCoordination};
 use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipPhysics;
-use crate::simulation::{Ship, ShipBoost, ShipImpulse};
+use crate::simulation::{ShipBoost, ShipImpulse};
 use crate::server_app::LocalShip;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Resources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -1019,7 +1019,6 @@ mod tests {
     use super::*;
     use crate::control_source::ControlSource;
     use crate::entity_config::EntityConfig;
-    use crate::server_app::ShipHullIntegrity;
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::lobby::LobbyPlugin;
@@ -1030,7 +1029,7 @@ mod tests {
     use crate::region_shape::RegionShape;
     use crate::regions::server::RegionPlugin;
     use crate::ship::rating;
-    use crate::simulation::LocalShip;
+    use crate::simulation::{LocalShip, Ship};
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -1040,14 +1039,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-                        .insert_resource(ShipHullIntegrity(crate::damage::ConsoleHull::from_config(
-                &[
-                    (crate::messages::Console::Helm, 25.0),
-                    (crate::messages::Console::Tactical, 25.0),
-                    (crate::messages::Console::Power, 25.0),
-                    (crate::messages::Console::Shields, 25.0),
-                ],
-            )))
             .insert_resource(crate::simulation::ShipShields(
                 crate::shield::ShieldSystem::default(),
             ))

@@ -254,7 +254,10 @@ fn update_entity_inspector(
         bevy::ecs::query::Without<crate::server_app::Asteroid>,
     >,
     ship_physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::server_app::LocalShip>>,
-    ship_hull: Res<crate::server_app::ShipHullIntegrity>,
+    player_hull_q: Query<
+        &crate::entity_spawner::EntityConsoleHull,
+        With<crate::server_app::LocalShip>,
+    >,
     ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
     faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
 ) {
@@ -274,13 +277,16 @@ fn update_entity_inspector(
         player_x, player_z
     ));
 
-    // Per-console hull
-    let hull_entries = ship_hull.0.entries();
+    // Per-console hull from the LocalShip's EntityConsoleHull component.
+    let hull_entries: Vec<(crate::messages::Console, f32, f32)> = player_hull_q
+        .single()
+        .map(|h| h.0.entries().iter().map(|(c, cur, max)| (c.clone(), *cur, *max)).collect())
+        .unwrap_or_default();
     if hull_entries.is_empty() {
         out.push_str("  hull: n/a\n");
     } else {
         out.push_str("  hull:");
-        for (console, cur, max) in hull_entries {
+        for (console, cur, max) in &hull_entries {
             out.push_str(&format!("  {:?} {}/{}", console, *cur as i32, *max as i32));
         }
         out.push('\n');

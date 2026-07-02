@@ -8,7 +8,6 @@ use crate::messages::{
 use crate::session::SessionManager;
 use crate::ship::rating;
 use crate::ship_plugin::{ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources};
-use crate::simulation::Ship;
 use crate::stations_config::{stations_from_ship_config, ShipStations};
 
 /// Cached `GameState` snapshot derived from `Sessions` + `GamePhase` each frame.

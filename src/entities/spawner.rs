@@ -97,8 +97,10 @@ pub struct EntityTarget(pub crate::entity_target::TargetSection);
 /// convention. Damage systems query this component to deal damage and detect
 /// destruction.
 ///
-/// This is a Bevy ECS component wrapping the pure `ConsoleHull` struct, as
-/// distinct from the `ShipHullIntegrity` resource used for the player ship.
+/// This is a Bevy ECS component wrapping the pure `ConsoleHull` struct. It is
+/// the sole per-ship hull store after PRD #597 PR 10 (the retired
+/// `ShipHullIntegrity` global resource that used to hold the player-ship copy
+/// was deleted along with its dual-write bridge).
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
@@ -347,6 +349,13 @@ pub fn spawn_entity(
         // cooldown timer (PRD #597 PR-8). Player ship gets one in
         // `spawn_game_start_entities`.
         entity_commands.insert(crate::server_app::CollisionCooldown::default());
+        // Per-entity combat activity trackers (PRD #597 PR-10). Every ship
+        // (player + NPC) records its own recent damage/hostile-fire/weapon
+        // fire and last attacker.
+        entity_commands.insert(crate::ship::combat_activity::RecentCombatActivity::default());
+        entity_commands.insert(crate::server_app::WeaponFiredThisTick::default());
+        entity_commands.insert(crate::server_app::ShipAttackedThisTick::default());
+        entity_commands.insert(crate::weapons_plugin::LastShipAttacker::default());
     }
 
     // Tags â€” mirror TOML tags onto the entity for snapshot builders.

@@ -309,7 +309,6 @@ mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
-    use crate::server_app::ShipHullIntegrity;
     use crate::messages::*;
     use crate::shield::ShieldSystem;
     use crate::ship_plugin::ShipSystemControlSources;
@@ -346,13 +345,6 @@ mod tests {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-                .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-            (Console::Helm, 25.0),
-            (Console::Tactical, 25.0),
-            (Console::Power, 25.0),
-            (Console::Shields, 25.0),
-            (Console::Core, 50.0),
-        ])))
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
         .insert_resource(crate::modifiers::ShipModifiers::new())

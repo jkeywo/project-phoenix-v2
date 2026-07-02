@@ -12,7 +12,7 @@ use crate::messages::{
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{
-    AsteroidUuid, GameOverReason, Ship, ShipShields, SimOutbox,
+    AsteroidUuid, GameOverReason, ShipShields, SimOutbox,
 };
 use crate::torpedo::{TorpedoConfig, TorpedoSystem};
 
@@ -64,11 +64,13 @@ impl Default for WeaponsUpdateFirstTick {
 #[derive(Component, Default, Clone, Debug)]
 pub struct WeaponsTarget(pub Option<String>);
 
-/// UUID of the NPC (or asteroid) that last attacked the player ship.
-/// Set by `handle_fire_phaser_npc` in the Damage phase; consumed as a
-/// fallback target in the next frame's Input phase. `None` when no recent
-/// attacker is known.
-#[derive(Resource, Default)]
+/// UUID of the last entity that attacked this ship. Written by
+/// `handle_npc_beam_fire` in the Damage phase on the targeted ship's entity;
+/// consumed by that ship's `operate_tactical_ai` as a fallback target.
+/// `None` when no recent attacker is known.
+///
+/// Per-ship `Component` — every ship (player + NPC) tracks its own attacker.
+#[derive(Component, Default, Clone, Debug)]
 pub struct LastShipAttacker(pub Option<String>);
 
 /// Active phaser beam state. `target_uuid` is `Some` while a beam is firing.
@@ -189,24 +191,31 @@ pub struct AsteroidDestroyedVfx {
 pub struct BeamStartedEvent {
     pub bank: PhaserBank,
     pub target_uuid: String,
+    /// The ship entity that fired the beam. Used by the observer to set the
+    /// `WeaponFiredThisTick` component on the correct ship.
+    pub source_entity: Entity,
 }
 
 #[derive(Event, Clone, Debug)]
 pub struct BeamEndedEvent {
     pub bank: PhaserBank,
     pub target_uuid: String,
+    /// The ship entity that fired the beam.
+    pub source_entity: Entity,
 }
 
 fn on_beam_started(
     trigger: On<BeamStartedEvent>,
     mut outbox: ResMut<SimOutbox>,
-    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::LocalShip>>,
-    mut weapon_fired: ResMut<crate::server_app::WeaponFiredThisTick>,
+    ship_q: Query<&crate::entity_spawner::EntityUuid>,
+    mut weapon_fired_q: Query<&mut crate::server_app::WeaponFiredThisTick>,
 ) {
-    weapon_fired.0 = true;
     let ev = trigger.event();
-    let source_uuid = player_ship_q
-        .single()
+    if let Ok(mut wf) = weapon_fired_q.get_mut(ev.source_entity) {
+        wf.0 = true;
+    }
+    let source_uuid = ship_q
+        .get(ev.source_entity)
         .map(|u| u.0.clone())
         .unwrap_or_default();
     outbox.0.push((
@@ -222,11 +231,11 @@ fn on_beam_started(
 fn on_beam_ended(
     trigger: On<BeamEndedEvent>,
     mut outbox: ResMut<SimOutbox>,
-    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::LocalShip>>,
+    ship_q: Query<&crate::entity_spawner::EntityUuid>,
 ) {
     let ev = trigger.event();
-    let source_uuid = player_ship_q
-        .single()
+    let source_uuid = ship_q
+        .get(ev.source_entity)
         .map(|u| u.0.clone())
         .unwrap_or_default();
     outbox.0.push((
@@ -253,9 +262,7 @@ pub struct WeaponsPlugin;
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<crate::messages::InterSystemQueue>();
-        app.init_resource::<crate::server_app::WeaponFiredThisTick>()
-            .init_resource::<crate::server_app::ShipAttackedThisTick>()
-            .init_resource::<LastShipAttacker>()
+        app
             .init_resource::<LastWeaponsUpdate>()
             .init_resource::<CurrentPhaserMode>()
             .init_resource::<PhaserRenderConfig>()
@@ -415,6 +422,7 @@ fn handle_fire_phaser(
     sessions: Res<Sessions>,
     ship_query: Query<
         (
+            Entity,
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
@@ -431,7 +439,7 @@ fn handle_fire_phaser(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    let Ok((ship_config, control_sources)) = ship_query.single() else {
+    let Ok((ship_entity, ship_config, control_sources)) = ship_query.single() else {
         return;
     };
     let Ok(weapons_target) = weapons_target_q.single() else {
@@ -535,6 +543,7 @@ fn handle_fire_phaser(
             commands.trigger(BeamEndedEvent {
                 bank: old_bank,
                 target_uuid: old_uuid,
+                source_entity: ship_entity,
             });
         }
 
@@ -555,6 +564,7 @@ fn handle_fire_phaser(
         commands.trigger(BeamStartedEvent {
             bank: bank.clone(),
             target_uuid: target_uuid.clone(),
+            source_entity: ship_entity,
         });
     }
 }
@@ -567,6 +577,7 @@ fn handle_fire_phaser(
 fn tick_phaser_auto_fire(
     mut commands: Commands,
     phaser_mode: Res<CurrentPhaserMode>,
+    ship_entity_q: Query<Entity, With<crate::server_app::LocalShip>>,
     weapons_target_q: Query<&WeaponsTarget, With<crate::server_app::LocalShip>>,
     mut beam_q: Query<&mut ActiveBeam, With<crate::server_app::LocalShip>>,
     cooldown_q: Query<&PhaserCooldown, With<crate::server_app::LocalShip>>,
@@ -691,9 +702,13 @@ fn tick_phaser_auto_fire(
     beam.damage_accumulator = 0.0;
     beam.bank = Some(bank_id.clone());
 
+    let Ok(ship_entity) = ship_entity_q.single() else {
+        return;
+    };
     commands.trigger(BeamStartedEvent {
         bank: bank_id,
         target_uuid: target_uuid.clone(),
+        source_entity: ship_entity,
     });
 }
 
@@ -718,13 +733,15 @@ fn handle_npc_beam_fire(
     >,
     mut beam_query: Query<&mut ActiveBeam, With<AiControllerComponent>>,
     entity_q: Query<(
+        Entity,
         &crate::entity_spawner::EntityUuid,
         &Transform,
-        bevy::ecs::query::Has<crate::server_app::LocalShip>,
     ), Without<AsteroidUuid>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
-    mut last_attacker: ResMut<LastShipAttacker>,
+    mut ship_attacked_q: Query<
+        (&mut crate::server_app::ShipAttackedThisTick, &mut LastShipAttacker),
+        With<crate::server_app::Ship>,
+    >,
 ) {
     let Some(registry) = registry else {
         return;
@@ -770,14 +787,19 @@ fn handle_npc_beam_fire(
             .map(|b| if b.beam_duration_secs > 0.0 { b.beam_duration_secs } else { PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS })
             .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
 
-        // Find target position for range check.
-        let target_pos = entity_q
+        // Find target entity + position for range check.
+        let target_info = entity_q
             .iter()
-            .find(|(u, _, _)| u.0 == t_uuid.to_string())
-            .map(|(_, t, _)| (t.translation.x, t.translation.z))
-            .or_else(|| asteroid_q.iter().find(|(u, _)| u.0 == t_uuid.to_string()).map(|(_, t)| (t.translation.x, t.translation.z)));
+            .find(|(_, u, _)| u.0 == t_uuid.to_string())
+            .map(|(e, _, t)| (Some(e), t.translation.x, t.translation.z))
+            .or_else(|| {
+                asteroid_q
+                    .iter()
+                    .find(|(u, _)| u.0 == t_uuid.to_string())
+                    .map(|(_, t)| (None, t.translation.x, t.translation.z))
+            });
 
-        let Some((tx, tz)) = target_pos else {
+        let Some((target_entity_opt, tx, tz)) = target_info else {
             continue;
         };
 
@@ -799,20 +821,20 @@ fn handle_npc_beam_fire(
                 beam.damage_accumulator = 0.0;
                 beam.bank = Some(first_bank.as_ref().map(|b| b.id.clone()).unwrap_or_default());
 
-                // Mark the player ship as attacked only when the target is the LocalShip.
-                let is_player_target = entity_q
-                    .iter()
-                    .find(|(u, _, _)| u.0 == t_uuid.to_string())
-                    .map(|(_, _, is_local)| is_local)
-                    .unwrap_or(false);
-                if is_player_target {
-                    ship_attacked.0 = true;
-                    last_attacker.0 = Some(npc_uuid.0.clone());
+                // Mark the target ship as attacked on its own per-entity
+                // components. Ships (player + NPC) each carry their own
+                // ShipAttackedThisTick + LastShipAttacker.
+                if let Some(target_entity) = target_entity_opt {
+                    if let Ok((mut atk, mut last)) = ship_attacked_q.get_mut(target_entity) {
+                        atk.0 = true;
+                        last.0 = Some(npc_uuid.0.clone());
+                    }
                 }
 
                 commands.trigger(BeamStartedEvent {
                     bank: beam.bank.clone().unwrap_or_default(),
                     target_uuid: t_uuid.to_string(),
+                    source_entity: npc_entity,
                 });
             }
         }
@@ -824,12 +846,21 @@ fn handle_npc_beam_fire(
 /// Replaces the beam-tick half of the old `handle_fire_phaser_npc`. Loops over
 /// all NPC entities with an active `ActiveBeam`, accumulates damage, and applies
 /// it to the target.
+///
+/// **TODO (PRD #597 follow-up)**: This system is nearly duplicated by
+/// [`tick_active_beam`]. The player uses per-bank arc/range checks and
+/// `ModifierSlot` multipliers from `PhaserCombatConfigResource` +
+/// `ShipModifiers`; NPCs use single-bank config from `WeaponsConsoleSection`
+/// with no modifiers. Once NPCs are wired to the same `PhaserCombatConfigResource`
+/// + `ShipModifiers` code paths, this system and `tick_active_beam` should be
+/// merged into a single `tick_beams` iterating `Query<..., With<Ship>>`.
 #[allow(clippy::too_many_arguments)]
 fn tick_npc_beams(
     time: Res<Time>,
     mut commands: Commands,
     mut npc_beam_q: Query<
         (
+            Entity,
             &crate::entity_spawner::EntityUuid,
             &ShipPhysics,
             &mut ActiveBeam,
@@ -849,11 +880,11 @@ fn tick_npc_beams(
             Option<&ShipPhysics>,
             &mut EntityConsoleHull,
             Option<&mut ShipShields>,
+            Option<&mut crate::server_app::ShipAttackedThisTick>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
         Without<AiControllerComponent>,
     >,
-    mut ship_attacked: ResMut<crate::server_app::ShipAttackedThisTick>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
@@ -868,13 +899,13 @@ fn tick_npc_beams(
     // Include yaw so bearing calculation uses the target ship's orientation.
     let mut target_positions: Vec<(String, f32, f32, f32)> = hull_query
         .iter()
-        .map(|(_, uid, t, physics_opt, _, _, _)| (uid.0.clone(), t.translation.x, t.translation.z, physics_opt.map(|p| p.yaw).unwrap_or(0.0)))
+        .map(|(_, uid, t, physics_opt, _, _, _, _)| (uid.0.clone(), t.translation.x, t.translation.z, physics_opt.map(|p| p.yaw).unwrap_or(0.0)))
         .collect();
     for (au, t) in asteroid_q.iter() {
         target_positions.push((au.0.clone(), t.translation.x, t.translation.z, 0.0));
     }
 
-    for (_npc_uuid, npc_physics, mut beam, mut cooldown, weapons_section) in npc_beam_q.iter_mut() {
+    for (npc_entity, _npc_uuid, npc_physics, mut beam, mut cooldown, weapons_section) in npc_beam_q.iter_mut() {
         cooldown.tick(dt);
 
         let Some(target_uuid) = beam.target_uuid.clone() else {
@@ -900,12 +931,20 @@ fn tick_npc_beams(
         let damage = beam.damage_accumulator.floor();
         beam.damage_accumulator -= damage;
 
-        // Determine whether the target is the player ship — used to set ShipAttackedThisTick.
-        let is_player_target = hull_query
-            .iter()
-            .any(|(_, u, _, _, _, _, is_local)| u.0 == target_uuid && is_local);
-        if is_player_target {
-            ship_attacked.0 = true;
+        // Mark target ship (if it's a ship) as attacked-this-tick. Uses its
+        // per-entity component; player and NPC share the same code path.
+        {
+            let target_entity = hull_query
+                .iter()
+                .find(|(_, u, _, _, _, _, _, _)| u.0 == target_uuid)
+                .map(|(e, _, _, _, _, _, _, _)| e);
+            if let Some(te) = target_entity {
+                if let Ok((_, _, _, _, _, _, attacked_opt, _)) = hull_query.get_mut(te) {
+                    if let Some(mut atk) = attacked_opt {
+                        atk.0 = true;
+                    }
+                }
+            }
         }
 
         if damage >= 1.0 {
@@ -917,7 +956,7 @@ fn tick_npc_beams(
                 .find(|(u, _, _, _)| *u == target_uuid)
                 .map(|(_, x, z, yaw)| (*x, *z, *yaw));
 
-            for (entity, entity_uuid, _, target_physics_opt, mut hull_comp, mut ship_shields_comp, is_local) in hull_query.iter_mut() {
+            for (entity, entity_uuid, _, target_physics_opt, mut hull_comp, mut ship_shields_comp, _attacked_opt, is_local) in hull_query.iter_mut() {
                 if entity_uuid.0 != target_uuid {
                     continue;
                 }
@@ -1010,6 +1049,7 @@ fn tick_npc_beams(
                 commands.trigger(BeamEndedEvent {
                     bank: bank_id.clone(),
                     target_uuid,
+                    source_entity: npc_entity,
                 });
                 continue;
             }
@@ -1023,6 +1063,7 @@ fn tick_npc_beams(
             commands.trigger(BeamEndedEvent {
                 bank: bank_id,
                 target_uuid,
+                source_entity: npc_entity,
             });
         }
     }
@@ -1171,7 +1212,10 @@ fn handle_fire_torpedo(
     mut outbox: ResMut<SimOutbox>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
     weapons_target_q: Query<&WeaponsTarget, With<crate::server_app::LocalShip>>,
-    mut weapon_fired: ResMut<crate::server_app::WeaponFiredThisTick>,
+    mut weapon_fired_q: Query<
+        &mut crate::server_app::WeaponFiredThisTick,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let Ok((ship_config, control_sources)) = ship_query.single() else {
         return;
@@ -1223,7 +1267,9 @@ fn handle_fire_torpedo(
             LaunchResult::Launched {
                 uuid: launched_uuid,
             } => {
-                weapon_fired.0 = true;
+                if let Ok(mut wf) = weapon_fired_q.single_mut() {
+                    wf.0 = true;
+                }
                 outbox.0.push((
                     Target::All,
                     ServerMessage::TorpedoLaunched {
@@ -1510,6 +1556,12 @@ fn tick_torpedo_system(
 
 /// Active beam tick handler for weapons plugin integration tests
 /// to reference when building their test app.
+///
+/// **TODO (PRD #597 follow-up)**: This player-only beam ticker duplicates
+/// most of [`tick_npc_beams`]. The two should be unified into a single
+/// `tick_beams` iterating `Query<..., With<Ship>>` once NPCs are wired to
+/// read `PhaserCombatConfigResource` + `ShipModifiers` instead of
+/// `WeaponsConsoleSection`.
 fn tick_active_beam(
     time: Res<Time>,
     mut beam_q: Query<&mut ActiveBeam, With<crate::server_app::LocalShip>>,
@@ -1527,6 +1579,7 @@ fn tick_active_beam(
     modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     local_ship_q: Query<
         (
+            Entity,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
         ),
@@ -1550,9 +1603,10 @@ fn tick_active_beam(
     cooldown.tick(dt);
     let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
     let local_view = local_ship_q.single().ok();
+    let ship_entity = local_view.map(|(e, _, _)| e);
     // Per-entity component path (preferred). Fallback: use the default config.
     let combat_config_default;
-    let combat_config: &PhaserCombatConfigResource = match local_view.and_then(|(c, _)| c) {
+    let combat_config: &PhaserCombatConfigResource = match local_view.and_then(|(_, c, _)| c) {
         Some(c) => c,
         None => {
             combat_config_default = PhaserCombatConfigResource::default();
@@ -1561,7 +1615,7 @@ fn tick_active_beam(
     };
     // Per-entity ShipModifiers component takes priority; fall back to Resource.
     let default_modifiers;
-    let modifiers: &crate::modifiers::ShipModifiers = match local_view.and_then(|(_, m)| m) {
+    let modifiers: &crate::modifiers::ShipModifiers = match local_view.and_then(|(_, _, m)| m) {
         Some(m) => m,
         None => match modifiers_res.as_deref() {
             Some(m) => m,
@@ -1595,10 +1649,13 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start_bank(&active_bank, active_bank_cooldown_secs_early);
-        commands.trigger(BeamEndedEvent {
-            bank: active_bank.clone(),
-            target_uuid,
-        });
+        if let Some(se) = ship_entity {
+            commands.trigger(BeamEndedEvent {
+                bank: active_bank.clone(),
+                target_uuid,
+                source_entity: se,
+            });
+        }
         return;
     };
     let bank_in_arc = if combat_config.0.banks.is_empty() {
@@ -1641,10 +1698,13 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start_bank(&active_bank, active_bank_cooldown_secs);
-        commands.trigger(BeamEndedEvent {
-            bank: active_bank.clone(),
-            target_uuid,
-        });
+        if let Some(se) = ship_entity {
+            commands.trigger(BeamEndedEvent {
+                bank: active_bank.clone(),
+                target_uuid,
+                source_entity: se,
+            });
+        }
         return;
     }
 
@@ -1749,10 +1809,13 @@ fn tick_active_beam(
                     uuid: target_uuid.clone(),
                 },
             ));
-            commands.trigger(BeamEndedEvent {
-                bank: active_bank.clone(),
-                target_uuid,
-            });
+            if let Some(se) = ship_entity {
+                commands.trigger(BeamEndedEvent {
+                    bank: active_bank.clone(),
+                    target_uuid,
+                    source_entity: se,
+                });
+            }
             return;
         }
 
@@ -1777,10 +1840,13 @@ fn tick_active_beam(
                 wt.0 = None;
             }
 
-            commands.trigger(BeamEndedEvent {
-                bank: active_bank.clone(),
-                target_uuid,
-            });
+            if let Some(se) = ship_entity {
+                commands.trigger(BeamEndedEvent {
+                    bank: active_bank.clone(),
+                    target_uuid,
+                    source_entity: se,
+                });
+            }
             return;
         }
     }
@@ -1791,10 +1857,13 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start_bank(&active_bank, active_bank_cooldown_secs);
-        commands.trigger(BeamEndedEvent {
-            bank: active_bank.clone(),
-            target_uuid,
-        });
+        if let Some(se) = ship_entity {
+            commands.trigger(BeamEndedEvent {
+                bank: active_bank.clone(),
+                target_uuid,
+                source_entity: se,
+            });
+        }
     }
 }
 
@@ -1810,6 +1879,7 @@ fn operate_tactical_ai(
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
             &crate::ship_plugin::ActiveStationRatings,
+            &LastShipAttacker,
         ),
         (
             With<crate::server_app::LocalShip>,
@@ -1834,9 +1904,8 @@ fn operate_tactical_ai(
         ),
         Without<crate::simulation::Asteroid>,
     >,
-    last_attacker: Res<LastShipAttacker>,
 ) {
-    let Ok((ship_config, _control_sources, active_ratings)) = ship_query.single() else {
+    let Ok((ship_config, _control_sources, active_ratings, last_attacker)) = ship_query.single() else {
         return;
     };
     let Ok(mut weapons_target) = weapons_target_q.single_mut() else {
@@ -2664,7 +2733,6 @@ mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
-    use crate::server_app::ShipHullIntegrity;
     use crate::messages::*;
     use crate::modifiers::ShipModifiers;
     use crate::simulation::{ShipImpulse, SimOutbox};
@@ -2733,12 +2801,6 @@ station = "tactical"
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-                .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-            (Console::Helm, 25.0),
-            (Console::Tactical, 25.0),
-            (Console::Power, 25.0),
-            (Console::Shields, 25.0),
-        ])))
         .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
         .init_resource::<WorldResource>()
         .add_message::<AsteroidDestroyedVfx>()
@@ -2860,6 +2922,11 @@ station = "tactical"
             WeaponsTarget::default(),
             ActiveBeam::default(),
             PhaserCooldown::default(),
+            // PR 10 (PRD #597) — per-entity combat activity trackers.
+            crate::server_app::WeaponFiredThisTick::default(),
+            crate::server_app::ShipAttackedThisTick::default(),
+            LastShipAttacker::default(),
+            crate::ship::combat_activity::RecentCombatActivity::default(),
         ));
         app
     }
@@ -5064,9 +5131,15 @@ station = "tactical"
             "NPC beam must damage NPC target hull (before={hp_before}, after={hp_after})"
         );
         // Player ship must NOT have been marked as attacked.
+        let player_atk = app
+            .world_mut()
+            .query_filtered::<&ShipAttackedThisTick, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|c| c.0)
+            .unwrap_or(false);
         assert!(
-            !app.world().resource::<ShipAttackedThisTick>().0,
-            "NPC-vs-NPC beam must not set ShipAttackedThisTick"
+            !player_atk,
+            "NPC-vs-NPC beam must not set player's ShipAttackedThisTick"
         );
     }
 
@@ -5075,7 +5148,6 @@ station = "tactical"
         // Regression test for PRD #597 PR-1: on_beam_started used With<Ship>.single()
         // which panics when multiple ships exist. After fix it uses With<LocalShip>.
         use crate::entity_spawner::EntityUuid;
-        use crate::server_app::WeaponFiredThisTick;
 
         let mut app = test_app();
         let player_uuid_str = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -5104,6 +5176,7 @@ station = "tactical"
         app.world_mut().trigger(super::BeamStartedEvent {
             bank: "port".to_string(),
             target_uuid: "some-target".to_string(),
+            source_entity: player_entity,
         });
         app.update();
 
@@ -5129,7 +5202,7 @@ station = "tactical"
         // must route through shields → hull component, not just EntityConsoleHull directly.
         use crate::ai_plugin::AiTokenRegistry;
         use crate::entity_spawner::EntityUuid;
-        use crate::server_app::{LocalShip, Ship, ShipAttackedThisTick};
+        use crate::server_app::{LocalShip, ShipAttackedThisTick};
         use crate::shield::ShieldConfig;
         use crate::simulation::{GameOverReason, ShipShields};
 
@@ -5242,8 +5315,14 @@ station = "tactical"
             hull_lost > 0.0 || shields_lost > 0,
             "NPC beam must damage player ship: hull {hull_before}->{hull_after} ({hull_lost}), shields {shields_sum_before}->{shields_sum_after} ({shields_lost})"
         );
+        let player_atk = app
+            .world_mut()
+            .query_filtered::<&ShipAttackedThisTick, With<LocalShip>>()
+            .single(app.world())
+            .map(|c| c.0)
+            .unwrap_or(false);
         assert!(
-            app.world().resource::<ShipAttackedThisTick>().0,
+            player_atk,
             "NPC beam targeting the player ship must mark the ship as attacked for Captain AI"
         );
     }
@@ -5312,7 +5391,6 @@ station = "tactical"
         // target directly in its forward arc causes `tick_ai_controllers` to write
         // a `FirePhaser` `InboundMessage`, which `handle_npc_beam_fire` picks up
         // and sets `ActiveBeam::target_uuid`.
-        use crate::ai_plugin::AiControllerComponent;
         use crate::damage::ConsoleHull;
         use crate::entity_config::{BehaviourConfig, DoctrineObjective};
         use crate::entity_spawner::{EntityConsoleHull, EntityUuid, WeaponsConsoleSection};
@@ -5431,7 +5509,6 @@ station = "tactical"
     fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
         use crate::ai_plugin::AiTokenRegistry;
         use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
-        use crate::server_app::Ship;
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();

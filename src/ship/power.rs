@@ -610,14 +610,13 @@ fn publish_power_blackboard(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::ConsoleHull;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
     use crate::messages::{ModifierSlot, ServerMessage, *};
     use crate::modifiers::ShipModifiers;
     use crate::power_system::SENSORS_POWER_GROUP;
     use crate::shield::ShieldSystem;
     use crate::simulation::{
-        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipHullIntegrity,
+        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields,
         ShipImpulse, ShipShields, SimOutbox,
     };
 
@@ -638,12 +637,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-                        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-                (Console::Power, 25.0),
-                (Console::Shields, 25.0),
-            ])))
             .insert_resource(ShipShields(ShieldSystem::default()))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())

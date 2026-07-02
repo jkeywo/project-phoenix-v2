@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::damage::ConsoleHull;
 use crate::lobby::{InboundMessage, LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
@@ -78,31 +77,29 @@ pub struct AsteroidShieldPierce(pub f32);
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
 
-/// Per-console hull tracker for the player ship. Tracked as a Bevy resource so
-/// systems can read/write it independently of `ShipState`.
-#[derive(Resource)]
-pub struct ShipHullIntegrity(pub ConsoleHull);
-
-// ShipShields has moved to `crate::ship::shields` as a Component.
-pub use crate::ship::shields::ShipShields;
-
 /// The ship's impulse drive state. Cancelled automatically when hull damage is taken.
 #[derive(Resource)]
 pub struct ShipImpulse(pub ImpulseState);
+
+// ShipShields has moved to `crate::ship::shields` as a Component.
+pub use crate::ship::shields::ShipShields;
 
 /// The ship's boost drive battery state. Toggle/partial-drain model; only
 /// active when the ship's TOML enables it (see `BoostConfigResource`).
 #[derive(Resource, Default)]
 pub struct ShipBoost(pub crate::boost::BoostState);
 
-/// Set to `true` by phaser/torpedo fire systems when a weapon actually fires
-/// this tick. Reset to `false` at the start of each tick by `update_combat_activity`.
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+/// Per-ship marker set to `true` by phaser/torpedo fire systems when that
+/// ship's weapon actually fires this tick. Reset to `false` by
+/// `update_combat_activity` at the start of each broadcast tick. Every ship
+/// (player + NPC) carries its own component; no global resource.
+#[derive(Component, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WeaponFiredThisTick(pub bool);
 
-/// Set to `true` when hostile fire targets the player ship this tick, even if
-/// shields absorb the hit before hull damage leaks through.
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+/// Per-ship marker set to `true` when hostile fire targets that ship this
+/// tick, even if shields absorb the hit before hull damage leaks through.
+/// Every ship carries its own component.
+#[derive(Component, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ShipAttackedThisTick(pub bool);
 
 /// Tracks the objective id the captain has chosen to prioritize.
@@ -244,17 +241,8 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_plugins(crate::entity_star::StarRenderPlugin)
     .add_message::<AsteroidDestroyedVfx>()
-        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-        (Console::Helm, 25.0),
-        (Console::Tactical, 25.0),
-        (Console::Power, 25.0),
-        (Console::Shields, 25.0),
-        (Console::Core, 50.0),
-    ])))
     .insert_resource(ShipImpulse(ImpulseState::new()))
     .insert_resource(ShipBoost(crate::boost::BoostState::new()))
-    .init_resource::<WeaponFiredThisTick>()
-    .init_resource::<ShipAttackedThisTick>()
     .init_resource::<CaptainPriorityBoost>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
         crate::config_cache::get_faction_registry(),
@@ -332,15 +320,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_systems(
         Update,
         crate::modifier_coordination::translate_impulse_modifiers
-            .in_set(crate::sim_sets::SimSet::Modifiers),
-    )
-    // Hull dual-write bridge: keep EntityConsoleHull ↔ ShipHullIntegrity in sync.
-    .add_systems(
-        Update,
-        (
-            sync_player_hull_to_resource,
-            sync_resource_hull_to_entity,
-        )
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
@@ -602,12 +581,15 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
 
 fn publish_viewscreen_blackboard(
     hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
-    activity: Option<Res<crate::ship::combat_activity::RecentCombatActivity>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
-    last_attacker: Option<Res<crate::weapons_plugin::LastShipAttacker>>,
     mut ship_blackboards_q: Query<
-        (&mut ShipSystemBlackboards, Option<&crate::ship_state::ShipRedAlert>),
+        (
+            &mut ShipSystemBlackboards,
+            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::combat_activity::RecentCombatActivity>,
+            Option<&crate::weapons_plugin::LastShipAttacker>,
+        ),
         With<LocalShip>,
     >,
 ) {
@@ -615,11 +597,20 @@ fn publish_viewscreen_blackboard(
     use crate::objectives::WorldConditions;
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
-    let entity_red_alert = ship_blackboards_q
-        .single()
-        .ok()
-        .and_then(|(_, ra)| ra.map(|r| r.0));
-    let red_alert = entity_red_alert.unwrap_or(false);
+    let entity_state = ship_blackboards_q.single().ok();
+    let red_alert = entity_state
+        .as_ref()
+        .and_then(|(_, ra, _, _)| ra.map(|r| r.0))
+        .unwrap_or(false);
+    let last_damage_taken_secs = entity_state
+        .as_ref()
+        .and_then(|(_, _, act, _)| act.and_then(|a| a.last_damage_taken));
+    let last_weapon_fired_secs = entity_state
+        .as_ref()
+        .and_then(|(_, _, act, _)| act.and_then(|a| a.last_weapon_fired));
+    let last_attacker_uuid = entity_state
+        .as_ref()
+        .and_then(|(_, _, _, la)| la.and_then(|l| l.0.clone()));
 
     let hull_integrity_pct = hull_q
         .single()
@@ -629,8 +620,6 @@ fn publish_viewscreen_blackboard(
             if max > 0.0 { (cur / max * 100.0).clamp(0.0, 100.0) } else { 100.0 }
         })
         .unwrap_or(100.0);
-    let last_damage_taken_secs = activity.as_ref().and_then(|a| a.last_damage_taken);
-    let last_weapon_fired_secs = activity.as_ref().and_then(|a| a.last_weapon_fired);
 
     let conditions = WorldConditions {
         red_alert,
@@ -651,12 +640,12 @@ fn publish_viewscreen_blackboard(
         hull_integrity_pct,
         last_damage_taken_secs,
         last_weapon_fired_secs,
-        last_attacker_uuid: last_attacker.as_ref().and_then(|la| la.0.clone()),
+        last_attacker_uuid,
         scored_objectives,
     };
 
     // Write directly to the per-entity component.
-    if let Ok((mut entity_bbs, _)) = ship_blackboards_q.single_mut() {
+    if let Ok((mut entity_bbs, _, _, _)) = ship_blackboards_q.single_mut() {
         entity_bbs.0.insert(
             SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
             SystemBlackboard::Viewscreen(bb),
@@ -996,48 +985,6 @@ fn reset_broadcast_caches_on_start(
     *positions = LastBroadcastEntityPositions::default();
     *weapons = LastWeaponsUpdate::default();
     *last_bb = LastBroadcastBlackboards::default();
-}
-
-/// Sync bridge: copies the player ship's `EntityConsoleHull` component into
-/// the global `ShipHullIntegrity` resource each tick. Runs after `SimSet::Damage`
-/// so that damage applied to `EntityConsoleHull` (e.g. by `tick_active_beam`) is
-/// reflected in `ShipHullIntegrity` before any system reads it.
-///
-/// This is the dual-write bridge for PRD #581 Gap D. Once all readers of
-/// `ShipHullIntegrity` have been migrated to query `EntityConsoleHull` directly,
-/// this system and `ShipHullIntegrity` can be deleted.
-pub fn sync_player_hull_to_resource(
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
-    mut hull_res: Option<ResMut<ShipHullIntegrity>>,
-) {
-    let Ok(hull_comp) = hull_q.single() else { return };
-    let Some(ref mut res) = hull_res else { return };
-    // Only copy if they differ (avoids change-detection noise).
-    if res.0.total_current() != hull_comp.0.total_current()
-        || res.0.total_max() != hull_comp.0.total_max()
-    {
-        res.0 = hull_comp.0.clone();
-    }
-}
-
-/// Sync bridge: copies `ShipHullIntegrity` resource into the player ship's
-/// `EntityConsoleHull` component when damage was applied via the resource path
-/// (e.g. `handle_collisions`). Runs after `SimSet::Damage`.
-///
-/// Together with `sync_player_hull_to_resource` this ensures both stores stay
-/// in sync regardless of which path damaged the hull this tick.
-pub fn sync_resource_hull_to_entity(
-    hull_res: Option<Res<ShipHullIntegrity>>,
-    mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
-) {
-    let Some(res) = hull_res else { return };
-    if !res.is_changed() { return };
-    let Ok(mut hull_comp) = hull_q.single_mut() else { return };
-    if hull_comp.0.total_current() != res.0.total_current()
-        || hull_comp.0.total_max() != res.0.total_max()
-    {
-        hull_comp.0 = res.0.clone();
-    }
 }
 
 /// Emit `BlackboardUpdate` for any system whose blackboard has changed since
@@ -1837,26 +1784,27 @@ fn spawn_game_start_entities(
                 // ShipModifiers as per-entity component (PR 6 — PRD #597). The
                 // legacy Resource form is still initialised by ModifierCoordinationPlugin
                 // and dual-written to by observers/translators until PR 7 completes.
-                .insert(crate::modifiers::ShipModifiers::new());
-                // EntityConsoleHull is kept on the player ship entity (not removed)
-                // so it serves as the per-entity hull component alongside the
-                // ShipHullIntegrity global resource (dual-write migration for #581 Gap D).
+                .insert(crate::modifiers::ShipModifiers::new())
+                // Combat activity state per-ship (PR 10 — PRD #597). Every
+                // ship (player + NPC) tracks its own recent combat activity
+                // + this-tick weapon-fired / attacked / last-attacker markers.
+                .insert(crate::ship::combat_activity::RecentCombatActivity::default())
+                .insert(WeaponFiredThisTick::default())
+                .insert(ShipAttackedThisTick::default())
+                .insert(crate::weapons_plugin::LastShipAttacker::default());
+                // The player ship's hull lives on its `EntityConsoleHull`
+                // component (PRD #581). All damage/repair paths write there
+                // directly; the old `ShipHullIntegrity` resource was retired
+                // in PRD #597 PR 10.
             ship_spawned = true;
 
             // Ship-specific resource setup
             if let Some(hc) = &config.hull {
-                let entries: Vec<(Console, f32)> = hc
+                let _entries: Vec<(Console, f32)> = hc
                     .console_hull
                     .iter()
                     .map(|e| (e.console.clone(), e.max_hp))
                     .collect();
-                let hull = if entries.is_empty() {
-                    // Legacy fallback: single "virtual" console with hull_integrity HP.
-                    ConsoleHull::from_config(&[(Console::Helm, hc.hull_integrity)])
-                } else {
-                    ConsoleHull::from_config(&entries)
-                };
-                commands.insert_resource(ShipHullIntegrity(hull));
                 // [repair] block — overrides default RepairTimings if present.
                 // Absent block keeps the same defaults the hardcoded constants
                 // used to provide (5.0s travel, 0.5 HP/s repair rate).
@@ -1872,13 +1820,6 @@ fn spawn_game_start_entities(
                 // Insert as per-entity component AND global resource (dual-write migration).
                 commands.entity(spawned).insert(teams.clone());
                 commands.insert_resource(teams);
-            } else {
-                commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                    (Console::Helm, 25.0),
-                    (Console::Tactical, 25.0),
-                    (Console::Power, 25.0),
-                    (Console::Shields, 25.0),
-                ])));
             }
 
             // Apply shield focus config + base shield-system values from TOML if present.
@@ -2583,12 +2524,6 @@ mod tests {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-                .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-            (Console::Helm, 25.0),
-            (Console::Tactical, 25.0),
-            (Console::Power, 25.0),
-            (Console::Shields, 25.0),
-        ])))
         .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<WorldResource>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
@@ -2673,7 +2608,7 @@ mod tests {
                 crate::ship_state::ShipViewMode::default(),
                 crate::ship_state::ShipPhaserFrequency::default(),
                 bevy::prelude::Transform::default(),
-                crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(&[
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[
                     (Console::Helm, 25.0),
                     (Console::Tactical, 25.0),
                     (Console::Power, 25.0),
@@ -3435,8 +3370,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        // Simulate OnEnter(InProgress) having run by inserting ShipHullIntegrity.
-        // The test explicitly advances phase to InProgress so broadcast_world_setup_on_start fires.
+        // Advance the phase to InProgress so broadcast_world_setup_on_start fires.
         push(&mut app, "captain", ClientMessage::SetReady { ready: true });
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));

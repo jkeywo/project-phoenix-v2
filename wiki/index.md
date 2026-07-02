@@ -135,7 +135,7 @@ Open (planned work):
 - **[Issue #441 — Tab Bar + Content Switching](./sources/issue-441-html-tab-bar-content-switching.md)** — Shipped. `gui/tab-bar.js` + `gui/content-switcher.js` pure modules; `#console-tab-bar` strip in the bezel safe zone (portrait top / landscape left, initials at 5+ in portrait); `setActiveConsole()` consolidates the three call sites.
 - **[Issue #442 — Bevy Cleanup (lobby + tab bar + bezel)](./sources/issue-442-bevy-cleanup.md)** — Shipped. Final slice of #438; deletes the Bevy lobby UI, embedded tab bar widget, and phone bezel frame from `src/client/{app,console_shell,phone_border/framing}.rs` (~2700 → ~900 lines). `ConsoleShell::spawn` signature preserved so the nine per-console panels compile unchanged; `PhoneAssets` + `DeviceOrientation` retained.
 - **[Issues #587-596 — PRD #581 Unified Ship Entity Model](./sources/prd-581-unified-ship-entity-model.md)** — Substantially complete. W1-W5 done (ShipState deleted, EntityConsoleHull primary hull store, all publish_*_blackboard → ShipSystemBlackboards, LastHelmInput per-entity, handle_comms_channel2 With<LocalShip>). Full parity continues under #597.
-- **[PRD #597 — Ship Parity: Eliminate All Player/NPC Divergences](./sources/prd-597-ship-parity.md)** — In progress. PR 1 underway. 10-PR plan to eliminate all remaining player/NPC simulation divergences.
+- **[PRD #597 — Ship Parity: Eliminate All Player/NPC Divergences](./sources/prd-597-ship-parity.md)** — Shipped. All 10 PRs complete. Player and NPC ships share identical code paths; only `ShipSystemControlSources` (AI vs human) and `LocalShip` (viewscreen render) differ.
 
 ### Design drafts (`docs/`)
 

@@ -14,9 +14,6 @@ pub struct CaptainPlugin;
 
 impl Plugin for CaptainPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RecentCombatActivity>();
-        app.init_resource::<crate::server_app::WeaponFiredThisTick>();
-        app.init_resource::<crate::server_app::ShipAttackedThisTick>();
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         app.add_systems(
             Update,
@@ -119,25 +116,23 @@ fn handle_set_objective_priority(
 /// differs from the current state. Runs before `handle_toggle_red_alert` so
 /// the command is visible to the handler in the same tick.
 ///
-/// After issue #591: loops over all ship entities (player and NPC) where the
-/// Captain system is `ControlSource::Ai`, reading combat timers from that
-/// entity's `ShipSystemBlackboards` viewscreen entry. No longer reads from the
-/// global `RecentCombatActivity` resource (kept only for the player-ship
-/// global path for backward compat with tests).
+/// After PRD #597 PR 10: reads combat timers from each ship's own
+/// per-entity `RecentCombatActivity` component — no global resource. Loops over
+/// all ship entities (player and NPC) where the Captain system is
+/// `ControlSource::Ai`.
 fn operate_captain_ai(
     time: Res<Time>,
     mut ship_query: Query<(
         &mut AdmittedCommands,
         &ShipSystemControlSources,
-        Option<&crate::server_app::ShipSystemBlackboards>,
+        &RecentCombatActivity,
         Option<&crate::ship_state::ShipRedAlert>,
     )>,
-    activity: Res<RecentCombatActivity>,
 ) {
     let now = time.elapsed_secs();
     let ai = crate::ai::core::CaptainAi;
 
-    for (mut admitted, control_sources, blackboards_opt, red_alert_opt) in ship_query.iter_mut() {
+    for (mut admitted, control_sources, activity, red_alert_opt) in ship_query.iter_mut() {
         let policy = control_sources
             .0
             .policy_for(&crate::system_registry::red_alert_system_id());
@@ -145,35 +140,12 @@ fn operate_captain_ai(
             continue;
         }
 
-        // Read combat activity from the entity's viewscreen blackboard when available.
-        // Falls back to global RecentCombatActivity for the player ship.
-        let (last_under_attack, last_weapon_fired) = if let Some(blackboards) = blackboards_opt {
-            match blackboards
-                .0
-                .get(&crate::system_registry::viewscreen_system_id())
-            {
-                Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
-                    let lda = bb.last_damage_taken_secs;
-                    let lwf = bb.last_weapon_fired_secs;
-                    (most_recent(lda, lda), lwf)
-                }
-                _ => (
-                    most_recent(
-                        activity.last_damage_taken,
-                        activity.last_hostile_fire_taken,
-                    ),
-                    activity.last_weapon_fired,
-                ),
-            }
-        } else {
-            (
-                most_recent(
-                    activity.last_damage_taken,
-                    activity.last_hostile_fire_taken,
-                ),
-                activity.last_weapon_fired,
-            )
-        };
+        // Read this ship's own combat activity.
+        let last_under_attack = most_recent(
+            activity.last_damage_taken,
+            activity.last_hostile_fire_taken,
+        );
+        let last_weapon_fired = activity.last_weapon_fired;
 
         if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, last_weapon_fired) {
             let current_red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
@@ -343,6 +315,16 @@ mod tests {
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_state::ShipViewMode::default(),
             crate::server_app::ShipSystemBlackboards::default(),
+            // Per-entity combat activity trackers (PRD #597 PR 10).
+            RecentCombatActivity::default(),
+            crate::server_app::WeaponFiredThisTick::default(),
+            crate::server_app::ShipAttackedThisTick::default(),
+            crate::entity_spawner::EntityConsoleHull(
+                crate::damage::ConsoleHull::from_config(&[(
+                    crate::messages::Console::CaptainChair,
+                    100.0,
+                )]),
+            ),
         ));
         // Tests that read AdmittedCommands as a resource need it inserted.
         app.insert_resource(crate::messages::AdmittedCommands::default());
@@ -960,6 +942,24 @@ mod tests {
         );
     }
 
+    fn set_activity_last_damage(app: &mut App, secs: Option<f32>) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut RecentCombatActivity, With<LocalShip>>();
+        if let Ok(mut a) = q.single_mut(app.world_mut()) {
+            a.last_damage_taken = secs;
+        }
+    }
+
+    fn set_activity_hostile_fire(app: &mut App, secs: Option<f32>) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut RecentCombatActivity, With<LocalShip>>();
+        if let Ok(mut a) = q.single_mut(app.world_mut()) {
+            a.last_hostile_fire_taken = secs;
+        }
+    }
+
     // ── operate_captain_ai tests ─────────────────────────────────────────────
 
     #[test]
@@ -972,9 +972,7 @@ mod tests {
             crate::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
-        app.world_mut()
-            .resource_mut::<RecentCombatActivity>()
-            .last_damage_taken = Some(0.0);
+        set_activity_last_damage(&mut app, Some(0.0));
         tick(&mut app);
         assert!(
             get_red_alert(&mut app),
@@ -1007,9 +1005,7 @@ mod tests {
     fn operate_captain_ai_does_nothing_when_human_controlled() {
         let mut app = test_app();
         start_game(&mut app);
-        app.world_mut()
-            .resource_mut::<RecentCombatActivity>()
-            .last_damage_taken = Some(0.0);
+        set_activity_last_damage(&mut app, Some(0.0));
         tick(&mut app);
         // Human-controlled: AI system should not fire
         assert!(
@@ -1027,9 +1023,7 @@ mod tests {
             crate::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
-        app.world_mut()
-            .resource_mut::<RecentCombatActivity>()
-            .last_hostile_fire_taken = Some(0.0);
+        set_activity_hostile_fire(&mut app, Some(0.0));
 
         tick(&mut app);
 
@@ -1048,9 +1042,7 @@ mod tests {
             crate::system_registry::captain_system_id(),
             ControlSource::Ai,
         );
-        app.world_mut()
-            .resource_mut::<RecentCombatActivity>()
-            .last_damage_taken = Some(0.0);
+        set_activity_last_damage(&mut app, Some(0.0));
 
         tick(&mut app);
 
@@ -1065,7 +1057,6 @@ mod tests {
     use crate::damage::ConsoleHull;
     use crate::messages::Console;
     use crate::objectives::ObjectiveManager;
-    use crate::server_app::ShipHullIntegrity;
     use crate::world::server::ObjectiveManagerRes;
 
     /// Minimal app: just publish_captain_blackboard + per-entity components.
@@ -1073,7 +1064,6 @@ mod tests {
         let mut app = App::new();
         app.add_systems(Update, publish_captain_blackboard);
         let hull = ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
-        app.insert_resource(ShipHullIntegrity(hull.clone()));
         // Spawn LocalShip entity with required components for publish_captain_blackboard.
         app.world_mut().spawn((
             crate::server_app::LocalShip,
@@ -1376,33 +1366,15 @@ mod tests {
         );
     }
 
-    /// Verifies that operate_captain_ai reads combat state from the per-entity
-    /// `ShipSystemBlackboards` viewscreen entry (issue #591 AC).
+    /// Verifies that operate_captain_ai reads combat state from the ship's
+    /// per-entity `RecentCombatActivity` component (PRD #597 PR 10).
     #[test]
     fn operate_captain_ai_activates_red_alert_when_attacker_in_blackboard() {
-        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
-        use crate::server_app::ShipSystemBlackboards;
-
-        // Build using the standard test_app but inject ShipSystemBlackboards
-        // before starting.
+        // Build using the standard test_app.
         let mut app = test_app();
 
-        // Add ShipSystemBlackboards to the Ship entity.
-        let mut vb = ViewscreenBlackboard::default();
-        vb.last_damage_taken_secs = Some(0.0); // very recent
-        vb.last_attacker_uuid = Some("attacker-uuid".into());
-        let mut entity_bbs = ShipSystemBlackboards::default();
-        entity_bbs.0.insert(
-            crate::system_registry::viewscreen_system_id(),
-            SystemBlackboard::Viewscreen(vb),
-        );
-        {
-            let mut q = app
-                .world_mut()
-                .query_filtered::<bevy::prelude::Entity, With<crate::server_app::LocalShip>>();
-            let ship_ent = q.single(app.world()).unwrap();
-            app.world_mut().entity_mut(ship_ent).insert(entity_bbs);
-        }
+        // Set last_damage_taken on the LocalShip's per-entity RecentCombatActivity.
+        set_activity_last_damage(&mut app, Some(0.0));
 
         start_game(&mut app);
         set_control_source(
@@ -1414,7 +1386,7 @@ mod tests {
         tick(&mut app);
         assert!(
             get_red_alert(&mut app),
-            "AI should activate red alert when last_damage_taken_secs is set in viewscreen blackboard"
+            "AI should activate red alert when last_damage_taken is set on the ship's RecentCombatActivity"
         );
     }
 }

@@ -412,10 +412,10 @@ pub fn yaw_to_compass_bearing(yaw_radians: f32) -> u32 {
 //
 // The in-game HEADING/HULL/CONDITION readout is now rendered by the HTML
 // viewscreen overlay. The Bevy side recomputes the serialised HUD state from
-// `ShipState` + `ShipHullIntegrity` each frame, writes it into a single
-// `ViewscreenHud` component only when it changes, and a `Changed<ViewscreenHud>`
-// system encodes + emits a `HudStateChanged` message. The wasm forwarding to
-// JS lives in `bridge::flush_hud_state`.
+// the LocalShip's `ShipPhysics` + `EntityConsoleHull` components each frame,
+// writes it into a single `ViewscreenHud` component only when it changes, and
+// a `Changed<ViewscreenHud>` system encodes + emits a `HudStateChanged`
+// message. The wasm forwarding to JS lives in `bridge::flush_hud_state`.
 
 /// Single-entity component carrying the latest serialised HUD state. Bevy
 /// change-detection drives the JS push.

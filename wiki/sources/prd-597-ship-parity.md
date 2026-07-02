@@ -8,7 +8,7 @@ updated: 2026-07-02
 
 ## Status
 
-**In progress** — PR 9 complete.
+**Complete** — all 10 PRs shipped.
 
 ## Problem
 
@@ -35,7 +35,7 @@ Eliminate every divergence in 10 sequential PRs. After all 10: a ship is a ship.
 | PR 7 | Weapons/sensors/navigation state → per-entity; unified beam system | **Done** (2026-07-02) |
 | PR 8 | Collision handling for all ships | **Done** (commit 1ce6a78) |
 | PR 9 | Region effects for all ships | **Done** (2026-07-02) |
-| PR 10 | Combat activity per-entity; delete `ShipHullIntegrity`; cleanup | Pending |
+| PR 10 | Combat activity per-entity; delete `ShipHullIntegrity`; cleanup | **Done** (2026-07-02) |
 
 ## PR 1 Detailed Scope
 
@@ -65,6 +65,60 @@ Region effects (damage zones, slow zones, blocks-impulse, comms-jam, sensor-blin
 - **Legitimately player-only**: `handle_blocks_impulse_region_enter` writes to `ShipImpulse` (still a global player-only Resource until NPC impulse is wired). Sensor-blind / comms-jam UI effects consumed by player-only Comms / Sensors panels — but the underlying `FlagKind` is set per-entity so NPC AI could opt in later.
 - New tests: `npc_ship_in_damage_zone_takes_hull_damage` and `slow_zone_slows_npc_ship` in `src/regions/server.rs` prove NPC ships take damage and get speed-clamped while the player is unaffected in a different location.
 - Test count: 1826 → 1828.
+
+## PR 10 Detailed Scope
+
+Final divergence-elimination pass: combat activity per-entity, delete `ShipHullIntegrity`, cleanup dead code.
+
+**Goal A — Combat activity per-entity**
+
+Four types converted from `Resource` to `Component` and inserted on every ship at spawn (player ship in `spawn_game_start_entities`, NPCs in `entities::spawner::spawn_entity`):
+
+- `RecentCombatActivity` (`src/ship/combat_activity.rs:5`) — `last_damage_taken`, `last_hostile_fire_taken`, `last_weapon_fired`, `prev_hull`.
+- `WeaponFiredThisTick` (`src/server_app.rs:82`) — set true when a weapon fires this tick.
+- `ShipAttackedThisTick` (`src/server_app.rs:89`) — set true when hostile fire targets this ship this tick.
+- `LastShipAttacker` (`src/console/weapons/server.rs:71`) — UUID of the most recent attacker.
+
+Readers/writers updated:
+
+- `update_combat_activity` (`src/ship/combat_activity.rs:20`) iterates `Query<..., With<Ship>>` — every ship tracks its own combat activity.
+- `operate_captain_ai` (`src/console/captain/server.rs:127`) reads the ship's own `RecentCombatActivity` component (no more blackboard-fallback or resource-fallback branching) and loops over all ship entities where the Captain system is AI-controlled.
+- `BeamStartedEvent` / `BeamEndedEvent` gained a `source_entity: Entity` field; the `on_beam_started` observer sets `WeaponFiredThisTick` on the correct firing ship and emits the correct `source_uuid`. Every trigger site (`handle_fire_phaser`, `tick_phaser_auto_fire`, `handle_npc_beam_fire`, `tick_active_beam`, `tick_npc_beams`) now passes the firing ship's entity.
+- `handle_npc_beam_fire` and `tick_npc_beams` write `ShipAttackedThisTick` + `LastShipAttacker` on the *target* ship's per-entity components (looked up via `hull_query`).
+- `handle_fire_torpedo` writes `WeaponFiredThisTick` on the LocalShip's per-entity component.
+- `aggregate_doctrine_blackboards` (`src/ai/server.rs:293`) populates NPC viewscreen blackboards with their own `red_alert`, `last_damage_taken_secs`, `last_weapon_fired_secs`, and `last_attacker_uuid` — no more hardcoded `None` / `false`.
+- `publish_viewscreen_blackboard` reads from the LocalShip's per-entity components (no `Option<Res<...>>` fallbacks).
+
+**Goal B — Delete `ShipHullIntegrity`**
+
+- `ShipHullIntegrity` struct definition deleted from `src/server_app.rs`.
+- `sync_player_hull_to_resource` and `sync_resource_hull_to_entity` bridge systems deleted.
+- All `init_resource::<ShipHullIntegrity>()` / `insert_resource(ShipHullIntegrity(...))` calls removed from production (`add_simulation_plugins`, `spawn_game_start_entities`) and from every test builder (`server_app`, `ship_plugin`, `ship/power`, `ship/sensors`, `ship/shields`, `regions/server`, `console/captain`, `console/weapons`, `console/repair`, `console/navigation`, `ship/combat_activity`).
+- `debug_overlay::update_entity_inspector` migrated from `Res<ShipHullIntegrity>` to `Query<&EntityConsoleHull, With<LocalShip>>`.
+- Comment in `entities/spawner.rs` and `server/viewscreen_border.rs` updated to reflect that `EntityConsoleHull` is the sole hull store.
+- `spawn_game_start_entities` no longer synthesises a hull resource when the config has an empty `[hull]` block — `EntityConsoleHull` is always inserted by `entity_spawner::spawn_entity` from the ship TOML.
+
+**Goal C — Delete dead code**
+
+- `EntityPhaserState` struct + `impl` in `src/ai/server.rs` deleted (0 production writers — only test scaffolding).
+- `NpcHullFraction` struct + `impl` deleted (0 production writers — only test scaffolding).
+- `detect_npc_hull_zero` system deleted (its only producer was the dead `NpcHullFraction`).
+- `AiPlugin` registration for `detect_npc_hull_zero` removed.
+- Associated tests deleted (`ai_entity_destroyed_event_emitted_when_hull_reaches_zero`, `entity_despawned_when_hull_reaches_zero`) — they were validating a code path that no production system ever reached.
+- `entity_phaser_ready_true/false` tests rewritten as `npc_beam_ready_true_when_active_beam_inactive_and_no_cooldown` and `npc_beam_ready_false_when_cooldown_active` — they now exercise the real `ActiveBeam` + `PhaserCooldown` per-entity components.
+- `server/pfx.rs` `sync_phaser_beams` `npc_beam_q` filter switched from `&EntityPhaserState` to `With<AiControllerComponent> + &ActiveBeam` — NPC beam rendering is now wired to the same `ActiveBeam` component that `tick_npc_beams` writes to (previously NPC beam rendering was dead code because nothing inserted `EntityPhaserState`).
+
+**Goal D — beam-tick unification (deferred)**
+
+`tick_active_beam` (player) and `tick_npc_beams` (NPC) both carry a `TODO (PRD #597 follow-up)` doc comment noting that they should be merged into a single `tick_beams` iterating `Query<..., With<Ship>>` once NPCs are wired to read `PhaserCombatConfigResource` + `ShipModifiers` instead of `WeaponsConsoleSection`. Left as-is for this PR to avoid concurrent-large-changes risk.
+
+Verification:
+
+- `grep 'ShipHullIntegrity' src/` → 2 comment-only historical mentions.
+- `grep 'EntityPhaserState' src/` → 0.
+- `grep 'NpcHullFraction' src/` → 0.
+- Test count: 1828 → 1826 (net -2 for deleted `NpcHullFraction` tests; combat_activity tests updated in-place; captain AI tests updated in-place).
+- No `is_npc` branches, no `fn npc_*()` helpers, no `Without<AiControllerComponent>` filters introduced.
 
 ## Key Decisions
 

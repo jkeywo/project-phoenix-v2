@@ -125,42 +125,6 @@ pub struct ShipAiMemory(pub AiMemory);
 #[derive(Component, Default)]
 pub struct AiControllerComponent;
 
-/// Per-NPC phaser state. Mirrors the player-ship `PhaserCooldown` / `ActiveBeam`
-/// but lives as an ECS component so each NPC tracks its own cooldown independently.
-#[derive(Component, Clone, Debug)]
-pub struct EntityPhaserState {
-    /// Cooldown remaining in seconds after a beam ends. Ready when 0.
-    pub cooldown_remaining: f32,
-    /// Whether a beam is currently active (firing this tick or ongoing).
-    pub beam_active: bool,
-    /// UUID of the entity currently being targeted by the beam, if active.
-    pub beam_target: Option<uuid::Uuid>,
-    /// Duration left on the current beam in seconds.
-    pub beam_remaining_secs: f32,
-    /// Sub-integer damage accumulator so that fractional per-tick damage
-    /// (e.g. 0.3/tick) is flushed in whole-integer chunks rather than being
-    /// lost to rounding when passed to shield/hull functions.
-    pub damage_accumulator: f32,
-}
-
-impl Default for EntityPhaserState {
-    fn default() -> Self {
-        EntityPhaserState {
-            cooldown_remaining: 0.0,
-            beam_active: false,
-            beam_target: None,
-            beam_remaining_secs: 0.0,
-            damage_accumulator: 0.0,
-        }
-    }
-}
-
-impl EntityPhaserState {
-    pub fn is_ready(&self) -> bool {
-        !self.beam_active && self.cooldown_remaining <= 0.0
-    }
-}
-
 /// Marker component set on NPC entities currently in a warp-out sequence.
 /// Carries the data needed to draw the warp-exit visual and to populate
 /// `EntitySnapshot::warp_out_remaining_secs` in the broadcast.
@@ -177,18 +141,6 @@ pub struct WarpOutMarker {
 /// the WorldView and emit an `AiEntityAttacked` event.
 #[derive(Component, Clone, Debug)]
 pub struct AttackerThisTick(pub uuid::Uuid);
-
-/// Component: tracks the hull integrity fraction [0.0, 1.0] of an NPC entity.
-/// Default 1.0 (full health). When it reaches ≤ 0.0 the `detect_npc_hull_zero`
-/// system emits an `AiEntityDestroyed` event and despawns the entity.
-#[derive(Component, Clone, Debug)]
-pub struct NpcHullFraction(pub f32);
-
-impl Default for NpcHullFraction {
-    fn default() -> Self {
-        NpcHullFraction(1.0)
-    }
-}
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
@@ -290,14 +242,23 @@ fn build_world_snapshot(
 /// `ShipSystemBlackboards` viewscreen entry. Covers all ships that carry a
 /// `BehaviourSection` — both NPC ships and any future player-ship variant that
 /// opts into doctrine-based AI.
+///
+/// After PRD #597 PR 10: reads red-alert / combat-activity / last-attacker
+/// from each ship's own per-entity components, so NPC ship viewscreen
+/// blackboards mirror the same fields the player ship exposes.
 fn aggregate_doctrine_blackboards(
     mut query: Query<(
         &BehaviourSection,
         &crate::entity_spawner::EntityConsoleHull,
         &mut crate::server_app::ShipSystemBlackboards,
+        Option<&crate::ship_state::ShipRedAlert>,
+        Option<&crate::ship::combat_activity::RecentCombatActivity>,
+        Option<&crate::weapons_plugin::LastShipAttacker>,
     )>,
 ) {
-    for (behaviour, hull, mut blackboards) in &mut query {
+    for (behaviour, hull, mut blackboards, red_alert_opt, activity_opt, last_attacker_opt) in
+        &mut query
+    {
         let hull_fraction = {
             let max = hull.0.total_max();
             if max > 0.0 {
@@ -306,8 +267,9 @@ fn aggregate_doctrine_blackboards(
                 1.0
             }
         };
+        let red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
         let conditions = crate::objectives::WorldConditions {
-            red_alert: false,
+            red_alert,
             hull_fraction,
         };
         let scored = crate::ai::score_doctrine_pool(
@@ -315,11 +277,11 @@ fn aggregate_doctrine_blackboards(
             &conditions,
         );
         let viewscreen_bb = crate::messages::ViewscreenBlackboard {
-            red_alert: false,
+            red_alert,
             hull_integrity_pct: hull_fraction * 100.0,
-            last_damage_taken_secs: None,
-            last_weapon_fired_secs: None,
-            last_attacker_uuid: None,
+            last_damage_taken_secs: activity_opt.and_then(|a| a.last_damage_taken),
+            last_weapon_fired_secs: activity_opt.and_then(|a| a.last_weapon_fired),
+            last_attacker_uuid: last_attacker_opt.and_then(|la| la.0.clone()),
             scored_objectives: scored,
         };
         blackboards.0.insert(
@@ -360,7 +322,6 @@ impl Plugin for AiPlugin {
                 process_attacker_this_tick
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .in_set(crate::sim_sets::AiTickLabel),
-                detect_npc_hull_zero,
                 unregister_on_despawn,
             ),
         );
@@ -428,23 +389,6 @@ fn process_attacker_this_tick(
     }
 }
 
-
-/// Emit `AiEntityDestroyed` and despawn any NPC entity whose `NpcHullFraction`
-/// has dropped to ≤ 0.0.
-fn detect_npc_hull_zero(
-    mut commands: Commands,
-    query: Query<(Entity, &EntityUuid, &NpcHullFraction), Changed<NpcHullFraction>>,
-    mut destroyed_events: MessageWriter<AiEntityDestroyed>,
-) {
-    for (entity, uuid, hull) in &query {
-        if hull.0 <= 0.0 {
-            destroyed_events.write(AiEntityDestroyed {
-                entity_uuid: uuid.0.clone(),
-            });
-            commands.entity(entity).despawn();
-        }
-    }
-}
 
 /// Unregister synthetic tokens when AI-controlled entities are despawned.
 fn unregister_on_despawn(
@@ -734,66 +678,6 @@ mod tests {
         assert_eq!(count, 1, "same attacker must not re-emit AiEntityAttacked");
     }
 
-    // ── AiEntityDestroyed event ────────────────────────────────────────────
-
-    #[test]
-    fn ai_entity_destroyed_event_emitted_when_hull_reaches_zero() {
-        let mut app = build_test_app();
-        app.world_mut()
-            .insert_resource(State::new(GamePhase::InProgress));
-
-        let entity = app
-            .world_mut()
-            .spawn((
-                Transform::from_xyz(0.0, 0.0, 0.0),
-                EntityUuid("ent-hull-001".to_string()),
-                NpcHullFraction(1.0),
-            ))
-            .id();
-        app.update();
-
-        // Reduce hull to zero
-        app.world_mut()
-            .entity_mut(entity)
-            .get_mut::<NpcHullFraction>()
-            .unwrap()
-            .0 = 0.0;
-        app.update();
-
-        let events = app.world().resource::<DestroyedBox>().0.clone();
-        assert!(
-            events.iter().any(|e| e.entity_uuid == "ent-hull-001"),
-            "AiEntityDestroyed must be emitted when hull reaches 0"
-        );
-    }
-
-    #[test]
-    fn entity_despawned_when_hull_reaches_zero() {
-        let mut app = build_test_app();
-
-        let entity = app
-            .world_mut()
-            .spawn((
-                Transform::from_xyz(0.0, 0.0, 0.0),
-                EntityUuid("ent-hull-002".to_string()),
-                NpcHullFraction(0.5),
-            ))
-            .id();
-        app.update();
-
-        app.world_mut()
-            .entity_mut(entity)
-            .get_mut::<NpcHullFraction>()
-            .unwrap()
-            .0 = 0.0;
-        app.update();
-
-        assert!(
-            app.world().get_entity(entity).is_err(),
-            "entity must be despawned when hull reaches 0"
-        );
-    }
-
     // ── Issue #314: WorldView population from components ───────────────────
 
     fn make_weapons_console_config(beam_range: f32) -> crate::entity_config::WeaponsConsoleConfig {
@@ -856,8 +740,9 @@ mod tests {
     }
 
     #[test]
-    fn entity_phaser_ready_true_when_weapons_console_present_and_no_cooldown() {
+    fn npc_beam_ready_true_when_active_beam_inactive_and_no_cooldown() {
         use crate::entity_spawner::WeaponsConsoleSection;
+        use crate::weapons_plugin::{ActiveBeam, PhaserCooldown};
 
         let mut app = build_test_app();
         app.world_mut()
@@ -870,26 +755,31 @@ mod tests {
                 EntityUuid("ent-phaser-002".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
                 WeaponsConsoleSection(make_weapons_console_config(40.0)),
-                EntityPhaserState::default(), // cooldown 0 → ready
+                ActiveBeam::default(),
+                PhaserCooldown::default(),
             ))
             .id();
 
         app.update(); // attach controller + first tick
         app.update(); // second tick runs the world_view logic
 
-        // entity_phaser_ready was used in the WorldView. We can't directly observe
-        // the WorldView, but we can verify that the entity has its components intact.
-        let ps = app.world().get::<EntityPhaserState>(entity).unwrap();
-        assert!(ps.is_ready(), "phaser must be ready when cooldown is 0");
+        let beam = app.world().get::<ActiveBeam>(entity).unwrap();
+        let cd = app.world().get::<PhaserCooldown>(entity).unwrap();
+        assert!(beam.target_uuid.is_none(), "beam must not be active");
+        assert!(!cd.is_bank_active("fore"), "cooldown must be 0");
     }
 
     #[test]
-    fn entity_phaser_ready_false_when_cooldown_active() {
+    fn npc_beam_ready_false_when_cooldown_active() {
         use crate::entity_spawner::WeaponsConsoleSection;
+        use crate::weapons_plugin::{ActiveBeam, PhaserCooldown};
 
         let mut app = build_test_app();
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
+
+        let mut cooldown = PhaserCooldown::default();
+        cooldown.start_bank("fore", 5.0);
 
         let entity = app
             .world_mut()
@@ -898,19 +788,17 @@ mod tests {
                 EntityUuid("ent-phaser-003".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
                 WeaponsConsoleSection(make_weapons_console_config(40.0)),
-                EntityPhaserState {
-                    cooldown_remaining: 5.0,
-                    ..EntityPhaserState::default()
-                },
+                ActiveBeam::default(),
+                cooldown,
             ))
             .id();
 
         app.update();
 
-        let ps = app.world().get::<EntityPhaserState>(entity).unwrap();
+        let cd = app.world().get::<PhaserCooldown>(entity).unwrap();
         assert!(
-            !ps.is_ready(),
-            "phaser must not be ready when cooldown is active"
+            cd.is_bank_active("fore"),
+            "phaser must not be ready when bank cooldown is active"
         );
     }
 

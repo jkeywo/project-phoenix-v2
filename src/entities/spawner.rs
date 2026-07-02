@@ -343,6 +343,10 @@ pub fn spawn_entity(
         // All ship entities carry the Ship marker — player and NPC alike.
         // The LocalShip marker (not set here) is the viewscreen selector only.
         entity_commands.insert(crate::server_app::Ship);
+        // Per-entity CollisionCooldown so NPC ships have their own collision
+        // cooldown timer (PRD #597 PR-8). Player ship gets one in
+        // `spawn_game_start_entities`.
+        entity_commands.insert(crate::server_app::CollisionCooldown::default());
     }
 
     // Tags â€” mirror TOML tags onto the entity for snapshot builders.

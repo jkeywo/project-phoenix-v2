@@ -128,9 +128,13 @@ pub struct GameOverReason(pub Option<String>);
 /// Prevents `handle_collisions` from applying damage every frame while the
 /// ship is in contact. After damage is applied once, a 1-second cooldown
 /// suppresses further hits until the ship clears the obstacle.
-#[derive(Resource, Default)]
-struct CollisionCooldown {
-    remaining_secs: f32,
+///
+/// Per-entity component (PRD #597 PR-8): every ship (player + NPC) carries
+/// its own `CollisionCooldown`, so an NPC in contact with an asteroid does
+/// not suppress the player's collision damage tick and vice versa.
+#[derive(Component, Default)]
+pub struct CollisionCooldown {
+    pub remaining_secs: f32,
 }
 
 /// Pending outbound messages produced by simulation systems.
@@ -257,7 +261,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     ))
     .init_resource::<WorldResource>()
     .init_resource::<WorldSetupBroadcast>()
-    .init_resource::<CollisionCooldown>()
     .init_resource::<TrackedEntities>()
     .init_resource::<SimOutbox>()
     .init_resource::<LastBroadcastEntityPositions>()
@@ -704,113 +707,118 @@ fn handle_set_sensors_target(
 fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
-    ship_query: Query<Entity, With<LocalShip>>,
     asteroid_query: Query<
         (&Transform, &AsteroidUuid, Option<&AsteroidShieldPierce>),
         With<Asteroid>,
     >,
-    mut physics_q: Query<&mut ShipPhysicsComponent, With<LocalShip>>,
+    mut ship_query: Query<
+        (
+            Entity,
+            &mut ShipPhysicsComponent,
+            &mut CollisionCooldown,
+            &mut crate::entity_spawner::EntityConsoleHull,
+            Option<&mut ShipShields>,
+            Option<&ShipModifiers>,
+            Option<&EntityUuid>,
+            Has<LocalShip>,
+        ),
+        With<Ship>,
+    >,
     mut impulse: ResMut<ShipImpulse>,
-    mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
-    mut cooldown: ResMut<CollisionCooldown>,
-    modifiers_q: Query<&ShipModifiers, With<LocalShip>>,
     modifiers_res: Option<Res<ShipModifiers>>,
-    mut shields_q: Query<&mut ShipShields, With<LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut game_over_reason: ResMut<GameOverReason>,
     mut damage_log: ResMut<DamageLog>,
+    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    mut world: ResMut<WorldResource>,
+    mut commands: Commands,
 ) {
     let dt = time.delta_secs();
-    cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
 
     let Ok(ctx) = context.single() else { return };
-    let Ok(ship_entity) = ship_query.single() else {
-        return;
-    };
-    let Ok(mut shields) = shields_q.single_mut() else {
-        return;
-    };
-    let Ok(mut hull_comp) = hull_q.single_mut() else {
-        return;
-    };
-    let Ok(mut physics) = physics_q.single_mut() else {
-        return;
-    };
-    // Per-entity ShipModifiers component takes priority; fall back to Resource.
-    let default_modifiers;
-    let modifiers: &ShipModifiers = match modifiers_q.single() {
-        Ok(m) => m,
-        Err(_) => match modifiers_res.as_deref() {
+
+    // Iterate every ship (player + NPCs) uniformly. Per-entity CollisionCooldown,
+    // ShipModifiers, ShipShields, EntityConsoleHull. Player-only side effects
+    // (impulse cancel, damage messages, GameOver, debug log) are gated on
+    // `is_local` — that's the LocalShip semantic distinction, not an
+    // NPC-vs-player special case.
+    for (
+        ship_entity,
+        mut physics,
+        mut cooldown,
+        mut hull_comp,
+        shields_opt,
+        modifiers_comp,
+        ship_uuid,
+        is_local,
+    ) in ship_query.iter_mut()
+    {
+        cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
+
+        // Per-entity ShipModifiers component takes priority; fall back to
+        // the global Resource for tests that only insert the Resource form.
+        let default_modifiers;
+        let modifiers: &ShipModifiers = match modifiers_comp {
             Some(m) => m,
-            None => {
-                default_modifiers = ShipModifiers::new();
-                &default_modifiers
+            None => match modifiers_res.as_deref() {
+                Some(m) => m,
+                None => {
+                    default_modifiers = ShipModifiers::new();
+                    &default_modifiers
+                }
+            },
+        };
+
+        let contact = ctx.contact_pairs_with(ship_entity).next().and_then(|pair| {
+            if pair.collider1() == Some(ship_entity) {
+                pair.collider2()
+            } else {
+                pair.collider1()
             }
-        },
-    };
+        });
 
-    let contact = ctx.contact_pairs_with(ship_entity).next().and_then(|pair| {
-        if pair.collider1() == Some(ship_entity) {
-            pair.collider2()
-        } else {
-            pair.collider1()
-        }
-    });
-
-    if contact.is_some() {
+        let Some(attacker_entity) = contact else {
+            continue;
+        };
         if cooldown.remaining_secs > 0.0 {
-            return;
+            continue;
         }
-        impulse.0.cancel_charge();
+
+        // Player-only: impulse charge cancel (ShipImpulse is a player-only
+        // Resource; NPCs run their impulse elsewhere in later PRs).
+        if is_local {
+            impulse.0.cancel_charge();
+        }
+
         let speed_at_impact = physics.forward_speed;
         physics.forward_speed = -0.5 * speed_at_impact;
-        let damage = collision_damage(speed_at_impact) as f32
-            * modifiers.get(&ModifierSlot::HullDamageTaken);
+        let damage =
+            collision_damage(speed_at_impact) as f32 * modifiers.get(&ModifierSlot::HullDamageTaken);
 
-        let bearing = contact
-            .and_then(|attacker_entity| {
-                asteroid_query.get(attacker_entity).ok().map(|(t, _, _)| {
-                    attacker_bearing_relative(
-                        t.translation.x,
-                        t.translation.z,
-                        physics.x,
-                        physics.z,
-                        physics.yaw,
-                    )
-                })
+        let asteroid_info = asteroid_query.get(attacker_entity).ok();
+        let bearing = asteroid_info
+            .map(|(t, _, _)| {
+                attacker_bearing_relative(
+                    t.translation.x,
+                    t.translation.z,
+                    physics.x,
+                    physics.z,
+                    physics.yaw,
+                )
             })
             .unwrap_or(0.0);
 
-        let source_label = contact
-            .and_then(|attacker_entity| {
-                asteroid_query
-                    .get(attacker_entity)
-                    .ok()
-                    .map(|(_, uuid, _)| format!("asteroid:{}", uuid.0))
-            })
+        let source_label = asteroid_info
+            .map(|(_, uuid, _)| format!("asteroid:{}", uuid.0))
             .unwrap_or_else(|| "collision".to_string());
 
         // Resolve the colliding asteroid's `shield_pierce` (missing → 0.0,
         // matching pre-#414 behaviour where all collision damage was first
         // absorbed by shields).
-        let shield_pierce = contact
-            .and_then(|attacker_entity| {
-                asteroid_query
-                    .get(attacker_entity)
-                    .ok()
-                    .and_then(|(_, _, sp)| sp.map(|c| c.0))
-            })
+        let shield_pierce = asteroid_info
+            .and_then(|(_, _, sp)| sp.map(|c| c.0))
             .unwrap_or(0.0);
-
-        let arc_idx = shields.0.facing_index_for_bearing(bearing);
-        let arc_label = shields.0.facings.get(arc_idx).map(|f| f.label.clone());
-
-        damage_log.push(DamageLogEntry {
-            source: source_label,
-            shield_arc: arc_label,
-            amount: damage,
-        });
 
         // Split impact damage by the asteroid's `shield_pierce`: the
         // pierced fraction goes straight to hull; the absorbed fraction
@@ -819,15 +827,48 @@ fn handle_collisions(
         let (pierced, absorbed) = crate::damage::split_damage_for_pierce(damage, shield_pierce);
         let mut total_hull = pierced;
         let mut shield_amount = 0.0;
-        if absorbed > 0.0 {
-            let leak = apply_damage_with_shields(absorbed.round() as i32, bearing, &mut shields.0);
-            shield_amount = (absorbed - leak as f32).max(0.0);
-            total_hull += leak as f32;
+
+        // Shields are optional per-ship. Absorb through them when present;
+        // otherwise all absorbed damage leaks straight to hull.
+        let arc_label = if let Some(mut shields) = shields_opt {
+            let arc_idx = shields.0.facing_index_for_bearing(bearing);
+            let label = shields.0.facings.get(arc_idx).map(|f| f.label.clone());
+            if absorbed > 0.0 {
+                let leak =
+                    apply_damage_with_shields(absorbed.round() as i32, bearing, &mut shields.0);
+                shield_amount = (absorbed - leak as f32).max(0.0);
+                total_hull += leak as f32;
+            }
+            label
+        } else {
+            // No shields → the "absorbed" portion also lands on hull.
+            total_hull += absorbed;
+            None
+        };
+
+        // Debug damage log: player-only (single-player debug overlay).
+        if is_local {
+            damage_log.push(DamageLogEntry {
+                source: source_label,
+                shield_arc: arc_label,
+                amount: damage,
+            });
         }
 
-        if total_hull > 0.0 {
+        let mut ship_destroyed = false;
+        let hull_applied = if total_hull > 0.0 {
             let rng = &mut rand::rngs::SmallRng::from_os_rng();
-            let (hull_applied, ship_destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
+            let (applied, destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
+            ship_destroyed = destroyed;
+            applied
+        } else {
+            0.0
+        };
+
+        // DamageTaken / ShipDestroyed / GameOver are player-facing UI events.
+        // Only emit for the LocalShip. NPCs use the AiEntityDestroyed +
+        // EntityDespawned path (same as beam-kill).
+        if is_local {
             outbox.0.push((
                 Target::All,
                 ServerMessage::DamageTaken {
@@ -842,14 +883,22 @@ fn handle_collisions(
                 }
                 next_state.set(GamePhase::GameOver);
             }
-        } else {
-            outbox.0.push((
-                Target::All,
-                ServerMessage::DamageTaken {
-                    hull: 0.0,
-                    shield: shield_amount,
-                },
-            ));
+        } else if ship_destroyed {
+            // NPC destruction: mirror the beam-kill path so downstream world
+            // triggers and clients update consistently.
+            if let Some(uuid) = ship_uuid {
+                world.0.entities.retain(|e| e.uuid != uuid.0);
+                destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+                    entity_uuid: uuid.0.clone(),
+                });
+                outbox.0.push((
+                    Target::All,
+                    ServerMessage::EntityDespawned {
+                        uuid: uuid.0.clone(),
+                    },
+                ));
+            }
+            commands.entity(ship_entity).try_despawn();
         }
         cooldown.remaining_secs = 1.0;
     }
@@ -1782,6 +1831,9 @@ fn spawn_game_start_entities(
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
                 .insert(crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()))
                 .insert(crate::ship_plugin::LastHelmInput::default())
+                // Per-entity CollisionCooldown so player and NPC ships each
+                // have their own cooldown timer (PRD #597 PR-8).
+                .insert(CollisionCooldown::default())
                 // ShipModifiers as per-entity component (PR 6 — PRD #597). The
                 // legacy Resource form is still initialised by ModifierCoordinationPlugin
                 // and dual-written to by observers/translators until PR 7 completes.
@@ -5055,6 +5107,141 @@ mod tests {
         assert!(
             near(total, 50.0),
             "hull should be 100 - 50 = 50 with halved collision damage"
+        );
+    }
+
+    /// PRD #597 PR-8: NPC ships share the collision code path with the player,
+    /// so an NPC ship overlapping an asteroid must take hull damage on its own
+    /// `EntityConsoleHull` component just like the player ship does.
+    ///
+    /// This spins up a minimal Rapier world (no plugin scaffolding) with just
+    /// `handle_collisions`, spawns an NPC ship (`Ship` marker, no `LocalShip`)
+    /// overlapping an asteroid, ticks once, and asserts the NPC's hull dropped.
+    /// Because the ship is not `LocalShip`, none of the player-only side
+    /// effects (`DamageTaken`, `ShipDestroyed`, `GameOver`) may fire.
+    #[test]
+    fn npc_ship_takes_hull_damage_from_asteroid_collision() {
+        use crate::damage::ConsoleHull;
+        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+        use crate::modifiers::ShipModifiers;
+        use bevy_rapier3d::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(50),
+            ))
+            .add_plugins(bevy::transform::TransformPlugin)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<bevy::mesh::Mesh>()
+            .init_resource::<bevy::scene::SceneSpawner>()
+            .add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_plugins(RapierPhysicsPlugin::<()>::default())
+            .init_resource::<SimOutbox>()
+            .init_resource::<WorldResource>()
+            .insert_resource(GameOverReason(None))
+            .insert_resource(ShipImpulse(ImpulseState::new()))
+            .init_resource::<DamageLog>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_systems(Update, handle_collisions);
+
+        // Move the game into InProgress so RapierPhysicsPlugin's default
+        // run condition (if any) doesn't gate the step. Not strictly required
+        // for handle_collisions itself, but keeps the test's app state
+        // consistent with production semantics.
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+
+        // Spawn an NPC ship at the origin with a ball collider, some hull,
+        // some forward speed (so collision_damage yields non-zero), and no
+        // `LocalShip` marker. `ShipShields` is omitted deliberately — NPCs
+        // in production may or may not have shields; when absent, all damage
+        // routes to hull.
+        let npc_uuid = "npc-test-uuid".to_string();
+        let npc_hull_max = 100.0f32;
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                EntityUuid(npc_uuid.clone()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+                ShipPhysicsComponent {
+                    x: 0.0,
+                    z: 0.0,
+                    yaw: 0.0,
+                    forward_speed: 100.0,
+                    roll: 0.0,
+                },
+                CollisionCooldown::default(),
+                EntityConsoleHull(ConsoleHull::from_config(&[(
+                    Console::CaptainChair,
+                    npc_hull_max,
+                )])),
+                ShipModifiers::new(),
+                Collider::ball(5.0),
+                RigidBody::KinematicPositionBased,
+                ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
+            ))
+            .id();
+
+        // Spawn an asteroid overlapping the NPC at the origin.
+        app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("ast-test-uuid".to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            Collider::ball(5.0),
+            RigidBody::Fixed,
+            ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+
+        // Several updates: first ticks let Rapier build the broad-phase and
+        // detect the overlapping pair; subsequent ticks run `handle_collisions`
+        // with the contact visible on `ReadRapierContext`.
+        for _ in 0..3 {
+            app.update();
+        }
+
+        let hull = app
+            .world()
+            .get::<EntityConsoleHull>(npc)
+            .expect("NPC must retain EntityConsoleHull");
+        assert!(
+            hull.0.total_current() < npc_hull_max,
+            "NPC hull must decrease from asteroid collision (current={}, max={})",
+            hull.0.total_current(),
+            npc_hull_max
+        );
+
+        // Player-only messages must NOT be emitted for an NPC-vs-asteroid
+        // collision — those are gated on `Has<LocalShip>`.
+        let outbox = &app.world().resource::<SimOutbox>().0;
+        assert!(
+            !outbox
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::DamageTaken { .. })),
+            "DamageTaken is a player-only UI message; must not fire for NPCs"
+        );
+        assert!(
+            !outbox
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::ShipDestroyed)),
+            "ShipDestroyed is a player-only UI message; must not fire for NPCs"
+        );
+
+        // The NPC's speed must be halved and reversed (uniform collision
+        // physics — same code path as the player ship).
+        let physics = app.world().get::<ShipPhysicsComponent>(npc).unwrap();
+        assert!(
+            physics.forward_speed < 0.0,
+            "NPC forward_speed should reverse after collision, got {}",
+            physics.forward_speed
         );
     }
 

@@ -378,9 +378,38 @@ pub fn spawn_entity(
         entity_commands.insert(FactionComponent(faction_uuid));
     }
 
-    // WeaponsConsole â€” attach a WeaponsConsoleSection so the AI can read weapons config from ECS.
+    // WeaponsConsole — attach a WeaponsConsoleSection so the AI can read weapons config from ECS.
+    // Also insert PhaserCombatConfigResource and PhaserRenderConfig as per-entity Components
+    // (PR 5/gap-review — PRD #597) so NPC ships share the same per-bank arc/range/damage
+    // model as the player ship. tick_beams reads these components uniformly.
     if let Some(wc) = &config.weapons_console {
         entity_commands.insert(WeaponsConsoleSection(wc.clone()));
+        // PhaserCombatConfig is built directly from the [[weapons_console.phaser_banks]] list.
+        let combat_config = crate::entity_config::PhaserCombatConfig::from_weapons_console(wc);
+        entity_commands.insert(crate::weapons_plugin::PhaserCombatConfigResource(combat_config));
+        // PhaserRenderConfig: take the first bank's beam_color if any, else default.
+        let render_config = if let Some(first_bank) = wc.phaser_banks.first() {
+            crate::weapons_plugin::PhaserRenderConfig {
+                beam_color: if first_bank.beam_color.len() == 4 {
+                    [
+                        first_bank.beam_color[0],
+                        first_bank.beam_color[1],
+                        first_bank.beam_color[2],
+                        first_bank.beam_color[3],
+                    ]
+                } else {
+                    crate::beam_render::DEFAULT_BEAM_COLOR
+                },
+                beam_range: if first_bank.beam_range > 0.0 {
+                    first_bank.beam_range
+                } else {
+                    40.0
+                },
+            }
+        } else {
+            crate::weapons_plugin::PhaserRenderConfig::default()
+        };
+        entity_commands.insert(render_config);
     }
 
     // HelmConsole - attach a HelmConsoleSection so the AI tick can read movement params.

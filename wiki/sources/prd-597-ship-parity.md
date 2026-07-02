@@ -108,9 +108,44 @@ Readers/writers updated:
 - `entity_phaser_ready_true/false` tests rewritten as `npc_beam_ready_true_when_active_beam_inactive_and_no_cooldown` and `npc_beam_ready_false_when_cooldown_active` — they now exercise the real `ActiveBeam` + `PhaserCooldown` per-entity components.
 - `server/pfx.rs` `sync_phaser_beams` `npc_beam_q` filter switched from `&EntityPhaserState` to `With<AiControllerComponent> + &ActiveBeam` — NPC beam rendering is now wired to the same `ActiveBeam` component that `tick_npc_beams` writes to (previously NPC beam rendering was dead code because nothing inserted `EntityPhaserState`).
 
-**Goal D — beam-tick unification (deferred)**
+**Goal D — beam-tick unification (completed 2026-07-02)**
 
-`tick_active_beam` (player) and `tick_npc_beams` (NPC) both carry a `TODO (PRD #597 follow-up)` doc comment noting that they should be merged into a single `tick_beams` iterating `Query<..., With<Ship>>` once NPCs are wired to read `PhaserCombatConfigResource` + `ShipModifiers` instead of `WeaponsConsoleSection`. Left as-is for this PR to avoid concurrent-large-changes risk.
+The former `tick_active_beam` (player) and `tick_npc_beams` (NPC) have been
+merged into a single `tick_beams` system (`src/console/weapons/server.rs:870`)
+that iterates every ship via `Query<..., With<Ship>>`. Both former systems
+have been deleted; `WeaponsPlugin::build` registers only `tick_beams`
+(in `SimSet::Damage`).
+
+Design highlights:
+
+- Three-phase pattern to satisfy Bevy borrow-checker rules on nested queries:
+  (1) snapshot per-shooter state (config, target position, damage integer,
+  cooldown) and tick per-bank cooldowns; (2) apply damage to targets via
+  `hull_q`, computing per-target destruction flags; (3) re-borrow `ship_q`
+  to end beams (either due to target destruction or time expiry) and clear
+  `WeaponsTarget` on the LocalShip.
+- Every shooter reads its own `PhaserCombatConfigResource` component and its
+  own `ShipModifiers` (with global-Resource fallback for legacy test paths).
+- LocalShip target damage emits `DamageTaken` / `ShipDestroyed` / `GameOver`;
+  non-LocalShip target damage despawns the target and emits `EntityDespawned`
+  + `AiEntityDestroyed` (or `AsteroidDestroyed` + VFX for asteroids).
+- Attacker tracking is uniform: every non-asteroid target has
+  `ShipAttackedThisTick.0 = true`, `LastShipAttacker.0 = Some(shooter_uuid)`,
+  and a fresh `AttackerThisTick` component inserted every tick the beam is
+  live — so the target's AI `on_attacked` transition fires reliably.
+- Also fixed as part of this PR: `handle_fire_torpedo` and
+  `operate_tactical_ai` `player_ship_q` filters changed from `With<Ship>` to
+  `With<LocalShip>` (Gap 2 — silently misidentified source UUIDs when
+  multiple ships existed).
+
+Verification:
+
+- `grep 'fn tick_active_beam' src/` → 0.
+- `grep 'fn tick_npc_beams' src/` → 0.
+- `grep 'fn tick_beams' src/` → 1.
+- No `is_npc` branches, no `fn npc_*()` helpers introduced.
+- No new `Without<AiControllerComponent>` filters.
+- All 1826 tests pass.
 
 Verification:
 
@@ -127,7 +162,7 @@ Verification:
 - `ShipShields` wraps the existing `ShieldSystem` (already supports configurable `num_facings`). `EntityShield` deleted in PR 2.
 - Fog-of-war (NPC AI sensor range filtering) is out of scope for this PRD.
 - `ShipImpulse` remains a player-only global Resource; NPCs do not have an impulse drive mechanic today.
-- Beam-tick unification (`tick_active_beam` + `tick_npc_beams` → single `tick_beams`) is deferred; two TODOs in `src/console/weapons/server.rs` mark the follow-up.
+- Beam-tick unification (`tick_active_beam` + `tick_npc_beams` → single `tick_beams`) completed 2026-07-02 as a follow-up to PR 10; the two former systems are deleted and every ship shares `tick_beams` in `SimSet::Damage`.
 
 ## Cross-references
 

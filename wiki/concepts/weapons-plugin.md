@@ -21,7 +21,7 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 | `handle_fire_torpedo` | Processes `FireTorpedo { tube, target_uuid }`; launches if tube is loaded |
 | `handle_load_tube` | Processes `LoadTube { tube }`; manually starts loading a tube |
 | `handle_unload_tube` | Processes `UnloadTube { tube }`; manually unloads or cancels loading |
-| `tick_active_beam` | Advances the active phaser beam: damage accumulation, sever-on-range, natural end, cooldown start |
+| `tick_beams` | Advances every active phaser beam (player + NPC): damage accumulation, sever-on-range, natural end, cooldown start |
 | `tick_torpedo_system` | Advances all in-flight torpedoes; fires `TorpedoDestroyed` for expired ones |
 
 ### Resources
@@ -83,9 +83,9 @@ Damage routing — three paths in `src/console/weapons/server.rs` route NPC-boun
 
 | Path | System | Pierce source |
 |---|---|---|
-| Player phaser → NPC | `tick_active_beam` | Active bank's `shield_pierce` (Option<f32>) |
+| Player phaser → NPC | `tick_beams` | Active bank's `shield_pierce` (Option<f32>) |
 | Player torpedo → NPC | `tick_torpedo_system` | `TorpedoDetonation.shield_pierce` (snapshot at launch) |
-| NPC phaser → NPC/station | `handle_fire_phaser_npc` (else-branch) | NPC's bank `shield_pierce` |
+| NPC phaser → NPC/station | `tick_beams` | Active bank's `shield_pierce` (per-entity `PhaserCombatConfigResource`) |
 
 Each path applies `split_damage_for_pierce(damage, pierce)`: the `pierced` portion lands on hull directly, `absorbed` hits the shield, and any overflow leaks back to hull. Damage with no shield component falls through to the legacy hull-direct path unchanged (zero regression for asteroids and shieldless stations).
 
@@ -162,7 +162,7 @@ inserted as `PhaserCombatConfigResource` during
 seeds the resource with `PhaserCombatConfig::default()` so test apps
 that never load a ship TOML still get a working phaser system.
 
-`handle_fire_phaser`, `tick_active_beam`, and the
+`handle_fire_phaser`, `tick_beams`, and the
 `weapons_update_broadcaster` all read this resource instead of the
 legacy module-private `_LEGACY_BEAM_DURATION_SECS` /
 `_LEGACY_BEAM_COOLDOWN_SECS` constants. The public

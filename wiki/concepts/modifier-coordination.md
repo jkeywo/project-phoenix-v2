@@ -199,7 +199,7 @@ Current consumers of `Res<ShipModifiers>`:
 | `src/simulation.rs:825` — `tick_collisions` | `ModifierSlot::HullDamageTaken` to scale collision damage |
 | `src/simulation.rs:936` — `handle_fire_phaser` | `ModifierSlot::RadarRange` to scale effective phaser range |
 | `src/simulation.rs:1298` — `tick_repair` | `ModifierSlot::RepairRate` to scale repair speed |
-| `src/simulation.rs:1328` — `tick_active_beam` | `ModifierSlot::PhaserDamage` to scale beam DPS |
+| `src/console/weapons/server.rs` — `tick_beams` | `ModifierSlot::PhaserDamage` to scale beam DPS (per shooter) |
 | `src/regions/server.rs:194` — `handle_slow_zone_speed_clamp` | `ModifierSlot::MaxSpeed` to clamp ship speed on slow-zone entry |
 
 ## How `RegionEffect { uuid }` source identity prevents stale accumulation

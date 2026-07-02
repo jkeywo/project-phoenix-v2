@@ -689,12 +689,14 @@ const NEBULA_FOG_LERP_RATE: f32 = 0.7;
 /// Number of small mesh spheres per nebula used to render the exterior cloud.
 const NEBULA_CLOUD_PARTICLE_COUNT: usize = 60;
 
-/// Each frame, checks whether the ship is inside a region with the `NebulaFog`
-/// effect and smoothly transitions `DistanceFog` on the `GameCamera`.
+/// Each frame, checks whether the local (viewscreen) ship is inside a region
+/// with the `NebulaFog` effect and smoothly transitions `DistanceFog` on the
+/// `GameCamera`. Nebula fog is a rendering effect on the player's viewscreen
+/// camera, so it follows the `LocalShip` only.
 fn nebula_fog_system(
     membership: Res<RegionMembership>,
     region_q: Query<&RegionEffectsSection>,
-    ship_q: Query<Entity, With<crate::server_app::Ship>>,
+    ship_q: Query<Entity, With<crate::server_app::LocalShip>>,
     cam_q: Query<Entity, With<GameCamera>>,
     mut state: ResMut<NebulaFogState>,
     mut commands: Commands,

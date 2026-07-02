@@ -274,18 +274,27 @@ impl Plugin for WorldPlugin {
 /// observer event once per boundary crossing. Staying inside on the next
 /// tick produces no further `RegionEntered` events.
 ///
-/// NPC entities are never considered by `update_region_membership`
-/// (it queries `With<Ship>` and only computes membership for the player
-/// ship), so this observer is only invoked for player ship crossings.
+/// After PRD #597 PR 9, `update_region_membership` tracks region membership
+/// for every ship (player + NPCs). World-scenario triggers, however, remain
+/// player-driven: only crossings by the `LocalShip` are bridged into
+/// `pending_world_events`.
 fn handle_region_entered_event(
     trigger: On<crate::regions::server::RegionEntered>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     runtime: Option<ResMut<WorldContentRuntime>>,
+    local_ship_q: Query<(), With<crate::simulation::LocalShip>>,
 ) {
     let (Some(membership), Some(mut runtime)) = (membership, runtime) else {
         return;
     };
     let ev = trigger.event();
+    // World triggers fire only on player-ship boundary crossings; NPC ships
+    // (also tracked in RegionMembership after PRD #597 PR 9) are silently
+    // dropped here — they still receive region effects via the other
+    // observers/systems.
+    if local_ship_q.get(ev.subject).is_err() {
+        return;
+    }
     let Some(uuid) = membership.region_uuids.get(&ev.region_entity).cloned() else {
         return;
     };
@@ -296,16 +305,21 @@ fn handle_region_entered_event(
 
 /// Observer: mirror of `handle_region_entered_event` for region exits.
 /// Fires both on boundary-crossing exits and on implicit exits when the
-/// region entity is despawned while the ship is inside.
+/// region entity is despawned while the ship is inside. Filters on
+/// `LocalShip` for the same reason: world-scenario triggers are player-driven.
 fn handle_region_exited_event(
     trigger: On<crate::regions::server::RegionExited>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     runtime: Option<ResMut<WorldContentRuntime>>,
+    local_ship_q: Query<(), With<crate::simulation::LocalShip>>,
 ) {
     let (Some(membership), Some(mut runtime)) = (membership, runtime) else {
         return;
     };
     let ev = trigger.event();
+    if local_ship_q.get(ev.subject).is_err() {
+        return;
+    }
     let Some(uuid) = membership.region_uuids.get(&ev.region_entity).cloned() else {
         return;
     };
@@ -7627,9 +7641,15 @@ condition = "on_world_loaded"
 
     #[test]
     fn npc_entering_region_does_not_fire_trigger() {
-        // The region membership system only tracks the player ship entity
-        // (queried via `With<LocalShip>`). Spawning an NPC inside a region must
-        // not cause an `OnEnteredRegion` trigger to fire.
+        // Region membership is tracked per-ship (PRD #597 PR 9), so an NPC ship
+        // does now enter `RegionMembership.inside` when it crosses a region
+        // boundary. World-scenario triggers, however, remain player-driven:
+        // `handle_region_entered_event` filters on `LocalShip`, so an NPC
+        // crossing does not fire an `OnEnteredRegion` trigger.
+        //
+        // This test uses a bare entity (no `Ship` marker) to keep the setup
+        // narrow. See `npc_ship_in_damage_zone_takes_hull_damage` in
+        // `src/regions/server.rs` for the equivalent test with a full NPC ship.
         let mut app = region_trigger_test_app();
         let uuid = "uuid-quarantine";
         // Region at (100, 0); player ship stays at origin (outside).

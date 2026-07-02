@@ -8,7 +8,7 @@ updated: 2026-07-02
 
 ## Status
 
-**In progress** — PR 7 complete.
+**In progress** — PR 9 complete.
 
 ## Problem
 
@@ -33,8 +33,8 @@ Eliminate every divergence in 10 sequential PRs. After all 10: a ship is a ship.
 | PR 5 | Weapons/torpedo/phaser config → per-entity | **Done** (2026-07-02) |
 | PR 6 | Power/modifier/repair state → per-entity only | **Done** (2026-07-02) |
 | PR 7 | Weapons/sensors/navigation state → per-entity; unified beam system | **Done** (2026-07-02) |
-| PR 8 | Collision handling for all ships | Pending |
-| PR 9 | Region effects for all ships | Pending |
+| PR 8 | Collision handling for all ships | **Done** (commit 1ce6a78) |
+| PR 9 | Region effects for all ships | **Done** (2026-07-02) |
 | PR 10 | Combat activity per-entity; delete `ShipHullIntegrity`; cleanup | Pending |
 
 ## PR 1 Detailed Scope
@@ -51,6 +51,20 @@ Fix all bugs introduced when NPCs gained the `Ship` marker (PRD #581) but code w
 - `handle_coordination_enqueue` / `process_coordination_lag` → `With<LocalShip>`
 - `handle_station_rating_change` → `With<LocalShip>`
 - `process_lobby` / `handle_disconnect` ship query → `With<LocalShip>` + `single_mut()`
+
+## PR 9 Detailed Scope
+
+Region effects (damage zones, slow zones, blocks-impulse, comms-jam, sensor-blind, radar dampening) apply to every ship, not just the LocalShip. Region membership tracked per-entity in `RegionMembership.inside` (HashMap keyed by ship Entity).
+
+- `update_region_membership` (`src/regions/server.rs:73`) iterates `With<Ship>` and computes membership per ship; stale-ship cleanup emits implicit `RegionExited` when a ship despawns while inside a region.
+- `apply_damage_zone_damage` (`src/regions/server.rs:162`) iterates all ships in the damage zone, applying damage to each ship's own `EntityConsoleHull` + optional `ShipShields`. Player-only side effects (`DamageTaken`, `ShipDestroyed`, `GameOver`, debug log) are gated on `Has<LocalShip>`. NPC destruction mirrors the beam-kill path: `AiEntityDestroyed` + `EntityDespawned` + `WorldResource` cleanup + entity despawn.
+- `handle_slow_zone_speed_clamp` observer (already fixed in PR 1) uses `trigger.subject` — now correctly clamps any ship (player or NPC) with its own `ShipModifiers` component driving the effective max.
+- Modifier-side effects (`RadarDampening`, `SlowZone`, `CommsJam`, `SensorBlind`) go through the `on_region_entered` / `on_region_exited` observers in `src/modifiers/coordination.rs`, which already use `trigger.subject` and write to the subject entity's `ShipModifiers` component.
+- `handle_region_entered_event` / `handle_region_exited_event` (`src/world/server.rs:280`, `:310`) filter on `LocalShip` so world-scenario triggers remain player-driven (NPC crossings do not fire `OnEnteredRegion` triggers).
+- `nebula_fog_system` (`src/server/renderer.rs:697`) filter switched from `With<Ship>` to `With<LocalShip>` — nebula fog is a rendering effect on the viewscreen camera.
+- **Legitimately player-only**: `handle_blocks_impulse_region_enter` writes to `ShipImpulse` (still a global player-only Resource until NPC impulse is wired). Sensor-blind / comms-jam UI effects consumed by player-only Comms / Sensors panels — but the underlying `FlagKind` is set per-entity so NPC AI could opt in later.
+- New tests: `npc_ship_in_damage_zone_takes_hull_damage` and `slow_zone_slows_npc_ship` in `src/regions/server.rs` prove NPC ships take damage and get speed-clamped while the player is unaffected in a different location.
+- Test count: 1826 → 1828.
 
 ## Key Decisions
 

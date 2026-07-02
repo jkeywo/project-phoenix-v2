@@ -8,7 +8,7 @@ use crate::lobby::Target;
 use crate::messages::{GamePhase, ModifierSlot, ServerMessage};
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
-use crate::server_app::SimOutbox;
+use crate::server_app::{Ship, SimOutbox};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::GameOverReason;
 use crate::simulation::{LocalShip, ShipImpulse};
@@ -65,102 +65,147 @@ pub(crate) fn update_region_membership(
     mut membership: ResMut<RegionMembership>,
     region_query: Query<(Entity, &Transform, &RegionShapeSection)>,
     uuid_query: Query<&EntityUuid>,
-    physics_q: Query<&ShipPhysics, With<LocalShip>>,
-    ship_query: Query<Entity, With<LocalShip>>,
+    ship_query: Query<(Entity, &ShipPhysics), With<Ship>>,
 ) {
-    let Ok(ship_entity) = ship_query.single() else {
-        return;
-    };
-    let physics = physics_q.single().ok().copied().unwrap_or_default();
-
-    let ship_pos = glam::Vec3::new(physics.x, 0.0, physics.z);
-
-    // Cache UUIDs for all current region entities (survives despawn)
+    // Cache UUIDs for all current region entities (survives despawn).
     for (entity, _, _) in region_query.iter() {
         if let Ok(uuid) = uuid_query.get(entity) {
             membership.region_uuids.insert(entity, uuid.0.clone());
         }
     }
 
-    // Determine current region occupancy
-    let current_inside: HashSet<Entity> = region_query
+    // Collect region positions/shapes into a Vec so we can reuse them across
+    // every ship without re-iterating the query per ship.
+    let regions: Vec<(Entity, Vec3)> = region_query
         .iter()
-        .filter(|(_, transform, shape)| {
-            let region_origin = transform.translation;
-            shape.0.contains(ship_pos, region_origin)
-        })
-        .map(|(entity, _, _)| entity)
+        .map(|(entity, transform, _)| (entity, transform.translation))
+        .collect();
+    let region_shapes: HashMap<Entity, &RegionShapeSection> = region_query
+        .iter()
+        .map(|(entity, _, shape)| (entity, shape))
         .collect();
 
-    // Get previous frame's inside set for this ship
-    let prev_inside = membership
+    // Track which ship entities are still present so stale membership entries
+    // for despawned ships can be cleaned up at the end.
+    let mut seen_ships: HashSet<Entity> = HashSet::new();
+
+    for (ship_entity, physics) in ship_query.iter() {
+        seen_ships.insert(ship_entity);
+        let ship_pos = glam::Vec3::new(physics.x, 0.0, physics.z);
+
+        // Determine current region occupancy for this ship.
+        let current_inside: HashSet<Entity> = regions
+            .iter()
+            .filter(|(entity, origin)| {
+                region_shapes
+                    .get(entity)
+                    .is_some_and(|shape| shape.0.contains(ship_pos, *origin))
+            })
+            .map(|(entity, _)| *entity)
+            .collect();
+
+        let prev_inside = membership
+            .inside
+            .get(&ship_entity)
+            .cloned()
+            .unwrap_or_default();
+
+        for entity in prev_inside.difference(&current_inside) {
+            commands.trigger(RegionExited {
+                subject: ship_entity,
+                region_entity: *entity,
+            });
+        }
+
+        for entity in current_inside.difference(&prev_inside) {
+            commands.trigger(RegionEntered {
+                subject: ship_entity,
+                region_entity: *entity,
+            });
+        }
+
+        membership.inside.insert(ship_entity, current_inside);
+    }
+
+    // Clean up membership entries for ships that no longer exist. Emit
+    // implicit exit events so downstream systems (modifier caches, etc.)
+    // can clear per-region state tied to the vanished ship.
+    let stale_ships: Vec<Entity> = membership
         .inside
-        .get(&ship_entity)
-        .cloned()
-        .unwrap_or_default();
-
-    // Detect exits: were in prev_inside but not in current_inside
-    // (also catches despawned regions Ã¢â‚¬â€ despawned entities don't appear in region_query)
-    for entity in prev_inside.difference(&current_inside) {
-        commands.trigger(RegionExited {
-            subject: ship_entity,
-            region_entity: *entity,
-        });
+        .keys()
+        .copied()
+        .filter(|e| !seen_ships.contains(e))
+        .collect();
+    for ship_entity in stale_ships {
+        if let Some(prev_inside) = membership.inside.remove(&ship_entity) {
+            for region_entity in prev_inside {
+                commands.trigger(RegionExited {
+                    subject: ship_entity,
+                    region_entity,
+                });
+            }
+        }
     }
-
-    // Detect enters: in current_inside but not in prev_inside
-    for entity in current_inside.difference(&prev_inside) {
-        commands.trigger(RegionEntered {
-            subject: ship_entity,
-            region_entity: *entity,
-        });
-    }
-
-    membership.inside.insert(ship_entity, current_inside);
 }
 
-/// Applies continuous damage from `DamageZone` regions to the ship each tick.
-/// Damage is split via the zone's `shield_pierce` field: the pierced fraction
-/// goes straight to the hull, and the absorbed fraction is distributed
-/// uniformly across all shield facings (since regions have no bearing).
-/// Damaged regions are tracked via `RegionMembership`.
+/// Applies continuous damage from `DamageZone` regions to every ship each tick
+/// (player + NPCs). Damage is split via the zone's `shield_pierce` field: the
+/// pierced fraction goes straight to the hull, and the absorbed fraction is
+/// distributed uniformly across all shield facings (since regions have no
+/// bearing). Damaged regions are tracked per-ship via `RegionMembership`.
+///
+/// Player-only side effects (`DamageTaken` UI messages, `ShipDestroyed`,
+/// `GameOver` transition, debug damage log) are gated on `Has<LocalShip>`.
+/// NPCs that die inside a damage zone follow the same path as beam-kill:
+/// emit `AiEntityDestroyed` + `EntityDespawned`, remove from `WorldResource`,
+/// then despawn the entity.
 fn apply_damage_zone_damage(
     time: Res<Time>,
     membership: Res<RegionMembership>,
     region_query: Query<(&RegionEffectsSection, Option<&EntityUuid>)>,
-    ship_query: Query<Entity, With<LocalShip>>,
-    mut hull_q: Query<&mut crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
-    mut player_shields: Query<&mut crate::simulation::ShipShields, With<crate::server_app::LocalShip>>,
+    mut ship_query: Query<
+        (
+            Entity,
+            &mut crate::entity_spawner::EntityConsoleHull,
+            Option<&mut crate::simulation::ShipShields>,
+            Option<&EntityUuid>,
+            Has<LocalShip>,
+        ),
+        With<Ship>,
+    >,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
     mut damage_log: Option<ResMut<DamageLog>>,
+    mut destroyed_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::ai_plugin::AiEntityDestroyed>>,
+    >,
+    mut world: Option<ResMut<crate::lobby::WorldResource>>,
+    mut commands: Commands,
 ) {
-    let Ok(mut hull) = hull_q.single_mut() else {
-        return;
-    };
-
-    let Ok(ship_entity) = ship_query.single() else {
-        return;
-    };
-
     let dt = time.delta_secs();
     if dt <= 0.0 {
         return;
     }
 
-    let Some(region_set) = membership.inside.get(&ship_entity) else {
-        return;
-    };
-
-    for &region_entity in region_set.iter() {
-        let Ok((effects, uuid_opt)) = region_query.get(region_entity) else {
+    for (ship_entity, mut hull, mut shields_opt, ship_uuid, is_local) in ship_query.iter_mut() {
+        let Some(region_set) = membership.inside.get(&ship_entity) else {
             continue;
         };
-        for effect in &effects.0 {
-            if let crate::region_effects::RegionEffectKind::DamageZone { dps, shield_pierce } =
-                effect
-            {
+        if region_set.is_empty() {
+            continue;
+        }
+
+        for &region_entity in region_set.iter() {
+            let Ok((effects, uuid_opt)) = region_query.get(region_entity) else {
+                continue;
+            };
+            for effect in &effects.0 {
+                let crate::region_effects::RegionEffectKind::DamageZone { dps, shield_pierce } =
+                    effect
+                else {
+                    continue;
+                };
                 let total_damage = dps * dt;
                 let (pierced, absorbed) =
                     crate::damage::split_damage_for_pierce(total_damage, *shield_pierce);
@@ -171,15 +216,15 @@ fn apply_damage_zone_damage(
                 let mut hull_amount = pierced;
                 let mut shield_amount = 0.0;
                 if absorbed > 0.0 {
-                    if let Ok(mut shields) = player_shields.single_mut() {
+                    if let Some(shields) = shields_opt.as_deref_mut() {
                         let leak = shields.0.apply_uniform_damage(absorbed.round() as i32);
                         shield_amount = (absorbed - leak as f32).max(0.0);
                         hull_amount += leak as f32;
                     } else {
-                        // No LocalShip with ShipShields (e.g. test app); treat absorbed as hull.
+                        // No shields on this ship — treat absorbed as hull.
                         hull_amount += absorbed;
                     }
-    }
+                }
 
                 let mut rng = rand::rngs::SmallRng::from_os_rng();
                 let (hull_applied, ship_destroyed) = if hull_amount > 0.0 {
@@ -187,36 +232,67 @@ fn apply_damage_zone_damage(
                 } else {
                     (0.0, false)
                 };
-                if let Some(ref mut log) = damage_log {
-                    let source = uuid_opt
-                        .map(|u| format!("region:{}", u.0))
-                        .unwrap_or_else(|| "region:damage_zone".to_string());
-                    log.push(DamageLogEntry {
-                        source,
-                        shield_arc: None,
-                        amount: total_damage,
-                    });
-                }
-                if let Some(ref mut ob) = outbox {
-                    ob.0.push((
-                        Target::All,
-                        ServerMessage::DamageTaken {
-                            hull: hull_applied,
-                            shield: shield_amount,
-                        },
-                    ));
-                }
-                if ship_destroyed {
-                    if let Some(ref mut ob) = outbox {
-                        ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+
+                // Debug damage log is a single-player developer overlay.
+                if is_local {
+                    if let Some(ref mut log) = damage_log {
+                        let source = uuid_opt
+                            .map(|u| format!("region:{}", u.0))
+                            .unwrap_or_else(|| "region:damage_zone".to_string());
+                        log.push(DamageLogEntry {
+                            source,
+                            shield_arc: None,
+                            amount: total_damage,
+                        });
                     }
-                    if let Some(ref mut reason) = game_over_reason {
-                        if reason.0.is_none() {
-                            reason.0 = Some("All consoles destroyed".into());
+                }
+
+                // DamageTaken / ShipDestroyed / GameOver are player-facing UI
+                // events — only emit for the LocalShip.
+                if is_local {
+                    if let Some(ref mut ob) = outbox {
+                        ob.0.push((
+                            Target::All,
+                            ServerMessage::DamageTaken {
+                                hull: hull_applied,
+                                shield: shield_amount,
+                            },
+                        ));
+                    }
+                    if ship_destroyed {
+                        if let Some(ref mut ob) = outbox {
+                            ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                        }
+                        if let Some(ref mut reason) = game_over_reason {
+                            if reason.0.is_none() {
+                                reason.0 = Some("All consoles destroyed".into());
+                            }
+                        }
+                        if let Some(ref mut ns) = next_state {
+                            ns.set(GamePhase::GameOver);
                         }
                     }
-                    if let Some(ref mut ns) = next_state {
-                        ns.set(GamePhase::GameOver);
+                } else if ship_destroyed {
+                    // NPC destruction: mirror the beam-kill path so downstream
+                    // world triggers and clients update consistently.
+                    if let Some(uuid) = ship_uuid {
+                        if let Some(ref mut world) = world {
+                            world.0.entities.retain(|e| e.uuid != uuid.0);
+                        }
+                        if let Some(ref mut msgs) = destroyed_events {
+                            msgs.write(crate::ai_plugin::AiEntityDestroyed {
+                                entity_uuid: uuid.0.clone(),
+                            });
+                        }
+                        if let Some(ref mut ob) = outbox {
+                            ob.0.push((
+                                Target::All,
+                                ServerMessage::EntityDespawned {
+                                    uuid: uuid.0.clone(),
+                                },
+                            ));
+                        }
+                        commands.entity(ship_entity).try_despawn();
                     }
                 }
             }
@@ -245,7 +321,7 @@ fn handle_blocks_impulse_region_enter(
 
 /// Clamps the ship's forward speed to the effective maximum when entering a
 /// slow zone region. The modifier registration is handled by the coordinator's
-/// `translate_region_modifiers` system Ã¢â‚¬â€ this system only clamps speed.
+/// `on_region_entered` observer — this system only clamps speed.
 ///
 /// This is a non-modifier side effect that must run after the coordinator so
 /// the effective max reflects the updated modifier state.
@@ -270,8 +346,8 @@ pub(crate) fn handle_slow_zone_speed_clamp(
     let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
     // Per-entity component on the subject takes priority; fall back to the
     // legacy global Resource, and finally to a fresh default cache (1.0 mult).
-    // After PR 6 (PRD #597), NPCs entering slow zones read their own modifier
-    // cache once region membership tracks NPCs (PR 9).
+    // After PR 9 (PRD #597), NPCs also enter region membership, so an NPC's
+    // own ShipModifiers component drives the effective max here.
     let default_modifiers;
     let modifiers: &ShipModifiers = match modifiers_q.get(ev.subject) {
         Ok(m) => m,
@@ -538,6 +614,12 @@ mod tests {
         // Manually control time — no TimePlugin. Bevy 0.18 Time is generic;
         // we insert Time<()> ourselves and use advance_by() before each update.
         app.insert_resource(Time::<()>::default());
+        // AiEntityDestroyed / WorldResource are needed by apply_damage_zone_damage
+        // for the NPC-destruction path (PRD #597 PR 9). They're written only
+        // when a non-LocalShip ship dies inside a damage zone, but the
+        // MessageWriter and Resource must be registered up-front.
+        app.add_message::<crate::ai_plugin::AiEntityDestroyed>();
+        app.init_resource::<crate::lobby::WorldResource>();
         use crate::shield::{ShieldConfig, ShieldSystem};
         let hull_config = &[
             (crate::messages::Console::Helm, 25.0),
@@ -809,6 +891,76 @@ mod tests {
             hull_hp
         );
     }
+
+    /// PRD #597 PR 9: region effects (including damage zones) must apply to
+    /// every ship (player + NPCs), not just the LocalShip. This test spawns
+    /// an NPC ship (with the `Ship` marker but no `LocalShip`) inside a
+    /// damage zone while the player ship sits outside; only the NPC's hull
+    /// should decrease.
+    #[test]
+    fn npc_ship_in_damage_zone_takes_hull_damage() {
+        use crate::damage::ConsoleHull;
+        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+
+        let mut app = damage_test_app();
+
+        // Move the player (LocalShip) far outside the damage zone.
+        set_ship_pos(&mut app, 500.0, 0.0);
+        let player_hull_before = ship_hull_hp(&mut app);
+
+        // Spawn an NPC ship at the origin with the Ship marker but no
+        // LocalShip. Its EntityConsoleHull starts at 100 HP.
+        let npc_hull_config = &[(crate::messages::Console::CaptainChair, 100.0)];
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                EntityUuid("npc-damage-zone".to_string()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                crate::ship_state::ShipPhysics {
+                    x: 0.0,
+                    z: 0.0,
+                    ..Default::default()
+                },
+                EntityConsoleHull(ConsoleHull::from_config(npc_hull_config)),
+                ShipModifiers::new(),
+            ))
+            .id();
+
+        // Damage zone at origin with 50 dps. NPC is inside; player is outside.
+        spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 50.0);
+        tick_with_dt(&mut app, 0.1);
+
+        // NPC hull must decrease.
+        let npc_hull_after = app
+            .world()
+            .get::<EntityConsoleHull>(npc)
+            .expect("NPC must retain EntityConsoleHull")
+            .0
+            .total_current();
+        assert!(
+            npc_hull_after < 100.0,
+            "NPC hull must decrease from damage zone, got {} (max 100)",
+            npc_hull_after
+        );
+        // At 50 dps for 0.1s = 5 damage → 95 HP.
+        assert!(
+            (npc_hull_after - 95.0).abs() < 1e-6,
+            "NPC hull should be ~95 after 0.1s at 50 dps, got {}",
+            npc_hull_after
+        );
+
+        // Player hull must be unaffected (player is outside the zone).
+        let player_hull_after = ship_hull_hp(&mut app);
+        assert!(
+            (player_hull_after - player_hull_before).abs() < 1e-6,
+            "player hull must be unchanged (player is outside zone), before={} after={}",
+            player_hull_before,
+            player_hull_after,
+        );
+    }
+
+    // -- BlocksImpulse tests ------------------------------------------------
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ BlocksImpulse tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -1271,6 +1423,71 @@ mod tests {
         assert!(
             player_speed < 50.0,
             "Player entering slow zone must still be clamped even when NPC ships exist (got {player_speed})"
+        );
+    }
+
+    /// PRD #597 PR 9: region membership is tracked for every ship (player +
+    /// NPCs), and the slow-zone speed clamp applies to whichever ship
+    /// crossed the boundary. Player is far outside the zone; an NPC enters
+    /// the zone at high speed and must be clamped by its own
+    /// `ShipModifiers` component — while the player's speed is untouched.
+    #[test]
+    fn slow_zone_slows_npc_ship() {
+        use crate::ship_state::ShipPhysics;
+
+        let mut app = slow_zone_test_app();
+
+        // Player is far outside the zone; give it a high speed too so we can
+        // prove the clamp acts on the NPC, not the player.
+        set_physics(&mut app, |p| {
+            p.forward_speed = 50.0;
+            p.x = 500.0;
+        });
+
+        // Spawn the NPC inside the upcoming slow zone. It needs its own
+        // ShipPhysics (region membership queries `With<Ship>` + &ShipPhysics)
+        // and its own ShipModifiers (the slow-zone modifier is applied
+        // per-entity via the coordination observer).
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                Transform::from_xyz(10.0, 0.0, 0.0),
+                ShipPhysics {
+                    x: 10.0,
+                    z: 0.0,
+                    forward_speed: 50.0,
+                    ..Default::default()
+                },
+                ShipModifiers::new(),
+            ))
+            .id();
+
+        // Slow zone around origin (thrust_modifier -0.5 → 1/(1+0.5) = 0.667 mult).
+        let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
+        tick_with_dt(&mut app, 0.016);
+
+        // NPC forward speed must be clamped to the effective max
+        // (base_max * 0.667 = 25.0 * 0.667 = ~16.667).
+        let npc_speed = app
+            .world()
+            .get::<ShipPhysics>(npc)
+            .expect("NPC must retain ShipPhysics")
+            .forward_speed;
+        let expected_clamped = crate::ship_physics::ShipPhysicsConfig::new().max_speed * (1.0 / 1.5);
+        assert!(
+            (npc_speed - expected_clamped).abs() < 0.5,
+            "NPC entering slow zone must be clamped to ~{}, got {}",
+            expected_clamped,
+            npc_speed,
+        );
+
+        // Player is outside the zone and must be unaffected.
+        let player_speed = get_ship_physics(&mut app).forward_speed;
+        assert!(
+            (player_speed - 50.0).abs() < 1e-6,
+            "player outside slow zone must retain its speed 50.0, got {}",
+            player_speed,
         );
     }
 

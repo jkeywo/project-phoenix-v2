@@ -269,6 +269,8 @@ mod console_id_tests {
             Console::Power,
             Console::Comms,
             Console::Core,
+            Console::HelmEnginePort,
+            Console::HelmEngineStarboard,
         ];
         for console in &consoles {
             assert_eq!(
@@ -305,6 +307,11 @@ pub enum Console {
     /// Ownerless AI-only systems (viewscreen etc.). Not player-selectable;
     /// used as a repair target for ship-wide core systems.
     Core,
+    // ── Fine-grained Helm sub-systems (issue #511) ────────────────────────
+    /// Per-instance hull target for the port engine (damageable, #511).
+    HelmEnginePort,
+    /// Per-instance hull target for the starboard engine (damageable, #511).
+    HelmEngineStarboard,
 }
 
 impl Console {
@@ -321,6 +328,8 @@ impl Console {
             Console::Power => "Power",
             Console::Comms => "Comms",
             Console::Core => "Core",
+            Console::HelmEnginePort => "Engine (Port)",
+            Console::HelmEngineStarboard => "Engine (Starboard)",
         }
     }
 
@@ -339,6 +348,8 @@ impl Console {
             Console::Power => "power",
             Console::Comms => "comms",
             Console::Core => "core",
+            Console::HelmEnginePort => "helm-engine-port",
+            Console::HelmEngineStarboard => "helm-engine-starboard",
         }
     }
 
@@ -357,6 +368,8 @@ impl Console {
             "power" => Some(Console::Power),
             "comms" => Some(Console::Comms),
             "core" => Some(Console::Core),
+            "helm-engine-port" => Some(Console::HelmEnginePort),
+            "helm-engine-starboard" => Some(Console::HelmEngineStarboard),
             _ => None,
         }
     }
@@ -373,6 +386,8 @@ impl Console {
             Console::Power => "P",
             Console::Comms => "C",
             Console::Core => "CO",
+            Console::HelmEnginePort => "EP",
+            Console::HelmEngineStarboard => "ES",
         }
     }
 }
@@ -1500,6 +1515,17 @@ pub struct HelmBlackboard {
     pub boost_enabled: bool,
 }
 
+/// Raw sim truth for a single Helm Engine fine system (port or starboard),
+/// published each tick into the ship blackboard (issue #511).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct HelmEngineBlackboard {
+    /// Current thrust fraction applied by this engine (0.0..=1.0).
+    /// Zero when the engine is offline (damaged/destroyed).
+    pub thrust_fraction: f32,
+    /// True when the engine is operational (not disabled or destroyed).
+    pub is_online: bool,
+}
+
 /// Raw sim truth for the Weapons (Tactical) system, published each tick into
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -1541,6 +1567,8 @@ pub enum SystemBlackboard {
     Sensors(SensorsBlackboard),
     Navigation(NavigationBlackboard),
     Viewscreen(ViewscreenBlackboard),
+    /// Per-engine fine-system blackboard (issue #511). One entry per engine instance.
+    HelmEngine(HelmEngineBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -1605,6 +1633,10 @@ pub enum InterSystemPayload {
     /// phaser beam is active. Applied once per tick during `SimSet::Physics`;
     /// consumed by the Power system during `SimSet::Modifiers`.
     DrainWeaponsBattery { amount: f32 },
+    /// Joystick input published by the Helm Joystick fine system (issue #511)
+    /// for consumption by each Helm Engine fine system. Channels thrust and
+    /// steering so each engine can independently gate on its own online state.
+    JoystickState { thrust: f32, steering: f32 },
 }
 
 /// An inter-system command: one system commanding another to mutate its own

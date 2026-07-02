@@ -308,6 +308,16 @@ impl ConsoleHull {
             None => true, // not tracked → treat as full
         }
     }
+
+    /// Directly set the current HP for a given console. No-op if the console
+    /// is not tracked. Clamps to `[0.0, max_hp]`.
+    ///
+    /// Used in tests to set specific damage states without applying random hull damage.
+    pub fn set_console_hp(&mut self, console: &Console, new_hp: f32) {
+        if let Some(entry) = self.entries.iter_mut().find(|(c, _, _)| c == console) {
+            entry.1 = new_hp.clamp(0.0, entry.2);
+        }
+    }
 }
 
 #[cfg(test)]

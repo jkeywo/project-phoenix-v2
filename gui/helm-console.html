@@ -296,6 +296,41 @@
       transform-origin: left;
       transition: none;
     }
+    /* ── Fine-system engine state bars (issue #511) ──── */
+    #engine-state {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 100%;
+    }
+    .engine-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+    }
+    .engine-label {
+      font-size: 0.65rem;
+      color: var(--ink-faint);
+      width: 2.5em;
+      flex-shrink: 0;
+      letter-spacing: 0.05em;
+    }
+    .engine-row .bar-wrap {
+      flex: 1;
+      height: 6px;
+      background: var(--bg-deep);
+      border: 1px solid var(--line-faint);
+      overflow: hidden;
+    }
+    .engine-row .fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, var(--teal, #3ad8c8), var(--teal, #57f0e0));
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: none;
+    }
   /* ── Landscape: compact for phone screens ──────────────────── */
   @media (orientation: landscape) and (max-width: 900px) {
     /* Minimal top padding, near-zero bottom — buttons sit at the screen edge */
@@ -514,6 +549,18 @@
                 <div class="boost-battery-fill" id="boost-battery-fill"></div>
               </div>
             </div>
+            <div id="engine-state" class="ctrl-group">
+              <div class="engine-row">
+                <span class="engine-label">PORT</span>
+                <div class="bar-wrap"><div id="engine-port-fill" class="fill"></div></div>
+                <span id="engine-port-auto-badge" class="auto-badge" hidden>AUTO</span>
+              </div>
+              <div class="engine-row">
+                <span class="engine-label">STBD</span>
+                <div class="bar-wrap"><div id="engine-stbd-fill" class="fill"></div></div>
+                <span id="engine-stbd-auto-badge" class="auto-badge" hidden>AUTO</span>
+              </div>
+            </div>
           </section>
 
         </div>
@@ -535,7 +582,7 @@
 
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
-    import { setAutoState } from './console-ui.js';
+    import { setBar, setAutoState } from './console-ui.js';
 
     var _state         = null;
     var _radarWidget   = null;
@@ -651,6 +698,16 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
       // AUTO badge: show when helm station is AI-controlled (Backfill rating).
       // The joystick is not a <button> so we only manage the badge + impulse btn.
       setAutoState(document.getElementById('impulse-btn'), document.getElementById('helm-auto-badge'), !!s.helm_auto);
+
+      // Engine status bars (fine-system decomposition #511)
+      var portFill = document.getElementById('engine-port-fill');
+      var stbdFill = document.getElementById('engine-stbd-fill');
+      var portBadge = document.getElementById('engine-port-auto-badge');
+      var stbdBadge = document.getElementById('engine-stbd-auto-badge');
+      if (portFill) setBar(portFill, s.engine_port_thrust || 0, { thresholds: [] });
+      if (stbdFill) setBar(stbdFill, s.engine_stbd_thrust || 0, { thresholds: [] });
+      setAutoState(null, portBadge, !!s.engine_port_auto);
+      setAutoState(null, stbdBadge, !!s.engine_stbd_auto);
     }
 
     var _stickValue = { x: 0, y: 0 };

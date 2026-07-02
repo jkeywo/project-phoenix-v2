@@ -340,6 +340,9 @@ pub fn handle_power_inter_system(
                         (pr.0.battery_charge - amount).clamp(0.0, config.0.capacity);
                 }
             }
+            // JoystickState messages are produced by the Helm fine systems (issue #511)
+            // and are not relevant to the Power system — ignore them.
+            InterSystemPayload::JoystickState { .. } => {}
         }
     }
 

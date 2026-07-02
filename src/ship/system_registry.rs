@@ -88,6 +88,29 @@ pub const REPAIR_SYSTEM_ID: &str = "repair";
 pub const REPAIR_KIND: &str = "repair";
 pub const REPAIR_AI_CONTROLLER: &str = "repair_ai";
 
+// ── Fine-grained Helm systems (issue #511) ────────────────────────────────────
+
+/// Wire `SystemId` for the Helm Joystick fine system.
+pub const HELM_JOYSTICK_KIND: &str = "helm_joystick";
+pub const HELM_JOYSTICK_SYSTEM_ID: &str = "helm-joystick";
+pub const HELM_JOYSTICK_AI_CONTROLLER: &str = "helm_joystick_ai";
+
+/// Wire `SystemId` for the Helm Engine fine systems (port + starboard instances).
+pub const HELM_ENGINE_KIND: &str = "helm_engine";
+pub const HELM_ENGINE_PORT_SYSTEM_ID: &str = "helm-engine-port";
+pub const HELM_ENGINE_STARBOARD_SYSTEM_ID: &str = "helm-engine-starboard";
+pub const HELM_ENGINE_AI_CONTROLLER: &str = "helm_engine_ai";
+
+/// Wire `SystemId` for the Helm Radar fine system.
+pub const HELM_RADAR_KIND: &str = "helm_radar";
+pub const HELM_RADAR_SYSTEM_ID: &str = "helm-radar";
+pub const HELM_RADAR_AI_CONTROLLER: &str = "helm_radar_ai";
+
+/// Wire `SystemId` for the Helm Impulse fine system.
+pub const HELM_IMPULSE_KIND: &str = "helm_impulse";
+pub const HELM_IMPULSE_SYSTEM_ID: &str = "helm-impulse";
+pub const HELM_IMPULSE_AI_CONTROLLER: &str = "helm_impulse_ai";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
     name: String,
@@ -189,6 +212,23 @@ impl SystemKindRegistry {
             REPAIR_KIND,
             AiControllerRegistration::new(REPAIR_AI_CONTROLLER)?,
         )?;
+        // Fine-grained Helm systems (issue #511)
+        registry.register(
+            HELM_JOYSTICK_KIND,
+            AiControllerRegistration::new(HELM_JOYSTICK_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            HELM_ENGINE_KIND,
+            AiControllerRegistration::new(HELM_ENGINE_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            HELM_RADAR_KIND,
+            AiControllerRegistration::new(HELM_RADAR_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            HELM_IMPULSE_KIND,
+            AiControllerRegistration::new(HELM_IMPULSE_AI_CONTROLLER)?,
+        )?;
         Ok(registry)
     }
 
@@ -278,6 +318,28 @@ pub fn viewscreen_system_id() -> SystemId {
 
 pub fn repair_system_id() -> SystemId {
     SystemId(REPAIR_SYSTEM_ID.to_string())
+}
+
+// ── Fine Helm system id helpers (issue #511) ──────────────────────────────────
+
+pub fn helm_joystick_system_id() -> SystemId {
+    SystemId(HELM_JOYSTICK_SYSTEM_ID.to_string())
+}
+
+pub fn helm_engine_port_system_id() -> SystemId {
+    SystemId(HELM_ENGINE_PORT_SYSTEM_ID.to_string())
+}
+
+pub fn helm_engine_starboard_system_id() -> SystemId {
+    SystemId(HELM_ENGINE_STARBOARD_SYSTEM_ID.to_string())
+}
+
+pub fn helm_radar_system_id() -> SystemId {
+    SystemId(HELM_RADAR_SYSTEM_ID.to_string())
+}
+
+pub fn helm_impulse_system_id() -> SystemId {
+    SystemId(HELM_IMPULSE_SYSTEM_ID.to_string())
 }
 
 #[cfg(test)]
@@ -574,5 +636,64 @@ mod tests {
             ),
             Err(SystemRegistryError::EmptyAiControllerName)
         );
+    }
+
+    // ── Fine Helm system tests (issue #511) ───────────────────────────────────
+
+    #[test]
+    fn fine_helm_kinds_are_registered() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(registry.contains(HELM_JOYSTICK_KIND), "helm_joystick not registered");
+        assert!(registry.contains(HELM_ENGINE_KIND), "helm_engine not registered");
+        assert!(registry.contains(HELM_RADAR_KIND), "helm_radar not registered");
+        assert!(registry.contains(HELM_IMPULSE_KIND), "helm_impulse not registered");
+
+        assert_eq!(
+            registry.registration(HELM_JOYSTICK_KIND).unwrap().ai_controller.name(),
+            HELM_JOYSTICK_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry.registration(HELM_ENGINE_KIND).unwrap().ai_controller.name(),
+            HELM_ENGINE_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry.registration(HELM_RADAR_KIND).unwrap().ai_controller.name(),
+            HELM_RADAR_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry.registration(HELM_IMPULSE_KIND).unwrap().ai_controller.name(),
+            HELM_IMPULSE_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn fine_helm_system_ids_are_lowercase_kebab() {
+        let ids = [
+            HELM_JOYSTICK_SYSTEM_ID,
+            HELM_ENGINE_PORT_SYSTEM_ID,
+            HELM_ENGINE_STARBOARD_SYSTEM_ID,
+            HELM_RADAR_SYSTEM_ID,
+            HELM_IMPULSE_SYSTEM_ID,
+        ];
+        for id in ids {
+            assert_eq!(id, id.to_lowercase(), "Fine helm SystemId {id:?} is not lowercase");
+            assert!(!id.contains('_'), "Fine helm SystemId {id:?} contains underscore (use hyphen)");
+            assert!(!id.is_empty(), "Fine helm SystemId must not be empty");
+        }
+        assert_eq!(HELM_JOYSTICK_SYSTEM_ID, "helm-joystick");
+        assert_eq!(HELM_ENGINE_PORT_SYSTEM_ID, "helm-engine-port");
+        assert_eq!(HELM_ENGINE_STARBOARD_SYSTEM_ID, "helm-engine-starboard");
+        assert_eq!(HELM_RADAR_SYSTEM_ID, "helm-radar");
+        assert_eq!(HELM_IMPULSE_SYSTEM_ID, "helm-impulse");
+    }
+
+    #[test]
+    fn fine_helm_system_id_helpers_return_expected_values() {
+        assert_eq!(helm_joystick_system_id().0, HELM_JOYSTICK_SYSTEM_ID);
+        assert_eq!(helm_engine_port_system_id().0, HELM_ENGINE_PORT_SYSTEM_ID);
+        assert_eq!(helm_engine_starboard_system_id().0, HELM_ENGINE_STARBOARD_SYSTEM_ID);
+        assert_eq!(helm_radar_system_id().0, HELM_RADAR_SYSTEM_ID);
+        assert_eq!(helm_impulse_system_id().0, HELM_IMPULSE_SYSTEM_ID);
     }
 }

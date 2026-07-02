@@ -7,8 +7,8 @@ use crate::damage::DamageTier;
 use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{
-    AdmittedCommands, ClientMessage, CoordinationPayload, ModifierSlot, StationId,
-    SystemControlPayload,
+    AdmittedCommands, ClientMessage, CoordinationPayload, InterSystemMsg, InterSystemPayload,
+    InterSystemQueue, ModifierSlot, StationId, SystemControlPayload,
 };
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
@@ -268,6 +268,12 @@ impl Plugin for ShipPlugin {
                 process_helm_inputs
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(operate_helm_ai),
+                publish_joystick_to_engines
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(process_helm_inputs),
+                operate_helm_engine_ai
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(operate_helm_ai),
                 detect_reached_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
@@ -384,6 +390,32 @@ fn process_helm_inputs(
             steering: last_input.steering,
         }
     };
+
+    // ── Engine-damage thrust scaling (issue #511) ─────────────────────────
+    // Count how many fine engine systems are online. Each offline engine
+    // removes 50% of the computed thrust. If both engines are offline, thrust
+    // is zeroed. Uses `offline_systems` set on `ShipSystemControlSources`
+    // (populated by `sync_console_damage_tiers` in `SimSet::Damage`).
+    let port_offline = sources.0.offline_systems.contains(
+        &crate::system_registry::helm_engine_port_system_id(),
+    );
+    let stbd_offline = sources.0.offline_systems.contains(
+        &crate::system_registry::helm_engine_starboard_system_id(),
+    );
+    // Fraction of engines online: 0 engines = 0.0, 1 engine = 0.5, 2 = 1.0.
+    // Only scale when at least one fine engine system is known (i.e. both IDs
+    // are registered in the control sources; if neither ID is present in
+    // offline_systems at all, it means no fine systems exist → no scaling).
+    let engine_thrust_scale: f32 = match (port_offline, stbd_offline) {
+        (true, true) => 0.0,
+        (true, false) | (false, true) => 0.5,
+        (false, false) => 1.0,
+    };
+    let scaled_input = ShipPhysicsInput {
+        thrust: input.thrust * engine_thrust_scale,
+        steering: input.steering,
+    };
+
     let mut config = match physics_cfg {
         Some(ref cfg) => cfg.0,
         None => ShipPhysicsConfig::new(),
@@ -410,14 +442,15 @@ fn process_helm_inputs(
         config.acceleration *= boost_cfg.multiplier;
         config.max_yaw_rate *= boost_cfg.steering_multiplier;
     }
-    let result = compute_physics(state, input, dt, &config);
+    let result = compute_physics(state, scaled_input, dt, &config);
 
     physics.x = result.x;
     physics.z = result.z;
     physics.yaw = result.yaw;
     physics.forward_speed = result.forward_speed;
 
-    // Visual banking: lerp roll toward target based on steering
+    // Visual banking: lerp roll toward target based on steering (use the unscaled
+    // input.steering so roll reflects intent, not engine count).
     let max_bank_rad = bank_cfg.max_bank_deg.to_radians();
     let target_roll = if impulse_active {
         0.0
@@ -694,6 +727,87 @@ fn detect_reached_objective_completion(
             if (dx * dx + dz * dz).sqrt() < crate::ai::WAYPOINT_ARRIVAL_RADIUS {
                 objectives.0.complete(&obj.snapshot.id);
             }
+        }
+    }
+}
+
+// ── Fine-grained Helm systems: channel-1 joystick → engines (issue #511) ──────
+
+/// Forwards the current joystick state from the Helm Joystick fine system to
+/// both Helm Engine fine systems via the `InterSystemQueue` (channel 1).
+///
+/// Runs in `SimSet::Physics` AFTER `process_helm_inputs` so `LastHelmInput`
+/// has been populated from admitted commands this tick. Both engine instances
+/// receive the same joystick payload; each engine independently gates on its
+/// own online state when interpreting the message.
+fn publish_joystick_to_engines(
+    ships: Query<(&ShipSystemControlSources, &LastHelmInput), With<LocalShip>>,
+    mut inter_system: ResMut<InterSystemQueue>,
+) {
+    for (sources, last_input) in ships.iter() {
+        let policy = sources
+            .0
+            .policy_for(&crate::system_registry::helm_joystick_system_id());
+        // Only publish when the joystick system can operate (human or AI).
+        if !policy.accept_human_input && !policy.operate_ai {
+            continue;
+        }
+        let port_id = crate::system_registry::helm_engine_port_system_id();
+        let stbd_id = crate::system_registry::helm_engine_starboard_system_id();
+        for target in [port_id, stbd_id] {
+            inter_system.0.push(InterSystemMsg {
+                target,
+                payload: InterSystemPayload::JoystickState {
+                    thrust: last_input.thrust,
+                    steering: last_input.steering,
+                },
+                source_entity: None,
+            });
+        }
+    }
+}
+
+/// Per-engine AI bookkeeping (issue #511). Mirrors what the joystick publishes
+/// but for ships where an engine is under AI control.
+///
+/// The coarse `operate_helm_ai` already drives physics; this system only
+/// ensures the fine engine systems reflect AI-controlled thrust in the
+/// blackboard so the GUI can show AUTO badges correctly.
+fn operate_helm_engine_ai(
+    ships: Query<(&ShipSystemControlSources, &LastHelmInput), With<LocalShip>>,
+    mut inter_system: ResMut<InterSystemQueue>,
+) {
+    for (sources, last_input) in ships.iter() {
+        let port_policy = sources
+            .0
+            .policy_for(&crate::system_registry::helm_engine_port_system_id());
+        let stbd_policy = sources
+            .0
+            .policy_for(&crate::system_registry::helm_engine_starboard_system_id());
+
+        // If an engine is AI-controlled we push its joystick state the same
+        // way as `publish_joystick_to_engines` does for human input, so the
+        // blackboard publisher sees a consistent value regardless of who is
+        // driving.
+        if port_policy.operate_ai {
+            inter_system.0.push(InterSystemMsg {
+                target: crate::system_registry::helm_engine_port_system_id(),
+                payload: InterSystemPayload::JoystickState {
+                    thrust: last_input.thrust,
+                    steering: last_input.steering,
+                },
+                source_entity: None,
+            });
+        }
+        if stbd_policy.operate_ai {
+            inter_system.0.push(InterSystemMsg {
+                target: crate::system_registry::helm_engine_starboard_system_id(),
+                payload: InterSystemPayload::JoystickState {
+                    thrust: last_input.thrust,
+                    steering: last_input.steering,
+                },
+                source_entity: None,
+            });
         }
     }
 }
@@ -3081,6 +3195,198 @@ station = "helm"
         assert_eq!(
             after.forward_speed, before.forward_speed,
             "forward_speed must not change when process_helm_inputs skips physics"
+        );
+    }
+
+    // ── Fine Helm system tests (issue #511) ───────────────────────────────────
+
+    /// Build an app that includes HelmEnginePort + HelmEngineStarboard hull
+    /// entries alongside the usual coarse consoles. Used for engine-damage tests.
+    fn test_app_with_engine_hull() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
+            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+            .insert_resource(ShipModifiers::new())
+            .add_plugins(ShipPlugin);
+        let hull_config = &[
+            (crate::messages::Console::Helm, 25.0_f32),
+            (crate::messages::Console::Tactical, 25.0),
+            (crate::messages::Console::Power, 25.0),
+            (crate::messages::Console::Shields, 25.0),
+            (crate::messages::Console::HelmEnginePort, 15.0),
+            (crate::messages::Console::HelmEngineStarboard, 15.0),
+        ];
+        app.world_mut().spawn((
+            Ship,
+            LocalShip,
+            Transform::default(),
+            ShipPhysics::default(),
+            ShipConfigComponent::default(),
+            ShipSystemControlSources::default(),
+            ActiveStationRatings::default(),
+            CoordinationQueue::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::ai_plugin::ShipAiMemory::default(),
+            crate::entity_spawner::EntityConsoleHull(
+                crate::damage::ConsoleHull::from_config(hull_config),
+            ),
+            LastHelmInput::default(),
+            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
+        ));
+        app
+    }
+
+    /// Set the HP of a specific console on the LocalShip hull to `new_hp`.
+    /// Delegates to `ConsoleHull::set_console_hp` which directly sets the value.
+    fn set_console_hp_direct(app: &mut App, console: crate::messages::Console, new_hp: f32) {
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let mut entity_mut = app.world_mut().entity_mut(ship);
+        let mut hull = entity_mut
+            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .unwrap();
+        hull.0.set_console_hp(&console, new_hp);
+    }
+
+    #[test]
+    fn joystick_publishes_state_to_engines_via_inter_system() {
+        let mut app = test_app_with_engine_hull();
+        // Ensure InterSystemQueue is initialised.
+        app.init_resource::<InterSystemQueue>();
+
+        // Set a known LastHelmInput before ticking.
+        set_last_helm_input(
+            &mut app,
+            LastHelmInput {
+                thrust: 0.75,
+                steering: 0.25,
+            },
+        );
+
+        tick(&mut app);
+
+        let queue = app.world().resource::<InterSystemQueue>();
+        let port_id = crate::system_registry::helm_engine_port_system_id();
+        let stbd_id = crate::system_registry::helm_engine_starboard_system_id();
+
+        let port_msgs: Vec<_> = queue
+            .for_target(port_id.0.as_str())
+            .collect();
+        let stbd_msgs: Vec<_> = queue
+            .for_target(stbd_id.0.as_str())
+            .collect();
+
+        // `publish_joystick_to_engines` and `operate_helm_engine_ai` may both push.
+        // At least one message must arrive for each engine.
+        assert!(
+            !port_msgs.is_empty(),
+            "expected at least one JoystickState message for helm-engine-port"
+        );
+        assert!(
+            !stbd_msgs.is_empty(),
+            "expected at least one JoystickState message for helm-engine-starboard"
+        );
+
+        // The first message should carry the joystick values.
+        let InterSystemPayload::JoystickState { thrust, steering } =
+            &port_msgs[0].payload
+        else {
+            panic!("expected JoystickState payload for port engine");
+        };
+        assert!(
+            (*thrust - 0.75).abs() < 0.01,
+            "port engine thrust should match joystick thrust"
+        );
+        assert!(
+            (*steering - 0.25).abs() < 0.01,
+            "port engine steering should match joystick steering"
+        );
+    }
+
+    #[test]
+    fn engine_port_hull_damage_gates_engine_offline() {
+        let mut app = test_app_with_engine_hull();
+
+        // Zero out the port engine HP (destroyed tier).
+        set_console_hp_direct(&mut app, crate::messages::Console::HelmEnginePort, 0.0);
+        tick(&mut app);
+
+        // After sync_console_damage_tiers, offline_systems should contain helm-engine-port.
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let control_sources = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let port_id = crate::system_registry::helm_engine_port_system_id();
+        assert!(
+            control_sources.0.offline_systems.contains(&port_id),
+            "helm-engine-port should be in offline_systems when HP = 0"
+        );
+    }
+
+    #[test]
+    fn engine_port_offline_reduces_thrust_compared_to_both_online() {
+        // With both engines online, terminal velocity = max_speed (25 m/s by default).
+        // With one engine offline, effective thrust = 0.5, so terminal = 0.5 * max_speed = 12.5.
+        // We run enough ticks to approach terminal velocity at the 50%-thrust case,
+        // then verify the one-engine-offline ship is slower than the both-online ship.
+        const TICK_MS: u64 = 34; // slightly above 1/30s so timer fires once per tick
+        const TICKS: usize = 120; // 120 ticks × 34ms ≈ 4s, enough to reach ~12.5 m/s terminal
+
+        let make_app = || {
+            let mut app = test_app_with_engine_hull();
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(TICK_MS),
+            ));
+            app
+        };
+
+        // ── Both engines online ────────────────────────────────────────────
+        let mut app_both = make_app();
+        set_last_helm_input(&mut app_both, LastHelmInput { thrust: 1.0, steering: 0.0 });
+        for _ in 0..TICKS { tick(&mut app_both); }
+        let speed_both = app_both
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<LocalShip>>()
+            .single(app_both.world())
+            .unwrap()
+            .forward_speed;
+
+        // ── Port engine disabled ───────────────────────────────────────────
+        // Zero the port engine HP, tick once so sync_console_damage_tiers runs
+        // (populating offline_systems), then drive at full thrust for TICKS more.
+        let mut app_one = make_app();
+        set_console_hp_direct(&mut app_one, crate::messages::Console::HelmEnginePort, 0.0);
+        tick(&mut app_one); // let Damage tier propagate
+        set_last_helm_input(&mut app_one, LastHelmInput { thrust: 1.0, steering: 0.0 });
+        for _ in 0..TICKS { tick(&mut app_one); }
+        let speed_one = app_one
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<LocalShip>>()
+            .single(app_one.world())
+            .unwrap()
+            .forward_speed;
+
+        // With enough ticks, app_both should be near 25 m/s and app_one near 12.5 m/s.
+        assert!(
+            speed_one < speed_both,
+            "forward_speed with one engine offline ({speed_one:.4}) should be less than \
+             with both engines online ({speed_both:.4})"
         );
     }
 }

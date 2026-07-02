@@ -2617,6 +2617,20 @@ mod tests {
     }
 
     #[test]
+    fn system_blackboard_helm_engine_round_trips_json_codec() {
+        use crate::messages::{HelmEngineBlackboard, SystemBlackboard, SystemId};
+        let bb = SystemBlackboard::HelmEngine(HelmEngineBlackboard {
+            thrust_fraction: 0.75,
+            is_online: true,
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("helm-engine-port".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn radar_blip_with_new_fields_round_trips() {
         let blip = RadarBlip {
             uuid: "abc-123".into(),

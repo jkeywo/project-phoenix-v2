@@ -21,8 +21,9 @@ description = "Harrow Destroyer"
 [hull]
 hull_integrity = 30.0
 
-[shields]
-max_hp = 15.0
+[shields_console.base]
+num_facings = 1
+max_hp = 15
 regen_per_sec = 0.5
 
 [collider]

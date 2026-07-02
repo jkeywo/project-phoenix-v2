@@ -1293,7 +1293,7 @@
       state.stations = defs.map(def => {
         const defConsoles = def.consoles || [];
         const holder = state.players.find(p =>
-          consolesOf(p, state.shipStations).some(c => defConsoles.includes(c))
+          p.connected && consolesOf(p, state.shipStations).some(c => defConsoles.includes(c))
         );
         return {
           name: def.name || '',

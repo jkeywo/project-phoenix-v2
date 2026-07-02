@@ -104,74 +104,6 @@ pub struct EntityTarget(pub crate::entity_target::TargetSection);
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
-/// Single-facing NPC shield component (legacy, kept for test compatibility).
-///
-/// All new spawn paths use `ShipShields` (the same multi-facing component
-/// used by the player ship). This struct remains so that existing unit tests
-/// that construct it directly continue to compile; it is no longer inserted
-/// by `spawn_entity`.
-///
-/// Distinct from the player ship's four-quadrant `ShipShields` resource,
-/// which carries a multi-facing `ShieldSystem` with offline timers.
-#[derive(Component, Clone, Debug)]
-pub struct EntityShield {
-    pub current_hp: f32,
-    pub max_hp: f32,
-    pub regen_per_sec: f32,
-    pub broken: bool,
-}
-
-impl EntityShield {
-    /// Build a fresh shield from its config: full HP, not broken.
-    pub fn from_config(cfg: &crate::entity_config::EntityShieldConfig) -> Self {
-        Self {
-            current_hp: cfg.max_hp,
-            max_hp: cfg.max_hp,
-            regen_per_sec: cfg.regen_per_sec,
-            broken: false,
-        }
-    }
-
-    /// Apply `absorbed` damage to the shield, returning the leak that
-    /// overflows to hull. If the shield depletes during this hit, the
-    /// `broken` latch is set; subsequent calls return the full `absorbed`
-    /// amount as leak (the shield will not regen back).
-    pub fn apply_damage(&mut self, absorbed: f32) -> f32 {
-        if self.broken {
-            return absorbed;
-        }
-        if absorbed <= 0.0 {
-            return 0.0;
-        }
-        if absorbed >= self.current_hp {
-            let leak = absorbed - self.current_hp;
-            self.current_hp = 0.0;
-            self.broken = true;
-            leak
-        } else {
-            self.current_hp -= absorbed;
-            0.0
-        }
-    }
-
-    /// Advance regen for `dt` seconds. No-op while broken or already at max.
-    pub fn tick_regen(&mut self, dt: f32) {
-        if self.broken || self.current_hp >= self.max_hp {
-            return;
-        }
-        self.current_hp = (self.current_hp + self.regen_per_sec * dt).min(self.max_hp);
-    }
-
-    /// Fraction (0.0..=1.0) of current vs max HP. Returns 0.0 when broken
-    /// regardless of `current_hp` (broken shields read as zero on the wire).
-    pub fn fraction(&self) -> f32 {
-        if self.broken || self.max_hp <= 0.0 {
-            0.0
-        } else {
-            (self.current_hp / self.max_hp).clamp(0.0, 1.0)
-        }
-    }
-}
 
 // â”€â”€ Spawner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -376,11 +308,11 @@ pub fn spawn_entity(
             }
         }
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
-        // ShipModifiers as per-entity component (PR 6 — PRD #597). Every ship
-        // gets an empty modifier cache; region entry, power translators, and
-        // impulse translators all write to this per-entity component (they will
-        // in later PRs; today the coordinator still writes the global resource
-        // and this component starts empty).
+        // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
+        // gets an empty modifier cache. Region-entry observers and
+        // translate_power_modifiers write to the subject entity's cache;
+        // translate_impulse_modifiers remains LocalShip-only (ShipImpulse is a
+        // player-only mechanic).
         entity_commands.insert(crate::modifiers::ShipModifiers::new());
         // Per-entity ShipRepairTeams — only insert when the entity TOML declares
         // a [repair] block. Absent block means the ship has no repair teams
@@ -578,125 +510,6 @@ mod tests {
     use super::*;
     use crate::entity_config::*;
 
-    // ── EntityShield unit tests (#471) ──────────────────────────────────────
-
-    #[test]
-    fn entity_shield_from_config_full_hp_not_broken() {
-        let cfg = EntityShieldConfig {
-            max_hp: 60.0,
-            regen_per_sec: 1.0,
-            num_facings: 1,
-            offline_duration: 10.0,
-        };
-        let shield = EntityShield::from_config(&cfg);
-        assert_eq!(shield.current_hp, 60.0);
-        assert_eq!(shield.max_hp, 60.0);
-        assert_eq!(shield.regen_per_sec, 1.0);
-        assert!(!shield.broken);
-    }
-
-    #[test]
-    fn entity_shield_apply_damage_partial_returns_zero_leak() {
-        let mut shield = EntityShield {
-            current_hp: 60.0,
-            max_hp: 60.0,
-            regen_per_sec: 1.0,
-            broken: false,
-        };
-        let leak = shield.apply_damage(10.0);
-        assert_eq!(leak, 0.0);
-        assert_eq!(shield.current_hp, 50.0);
-        assert!(!shield.broken);
-    }
-
-    #[test]
-    fn entity_shield_apply_damage_overflow_breaks_and_returns_leak() {
-        let mut shield = EntityShield {
-            current_hp: 10.0,
-            max_hp: 60.0,
-            regen_per_sec: 1.0,
-            broken: false,
-        };
-        let leak = shield.apply_damage(15.0);
-        assert_eq!(leak, 5.0);
-        assert_eq!(shield.current_hp, 0.0);
-        assert!(shield.broken, "shield must latch broken once depleted");
-    }
-
-    #[test]
-    fn entity_shield_apply_damage_when_broken_returns_full_amount_as_leak() {
-        let mut shield = EntityShield {
-            current_hp: 0.0,
-            max_hp: 60.0,
-            regen_per_sec: 1.0,
-            broken: true,
-        };
-        let leak = shield.apply_damage(20.0);
-        assert_eq!(leak, 20.0, "broken shields pass damage through unchanged");
-        assert!(shield.broken);
-    }
-
-    #[test]
-    fn entity_shield_tick_regen_advances_below_max() {
-        let mut shield = EntityShield {
-            current_hp: 30.0,
-            max_hp: 60.0,
-            regen_per_sec: 5.0,
-            broken: false,
-        };
-        shield.tick_regen(1.0);
-        assert_eq!(shield.current_hp, 35.0);
-    }
-
-    #[test]
-    fn entity_shield_tick_regen_clamps_to_max() {
-        let mut shield = EntityShield {
-            current_hp: 58.0,
-            max_hp: 60.0,
-            regen_per_sec: 10.0,
-            broken: false,
-        };
-        shield.tick_regen(1.0);
-        assert_eq!(shield.current_hp, 60.0);
-    }
-
-    #[test]
-    fn entity_shield_tick_regen_noop_when_broken() {
-        let mut shield = EntityShield {
-            current_hp: 0.0,
-            max_hp: 60.0,
-            regen_per_sec: 5.0,
-            broken: true,
-        };
-        shield.tick_regen(10.0);
-        assert_eq!(
-            shield.current_hp, 0.0,
-            "broken shields must never regen back"
-        );
-        assert!(shield.broken);
-    }
-
-    #[test]
-    fn entity_shield_fraction_returns_zero_when_broken() {
-        let shield = EntityShield {
-            current_hp: 0.0,
-            max_hp: 60.0,
-            regen_per_sec: 0.0,
-            broken: true,
-        };
-        assert_eq!(shield.fraction(), 0.0);
-    }
-
-    #[test]
-    fn entity_shield_fraction_returns_ratio_when_intact() {
-        let shield = EntityShield {
-            current_hp: 30.0,
-            max_hp: 60.0,
-            regen_per_sec: 0.0,
-            broken: false,
-        };
-        assert_eq!(shield.fraction(), 0.5);
-    }
 
     /// Helper: build a minimal Bevy app for spawning tests.
     fn test_app() -> App {

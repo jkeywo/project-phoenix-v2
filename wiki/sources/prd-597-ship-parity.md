@@ -8,7 +8,9 @@ updated: 2026-07-02
 
 ## Status
 
-**Complete** — all 10 PRs shipped.
+**Complete — all 10 PRs shipped + post-review gap-closure pass** (2026-07-02).
+
+Post-review pass unified the last four divergent code paths (`tick_active_beam` + `tick_npc_beams` → `tick_beams`; `handle_fire_phaser` + `handle_npc_beam_fire` → single `handle_fire_phaser`; `tick_phaser_auto_fire` iterates all ships; `sync_phaser_beams` renders all ships in one loop) and closed the remaining data-flow gaps (`translate_power_modifiers` and `tick_repair_teams` iterate all ships; NPCs get `TorpedoSystemResource` from `[torpedoes]` TOML; `handle_fire_torpedo` unified). `EntityShield` legacy struct + tests deleted. Final state: **the only differences between player and NPC ships are `ShipSystemControlSources` (AI vs human control per station, data-driven from TOML) and the `LocalShip` marker (viewscreen render/broadcast gate).**
 
 ## Problem
 

@@ -1936,10 +1936,7 @@ fn operate_tactical_ai(
             &crate::ship_plugin::ActiveStationRatings,
             &LastShipAttacker,
         ),
-        (
-            With<crate::server_app::LocalShip>,
-            Without<crate::ai::server::AiControllerComponent>,
-        ),
+        With<crate::server_app::LocalShip>,
     >,
     sessions: Res<Sessions>,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,

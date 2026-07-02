@@ -474,12 +474,15 @@ fn spawn_engine_trails(
 ) {
     let dt = time.delta_secs();
 
+    let mut live_key_bases: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     for (transform, physics, markers, helm, uuid, is_local) in ships_q.iter() {
         let key_base = match uuid {
             Some(u) => format!("engine:{}", u.0),
             None if is_local => "engine:player".to_string(),
             None => continue, // NPC without a UUID has no stable trail key.
         };
+        live_key_bases.insert(key_base.clone());
         let max_speed = helm.map(|h| h.0.max_speed).unwrap_or(12.5).max(0.1);
         let normalized = (physics.forward_speed / max_speed).clamp(0.0, 1.0);
         let cfg = helm.and_then(|h| h.0.engine_pfx.as_ref());
@@ -497,6 +500,25 @@ fn spawn_engine_trails(
             &mut meshes,
             &mut materials,
         );
+    }
+
+    // Prune trail ribbon entities for ships that no longer exist in the world.
+    // Emitter keys have the form "<key_base>:<emitter_idx>"; extract the base
+    // and drop every entry whose ship is no longer in the query.
+    let dead_keys: Vec<String> = state
+        .emitters
+        .keys()
+        .filter(|key| {
+            // Strip the trailing ":<emitter_idx>" suffix to recover the key_base.
+            let base = key.rsplitn(2, ':').nth(1).unwrap_or(key.as_str());
+            !live_key_bases.contains(base)
+        })
+        .cloned()
+        .collect();
+    for key in dead_keys {
+        if let Some(trail) = state.emitters.remove(&key) {
+            commands.entity(trail.entity).despawn();
+        }
     }
 }
 

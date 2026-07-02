@@ -6,8 +6,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ai_plugin::AiControllerComponent;
 use crate::beam_render;
-use crate::entity_config::{EnginePfxConfig, PhaserBankConfig, PhaserCombatConfig};
-use crate::entity_spawner::{EntityUuid, HelmConsoleSection, WeaponsConsoleSection};
+use crate::entity_config::{EnginePfxConfig, PhaserBankConfig};
+use crate::entity_spawner::{EntityUuid, HelmConsoleSection};
 use crate::messages::GamePhase;
 use crate::model_rig::ModelMarkers;
 use crate::ship_state::ShipPhysics;
@@ -126,12 +126,48 @@ struct EngineTrailState {
     emitters: HashMap<String, EmitterTrail>,
 }
 
+/// Unified beam-rendering system for every ship (player + NPC).
+///
+/// Iterates every ship with an `ActiveBeam` (`Query<..., With<Ship>>`) and
+/// upserts a beam-body + contact-glow pair per active beam. The per-ship
+/// `PhaserRenderConfig` component (color / range fallback) and
+/// `PhaserCombatConfigResource` (per-bank color / range / marker) are read
+/// from the shooter's own components — no separate player/NPC branches.
+///
+/// Beam origin: if the active bank has a `marker` name, use its transformed
+/// world position; otherwise a bank-aware fallback centered on the ship's
+/// [`Transform`] (bank facing → tangent offset around hull).
+///
+/// Beam end: target position resolved via [`target_position`] (asteroid, NPC,
+/// player ship, or ship-target-point), then clamped to the bank/render range
+/// via [`clamp_endpoint`] centered on the shooter's transform.
+///
+/// Key format: `"beam:<shooter_uuid>:<bank>:<target_uuid>"` — unique per
+/// (shooter, bank, target) so simultaneous beams from different shooters or
+/// different banks render as distinct entities.
 fn sync_phaser_beams(
-    physics_q: Query<&ShipPhysics, With<LocalShip>>,
-    beam_q: Query<&ActiveBeam, With<LocalShip>>,
-    render_cfg_q: Query<&PhaserRenderConfig, With<LocalShip>>,
+    // Every ship with an active beam. `EntityUuid` is `Option` because the
+    // legacy player-ship spawn path assigned no UUID in some code paths; when
+    // absent we synthesise `"local"` as the shooter identity.
+    beam_ships_q: Query<
+        (
+            &Transform,
+            Option<&ModelMarkers>,
+            &ActiveBeam,
+            Option<&EntityUuid>,
+            Option<&PhaserRenderConfig>,
+            Option<&PhaserCombatConfigResource>,
+            bevy::ecs::query::Has<LocalShip>,
+        ),
+        (
+            With<crate::server_app::Ship>,
+            Without<BeamBody>,
+            Without<BeamContactGlow>,
+        ),
+    >,
+    // Resource-level fallbacks kept for legacy code paths that read only the
+    // global resource (pre-PR-5 tests still work).
     render_cfg_res: Res<PhaserRenderConfig>,
-    combat_cfg_q: Query<&PhaserCombatConfigResource, With<LocalShip>>,
     combat_cfg_res: Res<PhaserCombatConfigResource>,
     asteroid_q: Query<
         (&AsteroidUuid, &Transform),
@@ -149,20 +185,6 @@ fn sync_phaser_beams(
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
         (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
-    npc_beam_q: Query<
-        (
-            &EntityUuid,
-            &Transform,
-            Option<&ModelMarkers>,
-            &ActiveBeam,
-            Option<&WeaponsConsoleSection>,
-        ),
-        (
-            With<AiControllerComponent>,
-            Without<BeamBody>,
-            Without<BeamContactGlow>,
-        ),
-    >,
     mut state: ResMut<BeamPfxState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -171,77 +193,48 @@ fn sync_phaser_beams(
     mut glow_q: Query<&mut Transform, (With<BeamContactGlow>, Without<BeamBody>)>,
 ) {
     let mut live_keys = HashSet::new();
-    let physics = physics_q.single().ok().copied().unwrap_or_default();
-    // Prefer per-entity component; fall back to global resource.
-    let render_cfg_default;
-    let render_cfg: &PhaserRenderConfig = match render_cfg_q.single() {
-        Ok(c) => c,
-        Err(_) => {
-            render_cfg_default = PhaserRenderConfig::default();
-            &render_cfg_default
-        }
-    };
-    let _ = render_cfg_res; // suppress unused-variable warning; resource kept for compat
-    let combat_cfg_default;
-    let combat_cfg: &PhaserCombatConfigResource = match combat_cfg_q.single() {
-        Ok(c) => c,
-        Err(_) => {
-            combat_cfg_default = PhaserCombatConfigResource::default();
-            &combat_cfg_default
-        }
-    };
-    let _ = combat_cfg_res; // suppress unused-variable warning; resource kept for compat
 
-    if let Ok(beam) = beam_q.single() {
-        if let Some(target_uuid) = &beam.target_uuid {
-        let key = format!(
-            "player:{}:{}",
-            beam.bank.as_ref().map(|b| b.as_str()).unwrap_or("default"),
-            target_uuid
-        );
-        let target_point_index = choose_target_point_index(
-            &key,
-            target_point_count(target_uuid, None, &entity_q, &player_ship_q),
-            &mut state,
-        );
-        if let Some((start, end, color)) = resolve_player_beam(
-            target_uuid,
-            &physics,
-            beam,
-            render_cfg,
-            &combat_cfg.0,
-            &asteroid_q,
-            &entity_q,
-            &player_ship_q,
-            target_point_index,
-        ) {
-            live_keys.insert(key.clone());
-            upsert_beam(
-                key,
-                start,
-                end,
-                color,
-                &mut state,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut body_q,
-                &mut glow_q,
-            );
-        }
-        }
-    }
-
+    // LocalShip UUID is needed by `target_position` / `target_point_count` to
+    // resolve beams that terminate on the player ship (NPC-fires-at-player).
     let player_ship_uuid = player_ship_q
         .single()
         .ok()
         .and_then(|(_, _, uuid)| uuid.map(|u| u.0.clone()));
 
-    for (src_uuid, src_t, src_markers, beam, weapons) in npc_beam_q.iter() {
+    for (
+        src_t,
+        src_markers,
+        beam,
+        src_uuid_opt,
+        render_cfg_opt,
+        combat_cfg_opt,
+        is_local,
+    ) in beam_ships_q.iter()
+    {
         let Some(target_uuid) = beam.target_uuid.clone() else {
             continue;
         };
-        let key = format!("npc:{}:{}", src_uuid.0, target_uuid);
+
+        // Shooter identity: prefer the entity's own UUID; for the LocalShip in
+        // legacy test harnesses without one, fall back to a stable string.
+        // NPCs always have a UUID from `entities::spawner::spawn_entity`; skip
+        // any that don't (nothing to key the render entity on).
+        let src_key: String = match src_uuid_opt {
+            Some(u) => u.0.clone(),
+            None if is_local => "local".to_string(),
+            None => continue,
+        };
+
+        let bank_id = beam.bank.as_deref().unwrap_or("default");
+        let key = format!("beam:{}:{}:{}", src_key, bank_id, target_uuid);
+
+        // Per-entity component paths (preferred). Fall back to the global
+        // Resource so pre-PR-5 test paths still render.
+        let render_cfg: &PhaserRenderConfig = render_cfg_opt.unwrap_or(&render_cfg_res);
+        let combat_cfg: &PhaserCombatConfigResource =
+            combat_cfg_opt.unwrap_or(&combat_cfg_res);
+        let bank_cfg = beam.bank.as_deref().and_then(|id| combat_cfg.0.bank_by_id(id));
+
         let target_point_index = choose_target_point_index(
             &key,
             target_point_count(
@@ -254,7 +247,7 @@ fn sync_phaser_beams(
         );
         let Some(target_pos) = target_position(
             &target_uuid,
-            &physics,
+            src_t,
             player_ship_uuid.as_deref(),
             target_point_index,
             &asteroid_q,
@@ -264,17 +257,21 @@ fn sync_phaser_beams(
             continue;
         };
 
-        let bank = weapons.and_then(|w| w.0.phaser_banks.first());
-        let color = bank
+        let color = bank_cfg
             .map(|b| beam_render::resolve_beam_color(&b.beam_color))
-            .unwrap_or(beam_render::DEFAULT_BEAM_COLOR);
-        let range = bank
+            .unwrap_or(render_cfg.beam_color);
+        let range = bank_cfg
             .map(|b| b.beam_range)
             .filter(|r| *r > 0.0)
-            .unwrap_or(PhaserCombatConfig::DEFAULT_PHASER_RANGE);
-        let origin = bank
+            .unwrap_or(render_cfg.beam_range);
+
+        // Origin: named marker takes priority; otherwise a bank-facing offset
+        // around ship center (falls through to bare ship center when no bank
+        // is defined). Uses the shooter's live Transform — position and yaw
+        // both come from there, so this works for player and NPC alike.
+        let origin = bank_cfg
             .and_then(|b| marker_origin(src_t, src_markers, b.marker.as_deref()))
-            .unwrap_or(src_t.translation + Vec3::new(0.0, BEAM_Y_OFFSET, 0.0));
+            .unwrap_or_else(|| bank_fallback_origin(src_t, bank_cfg));
         let end = clamp_endpoint(origin, target_pos, src_t.translation, range);
 
         live_keys.insert(key.clone());
@@ -305,64 +302,6 @@ fn sync_phaser_beams(
             commands.entity(entities.glow).despawn();
         }
     }
-}
-
-fn resolve_player_beam(
-    target_uuid: &str,
-    physics: &ShipPhysics,
-    beam: &ActiveBeam,
-    render_cfg: &PhaserRenderConfig,
-    combat_cfg: &PhaserCombatConfig,
-    asteroid_q: &Query<
-        (&AsteroidUuid, &Transform),
-        (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>),
-    >,
-    entity_q: &Query<
-        (&EntityUuid, &Transform, Option<&ModelMarkers>),
-        (
-            Without<Asteroid>,
-            Without<BeamBody>,
-            Without<BeamContactGlow>,
-        ),
-    >,
-    player_ship_q: &Query<
-        (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
-        (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
-    >,
-    target_point_index: Option<usize>,
-) -> Option<(Vec3, Vec3, [f32; 4])> {
-    let target_pos = target_position(
-        target_uuid,
-        physics,
-        None,
-        target_point_index,
-        asteroid_q,
-        entity_q,
-        player_ship_q,
-    )?;
-    let bank_id = beam.bank.as_deref();
-    let bank_config = bank_id.and_then(|id| combat_cfg.bank_by_id(id));
-    let color = bank_config
-        .map(|b| beam_render::resolve_beam_color(&b.beam_color))
-        .unwrap_or(render_cfg.beam_color);
-    let range = beam
-        .bank
-        .as_deref()
-        .and_then(|id| combat_cfg.bank_by_id(id))
-        .map(|b| b.beam_range)
-        .filter(|r| *r > 0.0)
-        .unwrap_or(render_cfg.beam_range);
-
-    let origin = if let Ok((transform, markers, _)) = player_ship_q.single() {
-        bank_config
-            .and_then(|b| marker_origin(transform, markers, b.marker.as_deref()))
-            .unwrap_or_else(|| player_bank_fallback_origin(physics, bank_config))
-    } else {
-        player_bank_fallback_origin(physics, bank_config)
-    };
-    let range_origin = Vec3::new(physics.x, BEAM_Y_OFFSET, physics.z);
-    let end = clamp_endpoint(origin, target_pos, range_origin, range);
-    Some((origin, end, color))
 }
 
 fn upsert_beam(
@@ -964,7 +903,7 @@ fn target_point_count(
 
 fn target_position(
     uuid: &str,
-    physics: &ShipPhysics,
+    shooter_transform: &Transform,
     player_ship_uuid: Option<&str>,
     target_point_index: Option<usize>,
     asteroid_q: &Query<
@@ -990,7 +929,9 @@ fn target_position(
                 return Some(point);
             }
         }
-        return Some(Vec3::new(physics.x, 0.0, physics.z));
+        // Degenerate: player_ship_q.single() failed but shooter is the player
+        // itself — return the shooter's transform position as a best-effort.
+        return Some(shooter_transform.translation);
     }
     asteroid_q
         .iter()
@@ -1038,13 +979,23 @@ fn marker_emitter(
     (direction.length_squared() > 1e-6).then_some((origin, direction.normalize()))
 }
 
-fn player_bank_fallback_origin(physics: &ShipPhysics, bank: Option<&PhaserBankConfig>) -> Vec3 {
-    let center = Vec3::new(physics.x, BEAM_Y_OFFSET, physics.z);
-    let forward = Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos());
-    let right = Vec3::new(physics.yaw.cos(), 0.0, physics.yaw.sin());
+/// Bank-aware fallback beam origin when the bank has no named marker.
+/// Positions the emitter around the ship's transform based on the bank's
+/// facing angle (forward for fore banks, right/left for beam banks, etc.),
+/// producing visually distinct emitter positions per bank.
+///
+/// Falls through to bare ship center when no bank config is available.
+fn bank_fallback_origin(src_t: &Transform, bank: Option<&PhaserBankConfig>) -> Vec3 {
+    let center = Vec3::new(src_t.translation.x, BEAM_Y_OFFSET, src_t.translation.z);
     let Some(bank) = bank else {
         return center;
     };
+    // Recover yaw from the transform's rotation. `Transform::rotation` is the
+    // authoritative attitude for both player and NPC ships — matches ship
+    // rendering and the physics-integrator output.
+    let (yaw, _pitch, _roll) = src_t.rotation.to_euler(bevy::math::EulerRot::YXZ);
+    let forward = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
+    let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
     let facing = bank.facing_deg.to_radians();
     center + forward * facing.cos() * 3.0 + right * facing.sin() * beam_render::BANK_HULL_OFFSET
 }

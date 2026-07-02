@@ -289,76 +289,78 @@ pub fn operate_helm(
 ) -> (f32, f32) {
     use crate::messages::{AiDirective, SystemAffinity};
 
-    // Find top-scoring directive with Helm relevance (score > 0).
-    // Helm serves: Patrol, Destroy, Reach. None of these if score == 0.
-    let top = scored_pool
+    // Iterate directives in descending score order. A directive that cannot
+    // produce movement (e.g. Destroy with an unresolvable target, or Reach
+    // with an unknown anchor) returns (0, 0) — in that case we fall through
+    // to the next lower-priority directive rather than leaving the ship idle.
+    // This ensures a Patrol objective acts as a default when the higher-scored
+    // Destroy target has not yet appeared in the world snapshot (as happens at
+    // the start of combat_test.toml where wave objectives are added on the
+    // same tick as the entities spawn).
+    for objective in scored_pool
         .iter()
-        .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm));
-
-    match top.map(|o| &o.directive) {
-        Some(AiDirective::Destroy { target }) => {
-            // Find matching doctrine entry for target_speed / maintain_range config.
-            let cfg = doctrine
-                .iter()
-                .find(|d| top.map(|o| o.id == d.id).unwrap_or(false));
-            let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.8);
-            let maintain_range = cfg.map(|d| d.maintain_range).unwrap_or(25.0);
-            helm_destroy(
-                memory,
-                world_view,
-                anchors,
-                avoidance_buffer,
-                avoidance_look_ahead_secs,
-                forward_speed,
-                faction_registry,
-                Some(target.as_str()),
-                target_speed,
-                maintain_range,
-            )
-        }
-        Some(AiDirective::Patrol {
-            anchors: waypoints,
-            loop_path,
-        }) => {
-            let cfg = doctrine
-                .iter()
-                .find(|d| top.map(|o| o.id == d.id).unwrap_or(false));
-            let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.5);
-            helm_patrol(
-                memory,
-                world_view,
-                waypoints,
-                *loop_path,
-                waypoint_arrival_radius,
-                avoidance_buffer,
-                avoidance_look_ahead_secs,
-                forward_speed,
-                target_speed,
-                anchors,
-            )
-        }
-        Some(AiDirective::Reach { anchor }) => {
-            let cfg = doctrine
-                .iter()
-                .find(|d| top.map(|o| o.id == d.id).unwrap_or(false));
-            let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.6);
-            if let Some(&pos) = anchors.get(anchor.as_str()) {
-                helm_navigate_to(
+        .filter(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm))
+    {
+        let cfg = doctrine.iter().find(|d| d.id == objective.id);
+        let result = match &objective.directive {
+            AiDirective::Destroy { target } => {
+                let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.8);
+                let maintain_range = cfg.map(|d| d.maintain_range).unwrap_or(25.0);
+                helm_destroy(
                     memory,
                     world_view,
-                    pos,
+                    anchors,
+                    avoidance_buffer,
+                    avoidance_look_ahead_secs,
+                    forward_speed,
+                    faction_registry,
+                    Some(target.as_str()),
+                    target_speed,
+                    maintain_range,
+                )
+            }
+            AiDirective::Patrol {
+                anchors: waypoints,
+                loop_path,
+            } => {
+                let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.5);
+                helm_patrol(
+                    memory,
+                    world_view,
+                    waypoints,
+                    *loop_path,
                     waypoint_arrival_radius,
                     avoidance_buffer,
                     avoidance_look_ahead_secs,
                     forward_speed,
                     target_speed,
+                    anchors,
                 )
-            } else {
-                (0.0, 0.0)
             }
+            AiDirective::Reach { anchor } => {
+                let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.6);
+                if let Some(&pos) = anchors.get(anchor.as_str()) {
+                    helm_navigate_to(
+                        memory,
+                        world_view,
+                        pos,
+                        waypoint_arrival_radius,
+                        avoidance_buffer,
+                        avoidance_look_ahead_secs,
+                        forward_speed,
+                        target_speed,
+                    )
+                } else {
+                    (0.0, 0.0)
+                }
+            }
+            _ => (0.0, 0.0),
+        };
+        if result != (0.0, 0.0) {
+            return result;
         }
-        _ => (0.0, 0.0),
     }
+    (0.0, 0.0)
 }
 
 /// Helm execute: pursue/attack using `memory.target` (or discover a new hostile).
@@ -971,6 +973,176 @@ mod tests {
         assert_eq!(
             memory.waypoint_index, 1,
             "should advance past arrived waypoint"
+        );
+    }
+
+    // ── operate_helm fallback ─────────────────────────────────────────────
+
+    /// Build a scored pool with Destroy (high score, unresolvable target) first,
+    /// then Patrol (lower score, resolvable anchor) second.
+    fn destroy_then_patrol_pool(anchors: &std::collections::HashMap<String, [f32; 3]>) -> Vec<crate::messages::ScoredObjective> {
+        let _ = anchors; // anchors used externally; pool just carries names
+        vec![
+            crate::messages::ScoredObjective {
+                id: "destroy-wave-1".into(),
+                score: 90.0,
+                directive: crate::messages::AiDirective::Destroy {
+                    target: "wave_1".into(), // entity not in world_view → unresolvable
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![
+                    crate::messages::SystemAffinity::Helm,
+                    crate::messages::SystemAffinity::Weapons,
+                    crate::messages::SystemAffinity::Captain,
+                ],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "destroy-wave-1".into(),
+                    text: "Destroy wave 1".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec!["wave_1".into()],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            },
+            crate::messages::ScoredObjective {
+                id: "patrol-base".into(),
+                score: 30.0,
+                directive: crate::messages::AiDirective::Patrol {
+                    anchors: vec!["alpha".into()],
+                    loop_path: true,
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "patrol-base".into(),
+                    text: "Patrol".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            },
+        ]
+    }
+
+    #[test]
+    fn operate_helm_falls_through_unresolvable_destroy_to_patrol() {
+        // Regression: when the top Destroy directive has no valid target in the
+        // world snapshot (entity not yet spawned / not in WorldSnapshot),
+        // operate_helm must fall through to the next lower-priority directive
+        // (Patrol) rather than leaving the ship idle.  Matches the
+        // combat_test.toml scenario where wave objectives are added on the same
+        // tick as the entities spawn, before the WorldSnapshot is rebuilt.
+        let mut memory = AiMemory::default();
+        let world = world_at_origin(); // entities list is empty → wave_1 not found
+        let anchors = anchors_with_alpha();
+        let pool = destroy_then_patrol_pool(&anchors);
+
+        let (thrust, _steering) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+        );
+        assert!(
+            thrust > 0.0,
+            "should fall through to Patrol and produce thrust when Destroy target is unresolvable"
+        );
+    }
+
+    #[test]
+    fn operate_helm_uses_destroy_when_target_exists_not_patrol() {
+        // Regression guard: when the Destroy target IS in the world snapshot,
+        // the ship must pursue that target and NOT fall through to Patrol.
+        let target_uuid = Uuid::new_v4();
+        let mut memory = AiMemory::default();
+        let mut anchors = anchors_with_alpha();
+        // Place the patrol anchor directly ahead so patrol would also produce
+        // positive thrust — this confirms Destroy wins by checking the memory
+        // target, not just thrust direction.
+        anchors.insert("alpha".into(), [100.0, 0.0, 0.0]);
+
+        // Target is far away in a different direction (to the side) so the
+        // Destroy path steers differently from the patrol path.
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: target_uuid,
+                name: Some("wave_1".into()),
+                position: [0.0, 0.0, -200.0], // behind the ship
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let pool = vec![
+            crate::messages::ScoredObjective {
+                id: "destroy-wave-1".into(),
+                score: 90.0,
+                directive: crate::messages::AiDirective::Destroy {
+                    target: "wave_1".into(),
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![
+                    crate::messages::SystemAffinity::Helm,
+                    crate::messages::SystemAffinity::Weapons,
+                    crate::messages::SystemAffinity::Captain,
+                ],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "destroy-wave-1".into(),
+                    text: "Destroy wave 1".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec!["wave_1".into()],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            },
+            crate::messages::ScoredObjective {
+                id: "patrol-base".into(),
+                score: 30.0,
+                directive: crate::messages::AiDirective::Patrol {
+                    anchors: vec!["alpha".into()],
+                    loop_path: true,
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "patrol-base".into(),
+                    text: "Patrol".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            },
+        ];
+
+        operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+        );
+
+        // The Destroy path sets memory.target to the resolved UUID.
+        assert_eq!(
+            memory.target,
+            Some(target_uuid),
+            "memory.target must be set by Destroy path, not left None by Patrol"
         );
     }
 

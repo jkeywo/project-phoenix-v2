@@ -21,7 +21,7 @@ use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{ShipBoost, ShipImpulse};
-use crate::server_app::LocalShip;
+use crate::server_app::{LocalShip, Ship};
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Resources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -211,8 +211,8 @@ struct HelmDriveParams<'w, 's> {
     impulse_cfg_res: Option<Res<'w, ImpulseConfigResource>>,
     boost_cfg_res: Option<Res<'w, BoostConfigResource>>,
     bank_cfg_res: Option<Res<'w, BankConfigResource>>,
-    /// Impulse and boost drive state (still global Resources; per-entity in PR 6/7).
-    impulse: Res<'w, ShipImpulse>,
+    /// Per-entity impulse state on the LocalShip (Component, not Resource).
+    impulse_q: Query<'w, 's, &'static ShipImpulse, With<LocalShip>>,
     boost: Res<'w, ShipBoost>,
 }
 
@@ -319,7 +319,8 @@ fn process_helm_inputs(
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
     // last cached helm input so a stale steering/thrust value can't
     // resurface the moment impulse cancels or the autopilot disengages.
-    let current_phase = drive.impulse.0.phase;
+    let current_phase = drive.impulse_q.iter().next().map(|i| i.0.phase)
+        .unwrap_or(crate::impulse::ImpulsePhase::Idle);
     if Some(current_phase) != *prev_phase {
         if current_phase == crate::impulse::ImpulsePhase::Charging {
             last_input.thrust = 0.0;
@@ -360,7 +361,7 @@ fn process_helm_inputs(
         yaw: physics.yaw,
         forward_speed: physics.forward_speed,
     };
-    let impulse_active = drive.impulse.0.is_active();
+    let impulse_active = drive.impulse_q.iter().next().map(|i| i.0.is_active()).unwrap_or(false);
     let input = if impulse_active {
         // Autopilot: full forward thrust, zero steering. Player input is ignored.
         ShipPhysicsInput {
@@ -699,7 +700,7 @@ fn sync_ship_position(
 
 pub fn handle_impulse_messages(
     ship_ac_query: Query<&AdmittedCommands, With<LocalShip>>,
-    mut impulse: ResMut<ShipImpulse>,
+    mut impulse_q: Query<&mut ShipImpulse, With<LocalShip>>,
     hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
     mut last_hull_hp: Local<f32>,
     membership: Option<Res<RegionMembership>>,
@@ -707,6 +708,9 @@ pub fn handle_impulse_messages(
     ship_query: Query<Entity, With<LocalShip>>,
 ) {
     let Some(admitted) = ship_ac_query.iter().next() else {
+        return;
+    };
+    let Some(mut impulse) = impulse_q.iter_mut().next() else {
         return;
     };
     let hull_total = hull_q.single().map(|h| (h.0.total_current(), h.0.total_max())).unwrap_or((100.0, 100.0));
@@ -737,17 +741,20 @@ pub fn handle_impulse_messages(
 
 fn tick_impulse(
     time: Res<Time>,
-    mut impulse: ResMut<ShipImpulse>,
-    // Per-entity component takes priority; Resource is the fallback.
-    config_q: Query<&ImpulseConfigResource, With<LocalShip>>,
+    mut ships_q: Query<(&mut ShipImpulse, Option<&ImpulseConfigResource>), With<Ship>>,
     config_res: Option<Res<ImpulseConfigResource>>,
 ) {
-    let charge_duration = config_q
-        .single()
+    let dt = time.delta_secs();
+    let fallback_duration = config_res
+        .as_deref()
         .map(|c| c.charge_duration)
-        .or_else(|_| config_res.as_deref().map(|c| c.charge_duration).ok_or(()))
         .unwrap_or(crate::impulse::IMPULSE_CHARGE_DURATION);
-    impulse.0.tick(time.delta_secs(), charge_duration);
+    for (mut impulse, entity_cfg) in ships_q.iter_mut() {
+        let charge_duration = entity_cfg
+            .map(|c| c.charge_duration)
+            .unwrap_or(fallback_duration);
+        impulse.0.tick(dt, charge_duration);
+    }
 }
 
 /// Toggle the boost drive in response to Helm boost controls. No-op when
@@ -797,7 +804,7 @@ fn tick_boost(
     boost_cfg_res: Option<Res<BoostConfigResource>>,
     last_input_q: Query<&LastHelmInput, With<LocalShip>>,
     sessions: Res<Sessions>,
-    impulse: Res<ShipImpulse>,
+    impulse_q: Query<&ShipImpulse, With<LocalShip>>,
     ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<LocalShip>>,
 ) {
     let Some((ship_config, control_sources)) = ship_components.iter().next() else {
@@ -818,9 +825,10 @@ fn tick_boost(
         .console_holder(&crate::messages::Console::Helm, &ship_config.0)
         .is_some()
         || policy.operate_ai;
+    let impulse_active = impulse_q.iter().next().map(|i| i.0.is_active()).unwrap_or(false);
     let drain_factor = if !has_helm {
         0.0
-    } else if impulse.0.is_active() {
+    } else if impulse_active {
         normalized_boost_drain_factor(1.0, 0.0)
     } else {
         normalized_boost_drain_factor(last_input.thrust, last_input.steering)
@@ -1126,6 +1134,8 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
+            // TODO: remove, ShipImpulse is a Component (not a Resource) since #b4b0605;
+            // kept here only to avoid breaking any remaining Resource-based readers in tests.
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
@@ -1152,6 +1162,7 @@ mod tests {
             ),
             LastHelmInput::default(),
             crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
         ));
         app
     }
@@ -1292,6 +1303,29 @@ mod tests {
 
     // ── Helm system control-source tests ───────────────────────────────────
 
+    fn get_ship_impulse(app: &mut App) -> crate::impulse::ImpulseState {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipImpulse, With<LocalShip>>();
+        q.single(app.world())
+            .expect("expected LocalShip entity with ShipImpulse")
+            .0
+            .clone()
+    }
+
+    fn set_ship_impulse(app: &mut App, state: crate::impulse::ImpulseState) {
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<ShipImpulse>()
+            .unwrap()
+            .0 = state;
+    }
+
     #[test]
     fn control_system_helm_input_updates_last_input_and_moves_ship() {
         let mut app = test_app();
@@ -1396,7 +1430,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Charging,
             "impulse should be charging after StartImpulseCharge"
         );
@@ -1405,7 +1439,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Idle,
             "impulse charge should be cancelled when hull damage is taken"
         );
@@ -1415,14 +1449,21 @@ mod tests {
     fn hull_damage_cancels_active_impulse() {
         let mut app = test_app();
         start_game_with_helm_and_science(&mut app);
+        // One tick to let handle_impulse_messages initialise last_hull_hp from the
+        // current (undamaged) hull, so a subsequent damage event is detected.
+        tick(&mut app);
 
         {
-            let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
-            imp.0.start_charge();
-            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+            let active = {
+                let mut s = crate::impulse::ImpulseState::new();
+                s.start_charge();
+                s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+                s
+            };
+            set_ship_impulse(&mut app, active);
         }
         assert!(
-            app.world().resource::<ShipImpulse>().0.is_active(),
+            get_ship_impulse(&mut app).is_active(),
             "impulse should be active before damage"
         );
 
@@ -1430,7 +1471,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Idle,
             "active impulse should be cancelled when hull damage is taken"
         );
@@ -1454,7 +1495,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Charging,
             "impulse should still be charging when no damage occurred"
         );
@@ -1476,7 +1517,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Charging,
         );
     }
@@ -1497,7 +1538,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Charging,
         );
     }
@@ -1527,7 +1568,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Idle,
         );
     }
@@ -1557,7 +1598,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Idle,
         );
     }
@@ -1622,7 +1663,7 @@ mod tests {
         start_game_with_helm_and_science(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Idle,
             "impulse should be idle before StartImpulseCharge"
         );
@@ -1638,7 +1679,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Idle,
             "StartImpulseCharge should be ignored inside BlocksImpulse region"
         );
@@ -1663,7 +1704,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Charging,
             "StartImpulseCharge should work when outside BlocksImpulse region"
         );
@@ -1690,9 +1731,10 @@ mod tests {
 
         // Activate impulse directly (bypass charge).
         {
-            let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
-            imp.0.start_charge();
-            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+            let mut s = crate::impulse::ImpulseState::new();
+            s.start_charge();
+            s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+            set_ship_impulse(&mut app, s);
         }
 
         // Player tries to fight the autopilot: zero thrust, hard right steer.
@@ -1780,9 +1822,10 @@ mod tests {
 
         // Activate impulse directly (bypass charge).
         {
-            let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
-            imp.0.start_charge();
-            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+            let mut s = crate::impulse::ImpulseState::new();
+            s.start_charge();
+            s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+            set_ship_impulse(&mut app, s);
         }
         tick(&mut app);
 
@@ -2085,7 +2128,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
+            get_ship_impulse(&mut app).phase,
             ImpulsePhase::Charging,
             "impulse should be charging after StartImpulseCharge"
         );

@@ -75,10 +75,27 @@ impl Plugin for ShipShieldsPlugin {
                     handle_shields_messages.in_set(crate::sim_sets::SimSet::Input),
                     emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
                     operate_shields_ai.in_set(crate::sim_sets::SimSet::Physics),
+                    tick_shields.in_set(crate::sim_sets::SimSet::Modifiers),
                     publish_shields_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             )
             .add_plugins(shields_state_broadcaster());
+    }
+}
+
+/// Tick shield regen and offline timers each frame for every ship
+/// (player + NPCs). PR-7 (issue #597) unifies this with the old
+/// `tick_npc_shield_regen` — one system iterating all ships with `Ship` marker.
+pub fn tick_shields(
+    time: Res<Time>,
+    mut shields_q: Query<&mut ShipShields, With<crate::server_app::Ship>>,
+) {
+    let dt = time.delta_secs();
+    if dt <= 0.0 {
+        return;
+    }
+    for mut shield in shields_q.iter_mut() {
+        shield.0.tick(dt);
     }
 }
 
@@ -236,7 +253,7 @@ fn publish_shields_blackboard(
     shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
     hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
     physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>,
-    weapons_target: Option<Res<crate::weapons_plugin::WeaponsTarget>>,
+    weapons_target_q: Query<&crate::weapons_plugin::WeaponsTarget, With<crate::server_app::LocalShip>>,
     asteroid_q: Query<
         (&crate::simulation::AsteroidUuid, &Transform),
         Without<crate::entity_spawner::EntityUuid>,
@@ -288,7 +305,7 @@ fn publish_shields_blackboard(
     }
     .to_string();
 
-    let target_bearing = weapons_target.as_ref().and_then(|wt| {
+    let target_bearing = weapons_target_q.single().ok().and_then(|wt| {
         let uuid = wt.0.as_ref()?;
         let live = asteroid_q
             .iter()

@@ -11,7 +11,6 @@ pub struct NavigationPlugin;
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         app
-            .init_resource::<NavigationWaypoint>()
             .add_systems(
                 Update,
                 handle_navigation_waypoint.in_set(crate::sim_sets::SimSet::Input),
@@ -41,9 +40,9 @@ impl Plugin for NavigationPlugin {
 /// waypoint that follows the named entity's transform until the entity
 /// despawns.
 ///
-/// Derives both `Resource` (existing player-ship singleton) and `Component`
-/// (per-entity path after issue #592 unification).
-#[derive(Resource, Component, Default, Clone, Debug, PartialEq)]
+/// Per-entity `Component` on every ship (player + NPC). PR-7 (issue #597)
+/// removed the dual `Resource` derive — every ship has its own waypoint.
+#[derive(Component, Default, Clone, Debug, PartialEq)]
 pub struct NavigationWaypoint(pub Option<WaypointMode>);
 
 /// Storage variant of the navigation waypoint.
@@ -88,9 +87,12 @@ impl NavigationWaypoint {
 
 fn handle_navigation_waypoint(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
-    mut waypoint: ResMut<NavigationWaypoint>,
+    mut waypoint_q: Query<&mut NavigationWaypoint, With<crate::server_app::LocalShip>>,
 ) {
     let Ok(admitted) = ship_query.single() else {
+        return;
+    };
+    let Ok(mut waypoint) = waypoint_q.single_mut() else {
         return;
     };
     for cmd in admitted.for_target(NAVIGATION_SYSTEM_ID) {
@@ -126,9 +128,12 @@ fn make_waypoint_mode(x: f32, z: f32, source_uuid: Option<&str>) -> WaypointMode
 /// waypoint's stored coordinates. If no entity carries the anchored UUID,
 /// auto-clear the waypoint (per the despawn policy).
 fn refresh_anchored_waypoint(
-    mut waypoint: ResMut<NavigationWaypoint>,
+    mut waypoint_q: Query<&mut NavigationWaypoint, With<crate::server_app::LocalShip>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform)>,
 ) {
+    let Ok(mut waypoint) = waypoint_q.single_mut() else {
+        return;
+    };
     let Some(WaypointMode::Anchored {
         source_uuid,
         last_x,
@@ -158,15 +163,16 @@ fn refresh_anchored_waypoint(
 
 fn publish_navigation_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    waypoint: Res<NavigationWaypoint>,
+    waypoint_q: Query<&NavigationWaypoint, With<crate::server_app::LocalShip>>,
     mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     let cfg = &ship_config.0;
+    let navigation_waypoint = waypoint_q.single().ok().and_then(|w| w.snapshot());
     let bb = NavigationBlackboard {
         nav_chart_range: cfg.nav_chart_range,
         nav_chart_shows: cfg.nav_chart_shows.clone(),
         nav_chart_selects: cfg.nav_chart_selects.clone(),
-        navigation_waypoint: waypoint.snapshot(),
+        navigation_waypoint,
     };
 
     if let Ok(mut bbs) = ship_bbs_q.single_mut() {
@@ -276,8 +282,18 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
+            // PR 7 (issue #597) — NavigationWaypoint is now a per-entity Component.
+            NavigationWaypoint::default(),
         ));
         app
+    }
+
+    /// PR 7 test helper — read the LocalShip's `NavigationWaypoint` component.
+    fn get_nav_waypoint(app: &mut App) -> Option<WaypointMode> {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&NavigationWaypoint, With<crate::server_app::LocalShip>>();
+        q.single(app.world()).ok().and_then(|w| w.0.clone())
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
@@ -376,7 +392,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<NavigationWaypoint>().0,
+            get_nav_waypoint(&mut app),
             Some(WaypointMode::Free { x: 120.0, z: -45.0 })
         );
 
@@ -389,7 +405,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
+        assert!(get_nav_waypoint(&mut app).is_none());
     }
 
     #[test]
@@ -410,7 +426,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
+        assert!(get_nav_waypoint(&mut app).is_none());
     }
 
     #[test]
@@ -431,7 +447,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
+        assert!(get_nav_waypoint(&mut app).is_none());
     }
 
     #[test]
@@ -560,12 +576,12 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<NavigationWaypoint>().0.is_some());
+        assert!(get_nav_waypoint(&mut app).is_some());
 
         // Despawn the parent entity. The next tick must auto-clear.
         app.world_mut().entity_mut(target).despawn();
         let out = tick(&mut app);
-        assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
+        assert!(get_nav_waypoint(&mut app).is_none());
         let bb = latest_navigation_blackboard(&out).expect("expected NavigationBlackboard");
         assert!(bb.navigation_waypoint.is_none());
     }
@@ -589,7 +605,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<NavigationWaypoint>().0,
+            get_nav_waypoint(&mut app),
             Some(WaypointMode::Free { x: 1.0, z: 2.0 })
         );
     }
@@ -616,7 +632,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<NavigationWaypoint>().0,
+            get_nav_waypoint(&mut app),
             Some(WaypointMode::Free { x: 200.0, z: -80.0 })
         );
 
@@ -629,7 +645,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
+        assert!(get_nav_waypoint(&mut app).is_none());
     }
 
     /// Non-navigation sender sends `ControlSystem` waypoint — rejected.
@@ -652,7 +668,7 @@ mod tests {
         );
         tick(&mut app);
         assert!(
-            app.world().resource::<NavigationWaypoint>().0.is_none(),
+            get_nav_waypoint(&mut app).is_none(),
             "non-navigation sender should be rejected"
         );
     }
@@ -687,7 +703,7 @@ mod tests {
         );
         tick(&mut app);
         assert!(
-            app.world().resource::<NavigationWaypoint>().0.is_none(),
+            get_nav_waypoint(&mut app).is_none(),
             "should reject waypoint when navigation is AI-controlled"
         );
     }
@@ -721,7 +737,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<NavigationWaypoint>().0,
+            get_nav_waypoint(&mut app),
             Some(WaypointMode::Anchored {
                 source_uuid: target_uuid.into(),
                 last_x: 30.0,
@@ -735,7 +751,7 @@ mod tests {
             .insert(Transform::from_xyz(40.0, 0.0, -70.0));
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<NavigationWaypoint>().0,
+            get_nav_waypoint(&mut app),
             Some(WaypointMode::Anchored {
                 source_uuid: target_uuid.into(),
                 last_x: 40.0,
@@ -763,7 +779,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<NavigationWaypoint>().0,
+            get_nav_waypoint(&mut app),
             Some(WaypointMode::Free { x: 15.0, z: 25.0 })
         );
     }
@@ -795,7 +811,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
+        assert!(get_nav_waypoint(&mut app).is_none());
     }
 
     /// Verifies operate_navigation_ai runs per-entity for AI-controlled ships (issue #592 AC).

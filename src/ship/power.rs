@@ -1122,26 +1122,42 @@ mod tests {
             // Power resources and handler.
             .insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
-            // Weapons resources and emitter.
-            .init_resource::<ActiveBeam>()
             .init_resource::<crate::messages::InterSystemQueue>()
             // Chain emitter before consumer so the queue is populated before it's read.
             .add_systems(
                 Update,
                 (drain_power_for_active_beam, handle_power_inter_system).chain(),
             );
+        // Spawn a LocalShip entity carrying the per-entity ActiveBeam component.
+        // After PR-7 (issue #597) `ActiveBeam` is a per-entity `Component`, not a `Resource`.
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            crate::simulation::LocalShip,
+            ActiveBeam::default(),
+        ));
         // Warm up the time plugin so delta_secs is non-zero on the first real tick.
         app.update();
         app
     }
 
+    /// Helper: mutate the LocalShip's `ActiveBeam` component in tests.
+    fn set_beam_target(app: &mut App, uuid: Option<String>) {
+        use crate::console::weapons::server::ActiveBeam;
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ActiveBeam, With<crate::simulation::LocalShip>>();
+        if let Ok(mut b) = q.single_mut(app.world_mut()) {
+            b.target_uuid = uuid;
+        }
+    }
+
     #[test]
     fn active_beam_drains_power_battery_via_inter_system_channel() {
-        use crate::console::weapons::server::{ActiveBeam, PHASER_BATTERY_DRAIN_PER_SEC};
+        use crate::console::weapons::server::PHASER_BATTERY_DRAIN_PER_SEC;
         let mut app = inter_system_test_app();
 
         // Simulate an active phaser beam.
-        app.world_mut().resource_mut::<ActiveBeam>().target_uuid = Some("target-asteroid".into());
+        set_beam_target(&mut app, Some("target-asteroid".into()));
 
         let charge_before = app.world().resource::<ShipPowerSystem>().0.battery_charge;
         app.update();
@@ -1175,7 +1191,6 @@ mod tests {
 
     #[test]
     fn inter_system_drain_clamps_battery_to_zero() {
-        use crate::console::weapons::server::ActiveBeam;
         let mut app = inter_system_test_app();
 
         // Set battery nearly empty (less than one tick of drain).
@@ -1183,7 +1198,7 @@ mod tests {
             .resource_mut::<ShipPowerSystem>()
             .0
             .battery_charge = 0.1;
-        app.world_mut().resource_mut::<ActiveBeam>().target_uuid = Some("target-asteroid".into());
+        set_beam_target(&mut app, Some("target-asteroid".into()));
 
         app.update();
 

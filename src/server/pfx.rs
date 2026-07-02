@@ -12,7 +12,7 @@ use crate::messages::GamePhase;
 use crate::model_rig::ModelMarkers;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{
-    ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, Ship,
+    ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig,
     TorpedoSystemResource,
 };
 use crate::weapons_plugin::PhaserCombatConfigResource;
@@ -128,7 +128,7 @@ struct EngineTrailState {
 
 fn sync_phaser_beams(
     physics_q: Query<&ShipPhysics, With<LocalShip>>,
-    beam: Res<ActiveBeam>,
+    beam_q: Query<&ActiveBeam, With<LocalShip>>,
     render_cfg_q: Query<&PhaserRenderConfig, With<LocalShip>>,
     render_cfg_res: Res<PhaserRenderConfig>,
     combat_cfg_q: Query<&PhaserCombatConfigResource, With<LocalShip>>,
@@ -188,7 +188,8 @@ fn sync_phaser_beams(
     };
     let _ = combat_cfg_res; // suppress unused-variable warning; resource kept for compat
 
-    if let Some(target_uuid) = &beam.target_uuid {
+    if let Ok(beam) = beam_q.single() {
+        if let Some(target_uuid) = &beam.target_uuid {
         let key = format!(
             "player:{}:{}",
             beam.bank.as_ref().map(|b| b.as_str()).unwrap_or("default"),
@@ -202,7 +203,7 @@ fn sync_phaser_beams(
         if let Some((start, end, color)) = resolve_player_beam(
             target_uuid,
             &physics,
-            &beam,
+            beam,
             render_cfg,
             &combat_cfg.0,
             &asteroid_q,
@@ -223,6 +224,7 @@ fn sync_phaser_beams(
                 &mut body_q,
                 &mut glow_q,
             );
+        }
         }
     }
 

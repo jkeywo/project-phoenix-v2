@@ -7,7 +7,6 @@ use crate::messages::{
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
-use crate::simulation::WeaponsTarget;
 
 // Placeholder shield frequency returned until entities expose a real value.
 const PLACEHOLDER_SHIELD_FREQUENCY: f32 = 0.5;
@@ -18,9 +17,9 @@ const PLACEHOLDER_SHIELD_FREQUENCY: f32 = 0.5;
 /// no target is selected. Broadcast to all clients via SensorsBlackboard so
 /// every radar can render a blue science-target marker.
 ///
-/// Derives both `Resource` (existing player-ship singleton) and `Component`
-/// (per-entity path after issue #589 unification).
-#[derive(Resource, Component, Default, Clone, Debug)]
+/// Per-entity `Component` on every ship (player + NPC). PR-7 (issue #597)
+/// removed the dual `Resource` derive — every ship has its own sensors target.
+#[derive(Component, Default, Clone, Debug)]
 pub struct SensorsTarget(pub Option<String>);
 
 /// Tracks the last frequency value sent for a given target so we avoid
@@ -39,7 +38,6 @@ impl Plugin for ShipSensorsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<SensorsFrequencyState>()
-            .init_resource::<SensorsTarget>()
             .add_systems(
                 Update,
                 (
@@ -70,7 +68,6 @@ pub fn handle_sensors_messages(
     >,
     mut sensors_q: Query<&mut SensorsTarget, With<crate::server_app::LocalShip>>,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
-    mut sensors_target: ResMut<SensorsTarget>,
 ) {
     let Ok((admitted, ship_config)) = ship_query.single() else {
         return;
@@ -81,8 +78,7 @@ pub fn handle_sensors_messages(
             continue;
         };
 
-        // Write to global resource (backward compat) and per-entity component.
-        sensors_target.0 = Some(uuid.clone());
+        // Write to the per-entity component on LocalShip.
         if let Ok(mut entity_target) = sensors_q.single_mut() {
             entity_target.0 = Some(uuid.clone());
         }
@@ -109,13 +105,14 @@ pub fn handle_sensors_messages(
 /// AI-controlled — the coordination bus handles routing (AI Tactical consumes
 /// silently; Human Tactical receives a popup).
 pub fn tick_sensors_frequency_hint(
-    weapons_target: Res<WeaponsTarget>,
+    weapons_target_q: Query<&crate::simulation::WeaponsTarget, With<crate::server_app::LocalShip>>,
     mut state: ResMut<SensorsFrequencyState>,
     ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    let current_target = match &weapons_target.0 {
-        Some(uuid) => uuid.clone(),
+    let weapons_target = weapons_target_q.single().ok();
+    let current_target = match weapons_target.and_then(|wt| wt.0.clone()) {
+        Some(uuid) => uuid,
         None => {
             state.last_sent_target = None;
             state.last_sent_frequency = None;
@@ -156,15 +153,16 @@ pub fn tick_sensors_frequency_hint(
 
 pub fn publish_sensors_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    sensors_target: Res<SensorsTarget>,
+    sensors_target_q: Query<&SensorsTarget, With<crate::server_app::LocalShip>>,
     mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
 ) {
     let cfg = &ship_config.0;
+    let science_target_uuid = sensors_target_q.single().ok().and_then(|st| st.0.clone());
     let bb = SensorsBlackboard {
         radar_range: cfg.sensors_radar_range,
         radar_shows: cfg.sensors_radar_shows.clone(),
         radar_selects: cfg.sensors_radar_selects.clone(),
-        science_target_uuid: sensors_target.0.clone(),
+        science_target_uuid,
     };
 
     if let Ok(mut bbs) = ship_bbs_q.single_mut() {
@@ -231,7 +229,6 @@ mod tests {
             ])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<SimOutbox>()
-            .init_resource::<WeaponsTarget>()
             .init_resource::<Outbox>()
             .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(ShipSensorsPlugin)
@@ -246,6 +243,8 @@ mod tests {
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             SensorsTarget::default(),
+            // PR 7 (issue #597) — WeaponsTarget is now per-entity Component.
+            crate::simulation::WeaponsTarget::default(),
         ));
         app
     }
@@ -392,15 +391,25 @@ mod tests {
         );
     }
 
+    /// Set the LocalShip's per-entity `WeaponsTarget` for tests.
+    fn set_local_weapons_target(app: &mut App, uuid: Option<String>) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::LocalShip>>();
+        if let Ok(mut wt) = q.single_mut(app.world_mut()) {
+            wt.0 = uuid;
+        }
+    }
+
     #[test]
     fn frequency_hint_emitted_when_target_changes() {
         let mut app = test_app();
         start_game_with_sensors_and_tactical(&mut app);
 
-        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("asteroid-1".into());
+        set_local_weapons_target(&mut app, Some("asteroid-1".into()));
         tick(&mut app); // emits first hint
 
-        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("asteroid-2".into());
+        set_local_weapons_target(&mut app, Some("asteroid-2".into()));
         let enqueue_count = {
             // Tick and count CoordinationEnqueue events written
             app.update();
@@ -423,7 +432,7 @@ mod tests {
         let mut app = test_app();
         start_game_with_sensors_and_tactical(&mut app);
 
-        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("asteroid-1".into());
+        set_local_weapons_target(&mut app, Some("asteroid-1".into()));
         tick(&mut app); // first emit
 
         let state_before = app

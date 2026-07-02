@@ -315,7 +315,6 @@ pub fn add_simulation_plugins(app: &mut App) {
         Update,
         (
             handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
-            tick_shields.in_set(crate::sim_sets::SimSet::Modifiers),
             broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
             handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
             sim_processing_anchor,
@@ -855,12 +854,14 @@ fn handle_collisions(
         cooldown.remaining_secs = 1.0;
     }
 }
-/// Tick shield regen and offline timers each frame.
-fn tick_shields(time: Res<Time>, mut ship_query: Query<&mut ShipShields, With<LocalShip>>) {
-    let Ok(mut shields) = ship_query.single_mut() else {
-        return;
-    };
-    shields.0.tick(time.delta_secs());
+/// Tick shield regen for the player ship. **PR-7 (issue #597) moved this
+/// canonical registration into `ShipShieldsPlugin::tick_shields`, which
+/// iterates every ship with the `Ship` marker (player + NPCs). This local
+/// stub is retained temporarily as a documented no-op if any test still
+/// references it directly; production wiring goes through the plugin.**
+#[allow(dead_code)]
+fn tick_shields(_time: Res<Time>, _shields_q: Query<&mut ShipShields, With<Ship>>) {
+    // Moved: see `crate::ship::shields::tick_shields`.
 }
 
 /// Broadcast `ShieldStatus` at 10 Hz.
@@ -2640,9 +2641,84 @@ mod tests {
             ),
             crate::weapons_plugin::PhaserCombatConfigResource::default(),
             PhaserRenderConfig::default(),
+            // PR 7 (issue #597) — per-entity beam / target / cooldown / sensors / waypoint.
+            crate::weapons_plugin::WeaponsTarget::default(),
+            crate::weapons_plugin::ActiveBeam::default(),
+            crate::weapons_plugin::PhaserCooldown::default(),
+            crate::sensors_plugin::SensorsTarget::default(),
+            crate::navigation_plugin::NavigationWaypoint::default(),
         ));
         app.insert_resource(ShipEntity(ship));
         app
+    }
+
+    // ── PR 7 (issue #597) test helpers ──────────────────────────────────────
+    // These wrap the `Query<&X, With<LocalShip>>` pattern that replaces
+    // direct Resource access after PR 7 removed the Resource derive from
+    // WeaponsTarget / ActiveBeam / PhaserCooldown / SensorsTarget / NavigationWaypoint.
+
+    fn get_weapons_target(app: &mut App) -> Option<String> {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::weapons_plugin::WeaponsTarget, With<LocalShip>>();
+        q.single(app.world()).ok().and_then(|wt| wt.0.clone())
+    }
+
+    fn get_active_beam_target(app: &mut App) -> Option<String> {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+        q.single(app.world()).ok().and_then(|b| b.target_uuid.clone())
+    }
+
+    fn active_beam_target_is_none(app: &mut App) -> bool {
+        get_active_beam_target(app).is_none()
+    }
+
+    fn set_active_beam_target(app: &mut App, uuid: Option<String>) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+        if let Ok(mut b) = q.single_mut(app.world_mut()) {
+            b.target_uuid = uuid;
+        }
+    }
+
+    fn set_active_beam_remaining_secs(app: &mut App, secs: f32) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+        if let Ok(mut b) = q.single_mut(app.world_mut()) {
+            b.remaining_secs = secs;
+        }
+    }
+
+    fn set_active_beam_damage_accumulator(app: &mut App, val: f32) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+        if let Ok(mut b) = q.single_mut(app.world_mut()) {
+            b.damage_accumulator = val;
+        }
+    }
+
+    fn phaser_bank_is_active(app: &mut App, bank: &str) -> bool {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::weapons_plugin::PhaserCooldown, With<LocalShip>>();
+        q.single(app.world())
+            .ok()
+            .map(|cd| cd.is_bank_active(bank))
+            .unwrap_or(false)
+    }
+
+    fn start_phaser_cooldown(app: &mut App, bank: &str, secs: f32) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::weapons_plugin::PhaserCooldown, With<LocalShip>>();
+        if let Ok(mut cd) = q.single_mut(app.world_mut()) {
+            cd.start_bank_with_cooldown(bank, secs);
+        }
     }
 
     fn apply_hull_damage(app: &mut App, amount: f32) {
@@ -3546,7 +3622,7 @@ mod tests {
 
         // Server state should record the lock.
         assert_eq!(
-            app.world().resource::<WeaponsTarget>().0.as_deref(),
+            get_weapons_target(&mut app).as_deref(),
             Some("target-uuid")
         );
     }
@@ -3578,7 +3654,7 @@ mod tests {
             })
             .expect("expected a TargetLock response");
         assert!(!lock.1, "expected locked=false for out-of-range asteroid");
-        assert!(app.world().resource::<WeaponsTarget>().0.is_none());
+        assert!(get_weapons_target(&mut app).is_none());
     }
 
     #[test]
@@ -3607,7 +3683,7 @@ mod tests {
             })
             .expect("expected a TargetLock response");
         assert!(!lock.1, "expected locked=false for unknown UUID");
-        assert!(app.world().resource::<WeaponsTarget>().0.is_none());
+        assert!(get_weapons_target(&mut app).is_none());
     }
 
     // â"€â"€ WeaponsUpdate / fire_ready tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -3743,7 +3819,7 @@ mod tests {
 
         // ActiveBeam resource should be populated.
         assert_eq!(
-            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            get_active_beam_target(&mut app).as_deref(),
             Some("target-uuid")
         );
     }
@@ -3755,10 +3831,8 @@ mod tests {
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
         // Manually put the cooldown into active state (simulating a beam just ended).
-        app.world_mut().resource_mut::<ActiveBeam>().target_uuid = None;
-        app.world_mut()
-            .resource_mut::<PhaserCooldown>()
-            .start_bank_with_cooldown("port", 3.0);
+        set_active_beam_target(&mut app, None);
+        start_phaser_cooldown(&mut app, "port", 3.0);
 
         push(
             &mut app,
@@ -3858,17 +3932,14 @@ mod tests {
 
         // Verify beam started.
         assert_eq!(
-            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            get_active_beam_target(&mut app).as_deref(),
             Some("target-uuid")
         );
 
         // Fast-forward: accumulate 30 damage via the damage_accumulator.
         // Set accumulator to 30.0 so all damage applies in one tick.
-        {
-            let mut b = app.world_mut().resource_mut::<ActiveBeam>();
-            b.damage_accumulator = 30.0;
-            b.remaining_secs = 5.0; // still "ongoing"
-        }
+        set_active_beam_damage_accumulator(&mut app, 30.0);
+        set_active_beam_remaining_secs(&mut app, 5.0); // still "ongoing"
 
         let out = tick(&mut app);
 
@@ -3904,13 +3975,11 @@ mod tests {
         );
 
         // Beam resource cleared.
-        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none());
+        assert!(active_beam_target_is_none(&mut app));
 
         // Cooldown started.
         assert!(
-            app.world()
-                .resource::<PhaserCooldown>()
-                .is_bank_active("port"),
+            phaser_bank_is_active(&mut app, "port"),
             "cooldown should start after beam end"
         );
 
@@ -3940,13 +4009,11 @@ mod tests {
             "expected BeamEnded when target leaves forward arc"
         );
         assert!(
-            app.world().resource::<ActiveBeam>().target_uuid.is_none(),
+            active_beam_target_is_none(&mut app),
             "beam should be cleared after sever-by-arc"
         );
         assert!(
-            app.world()
-                .resource::<PhaserCooldown>()
-                .is_bank_active("port"),
+            phaser_bank_is_active(&mut app, "port"),
             "cooldown should start after arc sever"
         );
     }
@@ -3977,13 +4044,11 @@ mod tests {
             "expected BeamEnded when target leaves phaser range"
         );
         assert!(
-            app.world().resource::<ActiveBeam>().target_uuid.is_none(),
+            active_beam_target_is_none(&mut app),
             "beam should be cleared after sever-by-range"
         );
         assert!(
-            app.world()
-                .resource::<PhaserCooldown>()
-                .is_bank_active("port"),
+            phaser_bank_is_active(&mut app, "port"),
             "cooldown should start after range sever"
         );
     }
@@ -4007,9 +4072,7 @@ mod tests {
         };
 
         // Apply partial damage via accumulator.
-        app.world_mut()
-            .resource_mut::<ActiveBeam>()
-            .damage_accumulator = 10.0;
+        set_active_beam_damage_accumulator(&mut app, 10.0);
         let _ = tick(&mut app);
 
         // Now sever by rotating ship.
@@ -4081,29 +4144,19 @@ mod tests {
             },
         );
         let _ = tick(&mut app);
-        assert_eq!(
-            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
-            Some("t1")
-        );
+        assert_eq!(get_active_beam_target(&mut app).as_deref(), Some("t1"));
 
         // Natural beam expiry: set remaining to 0.
-        app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 0.0;
+        set_active_beam_remaining_secs(&mut app, 0.0);
         // Zero damage accumulator so no destruction fires.
-        app.world_mut()
-            .resource_mut::<ActiveBeam>()
-            .damage_accumulator = 0.0;
+        set_active_beam_damage_accumulator(&mut app, 0.0);
         let _ = tick(&mut app); // beam ends, cooldown starts
 
         // Cooldown should be active.
-        assert!(app
-            .world()
-            .resource::<PhaserCooldown>()
-            .is_bank_active("port"));
+        assert!(phaser_bank_is_active(&mut app, "port"));
 
         // Force cooldown to expire.
-        app.world_mut()
-            .resource_mut::<PhaserCooldown>()
-            .start_bank_with_cooldown("port", 0.0);
+        start_phaser_cooldown(&mut app, "port", 0.0);
 
         // Lock and fire at t2.
         push(
@@ -4130,7 +4183,7 @@ mod tests {
             "expected BeamStarted for new target after cooldown"
         );
         assert_eq!(
-            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            get_active_beam_target(&mut app).as_deref(),
             Some("t2")
         );
     }
@@ -4732,11 +4785,8 @@ mod tests {
         );
         tick(&mut app_fast); // processes FirePhaser, beam becomes active
 
-        // Inject accumulated damage: 3.5s Ã— (5 HP/s Ã— 2Ã—) = 35 HP â†' enough to destroy 30-HP asteroid.
-        {
-            let mut beam = app_fast.world_mut().resource_mut::<ActiveBeam>();
-            beam.damage_accumulator = BEAM_DAMAGE_PER_SEC * 2.0 * 3.5;
-        }
+        // Inject accumulated damage: 3.5s × (5 HP/s × 2×) = 35 HP → enough to destroy 30-HP asteroid.
+        set_active_beam_damage_accumulator(&mut app_fast, BEAM_DAMAGE_PER_SEC * 2.0 * 3.5);
         tick(&mut app_fast); // One tick to process the accumulated damage.
 
         let still_exists_fast = app_fast
@@ -4774,11 +4824,8 @@ mod tests {
             },
         );
         tick(&mut app_base); // processes FirePhaser, beam becomes active
-                             // Inject same real time but at base rate: 3.5s Ã— 5 HP/s = 17.5 HP accumulated
-        {
-            let mut beam = app_base.world_mut().resource_mut::<ActiveBeam>();
-            beam.damage_accumulator = BEAM_DAMAGE_PER_SEC * 1.0 * 3.5;
-        }
+                             // Inject same real time but at base rate: 3.5s × 5 HP/s = 17.5 HP accumulated
+        set_active_beam_damage_accumulator(&mut app_base, BEAM_DAMAGE_PER_SEC * 1.0 * 3.5);
         tick(&mut app_base);
 
         let still_exists_base = app_base

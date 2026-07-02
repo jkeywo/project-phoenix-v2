@@ -3,12 +3,12 @@ title: PRD #597 — Ship Parity: Eliminate All Player/NPC Divergences
 type: source
 tags: [ship, npc, parity, refactor, unification]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/597
-updated: 2026-07-01
+updated: 2026-07-02
 ---
 
 ## Status
 
-**In progress** — PR 1 underway.
+**In progress** — PR 7 complete.
 
 ## Problem
 
@@ -32,7 +32,7 @@ Eliminate every divergence in 10 sequential PRs. After all 10: a ship is a ship.
 | PR 4 | Physics/impulse/boost/bank config → per-entity | **Done** (2026-07-01) |
 | PR 5 | Weapons/torpedo/phaser config → per-entity | **Done** (2026-07-02) |
 | PR 6 | Power/modifier/repair state → per-entity only | **Done** (2026-07-02) |
-| PR 7 | Weapons/sensors/navigation state → per-entity; unified beam system | Pending |
+| PR 7 | Weapons/sensors/navigation state → per-entity; unified beam system | **Done** (2026-07-02) |
 | PR 8 | Collision handling for all ships | Pending |
 | PR 9 | Region effects for all ships | Pending |
 | PR 10 | Combat activity per-entity; delete `ShipHullIntegrity`; cleanup | Pending |

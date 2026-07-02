@@ -7,7 +7,7 @@ sources:
   - src/lobby/session.rs
   - src/lobby/handler.rs
   - wiki/sources/issue-545-c5-retire-player-consoles.md
-updated: 2026-06-24
+updated: 2026-07-02
 ---
 
 # Player
@@ -36,9 +36,13 @@ The former per-player console list has been retired. Console access is derived f
 1. First visit: the client generates a UUIDv4, stores it in `localStorage`, and sends `Identify { token, name }`.
 2. The server registers the token, replies with `Welcome`, and announces `PlayerJoined` to other peers.
 3. The player sends `SelectStation { station }`; the server writes `Player.station = Some(StationId(...))` and broadcasts `StationAssigned`.
-4. The player toggles `SetReady`; when all connected players are ready, the server starts `Loading` or `InProgress`.
+4. The player toggles `SetReady`; when all connected players are ready in the lobby, the server starts `Loading` or `InProgress`.
 5. On disconnect, the player record stays in `SessionManager`, `connected` flips to false, and the station rating changes to `Backfill` so AI can operate station-owned systems.
 6. On reconnect with the same token, if no other connected player claimed the old station, the player keeps it and the server restores their `last_rating`; otherwise they reconnect as a spectator/no-station player.
+
+## Mid-Game Station Claims
+
+During `InProgress`, spectators can still send `SelectStation` for an unoccupied station. The server assigns `Player.station` and broadcasts `StationAssigned` so the client can show the normal station help and Ready button, but it also forces `ready = false` and does not change the station rating. Backfill AI keeps operating the station until the player sends `SetReady { ready: true }`, at which point the handler broadcasts `RatingChanged` back to the default human rating. A manual `ReleaseStation` during `InProgress` clears readiness and reapplies `Backfill`.
 
 ## Identity Vs Presence
 

@@ -271,21 +271,24 @@ pub fn process_message(
                 },
             ));
 
-            // Mid-game claim: reset from Backfill (AI) to manual control.
+            // Mid-game claim is a pending join: the player can read the station
+            // help and press Ready, but Backfill AI remains in control until
+            // SetReady(true) below applies the normal human rating.
             if phase == GamePhase::InProgress {
-                let default_rating = "Std".to_string();
                 outbound.push((
                     Target::All,
-                    ServerMessage::RatingChanged {
-                        station_id: station_def.id.clone(),
-                        rating_name: default_rating.clone(),
+                    ServerMessage::ReadyChanged {
+                        token: token.to_string(),
+                        ready: false,
                     },
                 ));
-                station_rating_update = Some((station_def.id.clone(), default_rating));
+                sessions.set_ready(token, false);
             }
         }
         ClientMessage::ReleaseStation => {
+            let released_station = sessions.station_for_token(token).cloned();
             sessions.set_station(token, None);
+            sessions.set_ready(token, false);
             if !ship_stations.stations.is_empty() {
                 sessions.push_spectator(token.to_string());
             }
@@ -298,6 +301,26 @@ pub fn process_message(
                     station_id: None,
                 },
             ));
+            outbound.push((
+                Target::All,
+                ServerMessage::ReadyChanged {
+                    token: token.to_string(),
+                    ready: false,
+                },
+            ));
+            if phase == GamePhase::InProgress {
+                if let Some(station_id) = released_station {
+                    let backfill = rating::BACKFILL_RATING.to_string();
+                    outbound.push((
+                        Target::All,
+                        ServerMessage::RatingChanged {
+                            station_id: station_id.clone(),
+                            rating_name: backfill.clone(),
+                        },
+                    ));
+                    station_rating_update = Some((station_id, backfill));
+                }
+            }
         }
         ClientMessage::SetReady { ready } => {
             sessions.set_ready(token, *ready);
@@ -315,6 +338,18 @@ pub fn process_message(
                     outbound.push((Target::All, ServerMessage::GameStarted));
                 } else {
                     new_phase = Some(GamePhase::Loading);
+                }
+            } else if phase == GamePhase::InProgress && *ready {
+                if let Some(station_id) = sessions.station_for_token(token).cloned() {
+                    let default_rating = "Std".to_string();
+                    outbound.push((
+                        Target::All,
+                        ServerMessage::RatingChanged {
+                            station_id: station_id.clone(),
+                            rating_name: default_rating.clone(),
+                        },
+                    ));
+                    station_rating_update = Some((station_id, default_rating));
                 }
             }
         }
@@ -1020,13 +1055,15 @@ max_level = 4
         assert!(has_claim, "swap must include a claim StationAssigned");
     }
 
-    // ── SelectStation mid-game: reset Backfill to Std ────────────────────
+    // ── SelectStation / SetReady mid-game handoff ────────────────────────
 
     #[test]
-    fn select_station_during_inprogress_resets_backfill_rating() {
+    fn select_station_during_inprogress_keeps_backfill_until_ready() {
         let mut sessions = sessions_with("t1", "Alice");
-        let station_ratings =
-            HashMap::from([(StationId("captain".into()), rating::BACKFILL_RATING.to_string())]);
+        let station_ratings = HashMap::from([(
+            StationId("captain".into()),
+            rating::BACKFILL_RATING.to_string(),
+        )]);
         let result = process_message(
             "t1",
             &ClientMessage::SelectStation {
@@ -1040,13 +1077,63 @@ max_level = 4
             true,
             &station_ratings,
         );
-        // Must emit RatingChanged to reset from Backfill to Std
+        assert!(
+            result.outbound.iter().any(|(_, m)| matches!(
+                m,
+                ServerMessage::StationAssigned { token, station, .. }
+                if token == "t1" && station.as_deref() == Some("Captain")
+            )),
+            "mid-game SelectStation should still assign the station for lobby help"
+        );
+        assert!(
+            result.outbound.iter().any(|(_, m)| matches!(
+                m,
+                ServerMessage::ReadyChanged { token, ready }
+                if token == "t1" && !*ready
+            )),
+            "mid-game SelectStation should force the claimant back to unready"
+        );
+        assert!(
+            !result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::RatingChanged { .. })),
+            "mid-game SelectStation must not stop Backfill AI"
+        );
+        assert_eq!(
+            result.station_rating_update, None,
+            "mid-game SelectStation must not change control sources"
+        );
+        assert!(
+            !sessions.players()[0].ready,
+            "mid-game claimant must press Ready before joining"
+        );
+    }
+
+    #[test]
+    fn set_ready_during_inprogress_resets_backfill_rating() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        let station_ratings = HashMap::from([(
+            StationId("captain".into()),
+            rating::BACKFILL_RATING.to_string(),
+        )]);
+        let result = process_message(
+            "t1",
+            &ClientMessage::SetReady { ready: true },
+            &mut sessions,
+            GamePhase::InProgress,
+            None,
+            &ship_stations(),
+            &default_ship_config(),
+            true,
+            &station_ratings,
+        );
         assert!(result.outbound.iter().any(|(_, m)| matches!(
             m,
             ServerMessage::RatingChanged { station_id, rating_name }
             if station_id.0 == "captain" && rating_name == "Std"
         )));
-        // station_rating_update must be set for Bevy runtime
         assert_eq!(
             result.station_rating_update,
             Some((StationId("captain".into()), "Std".to_string()))
@@ -1066,11 +1153,50 @@ max_level = 4
             None,
         );
         // In lobby, no rating change should occur
-        let has_rating_changed = result.outbound.iter().any(|(_, m)| {
-            matches!(m, ServerMessage::RatingChanged { .. })
-        });
-        assert!(!has_rating_changed, "lobby SelectStation must not emit RatingChanged");
-        assert!(result.station_rating_update.is_none(), "lobby SelectStation must not set station_rating_update");
+        let has_rating_changed = result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::RatingChanged { .. }));
+        assert!(
+            !has_rating_changed,
+            "lobby SelectStation must not emit RatingChanged"
+        );
+        assert!(
+            result.station_rating_update.is_none(),
+            "lobby SelectStation must not set station_rating_update"
+        );
+    }
+
+    #[test]
+    fn release_station_during_inprogress_restores_backfill_rating() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        sessions.set_ready("t1", true);
+        let result = process_message(
+            "t1",
+            &ClientMessage::ReleaseStation,
+            &mut sessions,
+            GamePhase::InProgress,
+            None,
+            &ship_stations(),
+            &default_ship_config(),
+            true,
+            &HashMap::new(),
+        );
+        assert!(result.outbound.iter().any(|(_, m)| matches!(
+            m,
+            ServerMessage::RatingChanged { station_id, rating_name }
+            if station_id.0 == "captain" && rating_name == rating::BACKFILL_RATING
+        )));
+        assert_eq!(
+            result.station_rating_update,
+            Some((
+                StationId("captain".into()),
+                rating::BACKFILL_RATING.to_string()
+            ))
+        );
+        assert_eq!(sessions.station_for_token("t1"), None);
+        assert!(!sessions.players()[0].ready);
     }
 
     // ── ReleaseStation: broadcasts empty station ──────────────────────────

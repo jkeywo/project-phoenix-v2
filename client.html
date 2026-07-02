@@ -1005,8 +1005,10 @@
             game: s.phase === 'InProgress' || s.phase === 'GameOver',
             bezel: s.phase === 'InProgress' || s.phase === 'GameOver' };
       const mine = myConsoles(s);
-      // Spectators / new joiners see the lobby even during InProgress
-      if (s.phase === 'InProgress' && !mine.length) {
+      const myPlayer = me(s);
+      // Spectators and pending mid-game claimants stay in the lobby. Ready is
+      // the point where the server actually hands the station over from AI.
+      if (s.phase === 'InProgress' && (!mine.length || (myPlayer && !myPlayer.ready))) {
         vis.lobby = true; vis.game = false; vis.bezel = false;
       }
       const inGame = vis.game;

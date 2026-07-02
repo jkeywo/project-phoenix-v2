@@ -214,12 +214,17 @@ describe('view derivations', () => {
     expect(s.isSpectator('ghost')).toBe(true);
   });
 
-  it('showLobbyPanel: lobby always, in-progress only for spectators, game-over never', () => {
+  it('showLobbyPanel: lobby always, in-progress for spectators and unready claimants, game-over never', () => {
     const s = new LobbyState();
-    s.players = [p('me', 'Me', ['Helm']), p('spec', 'Spec', [])];
+    s.players = [
+      { ...p('me', 'Me', ['Helm']), ready: true },
+      { ...p('pending', 'Pending', ['Tactical']), ready: false },
+      p('spec', 'Spec', []),
+    ];
     expect(s.showLobbyPanel('me')).toBe(true);
     s.phase = 'InProgress';
     expect(s.showLobbyPanel('me')).toBe(false);
+    expect(s.showLobbyPanel('pending')).toBe(true);
     expect(s.showLobbyPanel('spec')).toBe(true);
     expect(s.gameInProgressBanner('spec')).toBe(true);
     s.phase = 'GameOver';

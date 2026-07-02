@@ -899,6 +899,14 @@
       objectives: [] };
     let conn = null;
 
+    // DIAGNOSTIC: log every click at document level (capture phase) with target info
+    document.addEventListener('pointerdown', (e) => {
+      console.log('[client] doc pointerdown target:', e.target.tagName, e.target.className, 'id:', e.target.id);
+    }, true);
+    document.addEventListener('click', (e) => {
+      console.log('[client] doc click target:', e.target.tagName, e.target.className, 'id:', e.target.id);
+    }, true);
+
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
 
@@ -1180,7 +1188,7 @@
         if (isMine) {
           btn.className = 'mine-btn';
           btn.textContent = 'RELEASE';
-          btn.addEventListener('click', () => send('ReleaseStation'));
+          btn.addEventListener('click', () => { console.log('[client] RELEASE click'); send('ReleaseStation'); });
         } else if (st.holder_name) {
           btn.className = 'taken-btn';
           btn.textContent = 'TAKEN';
@@ -1188,7 +1196,8 @@
         } else {
           btn.className = 'claim-btn';
           btn.textContent = 'CLAIM';
-          btn.addEventListener('click', () => send('SelectStation', { station: st.name }));
+          btn.addEventListener('pointerdown', () => console.log('[client] CLAIM pointerdown', st.name));
+          btn.addEventListener('click', () => { console.log('[client] CLAIM click', st.name); send('SelectStation', { station: st.name }); });
         }
         action.appendChild(btn);
         row.appendChild(action);

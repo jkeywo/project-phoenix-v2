@@ -895,11 +895,14 @@ fn tick_impulse(
 /// Toggle the boost drive in response to Helm boost controls. No-op when
 /// the feature is disabled.
 pub fn handle_boost_messages(
-    ship_query: Query<(&AdmittedCommands, Option<&BoostConfigResource>), With<LocalShip>>,
-    mut boost: ResMut<ShipBoost>,
+    mut ship_query: Query<
+        (&AdmittedCommands, Option<&BoostConfigResource>, Option<&mut ShipBoost>),
+        With<LocalShip>,
+    >,
+    mut boost_res: ResMut<ShipBoost>,
     config_res: Option<Res<BoostConfigResource>>,
 ) {
-    let Some((admitted, entity_cfg)) = ship_query.iter().next() else {
+    let Some((admitted, entity_cfg, entity_boost)) = ship_query.iter_mut().next() else {
         return;
     };
     // Per-entity component takes priority over the Resource fallback.
@@ -910,16 +913,41 @@ pub fn handle_boost_messages(
     if !enabled {
         return;
     }
+    // Determine which boost state to mutate: entity component when present
+    // (production path), resource as fallback (legacy test path).
+    let has_entity_boost = entity_boost.is_some();
+    let mut entity_boost = entity_boost;
     for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
         match &cmd.payload {
             SystemControlPayload::ToggleBoost => {
-                boost.0.toggle();
+                if let Some(ref mut b) = entity_boost {
+                    b.0.toggle();
+                }
+                if !has_entity_boost {
+                    boost_res.0.toggle();
+                } else {
+                    // Keep resource in sync so process_helm_inputs (Res<ShipBoost>) sees it.
+                    if let Some(ref b) = entity_boost {
+                        boost_res.0 = b.0.clone();
+                    }
+                }
             }
             SystemControlPayload::SetBoost { active } => {
-                if *active {
-                    boost.0.activate();
-                } else {
-                    boost.0.deactivate();
+                if let Some(ref mut b) = entity_boost {
+                    if *active {
+                        b.0.activate();
+                    } else {
+                        b.0.deactivate();
+                    }
+                }
+                if !has_entity_boost {
+                    if *active {
+                        boost_res.0.activate();
+                    } else {
+                        boost_res.0.deactivate();
+                    }
+                } else if let Some(ref b) = entity_boost {
+                    boost_res.0 = b.0.clone();
                 }
             }
             _ => {}
@@ -933,9 +961,9 @@ fn normalized_boost_drain_factor(thrust: f32, steering: f32) -> f32 {
 
 fn tick_boost(
     time: Res<Time>,
-    mut boost: ResMut<ShipBoost>,
+    mut boost_res: ResMut<ShipBoost>,
     // Per-entity component takes priority; Resource is the fallback.
-    boost_cfg_q: Query<Option<&BoostConfigResource>, With<LocalShip>>,
+    mut boost_entity_q: Query<(Option<&BoostConfigResource>, Option<&mut ShipBoost>), With<LocalShip>>,
     boost_cfg_res: Option<Res<BoostConfigResource>>,
     last_input_q: Query<&LastHelmInput, With<LocalShip>>,
     sessions: Res<Sessions>,
@@ -946,7 +974,10 @@ fn tick_boost(
         return;
     };
     // Per-entity component takes priority over the Resource fallback.
-    let entity_cfg = boost_cfg_q.single().ok().flatten().cloned();
+    let Some((entity_cfg_opt, entity_boost_opt)) = boost_entity_q.iter_mut().next() else {
+        return;
+    };
+    let entity_cfg = entity_cfg_opt.cloned();
     let config = entity_cfg
         .or_else(|| boost_cfg_res.as_deref().cloned())
         .unwrap_or_default();
@@ -968,12 +999,25 @@ fn tick_boost(
     } else {
         normalized_boost_drain_factor(last_input.thrust, last_input.steering)
     };
-    boost.0.tick_with_drain_factor(
-        time.delta_secs(),
-        config.active_duration,
-        config.recharge_duration,
-        drain_factor,
-    );
+    if let Some(mut entity_boost) = entity_boost_opt {
+        // Production path: entity component takes priority.
+        entity_boost.0.tick_with_drain_factor(
+            time.delta_secs(),
+            config.active_duration,
+            config.recharge_duration,
+            drain_factor,
+        );
+        // Keep resource in sync so process_helm_inputs (Res<ShipBoost>) sees it.
+        boost_res.0 = entity_boost.0.clone();
+    } else {
+        // Fallback: legacy test path with no entity component.
+        boost_res.0.tick_with_drain_factor(
+            time.delta_secs(),
+            config.active_duration,
+            config.recharge_duration,
+            drain_factor,
+        );
+    }
 }
 
 fn is_inside_blocks_impulse(

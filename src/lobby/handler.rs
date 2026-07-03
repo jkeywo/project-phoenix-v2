@@ -224,8 +224,8 @@ pub fn process_message(
             };
 
             // Check if sender already holds this station (own station → no-op)
-            let sender_station = sessions.station_for_token(token);
-            if sender_station == Some(&station_def.id) {
+            let sender_station = sessions.station_for_token(token).cloned();
+            if sender_station.as_ref() == Some(&station_def.id) {
                 return LobbyHandlerResult {
                     new_phase,
                     outbound,
@@ -245,8 +245,20 @@ pub fn process_message(
                 };
             }
 
+            let mid_game_claim = phase == GamePhase::InProgress;
+            if mid_game_claim {
+                sessions.set_ready(token, false);
+                outbound.push((
+                    Target::All,
+                    ServerMessage::ReadyChanged {
+                        token: token.to_string(),
+                        ready: false,
+                    },
+                ));
+            }
+
             // Release current station if held.
-            if sender_station.is_some() {
+            if let Some(previous_station) = sender_station {
                 sessions.set_station(token, None);
                 outbound.push((
                     Target::All,
@@ -257,6 +269,17 @@ pub fn process_message(
                         station_id: None,
                     },
                 ));
+                if mid_game_claim {
+                    let backfill = rating::BACKFILL_RATING.to_string();
+                    outbound.push((
+                        Target::All,
+                        ServerMessage::RatingChanged {
+                            station_id: previous_station.clone(),
+                            rating_name: backfill.clone(),
+                        },
+                    ));
+                    station_rating_update = Some((previous_station, backfill));
+                }
             }
 
             // Assign the station.
@@ -274,16 +297,6 @@ pub fn process_message(
             // Mid-game claim is a pending join: the player can read the station
             // help and press Ready, but Backfill AI remains in control until
             // SetReady(true) below applies the normal human rating.
-            if phase == GamePhase::InProgress {
-                outbound.push((
-                    Target::All,
-                    ServerMessage::ReadyChanged {
-                        token: token.to_string(),
-                        ready: false,
-                    },
-                ));
-                sessions.set_ready(token, false);
-            }
         }
         ClientMessage::ReleaseStation => {
             let released_station = sessions.station_for_token(token).cloned();
@@ -1092,6 +1105,32 @@ max_level = 4
                 if token == "t1" && !*ready
             )),
             "mid-game SelectStation should force the claimant back to unready"
+        );
+        let ready_idx = result
+            .outbound
+            .iter()
+            .position(|(_, m)| {
+                matches!(
+                    m,
+                    ServerMessage::ReadyChanged { token, ready }
+                    if token == "t1" && !*ready
+                )
+            })
+            .expect("ReadyChanged(false) not found");
+        let assigned_idx = result
+            .outbound
+            .iter()
+            .position(|(_, m)| {
+                matches!(
+                    m,
+                    ServerMessage::StationAssigned { token, station, .. }
+                    if token == "t1" && station.as_deref() == Some("Captain")
+                )
+            })
+            .expect("StationAssigned not found");
+        assert!(
+            ready_idx < assigned_idx,
+            "mid-game claim must mark the player unready before assignment reaches clients"
         );
         assert!(
             !result

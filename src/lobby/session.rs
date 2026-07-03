@@ -56,6 +56,7 @@ impl SessionManager {
     pub fn disconnect(&mut self, token: &str) {
         if let Some(idx) = self.idx(token) {
             self.players[idx].connected = false;
+            self.players[idx].ready = false;
         }
     }
 
@@ -320,6 +321,16 @@ mod tests {
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.disconnect("t1");
         assert!(!sm.players()[0].connected);
+    }
+
+    #[test]
+    fn disconnect_clears_ready_flag() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.set_ready("t1", true);
+        assert!(sm.players()[0].ready);
+        sm.disconnect("t1");
+        assert!(!sm.players()[0].ready);
     }
 
     #[test]

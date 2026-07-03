@@ -389,10 +389,12 @@ pub fn process_message(
 pub fn process_disconnect_with_stations(
     token: &str,
     sessions: &mut SessionManager,
-    _ship_stations: &ShipStations,
+    ship_stations: &ShipStations,
     ship_config: &ShipConfig,
     resolver: &mut ControlSourceResolver,
     station_ratings: &HashMap<StationId, String>,
+    phase: GamePhase,
+    preload_complete: bool,
 ) -> LobbyHandlerResult {
     // Capture station + rating before disconnect mutates the player.
     let station_id = sessions.station_for_token(token).cloned();
@@ -408,12 +410,28 @@ pub fn process_disconnect_with_stations(
     sessions.disconnect(token);
     sessions.remove_spectator(token);
 
+    // Re-evaluate auto-start: if the last not-ready player disconnected,
+    // all remaining connected players may be ready.
+    let mut new_phase = None;
+    if phase == GamePhase::Lobby && sessions.all_ready() {
+        if preload_complete || ship_stations.stations.is_empty() {
+            new_phase = Some(GamePhase::InProgress);
+        } else {
+            new_phase = Some(GamePhase::Loading);
+        }
+    }
+
     let mut outbound = vec![(
         Target::All,
         ServerMessage::PlayerLeft {
             token: token.to_string(),
         },
     )];
+
+    if new_phase == Some(GamePhase::InProgress) {
+        outbound.push((Target::All, ServerMessage::GameStarted));
+    }
+
     let mut station_rating_update = None;
 
     if let Some(ref sid) = station_id {
@@ -429,23 +447,46 @@ pub fn process_disconnect_with_stations(
     }
 
     LobbyHandlerResult {
-        new_phase: None,
+        new_phase,
         outbound,
         station_rating_update,
     }
 }
 
 /// Mark a peer as disconnected (no station info available; Bevy-only path).
-pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHandlerResult {
+pub fn process_disconnect(
+    token: &str,
+    sessions: &mut SessionManager,
+    phase: GamePhase,
+    preload_complete: bool,
+) -> LobbyHandlerResult {
     sessions.disconnect(token);
+
+    // Re-evaluate auto-start.
+    let new_phase = if phase == GamePhase::Lobby && sessions.all_ready() {
+        if preload_complete {
+            Some(GamePhase::InProgress)
+        } else {
+            Some(GamePhase::Loading)
+        }
+    } else {
+        None
+    };
+
+    let mut outbound = vec![(
+        Target::All,
+        ServerMessage::PlayerLeft {
+            token: token.to_string(),
+        },
+    )];
+
+    if new_phase == Some(GamePhase::InProgress) {
+        outbound.push((Target::All, ServerMessage::GameStarted));
+    }
+
     LobbyHandlerResult {
-        new_phase: None,
-        outbound: vec![(
-            Target::All,
-            ServerMessage::PlayerLeft {
-                token: token.to_string(),
-            },
-        )],
+        new_phase,
+        outbound,
         station_rating_update: None,
     }
 }
@@ -509,6 +550,17 @@ max_level = 4
         sessions: &mut SessionManager,
         ship_stations: &ShipStations,
     ) -> LobbyHandlerResult {
+        pd_stations_with_phase(token, sessions, ship_stations, GamePhase::Lobby, true)
+    }
+
+    /// Like `pd_stations` but with explicit phase and preload_complete.
+    fn pd_stations_with_phase(
+        token: &str,
+        sessions: &mut SessionManager,
+        ship_stations: &ShipStations,
+        phase: GamePhase,
+        preload_complete: bool,
+    ) -> LobbyHandlerResult {
         let mut resolver = ControlSourceResolver::new();
         process_disconnect_with_stations(
             token,
@@ -517,6 +569,8 @@ max_level = 4
             &backfill_ship_config(),
             &mut resolver,
             &HashMap::new(),
+            phase,
+            preload_complete,
         )
     }
 
@@ -545,7 +599,7 @@ max_level = 4
     #[test]
     fn disconnect_broadcasts_player_left() {
         let mut sessions = sessions_with("t1", "Alice");
-        let result = process_disconnect("t1", &mut sessions);
+        let result = process_disconnect("t1", &mut sessions, GamePhase::Lobby, true);
         assert!(result
             .outbound
             .iter()
@@ -555,15 +609,85 @@ max_level = 4
     #[test]
     fn disconnect_marks_player_as_disconnected() {
         let mut sessions = sessions_with("t1", "Alice");
-        process_disconnect("t1", &mut sessions);
+        process_disconnect("t1", &mut sessions, GamePhase::Lobby, true);
         assert!(!sessions.players()[0].connected);
     }
 
     #[test]
     fn disconnect_returns_no_phase_change() {
+        // t1 (ready) disconnects, leaving t2 (not-ready) → no auto-start.
         let mut sessions = sessions_with("t1", "Alice");
-        let result = process_disconnect("t1", &mut sessions);
+        sessions.register("t2".into(), "Bob".into()).unwrap();
+        sessions.set_ready("t1", true);
+        let result = process_disconnect("t1", &mut sessions, GamePhase::Lobby, true);
         assert!(result.new_phase.is_none());
+    }
+
+    #[test]
+    fn disconnect_last_not_ready_auto_starts() {
+        // t1 ready, t2 not-ready; t2 disconnects → all remaining connected
+        // players are ready → auto-start.
+        let stations = ship_stations();
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.register("t2".into(), "Bob".into()).unwrap();
+        sessions.set_ready("t1", true);
+        let result = pd_stations_with_phase("t2", &mut sessions, &stations, GamePhase::Lobby, true);
+        assert_eq!(
+            result.new_phase,
+            Some(GamePhase::InProgress),
+            "disconnect of last not-ready player must auto-start"
+        );
+        assert!(result
+            .outbound
+            .iter()
+            .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
+    }
+
+    #[test]
+    fn disconnect_auto_start_enters_loading_when_preload_not_complete() {
+        let stations = ship_stations();
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.register("t2".into(), "Bob".into()).unwrap();
+        sessions.set_ready("t1", true);
+        let result =
+            pd_stations_with_phase("t2", &mut sessions, &stations, GamePhase::Lobby, false);
+        assert_eq!(
+            result.new_phase,
+            Some(GamePhase::Loading),
+            "disconnect with preload not complete must enter Loading"
+        );
+        // GameStarted should NOT be sent during Loading.
+        assert!(
+            !result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::GameStarted)),
+            "GameStarted must not be sent when entering Loading"
+        );
+    }
+
+    #[test]
+    fn reconnect_comes_back_not_ready() {
+        // t1 sets ready, disconnects (clears ready), reconnects via Identify
+        // → ready must remain false.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_ready("t1", true);
+        assert!(sessions.players()[0].ready);
+        let _ = process_disconnect("t1", &mut sessions, GamePhase::Lobby, true);
+        assert!(
+            !sessions.players()[0].ready,
+            "disconnect must clear ready flag"
+        );
+        // Reconnect via Identify
+        let msg = ClientMessage::Identify {
+            token: "t1".into(),
+            name: "Alice".into(),
+        };
+        let _ = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+        assert!(
+            !sessions.players()[0].ready,
+            "reconnected player must come back not-ready"
+        );
     }
 
     // ── process_message: Identify ─────────────────────────────────────────
@@ -1430,6 +1554,8 @@ max_level = 4
             &config,
             &mut resolver,
             &HashMap::new(),
+            GamePhase::Lobby,
+            true,
         );
         let msg = ClientMessage::Identify {
             token: "t1".into(),
@@ -1788,6 +1914,8 @@ max_level = 4
             &config,
             &mut resolver,
             &station_ratings,
+            GamePhase::Lobby,
+            true,
         );
         // Must broadcast PlayerLeft
         assert!(result
@@ -1823,6 +1951,8 @@ max_level = 4
             &config,
             &mut resolver,
             &station_ratings,
+            GamePhase::Lobby,
+            true,
         );
         let last = sessions
             .players()
@@ -1850,6 +1980,8 @@ max_level = 4
             &config,
             &mut resolver,
             &HashMap::new(),
+            GamePhase::Lobby,
+            true,
         );
         assert!(result.station_rating_update.is_none());
         let has_rating_changed = result
@@ -1889,6 +2021,8 @@ max_level = 4
             &config,
             &mut resolver,
             &station_ratings,
+            GamePhase::Lobby,
+            true,
         );
         // t1 reconnects via Identify
         let reconnect_result = process_message(
@@ -1953,6 +2087,8 @@ max_level = 4
             &config,
             &mut resolver,
             &HashMap::new(),
+            GamePhase::Lobby,
+            true,
         );
         // t2 claims Captain while t1 is away
         pm_stations(

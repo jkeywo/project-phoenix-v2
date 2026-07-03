@@ -7,6 +7,7 @@ use crate::messages::{
 };
 use crate::session::SessionManager;
 use crate::ship::rating;
+use crate::server::asset_preload::AssetPreloadResource;
 use crate::ship_plugin::{ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources};
 use crate::stations_config::{stations_from_ship_config, ShipStations};
 
@@ -398,6 +399,7 @@ pub fn process_lobby(
 fn handle_disconnect(
     mut events: MessageReader<PlayerDisconnected>,
     mut sessions: ResMut<Sessions>,
+    state: Res<State<GamePhase>>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
     mut ship_query: Query<
@@ -409,9 +411,21 @@ fn handle_disconnect(
         With<crate::server_app::LocalShip>,
     >,
     stations: Option<Res<ShipStations>>,
+    preload: Option<Res<AssetPreloadResource>>,
 ) {
     let empty_stations = ShipStations::default();
     let ship_stations = stations.as_deref().unwrap_or(&empty_stations);
+
+    // Preload gate: same logic as process_lobby.
+    let preload_complete = if crate::debug_overlay::is_playwright_automation() {
+        true
+    } else {
+        preload
+            .as_ref()
+            .map(|p| !p.started || p.complete)
+            .unwrap_or(true)
+    };
+
     for ev in events.read() {
         // Apply Backfill rating to the disconnecting player's station so the
         // ship keeps operating without a human at the console.
@@ -425,6 +439,8 @@ fn handle_disconnect(
                 &cfg.0,
                 &mut cs.0,
                 &ratings_snapshot,
+                state.get().clone(),
+                preload_complete,
             );
             apply_result(
                 result,
@@ -435,7 +451,12 @@ fn handle_disconnect(
                 &mut active_ratings,
             );
         } else {
-            let result = lobby_handler::process_disconnect(&ev.token, &mut sessions.0);
+            let result = lobby_handler::process_disconnect(
+                &ev.token,
+                &mut sessions.0,
+                state.get().clone(),
+                preload_complete,
+            );
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(
                 result,

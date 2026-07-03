@@ -583,11 +583,10 @@ export function buildPowerConsoleState(state) {
   const batteryOnline = batteryBb ? !!batteryBb.is_online : true;
   if (bb) {
     return JSON.stringify({
-      // Post issue #618: prefer the new PowerGroupId-keyed `groups` field
-      // authored by the publisher; fall back to the legacy `consoles` field
-      // for pre-#618 payloads still in flight. Mirrors the pattern used in
-      // buildRepairConsoleState (system_hull || console_hull).
-      consoles:       (bb.groups && bb.groups.length) ? bb.groups : (bb.consoles || []),
+      // Reads the PowerGroupId-keyed `groups` field from the publisher (the
+      // legacy `consoles` mirror was removed from the wire when the parent
+      // issue #516 cleanup closed out).
+      consoles:       bb.groups        || [],
       total:          bb.total          ?? 0,
       total_max:      bb.total_max      ?? 8,
       battery_charge: bb.battery_charge ?? 0,

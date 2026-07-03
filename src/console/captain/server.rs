@@ -645,6 +645,88 @@ mod tests {
     }
 
     #[test]
+    fn config_defined_system_controllable_by_owning_console() {
+        // A config-defined system (red-alert → station "captain") is controllable
+        // by the holder of its owning console, and denied for non-holders.
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // "captain" holds the captain station → should be admitted.
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(get_red_alert(&mut app), "captain should control red-alert");
+
+        // Toggle back off.
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(!get_red_alert(&mut app));
+
+        // "rando" (not identified, does not hold captain station) → denied.
+        push(
+            &mut app,
+            "rando",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(!get_red_alert(&mut app), "rando must not control red-alert");
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
+        let admitted = q
+            .single(app.world())
+            .expect("LocalShip must carry AdmittedCommands");
+        assert!(
+            !admitted.0.iter().any(|cmd| cmd.target.0 == "red-alert"),
+            "rando command targeting red-alert must be rejected"
+        );
+    }
+
+    #[test]
+    fn unknown_system_id_is_denied() {
+        // A system ID not present in the ship config is denied (not conservatively
+        // allowed) by the admission gate.
+        let mut app = test_app();
+        start_game(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("foobar".into()),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
+        tick(&mut app);
+        assert!(!get_red_alert(&mut app));
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
+        let admitted = q
+            .single(app.world())
+            .expect("LocalShip must carry AdmittedCommands");
+        assert!(
+            admitted.0.is_empty(),
+            "unknown system id must be rejected by the admission gate"
+        );
+    }
+
+    #[test]
     fn wrong_control_system_target_does_not_toggle_red_alert() {
         let mut app = test_app();
         start_game(&mut app);

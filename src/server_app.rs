@@ -1230,13 +1230,14 @@ fn admit_system_commands(
             Entity,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut crate::messages::AdmittedCommands,
+            &crate::ship_plugin::ShipConfigComponent,
         ),
         With<LocalShip>,
     >,
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
 ) {
-    let Some((ship_entity, control_sources, mut admitted)) =
+    let Some((ship_entity, control_sources, mut admitted, ship_config)) =
         ship_query.iter_mut().next()
     else {
         return;
@@ -1267,6 +1268,7 @@ fn admit_system_commands(
             payload,
             control_sources,
             &sessions,
+            &ship_config.0,
         ) {
             admitted.0.push(crate::messages::AdmittedCommand {
                 target: target.clone(),
@@ -1286,46 +1288,36 @@ fn admit_system_commands(
 
 /// Maps a `SystemId` to the `StationId` whose holder is authoritative for
 /// that system's admission. Returns `None` for systems with no owning
-/// station (either ship-wide or unknown), signalling a conservative allow
-/// at the caller.
-/// Resolve a `SystemId` to the `StationId` that owns it.
+/// station (either ship-wide or unknown), signalling a deny at the
+/// caller.
 ///
-/// After issue #619 the mapping is a direct match to lowercase station id
-/// strings — the pass-through via `Console` is gone. Fine-grained system ids
-/// like `helm-engine-port` and `phaser-fore` map back to their coarse-grained
-/// station (`helm` and `tactical` respectively).
-fn station_for_system(target: &crate::messages::SystemId) -> Option<StationId> {
-    use crate::system_registry::*;
-    // Fine-grained shield arcs (issue #514) — variable count, matched by prefix.
-    // Keep the coarse `SHIELDS_SYSTEM_ID` arm below as a legacy fallback for
-    // the aggregate blackboard string.
+/// Lookup order:
+///   1. Shield-arc prefix match — arcs are not auto-generated into
+///      `ShipConfig.systems` (they're synthesised at the entity-config layer),
+///      so they must be matched by prefix.
+///   2. Direct system→station from the config's `[[system]]` blocks
+///      (handles fine-grained systems and modern coarse systems).
+///   3. Station-name fallback: if the target string matches a known station
+///      id, treat it as the owning station (backward compatibility with
+///      deprecated coarse systems like `"tactical"`, `"power"` whose
+///      `[[system]]` entry was removed during fine-grained refactoring).
+///   4. `None` — truly unknown system id, caller will deny.
+fn station_for_system(config: &crate::ship::config::ShipConfig, target: &crate::messages::SystemId) -> Option<StationId> {
+    // Step 1: shield-arc prefix (arcs are not in `config.systems`).
     if target.0.starts_with("shield-arc-") {
         return Some(StationId("shields".into()));
     }
-    let station_id_str = match target.0.as_str() {
-        CAPTAIN_SYSTEM_ID | RED_ALERT_SYSTEM_ID => "captain",
-        HELM_SYSTEM_ID
-        | HELM_JOYSTICK_SYSTEM_ID
-        | HELM_ENGINE_PORT_SYSTEM_ID
-        | HELM_ENGINE_STARBOARD_SYSTEM_ID
-        | HELM_RADAR_SYSTEM_ID
-        | HELM_IMPULSE_SYSTEM_ID => "helm",
-        TACTICAL_SYSTEM_ID
-        | PHASER_FORE_SYSTEM_ID
-        | PHASER_AFT_SYSTEM_ID
-        | TORPEDO_TUBE_FORE_PORT_SYSTEM_ID
-        | TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID
-        | TORPEDO_TUBE_AFT_SYSTEM_ID
-        | TORPEDO_MAGAZINE_SYSTEM_ID => "tactical",
-        POWER_SYSTEM_ID | POWER_REACTOR_SYSTEM_ID | POWER_BATTERY_SYSTEM_ID => "power",
-        SENSORS_SYSTEM_ID => "sensors",
-        NAVIGATION_SYSTEM_ID => "navigation",
-        SHIELDS_SYSTEM_ID => "shields",
-        COMMS_SYSTEM_ID => "comms",
-        REPAIR_SYSTEM_ID => "repair",
-        _ => return None,
-    };
-    Some(StationId(station_id_str.to_string()))
+    // Step 2: direct system lookup.
+    if let Some(system) = config.system(target) {
+        return system.station.clone();
+    }
+    // Step 3: station-name fallback — does the target match a known station?
+    let candidate = StationId(target.0.clone());
+    if config.station(&candidate).is_some() {
+        return Some(candidate);
+    }
+    // Step 4: unknown.
+    None
 }
 
 fn is_command_authorized(
@@ -1334,6 +1326,7 @@ fn is_command_authorized(
     payload: &SystemControlPayload,
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
+    config: &crate::ship::config::ShipConfig,
 ) -> bool {
     // Viewscreen SetView: authority derives from the view mode's source system.
     let effective_target = if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID {
@@ -1359,9 +1352,15 @@ fn is_command_authorized(
     }
 
     // Human network token: must hold the station for the target system.
-    match station_for_system(&effective_target) {
+    match station_for_system(config, &effective_target) {
         Some(station) => sessions.0.holder_for_station(&station) == Some(token),
-        None => true, // Unknown system: conservative allow.
+        None => {
+            warn!(
+                "[admit] unknown system id {:?} — denying",
+                effective_target.0
+            );
+            false
+        }
     }
 }
 

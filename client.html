@@ -973,7 +973,11 @@
 
     function send(type, data) {
       if (!conn || !conn.open) return;
-      if (!NO_CLICK.has(type)) playClick();
+      // ControlSystem messages wrap their real type in data.payload.type (see
+      // gui/action-map.js), so the NO_CLICK check on continuous inputs like
+      // HelmInput must look there rather than at the 'ControlSystem' envelope.
+      const clickType = (type === 'ControlSystem' && data && data.payload) ? data.payload.type : type;
+      if (!NO_CLICK.has(clickType)) playClick();
       const msg = data !== undefined ? { type, data } : { type };
       conn.send(JSON.stringify(msg));
     }

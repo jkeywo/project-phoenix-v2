@@ -292,9 +292,12 @@ pub fn process_lobby(
     // here we handle *only* the reconnect handshake (`Identify`) — a browser
     // refresh mid-game must still receive its `Welcome` and have its seat
     // restored. Additionally, station management messages (`SelectStation`,
-    // `ReleaseStation`) are allowed during `InProgress` so players can claim
-    // vacated stations mid-game. All other message types are left for the
-    // in-game systems.
+    // `ReleaseStation`, `SetReady`) are allowed during `InProgress` so players
+    // can claim vacated stations mid-game and press Ready to hand control back
+    // from Backfill AI — `SetReady`'s InProgress branch in
+    // `lobby_handler::process_message` is unreachable without this, since it's
+    // the only place that handles that message. All other message types are
+    // left for the in-game systems.
     // (Bevy `MessageReader`s have independent cursors, so reading here never
     // hides messages from those systems.)
     //
@@ -340,6 +343,7 @@ pub fn process_lobby(
                 || matches!(ev.msg, ClientMessage::Identify { .. })
                 || matches!(ev.msg, ClientMessage::SelectStation { .. })
                 || matches!(ev.msg, ClientMessage::ReleaseStation)
+                || matches!(ev.msg, ClientMessage::SetReady { .. })
         })
         .cloned()
         .collect();

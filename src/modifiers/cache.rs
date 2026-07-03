@@ -143,14 +143,23 @@ impl ShipModifiers {
     }
 
     /// Inserts or replaces the modifier for the given `(source, slot)` pair,
-    /// then rebuilds the cache.
+    /// then rebuilds the cache. Only queues a broadcast `ModifierEvent::Added`
+    /// when the entry is new or its bonus actually changed — callers like
+    /// `translate_power_modifiers` re-apply the current power level every
+    /// simulation tick, and without this check that flooded every connected
+    /// client with a `ModifierAdded` message per tick regardless of whether
+    /// anything changed, starving the render loop (e.g. stalling the lobby's
+    /// Ready/Leave buttons for a mid-game station claimant).
     pub fn add_or_update(&mut self, modifier: Modifier) {
-        self.pending_events.push(ModifierEvent::Added {
-            source: modifier.source.clone(),
-            slot: modifier.slot.clone(),
-            bonus: modifier.bonus,
-        });
-        let key = (modifier.source, modifier.slot);
+        let key = (modifier.source.clone(), modifier.slot.clone());
+        let unchanged = self.table.get(&key) == Some(&modifier.bonus);
+        if !unchanged {
+            self.pending_events.push(ModifierEvent::Added {
+                source: modifier.source.clone(),
+                slot: modifier.slot.clone(),
+                bonus: modifier.bonus,
+            });
+        }
         self.table.insert(key, modifier.bonus);
         self.rebuild_cache();
     }

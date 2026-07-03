@@ -19,8 +19,13 @@ description = "Harrow Cruiser"
 [hull]
 hull_integrity = 120.0
 
-[shields_console.base]
-num_facings = 1
+# Single omni shield arc (issue #514). NPCs have no `[shields]` station so
+# the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
+[[shield_arc]]
+id = "all"
+label = "All"
+center_deg = 0
+width_deg = 360
 max_hp = 60
 regen_per_sec = 1.0
 
@@ -118,7 +123,29 @@ id = "helm"
 kind = "helm"
 ai_only = true
 
+# Fine Tactical systems (issue #512): port + starboard phaser banks. No torpedoes.
+# `phaser_bank_system_id("port")` resolves to `SystemId("phaser-port")` via
+# the `phaser-<id>` naming convention, and the resolver has that id from the
+# [[system]] block below, so per-bank gating (system_is_registered + own
+# fine-system policy) is used for firing.
 [[system]]
-id = "tactical"
-kind = "tactical"
+id = "phaser-port"
+kind = "phaser_bank"
+ai_only = true
+
+[[system]]
+id = "phaser-starboard"
+kind = "phaser_bank"
+ai_only = true
+
+# Fine Power systems (issue #513): reactor + battery for per-instance damage.
+# NPCs have no `[power_groups.*]` block so `power_group` is omitted.
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
 ai_only = true

@@ -63,3 +63,15 @@ target_speed     = 0.8
 id = "helm"
 kind = "helm"
 ai_only = true
+
+# Fine Power systems (issue #513): reactor + battery for per-instance damage.
+# NPCs have no `[power_groups.*]` block so `power_group` is omitted.
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+ai_only = true

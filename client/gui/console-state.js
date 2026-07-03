@@ -559,14 +559,22 @@ export function buildRepairConsoleState(state) {
 /**
  * Power console.
  *
- * Reads raw sim truth from `state.blackboards['power']` (PowerBlackboard),
- * falling back to legacy camelCase properties from PowerState messages.
+ * Reads raw sim truth from `state.blackboards['power']` (aggregate
+ * PowerBlackboard) plus the two fine blackboards (issue #513) at
+ * `state.blackboards['power-reactor']` and `state.blackboards['power-battery']`
+ * for per-instance online flags. Falls back to legacy camelCase properties
+ * from PowerState messages when no blackboards are present.
  *
  * @param {{ blackboards?, powerHelm?, powerWeapons?, powerSensors?,
  *           powerBattery?, powerLocked? }} state
  */
 export function buildPowerConsoleState(state) {
   const bb = (state.blackboards && state.blackboards['power']) || null;
+  const reactorBb = (state.blackboards && state.blackboards['power-reactor']) || null;
+  const batteryBb = (state.blackboards && state.blackboards['power-battery']) || null;
+  // Default to online when the fine blackboard is missing (legacy safety).
+  const reactorOnline = reactorBb ? !!reactorBb.is_online : true;
+  const batteryOnline = batteryBb ? !!batteryBb.is_online : true;
   if (bb) {
     return JSON.stringify({
       consoles:       bb.consoles       || [],
@@ -575,6 +583,8 @@ export function buildPowerConsoleState(state) {
       battery_charge: bb.battery_charge ?? 0,
       battery_max:    bb.battery_max    ?? 100,
       locked:         bb.locked         || false,
+      reactor_online: reactorOnline,
+      battery_online: batteryOnline,
       own_hull:       ownHull('Power', state),
       power_auto:     state.stationRatings?.['power'] === 'Backfill',
     });
@@ -586,6 +596,8 @@ export function buildPowerConsoleState(state) {
     sensors:        state.powerSensors || 0,
     battery_charge: state.powerBattery || 0,
     locked:         state.powerLocked  || false,
+    reactor_online: reactorOnline,
+    battery_online: batteryOnline,
     own_hull:       ownHull('Power', state),
     power_auto:     state.stationRatings?.['power'] === 'Backfill',
   });
@@ -834,22 +846,6 @@ export function buildNavigationConsoleState(state) {
     { rotate: false, edgeClamp: true }
   );
   if (waypoint) blips.push(waypoint);
-
-  // Shared target markers (world-axis, north-up)
-  const allEntities = state.asteroids || [];
-  const tacBb = state.blackboards?.['tactical'];
-  const sensBb = state.blackboards?.['sensors'];
-  const tacMarker = buildTargetBlip(
-    tacBb?.target_uuid, allEntities, state.shipX || 0, state.shipZ || 0, 0, range,
-    { rotate: false, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: 'TACTICAL TARGET' }
-  );
-  if (tacMarker) blips.push(tacMarker);
-  const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
-  const sciMarker = buildTargetBlip(
-    sciTargetUuid, allEntities, state.shipX || 0, state.shipZ || 0, 0, range,
-    { rotate: false, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: 'SCIENCE TARGET' }
-  );
-  if (sciMarker) blips.push(sciMarker);
 
   const charge = state.impulseChargeProgress || 0;
   const onScreen = state.currentView === 'NavigationChart';

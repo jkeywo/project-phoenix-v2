@@ -145,21 +145,42 @@ export const ACTION_MAP = Object.freeze({
    * PowerSystem::increase / decrease.
    *
    * `{ action: "set_power", console: "Power", target: "helm", level: 3 }`
+   *
+   * Wire target is `'power-reactor'` (issue #513): the reactor fine system
+   * owns the allocation surface, and `handle_power_messages` reads only
+   * `AdmittedCommands.for_target("power-reactor")`. Do NOT change back to
+   * `'power'` — the coarse system id is retained only for the aggregate
+   * blackboard, not for control input.
    */
   set_power: (a, send) => {
     if (a.target && typeof a.level === 'number') {
       send('ControlSystem', {
-        target: 'power',
+        target: 'power-reactor',
         payload: { type: 'SetPowerGroupAllocation', data: { group: a.target, level: a.level } },
       });
     }
   },
 
-  /** Focus shields on a specific facing. */
+  /**
+   * Focus shields on a specific arc (issue #514).
+   *
+   * Each arc has its own `SystemId("shield-arc-<arc_id>")` and receives a
+   * `SetShieldArcFocus { focused: bool }` payload. The GUI already knows
+   * which arc was clicked; pass its lowercase id in `a.arc_id`. `a.focused`
+   * defaults to `true` (button press = "focus this arc"); pass `false` to
+   * clear focus on the currently-focused arc.
+   *
+   * Wire target is `shield-arc-<arc_id>` (issue #514): the coarse
+   * `shields` string is retained only for the aggregate blackboard, not
+   * for control input. Do NOT change back to `'shields'` — the codec
+   * routing test pins the wire shape.
+   */
   set_shield_focus: (a, send) => {
+    if (!a.arc_id) return;
+    const focused = a.focused === undefined ? true : !!a.focused;
     send('ControlSystem', {
-      target: 'shields',
-      payload: { type: 'SetShieldFocus', data: { facing: a.facing || null } },
+      target: `shield-arc-${a.arc_id}`,
+      payload: { type: 'SetShieldArcFocus', data: { focused } },
     });
   },
 

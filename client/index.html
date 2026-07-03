@@ -10,6 +10,11 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Project Phoenix — Console</title>
+  <!-- Keep rAF-driven UI (scheduleRender, radar sweeps, joystick decay in
+       the console iframes) running at full rate even when this tab loses
+       focus — see gui/bg-raf-keepalive.js. Must load before any other
+       script calls requestAnimationFrame. -->
+  <script src="gui/bg-raf-keepalive.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- Pure-function helpers shared with Vitest unit tests (issue #439, #440, #441). -->
@@ -937,6 +942,20 @@
       const m = me(s);
       return m ? consolesOf(m, s.shipStations) : [];
     }
+
+    /// True while the lobby/station-select panel is being shown over an
+    /// in-progress game: true spectators, and mid-game claimants who have
+    /// picked a station but not yet pressed Ready. Single source of truth for
+    /// render()'s vis.lobby override and the SimState/BlackboardUpdate
+    /// render guards below — those messages arrive at ~10Hz and must skip the
+    /// lobby DOM rebuild in this state, or a click on Ready/Leave can land
+    /// between the old button being torn down and the new one's listener
+    /// being attached.
+    function showingLobbyDuringGame(s) {
+      if (s.phase !== 'InProgress') return false;
+      const player = me(s);
+      return pendingMidGameClaim || !myConsoles(s).length || !!(player && !player.ready);
+    }
     function hasConsole(s, c) { return myConsoles(s).includes(c); }
     function isCaptain(s)     { return hasConsole(s, 'CaptainChair'); }
     function isHelm(s)        { return hasConsole(s, 'Helm'); }
@@ -959,7 +978,11 @@
 
     function send(type, data) {
       if (!conn || !conn.open) return;
-      if (!NO_CLICK.has(type)) playClick();
+      // ControlSystem messages wrap their real type in data.payload.type (see
+      // gui/action-map.js), so the NO_CLICK check on continuous inputs like
+      // HelmInput must look there rather than at the 'ControlSystem' envelope.
+      const clickType = (type === 'ControlSystem' && data && data.payload) ? data.payload.type : type;
+      if (!NO_CLICK.has(clickType)) playClick();
       const msg = data !== undefined ? { type, data } : { type };
       conn.send(JSON.stringify(msg));
     }
@@ -1009,7 +1032,7 @@
       const myPlayer = me(s);
       // Spectators and pending mid-game claimants stay in the lobby. Ready is
       // the point where the server actually hands the station over from AI.
-      if (s.phase === 'InProgress' && (pendingMidGameClaim || !mine.length || (myPlayer && !myPlayer.ready))) {
+      if (showingLobbyDuringGame(s)) {
         vis.lobby = true; vis.game = false; vis.bezel = false;
       }
       const inGame = vis.game;
@@ -1894,10 +1917,11 @@
           pushRepairConsoleState();
           pushSensorsConsoleState();
           pushNavigationConsoleState();
-          // Don't re-render the full lobby at 10Hz when spectator — it
-          // destroys CSS hover state on station selection buttons.
+          // Don't re-render the full lobby at 10Hz when spectating or when a
+          // mid-game station claim is still pending Ready — it destroys CSS
+          // hover state and tears down the Ready/Leave button listeners.
           // The push calls are no-ops when no game console is active.
-          if (!myConsoles(state).length) return;
+          if (showingLobbyDuringGame(state)) return;
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state.
           break;
@@ -1974,6 +1998,15 @@
               }
             }
             pushCaptainConsoleState();
+            // Helm/Sensors/Comms/Navigation each derive their own "on screen"
+            // button state from state.currentView, so a view-mode change must
+            // refresh all of them too, not just the captain console — otherwise
+            // the button that requested the view change never reflects the
+            // toggle (see #on-screen-btn on Helm).
+            pushHelmConsoleState();
+            pushSensorsConsoleState();
+            pushCommsConsoleState();
+            pushNavigationConsoleState();
           }
           if (updatedSystems.has('navigation')) {
             const bb = state.blackboards['navigation'];
@@ -1987,9 +2020,10 @@
           if (updatedSystems.has('comms'))      pushCommsConsoleState();
           if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
           // Same guard as SimState: don't re-render the lobby at 10 Hz while
-          // spectating — it rebuilds the station list every frame, destroying
-          // button listeners before a click can register.
-          if (!myConsoles(state).length) return;
+          // spectating or mid-game-claim-pending — it rebuilds the station
+          // list every frame, destroying button listeners before a click can
+          // register.
+          if (showingLobbyDuringGame(state)) return;
           break;
         }
         case 'WeaponsUpdate': {

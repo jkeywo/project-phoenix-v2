@@ -163,6 +163,17 @@
     .pwr-btn.off { color: var(--ink-faint); background: linear-gradient(180deg, #2a3050 0%, #14182c 100%); }
     .pwr-btn.off > .bg { background: linear-gradient(180deg, #0a0f28 0%, #050918 100%); }
 
+    /* ── Fine-system offline (issue #513) ───────────────────
+       Dim the allocation section when the reactor is offline; dim the
+       battery bar when the battery is offline. Both indicators surface
+       as small badges in the status line. */
+    .power-alloc.offline > .inset-body { opacity: 0.42; filter: saturate(0.5); }
+    .battery-wrap.offline > .inset-body { opacity: 0.42; filter: saturate(0.5); }
+    .status-line .fine-offline {
+      color: var(--fire-bright); letter-spacing: 0.22em;
+      border: 1px solid var(--fire-dim); padding: 1px 6px;
+    }
+
     /* ── Battery inset ─────────────────────────────────────── */
     .battery-wrap { flex-shrink: 0; }
     .battery-wrap > .inset-body {
@@ -267,6 +278,10 @@
           <span id="status-pool">— POOL</span>
           <span class="sep" id="status-locked-sep" style="display:none;">·</span>
           <span id="status-locked" style="display:none; color:var(--fire-bright);">LOCKED</span>
+          <span class="sep" id="status-reactor-sep" style="display:none;">·</span>
+          <span class="fine-offline" id="status-reactor-off" style="display:none;">REACTOR OFFLINE</span>
+          <span class="sep" id="status-battery-sep" style="display:none;">·</span>
+          <span class="fine-offline" id="status-battery-off" style="display:none;">BATTERY OFFLINE</span>
           <span class="auto-badge" id="power-auto-badge" hidden>AUTO</span>
         </div>
 
@@ -274,7 +289,7 @@
         <div class="panel-mid">
 
           <!-- ── Power allocation ──────────────────────────────── -->
-          <div class="inset power-alloc">
+          <div class="inset power-alloc" id="power-alloc-inset">
             <div class="inset-body">
               <div class="section-header">
                 <span>POWER ALLOCATION</span>
@@ -291,7 +306,7 @@
           </div>
 
           <!-- ── Battery charge ────────────────────────────────── -->
-          <div class="inset battery-wrap">
+          <div class="inset battery-wrap" id="battery-wrap-inset">
             <div class="inset-body">
               <div class="section-header">
                 <span>BATTERY CHARGE</span>
@@ -393,6 +408,28 @@
       var lockedEl  = document.getElementById('status-locked');
       if (lockedSep) lockedSep.style.display = locked ? '' : 'none';
       if (lockedEl)  lockedEl.style.display  = locked ? '' : 'none';
+
+      /* ─ Fine-system offline indicators (issue #513) ────────── */
+      // `reactor_online` / `battery_online` are sent by buildPowerConsoleState.
+      // Missing → assume online (legacy).
+      var reactorOnline = (s.reactor_online === undefined) ? true : !!s.reactor_online;
+      var batteryOnline = (s.battery_online === undefined) ? true : !!s.battery_online;
+      var reactorSep = document.getElementById('status-reactor-sep');
+      var reactorOff = document.getElementById('status-reactor-off');
+      if (reactorSep) reactorSep.style.display = reactorOnline ? 'none' : '';
+      if (reactorOff) reactorOff.style.display = reactorOnline ? 'none' : '';
+      var batterySep = document.getElementById('status-battery-sep');
+      var batteryOff = document.getElementById('status-battery-off');
+      if (batterySep) batterySep.style.display = batteryOnline ? 'none' : '';
+      if (batteryOff) batteryOff.style.display = batteryOnline ? 'none' : '';
+      var allocInset = document.getElementById('power-alloc-inset');
+      if (allocInset) {
+        allocInset.classList.toggle('offline', !reactorOnline);
+      }
+      var batWrap = document.getElementById('battery-wrap-inset');
+      if (batWrap) {
+        batWrap.classList.toggle('offline', !batteryOnline);
+      }
 
       /* ─ Power rows ─────────────────────────────────────────── */
       var rows = document.getElementById('power-rows');

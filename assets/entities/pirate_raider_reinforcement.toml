@@ -21,8 +21,13 @@ description = "Harrow Destroyer"
 [hull]
 hull_integrity = 30.0
 
-[shields_console.base]
-num_facings = 1
+# Single omni shield arc (issue #514). NPCs have no `[shields]` station so
+# the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
+[[shield_arc]]
+id = "all"
+label = "All"
+center_deg = 0
+width_deg = 360
 max_hp = 15
 regen_per_sec = 0.5
 
@@ -103,7 +108,20 @@ id = "helm"
 kind = "helm"
 ai_only = true
 
+# Fine Tactical systems (issue #512): one phaser bank ("fore"). No torpedoes.
 [[system]]
-id = "tactical"
-kind = "tactical"
+id = "phaser-fore"
+kind = "phaser_bank"
+ai_only = true
+
+# Fine Power systems (issue #513): reactor + battery for per-instance damage.
+# NPCs have no `[power_groups.*]` block so `power_group` is omitted.
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
 ai_only = true

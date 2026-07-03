@@ -87,6 +87,10 @@ This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anch
 
 `operate_captain_ai` in `src/console/captain/server.rs` controls the `red-alert` system, so it is gated by `ControlSourceResolver::policy_for(red_alert_system_id())`, not by the umbrella `captain` system. The AI reads recent combat from `RecentCombatActivity` in `src/ship/combat_activity.rs`; `publish_viewscreen_blackboard` mirrors those timestamps into the viewscreen aggregate for UI and cross-system visibility. `update_combat_activity` treats an uninitialized previous-hull value as the configured maximum hull, so a first observed damaged hull records combat instead of being missed.
 
+## Helm destroy steering
+
+`operate_helm` in `src/ai/core.rs` uses the active Destroy target both as the facing target and as the range anchor. When the ship is already inside maintain range, thrust is zero and steering should only face the target. The active Destroy target is therefore excluded from `avoidance_steering`; otherwise a close enemy with a large collider can be treated as an obstacle and make an AI-controlled, stationary ship yaw left/right around the same target.
+
 ## NPC ship spawn
 
 When `spawn_entity` in `src/entities/spawner.rs` detects a TOML `[behaviour]` section, it inserts:

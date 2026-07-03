@@ -424,13 +424,12 @@ fn helm_destroy(
         }
     };
 
-    let self_uuid = uuid::Uuid::nil(); // excluded from avoidance (self already excluded upstream)
     let avoidance = avoidance_steering(
         pos,
         world_view.entity_yaw,
         forward_speed,
         world_view.self_radius,
-        self_uuid,
+        target_uuid,
         &world_view.entities,
         avoidance_buffer,
         avoidance_look_ahead_secs,
@@ -1010,7 +1009,9 @@ mod tests {
 
     /// Build a scored pool with Destroy (high score, unresolvable target) first,
     /// then Patrol (lower score, resolvable anchor) second.
-    fn destroy_then_patrol_pool(anchors: &std::collections::HashMap<String, [f32; 3]>) -> Vec<crate::messages::ScoredObjective> {
+    fn destroy_then_patrol_pool(
+        anchors: &std::collections::HashMap<String, [f32; 3]>,
+    ) -> Vec<crate::messages::ScoredObjective> {
         let _ = anchors; // anchors used externally; pool just carries names
         vec![
             crate::messages::ScoredObjective {
@@ -1184,7 +1185,10 @@ mod tests {
         target_name: &str,
         target_speed: f32,
         maintain_range: f32,
-    ) -> (Vec<crate::messages::ScoredObjective>, Vec<crate::entity_config::DoctrineObjective>) {
+    ) -> (
+        Vec<crate::messages::ScoredObjective>,
+        Vec<crate::entity_config::DoctrineObjective>,
+    ) {
         let pool = vec![crate::messages::ScoredObjective {
             id: "destroy-target".into(),
             score: 50.0,
@@ -1330,6 +1334,49 @@ mod tests {
             &empty_registry(),
         );
         assert_eq!(thrust, 0.0, "inside stop_dist: thrust must be 0");
+    }
+
+    #[test]
+    fn helm_destroy_holding_station_does_not_avoid_destroy_target() {
+        // While holding weapons range, the active Destroy target is the thing
+        // the ship intentionally faces. Treating that same target as an
+        // avoidance obstacle makes a stationary AI ship yaw away from a nearby
+        // enemy even when already lined up.
+        let target_uuid = Uuid::new_v4();
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: target_uuid,
+                name: Some("enemy".into()),
+                position: [0.0, 0.0, -10.0],
+                radius: 20.0,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut memory = AiMemory::default();
+        let (pool, doctrine) = destroy_pool_for("enemy", 0.8, 25.0);
+
+        let (thrust, steering) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+        );
+
+        assert_eq!(thrust, 0.0, "inside stop_dist: thrust must be 0");
+        assert_eq!(
+            steering, 0.0,
+            "active destroy target must not push avoidance steering while holding station"
+        );
     }
 
     // ── operate_weapons ───────────────────────────────────────────────────

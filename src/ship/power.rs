@@ -696,12 +696,17 @@ fn publish_power_blackboard(
         .collect();
 
     let bb = PowerBlackboard {
-        consoles: entries,
+        consoles: entries.clone(),
         total: power.0.total(),
         total_max: 8,
         battery_charge: power.0.battery_charge,
         battery_max: config.0.capacity,
         locked: power.0.locked,
+        // Additive-only PowerGroupId-keyed mirror (parent issue #516 sub-issue
+        // #616). `PowerGroupEntry` is currently a type alias for
+        // `PowerConsoleEntry` since the entry shape is already string-keyed;
+        // downstream consumers may read either. A later sub-PR renames.
+        groups: entries,
     };
     // Fine blackboards (issue #513) — reactor owns the allocation surface,
     // battery owns the emergency-reserve pool. Emitted alongside the legacy

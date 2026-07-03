@@ -976,20 +976,28 @@ mod tests {
 
     #[test]
     fn server_repair_state_round_trips() {
-        use crate::messages::{Console, TeamSlot};
+        use crate::messages::{Console, SystemId, TeamSlot};
         let msg = ServerMessage::RepairState {
             teams: vec![
                 TeamSlot::Idle,
                 TeamSlot::Travelling {
-                    console: Console::Helm,
+                    console: Some(Console::Helm),
+                    system_id: Some(SystemId("helm".into())),
+                    display_name: Some("Helm".into()),
                     elapsed: 2.5,
                 },
                 TeamSlot::Repairing {
-                    console: Console::Tactical,
+                    console: Some(Console::Tactical),
+                    system_id: Some(SystemId("tactical".into())),
+                    display_name: Some("Tactical".into()),
                 },
                 TeamSlot::Returning {
                     remaining: 3.0,
                     queued: None,
+                    system_id: None,
+                    display_name: None,
+                    queued_system_id: None,
+                    queued_display_name: None,
                 },
             ],
         };
@@ -2975,5 +2983,365 @@ mod tests {
                 target: Console::Helm
             }
         );
+    }
+
+    // ── issue #616 (parent #516): SystemId-keyed hull + Power group additive shapes ──
+    // These tests cover the new-shape wire types introduced alongside the
+    // legacy `Console`-keyed shapes. Publishers emit both; consumers may read
+    // either. Legacy payloads without the new fields must still deserialize.
+
+    #[test]
+    fn system_hull_status_round_trips() {
+        let status = SystemHullStatus {
+            system_id: SystemId("phaser-fore".into()),
+            display_name: "Phaser Bank (Fore)".into(),
+            current: 42.5,
+            max_hp: 100.0,
+            tier: crate::damage::DamageTier::Damaged,
+            debuff_magnitude: 0.15,
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        let decoded: SystemHullStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(status, decoded);
+        assert!(json.contains("\"system_id\":\"phaser-fore\""), "got: {json}");
+        assert!(
+            json.contains("\"display_name\":\"Phaser Bank (Fore)\""),
+            "got: {json}"
+        );
+    }
+
+    #[test]
+    fn system_hull_status_debuff_defaults_when_absent() {
+        // Legacy payload without debuff_magnitude must still deserialize.
+        let json = r#"{"system_id":"helm","display_name":"Helm","current":10.0,"max_hp":25.0,"tier":"Damaged"}"#;
+        let decoded: SystemHullStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(decoded.debuff_magnitude, 0.0);
+        assert_eq!(decoded.system_id, SystemId("helm".into()));
+    }
+
+    #[test]
+    fn server_system_hull_update_round_trips() {
+        let msg = ServerMessage::SystemHullUpdate {
+            entries: vec![
+                SystemHullStatus {
+                    system_id: SystemId("helm".into()),
+                    display_name: "Helm".into(),
+                    current: 25.0,
+                    max_hp: 25.0,
+                    tier: crate::damage::DamageTier::Operational,
+                    debuff_magnitude: 0.0,
+                },
+                SystemHullStatus {
+                    system_id: SystemId("tactical".into()),
+                    display_name: "Tactical".into(),
+                    current: 5.0,
+                    max_hp: 25.0,
+                    tier: crate::damage::DamageTier::Disabled,
+                    debuff_magnitude: 0.15,
+                },
+            ],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn team_slot_travelling_with_new_fields_round_trips() {
+        let msg = ServerMessage::RepairState {
+            teams: vec![TeamSlot::Travelling {
+                console: Some(Console::Helm),
+                system_id: Some(SystemId("helm".into())),
+                display_name: Some("Helm".into()),
+                elapsed: 1.5,
+            }],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn team_slot_repairing_with_new_fields_round_trips() {
+        let msg = ServerMessage::RepairState {
+            teams: vec![TeamSlot::Repairing {
+                console: Some(Console::PhaserFore),
+                system_id: Some(SystemId("phaser-fore".into())),
+                display_name: Some("Phaser Bank (Fore)".into()),
+            }],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn team_slot_returning_with_all_new_fields_round_trips() {
+        let msg = ServerMessage::RepairState {
+            teams: vec![TeamSlot::Returning {
+                remaining: 3.5,
+                queued: Some(Console::Tactical),
+                system_id: Some(SystemId("helm".into())),
+                display_name: Some("Helm".into()),
+                queued_system_id: Some(SystemId("tactical".into())),
+                queued_display_name: Some("Tactical".into()),
+            }],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn team_slot_legacy_wire_shape_still_decodes_with_defaults() {
+        // Pre-#616 wire form: no system_id / display_name fields on any variant.
+        // Both old and new fields are `#[serde(default)]` so a legacy payload
+        // decodes with the new fields as None.
+        let legacy_json = r#"{
+            "type": "RepairState",
+            "data": {
+                "teams": [
+                    "Idle",
+                    { "Travelling": { "console": "Helm", "elapsed": 1.2 } },
+                    { "Repairing": { "console": "Tactical" } },
+                    { "Returning": { "remaining": 4.0, "queued": null } }
+                ]
+            }
+        }"#;
+        let decoded = JsonCodec.decode_server(legacy_json).unwrap();
+        match decoded {
+            ServerMessage::RepairState { teams } => {
+                assert_eq!(teams.len(), 4);
+                assert!(matches!(teams[0], TeamSlot::Idle));
+                match &teams[1] {
+                    TeamSlot::Travelling {
+                        console,
+                        system_id,
+                        display_name,
+                        elapsed,
+                    } => {
+                        assert_eq!(*console, Some(Console::Helm));
+                        assert!(system_id.is_none(), "legacy payload -> system_id None");
+                        assert!(
+                            display_name.is_none(),
+                            "legacy payload -> display_name None"
+                        );
+                        assert!((*elapsed - 1.2).abs() < 1e-4);
+                    }
+                    other => panic!("expected Travelling, got {other:?}"),
+                }
+                match &teams[2] {
+                    TeamSlot::Repairing {
+                        console,
+                        system_id,
+                        display_name,
+                    } => {
+                        assert_eq!(*console, Some(Console::Tactical));
+                        assert!(system_id.is_none());
+                        assert!(display_name.is_none());
+                    }
+                    other => panic!("expected Repairing, got {other:?}"),
+                }
+                match &teams[3] {
+                    TeamSlot::Returning {
+                        remaining,
+                        queued,
+                        system_id,
+                        display_name,
+                        queued_system_id,
+                        queued_display_name,
+                    } => {
+                        assert!((*remaining - 4.0).abs() < 1e-4);
+                        assert!(queued.is_none());
+                        assert!(system_id.is_none());
+                        assert!(display_name.is_none());
+                        assert!(queued_system_id.is_none());
+                        assert!(queued_display_name.is_none());
+                    }
+                    other => panic!("expected Returning, got {other:?}"),
+                }
+            }
+            other => panic!("expected RepairState, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn team_slot_new_wire_shape_decodes_without_legacy_console_field() {
+        // Post-#619 wire form: no `console` field at all. Since it's marked
+        // `#[serde(default)]`, decoding must succeed with the field as None.
+        // This is the forward-compatibility guarantee that lets a later PR
+        // drop the field cleanly.
+        let new_json = r#"{
+            "type": "RepairState",
+            "data": {
+                "teams": [
+                    { "Travelling": { "system_id": "helm", "display_name": "Helm", "elapsed": 0.5 } },
+                    { "Repairing": { "system_id": "phaser-fore", "display_name": "Phaser Bank (Fore)" } },
+                    { "Returning": { "remaining": 1.0, "queued_system_id": "tactical", "queued_display_name": "Tactical" } }
+                ]
+            }
+        }"#;
+        let decoded = JsonCodec.decode_server(new_json).unwrap();
+        match decoded {
+            ServerMessage::RepairState { teams } => {
+                match &teams[0] {
+                    TeamSlot::Travelling {
+                        console,
+                        system_id,
+                        display_name,
+                        ..
+                    } => {
+                        assert!(console.is_none(), "no legacy console field in payload");
+                        assert_eq!(*system_id, Some(SystemId("helm".into())));
+                        assert_eq!(display_name.as_deref(), Some("Helm"));
+                    }
+                    other => panic!("expected Travelling, got {other:?}"),
+                }
+                match &teams[1] {
+                    TeamSlot::Repairing {
+                        console,
+                        system_id,
+                        display_name,
+                    } => {
+                        assert!(console.is_none());
+                        assert_eq!(*system_id, Some(SystemId("phaser-fore".into())));
+                        assert_eq!(display_name.as_deref(), Some("Phaser Bank (Fore)"));
+                    }
+                    other => panic!("expected Repairing, got {other:?}"),
+                }
+                match &teams[2] {
+                    TeamSlot::Returning {
+                        queued,
+                        queued_system_id,
+                        queued_display_name,
+                        ..
+                    } => {
+                        assert!(queued.is_none());
+                        assert_eq!(*queued_system_id, Some(SystemId("tactical".into())));
+                        assert_eq!(queued_display_name.as_deref(), Some("Tactical"));
+                    }
+                    other => panic!("expected Returning, got {other:?}"),
+                }
+            }
+            other => panic!("expected RepairState, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn repair_blackboard_with_system_hull_round_trips() {
+        let bb = SystemBlackboard::Repair(RepairBlackboard {
+            teams: vec![TeamSlot::Idle],
+            console_hull: vec![ConsoleHullStatus {
+                console: Console::Helm,
+                current: 20.0,
+                max_hp: 25.0,
+                tier: crate::damage::DamageTier::Operational,
+                debuff_magnitude: 0.0,
+            }],
+            travel_duration_secs: 5.0,
+            damageable_consoles: vec![Console::Helm, Console::Tactical],
+            system_hull: vec![SystemHullStatus {
+                system_id: SystemId("helm".into()),
+                display_name: "Helm".into(),
+                current: 20.0,
+                max_hp: 25.0,
+                tier: crate::damage::DamageTier::Operational,
+                debuff_magnitude: 0.0,
+            }],
+            damageable_systems: vec![
+                SystemId("helm".into()),
+                SystemId("tactical".into()),
+            ],
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("repair".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn repair_blackboard_legacy_wire_shape_defaults_new_fields() {
+        // Pre-#616 blackboard payload without system_hull / damageable_systems
+        // must still deserialize; the new fields default to empty.
+        let legacy_json = r#"{
+            "kind": "Repair",
+            "data": {
+                "teams": [],
+                "console_hull": [],
+                "travel_duration_secs": 5.0,
+                "damageable_consoles": ["Helm"]
+            }
+        }"#;
+        let decoded: SystemBlackboard = serde_json::from_str(legacy_json).unwrap();
+        match decoded {
+            SystemBlackboard::Repair(bb) => {
+                assert!(bb.system_hull.is_empty());
+                assert!(bb.damageable_systems.is_empty());
+                assert_eq!(bb.damageable_consoles, vec![Console::Helm]);
+            }
+            other => panic!("expected Repair blackboard, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn power_blackboard_with_groups_round_trips() {
+        let entry = PowerConsoleEntry {
+            id: "helm".into(),
+            label: "HELM".into(),
+            level: 2,
+            max_level: 4,
+        };
+        let bb = SystemBlackboard::Power(PowerBlackboard {
+            consoles: vec![entry.clone()],
+            total: 2,
+            total_max: 8,
+            battery_charge: 50.0,
+            battery_max: 100.0,
+            locked: false,
+            groups: vec![entry],
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("power".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn power_blackboard_legacy_wire_shape_defaults_groups_field() {
+        // Pre-#616 blackboard payload without groups must still deserialize
+        // with the new field defaulting to empty.
+        let legacy_json = r#"{
+            "kind": "Power",
+            "data": {
+                "consoles": [],
+                "total": 0,
+                "total_max": 8,
+                "battery_charge": 0.0,
+                "battery_max": 100.0,
+                "locked": false
+            }
+        }"#;
+        let decoded: SystemBlackboard = serde_json::from_str(legacy_json).unwrap();
+        match decoded {
+            SystemBlackboard::Power(bb) => {
+                assert!(bb.groups.is_empty(), "groups defaults to empty vec");
+                assert!(bb.consoles.is_empty());
+            }
+            other => panic!("expected Power blackboard, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn power_group_entry_is_alias_of_power_console_entry() {
+        // Compile-time / runtime confirmation that PowerGroupEntry is a type
+        // alias (introduced by issue #616): a value of one type is directly
+        // assignable to a Vec of the other.
+        let entry = PowerConsoleEntry {
+            id: "helm".into(),
+            label: "HELM".into(),
+            level: 1,
+            max_level: 4,
+        };
+        let groups: Vec<PowerGroupEntry> = vec![entry.clone()];
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, entry.id);
     }
 }

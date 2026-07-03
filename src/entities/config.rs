@@ -293,6 +293,38 @@ pub struct ConsoleHullEntry {
     pub debuff_magnitude: f32,
 }
 
+/// One entry in the `[[hull.system_hull]]` TOML array — the SystemId-keyed
+/// successor of [`ConsoleHullEntry`] introduced by parent issue #516
+/// sub-issue #616. TOML authors may populate either array during the
+/// additive migration; the entity loader accepts both.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemHullEntry {
+    /// Stable ship-wide system identifier (e.g. `"helm"`, `"phaser-fore"`).
+    /// Deserialises from a bare TOML string via the `SystemId(String)`
+    /// newtype.
+    pub system_id: crate::messages::SystemId,
+    /// Optional human-readable name. When omitted, downstream code falls
+    /// back to the raw `system_id` string.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Maximum (and starting) HP for this system.
+    pub max_hp: f32,
+    /// HP fraction below which the system enters the `Damaged` tier.
+    /// Defaults to `0.75` (below 75 % → Damaged).
+    #[serde(default = "default_damaged_threshold_pct")]
+    pub damaged_threshold_pct: f32,
+    /// HP fraction below which the system enters the `Disabled` tier.
+    /// Defaults to `0.25` (below 25 % → Disabled).
+    #[serde(default = "default_disabled_threshold_pct")]
+    pub disabled_threshold_pct: f32,
+    /// Performance reduction applied when the system is in the `Damaged` or
+    /// `Disabled` tier (fraction, e.g. `0.15` = 15 % reduction).
+    /// Defaults to `0.15`.
+    #[serde(default = "default_debuff_magnitude")]
+    pub debuff_magnitude: f32,
+}
+
 fn default_damaged_threshold_pct() -> f32 {
     0.75
 }
@@ -314,6 +346,12 @@ pub struct HullConfig {
     /// Per-console hull entries. When present, replaces `hull_integrity`.
     #[serde(default)]
     pub console_hull: Vec<ConsoleHullEntry>,
+    /// SystemId-keyed successor of `console_hull` introduced by parent issue
+    /// #516 sub-issue #616. Populated alongside `console_hull` during the
+    /// additive migration; the spawner accepts either shape. Left as an empty
+    /// vec when the TOML author only supplied `console_hull`.
+    #[serde(default)]
+    pub system_hull: Vec<SystemHullEntry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -2261,6 +2299,66 @@ hull_integrity = 100
         );
         assert!(config.hull.is_some(), "hull should be Some");
         assert_eq!(config.tags, vec!["full"]);
+    }
+
+    // ── SystemId-keyed hull entries (parent issue #516 sub-issue #616) ────────
+
+    #[test]
+    fn hull_system_hull_parses_from_toml() {
+        let toml_str = r##"
+[hull]
+hull_integrity = 100
+
+[[hull.system_hull]]
+system_id = "phaser-fore"
+display_name = "Phaser Bank (Fore)"
+max_hp = 25.0
+damaged_threshold_pct = 0.6
+disabled_threshold_pct = 0.2
+debuff_magnitude = 0.25
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let hull = config.hull.as_ref().expect("hull must parse");
+        assert_eq!(hull.system_hull.len(), 1);
+        let entry = &hull.system_hull[0];
+        assert_eq!(entry.system_id, crate::messages::SystemId("phaser-fore".into()));
+        assert_eq!(entry.display_name.as_deref(), Some("Phaser Bank (Fore)"));
+        assert!((entry.max_hp - 25.0).abs() < 1e-6);
+        assert!((entry.damaged_threshold_pct - 0.6).abs() < 1e-6);
+        assert!((entry.disabled_threshold_pct - 0.2).abs() < 1e-6);
+        assert!((entry.debuff_magnitude - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hull_system_hull_defaults_when_absent() {
+        // Legacy TOML without [[hull.system_hull]] must still parse; the new
+        // field defaults to an empty Vec.
+        let toml_str = r##"
+[hull]
+hull_integrity = 100
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let hull = config.hull.as_ref().expect("hull must parse");
+        assert!(hull.system_hull.is_empty());
+    }
+
+    #[test]
+    fn hull_system_hull_entry_optional_fields_default() {
+        // Only the required fields (system_id, max_hp) are provided; every
+        // other field has a serde default.
+        let toml_str = r##"
+[hull]
+[[hull.system_hull]]
+system_id = "helm"
+max_hp = 30.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let entry = &config.hull.as_ref().unwrap().system_hull[0];
+        assert_eq!(entry.system_id, crate::messages::SystemId("helm".into()));
+        assert!(entry.display_name.is_none());
+        assert!((entry.damaged_threshold_pct - 0.75).abs() < 1e-6);
+        assert!((entry.disabled_threshold_pct - 0.25).abs() < 1e-6);
+        assert!((entry.debuff_magnitude - 0.15).abs() < 1e-6);
     }
 
     // ── Shipped template TOML files referenced by assets/worlds/default.toml ──

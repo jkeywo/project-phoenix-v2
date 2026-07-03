@@ -1,5 +1,15 @@
 use crate::damage::ConsoleHull;
-use crate::messages::{Console, TeamSlot};
+use crate::messages::{Console, SystemId, TeamSlot};
+
+/// Derive the `system_id` and `display_name` new fields (issue #616) from a
+/// [`Console`]. Kept as a helper so every construction site produces the
+/// same shape.
+fn derive_system_fields(c: &Console) -> (SystemId, String) {
+    (
+        SystemId(c.station_console_id().to_string()),
+        c.display_name().to_string(),
+    )
+}
 
 /// Tunable timings for the repair-team state machine.
 ///
@@ -82,44 +92,91 @@ impl RepairTeams {
         let Some(slot) = self.slots.get_mut(team_idx) else {
             return;
         };
+        let (new_sid, new_label) = derive_system_fields(&new_console);
         match slot.clone() {
             TeamSlot::Idle => {
                 *slot = TeamSlot::Travelling {
-                    console: new_console,
+                    console: Some(new_console),
+                    system_id: Some(new_sid),
+                    display_name: Some(new_label),
                     elapsed: 0.0,
                 };
             }
             TeamSlot::Travelling {
                 console: current,
                 elapsed,
+                ..
             } => {
-                let queued = if new_console == current {
-                    None
-                } else {
-                    Some(new_console)
-                };
+                let is_same = current.as_ref() == Some(&new_console);
+                let queued = if is_same { None } else { Some(new_console) };
+                let (from_sid, from_label) = current
+                    .as_ref()
+                    .map(|c| {
+                        let (s, l) = derive_system_fields(c);
+                        (Some(s), Some(l))
+                    })
+                    .unwrap_or((None, None));
+                let (queued_sid, queued_label) = queued
+                    .as_ref()
+                    .map(|c| {
+                        let (s, l) = derive_system_fields(c);
+                        (Some(s), Some(l))
+                    })
+                    .unwrap_or((None, None));
                 *slot = TeamSlot::Returning {
                     remaining: elapsed,
                     queued,
+                    system_id: from_sid,
+                    display_name: from_label,
+                    queued_system_id: queued_sid,
+                    queued_display_name: queued_label,
                 };
             }
             TeamSlot::Repairing {
                 console: current, ..
             } => {
-                let queued = if new_console == current {
-                    None
-                } else {
-                    Some(new_console)
-                };
+                let is_same = current.as_ref() == Some(&new_console);
+                let queued = if is_same { None } else { Some(new_console) };
+                let (from_sid, from_label) = current
+                    .as_ref()
+                    .map(|c| {
+                        let (s, l) = derive_system_fields(c);
+                        (Some(s), Some(l))
+                    })
+                    .unwrap_or((None, None));
+                let (queued_sid, queued_label) = queued
+                    .as_ref()
+                    .map(|c| {
+                        let (s, l) = derive_system_fields(c);
+                        (Some(s), Some(l))
+                    })
+                    .unwrap_or((None, None));
                 *slot = TeamSlot::Returning {
                     remaining: travel_duration,
                     queued,
+                    system_id: from_sid,
+                    display_name: from_label,
+                    queued_system_id: queued_sid,
+                    queued_display_name: queued_label,
                 };
             }
-            TeamSlot::Returning { remaining, .. } => {
+            TeamSlot::Returning {
+                remaining,
+                system_id,
+                display_name,
+                ..
+            } => {
+                let (queued_sid, queued_label) = {
+                    let (s, l) = derive_system_fields(&new_console);
+                    (Some(s), Some(l))
+                };
                 *slot = TeamSlot::Returning {
                     remaining,
                     queued: Some(new_console),
+                    system_id,
+                    display_name,
+                    queued_system_id: queued_sid,
+                    queued_display_name: queued_label,
                 };
             }
         }
@@ -140,48 +197,99 @@ impl RepairTeams {
         let repair_rate = self.timings.repair_rate_hp_per_sec;
         for slot in self.slots.iter_mut() {
             match slot {
-                TeamSlot::Travelling { console, elapsed } => {
+                TeamSlot::Travelling {
+                    console, elapsed, ..
+                } => {
                     *elapsed += dt;
                     if *elapsed >= travel_duration {
-                        let console = console.clone();
-                        let is_full = hull.is_at_max(&console);
-                        let is_destroyed =
-                            hull.tier_for(console.clone()) == crate::damage::DamageTier::Destroyed;
+                        // A Travelling slot without a console value shouldn't
+                        // occur in-process (all constructors populate it), but
+                        // the field is now optional on the wire — treat a
+                        // missing value as "bounce straight back to Idle".
+                        let Some(console_val) = console.clone() else {
+                            *slot = TeamSlot::Returning {
+                                remaining: 0.0,
+                                queued: None,
+                                system_id: None,
+                                display_name: None,
+                                queued_system_id: None,
+                                queued_display_name: None,
+                            };
+                            continue;
+                        };
+                        let is_full = hull.is_at_max(&console_val);
+                        let is_destroyed = hull.tier_for(console_val.clone())
+                            == crate::damage::DamageTier::Destroyed;
+                        let (from_sid, from_label) = derive_system_fields(&console_val);
                         if is_full || is_destroyed {
                             *slot = TeamSlot::Returning {
                                 remaining: 0.0,
                                 queued: None,
+                                system_id: Some(from_sid),
+                                display_name: Some(from_label),
+                                queued_system_id: None,
+                                queued_display_name: None,
                             };
                         } else {
-                            *slot = TeamSlot::Repairing { console };
+                            *slot = TeamSlot::Repairing {
+                                console: Some(console_val),
+                                system_id: Some(from_sid),
+                                display_name: Some(from_label),
+                            };
                         }
                     }
                 }
-                TeamSlot::Repairing { console } => {
-                    // Do not repair a Destroyed console — the latch is
-                    // unrepairable by a repair team alone.
-                    if hull.tier_for(console.clone()) == crate::damage::DamageTier::Destroyed {
+                TeamSlot::Repairing { console, .. } => {
+                    let Some(console_val) = console.clone() else {
                         *slot = TeamSlot::Returning {
                             remaining: travel_duration,
                             queued: None,
+                            system_id: None,
+                            display_name: None,
+                            queued_system_id: None,
+                            queued_display_name: None,
+                        };
+                        continue;
+                    };
+                    // Do not repair a Destroyed console — the latch is
+                    // unrepairable by a repair team alone.
+                    if hull.tier_for(console_val.clone()) == crate::damage::DamageTier::Destroyed {
+                        let (from_sid, from_label) = derive_system_fields(&console_val);
+                        *slot = TeamSlot::Returning {
+                            remaining: travel_duration,
+                            queued: None,
+                            system_id: Some(from_sid),
+                            display_name: Some(from_label),
+                            queued_system_id: None,
+                            queued_display_name: None,
                         };
                         continue;
                     }
                     let hp_to_restore = dt * repair_rate;
-                    hull.restore(console.clone(), hp_to_restore);
-                    if hull.is_at_max(console) {
+                    hull.restore(console_val.clone(), hp_to_restore);
+                    if hull.is_at_max(&console_val) {
+                        let (from_sid, from_label) = derive_system_fields(&console_val);
                         *slot = TeamSlot::Returning {
                             remaining: travel_duration,
                             queued: None,
+                            system_id: Some(from_sid),
+                            display_name: Some(from_label),
+                            queued_system_id: None,
+                            queued_display_name: None,
                         };
                     }
                 }
-                TeamSlot::Returning { remaining, queued } => {
+                TeamSlot::Returning {
+                    remaining, queued, ..
+                } => {
                     *remaining -= dt;
                     if *remaining <= 0.0 {
                         if let Some(c) = queued.take() {
+                            let (sid, label) = derive_system_fields(&c);
                             *slot = TeamSlot::Travelling {
-                                console: c,
+                                console: Some(c),
+                                system_id: Some(sid),
+                                display_name: Some(label),
                                 elapsed: 0.0,
                             };
                         } else {
@@ -270,9 +378,10 @@ mod tests {
     fn dispatch_idle_team_enters_travelling() {
         let mut teams = RepairTeams::new(2);
         teams.dispatch(0, Console::Helm);
-        assert!(
-            matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, elapsed } if *elapsed == 0.0)
-        );
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Travelling { console: Some(Console::Helm), elapsed, .. } if *elapsed == 0.0
+        ));
     }
 
     #[test]
@@ -301,7 +410,7 @@ mod tests {
         assert!(matches!(
             &teams.slots()[0],
             TeamSlot::Repairing {
-                console: Console::Helm,
+                console: Some(Console::Helm),
                 ..
             }
         ));
@@ -415,14 +524,14 @@ mod tests {
         assert!(matches!(
             &teams.slots()[0],
             TeamSlot::Travelling {
-                console: Console::Helm,
+                console: Some(Console::Helm),
                 ..
             }
         ));
         assert!(matches!(
             &teams.slots()[1],
             TeamSlot::Travelling {
-                console: Console::Tactical,
+                console: Some(Console::Tactical),
                 ..
             }
         ));
@@ -435,7 +544,7 @@ mod tests {
             matches!(
                 s0,
                 TeamSlot::Repairing {
-                    console: Console::Helm,
+                    console: Some(Console::Helm),
                     ..
                 }
             ) || matches!(s0, TeamSlot::Returning { .. })
@@ -444,7 +553,7 @@ mod tests {
             matches!(
                 s1,
                 TeamSlot::Repairing {
-                    console: Console::Tactical,
+                    console: Some(Console::Tactical),
                     ..
                 }
             ) || matches!(s1, TeamSlot::Returning { .. })
@@ -493,9 +602,14 @@ mod tests {
         // Redirect to a different console
         teams.dispatch(0, Console::Tactical);
         // remaining should equal the elapsed (2.0)
-        assert!(
-            matches!(&teams.slots()[0], TeamSlot::Returning { remaining, queued: Some(Console::Tactical) } if (*remaining - 2.0).abs() < 1e-4)
-        );
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Returning {
+                remaining,
+                queued: Some(Console::Tactical),
+                ..
+            } if (*remaining - 2.0).abs() < 1e-4
+        ));
     }
 
     #[test]
@@ -519,9 +633,14 @@ mod tests {
         teams.tick(5.0, &mut hull); // travel → Repairing
         assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
         teams.dispatch(0, Console::Tactical);
-        assert!(
-            matches!(&teams.slots()[0], TeamSlot::Returning { remaining, queued: Some(Console::Tactical) } if (*remaining - 5.0).abs() < 1e-4)
-        );
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Returning {
+                remaining,
+                queued: Some(Console::Tactical),
+                ..
+            } if (*remaining - 5.0).abs() < 1e-4
+        ));
     }
 
     #[test]
@@ -563,9 +682,14 @@ mod tests {
         teams.tick(2.0, &mut hull); // elapsed=2
         teams.dispatch(0, Console::Tactical); // redirect → Returning { remaining:2, queued:Tactical }
         teams.tick(2.1, &mut hull); // remaining expires → auto-dispatch to Tactical
-        assert!(
-            matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Tactical, elapsed } if *elapsed < 1e-3)
-        );
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Travelling {
+                console: Some(Console::Tactical),
+                elapsed,
+                ..
+            } if *elapsed < 1e-3
+        ));
     }
 
     #[test]

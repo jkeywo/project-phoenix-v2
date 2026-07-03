@@ -104,6 +104,15 @@ pub struct EntityTarget(pub crate::entity_target::TargetSection);
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
+/// SystemId-keyed sibling of [`EntityConsoleHull`] introduced by parent issue
+/// #516 sub-issue #616. During the additive migration `spawn_entity` inserts
+/// both components with the same underlying `ConsoleHull` value so that
+/// per-system consumers may read from the SystemId-shaped component. A later
+/// sub-PR (#617) rebuilds the wrapped type from `ConsoleHull` to a proper
+/// `SystemHull` and drops the console-keyed sibling.
+#[derive(Component, Clone, Debug)]
+pub struct EntitySystemHull(pub crate::damage::ConsoleHull);
+
 /// Bevy ECS component wrapping the pure [`crate::damage::ShipArcHull`]
 /// struct (issue #514). Attached to ship entities that declare
 /// `[[shield_arc]]` blocks with `hull_max_hp` fields. `ship/damage.rs` is
@@ -564,6 +573,12 @@ pub fn spawn_entity(
     // Hull â€” attach an EntityConsoleHull component if the config has hull data.
     // Per-console entries (console_hull) take precedence; if absent, the legacy
     // hull_integrity value is mapped to a single CaptainChair slot.
+    //
+    // Additive migration for parent issue #516 sub-issue #616: also inserts an
+    // `EntitySystemHull` component wrapping the same underlying `ConsoleHull`
+    // value so that per-system consumers may query the SystemId-keyed sibling.
+    // A later sub-PR (#617) rebuilds the wrapped type from `ConsoleHull` to a
+    // proper `SystemHull` and drops the console-keyed component.
     if let Some(hull) = &config.hull {
         let console_hull = if !hull.console_hull.is_empty() {
             // Explicit per-console entries (player ship path).
@@ -597,9 +612,13 @@ pub fn spawn_entity(
             entity_commands.insert(EntityConsoleHull(crate::damage::ConsoleHull::from_config(
                 &[],
             )));
+            entity_commands.insert(EntitySystemHull(crate::damage::ConsoleHull::from_config(
+                &[],
+            )));
             return entity_commands.id();
         };
-        entity_commands.insert(EntityConsoleHull(console_hull));
+        entity_commands.insert(EntityConsoleHull(console_hull.clone()));
+        entity_commands.insert(EntitySystemHull(console_hull));
     }
 
     entity_commands.id()

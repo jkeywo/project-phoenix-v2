@@ -75,6 +75,27 @@ pub struct ConsoleHullStatus {
     pub debuff_magnitude: f32,
 }
 
+/// Per-system hull integrity snapshot — the SystemId-keyed successor of
+/// [`ConsoleHullStatus`] (parent issue #516, sub-issue #616). Publishers
+/// emit both shapes during the additive transition so downstream consumers
+/// can migrate independently; the console-keyed field will be removed in a
+/// later sub-PR.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SystemHullStatus {
+    /// Stable, ship-wide system identifier (e.g. `"helm"`, `"phaser-fore"`).
+    pub system_id: SystemId,
+    /// Human-readable name for UI display (e.g. `"Helm"`, `"Phaser Bank (Fore)"`).
+    pub display_name: String,
+    pub current: f32,
+    pub max_hp: f32,
+    /// Derived damage tier for this system.
+    pub tier: crate::damage::DamageTier,
+    /// Active debuff magnitude for this system (0.0 when Operational or
+    /// Destroyed, tier_config.debuff_magnitude when Damaged or Disabled).
+    #[serde(default)]
+    pub debuff_magnitude: f32,
+}
+
 /// A serialisable snapshot of a single shield facing for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ShieldFacingStatus {
@@ -210,20 +231,56 @@ pub enum PhaserMode {
 }
 
 /// The state of a single repair team, broadcast as part of `RepairState`.
+///
+/// Additive migration for parent issue #516 sub-issue #616:
+/// `Travelling`, `Repairing`, and `Returning` all carry both the legacy
+/// `Console` fields and the new `SystemId` / `display_name` fields. Publishers
+/// populate both; consumers may read either. The legacy fields are wrapped in
+/// `Option` and marked `#[serde(default)]` so the field can be dropped cleanly
+/// in a later sub-PR without wire-compat pain (both sides tolerate absence).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub enum TeamSlot {
     #[default]
     Idle,
-    /// Team is en route to the target console. `elapsed` counts up toward 5s.
-    Travelling { console: Console, elapsed: f32 },
+    /// Team is en route to the target console. `elapsed` counts up toward the
+    /// configured travel duration.
+    Travelling {
+        #[serde(default)]
+        console: Option<Console>,
+        #[serde(default)]
+        system_id: Option<SystemId>,
+        #[serde(default)]
+        display_name: Option<String>,
+        elapsed: f32,
+    },
     /// Team is at the console performing repairs.
-    Repairing { console: Console },
+    Repairing {
+        #[serde(default)]
+        console: Option<Console>,
+        #[serde(default)]
+        system_id: Option<SystemId>,
+        #[serde(default)]
+        display_name: Option<String>,
+    },
     /// Team has finished and is returning to engineering.
-    /// `remaining` counts down from 5s. `queued` holds the next console to
-    /// dispatch to automatically on arrival (if any).
+    /// `remaining` counts down from the travel duration. `queued` holds the
+    /// next console to dispatch to automatically on arrival (if any).
     Returning {
         remaining: f32,
+        #[serde(default)]
         queued: Option<Console>,
+        /// System id we are returning FROM (populated when known).
+        #[serde(default)]
+        system_id: Option<SystemId>,
+        /// Display name for the system we are returning FROM.
+        #[serde(default)]
+        display_name: Option<String>,
+        /// System id of the queued next target (mirrors `queued`).
+        #[serde(default)]
+        queued_system_id: Option<SystemId>,
+        /// Display name of the queued next target.
+        #[serde(default)]
+        queued_display_name: Option<String>,
     },
 }
 
@@ -1379,6 +1436,12 @@ pub enum ServerMessage {
     ConsoleHullUpdate {
         entries: Vec<ConsoleHullStatus>,
     },
+    /// SystemId-keyed successor of [`ServerMessage::ConsoleHullUpdate`] (parent
+    /// issue #516 sub-issue #616). Publishers emit both during the additive
+    /// transition so downstream consumers can migrate independently.
+    SystemHullUpdate {
+        entries: Vec<SystemHullStatus>,
+    },
     /// Broadcast when the ship takes damage (from collision or damage zone).
     /// `shield` = HP absorbed by shields, `hull` = HP that reached the hull.
     /// Either field may be zero (e.g. shield-only hit has `hull: 0.0`).
@@ -1815,6 +1878,13 @@ pub struct PowerBlackboard {
     pub battery_max: f32,
     /// Whether the power system is locked (battery exhausted).
     pub locked: bool,
+    /// PowerGroupId-keyed mirror of `consoles` (parent issue #516 sub-issue
+    /// #616). Populated alongside the legacy field during the additive
+    /// migration; consumers may read either. `PowerGroupEntry` is currently a
+    /// type alias for `PowerConsoleEntry` since the entry shape is already
+    /// string-keyed; a later sub-PR renames the type.
+    #[serde(default)]
+    pub groups: Vec<PowerGroupEntry>,
 }
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.
@@ -1939,6 +2009,14 @@ pub struct PowerConsoleEntry {
     pub max_level: u8,
 }
 
+/// A single entry in [`PowerBlackboard::groups`] — the PowerGroupId-keyed
+/// successor of [`PowerConsoleEntry`] introduced by parent issue #516
+/// sub-issue #616. Currently a type alias since the entry shape (string-keyed
+/// `id`, `label`, `level`, `max_level`) is already appropriate for
+/// PowerGroupId identity; a later sub-PR will rename this to a dedicated
+/// type once the console-keyed field is removed.
+pub type PowerGroupEntry = PowerConsoleEntry;
+
 /// Raw sim truth for the Repair system, published each tick into the ship
 /// blackboard (issue #564).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -1951,6 +2029,16 @@ pub struct RepairBlackboard {
     pub travel_duration_secs: f32,
     /// Consoles that can be targeted for repair dispatch (in display order).
     pub damageable_consoles: Vec<Console>,
+    /// SystemId-keyed mirror of `console_hull` (parent issue #516 sub-issue
+    /// #616). Populated alongside the legacy field during the additive
+    /// migration; consumers may read either.
+    #[serde(default)]
+    pub system_hull: Vec<SystemHullStatus>,
+    /// SystemId-keyed mirror of `damageable_consoles` (parent issue #516
+    /// sub-issue #616). Populated alongside the legacy field during the
+    /// additive migration; consumers may read either.
+    #[serde(default)]
+    pub damageable_systems: Vec<SystemId>,
 }
 
 /// Raw sim truth for the Comms system, published each tick into the ship

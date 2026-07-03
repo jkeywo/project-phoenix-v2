@@ -5,7 +5,7 @@ use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::ModifierSlot;
 use crate::messages::{
     AdmittedCommands, ClientMessage, Console, ConsoleHullStatus, RepairBlackboard, RepairTarget,
-    ServerMessage, SystemBlackboard, SystemControlPayload, SystemId, TeamSlot,
+    ServerMessage, SystemBlackboard, SystemControlPayload, SystemHullStatus, SystemId, TeamSlot,
 };
 use crate::modifiers::ShipModifiers;
 use crate::repair_teams::RepairTeams;
@@ -300,11 +300,33 @@ fn publish_repair_blackboard(
         .map(|h| h.0.entries().iter().map(|(c, _, _)| c.clone()).collect())
         .unwrap_or_default();
 
+    // ── Additive-only SystemId mirrors (parent issue #516 sub-issue #616) ─────
+    // Publishers emit both console-keyed and system-keyed shapes during the
+    // transition so downstream consumers can migrate independently. Derived
+    // from the same `Console → SystemId` mapping used by the wire codec.
+    let system_hull: Vec<SystemHullStatus> = console_hull
+        .iter()
+        .map(|c| SystemHullStatus {
+            system_id: SystemId(c.console.station_console_id().to_string()),
+            display_name: c.console.display_name().to_string(),
+            current: c.current,
+            max_hp: c.max_hp,
+            tier: c.tier,
+            debuff_magnitude: c.debuff_magnitude,
+        })
+        .collect();
+    let damageable_systems: Vec<SystemId> = damageable_consoles
+        .iter()
+        .map(|c| SystemId(c.station_console_id().to_string()))
+        .collect();
+
     let bb = RepairBlackboard {
         teams: team_slots,
         console_hull,
         travel_duration_secs: teams.0.timings().travel_duration,
         damageable_consoles,
+        system_hull,
+        damageable_systems,
     };
 
     if let Some(mut blackboards) = blackboards_q.iter_mut().next() {

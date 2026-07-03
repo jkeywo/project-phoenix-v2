@@ -91,27 +91,30 @@ pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfi
 #[derive(Component, Clone, Debug)]
 pub struct EntityTarget(pub crate::entity_target::TargetSection);
 
+/// Legacy console-keyed hull tracker retained only as a struct definition
+/// for any test fixture that still constructs it directly. As of the fix to
+/// issue #617 the spawner no longer inserts this component onto entities —
+/// all readers and writers were switched to [`EntitySystemHull`] after the
+/// reviewer caught that damage-application only mutated one of the two
+/// components, silently breaking damage-based system offlining every tick
+/// that `sync_console_damage_tiers` ran.
+#[derive(Component, Clone, Debug)]
+pub struct EntityConsoleHull(pub crate::damage::SystemHull);
+
 /// Hull tracker attached to any entity (NPC ship, asteroid) that carries a
 /// `[hull]` section in its TOML config. For NPC ships the HP is placed in a
 /// single `CaptainChair` console slot; asteroids use the same single-slot
 /// convention. Damage systems query this component to deal damage and detect
 /// destruction.
 ///
-/// This is a Bevy ECS component wrapping the pure `ConsoleHull` struct. It is
-/// the sole per-ship hull store after PRD #597 PR 10 (the retired
-/// `ShipHullIntegrity` global resource that used to hold the player-ship copy
-/// was deleted along with its dual-write bridge).
+/// This is a Bevy ECS component wrapping the pure `SystemHull` struct
+/// (parent issue #516 sub-issue #616). It is the sole per-ship hull store
+/// after PRD #597 PR 10 (the retired `ShipHullIntegrity` global resource
+/// that used to hold the player-ship copy was deleted along with its
+/// dual-write bridge). It fully supersedes the previous
+/// [`EntityConsoleHull`] component after the #617 fix.
 #[derive(Component, Clone, Debug)]
-pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
-
-/// SystemId-keyed sibling of [`EntityConsoleHull`] introduced by parent issue
-/// #516 sub-issue #616. During the additive migration `spawn_entity` inserts
-/// both components with the same underlying `ConsoleHull` value so that
-/// per-system consumers may read from the SystemId-shaped component. A later
-/// sub-PR (#617) rebuilds the wrapped type from `ConsoleHull` to a proper
-/// `SystemHull` and drops the console-keyed sibling.
-#[derive(Component, Clone, Debug)]
-pub struct EntitySystemHull(pub crate::damage::ConsoleHull);
+pub struct EntitySystemHull(pub crate::damage::SystemHull);
 
 /// Bevy ECS component wrapping the pure [`crate::damage::ShipArcHull`]
 /// struct (issue #514). Attached to ship entities that declare
@@ -318,26 +321,58 @@ pub fn spawn_entity(
         // `power_multipliers` blocks (helm_console/weapons_console/sensors_console)
         // and otherwise defaulted so NPC ships still get MaxSpeed / PhaserDamage
         // / RadarRange bonuses translated by `translate_power_modifiers`.
+        //
+        // After issue #617 the map is keyed by `PowerGroupId`.
         let defaults = [-0.5f32, 0.0, 0.25, 0.5];
-        let mut multipliers: std::collections::HashMap<crate::messages::Console, [f32; 4]> =
+        let mut multipliers: std::collections::HashMap<crate::messages::PowerGroupId, [f32; 4]> =
             std::collections::HashMap::from([
-                (crate::messages::Console::Helm, defaults),
-                (crate::messages::Console::Tactical, defaults),
-                (crate::messages::Console::Sensors, defaults),
+                (
+                    crate::messages::PowerGroupId(
+                        crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                    ),
+                    defaults,
+                ),
+                (
+                    crate::messages::PowerGroupId(
+                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                    ),
+                    defaults,
+                ),
+                (
+                    crate::messages::PowerGroupId(
+                        crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
+                    ),
+                    defaults,
+                ),
             ]);
         if let Some(hc) = &config.helm_console {
             if let Some(pm) = hc.power_multipliers {
-                multipliers.insert(crate::messages::Console::Helm, pm);
+                multipliers.insert(
+                    crate::messages::PowerGroupId(
+                        crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                    ),
+                    pm,
+                );
             }
         }
         if let Some(wc) = &config.weapons_console {
             if let Some(pm) = wc.power_multipliers {
-                multipliers.insert(crate::messages::Console::Tactical, pm);
+                multipliers.insert(
+                    crate::messages::PowerGroupId(
+                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                    ),
+                    pm,
+                );
             }
         }
         if let Some(sc) = &config.sensors_console {
             if let Some(pm) = sc.power_multipliers {
-                multipliers.insert(crate::messages::Console::Sensors, pm);
+                multipliers.insert(
+                    crate::messages::PowerGroupId(
+                        crate::modifiers::power_system::SENSORS_POWER_GROUP.into(),
+                    ),
+                    pm,
+                );
             }
         }
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
@@ -570,28 +605,33 @@ pub fn spawn_entity(
         }
     }
 
-    // Hull â€” attach an EntityConsoleHull component if the config has hull data.
-    // Per-console entries (console_hull) take precedence; if absent, the legacy
-    // hull_integrity value is mapped to a single CaptainChair slot.
+    // Hull -- attach an EntitySystemHull component if the config has hull data.
+    // Per-system entries take precedence; if absent we fall back to per-console
+    // entries (translated via `Console::station_console_id()`), and if that too
+    // is empty we use the legacy scalar `hull_integrity` value mapped to a
+    // single `SystemId("captain")` slot.
     //
-    // Additive migration for parent issue #516 sub-issue #616: also inserts an
-    // `EntitySystemHull` component wrapping the same underlying `ConsoleHull`
-    // value so that per-system consumers may query the SystemId-keyed sibling.
-    // A later sub-PR (#617) rebuilds the wrapped type from `ConsoleHull` to a
-    // proper `SystemHull` and drops the console-keyed component.
+    // After the fix to issue #617 the spawner only inserts `EntitySystemHull` --
+    // the console-keyed `EntityConsoleHull` sibling was dropped when the
+    // reviewer caught that damage-application only wrote to one of the two
+    // components, silently breaking damage-based system offlining every tick
+    // that `sync_console_damage_tiers` ran.
     if let Some(hull) = &config.hull {
-        let console_hull = if !hull.console_hull.is_empty() {
-            // Explicit per-console entries (player ship path).
+        let system_hull: crate::damage::SystemHull = if !hull.system_hull.is_empty() {
+            // Explicit `[[hull.system_hull]]` entries — new authoring path.
             let entries: Vec<(
-                crate::messages::Console,
+                crate::messages::SystemId,
+                String,
                 f32,
                 crate::damage::ConsoleTierConfig,
             )> = hull
-                .console_hull
+                .system_hull
                 .iter()
                 .map(|e| {
+                    let display = e.display_name.clone().unwrap_or_else(|| e.system_id.0.clone());
                     (
-                        e.console.clone(),
+                        e.system_id.clone(),
+                        display,
                         e.max_hp,
                         crate::damage::ConsoleTierConfig {
                             damaged_threshold_pct: e.damaged_threshold_pct,
@@ -601,24 +641,48 @@ pub fn spawn_entity(
                     )
                 })
                 .collect();
-            crate::damage::ConsoleHull::from_config_with_tiers(&entries)
+            crate::damage::SystemHull::from_config_with_display_names(entries)
+        } else if !hull.console_hull.is_empty() {
+            // Legacy `[[hull.console_hull]]` entries (player_ship.toml path).
+            // Translate each `console` field to a `SystemId` via
+            // `console.station_console_id().to_string()`.
+            let entries: Vec<(
+                crate::messages::SystemId,
+                String,
+                f32,
+                crate::damage::ConsoleTierConfig,
+            )> = hull
+                .console_hull
+                .iter()
+                .map(|e| {
+                    let sid = crate::messages::SystemId(
+                        e.console.station_console_id().to_string(),
+                    );
+                    let display = e.console.display_name().to_string();
+                    (
+                        sid,
+                        display,
+                        e.max_hp,
+                        crate::damage::ConsoleTierConfig {
+                            damaged_threshold_pct: e.damaged_threshold_pct,
+                            disabled_threshold_pct: e.disabled_threshold_pct,
+                            debuff_magnitude: e.debuff_magnitude,
+                        },
+                    )
+                })
+                .collect();
+            crate::damage::SystemHull::from_config_with_display_names(entries)
         } else if hull.hull_integrity > 0.0 {
-            crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".to_string()),
                 hull.hull_integrity,
             )])
         } else {
-            // Empty hull section â€” skip.
-            entity_commands.insert(EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                &[],
-            )));
-            entity_commands.insert(EntitySystemHull(crate::damage::ConsoleHull::from_config(
-                &[],
-            )));
+            // Empty hull section — skip.
+            entity_commands.insert(EntitySystemHull(crate::damage::SystemHull::default()));
             return entity_commands.id();
         };
-        entity_commands.insert(EntityConsoleHull(console_hull.clone()));
-        entity_commands.insert(EntitySystemHull(console_hull));
+        entity_commands.insert(EntitySystemHull(system_hull));
     }
 
     entity_commands.id()
@@ -1248,7 +1312,7 @@ mod tests {
         assert_eq!(transform.translation.z, -7.0);
     }
 
-    // â”€â”€ EntityConsoleHull component tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // -- EntitySystemHull component tests --
 
     #[test]
     fn spawn_entity_with_hull_integrity_attaches_captain_chair_slot() {
@@ -1290,8 +1354,8 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
         let hull_comp = world
-            .get::<EntityConsoleHull>(spawned)
-            .expect("should have EntityConsoleHull when hull_integrity > 0");
+            .get::<EntitySystemHull>(spawned)
+            .expect("should have EntitySystemHull when hull_integrity > 0");
         assert!(
             (hull_comp.0.total_max() - 60.0).abs() < 1e-6,
             "max HP should be 60"
@@ -1310,8 +1374,8 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
         assert!(
-            world.get::<EntityConsoleHull>(spawned).is_none(),
-            "entity with no hull config must not have EntityConsoleHull"
+            world.get::<EntitySystemHull>(spawned).is_none(),
+            "entity with no hull config must not have EntitySystemHull"
         );
     }
 
@@ -1402,11 +1466,11 @@ hull_integrity = 60.0
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
         let hull_comp = world
-            .get::<EntityConsoleHull>(spawned)
-            .expect("entity with hull_integrity should still get EntityConsoleHull");
+            .get::<EntitySystemHull>(spawned)
+            .expect("entity with hull_integrity should still get EntitySystemHull");
         assert!((hull_comp.0.total_max() - 200.0).abs() < 1e-6);
-        let entries = hull_comp.0.entries();
-        assert_eq!(entries[0].0, crate::messages::Console::CaptainChair);
+        let entries: Vec<_> = hull_comp.0.entries().collect();
+        assert_eq!(entries[0].0, &crate::messages::SystemId("captain".to_string()));
     }
 
     // -- Channel-3 NPC routing smoke test (#552) --------------------------------

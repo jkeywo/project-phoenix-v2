@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use crate::entity_spawner::{EntityUuid, RegionEffectsSection};
 use crate::flag_kind::FlagKind;
 use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
-use crate::messages::{Console, ModifierSlot, ModifierSource, PowerGroupId};
+use crate::messages::{ModifierSlot, ModifierSource, PowerGroupId};
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
 use crate::power_system::{
@@ -143,15 +143,16 @@ pub fn translate_power_modifiers(
 }
 
 /// Apply power-level modifiers to `modifiers` based on the current `PowerSystem`
-/// state and per-console multiplier config.
+/// state and per-group multiplier config.
 ///
-/// Registers one `Modifier` per console slot using `ModifierSource::Console`.
-/// Re-registration replaces the previous entry (no stacking). Multiplier
-/// arrays are indexed by power level 1–4 (1 maps to index 0).
+/// Registers one `Modifier` per power group using
+/// [`ModifierSource::PowerGroup`]. Re-registration replaces the previous entry
+/// (no stacking). Multiplier arrays are indexed by power level 1–4 (1 maps
+/// to index 0).
 pub fn apply_power_modifiers(
     modifiers: &mut ShipModifiers,
     power: &PowerSystem,
-    multipliers: &HashMap<Console, [f32; 4]>,
+    multipliers: &HashMap<PowerGroupId, [f32; 4]>,
 ) {
     apply_power_modifiers_from_read_state(modifiers, &power.read_state(), multipliers);
 }
@@ -159,45 +160,43 @@ pub fn apply_power_modifiers(
 pub fn apply_power_modifiers_from_read_state(
     modifiers: &mut ShipModifiers,
     power: &PowerReadState,
-    multipliers: &HashMap<Console, [f32; 4]>,
+    multipliers: &HashMap<PowerGroupId, [f32; 4]>,
 ) {
     let default_mult = [-0.5, 0.0, 0.25, 0.5];
     let channel_1 = Channel1Read::new(power);
 
-    let helm_level = channel_1
-        .power_level(&PowerGroupId(HELM_POWER_GROUP.into()))
-        .unwrap_or(2);
+    let helm_id = PowerGroupId(HELM_POWER_GROUP.into());
+    let weapons_id = PowerGroupId(WEAPONS_POWER_GROUP.into());
+    let sensors_id = PowerGroupId(SENSORS_POWER_GROUP.into());
+
+    let helm_level = channel_1.power_level(&helm_id).unwrap_or(2);
     let helm_level = (helm_level as usize).saturating_sub(1).min(3);
-    let helm_bonus = multipliers.get(&Console::Helm).unwrap_or(&default_mult)[helm_level];
+    let helm_bonus = multipliers.get(&helm_id).unwrap_or(&default_mult)[helm_level];
     modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Helm),
+        source: ModifierSource::PowerGroup(helm_id.clone()),
         slot: ModifierSlot::MaxSpeed,
         bonus: helm_bonus,
     });
     modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Helm),
+        source: ModifierSource::PowerGroup(helm_id),
         slot: ModifierSlot::MaxYawRate,
         bonus: helm_bonus,
     });
 
-    let weapons_level = channel_1
-        .power_level(&PowerGroupId(WEAPONS_POWER_GROUP.into()))
-        .unwrap_or(2);
+    let weapons_level = channel_1.power_level(&weapons_id).unwrap_or(2);
     let weapons_level = (weapons_level as usize).saturating_sub(1).min(3);
-    let weapons_bonus = multipliers.get(&Console::Tactical).unwrap_or(&default_mult)[weapons_level];
+    let weapons_bonus = multipliers.get(&weapons_id).unwrap_or(&default_mult)[weapons_level];
     modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Tactical),
+        source: ModifierSource::PowerGroup(weapons_id),
         slot: ModifierSlot::PhaserDamage,
         bonus: weapons_bonus,
     });
 
-    let sensors_level = channel_1
-        .power_level(&PowerGroupId(SENSORS_POWER_GROUP.into()))
-        .unwrap_or(2);
+    let sensors_level = channel_1.power_level(&sensors_id).unwrap_or(2);
     let sensors_level = (sensors_level as usize).saturating_sub(1).min(3);
-    let sensors_bonus = multipliers.get(&Console::Sensors).unwrap_or(&default_mult)[sensors_level];
+    let sensors_bonus = multipliers.get(&sensors_id).unwrap_or(&default_mult)[sensors_level];
     modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Sensors),
+        source: ModifierSource::PowerGroup(sensors_id),
         slot: ModifierSlot::RadarRange,
         bonus: sensors_bonus,
     });
@@ -418,22 +417,32 @@ mod tests {
 
     use super::*;
 
-    fn default_multipliers() -> HashMap<Console, [f32; 4]> {
+    fn default_multipliers() -> HashMap<PowerGroupId, [f32; 4]> {
         let d = [-0.5f32, 0.0, 0.25, 0.5];
         HashMap::from([
-            (Console::Helm, d),
-            (Console::Tactical, d),
-            (Console::Sensors, d),
+            (PowerGroupId(HELM_POWER_GROUP.into()), d),
+            (PowerGroupId(WEAPONS_POWER_GROUP.into()), d),
+            (PowerGroupId(SENSORS_POWER_GROUP.into()), d),
         ])
+    }
+
+    fn helm() -> PowerGroupId {
+        PowerGroupId(HELM_POWER_GROUP.into())
+    }
+    fn weapons() -> PowerGroupId {
+        PowerGroupId(WEAPONS_POWER_GROUP.into())
+    }
+    fn sensors() -> PowerGroupId {
+        PowerGroupId(SENSORS_POWER_GROUP.into())
     }
 
     #[test]
     fn power_level_2_gives_zero_bonus() {
         let mut mods = ShipModifiers::new();
         let mut power = PowerSystem::default();
-        power.helm = 2;
-        power.weapons = 2;
-        power.sensors = 2;
+        power.set_group_allocation(&helm(), 2).unwrap();
+        power.set_group_allocation(&weapons(), 2).unwrap();
+        power.set_group_allocation(&sensors(), 2).unwrap();
         apply_power_modifiers(&mut mods, &power, &default_multipliers());
         assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
         assert_eq!(mods.get(&ModifierSlot::PhaserDamage), 1.0);
@@ -444,7 +453,7 @@ mod tests {
     fn helm_power_4_gives_positive_bonus() {
         let mut mods = ShipModifiers::new();
         let mut power = PowerSystem::default();
-        power.helm = 4;
+        power.set_group_allocation(&helm(), 4).unwrap();
         apply_power_modifiers(&mut mods, &power, &default_multipliers());
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
     }
@@ -453,7 +462,7 @@ mod tests {
     fn helm_power_1_gives_negative_bonus() {
         let mut mods = ShipModifiers::new();
         let mut power = PowerSystem::default();
-        power.helm = 1;
+        power.set_group_allocation(&helm(), 1).unwrap();
         apply_power_modifiers(&mut mods, &power, &default_multipliers());
         // Negative bonus uses 1/(1+|bonus|): -0.5 → 1/1.5 ≈ 0.667
         let expected = 1.0 / 1.5f32;
@@ -464,7 +473,7 @@ mod tests {
     fn apply_twice_does_not_stack() {
         let mut mods = ShipModifiers::new();
         let mut power = PowerSystem::default();
-        power.helm = 4;
+        power.set_group_allocation(&helm(), 4).unwrap();
         let mult = default_multipliers();
         apply_power_modifiers(&mut mods, &power, &mult);
         apply_power_modifiers(&mut mods, &power, &mult);
@@ -779,10 +788,10 @@ mod tests {
         // Spawn an NPC ship (Ship marker, no LocalShip). Give it helm=3 and
         // an explicit multipliers table so we can predict the bonus.
         let mut power = PowerSystem::default();
-        power.helm = 3;
+        power.set_group_allocation(&helm(), 3).unwrap();
         let mut mult = PowerMultiplierResource::default();
         mult.multipliers
-            .insert(crate::messages::Console::Helm, [-0.5, 0.0, 1.0, 2.0]);
+            .insert(helm(), [-0.5, 0.0, 1.0, 2.0]);
 
         let npc = app
             .world_mut()

@@ -1209,6 +1209,22 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    /// After issue #617 the coordination producer registers modifiers with a
+    /// [`ModifierSource::PowerGroup`] variant. The wire format must
+    /// round-trip that new discriminant unchanged.
+    #[test]
+    fn server_modifier_added_power_group_source_round_trips() {
+        let msg = ServerMessage::ModifierAdded {
+            source: crate::messages::ModifierSource::PowerGroup(
+                crate::messages::PowerGroupId("sensors".to_string()),
+            ),
+            slot: crate::messages::ModifierSlot::RadarRange,
+            bonus: 0.5,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
     #[test]
     fn server_modifier_added_region_source_round_trips() {
         let msg = ServerMessage::ModifierAdded {

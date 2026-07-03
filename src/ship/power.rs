@@ -3,10 +3,12 @@ use bevy::prelude::*;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
     Console, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard,
-    PowerConsoleEntry, PowerReactorBlackboard, ServerMessage, SystemBlackboard, SystemId,
+    PowerConsoleEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage, SystemBlackboard,
+    SystemId,
 };
 use crate::modifiers::power_system::{
-    power_group_for_console, power_level_for_console, PowerConfig, PowerSystem,
+    power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
+    SENSORS_POWER_GROUP, WEAPONS_POWER_GROUP,
 };
 use crate::ship_plugin::LastHelmInput;
 
@@ -26,27 +28,27 @@ pub struct ShipPowerSystem(pub PowerSystem);
 #[derive(Resource, Component, Default, Clone)]
 pub struct PowerConfigResource(pub PowerConfig);
 
-/// Per-console power multiplier configuration: `[f32; 4]` indexed by level-1
+/// Per-group power multiplier configuration: `[f32; 4]` indexed by level-1
 /// (index 0 = level 1, index 3 = level 4). Defaults give `[-0.5, 0.0, 0.25, 0.5]`
-/// for every console unless overridden in the ship TOML.
+/// for every canonical power group unless overridden in the ship TOML.
+///
+/// After issue #617 the map is keyed by [`PowerGroupId`] rather than `Console`.
 ///
 /// Dual-derives `Resource` (legacy global fallback used by tests) and
 /// `Component` (per-entity storage on each ship — PR 6 migration, see PRD #597).
 #[derive(Resource, Component, Clone, Debug)]
 pub struct PowerMultiplierResource {
-    pub multipliers: std::collections::HashMap<Console, [f32; 4]>,
+    pub multipliers: std::collections::HashMap<PowerGroupId, [f32; 4]>,
 }
 
 impl Default for PowerMultiplierResource {
     fn default() -> Self {
         let defaults = [-0.5, 0.0, 0.25, 0.5];
-        Self {
-            multipliers: std::collections::HashMap::from([
-                (Console::Helm, defaults),
-                (Console::Tactical, defaults),
-                (Console::Sensors, defaults),
-            ]),
+        let mut multipliers = std::collections::HashMap::new();
+        for &name in POWER_GROUP_ORDER {
+            multipliers.insert(PowerGroupId(name.to_string()), defaults);
         }
+        Self { multipliers }
     }
 }
 
@@ -84,42 +86,24 @@ impl Default for PowerAiConfigResource {
     }
 }
 
-/// Canonical display order for powered consoles in the HTML panel.
-///
-/// Consoles absent from `PowerMultiplierResource.multipliers` are skipped,
-/// so adding or removing a powered console in the ship TOML automatically
-/// adjusts the list without any code change.
-const POWER_CONSOLE_ORDER: &[Console] = &[
-    Console::Helm,
-    Console::Tactical,
-    Console::Sensors,
-    Console::Shields,
-    Console::Navigation,
-    Console::Comms,
-];
-
-/// Maps a powered `Console` to its display label in the HTML power panel.
-///
-/// `Tactical` is labeled `"WEAPONS"` to match the in-universe terminology;
-/// all others use the uppercased display name.
-pub fn power_console_label(console: &Console) -> &'static str {
-    match console {
-        Console::Helm => "HELM",
-        Console::Tactical => "WEAPONS",
-        Console::Sensors => "SENSORS",
-        Console::Shields => "SHIELDS",
-        Console::Navigation => "NAVIGATION",
-        Console::Comms => "COMMS",
+/// Maps a canonical power group id string to its display label in the HTML
+/// power panel. Anything unknown falls back to the upper-cased id string
+/// (via the caller).
+pub fn power_group_label(group_id: &str) -> &'static str {
+    match group_id {
+        HELM_POWER_GROUP => "HELM",
+        WEAPONS_POWER_GROUP => "WEAPONS",
+        SENSORS_POWER_GROUP => "SENSORS",
         _ => "UNKNOWN",
     }
 }
 
-/// Returns the current power level for `console` from the `PowerSystem`.
+/// Returns the current power level for `group` from the `PowerSystem`.
 ///
-/// Only `Helm`, `Tactical`, and `Sensors` have first-class fields; any other
-/// console silently returns `0` (it should not appear in multipliers).
-pub fn power_level_for(ps: &PowerSystem, console: &Console) -> u8 {
-    power_level_for_console(ps, console)
+/// Delegates to [`power_level_for_group`]; kept as a thin wrapper for the
+/// legacy call-site shape.
+pub fn power_level_for(ps: &PowerSystem, group: &PowerGroupId) -> u8 {
+    power_level_for_group(ps, group)
 }
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────
@@ -176,9 +160,9 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
                 return vec![];
             };
             vec![ServerMessage::PowerState {
-                helm: power.0.helm,
-                weapons: power.0.weapons,
-                sensors: power.0.sensors,
+                helm: power.0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
+                weapons: power.0.level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
+                sensors: power.0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
                 battery_charge: power.0.battery_charge,
                 locked: power.0.locked,
             }]
@@ -212,27 +196,39 @@ pub fn handle_power_messages(
     >,
     power_res: Option<ResMut<ShipPowerSystem>>,
 ) {
-    #[derive(Clone)]
-    enum PowerCmd {
-        SetGroup(crate::messages::PowerGroupId, u8),
-        SetConsole(Console, u8),
+    // After issue #617 the power system speaks only `PowerGroupId`. Legacy
+    // `SetPower { target: Console, .. }` messages from the wire are
+    // translated to a group id at the message-handler edge (inline the
+    // three-branch mapping formerly in `power_group_for_console`); anything
+    // that doesn't map (e.g. `Console::Shields`) is silently dropped, as it
+    // was before this refactor.
+    fn console_to_group(console: &Console) -> Option<crate::messages::PowerGroupId> {
+        match console {
+            Console::Helm => Some(crate::messages::PowerGroupId(HELM_POWER_GROUP.into())),
+            Console::Tactical => Some(crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into())),
+            Console::Sensors => Some(crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into())),
+            _ => None,
+        }
     }
+
     let mut power_res = power_res;
     // Iterate every ship (player + NPC) so both the player's Power console
     // commands and the future NPC `operate_power_ai` writes into
     // `AdmittedCommands` re-allocate that ship's own power grid.
     for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
-        let mut pending: Vec<PowerCmd> = Vec::new();
+        let mut pending: Vec<(crate::messages::PowerGroupId, u8)> = Vec::new();
         for cmd in admitted.for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID) {
             match &cmd.payload {
                 crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
-                    pending.push(PowerCmd::SetGroup(group.clone(), *level));
+                    pending.push((group.clone(), *level));
                 }
                 crate::messages::SystemControlPayload::SetPower {
                     target: console,
                     level,
                 } => {
-                    pending.push(PowerCmd::SetConsole(console.clone(), *level));
+                    if let Some(group) = console_to_group(console) {
+                        pending.push((group, *level));
+                    }
                 }
                 _ => {}
             }
@@ -240,28 +236,15 @@ pub fn handle_power_messages(
         if pending.is_empty() {
             continue;
         }
-        for cmd in pending {
-            match cmd {
-                PowerCmd::SetGroup(group, level) => {
-                    if let Some(pc) = power_comp.as_deref_mut() {
-                        if let Err(err) = pc.0.set_group_allocation(&group, level) {
-                            warn!("[power] ignored power allocation: {err:?}");
-                        }
-                    } else if is_local {
-                        if let Some(pr) = power_res.as_deref_mut() {
-                            if let Err(err) = pr.0.set_group_allocation(&group, level) {
-                                warn!("[power] ignored power allocation: {err:?}");
-                            }
-                        }
-                    }
+        for (group, level) in pending {
+            if let Some(pc) = power_comp.as_deref_mut() {
+                if let Err(err) = pc.0.set_group_allocation(&group, level) {
+                    warn!("[power] ignored power allocation: {err:?}");
                 }
-                PowerCmd::SetConsole(console, level) => {
-                    if let Some(pc) = power_comp.as_deref_mut() {
-                        pc.0.set_console_allocation(console.clone(), level);
-                    } else if is_local {
-                        if let Some(pr) = power_res.as_deref_mut() {
-                            pr.0.set_console_allocation(console, level);
-                        }
+            } else if is_local {
+                if let Some(pr) = power_res.as_deref_mut() {
+                    if let Err(err) = pr.0.set_group_allocation(&group, level) {
+                        warn!("[power] ignored power allocation: {err:?}");
                     }
                 }
             }
@@ -565,30 +548,39 @@ pub fn operate_power_ai(
 
         let battery_pct = power_comp.0.battery_charge / cfg.0.capacity;
 
+        let helm_id = PowerGroupId(HELM_POWER_GROUP.into());
+        let weapons_id = PowerGroupId(WEAPONS_POWER_GROUP.into());
+        let sensors_id = PowerGroupId(SENSORS_POWER_GROUP.into());
+
         // Weapons: boost on red alert when battery allows.
         if red_alert && battery_pct >= ai_cfg.weapons_battery_floor {
-            power_comp.0.weapons = 3;
+            let _ = power_comp.0.set_group_allocation(&weapons_id, 3);
         }
 
         // Helm: scale with throttle demand and battery availability.
         if throttle > ai_cfg.helm_throttle_threshold && battery_pct >= ai_cfg.helm_battery_floor {
-            power_comp.0.helm = 3;
+            let _ = power_comp.0.set_group_allocation(&helm_id, 3);
         } else if throttle == 0.0 {
-            power_comp.0.helm = 1;
+            let _ = power_comp.0.set_group_allocation(&helm_id, 1);
             if !red_alert || battery_pct < ai_cfg.weapons_battery_floor {
-                power_comp.0.weapons = 2;
+                let _ = power_comp.0.set_group_allocation(&weapons_id, 2);
             }
         } else {
-            power_comp.0.helm = 2;
+            let _ = power_comp.0.set_group_allocation(&helm_id, 2);
             if !red_alert || battery_pct < ai_cfg.weapons_battery_floor {
-                power_comp.0.weapons = 2;
+                let _ = power_comp.0.set_group_allocation(&weapons_id, 2);
             }
         }
 
-        // Clamp all fields to [1, 4].
-        power_comp.0.helm = power_comp.0.helm.clamp(1, 4);
-        power_comp.0.weapons = power_comp.0.weapons.clamp(1, 4);
-        power_comp.0.sensors = power_comp.0.sensors.clamp(1, 4);
+        // Clamp all groups to [1, 4] — set_group_allocation already clamps
+        // but preserve the explicit clamping call for legibility and to keep
+        // the sensors group in-range if some future code path pokes it.
+        let helm_level = power_comp.0.level_for(&helm_id).clamp(1, 4);
+        let weapons_level = power_comp.0.level_for(&weapons_id).clamp(1, 4);
+        let sensors_level = power_comp.0.level_for(&sensors_id).clamp(1, 4);
+        let _ = power_comp.0.set_group_allocation(&helm_id, helm_level);
+        let _ = power_comp.0.set_group_allocation(&weapons_id, weapons_level);
+        let _ = power_comp.0.set_group_allocation(&sensors_id, sensors_level);
 
         if is_local {
             player_power = Some(power_comp.0.clone());
@@ -679,17 +671,20 @@ fn publish_power_blackboard(
         .map(|cs| !cs.0.offline_systems.contains(&battery_id))
         .unwrap_or(true);
 
-    let entries: Vec<PowerConsoleEntry> = POWER_CONSOLE_ORDER
+    let entries: Vec<PowerConsoleEntry> = POWER_GROUP_ORDER
         .iter()
-        .filter(|c| multipliers.multipliers.contains_key(c))
-        .map(|c| {
-            let max_level = multipliers.multipliers[c].len() as u8;
+        .map(|name| PowerGroupId(name.to_string()))
+        .filter(|gid| multipliers.multipliers.contains_key(gid))
+        .map(|gid| {
+            let max_level = multipliers
+                .multipliers
+                .get(&gid)
+                .map(|arr| arr.len() as u8)
+                .unwrap_or(4);
             PowerConsoleEntry {
-                id: power_group_for_console(c)
-                    .map(|g| g.0)
-                    .unwrap_or_else(|| format!("{:?}", c)),
-                label: power_console_label(c).into(),
-                level: power_level_for(&power.0, c),
+                id: gid.0.clone(),
+                label: power_group_label(gid.0.as_str()).into(),
+                level: power_level_for(&power.0, &gid),
                 max_level,
             }
         })
@@ -932,11 +927,11 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
+        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 4);
         // Directly set via resource (the human message path lives in ship_plugin.rs).
         // Verify the field clamps at 4 on the PowerSystem itself.
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.helm,
+            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
             4,
             "helm should remain at 4"
         );
@@ -950,16 +945,16 @@ mod tests {
         // Force total to 8 and check PowerSystem::increase is a no-op.
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            ps.0.helm = 4;
-            ps.0.weapons = 2;
-            ps.0.sensors = 2;
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 4);
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()), 2);
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()), 2);
         }
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            ps.0.increase(Console::Sensors);
+            ps.0.increase(&PowerGroupId(SENSORS_POWER_GROUP.into()));
         }
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.sensors,
+            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
             2,
             "sensors should stay at 2 when total is already at the cap of 8"
         );
@@ -978,10 +973,10 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Helm, [-0.5, 0.0, 1.0, 2.0]);
+            .insert(PowerGroupId(HELM_POWER_GROUP.into()), [-0.5, 0.0, 1.0, 2.0]);
 
         // Directly set helm=3 and tick to let translate_power_modifiers run.
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 3;
+        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
         let _ = tick(&mut app);
 
         let mult = app
@@ -1002,10 +997,10 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Tactical, [-0.5, 0.0, 0.25, 0.5]);
+            .insert(PowerGroupId(WEAPONS_POWER_GROUP.into()), [-0.5, 0.0, 0.25, 0.5]);
 
         // Set weapons=1 directly and tick.
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.weapons = 1;
+        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(WEAPONS_POWER_GROUP.into()), 1);
         let _ = tick(&mut app);
 
         let expected = 1.0 / 1.5;
@@ -1028,21 +1023,21 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Helm, defaults);
+            .insert(PowerGroupId(HELM_POWER_GROUP.into()), defaults);
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Tactical, defaults);
+            .insert(PowerGroupId(WEAPONS_POWER_GROUP.into()), defaults);
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Sensors, defaults);
+            .insert(PowerGroupId(SENSORS_POWER_GROUP.into()), defaults);
 
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            ps.0.helm = 4;
-            ps.0.weapons = 2;
-            ps.0.sensors = 2;
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 4);
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()), 2);
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()), 2);
             ps.0.battery_charge = 0.0;
             ps.0.locked = false;
         }
@@ -1119,7 +1114,7 @@ mod tests {
         start_game_with_power(&mut app);
         tick(&mut app);
 
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 3;
+        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
         tick(&mut app);
 
         let bb = power_blackboard(&mut app);
@@ -1148,7 +1143,7 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.sensors, 4);
+        assert_eq!(app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())), 4);
     }
 
     /// Wire-string regression: JS clients send `target: 'power-reactor'`
@@ -1176,7 +1171,7 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.sensors,
+            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
             4,
             "raw wire string \"power-reactor\" must reach handle_power_messages \
              — if this fails, either the handler's for_target() argument or the \
@@ -1227,7 +1222,7 @@ mod tests {
         });
         // battery_pct = 100/100 = 1.0 >= 0.75 floor
         app.update();
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.helm, 3);
+        assert_eq!(app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())), 3);
     }
 
     #[test]
@@ -1235,7 +1230,7 @@ mod tests {
         let mut app = ai_test_app();
         // Default LastHelmInput has thrust=0.0
         app.update();
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.helm, 1);
+        assert_eq!(app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())), 1);
     }
 
     #[test]
@@ -1248,7 +1243,7 @@ mod tests {
             }
         }
         app.update();
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.weapons, 3);
+        assert_eq!(app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())), 3);
     }
 
     #[test]
@@ -1275,7 +1270,7 @@ mod tests {
         app.update();
         // weapons should not be 3 — battery below floor
         assert_ne!(
-            app.world().resource::<ShipPowerSystem>().0.weapons,
+            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
             3,
             "weapons should not be boosted when battery is below floor"
         );
@@ -1508,7 +1503,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.sensors,
+            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
             4,
             "baseline sanity: online reactor should accept allocation input"
         );
@@ -1528,7 +1523,7 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.sensors,
+            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
             4,
             "reactor offline must refuse allocation input (sensors should stay at 4)"
         );

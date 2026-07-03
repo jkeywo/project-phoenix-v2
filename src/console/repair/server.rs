@@ -102,21 +102,45 @@ pub fn handle_dispatch_repair_team(
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
             Option<&mut ShipRepairTeams>,
+            Option<&crate::entity_spawner::EntitySystemHull>,
         ),
         With<crate::server_app::LocalShip>,
     >,
     teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Some((admitted, ship_config, control_sources, mut teams_comp)) =
+    let Some((admitted, ship_config, control_sources, mut teams_comp, hull_opt)) =
         ship_query.iter_mut().next()
     else {
         return;
     };
     let mut teams_res = teams_res;
 
+    // Look up a human-readable display name for a SystemId. Prefer the
+    // ship's `EntitySystemHull` entry (populated from TOML with the
+    // designer-authored display name), fall back to `Console::from_console_id`
+    // when the SystemId maps to a well-known console, and finally fall back
+    // to the raw SystemId string.
+    //
+    // The reviewer flagged that the pre-fix code passed the raw SystemId
+    // string as the display name for the legacy `Console`-keyed wire path,
+    // which regressed `TeamSlot.display_name` from "Engine (Port)" to
+    // "helm-engine-port" for every legacy `DispatchRepairTeam` message.
+    let hull_ref = hull_opt.map(|h| &h.0);
+    let display_name_for = |sid: &SystemId| -> String {
+        if let Some(hull) = hull_ref {
+            if let Some(entry) = hull.get(sid) {
+                return entry.display_name.clone();
+            }
+        }
+        if let Some(console) = Console::from_console_id(sid.0.as_str()) {
+            return console.display_name().to_string();
+        }
+        sid.0.clone()
+    };
+
     // Collect all dispatches into a batch first, then apply once — avoids the
     // closure-captures-borrow tangle when routing between Component and Resource.
-    let mut pending: Vec<(usize, Console)> = Vec::new();
+    let mut pending: Vec<(usize, SystemId, String)> = Vec::new();
 
     // ── ControlSystem path (authority already checked at admission) ────────
     for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
@@ -125,16 +149,12 @@ pub fn handle_dispatch_repair_team(
             target: repair_target,
         } = &cmd.payload
         {
-            let console = match repair_target {
-                RepairTarget::Station(station_id) => {
-                    match Console::from_console_id(&station_id.0) {
-                        Some(c) => c,
-                        None => continue,
-                    }
-                }
-                RepairTarget::Core => Console::Core,
+            let sid = match repair_target {
+                RepairTarget::Station(station_id) => SystemId(station_id.0.clone()),
+                RepairTarget::Core => SystemId("core".into()),
             };
-            pending.push((*team_idx as usize, console));
+            let display = display_name_for(&sid);
+            pending.push((*team_idx as usize, sid, display));
         }
     }
 
@@ -150,7 +170,14 @@ pub fn handle_dispatch_repair_team(
             if ev.token.as_str() != repair_token {
                 continue;
             }
-            pending.push((*team_idx as usize, console.clone()));
+            let sid = SystemId(console.station_console_id().to_string());
+            // For the legacy Console-keyed path we always have the Console
+            // in hand, so use its display_name directly. This is the exact
+            // behaviour the reviewer's finding requires: the legacy wire
+            // message must produce the human-readable name, not the raw
+            // SystemId string.
+            let display = console.display_name().to_string();
+            pending.push((*team_idx as usize, sid, display));
         }
     } else {
         for _ in reader.read() {}
@@ -161,12 +188,12 @@ pub fn handle_dispatch_repair_team(
     }
 
     // Apply to whichever backing store is available; dual-write when both.
-    for (idx, console) in pending {
+    for (idx, sid, display) in pending {
         if let Some(t) = teams_comp.as_deref_mut() {
-            t.0.dispatch(idx, console.clone());
+            t.0.dispatch(idx, sid.clone(), display.clone());
         }
         if let Some(r) = teams_res.as_deref_mut() {
-            r.0.dispatch(idx, console);
+            r.0.dispatch(idx, sid, display);
         }
     }
     // Keep Resource in sync with per-entity component (Resource is dual-written
@@ -182,7 +209,7 @@ pub fn handle_dispatch_repair_team(
 /// After PRD #597 gap-5 closure: iterates every ship (`With<Ship>`) — player
 /// and NPC — so ships with a per-entity `ShipRepairTeams` component (spawned
 /// when their TOML declares a `[repair]` block) tick their own teams against
-/// their own `EntityConsoleHull`. Each ship applies its own
+/// their own `EntitySystemHull`. Each ship applies its own
 /// `ShipModifiers.RepairRate` multiplier. The global `ShipRepairTeams`
 /// resource is dual-written from the LocalShip so legacy Resource-based
 /// readers (broadcasters, tests) stay in sync.
@@ -194,7 +221,7 @@ pub fn tick_repair_teams(
         (
             Option<&mut ShipRepairTeams>,
             Option<&ShipModifiers>,
-            &mut crate::entity_spawner::EntityConsoleHull,
+            &mut crate::entity_spawner::EntitySystemHull,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
         With<crate::server_app::Ship>,
@@ -256,7 +283,7 @@ fn publish_repair_blackboard(
     ship_q: Query<
         (
             Option<&ShipRepairTeams>,
-            &crate::entity_spawner::EntityConsoleHull,
+            &crate::entity_spawner::EntitySystemHull,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -281,44 +308,48 @@ fn publish_repair_blackboard(
     let hull_ref = entity_view.map(|(_, h)| h);
     let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
-    let console_hull: Vec<ConsoleHullStatus> = hull_ref
+    // Build the new `SystemHullStatus` list first from the authoritative
+    // `SystemHull` iteration; the legacy `console_hull`/`damageable_consoles`
+    // wire fields are derived from it by mapping each SystemId back to a
+    // Console variant. SystemIds that don't map to a Console variant (custom
+    // designer-authored systems) are dropped from the legacy list but still
+    // emitted in the new list.
+    let system_hull: Vec<SystemHullStatus> = hull_ref
         .map(|h| {
-            h.0.entries()
-                .iter()
-                .map(|(c, cur, max)| ConsoleHullStatus {
-                    console: c.clone(),
-                    current: *cur,
-                    max_hp: *max,
-                    tier: h.0.tier_for(c.clone()),
-                    debuff_magnitude: h.0.debuff_magnitude_for(c.clone()),
+            h.0.iter()
+                .map(|(sid, entry)| SystemHullStatus {
+                    system_id: sid.clone(),
+                    display_name: entry.display_name.clone(),
+                    current: entry.current,
+                    max_hp: entry.max,
+                    tier: h.0.tier_for(sid),
+                    debuff_magnitude: h.0.debuff_magnitude_for(sid),
                 })
                 .collect()
         })
         .unwrap_or_default();
 
-    let damageable_consoles: Vec<Console> = hull_ref
-        .map(|h| h.0.entries().iter().map(|(c, _, _)| c.clone()).collect())
-        .unwrap_or_default();
-
-    // ── Additive-only SystemId mirrors (parent issue #516 sub-issue #616) ─────
-    // Publishers emit both console-keyed and system-keyed shapes during the
-    // transition so downstream consumers can migrate independently. Derived
-    // from the same `Console → SystemId` mapping used by the wire codec.
-    let system_hull: Vec<SystemHullStatus> = console_hull
+    let damageable_systems: Vec<SystemId> = system_hull
         .iter()
-        .map(|c| SystemHullStatus {
-            system_id: SystemId(c.console.station_console_id().to_string()),
-            display_name: c.console.display_name().to_string(),
-            current: c.current,
-            max_hp: c.max_hp,
-            tier: c.tier,
-            debuff_magnitude: c.debuff_magnitude,
+        .map(|s| s.system_id.clone())
+        .collect();
+
+    // Legacy `console_hull` derived from the SystemId-keyed side by mapping
+    // each SystemId back to a Console variant when possible.
+    let console_hull: Vec<ConsoleHullStatus> = system_hull
+        .iter()
+        .filter_map(|s| {
+            Console::from_console_id(s.system_id.0.as_str()).map(|c| ConsoleHullStatus {
+                console: c,
+                current: s.current,
+                max_hp: s.max_hp,
+                tier: s.tier,
+                debuff_magnitude: s.debuff_magnitude,
+            })
         })
         .collect();
-    let damageable_systems: Vec<SystemId> = damageable_consoles
-        .iter()
-        .map(|c| SystemId(c.station_console_id().to_string()))
-        .collect();
+
+    let damageable_consoles: Vec<Console> = console_hull.iter().map(|c| c.console.clone()).collect();
 
     let bb = RepairBlackboard {
         teams: team_slots,
@@ -347,7 +378,7 @@ fn publish_repair_blackboard(
 ///
 /// The most-damaged console is the one with the largest absolute HP deficit
 /// (`max - current`) that is still > 0. Ties are broken by the entry order in
-/// `EntityConsoleHull`. Ships with no per-entity `ShipRepairTeams` component
+/// `EntitySystemHull`. Ships with no per-entity `ShipRepairTeams` component
 /// silently skip — an NPC without a `[repair]` block simply has no teams to
 /// dispatch.
 ///
@@ -359,7 +390,7 @@ pub fn operate_repair_ai(
         (
             &ShipSystemControlSources,
             Option<&mut ShipRepairTeams>,
-            Option<&crate::entity_spawner::EntityConsoleHull>,
+            Option<&crate::entity_spawner::EntitySystemHull>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -373,16 +404,15 @@ pub fn operate_repair_ai(
         let (Some(mut teams), Some(hull)) = (teams_comp, hull_comp) else {
             continue;
         };
-        // Pick the console with the largest current HP deficit (max - cur > 0).
+        // Pick the system with the largest current HP deficit (max - cur > 0).
         // Ties broken by entry order (first-declared wins).
-        // Destroyed consoles (hp == 0) are skipped — they are unrepairable.
-        let target: Option<Console> = hull
+        // Destroyed systems (hp == 0) are skipped — they are unrepairable.
+        let target: Option<SystemId> = hull
             .0
             .entries()
-            .iter()
-            .filter(|(c, cur, max)| {
+            .filter(|(sid, cur, max)| {
                 max - cur > 0.0
-                    && hull.0.tier_for((*c).clone()) != crate::damage::DamageTier::Destroyed
+                    && hull.0.tier_for(sid) != crate::damage::DamageTier::Destroyed
             })
             .max_by(|(_, a_cur, a_max), (_, b_cur, b_max)| {
                 let a_deficit = a_max - a_cur;
@@ -391,14 +421,23 @@ pub fn operate_repair_ai(
                     .partial_cmp(&b_deficit)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .map(|(c, _, _)| c.clone());
+            .map(|(sid, _, _)| sid.clone());
         let Some(target) = target else {
             continue;
         };
+        // Look up the target's display name from the hull entry so the
+        // resulting `TeamSlot` carries the human-readable label. Falls back
+        // to the raw SystemId string only if the entry is missing (which
+        // should not happen for a target we just picked from the hull).
+        let target_display = hull
+            .0
+            .get(&target)
+            .map(|e| e.display_name.clone())
+            .unwrap_or_else(|| target.0.clone());
         // Dispatch every idle team to the target. Reuses the same
         // `RepairTeams::dispatch` entry point that the human console uses.
         while let Some(idx) = teams.0.lowest_free_team() {
-            teams.0.dispatch(idx, target.clone());
+            teams.0.dispatch(idx, target.clone(), target_display.clone());
         }
     }
 }
@@ -406,7 +445,7 @@ pub fn operate_repair_ai(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::ConsoleHull;
+    use crate::damage::SystemHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::shield::ShieldSystem;
@@ -454,11 +493,11 @@ mod tests {
         .add_systems(PostUpdate, collect);
         // Spawn the player ship entity so handle_dispatch_repair_team can query it.
         let hull_config = &[
-            (Console::Helm, 25.0_f32),
-            (Console::Tactical, 25.0),
-            (Console::Power, 25.0),
-            (Console::Shields, 25.0),
-            (Console::Core, 50.0),
+            (SystemId("helm".into()), 25.0_f32),
+            (SystemId("tactical".into()), 25.0),
+            (SystemId("power".into()), 25.0),
+            (SystemId("shields".into()), 25.0),
+            (SystemId("core".into()), 50.0),
         ];
         app.world_mut().spawn((
             crate::simulation::Ship,
@@ -468,7 +507,7 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
-            crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(hull_config)),
+            crate::entity_spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
             crate::server_app::ShipSystemBlackboards::default(),
             ShipShields(ShieldSystem::default()),
         ));
@@ -822,6 +861,51 @@ mod tests {
         );
     }
 
+    /// Regression test for the reviewer's second finding on issue #617.
+    ///
+    /// Pre-#617 the legacy `ClientMessage::DispatchRepairTeam { console:
+    /// Console::HelmEnginePort }` wire message produced a
+    /// `TeamSlot::Travelling` with `display_name: Some("Engine (Port)")`
+    /// (the `Console::display_name()` for that variant). The initial
+    /// #617 implementation regressed this to `Some("helm-engine-port")`
+    /// (the raw SystemId string) because `RepairTeams::dispatch` had
+    /// dropped the display-name parameter and defaulted to
+    /// `new_system.0.clone()`.
+    ///
+    /// This test sends the exact legacy wire message the reviewer called
+    /// out and asserts the resulting `TeamSlot.display_name` is the
+    /// human-readable label, matching pre-#617 behaviour.
+    #[test]
+    fn legacy_dispatch_preserves_console_display_name_on_team_slot() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        let slot = &teams.0.slots()[0];
+        assert!(
+            matches!(
+                slot,
+                TeamSlot::Travelling { display_name: Some(d), .. }
+                    if d == Console::Helm.display_name()
+            ),
+            "legacy DispatchRepairTeam {{ console: Helm }} must produce \
+             TeamSlot::Travelling with display_name = Some(\"{}\") \
+             (Console::display_name()); got {:?}",
+            Console::Helm.display_name(),
+            slot
+        );
+    }
+
     /// End-to-end TOML-driven wiring check: build the runtime `RepairTeams`
     /// the same way `spawn_game_start_entities` does (parse player_ship.toml
     /// → RepairConfig::to_runtime → RepairTeams::new_with_timings) and
@@ -877,7 +961,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ShipRepairTeams>()
             .0
-            .dispatch(0, Console::Helm);
+            .dispatch(0, SystemId("helm".into()), "Helm".to_string());
         tick(&mut app);
 
         let bb = repair_bb(&mut app);
@@ -972,7 +1056,7 @@ mod tests {
     }
 
     /// Regression test for PRD #597 gap-5: an NPC ship that carries a per-entity
-    /// `[repair]` block (ShipRepairTeams + EntityConsoleHull) must have its
+    /// `[repair]` block (ShipRepairTeams + EntitySystemHull) must have its
     /// teams ticked by `tick_repair_teams` AND auto-dispatched by
     /// `operate_repair_ai`, and the resulting HP restoration must land on its
     /// own hull — no LocalShip marker involved.
@@ -996,7 +1080,7 @@ mod tests {
         // Damage the hull by 40 HP so total_current == 60 (max = 100).
         let mut ai_resolver = ControlSourceResolver::new();
         ai_resolver.set(repair_system_id(), ControlSource::Ai);
-        let mut hull = crate::damage::ConsoleHull::from_config(&[(Console::Helm, 100.0_f32)]);
+        let mut hull = crate::damage::SystemHull::from_config(&[(SystemId("helm".into()), 100.0_f32)]);
         let mut rng = rand::rng();
         hull.apply_damage(40.0, &mut rng);
         let hp_before = hull.total_current();
@@ -1011,7 +1095,7 @@ mod tests {
                 crate::server_app::Ship,
                 ShipSystemControlSources(ai_resolver),
                 ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
-                crate::entity_spawner::EntityConsoleHull(hull),
+                crate::entity_spawner::EntitySystemHull(hull),
             ))
             .id();
 
@@ -1055,7 +1139,7 @@ mod tests {
 
         let hull_after = app
             .world()
-            .get::<crate::entity_spawner::EntityConsoleHull>(npc)
+            .get::<crate::entity_spawner::EntitySystemHull>(npc)
             .expect("NPC must still have hull component");
         let hp_after = hull_after.0.total_current();
         assert!(

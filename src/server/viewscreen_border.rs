@@ -412,7 +412,7 @@ pub fn yaw_to_compass_bearing(yaw_radians: f32) -> u32 {
 //
 // The in-game HEADING/HULL/CONDITION readout is now rendered by the HTML
 // viewscreen overlay. The Bevy side recomputes the serialised HUD state from
-// the LocalShip's `ShipPhysics` + `EntityConsoleHull` components each frame,
+// the LocalShip's `ShipPhysics` + `EntitySystemHull` components each frame,
 // writes it into a single `ViewscreenHud` component only when it changes, and
 // a `Changed<ViewscreenHud>` system encodes + emits a `HudStateChanged`
 // message. The wasm forwarding to JS lives in `bridge::flush_hud_state`.
@@ -476,7 +476,7 @@ fn compute_hud_state(
 /// fires only on actual change.
 fn recompute_hud_state(
     red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::simulation::LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::simulation::LocalShip>>,
+    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
     phase: Option<Res<State<GamePhase>>>,
     game_over_reason: Option<Res<GameOverReason>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
@@ -507,7 +507,7 @@ fn recompute_hud_state(
 /// `OnEnter(GamePhase::GameOver)` system: push one final HUD state.
 fn push_game_over_hud_state(
     red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::simulation::LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::simulation::LocalShip>>,
+    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
     game_over_reason: Option<Res<GameOverReason>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,

@@ -407,6 +407,7 @@ fn format_source(source: &ModifierSource) -> String {
         ModifierSource::ImpulseDrive => "ImpulseDrive".to_string(),
         ModifierSource::RegionEffect { uuid } => format!("Region({})", &uuid.to_string()[..8]),
         ModifierSource::World { id, tag } => format!("World({id}/{tag})"),
+        ModifierSource::PowerGroup(g) => format!("PowerGroup({})", g.0),
     }
 }
 

@@ -25,7 +25,7 @@ pub fn update_combat_activity(
     time: Res<Time>,
     mut ships: Query<
         (
-            &crate::entity_spawner::EntityConsoleHull,
+            &crate::entity_spawner::EntitySystemHull,
             &mut RecentCombatActivity,
             &mut crate::server_app::WeaponFiredThisTick,
             &mut crate::server_app::ShipAttackedThisTick,
@@ -63,11 +63,11 @@ pub fn update_combat_activity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::ConsoleHull;
-    use crate::messages::Console;
+    use crate::damage::SystemHull;
+    use crate::messages::SystemId;
     use crate::server_app::{Ship, ShipAttackedThisTick, WeaponFiredThisTick};
 
-    fn app_with_hull(hull: ConsoleHull) -> (App, Entity) {
+    fn app_with_hull(hull: SystemHull) -> (App, Entity) {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .add_systems(Update, update_combat_activity);
@@ -75,7 +75,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Ship,
-                crate::entity_spawner::EntityConsoleHull(hull),
+                crate::entity_spawner::EntitySystemHull(hull),
                 RecentCombatActivity::default(),
                 WeaponFiredThisTick::default(),
                 ShipAttackedThisTick::default(),
@@ -91,8 +91,8 @@ mod tests {
             .clone()
     }
 
-    fn test_hull(current_damage: f32) -> ConsoleHull {
-        let mut hull = ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+    fn test_hull(current_damage: f32) -> SystemHull {
+        let mut hull = SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
         if current_damage > 0.0 {
             let mut rng = rand::rng();
             hull.apply_damage(current_damage, &mut rng);

@@ -312,7 +312,7 @@ pub fn emit_shields_coordination(
 
 fn publish_shields_blackboard(
     shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
+    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     control_sources_q: Query<
         &crate::ship_plugin::ShipSystemControlSources,
         With<crate::server_app::LocalShip>,

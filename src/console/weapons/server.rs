@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::ai_plugin::AiTokenRegistry;
-use crate::entity_spawner::EntityConsoleHull;
+use crate::entity_spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     AdmittedCommands, ClientMessage, Console, GamePhase, InterSystemMsg, InterSystemPayload,
@@ -1048,7 +1048,7 @@ fn tick_beams(
         Option<&crate::entity_spawner::EntityUuid>,
         Option<&Transform>,
         Option<&ShipPhysics>,
-        &mut EntityConsoleHull,
+        &mut EntitySystemHull,
         Option<&mut crate::ship::shields::ShipShields>,
         Option<&mut crate::server_app::ShipAttackedThisTick>,
         Option<&mut LastShipAttacker>,
@@ -1997,7 +1997,7 @@ fn tick_torpedo_system(
         Entity,
         Option<&AsteroidUuid>,
         Option<&crate::entity_spawner::EntityUuid>,
-        &mut EntityConsoleHull,
+        &mut EntitySystemHull,
         Option<&mut crate::ship::shields::ShipShields>,
         Option<&mut crate::entity_spawner::EntityShipArcHull>,
     )>,
@@ -3256,7 +3256,7 @@ fn blip_default_color(icon: &str) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::ConsoleHull;
+    use crate::damage::SystemHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::modifiers::ShipModifiers;
@@ -3434,20 +3434,20 @@ station = "tactical"
                 ShipPhysics::default(),
                 crate::ship_state::ShipPhaserFrequency::default(),
                 bevy::prelude::Transform::default(),
-                crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(&[
-                    (Console::Helm, 25.0),
-                    (Console::Tactical, 25.0),
-                    (Console::Power, 25.0),
-                    (Console::Shields, 25.0),
+                crate::entity_spawner::EntitySystemHull(SystemHull::from_config(&[
+                    (SystemId("helm".into()), 25.0),
+                    (SystemId("tactical".into()), 25.0),
+                    (SystemId("power".into()), 25.0),
+                    (SystemId("shields".into()), 25.0),
                     // Fine Tactical hull entries (issue #512) so tests can drive
                     // sync_console_damage_tiers → offline_systems for the fine
                     // systems declared in the updated test_ship_config().
-                    (Console::PhaserFore, 15.0),
-                    (Console::PhaserAft, 15.0),
-                    (Console::TorpedoTubeForePort, 12.0),
-                    (Console::TorpedoTubeForeStarboard, 12.0),
-                    (Console::TorpedoTubeAft, 12.0),
-                    (Console::TorpedoMagazine, 20.0),
+                    (SystemId("phaser-fore".into()), 15.0),
+                    (SystemId("phaser-aft".into()), 15.0),
+                    (SystemId("torpedo-tube-fore-port".into()), 12.0),
+                    (SystemId("torpedo-tube-fore-starboard".into()), 12.0),
+                    (SystemId("torpedo-tube-aft".into()), 12.0),
+                    (SystemId("torpedo-magazine".into()), 20.0),
                 ])),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::entity_spawner::EntityUuid("test-local-ship".to_string()),
@@ -3683,8 +3683,8 @@ station = "tactical"
             .spawn((
                 crate::simulation::Asteroid,
                 crate::simulation::AsteroidUuid(uuid),
-                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                    crate::messages::Console::CaptainChair,
+                EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                    crate::messages::SystemId("captain".into()),
                     30.0,
                 )])),
                 Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
@@ -4101,7 +4101,7 @@ station = "tactical"
 
         assert!(
             app.world()
-                .get::<EntityConsoleHull>(asteroid_entity)
+                .get::<EntitySystemHull>(asteroid_entity)
                 .is_none(),
             "asteroid entity should be despawned"
         );
@@ -4180,8 +4180,8 @@ station = "tactical"
             .spawn((
                 crate::simulation::Asteroid,
                 crate::simulation::AsteroidUuid("target-uuid".into()),
-                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                    crate::messages::Console::CaptainChair,
+                EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                    crate::messages::SystemId("captain".into()),
                     30.0,
                 )])),
             ))
@@ -4198,7 +4198,7 @@ station = "tactical"
 
         let hp = app
             .world()
-            .get::<EntityConsoleHull>(asteroid_entity)
+            .get::<EntitySystemHull>(asteroid_entity)
             .map(|h| h.0.total_current());
         assert!(
             hp.is_some() && hp.unwrap() < 30.0,
@@ -4222,8 +4222,8 @@ station = "tactical"
         app.world_mut().spawn((
             crate::simulation::Asteroid,
             crate::simulation::AsteroidUuid("t1".into()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
                 30.0,
             )])),
             Transform::from_xyz(0.0, 0.0, -20.0),
@@ -4231,8 +4231,8 @@ station = "tactical"
         app.world_mut().spawn((
             crate::simulation::Asteroid,
             crate::simulation::AsteroidUuid("t2".into()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
                 30.0,
             )])),
             Transform::from_xyz(0.0, 0.0, -15.0),
@@ -5084,8 +5084,8 @@ station = "tactical"
         app.world_mut()
             .spawn((
                 crate::entity_spawner::EntityUuid("npc-1".into()),
-                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                    crate::messages::Console::CaptainChair,
+                EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                    crate::messages::SystemId("captain".into()),
                     max_hp,
                 )])),
                 Transform::from_xyz(npc_x, 0.0, npc_z),
@@ -5130,7 +5130,7 @@ station = "tactical"
 
         let hp = app
             .world()
-            .get::<EntityConsoleHull>(npc_entity)
+            .get::<EntitySystemHull>(npc_entity)
             .expect("NPC entity should still exist")
             .0
             .total_current();
@@ -5177,7 +5177,7 @@ station = "tactical"
 
         // ECS entity despawned
         assert!(
-            app.world().get::<EntityConsoleHull>(npc_entity).is_none(),
+            app.world().get::<EntitySystemHull>(npc_entity).is_none(),
             "NPC entity should be despawned after hull reaches 0"
         );
 
@@ -5222,8 +5222,8 @@ station = "tactical"
                 // so the unified `tick_shields` picks them up.
                 crate::simulation::Ship,
                 crate::entity_spawner::EntityUuid("npc-1".into()),
-                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                    crate::messages::Console::CaptainChair,
+                EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                    crate::messages::SystemId("captain".into()),
                     hull_max,
                 )])),
                 crate::ship::shields::ShipShields(ShieldSystem::new(&ShieldConfig {
@@ -5287,7 +5287,7 @@ station = "tactical"
 
         let hull_hp = app
             .world()
-            .get::<EntityConsoleHull>(npc_entity)
+            .get::<EntitySystemHull>(npc_entity)
             .expect("hull must still exist")
             .0
             .total_current();
@@ -5342,7 +5342,7 @@ station = "tactical"
 
         let hull_hp = app
             .world()
-            .get::<EntityConsoleHull>(npc_entity)
+            .get::<EntitySystemHull>(npc_entity)
             .expect("hull must exist")
             .0
             .total_current();
@@ -5374,8 +5374,8 @@ station = "tactical"
             .world_mut()
             .spawn((
                 crate::entity_spawner::EntityUuid("npc-1".into()),
-                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                    crate::messages::Console::CaptainChair,
+                EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                    crate::messages::SystemId("captain".into()),
                     30.0,
                 )])),
                 crate::ship::shields::ShipShields(shield_sys),
@@ -5409,7 +5409,7 @@ station = "tactical"
 
         let hull_hp = app
             .world()
-            .get::<EntityConsoleHull>(npc_entity)
+            .get::<EntitySystemHull>(npc_entity)
             .expect("hull must exist")
             .0
             .total_current();
@@ -5539,7 +5539,7 @@ station = "tactical"
         let hull_before = app
             .world()
             .entity(player_entity)
-            .get::<crate::entity_spawner::EntityConsoleHull>()
+            .get::<crate::entity_spawner::EntitySystemHull>()
             .unwrap()
             .0
             .total_current();
@@ -5589,7 +5589,7 @@ station = "tactical"
         let hull_after = app
             .world()
             .entity(player_entity)
-            .get::<crate::entity_spawner::EntityConsoleHull>()
+            .get::<crate::entity_spawner::EntitySystemHull>()
             .unwrap()
             .0
             .total_current();
@@ -5680,7 +5680,7 @@ station = "tactical"
     ) -> (bevy::ecs::entity::Entity, bevy::ecs::entity::Entity) {
         use crate::ai::AiMemory;
         use crate::ai_plugin::AiControllerComponent;
-        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
         // Register the AI token (including Bevy entity link for handle_fire_phaser).
         let target_as_uuid = uuid::Uuid::parse_str(target_uuid).ok();
@@ -5730,8 +5730,8 @@ station = "tactical"
             .world_mut()
             .spawn((
                 EntityUuid(target_uuid.to_string()),
-                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                    crate::messages::Console::CaptainChair,
+                EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                    crate::messages::SystemId("captain".into()),
                     50.0,
                 )])),
                 Transform::from_xyz(target_x, 0.0, target_z),
@@ -5781,9 +5781,9 @@ station = "tactical"
     #[test]
     fn npc_beam_tick_applies_damage_to_target_hull() {
         // With an active NPC beam, each tick of tick_beams reduces
-        // the target's EntityConsoleHull.
+        // the target's EntitySystemHull.
         use crate::ai_plugin::AiTokenRegistry;
-        use crate::entity_spawner::EntityConsoleHull;
+        use crate::entity_spawner::EntitySystemHull;
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -5803,7 +5803,7 @@ station = "tactical"
 
         let hp_before = app
             .world()
-            .get::<EntityConsoleHull>(target_entity)
+            .get::<EntitySystemHull>(target_entity)
             .unwrap()
             .0
             .total_current();
@@ -5815,7 +5815,7 @@ station = "tactical"
 
         let hp_after = app
             .world()
-            .get::<EntityConsoleHull>(target_entity)
+            .get::<EntitySystemHull>(target_entity)
             .unwrap()
             .0
             .total_current();
@@ -5833,7 +5833,7 @@ station = "tactical"
         // was silently lost. The unified `tick_beams` iterates all ships
         // and applies damage to any target found via `hull_q`.
         use crate::ai_plugin::AiTokenRegistry;
-        use crate::entity_spawner::EntityConsoleHull;
+        use crate::entity_spawner::EntitySystemHull;
         use crate::server_app::ShipAttackedThisTick;
 
         let mut app = test_app();
@@ -5869,7 +5869,7 @@ station = "tactical"
 
         let hp_before = app
             .world()
-            .get::<EntityConsoleHull>(npc_target_entity)
+            .get::<EntitySystemHull>(npc_target_entity)
             .unwrap()
             .0
             .total_current();
@@ -5880,7 +5880,7 @@ station = "tactical"
 
         let hp_after = app
             .world()
-            .get::<EntityConsoleHull>(npc_target_entity)
+            .get::<EntitySystemHull>(npc_target_entity)
             .unwrap()
             .0
             .total_current();
@@ -5960,7 +5960,7 @@ station = "tactical"
     #[test]
     fn npc_beam_tick_applies_damage_to_player_ship_through_shields() {
         // When the beam target is the player ship (has Ship marker), damage
-        // must route through shields → hull component, not just EntityConsoleHull directly.
+        // must route through shields → hull component, not just EntitySystemHull directly.
         use crate::ai_plugin::AiTokenRegistry;
         use crate::entity_spawner::EntityUuid;
         use crate::server_app::{LocalShip, ShipAttackedThisTick};
@@ -6033,7 +6033,7 @@ station = "tactical"
         let hull_before = app
             .world()
             .entity(player_entity)
-            .get::<crate::entity_spawner::EntityConsoleHull>()
+            .get::<crate::entity_spawner::EntitySystemHull>()
             .unwrap()
             .0
             .total_current();
@@ -6064,7 +6064,7 @@ station = "tactical"
         let hull_after = app
             .world()
             .entity(player_entity)
-            .get::<crate::entity_spawner::EntityConsoleHull>()
+            .get::<crate::entity_spawner::EntitySystemHull>()
             .unwrap()
             .0
             .total_current();
@@ -6162,10 +6162,10 @@ station = "tactical"
         // a `FirePhaser` `InboundMessage`, which the unified `handle_fire_phaser`
         // picks up
         // and sets `ActiveBeam::target_uuid`.
-        use crate::damage::ConsoleHull;
+        use crate::damage::SystemHull;
         use crate::entity_config::{BehaviourConfig, DoctrineObjective};
-        use crate::entity_spawner::{EntityConsoleHull, EntityUuid, WeaponsConsoleSection};
-        use crate::messages::{Console, GamePhase};
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid, WeaponsConsoleSection};
+        use crate::messages::{GamePhase, SystemId};
         use bevy::prelude::State;
 
         let mut app = combined_test_app();
@@ -6231,7 +6231,7 @@ station = "tactical"
                     }],
                     radar: None,
                 }),
-                EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)])),
+                EntitySystemHull(SystemHull::from_config(&[(SystemId("captain".into()), 100.0)])),
                 Transform::from_xyz(0.0, 0.0, 0.0),
             ))
             .id();
@@ -6241,7 +6241,7 @@ station = "tactical"
             .world_mut()
             .spawn((
                 EntityUuid(target_uuid_str.to_string()),
-                EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 200.0)])),
+                EntitySystemHull(SystemHull::from_config(&[(SystemId("captain".into()), 200.0)])),
                 Transform::from_xyz(0.0, 0.0, -10.0),
             ))
             .id();
@@ -6297,7 +6297,7 @@ station = "tactical"
     #[test]
     fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
         use crate::ai_plugin::AiTokenRegistry;
-        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -6310,8 +6310,8 @@ station = "tactical"
             .world_mut()
             .spawn((
                 EntityUuid(target_uuid.to_string()),
-                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                    Console::CaptainChair,
+                EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                    SystemId("captain".into()),
                     100.0,
                 )])),
                 Transform::from_xyz(0.0, 0.0, -15.0),
@@ -6350,7 +6350,7 @@ station = "tactical"
 
         let hp = app
             .world()
-            .get::<EntityConsoleHull>(target_entity)
+            .get::<EntitySystemHull>(target_entity)
             .unwrap()
             .0
             .total_current();
@@ -6370,7 +6370,7 @@ station = "tactical"
     #[test]
     fn tick_phaser_auto_fire_activates_ai_controlled_npc_beam() {
         use crate::ai_plugin::AiTokenRegistry;
-        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -6418,8 +6418,8 @@ station = "tactical"
         // Spawn target directly ahead (in-arc, in-range).
         app.world_mut().spawn((
             EntityUuid(target_uuid.to_string()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                Console::CaptainChair,
+            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                SystemId("captain".into()),
                 50.0,
             )])),
             Transform::from_xyz(0.0, 0.0, -20.0),
@@ -6453,7 +6453,7 @@ station = "tactical"
     #[test]
     fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
         use crate::ai_plugin::AiTokenRegistry;
-        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -6511,8 +6511,8 @@ station = "tactical"
         // whose arc runs from -120° to -60°.
         app.world_mut().spawn((
             EntityUuid(target_uuid.to_string()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                Console::CaptainChair,
+            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                SystemId("captain".into()),
                 50.0,
             )])),
             Transform::from_xyz(0.0, 0.0, -20.0),
@@ -6646,8 +6646,8 @@ station = "tactical"
         app.world_mut().spawn((
             crate::simulation::Asteroid,
             AsteroidUuid(uuid.into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
                 30.0,
             )])),
             Transform::from_xyz(x, 0.0, z),
@@ -7376,7 +7376,7 @@ station = "tactical"
     #[test]
     fn tick_phaser_auto_fire_activates_when_any_bank_operates_ai() {
         use crate::ai_plugin::AiTokenRegistry;
-        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -7444,8 +7444,8 @@ ai_only = true
         // Target directly ahead of NPC (yaw=0, forward=-Z).
         app.world_mut().spawn((
             EntityUuid(target_uuid.to_string()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                Console::CaptainChair,
+            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                SystemId("captain".into()),
                 50.0,
             )])),
             Transform::from_xyz(0.0, 0.0, -20.0),
@@ -7635,9 +7635,9 @@ ai_only = true
                 .unwrap();
             let mut entity_mut = app.world_mut().entity_mut(ship);
             let mut hull = entity_mut
-                .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+                .get_mut::<crate::entity_spawner::EntitySystemHull>()
                 .unwrap();
-            hull.0.set_console_hp(&Console::PhaserFore, 0.0);
+            hull.0.set_hp(&SystemId("phaser-fore".into()), 0.0);
         }
 
         // One update: sync_console_damage_tiers (Damage) writes offline_systems,

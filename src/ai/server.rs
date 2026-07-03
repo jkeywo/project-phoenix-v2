@@ -238,7 +238,7 @@ fn build_world_snapshot(
         &Transform,
         Option<&crate::entity_spawner::EntityName>,
         Option<&crate::entity_spawner::FactionComponent>,
-        Option<&crate::entity_spawner::EntityConsoleHull>,
+        Option<&crate::entity_spawner::EntitySystemHull>,
         Option<&crate::entity_spawner::ColliderSection>,
         Option<&crate::ship_state::ShipPhysics>,
     )>,
@@ -290,7 +290,7 @@ fn build_world_snapshot(
 fn aggregate_doctrine_blackboards(
     mut query: Query<(
         &BehaviourSection,
-        &crate::entity_spawner::EntityConsoleHull,
+        &crate::entity_spawner::EntitySystemHull,
         &mut crate::server_app::ShipSystemBlackboards,
         Option<&crate::ship_state::ShipRedAlert>,
         Option<&crate::ship::combat_activity::RecentCombatActivity>,
@@ -753,16 +753,16 @@ mod tests {
 
     #[test]
     fn self_hull_fraction_reflects_entity_console_hull() {
-        use crate::damage::ConsoleHull;
-        use crate::entity_spawner::EntityConsoleHull;
-        use crate::messages::Console;
+        use crate::damage::SystemHull;
+        use crate::entity_spawner::EntitySystemHull;
+        use crate::messages::SystemId;
 
         let mut app = build_test_app();
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
 
         // 50 HP out of 100 HP = 0.5 fraction
-        let mut hull = ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+        let mut hull = SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
         let mut rng = rand::rng();
         hull.apply_damage(50.0, &mut rng);
 
@@ -772,7 +772,7 @@ mod tests {
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-hull-frac-001".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
-                EntityConsoleHull(hull),
+                EntitySystemHull(hull),
             ))
             .id();
 
@@ -780,8 +780,8 @@ mod tests {
         app.update(); // tick
 
         // The hull fraction should be ~0.5; we verify via the world_view that was
-        // used internally by confirming the EntityConsoleHull component is readable.
-        let hull_comp = app.world().get::<EntityConsoleHull>(entity).unwrap();
+        // used internally by confirming the EntitySystemHull component is readable.
+        let hull_comp = app.world().get::<EntitySystemHull>(entity).unwrap();
         let frac = hull_comp.0.total_current() / hull_comp.0.total_max();
         assert!(
             (frac - 0.5).abs() < 0.01,
@@ -937,10 +937,10 @@ mod tests {
     /// still even when Backfill AI is active.
     #[test]
     fn aggregate_doctrine_blackboards_writes_scored_helm_objective() {
-        use crate::damage::ConsoleHull;
+        use crate::damage::SystemHull;
         use crate::entity_config::{BehaviourConfig, DoctrineObjective};
-        use crate::entity_spawner::EntityConsoleHull;
-        use crate::messages::{Console, SystemAffinity};
+        use crate::entity_spawner::EntitySystemHull;
+        use crate::messages::{SystemAffinity, SystemId};
         use crate::server_app::ShipSystemBlackboards;
         use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
@@ -958,7 +958,7 @@ mod tests {
             ..Default::default()
         };
 
-        let hull = EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]));
+        let hull = EntitySystemHull(SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]));
 
         app.world_mut().spawn((
             BehaviourSection(behaviour),

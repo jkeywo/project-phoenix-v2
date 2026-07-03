@@ -31,7 +31,7 @@ use crate::messages::{EntitySnapshot, ServerMessage};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::SimOutbox;
 
-pub use crate::entity_spawner::EntityConsoleHull;
+pub use crate::entity_spawner::EntitySystemHull;
 pub use crate::simulation::{Asteroid, AsteroidShieldPierce, AsteroidUuid};
 
 // ── Components ───────────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ pub fn check_destroyed_asteroids(
         Entity,
         &Transform,
         &AsteroidUuid,
-        &EntityConsoleHull,
+        &EntitySystemHull,
         Option<&FieldOwner>,
     )>,
     mut outbox: ResMut<SimOutbox>,
@@ -652,8 +652,8 @@ fn try_spawn_cell(
         bevy::math::Quat::IDENTITY
     };
 
-    let asteroid_hull = EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-        crate::messages::Console::CaptainChair,
+    let asteroid_hull = EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+        crate::messages::SystemId("captain".into()),
         max_hp,
     )]));
 

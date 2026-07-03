@@ -33,6 +33,11 @@ pub enum ModifierSource {
         id: String,
         tag: String,
     },
+    /// A modifier attributed to a power group (issue #617). Successor of the
+    /// `Console` variant for power-derived modifiers; kept alongside `Console`
+    /// during the additive migration since the `Console` variant is still a
+    /// valid wire shape.
+    PowerGroup(PowerGroupId),
 }
 
 impl Eq for ModifierSource {}
@@ -55,6 +60,10 @@ impl std::hash::Hash for ModifierSource {
                 3u8.hash(state);
                 id.hash(state);
                 tag.hash(state);
+            }
+            ModifierSource::PowerGroup(g) => {
+                4u8.hash(state);
+                g.hash(state);
             }
         }
     }
@@ -2306,8 +2315,18 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::SetPower { target, level } => ClientMessage::ControlSystem {
             target: crate::system_registry::power_reactor_system_id(),
             payload: SystemControlPayload::SetPowerGroupAllocation {
-                group: crate::power_system::power_group_for_console(target)
-                    .unwrap_or_else(|| PowerGroupId(target.station_console_id().into())),
+                group: match target {
+                    Console::Helm => {
+                        PowerGroupId(crate::power_system::HELM_POWER_GROUP.into())
+                    }
+                    Console::Tactical => {
+                        PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into())
+                    }
+                    Console::Sensors => {
+                        PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into())
+                    }
+                    other => PowerGroupId(other.station_console_id().into()),
+                },
                 level: *level,
             },
         },

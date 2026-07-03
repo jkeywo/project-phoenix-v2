@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::damage::DamageTier;
 use crate::messages::{
-    Console, HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue,
+    HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue,
     SystemBlackboard, SystemId,
 };
 use crate::server_app::{ShipBoost, ShipImpulse};
@@ -39,7 +39,7 @@ fn publish_helm_blackboard(
     boost_q: Query<&ShipBoost, With<crate::simulation::LocalShip>>,
     boost_res: Option<Res<ShipBoost>>,
     boost_config_res: Option<Res<BoostConfigResource>>,
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::simulation::LocalShip>>,
+    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
     queue: Res<InterSystemQueue>,
     mut ship_q: Query<
@@ -90,10 +90,13 @@ fn publish_helm_blackboard(
     // Per-engine blackboard (issue #511): one entry per fine engine system.
     let hull = hull_q.single().ok();
     let engine_entries = [
-        (helm_engine_port_system_id(), Console::HelmEnginePort),
+        (
+            helm_engine_port_system_id(),
+            SystemId("helm-engine-port".into()),
+        ),
         (
             helm_engine_starboard_system_id(),
-            Console::HelmEngineStarboard,
+            SystemId("helm-engine-starboard".into()),
         ),
     ];
 
@@ -104,10 +107,10 @@ fn publish_helm_blackboard(
         );
 
         // Publish per-engine entries.
-        for (system_id, engine_console) in engine_entries {
+        for (system_id, engine_sid) in engine_entries {
             let tier = hull
                 .as_ref()
-                .map(|h| h.0.tier_for(engine_console))
+                .map(|h| h.0.tier_for(&engine_sid))
                 .unwrap_or(DamageTier::Operational);
             let is_online = !matches!(tier, DamageTier::Disabled | DamageTier::Destroyed);
             // Prefer the JoystickState from the InterSystemQueue (written by

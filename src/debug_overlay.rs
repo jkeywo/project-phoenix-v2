@@ -245,7 +245,7 @@ fn update_entity_inspector(
         (
             &Transform,
             &crate::entities::spawner::EntityName,
-            Option<&crate::entities::spawner::EntityConsoleHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
             Option<&crate::ai::server::ShipAiMemory>,
@@ -255,7 +255,7 @@ fn update_entity_inspector(
     >,
     ship_physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::server_app::LocalShip>>,
     player_hull_q: Query<
-        &crate::entity_spawner::EntityConsoleHull,
+        &crate::entity_spawner::EntitySystemHull,
         With<crate::server_app::LocalShip>,
     >,
     ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
@@ -277,13 +277,12 @@ fn update_entity_inspector(
         player_x, player_z
     ));
 
-    // Per-console hull from the LocalShip's EntityConsoleHull component.
-    let hull_entries: Vec<(crate::messages::Console, f32, f32)> = player_hull_q
+    // Per-system hull from the LocalShip's EntitySystemHull component.
+    let hull_entries: Vec<(crate::messages::SystemId, f32, f32)> = player_hull_q
         .single()
         .map(|h| {
             h.0.entries()
-                .iter()
-                .map(|(c, cur, max)| (c.clone(), *cur, *max))
+                .map(|(sid, cur, max)| (sid.clone(), cur, max))
                 .collect()
         })
         .unwrap_or_default();
@@ -291,8 +290,8 @@ fn update_entity_inspector(
         out.push_str("  hull: n/a\n");
     } else {
         out.push_str("  hull:");
-        for (console, cur, max) in &hull_entries {
-            out.push_str(&format!("  {:?} {}/{}", console, *cur as i32, *max as i32));
+        for (sid, cur, max) in &hull_entries {
+            out.push_str(&format!("  {} {}/{}", sid.0, *cur as i32, *max as i32));
         }
         out.push('\n');
     }
@@ -418,7 +417,7 @@ fn update_entity_inspector(
         (
             &Transform,
             &crate::entities::spawner::EntityName,
-            Option<&crate::entities::spawner::EntityConsoleHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
             Option<&crate::ai::server::ShipAiMemory>,

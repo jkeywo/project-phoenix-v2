@@ -177,7 +177,7 @@ fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
 // ── Blackboard publish ───────────────────────────────────────────────────────
 
 fn publish_captain_blackboard(
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
+    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
     ship_query: Query<
@@ -334,8 +334,8 @@ mod tests {
             RecentCombatActivity::default(),
             crate::server_app::WeaponFiredThisTick::default(),
             crate::server_app::ShipAttackedThisTick::default(),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
                 100.0,
             )])),
         ));
@@ -1062,8 +1062,8 @@ mod tests {
 
     // ── Blackboard publish tests ─────────────────────────────────────────────
 
-    use crate::damage::ConsoleHull;
-    use crate::messages::Console;
+    use crate::damage::SystemHull;
+    use crate::messages::SystemId;
     use crate::objectives::ObjectiveManager;
     use crate::world::server::ObjectiveManagerRes;
 
@@ -1071,14 +1071,14 @@ mod tests {
     fn bb_test_app() -> App {
         let mut app = App::new();
         app.add_systems(Update, publish_captain_blackboard);
-        let hull = ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+        let hull = SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
         // Spawn LocalShip entity with required components for publish_captain_blackboard.
         app.world_mut().spawn((
             crate::server_app::LocalShip,
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_state::ShipViewMode::default(),
             ShipSystemControlSources::default(),
-            crate::entity_spawner::EntityConsoleHull(hull),
+            crate::entity_spawner::EntitySystemHull(hull),
             crate::server_app::ShipSystemBlackboards::default(),
         ));
         app
@@ -1093,7 +1093,7 @@ mod tests {
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
-            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .get_mut::<crate::entity_spawner::EntitySystemHull>()
             .unwrap()
             .0
             .apply_damage(amount, &mut rng);
@@ -1454,8 +1454,8 @@ mod tests {
                 },
                 crate::server_app::WeaponFiredThisTick::default(),
                 crate::server_app::ShipAttackedThisTick::default(),
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                    &[(crate::messages::Console::CaptainChair, 100.0)],
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    &[(crate::messages::SystemId("captain".into()), 100.0)],
                 )),
             ))
             .id();
@@ -1507,8 +1507,8 @@ mod tests {
                 RecentCombatActivity::default(),
                 crate::server_app::WeaponFiredThisTick::default(),
                 crate::server_app::ShipAttackedThisTick::default(),
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                    &[(crate::messages::Console::CaptainChair, 100.0)],
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    &[(crate::messages::SystemId("captain".into()), 100.0)],
                 )),
             ))
             .id();

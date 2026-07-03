@@ -524,7 +524,7 @@ fn operate_helm_ai(
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
         Option<&crate::entities::spawner::FactionComponent>,
-        Option<&crate::entities::spawner::EntityConsoleHull>,
+        Option<&crate::entities::spawner::EntitySystemHull>,
         Option<&crate::entities::spawner::ColliderSection>,
     )>,
     mut ships: Query<(
@@ -865,7 +865,7 @@ fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
 pub fn handle_impulse_messages(
     ship_ac_query: Query<&AdmittedCommands, With<LocalShip>>,
     mut impulse_q: Query<&mut ShipImpulse, With<LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
+    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
     mut last_hull_hp: Local<f32>,
     membership: Option<Res<RegionMembership>>,
     region_query: Query<&RegionEffectsSection>,
@@ -1294,41 +1294,48 @@ pub fn handle_coordination_messages(mut reader: MessageReader<InboundMessage>) {
 // ── Damage-tier → control gate sync ──────────────────────────────────────────
 
 /// Bevy system that synchronises `ControlSourceResolver.offline_systems` with
-/// the current damage tiers of each console in the ship hull.
+/// the current damage tiers of each system in the ship hull.
 ///
 /// Runs in `SimSet::Damage` (after hull damage is applied). For every ship that
-/// carries both `EntityConsoleHull` and `ShipSystemControlSources`:
+/// carries both an [`EntitySystemHull`](crate::entity_spawner::EntitySystemHull)
+/// (wrapping [`SystemHull`]) and `ShipSystemControlSources`:
 ///
-/// - Consoles in `Disabled` or `Destroyed` tier: their corresponding `SystemId`
+/// - Systems in `Disabled` or `Destroyed` tier: their corresponding `SystemId`
 ///   is added to `offline_systems`.
-/// - Consoles in `Operational` or `Damaged` tier: their corresponding
+/// - Systems in `Operational` or `Damaged` tier: their corresponding
 ///   `SystemId` is removed from `offline_systems` (restoring normal gating).
 ///
-/// The `SystemId` for a console is derived from `Console::station_console_id()`,
-/// which matches the `id` field of the `[[system]]` entries in the TOML.
+/// The `SystemId` for each entry is the key of the [`SystemHull`] map
+/// directly — no `Console` → `SystemId` translation is needed.
 ///
 /// Post-#514: also iterates the ship's `ShipArcHull` (when present) and flips
 /// each arc's fine `SystemId("shield-arc-<id>")` in/out of `offline_systems`
 /// using the same tier-derivation policy. Ships without a `ShipArcHull` (NPCs,
 /// legacy fixtures) are unaffected.
+///
+/// Fix to issue #617: earlier this system iterated BOTH `EntityConsoleHull`
+/// AND `EntitySystemHull` in parallel. In production only one of the two was
+/// mutated by damage code, so the second (unmodified) iteration silently
+/// cleared `offline_systems` entries that the first iteration correctly
+/// inserted. The reviewer caught this and the fix drops the duplicate
+/// iteration and picks `EntitySystemHull` as the single source of truth.
 pub fn sync_console_damage_tiers(
     mut ships: Query<(
-        &crate::entity_spawner::EntityConsoleHull,
+        &crate::entity_spawner::EntitySystemHull,
         Option<&crate::entity_spawner::EntityShipArcHull>,
         &mut ShipSystemControlSources,
     )>,
 ) {
-    for (hull_component, arc_hull_opt, mut control_sources) in ships.iter_mut() {
-        let hull = &hull_component.0;
-        for (console, _cur, _max) in hull.entries() {
-            let system_id = crate::messages::SystemId(console.station_console_id().to_string());
-            let tier = hull.tier_for(console.clone());
+    for (system_hull_component, arc_hull_opt, mut control_sources) in ships.iter_mut() {
+        let hull = &system_hull_component.0;
+        for (sid, _cur, _max) in hull.entries() {
+            let tier = hull.tier_for(sid);
             match tier {
                 DamageTier::Disabled | DamageTier::Destroyed => {
-                    control_sources.0.offline_systems.insert(system_id);
+                    control_sources.0.offline_systems.insert(sid.clone());
                 }
                 DamageTier::Operational | DamageTier::Damaged => {
-                    control_sources.0.offline_systems.remove(&system_id);
+                    control_sources.0.offline_systems.remove(sid);
                 }
             }
         }
@@ -1384,10 +1391,10 @@ mod tests {
             .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
         let hull_config = &[
-            (crate::messages::Console::Helm, 25.0_f32),
-            (crate::messages::Console::Tactical, 25.0),
-            (crate::messages::Console::Power, 25.0),
-            (crate::messages::Console::Shields, 25.0),
+            (crate::messages::SystemId("helm".into()), 25.0_f32),
+            (crate::messages::SystemId("tactical".into()), 25.0),
+            (crate::messages::SystemId("power".into()), 25.0),
+            (crate::messages::SystemId("shields".into()), 25.0),
         ];
         app.world_mut().spawn((
             Ship,
@@ -1401,7 +1408,7 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                 hull_config,
             )),
             LastHelmInput::default(),
@@ -1420,7 +1427,7 @@ mod tests {
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
-            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .get_mut::<crate::entity_spawner::EntitySystemHull>()
             .unwrap()
             .0
             .apply_damage(amount, &mut rng);
@@ -3196,7 +3203,7 @@ station = "helm"
             .policy_for(&crate::messages::SystemId(system_id.into()))
     }
 
-    fn set_console_hp(app: &mut App, console: crate::messages::Console, hp: f32) {
+    fn set_hp(app: &mut App, console: crate::messages::Console, hp: f32) {
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
@@ -3204,11 +3211,12 @@ station = "helm"
             .unwrap();
         let mut binding = app.world_mut().entity_mut(ship);
         let mut hull_component = binding
-            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .get_mut::<crate::entity_spawner::EntitySystemHull>()
             .unwrap();
+        let sid = crate::messages::SystemId(console.station_console_id().to_string());
         // Wipe then restore to exact HP.
         hull_component.0.apply_damage(1_000_000.0, &mut rand::rng());
-        hull_component.0.restore(console, hp);
+        hull_component.0.restore(&sid, hp);
     }
 
     #[test]
@@ -3216,7 +3224,7 @@ station = "helm"
         let mut app = test_app();
         // Helm console max_hp = 25. Disabled threshold = 25 % = 6.25 HP.
         // Set Helm to 5 HP (below disabled threshold) → Disabled tier.
-        set_console_hp(&mut app, crate::messages::Console::Helm, 5.0);
+        set_hp(&mut app, crate::messages::Console::Helm, 5.0);
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -3231,7 +3239,7 @@ station = "helm"
     fn destroyed_console_gates_human_and_ai_input() {
         let mut app = test_app();
         // Wipe helm to 0 HP → Destroyed tier.
-        set_console_hp(&mut app, crate::messages::Console::Helm, 0.0);
+        set_hp(&mut app, crate::messages::Console::Helm, 0.0);
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -3246,13 +3254,13 @@ station = "helm"
     fn restored_console_re_enables_input() {
         let mut app = test_app();
         // First disable helm.
-        set_console_hp(&mut app, crate::messages::Console::Helm, 5.0);
+        set_hp(&mut app, crate::messages::Console::Helm, 5.0);
         tick(&mut app);
         // Verify it is gated.
         assert!(!get_policy(&mut app, "helm").accept_human_input);
 
         // Now restore to operational HP.
-        set_console_hp(&mut app, crate::messages::Console::Helm, 25.0);
+        set_hp(&mut app, crate::messages::Console::Helm, 25.0);
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -3267,7 +3275,7 @@ station = "helm"
         let mut app = test_app();
         // Helm at 50% = 12.5 HP → Damaged tier (25 % < 50 % < 75 %).
         // Damaged tier must NOT block input — only Disabled and Destroyed do.
-        set_console_hp(&mut app, crate::messages::Console::Helm, 12.5);
+        set_hp(&mut app, crate::messages::Console::Helm, 12.5);
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -3343,12 +3351,12 @@ station = "helm"
             .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
         let hull_config = &[
-            (crate::messages::Console::Helm, 25.0_f32),
-            (crate::messages::Console::Tactical, 25.0),
-            (crate::messages::Console::Power, 25.0),
-            (crate::messages::Console::Shields, 25.0),
-            (crate::messages::Console::HelmEnginePort, 15.0),
-            (crate::messages::Console::HelmEngineStarboard, 15.0),
+            (crate::messages::SystemId("helm".into()), 25.0_f32),
+            (crate::messages::SystemId("tactical".into()), 25.0),
+            (crate::messages::SystemId("power".into()), 25.0),
+            (crate::messages::SystemId("shields".into()), 25.0),
+            (crate::messages::SystemId("helm-engine-port".into()), 15.0),
+            (crate::messages::SystemId("helm-engine-starboard".into()), 15.0),
         ];
         app.world_mut().spawn((
             Ship,
@@ -3362,7 +3370,7 @@ station = "helm"
             crate::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                 hull_config,
             )),
             LastHelmInput::default(),
@@ -3373,7 +3381,7 @@ station = "helm"
     }
 
     /// Set the HP of a specific console on the LocalShip hull to `new_hp`.
-    /// Delegates to `ConsoleHull::set_console_hp` which directly sets the value.
+    /// Delegates to `SystemHull::set_hp` which directly sets the value.
     fn set_console_hp_direct(app: &mut App, console: crate::messages::Console, new_hp: f32) {
         let ship = app
             .world_mut()
@@ -3382,9 +3390,10 @@ station = "helm"
             .unwrap();
         let mut entity_mut = app.world_mut().entity_mut(ship);
         let mut hull = entity_mut
-            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .get_mut::<crate::entity_spawner::EntitySystemHull>()
             .unwrap();
-        hull.0.set_console_hp(&console, new_hp);
+        let sid = crate::messages::SystemId(console.station_console_id().to_string());
+        hull.0.set_hp(&sid, new_hp);
     }
 
     #[test]
@@ -3460,6 +3469,82 @@ station = "helm"
             control_sources.0.offline_systems.contains(&port_id),
             "helm-engine-port should be in offline_systems when HP = 0"
         );
+    }
+
+    /// Regression test for the reviewer's finding on issue #617.
+    ///
+    /// Before the fix, `sync_console_damage_tiers` iterated BOTH
+    /// `EntityConsoleHull` AND `EntitySystemHull`. In production only the
+    /// former was mutated by damage code, so the second (unmodified)
+    /// iteration silently cleared every `offline_systems` entry that the
+    /// first correctly inserted — meaning a hull-destroyed system would be
+    /// re-marked online on the very next tick.
+    ///
+    /// This test spawns a ship carrying only `EntitySystemHull`, damages the
+    /// helm system to 0 HP, runs the sync system TWICE, and asserts the
+    /// SystemId stays in `offline_systems` across both ticks. Under the old
+    /// buggy behaviour the second tick would have cleared the entry.
+    #[test]
+    fn sync_damage_tiers_keeps_disabled_system_offline_across_ticks() {
+        let mut app = test_app();
+        let helm_sid = crate::messages::SystemId("helm".into());
+
+        // Damage the helm system to 0 HP (Destroyed tier).
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .unwrap();
+            hull.0.set_hp(&helm_sid, 0.0);
+        }
+
+        // Tick 1: sync_console_damage_tiers runs, must insert helm into
+        // offline_systems.
+        tick(&mut app);
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let control_sources = app
+                .world()
+                .entity(ship)
+                .get::<ShipSystemControlSources>()
+                .unwrap();
+            assert!(
+                control_sources.0.offline_systems.contains(&helm_sid),
+                "after tick 1, helm should be in offline_systems (HP = 0)"
+            );
+        }
+
+        // Tick 2: no damage change. Under the pre-fix bug the second loop
+        // (over the unmutated sibling component) would have re-marked helm
+        // as Operational and cleared it from offline_systems. After the fix
+        // there is only one iteration, so the entry must persist.
+        tick(&mut app);
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let control_sources = app
+                .world()
+                .entity(ship)
+                .get::<ShipSystemControlSources>()
+                .unwrap();
+            assert!(
+                control_sources.0.offline_systems.contains(&helm_sid),
+                "after tick 2, helm MUST still be in offline_systems (regression \
+                 for issue #617 dual-iteration clobber bug)"
+            );
+        }
     }
 
     #[test]
@@ -3546,11 +3631,11 @@ station = "helm"
             .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
         let hull_config = &[
-            (crate::messages::Console::Helm, 25.0_f32),
-            (crate::messages::Console::Tactical, 25.0),
-            (crate::messages::Console::PowerReactor, 15.0),
-            (crate::messages::Console::PowerBattery, 10.0),
-            (crate::messages::Console::Shields, 25.0),
+            (crate::messages::SystemId("helm".into()), 25.0_f32),
+            (crate::messages::SystemId("tactical".into()), 25.0),
+            (crate::messages::SystemId("power-reactor".into()), 15.0),
+            (crate::messages::SystemId("power-battery".into()), 10.0),
+            (crate::messages::SystemId("shields".into()), 25.0),
         ];
         app.world_mut().spawn((
             Ship,
@@ -3564,7 +3649,7 @@ station = "helm"
             crate::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                 hull_config,
             )),
             LastHelmInput::default(),
@@ -3655,7 +3740,7 @@ station = "helm"
                 },
             ),
         ]);
-        let hull_config = &[(crate::messages::Console::Helm, 25.0_f32)];
+        let hull_config = &[(crate::messages::SystemId("helm".into()), 25.0_f32)];
         app.world_mut().spawn((
             (
                 Ship,
@@ -3669,9 +3754,9 @@ station = "helm"
                 crate::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ai_plugin::ShipAiMemory::default(),
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                    hull_config,
-                )),
+                crate::entity_spawner::EntitySystemHull(
+                    crate::damage::SystemHull::from_config(hull_config),
+                ),
                 crate::entity_spawner::EntityShipArcHull(arc_hull),
                 LastHelmInput::default(),
                 crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),

@@ -1,4 +1,4 @@
-use crate::messages::Console;
+use crate::messages::SystemId;
 use crate::shield::ShieldSystem;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -68,15 +68,15 @@ pub fn apply_damage_with_shields(
     shields.apply_damage(amount, bearing_relative)
 }
 
-/// Apply hull damage via `ConsoleHull`.
+/// Apply hull damage via `SystemHull`.
 ///
 /// Takes the final hull damage amount (after shields), distributes it randomly
-/// across consoles, and returns:
+/// across systems, and returns:
 ///
-/// - `hull_damage_applied`: what was actually absorbed by consoles
-/// - `ship_destroyed`: true when all consoles have reached 0 HP after this hit
+/// - `hull_damage_applied`: what was actually absorbed by systems
+/// - `ship_destroyed`: true when all systems have reached 0 HP after this hit
 pub fn apply_hull_damage(
-    hull: &mut ConsoleHull,
+    hull: &mut SystemHull,
     amount: f32,
     rng: &mut impl rand::Rng,
 ) -> (f32, bool) {
@@ -117,209 +117,317 @@ pub fn collision_damage(forward_speed: f32) -> i32 {
     (forward_speed.abs() * 0.5).round() as i32
 }
 
-// ── ConsoleHull ───────────────────────────────────────────────────────────────
+// ── SystemHull ────────────────────────────────────────────────────────────────
 
-/// Per-console hull tracker.
-///
-/// Stores `(console, current_hp, max_hp)` entries plus per-console tier
-/// thresholds. Damage is distributed randomly across consoles that still have
-/// HP, spilling to further random consoles when a console reaches 0. Repair
-/// targets a specific console.
+/// One entry in [`SystemHull`]: per-system HP + tier thresholds + display name.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ConsoleHull {
-    entries: Vec<(Console, f32, f32)>,
-    /// Parallel vec of tier thresholds, one entry per `entries` element.
-    tier_configs: Vec<ConsoleTierConfig>,
+pub struct SystemHullEntry {
+    /// Current hull HP for this system.
+    pub current: f32,
+    /// Maximum hull HP for this system.
+    pub max: f32,
+    /// Tier thresholds for damage-tier derivation.
+    pub tier_config: ConsoleTierConfig,
+    /// Human-readable name for UI display. Falls back to the raw
+    /// `SystemId` string when no `display_name` was supplied via TOML.
+    pub display_name: String,
 }
 
-impl ConsoleHull {
-    /// Build from a list of `(console, max_hp)` pairs using default tier
-    /// thresholds. All consoles start at full HP.
-    pub fn from_config(config: &[(Console, f32)]) -> Self {
-        Self {
-            entries: config
-                .iter()
-                .map(|(c, max)| (c.clone(), *max, *max))
-                .collect(),
-            tier_configs: config
-                .iter()
-                .map(|_| ConsoleTierConfig::default())
-                .collect(),
+/// Per-system hull tracker keyed by [`SystemId`] (parent issue #516,
+/// sub-issue #617). Successor of the retired `ConsoleHull` type.
+///
+/// Stores `(SystemId, entry)` pairs plus a parallel insertion-order `order`
+/// vec so iteration is deterministic (a bare HashMap would randomise iteration
+/// and break deterministic damage distribution — see `ShipArcHull` for the
+/// same pattern).
+///
+/// Damage is distributed randomly across entries that still have HP, spilling
+/// to further random entries when a system reaches 0. Repair targets a
+/// specific system by [`SystemId`].
+///
+/// Pure struct — `ship/damage.rs` is Bevy-free per AGENTS.md rule 9.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SystemHull {
+    entries: HashMap<SystemId, SystemHullEntry>,
+    /// Ordered list of system ids (matches TOML insertion order).
+    order: Vec<SystemId>,
+}
+
+impl SystemHull {
+    /// Build from a list of `(SystemId, max_hp)` pairs using default tier
+    /// thresholds and derived display names. All systems start at full HP.
+    pub fn from_config(config: &[(SystemId, f32)]) -> Self {
+        let mut order = Vec::with_capacity(config.len());
+        let mut entries = HashMap::with_capacity(config.len());
+        for (sid, max) in config {
+            let display_name = sid.0.clone();
+            if !entries.contains_key(sid) {
+                order.push(sid.clone());
+            }
+            entries.insert(
+                sid.clone(),
+                SystemHullEntry {
+                    current: *max,
+                    max: *max,
+                    tier_config: ConsoleTierConfig::default(),
+                    display_name,
+                },
+            );
         }
+        Self { entries, order }
     }
 
-    /// Build from a list of `(console, max_hp, tier_config)` triples.
-    /// All consoles start at full HP.
-    pub fn from_config_with_tiers(config: &[(Console, f32, ConsoleTierConfig)]) -> Self {
-        Self {
-            entries: config
-                .iter()
-                .map(|(c, max, _)| (c.clone(), *max, *max))
-                .collect(),
-            tier_configs: config.iter().map(|(_, _, tc)| *tc).collect(),
+    /// Build from a list of `(SystemId, max_hp, tier_config)` triples.
+    /// Display names default to the raw `SystemId` string.
+    pub fn from_config_with_tiers(config: &[(SystemId, f32, ConsoleTierConfig)]) -> Self {
+        let mut order = Vec::with_capacity(config.len());
+        let mut entries = HashMap::with_capacity(config.len());
+        for (sid, max, tc) in config {
+            let display_name = sid.0.clone();
+            if !entries.contains_key(sid) {
+                order.push(sid.clone());
+            }
+            entries.insert(
+                sid.clone(),
+                SystemHullEntry {
+                    current: *max,
+                    max: *max,
+                    tier_config: *tc,
+                    display_name,
+                },
+            );
         }
+        Self { entries, order }
     }
 
-    /// Return the `DamageTier` for the given console.
+    /// Build from a list of `(SystemId, display_name, max_hp, tier_config)`
+    /// quadruples — the spawner main path uses this to preserve TOML-supplied
+    /// display names.
+    pub fn from_config_with_display_names(
+        config: Vec<(SystemId, String, f32, ConsoleTierConfig)>,
+    ) -> Self {
+        let mut order = Vec::with_capacity(config.len());
+        let mut entries = HashMap::with_capacity(config.len());
+        for (sid, display_name, max, tc) in config {
+            if !entries.contains_key(&sid) {
+                order.push(sid.clone());
+            }
+            entries.insert(
+                sid,
+                SystemHullEntry {
+                    current: max,
+                    max,
+                    tier_config: tc,
+                    display_name,
+                },
+            );
+        }
+        Self { entries, order }
+    }
+
+    /// True when the tracker has no systems.
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty()
+    }
+
+    /// Return the `DamageTier` for the given system.
     ///
     /// - `Destroyed`: `current == 0`
     /// - `Disabled`: `current/max < disabled_threshold_pct`
     /// - `Damaged`: `current/max < damaged_threshold_pct`
     /// - `Operational`: otherwise
     ///
-    /// Returns `Operational` for consoles not tracked by this hull.
-    pub fn tier_for(&self, console: Console) -> DamageTier {
-        let idx = self.entries.iter().position(|(c, _, _)| *c == console);
-        let Some(idx) = idx else {
+    /// Returns `Operational` for systems not tracked by this hull.
+    pub fn tier_for(&self, sid: &SystemId) -> DamageTier {
+        let Some(entry) = self.entries.get(sid) else {
             return DamageTier::Operational;
         };
-        let (_, cur, max) = self.entries[idx];
-        let tier_cfg = &self.tier_configs[idx];
-
-        if cur == 0.0 {
+        if entry.current == 0.0 {
             return DamageTier::Destroyed;
         }
-        let ratio = if max > 0.0 { cur / max } else { 0.0 };
-        if ratio < tier_cfg.disabled_threshold_pct {
+        let ratio = if entry.max > 0.0 {
+            entry.current / entry.max
+        } else {
+            0.0
+        };
+        if ratio < entry.tier_config.disabled_threshold_pct {
             DamageTier::Disabled
-        } else if ratio < tier_cfg.damaged_threshold_pct {
+        } else if ratio < entry.tier_config.damaged_threshold_pct {
             DamageTier::Damaged
         } else {
             DamageTier::Operational
         }
     }
 
-    /// Apply `amount` of damage distributed across consoles above 0 HP, weighted
-    /// by their remaining HP (a console with more HP is proportionally more likely
-    /// to absorb the next hit). Damage spills to further weighted selections when
-    /// a console is exhausted. Consoles already at 0 HP are never targeted.
+    /// Apply `amount` of damage distributed across systems above 0 HP,
+    /// weighted by their remaining HP (a system with more HP is proportionally
+    /// more likely to absorb the next hit). Damage spills to further weighted
+    /// selections when a system is exhausted. Systems already at 0 HP are
+    /// never targeted.
     pub fn apply_damage(&mut self, mut amount: f32, rng: &mut impl Rng) {
         while amount > 0.0 {
             let total: f32 = self
-                .entries
+                .order
                 .iter()
-                .filter(|(_, cur, _)| *cur > 0.0)
-                .map(|(_, cur, _)| *cur)
+                .filter_map(|id| self.entries.get(id))
+                .filter(|entry| entry.current > 0.0)
+                .map(|entry| entry.current)
                 .sum();
             if total == 0.0 {
                 break;
             }
             // Weighted selection: generate r in [0, total), subtract each
-            // console's HP in order; choose the first one that drives r negative.
+            // system's HP in order; choose the first one that drives r
+            // negative.
             let mut r = rng.random::<f32>() * total;
-            let mut chosen = None;
-            for (i, (_, cur, _)) in self.entries.iter().enumerate() {
-                if *cur <= 0.0 {
+            let mut chosen_id: Option<SystemId> = None;
+            for id in &self.order {
+                let entry = self
+                    .entries
+                    .get(id)
+                    .expect("SystemHull invariant: order and entries agree");
+                if entry.current <= 0.0 {
                     continue;
                 }
-                r -= cur;
+                r -= entry.current;
                 if r < 0.0 {
-                    chosen = Some(i);
+                    chosen_id = Some(id.clone());
                     break;
                 }
             }
-            // Float-precision safety: fall back to the last available console.
-            let idx = chosen.unwrap_or_else(|| {
-                self.entries
+            // Float-precision safety: fall back to the last available system.
+            let idx = chosen_id.unwrap_or_else(|| {
+                self.order
                     .iter()
-                    .enumerate()
-                    .rfind(|(_, (_, cur, _))| *cur > 0.0)
-                    .unwrap()
-                    .0
+                    .rev()
+                    .find(|id| {
+                        self.entries
+                            .get(*id)
+                            .is_some_and(|e| e.current > 0.0)
+                    })
+                    .cloned()
+                    .expect("total > 0.0 implies at least one live entry")
             });
-            let (_, cur, _) = &mut self.entries[idx];
-            let absorbed = amount.min(*cur);
-            *cur -= absorbed;
+            let entry = self
+                .entries
+                .get_mut(&idx)
+                .expect("SystemHull invariant: order and entries agree");
+            let absorbed = amount.min(entry.current);
+            entry.current -= absorbed;
             amount -= absorbed;
         }
     }
 
-    /// Read-only view of all `(console, current_hp, max_hp)` entries.
-    pub fn entries(&self) -> &[(Console, f32, f32)] {
-        &self.entries
+    /// Iterate `(SystemId, current, max)` triples in TOML declaration order.
+    /// Kept as `(&SystemId, f32, f32)` so callers don't have to reach into
+    /// `SystemHullEntry` for the two most common fields.
+    pub fn entries(&self) -> impl Iterator<Item = (&SystemId, f32, f32)> {
+        self.order.iter().map(move |id| {
+            let entry = self
+                .entries
+                .get(id)
+                .expect("SystemHull invariant: order and entries agree");
+            (id, entry.current, entry.max)
+        })
     }
 
-    /// Restore `amount` HP to a specific console, clamped to its max.
-    /// Consoles not present in the map are silently ignored.
-    pub fn restore(&mut self, console: Console, amount: f32) {
-        for (c, cur, max) in &mut self.entries {
-            if *c == console {
-                *cur = (*cur + amount).min(*max);
-                return;
-            }
+    /// Iterate the full `(SystemId, &SystemHullEntry)` view when callers need
+    /// the display name / tier config.
+    pub fn iter(&self) -> impl Iterator<Item = (&SystemId, &SystemHullEntry)> {
+        self.order.iter().map(move |id| {
+            let entry = self
+                .entries
+                .get(id)
+                .expect("SystemHull invariant: order and entries agree");
+            (id, entry)
+        })
+    }
+
+    /// Look up a full entry by SystemId.
+    pub fn get(&self, sid: &SystemId) -> Option<&SystemHullEntry> {
+        self.entries.get(sid)
+    }
+
+    /// Restore `amount` HP to a specific system, clamped to its max.
+    /// Systems not present in the map are silently ignored.
+    pub fn restore(&mut self, sid: &SystemId, amount: f32) {
+        if let Some(entry) = self.entries.get_mut(sid) {
+            entry.current = (entry.current + amount).min(entry.max);
         }
     }
 
-    /// Sum of current HP across all consoles.
+    /// Sum of current HP across all systems.
     pub fn total_current(&self) -> f32 {
-        self.entries.iter().map(|(_, cur, _)| cur).sum()
+        self.entries.values().map(|e| e.current).sum()
     }
 
-    /// Sum of max HP across all consoles.
+    /// Sum of max HP across all systems.
     pub fn total_max(&self) -> f32 {
-        self.entries.iter().map(|(_, _, max)| max).sum()
+        self.entries.values().map(|e| e.max).sum()
     }
 
-    /// True only when every console is at 0 HP.
+    /// True only when every system is at 0 HP.
     pub fn is_destroyed(&self) -> bool {
-        self.entries.iter().all(|(_, cur, _)| *cur == 0.0)
+        !self.entries.is_empty() && self.entries.values().all(|e| e.current == 0.0)
     }
 
-    /// Current HP for a specific console. Returns `None` if not tracked.
-    pub fn current_for(&self, console: Console) -> Option<f32> {
-        self.entries
-            .iter()
-            .find(|(c, _, _)| *c == console)
-            .map(|(_, cur, _)| *cur)
+    /// Current HP for a specific system. Returns `None` if not tracked.
+    pub fn current_for(&self, sid: &SystemId) -> Option<f32> {
+        self.entries.get(sid).map(|e| e.current)
     }
 
-    /// Restore `amount` HP to the first console that is below its max HP.
-    /// Useful for repair systems that don't yet target a specific console.
-    /// Returns the console that was restored, or `None` if all are at max.
-    pub fn restore_any_damaged(&mut self, amount: f32) -> Option<Console> {
-        for (c, cur, max) in &mut self.entries {
-            if *cur < *max {
-                *cur = (*cur + amount).min(*max);
-                return Some(c.clone());
+    /// Restore `amount` HP to the first system that is below its max HP.
+    /// Useful for repair systems that don't yet target a specific system.
+    /// Returns the `SystemId` that was restored, or `None` if all are at max.
+    pub fn restore_any_damaged(&mut self, amount: f32) -> Option<SystemId> {
+        for sid in &self.order {
+            let entry = self
+                .entries
+                .get_mut(sid)
+                .expect("SystemHull invariant: order and entries agree");
+            if entry.current < entry.max {
+                entry.current = (entry.current + amount).min(entry.max);
+                return Some(sid.clone());
             }
         }
         None
     }
 
-    /// Return the active debuff magnitude for the given console.
+    /// Return the active debuff magnitude for the given system.
     ///
-    /// - `Operational` or `Destroyed` → `0.0` (fully operational or fully offline;
-    ///   no partial debuff applies).
+    /// - `Operational` or `Destroyed` → `0.0` (fully operational or fully
+    ///   offline; no partial debuff applies).
     /// - `Damaged` or `Disabled` → `tier_config.debuff_magnitude` from the
-    ///   per-console TOML configuration.
+    ///   per-system TOML configuration.
     ///
-    /// Returns `0.0` for consoles not tracked by this hull.
-    pub fn debuff_magnitude_for(&self, console: Console) -> f32 {
-        let idx = self.entries.iter().position(|(c, _, _)| *c == console);
-        let Some(idx) = idx else {
+    /// Returns `0.0` for systems not tracked by this hull.
+    pub fn debuff_magnitude_for(&self, sid: &SystemId) -> f32 {
+        let Some(entry) = self.entries.get(sid) else {
             return 0.0;
         };
-        match self.tier_for(console) {
+        match self.tier_for(sid) {
             DamageTier::Operational | DamageTier::Destroyed => 0.0,
-            DamageTier::Damaged | DamageTier::Disabled => self.tier_configs[idx].debuff_magnitude,
+            DamageTier::Damaged | DamageTier::Disabled => entry.tier_config.debuff_magnitude,
         }
     }
 
-    /// Returns `true` if the given console is at its maximum HP (or not tracked).
-    pub fn is_at_max(&self, console: &Console) -> bool {
-        match self.entries.iter().find(|(c, _, _)| c == console) {
-            Some((_, cur, max)) => *cur >= *max,
+    /// Returns `true` if the given system is at its maximum HP (or not
+    /// tracked).
+    pub fn is_at_max(&self, sid: &SystemId) -> bool {
+        match self.entries.get(sid) {
+            Some(entry) => entry.current >= entry.max,
             None => true, // not tracked → treat as full
         }
     }
 
-    /// Directly set the current HP for a given console. No-op if the console
+    /// Directly set the current HP for a given system. No-op if the system
     /// is not tracked. Clamps to `[0.0, max_hp]`.
     ///
-    /// Used in tests to set specific damage states without applying random hull damage.
-    pub fn set_console_hp(&mut self, console: &Console, new_hp: f32) {
-        if let Some(entry) = self.entries.iter_mut().find(|(c, _, _)| c == console) {
-            entry.1 = new_hp.clamp(0.0, entry.2);
+    /// Used in tests to set specific damage states without applying random
+    /// hull damage.
+    pub fn set_hp(&mut self, sid: &SystemId, new_hp: f32) {
+        if let Some(entry) = self.entries.get_mut(sid) {
+            entry.current = new_hp.clamp(0.0, entry.max);
         }
     }
 }
@@ -339,14 +447,14 @@ pub struct ArcHullEntry {
 
 /// Per-arc hull tracker (issue #514).
 ///
-/// Parallels [`ConsoleHull`] but keyed by arc id (string) instead of `Console`
-/// enum. Each shield arc declared via a `[[shield_arc]]` block in ship TOML
-/// gets a corresponding entry here. Damage is distributed proportionally to
-/// total hull damage on the ship (the arc HP pool tracks total ship hull
-/// damage, matching how `Console` hull entries behave).
+/// Parallels [`SystemHull`] but keyed by arc id (string) instead of
+/// [`SystemId`]. Each shield arc declared via a `[[shield_arc]]` block in
+/// ship TOML gets a corresponding entry here. Damage is distributed
+/// proportionally to total hull damage on the ship (the arc HP pool tracks
+/// total ship hull damage, matching how per-system hull entries behave).
 ///
 /// `sync_console_damage_tiers` iterates this component alongside
-/// [`ConsoleHull`], deriving `SystemId("shield-arc-<id>")` offline states from
+/// [`SystemHull`], deriving `SystemId("shield-arc-<id>")` offline states from
 /// each entry's tier.
 ///
 /// Skipped on NPCs — NPCs use scalar `hull_integrity` and do not declare
@@ -407,7 +515,7 @@ impl ShipArcHull {
     /// Return the current [`DamageTier`] for the given arc.
     ///
     /// Returns `Operational` for arcs not tracked by this hull (mirrors
-    /// [`ConsoleHull::tier_for`]).
+    /// [`SystemHull::tier_for`]).
     pub fn tier_for(&self, arc_id: &str) -> DamageTier {
         let Some(entry) = self.entries.get(arc_id) else {
             return DamageTier::Operational;
@@ -430,7 +538,7 @@ impl ShipArcHull {
     }
 
     /// Apply `amount` of damage distributed across arcs above 0 HP, weighted
-    /// by remaining HP — same policy as [`ConsoleHull::apply_damage`]. Damage
+    /// by remaining HP — same policy as [`SystemHull::apply_damage`]. Damage
     /// spills to further weighted selections when an arc is exhausted.
     pub fn apply_damage(&mut self, mut amount: f32, rng: &mut impl Rng) {
         while amount > 0.0 {
@@ -588,10 +696,14 @@ mod tests {
         (a - b).abs() < 1e-6
     }
 
+    fn sid(s: &str) -> SystemId {
+        SystemId(s.into())
+    }
+
     // ── apply_hull_damage helper ────────────────────────────────────────────
 
-    fn single_console_hull(hp: f32) -> ConsoleHull {
-        ConsoleHull::from_config(&[(Console::Helm, hp)])
+    fn single_console_hull(hp: f32) -> SystemHull {
+        SystemHull::from_config(&[(sid("helm"), hp)])
     }
 
     #[test]
@@ -662,7 +774,7 @@ mod tests {
 
     #[test]
     fn apply_hull_damage_spillover_fires_destroyed_after_second_console_wiped() {
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 5.0), (Console::Tactical, 10.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 5.0), (sid("tactical"), 10.0)]);
         let mut rng = rand::rng();
         let (_applied, destroyed) = apply_hull_damage(&mut hull, 20.0, &mut rng);
         assert!(
@@ -721,20 +833,20 @@ mod tests {
         assert_eq!(shields.facings[0].hp, 100); // Fore untouched
     }
 
-    // ── ConsoleHull ──────────────────────────────────────────────────────────
+    // ── SystemHull ───────────────────────────────────────────────────────────
 
-    fn four_console_hull() -> ConsoleHull {
-        ConsoleHull::from_config(&[
-            (Console::Helm, 25.0),
-            (Console::Tactical, 25.0),
-            (Console::Power, 25.0),
-            (Console::Shields, 25.0),
+    fn four_console_hull() -> SystemHull {
+        SystemHull::from_config(&[
+            (sid("helm"), 25.0),
+            (sid("tactical"), 25.0),
+            (sid("power"), 25.0),
+            (sid("shields"), 25.0),
         ])
     }
 
     // Cycle 1: aggregates are correct at full HP
     #[test]
-    fn console_hull_total_current_and_max_at_start() {
+    fn system_hull_total_current_and_max_at_start() {
         let hull = four_console_hull();
         assert!(near(hull.total_current(), 100.0));
         assert!(near(hull.total_max(), 100.0));
@@ -742,14 +854,14 @@ mod tests {
 
     // Cycle 2: not destroyed when HP remains
     #[test]
-    fn console_hull_not_destroyed_when_hp_remains() {
+    fn system_hull_not_destroyed_when_hp_remains() {
         let hull = four_console_hull();
         assert!(!hull.is_destroyed());
     }
 
     // Cycle 3: is_destroyed only when all consoles at 0
     #[test]
-    fn console_hull_is_destroyed_only_when_all_at_zero() {
+    fn system_hull_is_destroyed_only_when_all_at_zero() {
         let mut hull = four_console_hull();
         let mut rng = rand::rng();
         hull.apply_damage(1000.0, &mut rng); // wipe everything
@@ -771,7 +883,7 @@ mod tests {
         // Build hull with one console at very low HP so it depletes first.
         // Use a seeded RNG to control which console is chosen.
         let mut hull =
-            ConsoleHull::from_config(&[(Console::Helm, 5.0), (Console::Tactical, 100.0)]);
+            SystemHull::from_config(&[(sid("helm"), 5.0), (sid("tactical"), 100.0)]);
         let mut rng = rand::rng();
         // Apply 110 damage — should wipe both consoles (5 + 105 spill to Tactical)
         hull.apply_damage(110.0, &mut rng);
@@ -785,20 +897,20 @@ mod tests {
         let mut hull = four_console_hull();
         let mut rng = rand::rng();
         hull.apply_damage(100.0, &mut rng); // wipe all
-        hull.restore(Console::Helm, 10.0);
+        hull.restore(&sid("helm"), 10.0);
         // Only Helm should have HP restored
-        assert!(near(hull.current_for(Console::Helm).unwrap(), 10.0));
-        assert!(near(hull.current_for(Console::Tactical).unwrap(), 0.0));
-        assert!(near(hull.current_for(Console::Power).unwrap(), 0.0));
-        assert!(near(hull.current_for(Console::Shields).unwrap(), 0.0));
+        assert!(near(hull.current_for(&sid("helm")).unwrap(), 10.0));
+        assert!(near(hull.current_for(&sid("tactical")).unwrap(), 0.0));
+        assert!(near(hull.current_for(&sid("power")).unwrap(), 0.0));
+        assert!(near(hull.current_for(&sid("shields")).unwrap(), 0.0));
     }
 
     // Cycle 7: restore is clamped to max HP
     #[test]
     fn restore_is_clamped_to_max() {
         let mut hull = four_console_hull();
-        hull.restore(Console::Helm, 50.0); // already at 25, restore 50 → capped at 25
-        assert!(near(hull.current_for(Console::Helm).unwrap(), 25.0));
+        hull.restore(&sid("helm"), 50.0); // already at 25, restore 50 → capped at 25
+        assert!(near(hull.current_for(&sid("helm")).unwrap(), 25.0));
         assert!(near(hull.total_current(), 100.0));
     }
 
@@ -806,24 +918,24 @@ mod tests {
     #[test]
     fn default_ship_config_four_consoles_at_25hp() {
         let hull = four_console_hull();
-        assert!(near(hull.current_for(Console::Helm).unwrap(), 25.0));
-        assert!(near(hull.current_for(Console::Tactical).unwrap(), 25.0));
-        assert!(near(hull.current_for(Console::Power).unwrap(), 25.0));
-        assert!(near(hull.current_for(Console::Shields).unwrap(), 25.0));
+        assert!(near(hull.current_for(&sid("helm")).unwrap(), 25.0));
+        assert!(near(hull.current_for(&sid("tactical")).unwrap(), 25.0));
+        assert!(near(hull.current_for(&sid("power")).unwrap(), 25.0));
+        assert!(near(hull.current_for(&sid("shields")).unwrap(), 25.0));
     }
 
-    // Cycle 9: restore on unknown console is a no-op
+    // Cycle 9: weighted selection
     #[test]
     fn weighted_selection_favours_higher_hp_console() {
         // Tactical has 99× more HP than Helm, so it should absorb ~99% of hits.
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 1.0), (Console::Tactical, 99.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 1.0), (sid("tactical"), 99.0)]);
         let mut rng = rand::rng();
         let mut tactical_hits = 0u32;
         let trials = 10_000;
         for _ in 0..trials {
-            let before_tactical = hull.current_for(Console::Tactical).unwrap();
+            let before_tactical = hull.current_for(&sid("tactical")).unwrap();
             hull.apply_damage(0.001, &mut rng); // tiny damage to record which was chosen
-            let after_tactical = hull.current_for(Console::Tactical).unwrap();
+            let after_tactical = hull.current_for(&sid("tactical")).unwrap();
             if after_tactical < before_tactical {
                 tactical_hits += 1;
             }
@@ -841,7 +953,7 @@ mod tests {
     fn restore_on_unknown_console_is_noop() {
         let mut hull = four_console_hull();
         let before = hull.total_current();
-        hull.restore(Console::Navigation, 10.0); // not in the map
+        hull.restore(&sid("navigation"), 10.0); // not in the map
         assert!(near(hull.total_current(), before));
     }
 
@@ -849,37 +961,37 @@ mod tests {
 
     #[test]
     fn tier_is_operational_at_full_hp() {
-        let hull = ConsoleHull::from_config(&[(Console::Helm, 25.0)]);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+        let hull = SystemHull::from_config(&[(sid("helm"), 25.0)]);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Operational);
     }
 
     #[test]
     fn tier_is_damaged_below_damaged_threshold() {
         // Default damaged_threshold = 0.75. 74% of 100 → Damaged.
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
         let mut rng = rand::rng();
         // Directly set HP to 74 by restoring after wiping.
         hull.apply_damage(100.0, &mut rng); // wipe to 0
-        hull.restore(Console::Helm, 74.0); // 74/100 = 0.74 < 0.75 → Damaged
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+        hull.restore(&sid("helm"), 74.0); // 74/100 = 0.74 < 0.75 → Damaged
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Damaged);
     }
 
     #[test]
     fn tier_is_disabled_below_disabled_threshold() {
         // Default disabled_threshold = 0.25. 24% of 100 → Disabled.
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
         let mut rng = rand::rng();
         hull.apply_damage(100.0, &mut rng); // wipe to 0
-        hull.restore(Console::Helm, 24.0); // 24/100 = 0.24 < 0.25 → Disabled
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Disabled);
+        hull.restore(&sid("helm"), 24.0); // 24/100 = 0.24 < 0.25 → Disabled
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Disabled);
     }
 
     #[test]
     fn tier_is_destroyed_at_zero_hp() {
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 25.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 25.0)]);
         let mut rng = rand::rng();
         hull.apply_damage(100.0, &mut rng);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Destroyed);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Destroyed);
     }
 
     #[test]
@@ -890,60 +1002,60 @@ mod tests {
             disabled_threshold_pct: 0.10,
             debuff_magnitude: 0.15,
         };
-        let mut hull = ConsoleHull::from_config_with_tiers(&[(Console::Helm, 100.0, cfg)]);
+        let mut hull = SystemHull::from_config_with_tiers(&[(sid("helm"), 100.0, cfg)]);
         let mut rng = rand::rng();
 
         // 60% → still Operational (above 50% threshold).
         hull.apply_damage(100.0, &mut rng);
-        hull.restore(Console::Helm, 60.0);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+        hull.restore(&sid("helm"), 60.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Operational);
 
         // 40% → Damaged (below 50%, above 10%).
         hull.apply_damage(100.0, &mut rng);
-        hull.restore(Console::Helm, 40.0);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+        hull.restore(&sid("helm"), 40.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Damaged);
 
         // 9% → Disabled (below 10%).
         hull.apply_damage(100.0, &mut rng);
-        hull.restore(Console::Helm, 9.0);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Disabled);
+        hull.restore(&sid("helm"), 9.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Disabled);
     }
 
     #[test]
     fn tier_transitions_correctly_with_damage() {
         // Track the tier as the console takes progressive damage.
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
         let mut rng = rand::rng();
 
         // Full HP → Operational.
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Operational);
 
         // 80% → still Operational (default damaged_threshold = 0.75).
         hull.apply_damage(100.0, &mut rng);
-        hull.restore(Console::Helm, 80.0);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+        hull.restore(&sid("helm"), 80.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Operational);
 
         // 50% → Damaged.
         hull.apply_damage(100.0, &mut rng);
-        hull.restore(Console::Helm, 50.0);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+        hull.restore(&sid("helm"), 50.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Damaged);
 
         // 10% → Disabled (below 0.25).
         hull.apply_damage(100.0, &mut rng);
-        hull.restore(Console::Helm, 10.0);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Disabled);
+        hull.restore(&sid("helm"), 10.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Disabled);
 
         // 0% → Destroyed.
         hull.apply_damage(100.0, &mut rng);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Destroyed);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Destroyed);
 
         // Repaired back to 50% → Damaged again (tier latches only at 0).
-        hull.restore(Console::Helm, 50.0);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
+        hull.restore(&sid("helm"), 50.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Damaged);
 
         // Fully repaired → Operational.
-        hull.restore(Console::Helm, 100.0);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Operational);
+        hull.restore(&sid("helm"), 100.0);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Operational);
     }
 
     // ── debuff_magnitude_for tests ────────────────────────────────────────────
@@ -951,9 +1063,9 @@ mod tests {
     #[test]
     fn debuff_magnitude_for_operational_console_returns_zero() {
         // Full HP → Operational → no debuff.
-        let hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
         assert!(
-            (hull.debuff_magnitude_for(Console::Helm) - 0.0).abs() < 1e-6,
+            (hull.debuff_magnitude_for(&sid("helm")) - 0.0).abs() < 1e-6,
             "Operational console should have 0.0 debuff magnitude"
         );
     }
@@ -961,12 +1073,12 @@ mod tests {
     #[test]
     fn debuff_magnitude_for_damaged_console_returns_config_value() {
         // 50% HP → Damaged tier → returns tier_config.debuff_magnitude (default 0.15).
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
         let mut rng = rand::rng();
         hull.apply_damage(100.0, &mut rng);
-        hull.restore(Console::Helm, 50.0); // 50% < 75% threshold → Damaged
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
-        let debuff = hull.debuff_magnitude_for(Console::Helm);
+        hull.restore(&sid("helm"), 50.0); // 50% < 75% threshold → Damaged
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Damaged);
+        let debuff = hull.debuff_magnitude_for(&sid("helm"));
         assert!(
             (debuff - 0.15).abs() < 1e-6,
             "Damaged console should return default debuff_magnitude 0.15, got {debuff}"
@@ -981,11 +1093,11 @@ mod tests {
             disabled_threshold_pct: 0.25,
             debuff_magnitude: 0.30,
         };
-        let mut hull = ConsoleHull::from_config_with_tiers(&[(Console::Helm, 100.0, cfg)]);
+        let mut hull = SystemHull::from_config_with_tiers(&[(sid("helm"), 100.0, cfg)]);
         let mut rng = rand::rng();
         hull.apply_damage(100.0, &mut rng);
-        hull.restore(Console::Helm, 50.0); // 50% → Damaged
-        let debuff = hull.debuff_magnitude_for(Console::Helm);
+        hull.restore(&sid("helm"), 50.0); // 50% → Damaged
+        let debuff = hull.debuff_magnitude_for(&sid("helm"));
         assert!(
             (debuff - 0.30).abs() < 1e-6,
             "Damaged console should return custom debuff_magnitude 0.30, got {debuff}"
@@ -995,11 +1107,11 @@ mod tests {
     #[test]
     fn debuff_magnitude_for_destroyed_console_returns_zero() {
         // 0 HP → Destroyed → no partial debuff (fully offline).
-        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 100.0)]);
         let mut rng = rand::rng();
         hull.apply_damage(100.0, &mut rng);
-        assert_eq!(hull.tier_for(Console::Helm), DamageTier::Destroyed);
-        let debuff = hull.debuff_magnitude_for(Console::Helm);
+        assert_eq!(hull.tier_for(&sid("helm")), DamageTier::Destroyed);
+        let debuff = hull.debuff_magnitude_for(&sid("helm"));
         assert!(
             (debuff - 0.0).abs() < 1e-6,
             "Destroyed console should have 0.0 debuff magnitude, got {debuff}"

@@ -392,7 +392,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         let asteroid_raw: Vec<AsteroidRaw> = {
             let mut q = world.query::<(
                 &AsteroidUuid,
-                Option<&crate::entity_spawner::EntityConsoleHull>,
+                Option<&crate::entity_spawner::EntitySystemHull>,
                 Option<&crate::ship::shields::ShipShields>,
             )>();
             q.iter(world)
@@ -457,7 +457,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let mut q = world.query_filtered::<(
                 &Transform,
                 &EntityUuid,
-                Option<&crate::entity_spawner::EntityConsoleHull>,
+                Option<&crate::entity_spawner::EntitySystemHull>,
                 Option<&crate::ship::shields::ShipShields>,
             ), Without<Asteroid>>();
             q.iter(world)
@@ -576,17 +576,20 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         // ── Emit ConsoleHullUpdate only when hull HP changed.
         {
             let hull_current: Vec<crate::messages::ConsoleHullStatus> = world
-                .query_filtered::<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>()
+                .query_filtered::<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>()
                 .single(world)
                 .map(|h| {
-                    h.0.entries()
-                        .iter()
-                        .map(|(c, cur, max)| crate::messages::ConsoleHullStatus {
-                            console: c.clone(),
-                            current: *cur,
-                            max_hp: *max,
-                            tier: h.0.tier_for(c.clone()),
-                            debuff_magnitude: h.0.debuff_magnitude_for(c.clone()),
+                    h.0.iter()
+                        .filter_map(|(sid, entry)| {
+                            crate::messages::Console::from_console_id(sid.0.as_str()).map(|c| {
+                                crate::messages::ConsoleHullStatus {
+                                    console: c,
+                                    current: entry.current,
+                                    max_hp: entry.max,
+                                    tier: h.0.tier_for(sid),
+                                    debuff_magnitude: h.0.debuff_magnitude_for(sid),
+                                }
+                            })
                         })
                         .collect::<Vec<_>>()
                 })
@@ -678,7 +681,7 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
 // -- Systems -------------------------------------------------------------------
 
 fn publish_viewscreen_blackboard(
-    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>,
+    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
     mut ship_blackboards_q: Query<
@@ -807,7 +810,7 @@ fn handle_collisions(
             Entity,
             &mut ShipPhysicsComponent,
             &mut CollisionCooldown,
-            &mut crate::entity_spawner::EntityConsoleHull,
+            &mut crate::entity_spawner::EntitySystemHull,
             Option<&mut ShipShields>,
             Option<&ShipModifiers>,
             Option<&EntityUuid>,
@@ -833,7 +836,7 @@ fn handle_collisions(
     let Ok(ctx) = context.single() else { return };
 
     // Iterate every ship (player + NPCs) uniformly. Per-entity CollisionCooldown,
-    // ShipModifiers, ShipShields, EntityConsoleHull, ShipImpulse. Player-only side
+    // ShipModifiers, ShipShields, EntitySystemHull, ShipImpulse. Player-only side
     // effects (damage messages, GameOver, debug log) are gated on `is_local`.
     for (
         ship_entity,
@@ -1484,7 +1487,7 @@ fn reconcile_runtime_entities(
             Option<&EntityTagsSection>,
             Option<&RadarAppearanceSection>,
             Option<&AsteroidFieldSection>,
-            Option<&crate::entity_spawner::EntityConsoleHull>,
+            Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&crate::entity_spawner::EntityTarget>,
             Option<&crate::ship::shields::ShipShields>,
         ),
@@ -1989,7 +1992,7 @@ fn spawn_game_start_entities(
                 .insert(WeaponFiredThisTick::default())
                 .insert(ShipAttackedThisTick::default())
                 .insert(crate::weapons_plugin::LastShipAttacker::default());
-            // The player ship's hull lives on its `EntityConsoleHull`
+            // The player ship's hull lives on its `EntitySystemHull`
             // component (PRD #581). All damage/repair paths write there
             // directly; the old `ShipHullIntegrity` resource was retired
             // in PRD #597 PR 10.
@@ -2189,26 +2192,58 @@ fn spawn_game_start_entities(
 
             // Power multipliers
             let defaults = [-0.5, 0.0, 0.25, 0.5];
-            let mut multipliers: std::collections::HashMap<Console, [f32; 4]> =
-                std::collections::HashMap::from([
-                    (Console::Helm, defaults),
-                    (Console::Tactical, defaults),
-                    (Console::Sensors, defaults),
-                ]);
+            let mut multipliers: std::collections::HashMap<
+                crate::messages::PowerGroupId,
+                [f32; 4],
+            > = std::collections::HashMap::from([
+                (
+                    crate::messages::PowerGroupId(
+                        crate::power_system::HELM_POWER_GROUP.into(),
+                    ),
+                    defaults,
+                ),
+                (
+                    crate::messages::PowerGroupId(
+                        crate::power_system::WEAPONS_POWER_GROUP.into(),
+                    ),
+                    defaults,
+                ),
+                (
+                    crate::messages::PowerGroupId(
+                        crate::power_system::SENSORS_POWER_GROUP.into(),
+                    ),
+                    defaults,
+                ),
+            ]);
             if let Some(hc) = &config.helm_console {
                 if let Some(pm) = hc.power_multipliers {
-                    multipliers.insert(Console::Helm, pm);
+                    multipliers.insert(
+                        crate::messages::PowerGroupId(
+                            crate::power_system::HELM_POWER_GROUP.into(),
+                        ),
+                        pm,
+                    );
                 }
             }
             if let Some(wc) = &config.weapons_console {
                 if let Some(pm) = wc.power_multipliers {
-                    multipliers.insert(Console::Tactical, pm);
+                    multipliers.insert(
+                        crate::messages::PowerGroupId(
+                            crate::power_system::WEAPONS_POWER_GROUP.into(),
+                        ),
+                        pm,
+                    );
                 }
             }
             if let Some(sc) = &config.sensors_console {
                 if let Some(pm) = sc.power_multipliers {
                     // sensors_console power drives the Sensors radar range multiplier
-                    multipliers.insert(Console::Sensors, pm);
+                    multipliers.insert(
+                        crate::messages::PowerGroupId(
+                            crate::power_system::SENSORS_POWER_GROUP.into(),
+                        ),
+                        pm,
+                    );
                 }
             }
             commands.insert_resource(PowerMultiplierResource {
@@ -2868,12 +2903,12 @@ mod tests {
                 crate::ship_state::ShipViewMode::default(),
                 crate::ship_state::ShipPhaserFrequency::default(),
                 bevy::prelude::Transform::default(),
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                     &[
-                        (Console::Helm, 25.0),
-                        (Console::Tactical, 25.0),
-                        (Console::Power, 25.0),
-                        (Console::Shields, 25.0),
+                        (SystemId("helm".into()), 25.0),
+                        (SystemId("tactical".into()), 25.0),
+                        (SystemId("power".into()), 25.0),
+                        (SystemId("shields".into()), 25.0),
                     ],
                 )),
             ))
@@ -2981,7 +3016,7 @@ mod tests {
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
-            .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+            .get_mut::<crate::entity_spawner::EntitySystemHull>()
             .unwrap()
             .0
             .apply_damage(amount, &mut rng);
@@ -3718,7 +3753,7 @@ mod tests {
         // Consume the initial ConsoleHullUpdate so LastBroadcastHull is seeded.
         let _ = tick(&mut app);
 
-        // Directly apply damage to the EntityConsoleHull component (simulates collision at ~half speed).
+        // Directly apply damage to the EntitySystemHull component (simulates collision at ~half speed).
         apply_hull_damage(&mut app, 10.0);
 
         let out = tick(&mut app);
@@ -3751,8 +3786,8 @@ mod tests {
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("target-uuid".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
                 30.0,
             )])),
             Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
@@ -3779,8 +3814,8 @@ mod tests {
             .spawn((
                 Asteroid,
                 AsteroidUuid("target-uuid".into()),
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                    &[(crate::messages::Console::CaptainChair, 30.0)],
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    &[(crate::messages::SystemId("captain".into()), 30.0)],
                 )),
                 Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
             ))
@@ -4219,7 +4254,7 @@ mod tests {
         // The entity should be despawned.
         assert!(
             app.world()
-                .get::<crate::entity_spawner::EntityConsoleHull>(asteroid_entity)
+                .get::<crate::entity_spawner::EntitySystemHull>(asteroid_entity)
                 .is_none(),
             "asteroid entity should be despawned"
         );
@@ -4314,7 +4349,7 @@ mod tests {
 
         let hp = app
             .world()
-            .get::<crate::entity_spawner::EntityConsoleHull>(asteroid_entity)
+            .get::<crate::entity_spawner::EntitySystemHull>(asteroid_entity)
             .map(|h| h.0.total_current());
         assert!(
             hp.is_some() && hp.unwrap() < 30.0,
@@ -4342,8 +4377,8 @@ mod tests {
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("t1".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
                 30.0,
             )])),
             Transform::from_xyz(0.0, 0.0, -20.0),
@@ -4351,8 +4386,8 @@ mod tests {
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("t2".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
                 30.0,
             )])),
             Transform::from_xyz(0.0, 0.0, -15.0),
@@ -5151,7 +5186,7 @@ mod tests {
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
-        let mut hull = crate::damage::ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+        let mut hull = crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         let damage: f32 = 10.0;
         let (pierced, absorbed) = split_damage_for_pierce(damage, 0.0);
@@ -5183,7 +5218,7 @@ mod tests {
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
-        let mut hull = crate::damage::ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+        let mut hull = crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         let damage: f32 = 10.0;
         let (pierced, absorbed) = split_damage_for_pierce(damage, 1.0);
@@ -5215,7 +5250,7 @@ mod tests {
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
-        let mut hull = crate::damage::ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+        let mut hull = crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         // pierce = 0.3 on 10 damage → 3 to hull, 7 to fore shield.
         let damage: f32 = 10.0;
@@ -5290,7 +5325,7 @@ mod tests {
 
     /// PRD #597 PR-8: NPC ships share the collision code path with the player,
     /// so an NPC ship overlapping an asteroid must take hull damage on its own
-    /// `EntityConsoleHull` component just like the player ship does.
+    /// `EntitySystemHull` component just like the player ship does.
     ///
     /// This spins up a minimal Rapier world (no plugin scaffolding) with just
     /// `handle_collisions`, spawns an NPC ship (`Ship` marker, no `LocalShip`)
@@ -5299,9 +5334,9 @@ mod tests {
     /// effects (`DamageTaken`, `ShipDestroyed`, `GameOver`) may fire.
     #[test]
     fn npc_ship_takes_hull_damage_from_asteroid_collision() {
-        use crate::damage::ConsoleHull;
+        use crate::damage::SystemHull;
         use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntityConsoleHull, EntityUuid};
+        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
         use bevy_rapier3d::prelude::*;
 
@@ -5357,8 +5392,8 @@ mod tests {
                     roll: 0.0,
                 },
                 CollisionCooldown::default(),
-                EntityConsoleHull(ConsoleHull::from_config(&[(
-                    Console::CaptainChair,
+                EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
                     npc_hull_max,
                 )])),
                 ShipModifiers::new(),
@@ -5399,8 +5434,8 @@ mod tests {
 
         let hull = app
             .world()
-            .get::<EntityConsoleHull>(npc)
-            .expect("NPC must retain EntityConsoleHull");
+            .get::<EntitySystemHull>(npc)
+            .expect("NPC must retain EntitySystemHull");
         assert!(
             hull.0.total_current() < npc_hull_max,
             "NPC hull must decrease from asteroid collision (current={}, max={})",
@@ -5512,7 +5547,7 @@ mod tests {
         start_game_with_power(&mut app);
 
         // Reset power to known state.
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 1;
+        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), 1);
 
         // Captain (not Power holder) tries to set Helm to 2.
         push(
@@ -5529,7 +5564,7 @@ mod tests {
         let _ = tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.helm,
+            app.world().resource::<ShipPowerSystem>().0.level_for(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into())),
             1,
             "non-Power sender should not be able to increase power"
         );
@@ -5555,7 +5590,7 @@ mod tests {
         let _ = tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.sensors,
+            app.world().resource::<ShipPowerSystem>().0.level_for(&crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into())),
             2,
             "non-Power sender should not be able to decrease power"
         );
@@ -5669,7 +5704,7 @@ mod tests {
         start_game_with_power(&mut app);
 
         // Manually set Helm to 4 (max).
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
+        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), 4);
 
         push(
             &mut app,
@@ -5709,7 +5744,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Helm, [-0.5, 0.0, 1.0, 2.0]);
+            .insert(crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), [-0.5, 0.0, 1.0, 2.0]);
 
         // Set Helm to 3.
         push(
@@ -5745,7 +5780,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Tactical, [-0.5, 0.0, 0.25, 0.5]);
+            .insert(crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()), [-0.5, 0.0, 0.25, 0.5]);
 
         // Set Weapons to 1.
         push(
@@ -5783,24 +5818,24 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Helm, defaults);
+            .insert(crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), defaults);
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Tactical, defaults);
+            .insert(crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()), defaults);
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(Console::Sensors, defaults);
+            .insert(crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()), defaults);
 
         // Set state that will trigger exhaustion on the next tick:
         // total=8 (negative rate), battery already at 0 ? tick keeps it at 0
         // and forces all consoles to 1 + lock.
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            ps.0.helm = 4;
-            ps.0.weapons = 2;
-            ps.0.sensors = 2;
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), 4);
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()), 2);
+            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()), 2);
             ps.0.battery_charge = 0.0;
             ps.0.locked = false;
         }
@@ -5835,7 +5870,7 @@ mod tests {
         start_game_with_power(&mut app);
 
         // Set total to 8: helm=4, weapons=2, sensors=2.
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
+        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), 4);
 
         // Try to set sensors to 3 — total would be 9 (over cap), should be blocked at 2.
         push(
@@ -5975,8 +6010,8 @@ mod tests {
             crate::entity_spawner::EntityUuid("asteroid-1".into()),
             Asteroid,
             AsteroidUuid("asteroid-1".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
                 30.0,
             )])),
             Transform::default(),

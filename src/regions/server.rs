@@ -166,7 +166,7 @@ fn apply_damage_zone_damage(
     mut ship_query: Query<
         (
             Entity,
-            &mut crate::entity_spawner::EntityConsoleHull,
+            &mut crate::entity_spawner::EntitySystemHull,
             Option<&mut crate::simulation::ShipShields>,
             Option<&EntityUuid>,
             Has<LocalShip>,
@@ -385,7 +385,7 @@ pub(crate) fn handle_slow_zone_speed_clamp(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::ConsoleHull;
+    use crate::damage::SystemHull;
     use crate::entity_config::EntityConfig;
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_CHARGE_DURATION};
@@ -619,7 +619,7 @@ mod tests {
     fn ship_hull_hp(app: &mut App) -> f32 {
         let hull = app
             .world_mut()
-            .query_filtered::<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>()
+            .query_filtered::<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>()
             .single(app.world())
             .unwrap()
             .0
@@ -641,10 +641,10 @@ mod tests {
         app.init_resource::<crate::lobby::WorldResource>();
         use crate::shield::{ShieldConfig, ShieldSystem};
         let hull_config = &[
-            (crate::messages::Console::Helm, 25.0),
-            (crate::messages::Console::Tactical, 25.0),
-            (crate::messages::Console::Power, 25.0),
-            (crate::messages::Console::Shields, 25.0),
+            (crate::messages::SystemId("helm".into()), 25.0),
+            (crate::messages::SystemId("tactical".into()), 25.0),
+            (crate::messages::SystemId("power".into()), 25.0),
+            (crate::messages::SystemId("shields".into()), 25.0),
         ];
         app.insert_resource(ShipModifiers::new());
         app.world_mut().spawn((
@@ -653,7 +653,7 @@ mod tests {
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
             crate::simulation::ShipShields(ShieldSystem::new(&ShieldConfig::default())),
-            crate::entity_spawner::EntityConsoleHull(ConsoleHull::from_config(hull_config)),
+            crate::entity_spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
         ));
         app
     }
@@ -941,8 +941,8 @@ mod tests {
     /// should decrease.
     #[test]
     fn npc_ship_in_damage_zone_takes_hull_damage() {
-        use crate::damage::ConsoleHull;
-        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+        use crate::damage::SystemHull;
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
         let mut app = damage_test_app();
 
@@ -951,8 +951,8 @@ mod tests {
         let player_hull_before = ship_hull_hp(&mut app);
 
         // Spawn an NPC ship at the origin with the Ship marker but no
-        // LocalShip. Its EntityConsoleHull starts at 100 HP.
-        let npc_hull_config = &[(crate::messages::Console::CaptainChair, 100.0)];
+        // LocalShip. Its EntitySystemHull starts at 100 HP.
+        let npc_hull_config = &[(crate::messages::SystemId("captain".into()), 100.0)];
         let npc = app
             .world_mut()
             .spawn((
@@ -964,7 +964,7 @@ mod tests {
                     z: 0.0,
                     ..Default::default()
                 },
-                EntityConsoleHull(ConsoleHull::from_config(npc_hull_config)),
+                EntitySystemHull(SystemHull::from_config(npc_hull_config)),
                 ShipModifiers::new(),
             ))
             .id();
@@ -976,8 +976,8 @@ mod tests {
         // NPC hull must decrease.
         let npc_hull_after = app
             .world()
-            .get::<EntityConsoleHull>(npc)
-            .expect("NPC must retain EntityConsoleHull")
+            .get::<EntitySystemHull>(npc)
+            .expect("NPC must retain EntitySystemHull")
             .0
             .total_current();
         assert!(

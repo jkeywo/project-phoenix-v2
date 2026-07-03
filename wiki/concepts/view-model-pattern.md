@@ -4,9 +4,12 @@ type: concept
 tags: [view-model, renderer, pure-derived, refactor]
 sources: [CONTEXT.md, src/client/lobby_state.rs, src/server/renderer.rs]
 updated: 2026-05-08
+status: current
 ---
 
 # View-Model Pattern
+
+> **Update (2026-07-03):** the pattern survives but the client examples below describe deleted Rust code. Current view-models: server `GameState` (in `GameStateCache`) for the renderer; client-side pure JS — `gui/lobby-state.js`, `gui/sim-state.js`, and the `build*(state)` functions in `gui/console-state.js` (see [Client Architecture](./client-architecture.md)).
 
 Renderers read **pure derived snapshots**, not raw session/simulation state. This was one of the architectural deepenings (commit `f3ef92c`).
 

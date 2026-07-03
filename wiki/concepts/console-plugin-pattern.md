@@ -4,9 +4,12 @@ type: concept
 tags: [bevy, plugin, console, modularity, planned]
 sources: [src/client_app.rs, src/comms_plugin.rs, src/phone_border/, CONTEXT.md]
 updated: 2026-05-14
+status: superseded
 ---
 
 # Console Plugin Pattern
+
+> **Update (2026-07-03):** the client half of this pattern is gone — the Bevy/WASM client was deleted (PRD #438, #463) and console UIs are now HTML iframes under `gui/` (see [Client Architecture](./client-architecture.md)). The **server** half survives: one Bevy plugin per console at `src/console/<name>/server.rs`, registered in `server_app.rs`.
 
 The intended pattern is that each client-side console is a **single Bevy plugin** owning everything for that console:
 

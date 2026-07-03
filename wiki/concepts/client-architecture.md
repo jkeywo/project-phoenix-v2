@@ -1,95 +1,55 @@
 ---
 title: Client Architecture
 type: concept
-tags: [client, plugin, wasm, bevy, panel, composition]
-sources: [client.html, gui/sim-state.js, gui/console-state.js, gui/action-map.js]
-updated: 2026-06-13
+tags: [client, javascript, iframe, console, state, vitest]
+sources: [client.html, gui/console-registry.js, gui/sim-state.js, gui/console-state.js, gui/action-map.js, gui/iframe-bridge.js, tests/client/]
+updated: 2026-07-03
 ---
 
 ## Summary
 
-The client is a full Bevy/WASM app built with the `client` Cargo feature, loaded by `client.html`. It renders the phone console UI — lobby station picker, then the in-game panel for whichever console(s) the local player holds. The plugin set is assembled in `src/client/app.rs::add_client_plugins` and registered by `wasm_client_init` in `src/client/bridge.rs`.
+The client (`client.html`) is **pure HTML/CSS/JS — no WASM, no Bevy, no `client` Cargo feature** (the Bevy client was deleted in PRD #438 / issues #442, #463). It connects to the host over PeerJS, folds `ServerMessage`s into a plain JS state object, and renders each console as a standalone HTML iframe. All logic lives in pure, Vitest-tested modules under `gui/`; `client.html` itself is thin wiring.
 
-## Panel plugin inventory
+## Data flow
 
-All client-side plugins registered by `add_client_plugins` (see `src/client/app.rs:2018`):
-
-| Plugin | File | What it owns |
-|---|---|---|
-| `ClientAppPlugin` | `src/client/app.rs` | Lobby UI, sensors/shields/navigation panels, tab bar, complexity UI, hideable elements |
-| `ShipViewPlugin` | `src/ship_view.rs` | `ShipView` resource — ship pose, red-alert, power levels, impulse |
-| `PhoneBorderPlugin` | `src/client/phone_border/framing.rs` | Diegetic phone bezel frame around all panels. *Being replaced by an HTML/CSS bezel in `client.html` (issues #439–#442); both implementations coexist transitionally.* |
-| `CaptainPanelPlugin` | `src/client/phone_border/captain.rs` | View selector + Red Alert toggle |
-| `HelmPanelPlugin` | `src/helm_panel.rs` | Joystick, helm radar gizmo, "On Screen" button |
-| `WeaponsPanelPlugin` | `src/weapons_panel.rs` | Phaser / torpedo UI, weapons radar gizmo |
-| `RepairPanelPlugin` | `src/repair_panel.rs` | Shape-matching repair console, team status |
-| `PowerPanelPlugin` | `src/power_panel.rs` | 6+2 power allocation console |
-| `SciencePanelPlugin` | `src/science_panel.rs` | Long-range radar, system chart, cancel-impulse |
-| `CommsPanelPlugin` | `src/comms_panel.rs` | Comms console (placeholder) |
-
-`ClientRendererPlugin` (intentionally empty stub retained for backwards compat) is registered separately in the bridge after `add_client_plugins`.
-
-## Composition entry point
-
-```rust
-// src/client/app.rs
-pub fn add_client_plugins(app: &mut App) {
-    app.add_plugins(ClientAppPlugin)
-        .add_plugins(ShipViewPlugin)
-        .add_plugins(PhoneBorderPlugin)
-        .add_plugins(HelmPanelPlugin)
-        .add_plugins(WeaponsPanelPlugin)
-        .add_plugins(RepairPanelPlugin)
-        .add_plugins(PowerPanelPlugin)
-        .add_plugins(CaptainPanelPlugin)
-        .add_plugins(SciencePanelPlugin)
-        .add_plugins(CommsPanelPlugin);
-}
+```
+PeerJS message (JSON)
+  → client.html handleMessage()
+  → gui/sim-state.js apply(msg)          # folds ServerMessage into sim-state object
+      gui/lobby-state.js                  # lobby-phase state
+      gui/comms-state.js                  # comms inbox/contacts state
+  → gui/console-state.js build*(state)    # pure per-console view-model → JSON string
+  → gui/iframe-bridge.js push()           # __updateConsole(name, json) into the iframe
 ```
 
-The bridge (`src/client/bridge.rs::wasm_client_init`) adds `DefaultPlugins`, calls `add_client_plugins`, then adds `ClientRendererPlugin` and four bridge systems (`forward_local_token`, `forward_complexity_presets`, `forward_inbound_messages`, `flush_outbound_messages`).
+Outbound: each console iframe posts `console_action` messages; `gui/action-map.js` is the table-driven dispatcher mapping `action.action` values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
 
-## Shared client state resources
+## Module inventory (`gui/`)
 
-| Resource | File | Contents |
-|---|---|---|
-| `LobbyState` | `src/lobby/client_panel.rs` | Station assignments, player list, complexity map |
-| `ClientSimState` | `src/client_sim.rs` | Console-specific sim state: repair teams, weapons, shields, world entities, modifiers, power, torpedo state |
-| `ShipView` | `src/ship_view.rs` | Ship-level broadcast fields extracted from `ClientSimState` |
-| `LocalPlayerToken` | `src/lobby/client_panel.rs` | Session token for the local player |
-| `ActiveConsole` | `src/lobby/client_panel.rs` | Which console tab is currently visible |
-| `ComplexityStore` | `src/client_complexity.rs` | Per-console complexity preset choices |
-| `HideableElementRegistry` | `src/client/elements.rs` | Registry of UI element names that complexity presets can hide |
+| Module | Owns |
+|---|---|
+| `console-registry.js` | **Single source of truth** for HTML-panel consoles: Console enum variant → section id + iframe id |
+| `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders |
+| `lobby-state.js` | Lobby view-model (stations, players, ready states) |
+| `comms-state.js` | Comms inbox/contact view-model |
+| `console-state.js` | Pure `build*(state)` view-model builders, one per console iframe |
+| `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
+| `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
+| `content-switcher.js` + `tab-bar.js` | Console tab bar + section visibility |
+| `active-console.js` | Pure next-active-console selection logic |
+| `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |
+| `phone-bezel.js` | Diegetic phone bezel chrome |
+| `radar-math.js` | Client-side radar blip projection |
+| `console-ui.js` | Shared iframe UI primitives (`reconcileRows`, `setBtn`, `setBar`, `setAutoState`, `setText`, keyed rebuild) |
+| `console-core.js`, `device-orientation.js`, `help-panel.js` | Iframe boot glue, orientation handling, help overlay |
 
-## Notes on client_sim.rs
+Each console UI is one HTML file: `gui/captain-console.html`, `gui/helm-console.html`, `gui/comms-console.html`, `gui/navigation-console.html`, etc., loaded as an iframe and listed in `console-registry.js`. See [Console UI Authoring Library](./console-ui-library.md) for the authoring pattern.
 
-`src/client_sim.rs` retains `ClientSimState` and all its console-specific fields. These have not yet been migrated to per-panel resources. The client-split series (#228) extracted ship-level fields into `ShipView` (issue #234) but the remaining console-specific state (repair, weapons, shields, world entities, modifiers, power, torpedoes) still lives in `ClientSimState`. Future splits could extract each panel's state into its own resource alongside its plugin.
+## Build & test
 
-## HTML waypoint state
+- `node scripts/build-client.mjs` — file copy → `dist/client/` (no compile step).
+- `npx vitest run` — `tests/client/*.test.js` cover every pure module above.
 
-The pure-JS client mirrors the server-owned `SimSnapshot.navigation_waypoint` into `gui/sim-state.js::ClientSimState.navigationWaypoint`, then `client.html` copies it into the inline iframe state. `gui/console-state.js` includes it in Navigation state and appends a special waypoint blip to Helm state. Navigation sends `set_navigation_waypoint` / `clear_navigation_waypoint` actions through `gui/action-map.js`, which map to `ClientMessage::SetNavigationWaypoint` and `ClientMessage::ClearNavigationWaypoint`.
+## History
 
-## Client-split history
-
-The client-split series (issue #228, closed with issue #263) refactored the client from two large god-modules into per-console plugins:
-
-- **#234** — `ShipView` extracted from `ClientSimState`
-- **#240** — `CaptainPanelPlugin` extracted from `client/app.rs`
-- **#246** — `HelmPanelPlugin` extracted
-- **#251** — `WeaponsPanelPlugin` extracted
-- **#255** — `RepairPanelPlugin` extracted
-- **#259** — `PowerPanelPlugin` extracted
-- **#262** — `SciencePanelPlugin` + `CommsPanelPlugin` extracted
-- **#263** — Thin composition `add_client_plugins` added; bridge updated (this issue)
-
-## Cross-links
-
-- [Ship View](ship-view.md)
-- [Console Plugin Pattern](console-plugin-pattern.md)
-- [Helm Panel](helm-panel.md)
-- [Weapons Panel](weapons-panel.md)
-- [Repair Panel](repair-panel.md)
-- [Power Panel](power-panel.md)
-- [Science Panel](science-panel.md)
-- [Comms Panel](comms-panel.md)
-- [Captain Panel](captain-panel.md)
+The Rust/Bevy client and its panel plugins (`src/client/`, `src/*_panel.rs`, `ShipView`, `PhoneBorderPlugin`) were removed in the #438 slice series (#439 bezel, #440 lobby, #441 tab bar, #442 Bevy cleanup) and #463 (client WASM removal). The wiki pages describing those deleted panels (CaptainPanel, HelmPanel, WeaponsPanel, RepairPanel, PowerPanel, SciencePanel, ShipView) were deleted in the 2026-07-03 docs audit — this page is their replacement.

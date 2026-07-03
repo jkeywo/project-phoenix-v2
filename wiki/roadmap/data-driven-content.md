@@ -4,9 +4,12 @@ type: roadmap
 tags: [roadmap, data, config, scenario, world, asteroid, ship]
 sources: [docs/1.md, docs/2.md, docs/6.md, docs/7.md]
 updated: 2026-05-08
+status: shipped
 ---
 
 # Data-Driven Content
+
+> **Shipped (marked 2026-07-03):** the "Today" section below is long obsolete — all gameplay data now lives in TOML (`assets/entities/`, `assets/worlds/`, `assets/factions/`), enforced by AGENTS.md rule 11 ("No hardcoded gameplay values"). Kept as history.
 
 Move game content (entities, maps, scenarios) out of Rust source and into data files. Ship the engine, ship the content separately.
 

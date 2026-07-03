@@ -16,15 +16,16 @@ People, things, and game objects.
 
 - **[Player](./entities/player.md)** — A connected human, identified by session token.
 - **[Session](./entities/session.md)** — Server-side player record, survives reconnects.
-- **[Console](./entities/console.md)** — A role on the bridge (one seat each).
-- **[Captain Console](./entities/captain-console.md)** — Red Alert + View selector. Game-start authority.
+- **[Console](./entities/console.md)** — An operator surface on the bridge; access derives from the player's station.
+- **[Station](./entities/station.md)** — The fixed bridge seat a player claims in the lobby (`StationId`, ratings, Backfill).
+- **[System](./entities/system.md)** — The fine-grained addressable capability (`SystemId`) beneath a console.
+- **[Captain Console](./entities/captain-console.md)** — Red Alert + View selector.
 - **[Helm Console](./entities/helm-console.md)** — Thrust + steering. The only console that moves the ship. Radar overlay.
 - **[Navigation Console](./entities/navigation-console.md)** — System chart at long range; sets the shared navigation waypoint (free or entity-anchored).
-- **[Console](./entities/console.md)** — All four consoles (CaptainChair, Helm, Tactical, Engineering) and how to add more.
 - **[Ship](./entities/ship.md)** — The player-controlled vessel. Capsule collider, XZ plane, Y-up.
 - **[Asteroid](./entities/asteroid.md)** — Static obstacle in the field. Sphere collider.
-- **[World Data](./entities/world-data.md)** — Fixed asteroid layout for a session. Deterministic.
-- **[Bridge Crew Stations (planned)](./entities/bridge-crew-stations-planned.md)** — Weapons, Engineering, Science, Comms.
+- **[World Data](./entities/world-data.md)** — The TOML-defined layout of a session: anchors, entities, triggers, comms templates.
+- **[Bridge Crew Stations (planned)](./entities/bridge-crew-stations-planned.md)** — *Historical.* All listed consoles have shipped; superseded by the Station/System model.
 - **[Editor](./entities/editor.md)** — In-browser TOML authoring tool (Scenario / Entity / Definitions modes) over the File System Access API. Vitest-tested deep modules. Not part of the game runtime.
 
 ## Concepts
@@ -43,8 +44,10 @@ Architecture, patterns, processes.
 - **[Radar Projection](./concepts/radar-projection.md)** — Shared pure iterator, server + helm reuse.
 - **[View Modes](./concepts/view-modes.md)** — Camera (Fore/Aft/Port/Starboard) vs Radar.
 - **[UiMaterial Shader Pattern](./concepts/ui-materials.md)** — Custom WGSL fragment shaders behind UI nodes (Red Alert vignette as worked example).
-- **[View-Model Pattern](./concepts/view-model-pattern.md)** — Pure derived snapshots for renderers.
-- **[Console Plugin Pattern](./concepts/console-plugin-pattern.md)** — One Bevy plugin per console.
+- **[View-Model Pattern](./concepts/view-model-pattern.md)** — Pure derived snapshots for renderers (server `GameState`; client pure-JS builders).
+- **[Console Plugin Pattern](./concepts/console-plugin-pattern.md)** — One Bevy plugin per console *(server side only — client half superseded by HTML iframes)*.
+- **[Stations](./concepts/stations.md)** — The station model: claiming, ratings, AI backfill, spectators.
+- **[ServerApp](./concepts/server-app.md)** — `server_app.rs` composition root: plugin registration + SimSet chain.
 - **[WorldPlugin](./concepts/world-plugin.md)** — Owns world bootstrap and runtime content lifecycle. Landing zone for the World/Scenario merger (#218).
 - **[CaptainPlugin](./concepts/captain-plugin.md)** — First extracted console plugin: red alert toggle + view selector. Validates the simulation-split pattern (#227).
 - **[ShipPlugin](./concepts/ship-plugin.md)** — Second simulation split: helm physics, impulse drive. Extracted from `simulation.rs` (#239).
@@ -52,17 +55,10 @@ Architecture, patterns, processes.
 - **[RepairPlugin](./concepts/repair-plugin.md)** — Fourth simulation split: breakdown queue, three-team dispatch, repair-icon broadcast. Extracted from `simulation.rs` (#250).
 - **[PowerPlugin](./concepts/power-plugin.md)** — Fifth simulation split: 6+2 power allocation, battery exhaustion lock, recharge threshold, `PowerState` broadcaster. Extracted from `simulation.rs` (#254).
 - **[SciencePlugin](./concepts/science-plugin.md)** — Sixth simulation split: `SetScienceTarget` advisory hand-off from Sensors to Tactical. Extracted from `simulation.rs` (#258).
-- **[ShipView](./concepts/ship-view.md)** — Client-side `Resource` holding shared ship state (pose, red alert, view mode, power levels, hull fraction, impulse charge). Updated by `ShipViewPlugin`; read by all console panels instead of `ClientSimState` (#234).
-- **[CaptainPanel](./concepts/captain-panel.md)** — Client-side plugin for the captain console UI: compass dial, direction pad, red alert toggle, panel visibility logic. Lives in `phone_border/captain.rs`; extracted from `client/app.rs` (#240).
-- **[HelmPanel](./concepts/helm-panel.md)** — Client-side plugin for the helm console UI: compass-ring radar, polished thumbstick, 10 Hz resend, On Screen button, gizmo radar overlay. Lives in `src/helm_panel.rs`; extracted from `client/app.rs` and `phone_border/helm.rs` (#246).
-- **[WeaponsPanel](./concepts/weapons-panel.md)** — Client-side plugin for the Tactical console UI: phaser fire/mode, torpedo tube selection + fire, gizmo radar overlay, panel visibility. Lives in `src/weapons_panel.rs`; extracted from `client/app.rs` (#251).
-- **[RepairPanel](./concepts/repair-panel.md)** — Client-side plugin for the Repair console UI: breakdown label, shape-match buttons, three team status rows, repair icon label, panel visibility. Lives in `src/repair_panel.rs`; extracted from `client/app.rs` (#255).
-- **[PowerPanel](./concepts/power-panel.md)** — Client-side plugin for the Power console UI: per-console power allocation rows, battery bar, lock state, overflow controls, panel visibility. Lives in `src/power_panel.rs`; extracted from `client/app.rs` (#259).
-- **[SciencePanel](./concepts/science-panel.md)** — Client-side plugin for the Science (Sensors) console UI: view-mode selector (Radar / System Chart), On Screen button, Cancel Impulse button, `ScienceView` resource, panel visibility. Lives in `src/science_panel.rs` (#262).
 - **[CommsPanel](./concepts/comms-panel.md)** — Comms console inbox/chat model, including thread grouping, contact/channel labels, and multi-speaker dialogue via TOML `speaker`.
 - **[Comms range](./concepts/comms-range.md)** — Per-entity `[comms].range` opt-in; `CommsRange` Component; pure `comms::in_range` helper; `update_comms_range_flags` server system stamps `in_range` / `sender_in_range`; client hides out-of-range contacts and greys response buttons; server enforces Hail/Respond gate.
 - **[Server HTML Lobby UI](./concepts/server-lobby-ui.md)** — HTML lobby overlay in `server.html`; `LobbyStateChanged` → `__updateLobby` push channel. Replaced the deleted Bevy `LobbyScreenRoot` tree (#436). Auto-fit grid + portrait reflow.
-- **[Client Architecture](./concepts/client-architecture.md)** — Full panel plugin inventory, `add_client_plugins` composition entry point, shared client resources, `ClientSimState` audit notes, client-split series history (#263).
+- **[Client Architecture](./concepts/client-architecture.md)** — The pure-JS client: `gui/` module inventory, iframe consoles, state flow, Vitest coverage.
 - **[Broadcaster Seam](./concepts/broadcaster-seam.md)** — `SimBroadcaster` + `LobbyBroadcaster` registration API; Audience, Cadence, producer-registration recipe, full message catalogue with file:line references, `OutboundMessage` write contract, and cross-links to PRDs #117/#118/#120/#153/#154/#180/#187.
 - **[Modifier Coordination](./concepts/modifier-coordination.md)** — Single owner of `ShipModifiers`; complete catalogue of three modifier sources (power, regions, impulse) with translator recipe, read-interface guide, and per-UUID source identity.
 - **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.
@@ -90,11 +86,11 @@ Shipped:
 - **[PRD #117 — Modifier System](./sources/prd-117-modifier-system.md)** — Shipped. Pure `modifiers.rs` cache + `ModifierAdded`/`ModifierRemoved` wire.
 - **[PRD #118 — Repair + Power Consoles](./sources/prd-118-repair-and-power-consoles.md)** — Shipped. `Engineering` → `Repair`; new `Power` console; shape-matching repair with three teams; 6+2 power allocation.
 - **[PRD #120 — Station-Based Lobby](./sources/prd-120-station-based-lobby.md)** — Shipped. Per-station picking, auto-shuffle, spectator FIFO. `SelectStation` / `ReleaseStation` / `StationAssigned` wire.
-- **[PRD #153 — Region Entities, Component-Driven Spawning & Modifier Flags](./sources/prd-153-region-entities-and-entity-pipeline.md)** — Shipped. Single `[[entity]]` pipeline; six region effects; `f32` hull; `FlagKind`; unified `EntitySnapshot`.
+- **[PRD #153 — Region Entities, Component-Driven Spawning & Modifier Flags](./sources/prd-153-region-entities.md)** — Shipped. Single `[[entity]]` pipeline; six region effects; `f32` hull; `FlagKind`; unified `EntitySnapshot`.
 - **[PRD #154 — Console Complexity: UI Hiding + AI Automation](./sources/prd-154-console-complexity.md)** — Shipped. Per-console `Low`/`Full` presets; hide UI + server-side `console_ai` to operate hidden controls.
 - **[PRD #180 — Viewscreen Frame](./sources/prd-180-viewscreen-frame.md)** — Shipped. Bevy UI border, `RedAlertVignetteMaterial`, designation + HEADING / HULL / CONDITION HUD.
 - **[PRD #187 — Phone Console HUD — Diegetic Bezel Frame](./sources/prd-187-phone-console-hud.md)** — Shipped. `phone_border/` plugin: bezel wraps every console; full helm + captain chrome. *Being superseded by PRD #438.*
-- **[PRD #191 — Grid-Based Asteroid Lifecycle](./sources/prd-191-grid-asteroid-lifecycle.md)** — Shipped. `asteroid_window.rs`, player-centred ring buffer, destroyed asteroids respawn on return.
+- **[PRD #191 — Grid-Based Asteroid Lifecycle](./sources/prd-191-grid-based-asteroid-lifecycle.md)** — Shipped. `AsteroidWindow` player-centred ring buffer (`src/asteroids/lifecycle.rs`), destroyed asteroids respawn on return.
 
 Open (planned work):
 
@@ -110,6 +106,7 @@ Open (planned work):
 - **[Issue #493 — Coordination-lag scope](./sources/issue-493-coordination-lag-scope.md)** — Open. Decision slice: channel-3 lag applies to all bus traffic; target control resolves at delivery time.
 - **[PRD #517 — Consistency cleanup for the 9 coarse systems](./sources/prd-517-consistency-cleanup.md)** — Open. Eight slices closing inconsistencies from the coarse-system conversion PRs; Repair + Navigation conversions; hardcoded console list fix; `serde_json` cleanup; `SystemId` naming pin.
 - **[PRD #519 - Lobby migration to Player.station + AI backfill](./sources/prd-519-player-station-ai-backfill.md)** - Open. Retires `Player.consoles`, makes `Player.station` the ownership unit, adds Backfill disconnect + reconnect-yield, removes `StartGame`, and wires Core repair.
+- **[Issue #540 — Config migration docs](./sources/issue-540-config-migration-docs.md)** — Docs slice for the station/system ship-config migration.
 - **[Issue #541 C1 - Add Player.station](./sources/issue-541-c1-player-station-field.md)** - Shipped. Adds `Player.station: Option<StationId>` and session helpers.
 - **[Issue #541 C2 - SelectStation writes station](./sources/issue-541-c2-selectstation-writes-station.md)** - Shipped. Station selection writes `Player.station` and derives consoles from `ShipConfig`.
 - **[Issue #544 C3 - AI backfill on disconnect](./sources/issue-544-c3-ai-backfill-disconnect.md)** - Shipped. Disconnect stores `last_rating` and applies `Backfill`.
@@ -168,7 +165,7 @@ Synthesis of where the project is going.
 
 - **[Roadmap Overview](./roadmap/overview.md)** — Shipped vs in-flight vs drafted.
 - **[Polish Audit](./roadmap/polish-audit.md)** — Missing quality-of-life, presentation, audio, and juice work for the current game.
-- **[Console Expansion](./roadmap/console-expansion.md)** — Path from 2 consoles to 6.
-- **[Combat & Damage](./roadmap/combat-and-damage.md)** — Hull, shields, phasers, torpedoes.
-- **[Data-Driven Content](./roadmap/data-driven-content.md)** — Entity files, scenarios, system maps.
+- **[Console Expansion](./roadmap/console-expansion.md)** — *Shipped/historical.* Nine consoles are live.
+- **[Combat & Damage](./roadmap/combat-and-damage.md)** — *Shipped/historical.* Combat loop landed and evolved past this plan.
+- **[Data-Driven Content](./roadmap/data-driven-content.md)** — *Shipped/historical.* All gameplay data is TOML now.
 - **[Open Architectural Questions](./roadmap/open-architectural-questions.md)** — Per-console messaging, scenarios.

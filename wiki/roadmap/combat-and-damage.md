@@ -4,9 +4,12 @@ type: roadmap
 tags: [roadmap, combat, weapons, engineering, hull, shields, torpedoes, repair]
 sources: [PRD-066, docs/4.md, docs/5.md]
 updated: 2026-05-08
+status: shipped
 ---
 
 # Combat & Damage
+
+> **Shipped (marked 2026-07-03):** everything this page plans has landed and evolved past it — phasers, torpedoes, four-quadrant shields, per-console hull (`ConsoleHull`), three-team dispatch repair. The breakdown-queue shape puzzle described below was built (PRD #118) and later **deleted** in favour of `DispatchRepairTeam`. Kept as history.
 
 The first combat loop, hull integrity, and the crew-coordination repair mechanic. Spans one shipping PRD and two follow-on drafts.
 

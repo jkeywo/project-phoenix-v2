@@ -4,9 +4,12 @@ type: entity
 tags: [console, planned, weapons, engineering, science, comms, roadmap]
 sources: [PRD-066, docs/3. Draft Design - Science Console.md, docs/8. Draft Design - Comms console.md]
 updated: 2026-05-08
+status: shipped
 ---
 
 # Bridge Crew Stations (planned)
+
+> **Shipped (marked 2026-07-03):** every console this page listed as planned is live, and the Station/Console/System redesign (PRD #487) restructured the model beyond it. See [Station](./station.md), [System](./system.md), [Console](./console.md). Kept as history.
 
 Consoles that have a PRD or design draft but are not yet shipped.
 

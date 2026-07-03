@@ -2,12 +2,9 @@
 
 ## TL;DR
 
-A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code — no installation. Both the host (view screen) and the client (phone console) run Rust/Bevy compiled to WebAssembly. The host acts as the authoritative server; clients send inputs and receive state snapshots. Networking uses PeerJS (WebRTC) in a star topology.
+A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking uses PeerJS (WebRTC) in a star topology.
 
-**Open PRDs (planned work):**
-- **PRD #116:** [Save/Load Game Sessions](https://github.com/jkeywo/project-phoenix-v2/issues/116) — `localStorage`-backed save slots, periodic + lifecycle saves, version-gated load. Introduces `save.rs` (the *second* sanctioned `serde_json` surface).
-
-**Current state:** Nine player-facing consoles (`CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms`) plus `Core` as an ownerless repair target. Players claim fixed *stations* from `player_ship.toml`; `Player.station: Option<StationId>` is the authoritative ownership field, and held consoles are derived from the station + `ShipConfig`. Full simulation: ship physics loaded from TOML, grid-based streaming asteroid field, phaser banks, torpedoes, four-quadrant shields, impulse drive, per-console hull damage, three-team dispatch repair, 6+2 power allocation, region effects, station ratings with Backfill AI, TOML-driven world engine with objectives and NPC AI patrols. See **[wiki/](./wiki/)** for the deeper map of the codebase.
+For the current feature set, console roster, and in-flight work, read **[wiki/concepts/project-overview.md](./wiki/concepts/project-overview.md)** and **[wiki/roadmap/overview.md](./wiki/roadmap/overview.md)** — that state changes too fast to keep accurate here. Planned work lives on the GitHub issue tracker (label `PRD`). Domain vocabulary lives in **[CONTEXT.md](./CONTEXT.md)** — use those terms, don't invent synonyms.
 
 ---
 
@@ -15,83 +12,70 @@ A browser-based spaceship bridge simulator. One browser tab shows a shared 3D vi
 
 This repo carries an **LLM-maintained wiki** under `wiki/`. It is a persistent, compounding knowledge base that summarises and indexes the raw sources (this file, `README.md`, `CONTEXT.md`, the codebase, PRDs, design drafts). Treat it as the index you reach for first when orienting in a new session, and update it whenever you ingest a new source or learn something non-trivial.
 
-**Read [wiki/SCHEMA.md](./wiki/SCHEMA.md) at the start of any non-trivial task.** It defines the layout (`entities/`, `concepts/`, `sources/`, `roadmap/`, `index.md`, `log.md`), the page conventions (YAML frontmatter, code references, cross-links), and the workflows.
+**Read [wiki/SCHEMA.md](./wiki/SCHEMA.md) at the start of any non-trivial task.** It defines the layout, page conventions, and workflows.
 
-**Workflow at a glance:**
+- *Orienting* — open `wiki/index.md`, find candidate pages, read them; follow their `sources:` links when precision matters.
+- *Ingesting a new source* — create/update the matching `wiki/sources/` page, update every `entities/` and `concepts/` page it touches, append one line to `wiki/log.md`, update `wiki/index.md` if pages were created.
+- *Answering a query* — synthesise from the wiki; file non-trivial answers back as new `concepts/` or `roadmap/` pages.
+- *Linting* — **run the SCHEMA.md lint pass whenever you close out a PRD or a batch of issues**: check `file.rs:LINE` references still resolve, index entries match files on disk, superseded pages are marked, and roadmap pages whose PRD shipped get closed. This is the step that historically never ran; don't skip it.
 
-- *Orienting* — open `wiki/index.md`, find candidate pages, read them. If precision matters, follow their `sources:` links into the raw layer (code, PRDs, drafts).
-- *Ingesting a new source* (a new PRD lands, a `docs/*.md` is added, or you discover the codebase has shifted from what the wiki says) — create or update the matching `wiki/sources/` page, then update every `entities/` and `concepts/` page the source touches, then append a one-line entry to `wiki/log.md`, then update `wiki/index.md` if pages were created.
-- *Answering a query* — synthesise from the wiki, and if the answer is non-trivial, **file the answer back** as a new `concepts/` or `roadmap/` page so the next agent doesn't have to redo the work.
-- *Linting* — periodically check that `path/to/file.rs:LINE` references still resolve and that roadmap pages whose backing PRD has shipped get moved/closed.
-
-The wiki is *not* a replacement for `README.md`, `CONTEXT.md`, or this file — those remain the canonical raw sources. The wiki is the navigable, cross-linked overlay on top.
-
----
-
-## Prerequisites
-
-```bash
-# Rust stable + wasm target
-rustup target add wasm32-unknown-unknown
-
-# Trunk (build tool for WASM + HTML)
-cargo install trunk
-
-# node/npm (for npm scripts)
-```
+The wiki is *not* a replacement for `README.md`, `CONTEXT.md`, or this file — those remain the canonical raw sources.
 
 ---
 
 ## Common Commands
 
 ```bash
-# Rust unit tests
+# Rust unit tests / quick compile check
 cargo test
-
-# Native debug build (no WASM, for quick compile checks)
 cargo check
+
+# JS client module tests (Vitest, tests/client/*.test.js)
+npx vitest run
 
 # Local dev — server page (WASM, Bevy, peer host)
 trunk serve                                    # → http://localhost:8080
 
-# Local dev — client page (pure HTML/JS, no WASM; connects to server)
+# Local dev — client page (pure HTML/JS, no WASM)
 node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
 
 # Production build
-trunk build --release                          # server page (WASM)
-node scripts/build-client.mjs                  # client page (pure JS, file copy → dist/client/)
-
-# Smoke tests (Playwright, Chromium) — requires dist/ built first
 trunk build --release
 node scripts/build-client.mjs
+
+# Smoke tests (Playwright, Chromium) — requires dist/ built first
 cd tests/smoke && npm install && npx playwright install chromium
 npx playwright test                            # from tests/smoke/
 
 # CI: ci.yml — unit tests → WASM build → Playwright smoke tests → deploy (on main)
 ```
 
+Prerequisites: Rust stable + `rustup target add wasm32-unknown-unknown`, `cargo install trunk`, node/npm.
+
 ---
 
 ## Message Flow (The Core Loop)
 
 ```
-Player phone (client.html)
+Player phone (client.html, pure JS)
   ↓  sends WebRTC message with JSON
 server.html JavaScript
-  ↓  resolves peer ID → session token
-  ↓  calls wasm_receive_message(token, json)
+  ↓  resolves peer ID → session token, calls wasm_receive_message(token, json)
 server/bridge.rs: drain_inbound()
   ↓  queues InboundMessage into Bevy's pull-based message system
 lobby/server.rs (or console plugins via SimSet::Input)
-  ↓  reads InboundMessage, mutates SessionManager / ShipState
+  ↓  reads InboundMessage, mutates SessionManager / ship state
   ↓  writes OutboundMessage events
 server/bridge.rs: flush_outbound()
   ↓  encodes ServerMessage → JSON, calls JS callback
 server.html JavaScript: routeOutbound()
   ↓  broadcasts to all peers / targeted peer
-client.html JavaScript
-  ↓  handleMessage() → wasm_client_receive(json)
+client.html JavaScript: handleMessage()
+  ↓  gui/sim-state.js apply() folds message into client state
+  ↓  gui/console-state.js build*() → JSON pushed into per-console iframes
 ```
+
+In-game commands are `ClientMessage::ControlSystem { target: SystemId, payload }` — humans and AI issue the same commands. See `wiki/concepts/message-flow.md`.
 
 ---
 
@@ -99,104 +83,63 @@ client.html JavaScript
 
 ```
 src/
-  core/         - Wire types, codec, flag_kind, broadcaster; `Player` carries `station` / `last_rating`
+  core/         — Wire types, codec, flag_kind, broadcast/ (Broadcaster seam)
   lobby/        — Session management, station assignment, lobby handler (pure + Bevy)
-  ship/         — Physics, state, damage, impulse (mostly pure)
-  weapons/      — Phaser, torpedo, shield state machines + beam renderer
-  modifiers/    — Modifier cache, breakdown queue, repair teams, power system
-  asteroids/    — Deterministic density spawner, ring-buffer window, Bevy lifecycle
+  ship/         — Physics, damage, power, shields, sensors, ratings, system registry, coordination (mostly pure)
+  weapons/      — Phaser, torpedo state machines + beam renderer
+  modifiers/    — Modifier cache, repair teams, coordination plugin
+  asteroids/    — Deterministic density spawner + AsteroidWindow lifecycle
   regions/      — Region containment, effect components, shape types
   entities/     — TOML entity config types, config cache (JS fetch), spawner, loader
   world/        — WorldPlugin, parse_world, runtime trigger/comms evaluators
-  ai/           — NPC patrol loop, pure AI state machine, faction configs
-  console/      — Per-console server + client plugins (captain, helm, weapons, repair, power, science, comms)
-  console_ai/   — Server-side AI for Low-complexity consoles
-  server/       — wasm-bindgen exports, renderer, viewscreen border, debug overlay
-  client/       — wasm-bindgen exports, lobby + console panels, phone border
-  sim_sets.rs   — SimSet enum: Input → Physics → Damage → Modifiers → Broadcast
+  ai/           — NPC AI plugins (same ControlSystem commands as players)
+  comms/        — Comms range check + component
+  console/      — Per-console SERVER plugins: captain, comms, helm, navigation, repair, weapons
+  console_ai/   — Server-side AI controllers for systems under AI control
+  server/       — wasm-bindgen exports, renderer, viewscreen border
+  gui/          — Rust-side GenericRadar UI widget (server viewscreen)
   server_app.rs — Server App builder: plugin registration + SimSet chain ordering
+  sim_sets.rs   — SimSet: Input → Physics → Damage → Modifiers → Publish → PublishAggregate → Broadcast
 
-assets/
-  worlds/       — TOML world files (anchors, [[entity]], [[trigger]], [[comms]])
-  entities/     — TOML entity configs (player ship, asteroids, pirates, regions)
-  factions/     — AI faction definitions
-  complexity/   — Per-console complexity presets (Low / Full) + AI tuning
-
-server.html       — Host page: loads server WASM, runs Bevy, owns PeerJS host peer
-client.html       — Client page: pure HTML/JS (no WASM), connects via PeerJS peer ID in URL hash
-Cargo.toml        — Single crate: cdylib (WASM) + rlib (tests). Feature: server
-Trunk.toml        — Build config for server.html
-scripts/build-client.mjs — Builds the pure-JS client page (file copy → dist/client/)
-wiki/             — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.
-docs/             — Draft design notes (numbered).
+gui/            — CLIENT: pure JS modules + one HTML file per console (iframe),
+                  console-registry.js is the single source of truth for panels
+assets/         — TOML configs: worlds/, entities/, factions/; models, shaders, sounds
+server.html     — Host page: loads server WASM, runs Bevy, owns PeerJS host peer
+client.html     — Client page: pure HTML/JS, connects via PeerJS peer ID in URL hash
+tests/client/   — Vitest tests for gui/*.js
+tests/smoke/    — Playwright smoke tests
+wiki/           — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.
+docs/           — Draft design notes (numbered).
 ```
-
----
-
-## Architecture
-
-### Networking — Star Topology
-
-```
-        ┌─────────────┐
-        │  server.html │  ← PeerJS host (authoritative)
-        │  (Bevy+WASM) │     Runs the game simulation
-        └──────┬──────┘
-            ┌──┴──┐
-      ┌─────┘     └─────┐
-      ▼                 ▼
- client.html       client.html
- (phone #1)        (phone #2)
-              ...
-```
-
-- **Server = authority.** Bevy runs the simulation, owns session state, decides everything.
-- **Clients = stateless spokes.** They send input, receive state snapshots. Clients never talk to each other.
-- **Session tokens** (UUIDv4 in `localStorage`) are the identity system — not peer IDs. Tokens survive refreshes; peer IDs are ephemeral.
-
-### Serialization — The Codec Contract
-
-`serde_json` must **never** be called directly outside `src/core/codec.rs`. The `MessageCodec` trait is the only serialization surface. This exists so the wire format can be swapped to binary (MessagePack, etc.) by changing one module.
-
----
-
-## Game Flow
-
-1. **Lobby:** Players scan QR -> join via `client.html#<peerId>` -> pick a station -> toggle `SetReady`. When all connected players are ready, the server enters `Loading` while assets preload or goes straight to `InProgress`; the legacy start message is gone.
-2. **In-Progress:** Each station-owned console sends inputs; server simulation ticks at 10Hz (helm, weapons, repair, power, sensors, shields, navigation, comms). Server broadcasts `SimState` every 100ms with hull, power, flags, entity states. Region containment, asteroid streaming, NPC patrols, and world triggers all run server-side.
-3. **Disconnect/Reconnect:** The dropped player's `Player.station` remains on their session record and the station rating flips to `Backfill` so AI runs its systems. The session token (in `localStorage`) is the identity; on browser refresh the client re-sends `Identify`. If no connected player claimed the old station, the server restores the station and `last_rating`; otherwise the player reconnects without a station / as a spectator. Reconnect is handled in every phase.
-
-See `wiki/concepts/game-loop.md` and `wiki/entities/console.md` for per-console details.
-
----
-
-## Testing Strategy
-
-**Rust unit tests (`cargo test`):** Tests live inline (`#[cfg(test)] mod tests`). Cover pure modules: session, stations, codec round-trips, lobby handler, physics, asteroid spawner/window, damage, breakdown, repair teams, modifier cache, power system, client panels, joystick.
-
-**Smoke tests (`tests/smoke/`, Playwright + Chromium):** Boot real server WASM in headless Chromium with a `BroadcastChannel`-backed PeerJS shim (no real WebRTC). Cover: server load, client connect, lobby, stations, sim-state, world bootstrap, AI patrol, engineering, comms.
-
-**Not tested:** Renderer (visual output), bridge internals, CI pipeline.
-
-> Good tests: set up state → perform action → assert on observable output through the public interface. Do NOT assert on private fields, internal call counts, or implementation-specific details.
-
-See `wiki/concepts/testing-strategy.md` for the full file-by-file breakdown.
 
 ---
 
 ## Key Constraints & Rules
 
-1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules.
-2. **Feature gates for bridges.** `server/bridge.rs` is compiled under the `server` feature; `client/bridge.rs` under the `client` feature. Neither is gated by `cfg(target_arch)` alone.
-3. **Captain authority.** Only the player at `CaptainChair` can `ToggleRedAlert`. Game start is collective `SetReady` auto-start, not a captain-only command.
-4. **Backfill on disconnect.** A disconnected station holder stays associated with their `StationId`; the station flips to the `Backfill` rating until reconnect or a new claim.
-5. **Helm sends at 10Hz.** Simulation reads helm inputs at 10Hz tick intervals.
-6. **Deterministic asteroids.** Per-cell density is seeded from `(field_idx, gx, gz) + Perlin noise`. Destroyed asteroids respawn fresh when the player leaves the cell and returns (no persistent destroyed-set).
-7. **WebGL2 rendering.** For broad browser support.
-8. **PeerJS cloud broker.** Not self-hosted (deferred post-PoC).
-9. **Pure modules are Bevy-free.** `lobby/handler`, `radar`, `ship/damage`, `modifiers/breakdown`, `lobby/client_panel`, `client_sim`, `client_comms`, `console/helm/joystick` have no Bevy imports — fully unit-testable on native, shared between server and client.
-10. **Station ownership is authoritative.** `Player.station: Option<StationId>` is the ownership field; console tabs and authorization derive held consoles from the station and `ShipConfig`.
+1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules. (Planned exception: `save.rs`, PRD #116.)
+2. **Server = authority.** Bevy runs the simulation and decides everything; clients are stateless spokes that never talk to each other. Session tokens (UUIDv4 in `localStorage`) are the identity system — peer IDs are ephemeral.
+3. **Client is pure JS.** No client-side Rust/WASM, no new Rust glue for the client. Client state is built by pure `gui/*.js` modules (Vitest-tested); console UIs are per-console HTML iframes.
+4. **Captain authority.** Only the player at `CaptainChair` can `ToggleRedAlert`. Game start is collective `SetReady` auto-start, not a captain-only command.
+5. **Station ownership is authoritative.** `Player.station: Option<StationId>` is the ownership field; console access derives from the station + `ShipConfig`. On disconnect the station keeps its holder and flips to the `Backfill` rating (AI operates its systems) until reconnect or a new claim.
+6. **Humans and AI are symmetric.** Both issue `ControlSystem { target: SystemId, payload }`; admission strips source identity. Never branch on human-vs-AI downstream of admission.
+7. **Helm sends at 10Hz.** Simulation reads helm inputs at 10Hz tick intervals.
+8. **Deterministic asteroids.** Per-cell density is seeded from `(field_idx, gx, gz) + Perlin noise`. Destroyed asteroids respawn fresh when the player leaves the cell and returns.
+9. **WebGL2 rendering; PeerJS cloud broker** (not self-hosted, deferred post-PoC).
+10. **Pure modules are Bevy-free.** `lobby/handler`, `radar`, `ship/{damage,physics,rating,control_source,coordination}`, `modifiers/repair_teams`, and friends have no Bevy imports — fully unit-testable on native.
 11. **No hardcoded gameplay values.** All gameplay data (stats, icons, colours, sizes, behaviours) comes from TOML config, loaded into entities/components and sent over the network where the client needs it. The only acceptable hardcoded values are: (a) defaults applied while parsing a TOML file (`unwrap_or(...)`-style fallbacks), and (b) client-side placeholders shown while waiting for authoritative data from the server. If a value could plausibly be tuned by a designer, it belongs in TOML — never inline it "for now", and never add a hardcoded branch that can override what the config says.
+
+---
+
+## Testing Strategy
+
+- **Rust unit tests (`cargo test`):** inline `#[cfg(test)] mod tests` covering the pure modules (session, stations, codec round-trips, lobby handler, physics, damage, repair teams, modifiers, power, ratings, system registry).
+- **JS tests (`npx vitest run`):** `tests/client/*.test.js` covering the pure `gui/*.js` modules (state builders, action map, registries, panels).
+- **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed PeerJS shim (no real WebRTC).
+- **Not tested:** renderer visual output, bridge internals, CI pipeline.
+
+> Good tests: set up state → perform action → assert on observable output through the public interface. Do NOT assert on private fields, internal call counts, or implementation-specific details.
+
+See `wiki/concepts/testing-strategy.md` for the file-by-file breakdown.
 
 ---
 
@@ -209,17 +152,11 @@ crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for testing
 [features]
 default = ["server"]
 server = []   # host build → server.html (bridge.rs compiled in)
-# The client page (client.html) is now pure JS (gui/*.js) — there is no
+# The client page (client.html) is pure JS (gui/*.js) — there is no
 # `client` cargo feature and no client-side WASM (removed in #463).
 
-# WASM-specific: no parallel physics, needs getrandom wasm_js backend
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-bevy_rapier3d = { version = "0.33", features = ["dim3"] }
-getrandom = { version = "0.3", features = ["wasm_js"] }
-
-# Native: parallel physics enabled
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bevy_rapier3d = { version = "0.33", features = ["parallel"] }
+# WASM: no parallel physics, needs getrandom wasm_js backend.
+# Native: parallel physics enabled. (See [target.'cfg(...)'] sections.)
 ```
 
 ---
@@ -234,13 +171,12 @@ bevy_rapier3d = { version = "0.33", features = ["parallel"] }
 
 ## Adding New Message Types
 
-When extending `ClientMessage` or `ServerMessage`:
+When extending `ClientMessage` or `ServerMessage` (prefer a new `SystemControlPayload` variant over a new top-level `ClientMessage` for in-game commands):
 
-1. Add variant to enum in `core/messages.rs` (derive `Clone, Debug, Serialize, Deserialize, PartialEq`)
-2. Add round-trip test in `core/codec.rs` (`codec-tests` module)
-3. Handle in `lobby/handler.rs` `process_message()` (pass through or produce outbound)
-4. Handle in the appropriate console plugin (`.in_set(SimSet::Input)`) if it is an in-game message
-5. Handle in `lobby/client_panel.rs` `LobbyState::apply()` or `client_sim.rs` `ClientSimState::apply()` as appropriate
-6. Update `client/app.rs` if a new UI element or button is needed
-7. Handle in `server.html` JS `routeOutbound()` if routing logic needs adjustment
-8. Handle in `client.html` JS if the handshake / PeerJS wiring changes
+1. Add the variant in `core/messages.rs` (derive `Clone, Debug, Serialize, Deserialize, PartialEq`)
+2. Add a round-trip test in `core/codec.rs` (`codec-tests` module)
+3. Handle in `lobby/handler.rs` `process_message()` (pass through or produce outbound), or in the appropriate console server plugin (`.in_set(SimSet::Input)`) for in-game messages
+4. Client inbound: fold into state in `gui/sim-state.js` `apply()` (or `gui/comms-state.js` / `gui/lobby-state.js`), then surface via the relevant `build*()` in `gui/console-state.js`
+5. Client outbound: add the UI action to `gui/action-map.js` (and the button/control to the console's `gui/<name>-console.html`)
+6. Add/extend Vitest coverage in `tests/client/`
+7. Touch `server.html` `routeOutbound()` / `client.html` only if routing or the PeerJS handshake changes

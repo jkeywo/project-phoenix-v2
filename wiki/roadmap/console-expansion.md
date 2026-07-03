@@ -4,9 +4,12 @@ type: roadmap
 tags: [roadmap, console, captain, helm, weapons, engineering, science, comms]
 sources: [PRD-066, docs/3.md, docs/8.md]
 updated: 2026-05-08
+status: shipped
 ---
 
 # Console Expansion
+
+> **Shipped (marked 2026-07-03):** the expansion happened and overshot this plan — nine consoles are live (CaptainChair, Helm, Tactical, Repair, Sensors, Shields, Navigation, Power, Comms) plus `Core`. See [Console](../entities/console.md). Kept as history.
 
 Path from today's two consoles to the full six-station bridge crew.
 

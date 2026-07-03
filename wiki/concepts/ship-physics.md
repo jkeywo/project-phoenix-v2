@@ -2,8 +2,8 @@
 title: Ship Physics
 type: concept
 tags: [ship, physics, rapier, controller, pure-function]
-sources: [src/server/ship_physics.rs, src/server/simulation.rs, PRD-022]
-updated: 2026-05-08
+sources: [src/ship/physics.rs, src/server_app.rs, PRD-022]
+updated: 2026-07-03
 ---
 
 # Ship Physics
@@ -19,7 +19,7 @@ fn compute_physics(
 ) -> ShipPhysicsResult { ... }
 ```
 
-`simulation.rs` calls this each tick, then applies the result to the ship's Rapier rigid body as a **direct velocity set** (not force application).
+`ShipPlugin` calls this each helm tick and stores the result in the per-ship `ShipPhysics` component. `sync_ship_position` then writes the component pose into the ECS `Transform`; Rapier sees kinematic bodies at those positions.
 
 ## The model
 
@@ -39,7 +39,7 @@ fn compute_physics(
 - **Arcade lerp.** Velocity lerps toward `thrust * max_speed`. Steering directly sets angular velocity around Y.
 - **No reverse on zero thrust** — deceleration brings velocity to zero, not negative. Negative thrust (reverse) is supported via the model but the joystick only outputs 0..1 today.
 - **Steering snaps to centre** on release (client-side).
-- **Collision kills velocity.** Server collision event sets ship velocity to zero. Helm must re-apply thrust.
+- **Collision stops and separates.** `server_app.rs::handle_collisions` reads Rapier contact pairs, sets the ship's forward speed to zero, and nudges the `ShipPhysics` X/Z position outside the overlap using the TOML collider radii where available. Helm must re-apply thrust on later ticks.
 
 ## Why a pure function
 
@@ -51,7 +51,7 @@ Three reasons:
 
 ## Future: damage
 
-PRD #66 adds `5 + (forward_speed / max_speed) * 10` clamped 5..15 collision damage to a separate Hull Integrity pool. The physics function itself is unchanged — damage is a *consumer* of `forward_speed`, not a parameter.
+Collision damage is a consumer of `forward_speed`, not a parameter to the pure physics function. `handle_collisions` snapshots the impact speed before zeroing movement, scales `collision_damage(speed)` through `ModifierSlot::HullDamageTaken`, then routes it through shields and hull.
 
 ## Related
 

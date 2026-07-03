@@ -2,7 +2,7 @@
 title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, per-kind-plugin, control-source, prd-520]
-updated: 2026-06-27
+updated: 2026-07-03
 ---
 
 # AI Ship Unification

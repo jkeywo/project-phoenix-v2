@@ -19,8 +19,9 @@ use bevy_rapier3d::prelude::ReadRapierContext;
 pub use crate::ship_state::ShipPhysics as ShipPhysicsComponent;
 
 use crate::entity_spawner::{
-    AsteroidFieldSection, BehaviourSection, EntityId, EntityName, EntityTagsSection, EntityUuid,
-    FactionComponent, MeshSection, RadarAppearanceSection, RegionShapeSection,
+    AsteroidFieldSection, BehaviourSection, ColliderSection, EntityId, EntityName,
+    EntityTagsSection, EntityUuid, FactionComponent, MeshSection, RadarAppearanceSection,
+    RegionShapeSection,
 };
 use crate::impulse::ImpulseState;
 use crate::messages::ModifierSlot;
@@ -773,11 +774,13 @@ fn handle_collisions(
             Option<&mut ShipShields>,
             Option<&ShipModifiers>,
             Option<&EntityUuid>,
+            Option<&ColliderSection>,
             Has<LocalShip>,
             Option<&mut ShipImpulse>,
         ),
         With<Ship>,
     >,
+    body_query: Query<(&Transform, Option<&ColliderSection>)>,
     modifiers_res: Option<Res<ShipModifiers>>,
     mut outbox: ResMut<SimOutbox>,
     mut next_state: ResMut<NextState<GamePhase>>,
@@ -802,6 +805,7 @@ fn handle_collisions(
         shields_opt,
         modifiers_comp,
         ship_uuid,
+        ship_collider,
         is_local,
         mut impulse_opt,
     ) in ship_query.iter_mut()
@@ -843,9 +847,16 @@ fn handle_collisions(
         }
 
         let speed_at_impact = physics.forward_speed;
-        physics.forward_speed = -0.5 * speed_at_impact;
-        let damage =
-            collision_damage(speed_at_impact) as f32 * modifiers.get(&ModifierSlot::HullDamageTaken);
+        physics.forward_speed = 0.0;
+        let attacker_body = body_query.get(attacker_entity).ok();
+        separate_ship_from_collision(
+            &mut physics,
+            collider_radius(ship_collider),
+            attacker_body.map(|(transform, _)| transform),
+            collider_radius(attacker_body.and_then(|(_, collider)| collider)),
+        );
+        let damage = collision_damage(speed_at_impact) as f32
+            * modifiers.get(&ModifierSlot::HullDamageTaken);
 
         let asteroid_info = asteroid_query.get(attacker_entity).ok();
         let bearing = asteroid_info
@@ -954,6 +965,44 @@ fn handle_collisions(
         cooldown.remaining_secs = 1.0;
     }
 }
+
+const COLLISION_SEPARATION_SLOP: f32 = 0.05;
+
+fn collider_radius(collider: Option<&ColliderSection>) -> f32 {
+    collider.map(|c| c.0.radius.max(0.0)).unwrap_or(0.0)
+}
+
+fn separate_ship_from_collision(
+    physics: &mut ShipPhysicsComponent,
+    ship_radius: f32,
+    attacker_transform: Option<&Transform>,
+    attacker_radius: f32,
+) {
+    let Some(attacker_transform) = attacker_transform else {
+        return;
+    };
+    let min_dist = ship_radius + attacker_radius + COLLISION_SEPARATION_SLOP;
+    if min_dist <= 0.0 {
+        return;
+    }
+
+    let dx = physics.x - attacker_transform.translation.x;
+    let dz = physics.z - attacker_transform.translation.z;
+    let dist_sq = dx * dx + dz * dz;
+    let (nx, nz, dist) = if dist_sq > 1e-6 {
+        let dist = dist_sq.sqrt();
+        (dx / dist, dz / dist, dist)
+    } else {
+        // Degenerate overlap: step back opposite the ship's current forward.
+        (-physics.yaw.sin(), physics.yaw.cos(), 0.0)
+    };
+
+    if dist < min_dist {
+        physics.x = attacker_transform.translation.x + nx * min_dist;
+        physics.z = attacker_transform.translation.z + nz * min_dist;
+    }
+}
+
 /// Tick shield regen for the player ship. **PR-7 (issue #597) moved this
 /// canonical registration into `ShipShieldsPlugin::tick_shields`, which
 /// iterates every ship with the `Ship` marker (player + NPCs). This local
@@ -5149,7 +5198,8 @@ mod tests {
     #[test]
     fn npc_ship_takes_hull_damage_from_asteroid_collision() {
         use crate::damage::ConsoleHull;
-        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+        use crate::entity_config::{ColliderConfig, ColliderShape};
+        use crate::entity_spawner::{ColliderSection, EntityConsoleHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
         use bevy_rapier3d::prelude::*;
 
@@ -5210,6 +5260,11 @@ mod tests {
                     npc_hull_max,
                 )])),
                 ShipModifiers::new(),
+                ColliderSection(ColliderConfig {
+                    shape: ColliderShape::Ball,
+                    radius: 5.0,
+                    length: 0.0,
+                }),
                 Collider::ball(5.0),
                 RigidBody::KinematicPositionBased,
                 ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
@@ -5223,6 +5278,11 @@ mod tests {
             Transform::from_xyz(0.0, 0.0, 0.0),
             GlobalTransform::default(),
             Visibility::default(),
+            ColliderSection(ColliderConfig {
+                shape: ColliderShape::Ball,
+                radius: 5.0,
+                length: 0.0,
+            }),
             Collider::ball(5.0),
             RigidBody::Fixed,
             ActiveCollisionTypes::KINEMATIC_STATIC,
@@ -5262,13 +5322,17 @@ mod tests {
             "ShipDestroyed is a player-only UI message; must not fire for NPCs"
         );
 
-        // The NPC's speed must be halved and reversed (uniform collision
-        // physics — same code path as the player ship).
+        // Collision response stops the ship and separates it out of the
+        // overlapping collider volume, instead of bouncing it backward.
         let physics = app.world().get::<ShipPhysicsComponent>(npc).unwrap();
+        assert_eq!(
+            physics.forward_speed, 0.0,
+            "NPC forward_speed should be zeroed after collision"
+        );
+        let dist = (physics.x * physics.x + physics.z * physics.z).sqrt();
         assert!(
-            physics.forward_speed < 0.0,
-            "NPC forward_speed should reverse after collision, got {}",
-            physics.forward_speed
+            dist >= 10.0 + COLLISION_SEPARATION_SLOP - 1e-5,
+            "NPC should be separated outside the two collider radii, distance={dist}"
         );
     }
 

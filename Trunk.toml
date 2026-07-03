@@ -6,3 +6,8 @@ public_url = "./"
 [watch]
 watch_path = ["assets/", "gui/"]
 include = "*.toml"
+
+[[hooks]]
+stage = "post_build"
+command = "node"
+command_arguments = ["scripts/wasm-opt-fixup.mjs", "dist/.stage"]

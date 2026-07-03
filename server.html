@@ -853,8 +853,14 @@
   </div>
 
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
-       TrunkApplicationStarted and sets window.wasmBindings when ready. -->
-  <link data-trunk rel="rust" data-wasm-opt="z" />
+       TrunkApplicationStarted and sets window.wasmBindings when ready.
+       wasm-opt is intentionally NOT run here (no data-wasm-opt attribute):
+       Trunk's bundled wasm-opt fails to validate WASM emitted by newer Rust
+       toolchains (bulk-memory / nontrapping-float-to-int) with no way to
+       pass --enable-* flags through. The equivalent -Oz pass runs instead
+       via the post_build hook in Trunk.toml (scripts/wasm-opt-fixup.mjs),
+       using the `binaryen` npm package directly. -->
+  <link data-trunk rel="rust" data-wasm-opt="0" />
   <link data-trunk rel="copy-dir" href="assets" />
   <link data-trunk rel="copy-dir" href="assets/viewscreen" />
   <link data-trunk rel="copy-dir" href="assets/fonts" />

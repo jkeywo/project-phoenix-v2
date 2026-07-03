@@ -1,2 +1,10 @@
 [target.wasm32-unknown-unknown]
-rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+# bulk-memory / nontrapping-float-to-int are default-on for this target in
+# recent rustc, but trunk's bundled wasm-opt validates against the MVP
+# feature set and rejects them (no way to pass --enable-* through trunk).
+# Disabling is a pure codegen choice (checked/loop fallback instead of the
+# native instruction) with no behavior change.
+rustflags = [
+    "--cfg", "getrandom_backend=\"wasm_js\"",
+    "-C", "target-feature=-bulk-memory,-bulk-memory-opt,-nontrapping-fptoint",
+]

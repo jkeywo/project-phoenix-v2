@@ -7,6 +7,13 @@ license = "AGPL-3.0-or-later"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
 [features]
 default = ["server"]
 # Server feature: builds the host crate (Trunk → server.html) which runs

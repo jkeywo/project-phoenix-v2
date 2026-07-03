@@ -70,13 +70,20 @@ jobs:
         with:
           tool: wasm-bindgen-cli@0.2.120
 
-      - name: Build server page (WASM + JS)
-        run: trunk build --release
-
       - name: Install Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # Needed before the trunk build: its post_build hook (Trunk.toml,
+      # scripts/wasm-opt-fixup.mjs) runs `node` and requires the `binaryen`
+      # package to do the -Oz size optimization trunk's own wasm-opt can't
+      # validate on this toolchain (see script header for why).
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Build server page (WASM + JS)
+        run: TRUNK_BUILD_RELEASE=true trunk build --release
 
       - name: Build client page (pure JS — copies client.html + gui/assets, no WASM)
         run: node scripts/build-client.mjs

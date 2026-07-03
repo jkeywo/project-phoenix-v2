@@ -41,8 +41,9 @@ trunk serve                                    # → http://localhost:8080
 # Local dev — client page (pure HTML/JS, no WASM)
 node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
 
-# Production build
-trunk build --release
+# Production build (TRUNK_BUILD_RELEASE gates the wasm-opt-fixup post_build
+# hook in Trunk.toml — see scripts/wasm-opt-fixup.mjs; requires `npm install`)
+TRUNK_BUILD_RELEASE=true trunk build --release
 node scripts/build-client.mjs
 
 # Smoke tests (Playwright, Chromium) — requires dist/ built first

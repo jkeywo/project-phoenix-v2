@@ -1387,13 +1387,13 @@
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildWeaponsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Tactical', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('tactical', state);
       return JSON.stringify({ target_uuid: null, target_name: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto', blips: [], phaser_arcs: [], torpedo_arcs: [] });
     }
 
     function pushWeaponsConsoleState() {
       if (activeConsole !== 'Tactical') return;
-      _pushIframe($('weapons-iframe'), 'Tactical', buildWeaponsConsoleState());
+      _pushIframe($('weapons-iframe'), 'tactical', buildWeaponsConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
@@ -1430,12 +1430,12 @@
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildCaptainConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('CaptainChair', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('captain', state);
       return JSON.stringify({ red_alert: false, view_direction: 'Fore', view_mode: 'Camera', objectives: [], hull_integrity_pct: 100, game_status: '', blips: [] });
     }
 
     function pushCaptainConsoleState() {
-      _pushIframe($('captain-iframe'), 'CaptainChair', buildCaptainConsoleState());
+      _pushIframe($('captain-iframe'), 'captain', buildCaptainConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
@@ -1445,13 +1445,13 @@
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildHelmConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Helm', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('helm', state);
       return JSON.stringify({ heading: 0, speed: 0, x: 0, z: 0, yaw: 0, impulse_charge_progress: 0, on_screen: false, lock_id: null, blips: [] });
     }
 
     function pushHelmConsoleState() {
       if (activeConsole !== 'Helm') return;
-      _pushIframe($('helm-iframe'), 'Helm', buildHelmConsoleState());
+      _pushIframe($('helm-iframe'), 'helm', buildHelmConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
@@ -1460,13 +1460,13 @@
     // ── Repair console iframe bridge (issue #425) ────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
     function buildRepairConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Repair', state);
-      return JSON.stringify({ teams: [], console_hull: [], travel_duration_secs: 5.0, damageable_consoles: [] });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('repair', state);
+      return JSON.stringify({ teams: [], system_hull: [], damageable_systems: [], console_hull: [], damageable_consoles: [], travel_duration_secs: 5.0 });
     }
 
     function pushRepairConsoleState() {
       if (activeConsole !== 'Repair') return;
-      _pushIframe($('repair-iframe'), 'Repair', buildRepairConsoleState());
+      _pushIframe($('repair-iframe'), 'repair', buildRepairConsoleState());
     }
 
     if ($('repair-iframe')) $('repair-iframe').addEventListener('load', () => { pushRepairConsoleState(); injectSwipeRelay($('repair-iframe')); });
@@ -1474,13 +1474,13 @@
     // ── Power console iframe bridge (issue #425) ─────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
     function buildPowerConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Power', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('power', state);
       return JSON.stringify({ helm: 0, weapons: 0, sensors: 0, battery_charge: 0, locked: false });
     }
 
     function pushPowerConsoleState() {
       if (activeConsole !== 'Power') return;
-      _pushIframe($('power-iframe'), 'Power', buildPowerConsoleState());
+      _pushIframe($('power-iframe'), 'power', buildPowerConsoleState());
     }
 
     if ($('power-iframe')) $('power-iframe').addEventListener('load', () => { pushPowerConsoleState(); injectSwipeRelay($('power-iframe')); });
@@ -1488,13 +1488,13 @@
     // ── Shields console iframe bridge (issue #423) ───────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
     function buildShieldsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Shields', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('shields', state);
       return JSON.stringify({ facings: [], hull_integrity_pct: 100, focused_facing: null, target_bearing: null, grid_status: 'GRID OFFLINE' });
     }
 
     function pushShieldsConsoleState() {
       if (activeConsole !== 'Shields') return;
-      _pushIframe($('shields-iframe'), 'Shields', buildShieldsConsoleState());
+      _pushIframe($('shields-iframe'), 'shields', buildShieldsConsoleState());
     }
 
     if ($('shields-iframe')) $('shields-iframe').addEventListener('load', () => { pushShieldsConsoleState(); injectSwipeRelay($('shields-iframe')); });
@@ -1502,13 +1502,13 @@
     // ── Sensors console iframe bridge ─────────────────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
     function buildSensorsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Sensors', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('sensors', state);
       return JSON.stringify({ scan_range: 2000, complexity: 'full', impulse_charge_progress: 0, regions: [], blips: [], target_uuid: null, target_name: null, target_kind: null, target_stance: null, target_faction: null, target_bearing: null, target_range: null, target_class: null, target_hull_pct: null, target_heading: null, target_speed: null, target_threat: null, target_shield_freq: null, target_shields: [] });
     }
 
     function pushSensorsConsoleState() {
       if (activeConsole !== 'Sensors') return;
-      _pushIframe($('sensors-iframe'), 'Sensors', buildSensorsConsoleState());
+      _pushIframe($('sensors-iframe'), 'sensors', buildSensorsConsoleState());
     }
 
     if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); injectSwipeRelay($('sensors-iframe')); });
@@ -1516,13 +1516,13 @@
     // ── Comms console iframe bridge ────────────────────────────────────────────
     // State builder extracted to gui/console-state.js (issue #454).
     function buildCommsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Comms', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('comms', state);
       return JSON.stringify({ messages: [], contacts: [] });
     }
 
     function pushCommsConsoleState() {
       if (activeConsole !== 'Comms') return;
-      _pushIframe($('comms-iframe'), 'Comms', buildCommsConsoleState());
+      _pushIframe($('comms-iframe'), 'comms', buildCommsConsoleState());
     }
 
     if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); injectSwipeRelay($('comms-iframe')); });
@@ -1584,13 +1584,13 @@
     // ── Navigation console iframe bridge (issue #458) ─────────────────────────
     // State builder extracted to gui/console-state.js.
     function buildNavigationConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Navigation', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('navigation', state);
       return JSON.stringify({ blips: [], ship_x: 0, ship_z: 0, impulse_charge_progress: 0, cancel_visible: false, on_screen: false, radar_range: 5000 });
     }
 
     function pushNavigationConsoleState() {
       if (activeConsole !== 'Navigation') return;
-      _pushIframe($('navigation-iframe'), 'Navigation', buildNavigationConsoleState());
+      _pushIframe($('navigation-iframe'), 'navigation', buildNavigationConsoleState());
     }
 
     if ($('navigation-iframe')) $('navigation-iframe').addEventListener('load', () => { pushNavigationConsoleState(); injectSwipeRelay($('navigation-iframe')); });
@@ -2065,7 +2065,7 @@
           pushWeaponsConsoleState();
           break;
         }
-        case 'ConsoleHullUpdate': {
+        case 'SystemHullUpdate': {
           state.consoleHull = window.simState
             ? window.simState.consoleHull
             : (msg.data.entries || []);

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::lobby::Sessions;
 use crate::messages::{
-    Console, CoordinationPayload, SensorsBlackboard, ServerMessage, SystemBlackboard,
+    CoordinationPayload, SensorsBlackboard, ServerMessage, StationId, SystemBlackboard,
     SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
@@ -54,9 +54,9 @@ impl Plugin for ShipSensorsPlugin {
 
 /// Handle `SetScienceTarget` messages from the Sensors console.
 ///
-/// Validates: sender holds `Console::Sensors` and `accept_human_input` is true.
-/// Stores the target in [`SensorsTarget`] for blackboard broadcast, and emits
-/// `SensorsTargetSuggestion` directly to the Tactical console holder.
+/// Validates: sender holds the Sensors station and `accept_human_input` is
+/// true. Stores the target in [`SensorsTarget`] for blackboard broadcast, and
+/// emits `SensorsTargetSuggestion` directly to the Tactical station holder.
 pub fn handle_sensors_messages(
     sessions: Res<Sessions>,
     mut ship_query: Query<
@@ -70,7 +70,7 @@ pub fn handle_sensors_messages(
     >,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
 ) {
-    for (admitted, ship_config, mut entity_target, is_local) in ship_query.iter_mut() {
+    for (admitted, _ship_config, mut entity_target, is_local) in ship_query.iter_mut() {
         for cmd in admitted.for_target(crate::system_registry::SENSORS_SYSTEM_ID) {
             let SystemControlPayload::SetScienceTarget { uuid } = &cmd.payload else {
                 continue;
@@ -88,7 +88,7 @@ pub fn handle_sensors_messages(
             }
             let Some(tactical_token) = sessions
                 .0
-                .console_holder(&Console::Tactical, &ship_config.0)
+                .holder_for_station(&StationId("tactical".into()))
             else {
                 continue;
             };

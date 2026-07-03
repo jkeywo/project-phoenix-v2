@@ -139,7 +139,11 @@ export class ClientSimState {
     if (!msg || !msg.type) return;
     const d = msg.data || {};
     switch (msg.type) {
-      case 'ConsoleHullUpdate':
+      case 'SystemHullUpdate':
+        // Post issue #618: publisher no longer emits legacy Console-keyed
+        // `ConsoleHullUpdate`. Entries carry `{ system_id, display_name,
+        // current, max_hp, tier, debuff_magnitude }` — see SystemHullStatus
+        // in src/core/messages.rs.
         this.consoleHull = d.entries || [];
         break;
       case 'SimState': {
@@ -327,6 +331,16 @@ export function fireTorpedoMessage(tube, targetUuid) {
   return { type: 'FireTorpedo', data: { tube, target_uuid: targetUuid != null ? targetUuid : null } };
 }
 
+/**
+ * Legacy client → server DispatchRepairTeam message.
+ *
+ * Retained for callers that still target the legacy Rust handler at
+ * `src/console/repair/server.rs:161-184`. The main client flow now dispatches
+ * via `gui/action-map.js:dispatch_repair_team` which wraps the intent in a
+ * `ControlSystem` envelope (issue #618). The `console` argument here is the
+ * PascalCase Console enum name still expected by the legacy wire message
+ * (retained pending issue #619).
+ */
 export function dispatchRepairTeamMessage(teamIdx, console) {
   return { type: 'DispatchRepairTeam', data: { team_idx: teamIdx, console } };
 }

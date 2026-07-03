@@ -4,10 +4,10 @@ use crate::ai_plugin::AiTokenRegistry;
 use crate::entity_spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    AdmittedCommands, ClientMessage, Console, GamePhase, InterSystemMsg, InterSystemPayload,
+    AdmittedCommands, ClientMessage, GamePhase, InterSystemMsg, InterSystemPayload,
     InterSystemQueue, ModifierSlot, PhaserBank, PhaserBankClientConfig, PhaserBankState,
-    PhaserMode, RadarBlip, RadarRegion, ServerMessage, SystemBlackboard, SystemControlPayload,
-    SystemId, TorpedoTubeClientConfig, TorpedoTubeState, WeaponsBlackboard,
+    PhaserMode, RadarBlip, RadarRegion, ServerMessage, StationId, SystemBlackboard,
+    SystemControlPayload, SystemId, TorpedoTubeClientConfig, TorpedoTubeState, WeaponsBlackboard,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
@@ -422,12 +422,12 @@ fn handle_set_target(
 /// directly with no remote PeerJS session (issue #422 / PRD #419).
 fn tactical_authorized(
     sessions: &Sessions,
-    ship_config: &crate::ship_plugin::ShipConfigComponent,
+    _ship_config: &crate::ship_plugin::ShipConfigComponent,
     token: &str,
 ) -> bool {
     sessions
         .0
-        .console_holder(&Console::Tactical, &ship_config.0)
+        .holder_for_station(&StationId("tactical".into()))
         == Some(token)
         || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
 }
@@ -1567,7 +1567,7 @@ fn handle_set_phaser_frequency(
         }
         if sessions
             .0
-            .console_holder(&Console::Tactical, &ship_config.0)
+            .holder_for_station(&StationId("tactical".into()))
             != Some(ev.token.as_str())
         {
             continue;
@@ -2381,7 +2381,7 @@ fn operate_tactical_ai(
         // ai_tuning has the torpedo_auto_fire rule. Unclaimed → unconditional.
         let auto_fire_enabled = match sessions
             .0
-            .console_holder(&Console::Tactical, &ship_config.0)
+            .holder_for_station(&StationId("tactical".into()))
         {
             Some(_) => active_ratings.0.get(&tactical_station).is_some_and(|r| {
                 ship_config.0.has_ai_rule(
@@ -2545,7 +2545,7 @@ fn resolve_objective_target_uuid(
 
 pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
     crate::core::broadcast::SimBroadcaster::new().register(
-        crate::core::broadcast::Audience::Holding(Console::Tactical),
+        crate::core::broadcast::Audience::Holding(StationId("tactical".into())),
         crate::core::broadcast::Cadence::Hz(10.0),
         |world: &mut World| {
             // Extract all resource values as owned copies/clones so we can
@@ -4508,7 +4508,7 @@ station = "tactical"
     fn local_console_token_can_fire_torpedo() {
         // issue #422: actions from the local HTML console (browser server
         // viewscreen / native wry server) arrive under LOCAL_CONSOLE_TOKEN with
-        // no remote PeerJS session, so console_holder(Tactical) is None.
+        // no remote PeerJS session, so holder_for_station(tactical) is None.
         // `tactical_authorized` must treat that token as an authorized local
         // operator so a button press actually launches end-to-end — the
         // decode→map→InboundMessage→fire hop the wasm bridge cannot unit-test.

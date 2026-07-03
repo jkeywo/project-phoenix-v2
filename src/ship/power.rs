@@ -3,8 +3,8 @@ use bevy::prelude::*;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
     Console, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard,
-    PowerConsoleEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage, SystemBlackboard,
-    SystemId,
+    PowerConsoleEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage, StationId,
+    SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
     power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
@@ -144,7 +144,7 @@ impl Plugin for ShipPowerPlugin {
 /// resource for test harnesses that only insert the Resource form.
 pub fn power_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
-        Audience::Holding(Console::Power),
+        Audience::Holding(StationId("power".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {
             // Prefer per-entity component on the LocalShip; fall back to the
@@ -491,10 +491,10 @@ pub fn operate_power_ai(
     // have no human console holders, so they always run the AI branch when
     // their Power system is under AI control.
     let human_holds_player_power =
-        if let (Some(sessions), Some(ship_config)) = (&sessions, ship_comp_query.iter().next()) {
+        if let (Some(sessions), Some(_ship_config)) = (&sessions, ship_comp_query.iter().next()) {
             sessions
                 .0
-                .console_holder(&Console::Power, &ship_config.0)
+                .holder_for_station(&StationId("power".into()))
                 .is_some()
         } else {
             false
@@ -691,7 +691,10 @@ fn publish_power_blackboard(
         .collect();
 
     let bb = PowerBlackboard {
-        consoles: entries.clone(),
+        // Legacy `consoles` wire field: emptied by the publisher post issue
+        // #618. The struct field survives the wire (with `#[serde(default)]`
+        // for compat) until its removal in a later sub-PR.
+        consoles: Vec::new(),
         total: power.0.total(),
         total_max: 8,
         battery_charge: power.0.battery_charge,
@@ -908,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn no_power_console_holder_no_power_state_broadcast() {
+    fn no_power_station_holder_no_power_state_broadcast() {
         let mut app = test_app();
         start_game(&mut app);
 
@@ -918,7 +921,7 @@ mod tests {
             .any(|m| matches!(&m.msg, ServerMessage::PowerState { .. }));
         assert!(
             !any_power_state,
-            "no PowerState should be sent when no Power console holder exists"
+            "no PowerState should be sent when no Power station holder exists"
         );
     }
 
@@ -1088,19 +1091,19 @@ mod tests {
 
         let bb = power_blackboard(&mut app);
         assert!(
-            !bb.consoles.is_empty(),
-            "expected at least one power console entry"
+            !bb.groups.is_empty(),
+            "expected at least one power group entry"
         );
         assert!(
-            bb.consoles.iter().any(|e| e.label == "HELM"),
+            bb.groups.iter().any(|e| e.label == "HELM"),
             "expected HELM entry"
         );
         assert!(
-            bb.consoles.iter().any(|e| e.label == "WEAPONS"),
+            bb.groups.iter().any(|e| e.label == "WEAPONS"),
             "expected WEAPONS entry"
         );
         assert!(
-            bb.consoles.iter().any(|e| e.label == "SENSORS"),
+            bb.groups.iter().any(|e| e.label == "SENSORS"),
             "expected SENSORS entry"
         );
         assert!(bb.total > 0, "total should be > 0");
@@ -1118,7 +1121,7 @@ mod tests {
         tick(&mut app);
 
         let bb = power_blackboard(&mut app);
-        let helm_entry = bb.consoles.iter().find(|e| e.label == "HELM").unwrap();
+        let helm_entry = bb.groups.iter().find(|e| e.label == "HELM").unwrap();
         assert_eq!(
             helm_entry.level, 3,
             "helm level should be 3 after direct assignment"

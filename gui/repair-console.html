@@ -320,7 +320,9 @@
     /* ── Constants ─────────────────────────────────────────────── */
     var NAMES    = ['ALPHA', 'BETA', 'GAMMA', 'DELTA', 'EPSILON', 'ZETA'];
     var DEF_DUR  = 5.0;
-    var DEF_CONS = ['Helm', 'Tactical', 'Power', 'Shields'];
+    // Lowercase station ids post issue #618 — matches the `SystemId`-keyed
+    // wire fields `system_hull` / `damageable_systems` on RepairBlackboard.
+    var DEF_CONS = ['helm', 'tactical', 'power', 'shields'];
 
     /* ── Runtime state ─────────────────────────────────────────── */
     var _state     = null;
@@ -389,10 +391,14 @@
     /* ── Full render ────────────────────────────────────────────── */
     function _render(s) {
       var dur   = s.travel_duration_secs || DEF_DUR;
-      var hull  = s.console_hull || [];
+      // Post issue #618: prefer the SystemId-keyed side (`system_hull` /
+      // `damageable_systems`); fall back to the legacy Console-keyed
+      // fields for pre-#618 payloads still in flight.
+      var hull  = s.system_hull || s.console_hull || [];
       var teams = s.teams || [];
-      var tgts  = s.damageable_consoles ||
-        (hull.length ? hull.map(function(h) { return h.console; }) : DEF_CONS);
+      var tgts  = s.damageable_systems ||
+        s.damageable_consoles ||
+        (hull.length ? hull.map(function(h) { return h.system_id || h.console; }) : DEF_CONS);
 
       /* ─ Hull aggregate ─────────────────────────────────────── */
       var totC = 0, totM = 0;
@@ -589,7 +595,7 @@
       if (!_demoMode || !_demoState) return;
       var dur   = _demoState.travel_duration_secs;
       var teams = _demoState.teams.slice();
-      var hull  = _demoState.console_hull.map(function(h) { return Object.assign({}, h); });
+      var hull  = _demoState.system_hull.map(function(h) { return Object.assign({}, h); });
       var dirty = false;
 
       teams.forEach(function(slot, i) {
@@ -599,7 +605,7 @@
             teams[i] = { Repairing: { console: slot.Travelling.console } }; dirty = true;
           }
         } else if (slot.Repairing) {
-          var h = hull.find(function(x) { return x.console === slot.Repairing.console; });
+          var h = hull.find(function(x) { return x.system_id === slot.Repairing.console; });
           if (h) {
             h.current = Math.min(h.current + 0.28, h.max_hp);
             if (Math.round(h.current * 10) >= Math.round(h.max_hp * 10)) {
@@ -619,7 +625,7 @@
         }
       });
 
-      _demoState = Object.assign({}, _demoState, { teams: teams, console_hull: hull });
+      _demoState = Object.assign({}, _demoState, { teams: teams, system_hull: hull });
       _state = _demoState;
       /* Always re-render so hull bars animate smoothly during Repairing */
       _render(_state);
@@ -627,25 +633,27 @@
 
     function _initDemo() {
       _demoState = {
-        console_hull: [
-          { console: 'Helm',     current: 14.0, max_hp: 25.0 },
-          { console: 'Tactical', current: 25.0, max_hp: 25.0 },
-          { console: 'Power',    current:  6.0, max_hp: 25.0 },
-          { console: 'Shields',  current: 19.0, max_hp: 25.0 }
+        // Post issue #618 shape: SystemId-keyed hull entries. `.system_id`
+        // is a lowercase station id matching the wire `SystemHullStatus`.
+        system_hull: [
+          { system_id: 'helm',     current: 14.0, max_hp: 25.0 },
+          { system_id: 'tactical', current: 25.0, max_hp: 25.0 },
+          { system_id: 'power',    current:  6.0, max_hp: 25.0 },
+          { system_id: 'shields',  current: 19.0, max_hp: 25.0 }
         ],
         teams: [
-          { Travelling: { console: 'Power', elapsed: 1.4 } },
+          { Travelling: { console: 'power', elapsed: 1.4 } },
           'Idle'
         ],
         travel_duration_secs: 5.0,
-        damageable_consoles: ['Helm', 'Tactical', 'Power', 'Shields']
+        damageable_systems: ['helm', 'tactical', 'power', 'shields']
       };
       _apply(_demoState);
       setInterval(_demoTick, 400);
     }
 
     var sendAction = initConsole({
-      name: 'Repair',
+      name: 'repair',
       render: function(s) { _demoMode = false; _apply(s); }
     }).sendAction;
 

@@ -1,7 +1,10 @@
-// Issue #70 — Smoke test: Per-console hull integrity in SimState.
+// Issue #70 — Smoke test: Per-system hull integrity in SimState.
 //
 // SimSnapshot no longer carries a flat hull_integrity; it carries
-// console_hull: Vec<ConsoleHullStatus { console, current, max_hp }>.
+// system_hull: Vec<SystemHullStatus { system_id, display_name, current, max_hp, ... }>
+// broadcast via `SystemHullUpdate` (issue #618, renamed from
+// `ConsoleHullUpdate` when the publisher stopped emitting legacy
+// Console-keyed wire fields).
 
 import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
@@ -41,16 +44,17 @@ async function startGameWithEngineering(context: BrowserContext) {
   return { captain, engineer };
 }
 
-test('Engineering player receives ConsoleHullUpdate after game start', async ({ context }) => {
+test('Engineering player receives SystemHullUpdate after game start', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
-  const msg = await engineer.waitForMessage('ConsoleHullUpdate', 2_000) as any;
+  const msg = await engineer.waitForMessage('SystemHullUpdate', 2_000) as any;
   const hull = msg.data.entries;
 
   expect(Array.isArray(hull)).toBe(true);
   expect(hull.length).toBeGreaterThanOrEqual(1);
   for (const entry of hull) {
-    expect(typeof entry.console).toBe('string');
+    expect(typeof entry.system_id).toBe('string');
+    expect(typeof entry.display_name).toBe('string');
     expect(typeof entry.current).toBe('number');
     expect(typeof entry.max_hp).toBe('number');
     expect(entry.current).toBeGreaterThanOrEqual(0);
@@ -61,10 +65,10 @@ test('Engineering player receives ConsoleHullUpdate after game start', async ({ 
   await engineer.close();
 });
 
-test('total hull starts at 211 in first ConsoleHullUpdate', async ({ context }) => {
+test('total hull starts at 211 in first SystemHullUpdate', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
-  const msg = await engineer.waitForMessage('ConsoleHullUpdate', 2_000) as any;
+  const msg = await engineer.waitForMessage('SystemHullUpdate', 2_000) as any;
   const hull = msg.data.entries;
   const total = hull.reduce((sum: number, e: any) => sum + e.current, 0);
 

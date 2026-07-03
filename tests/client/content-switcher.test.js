@@ -8,35 +8,58 @@ import {
 } from '../../gui/content-switcher.js';
 
 describe('CONSOLE_SECTION map', () => {
-  it('keys all nine HTML-panel consoles', () => {
-    expect(Object.keys(CONSOLE_SECTION).sort())
-      .toEqual(['CaptainChair', 'Comms', 'Helm', 'Navigation', 'Power', 'Repair', 'Sensors', 'Shields', 'Tactical']);
+  it('keys all nine HTML-panel consoles by lowercase station id', () => {
+    // Post issue #618: `CONSOLE_SECTION` is dual-keyed — lowercase station
+    // ids (the primary keys, sourced from `REGISTRY`) and PascalCase Console
+    // enum aliases (retained so callers passing wire-field values from
+    // `player.consoles` still resolve). The lowercase side must expose all
+    // nine consoles.
+    const lowercase = ['captain', 'comms', 'helm', 'navigation', 'power', 'repair', 'sensors', 'shields', 'tactical'];
+    for (const id of lowercase) {
+      expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, id)).toBe(true);
+    }
   });
 
-  it('maps CaptainChair to captain-ui', () => {
+  it('exposes PascalCase Console-enum aliases for wire-field compatibility', () => {
+    const pascal = ['CaptainChair', 'Comms', 'Helm', 'Navigation', 'Power', 'Repair', 'Sensors', 'Shields', 'Tactical'];
+    for (const name of pascal) {
+      expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, name)).toBe(true);
+    }
+  });
+
+  it('maps captain to captain-ui (both cases)', () => {
+    expect(CONSOLE_SECTION.captain).toBe('captain-ui');
     expect(CONSOLE_SECTION.CaptainChair).toBe('captain-ui');
   });
 
-  it('maps Helm to helm-ui', () => {
+  it('maps helm to helm-ui (both cases)', () => {
+    expect(CONSOLE_SECTION.helm).toBe('helm-ui');
     expect(CONSOLE_SECTION.Helm).toBe('helm-ui');
   });
 
-  it('maps Tactical to weapons-ui', () => {
+  it('maps tactical to weapons-ui (both cases)', () => {
+    expect(CONSOLE_SECTION.tactical).toBe('weapons-ui');
     expect(CONSOLE_SECTION.Tactical).toBe('weapons-ui');
   });
 
-  it('maps Repair to repair-ui', () => {
+  it('maps repair to repair-ui (both cases)', () => {
+    expect(CONSOLE_SECTION.repair).toBe('repair-ui');
     expect(CONSOLE_SECTION.Repair).toBe('repair-ui');
   });
 
-  it('maps Power to power-ui', () => {
+  it('maps power to power-ui (both cases)', () => {
+    expect(CONSOLE_SECTION.power).toBe('power-ui');
     expect(CONSOLE_SECTION.Power).toBe('power-ui');
   });
 
-  it('maps Sensors, Shields, Comms, and Navigation', () => {
+  it('maps sensors, shields, comms, and navigation (both cases)', () => {
+    expect(CONSOLE_SECTION.sensors).toBe('sensors-ui');
     expect(CONSOLE_SECTION.Sensors).toBe('sensors-ui');
+    expect(CONSOLE_SECTION.shields).toBe('shields-ui');
     expect(CONSOLE_SECTION.Shields).toBe('shields-ui');
+    expect(CONSOLE_SECTION.comms).toBe('comms-ui');
     expect(CONSOLE_SECTION.Comms).toBe('comms-ui');
+    expect(CONSOLE_SECTION.navigation).toBe('navigation-ui');
     expect(CONSOLE_SECTION.Navigation).toBe('navigation-ui');
   });
 

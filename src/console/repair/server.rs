@@ -4,8 +4,8 @@ use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::ModifierSlot;
 use crate::messages::{
-    AdmittedCommands, ClientMessage, Console, ConsoleHullStatus, RepairBlackboard, RepairTarget,
-    ServerMessage, SystemBlackboard, SystemControlPayload, SystemHullStatus, SystemId, TeamSlot,
+    AdmittedCommands, ClientMessage, Console, RepairBlackboard, RepairTarget, ServerMessage,
+    StationId, SystemBlackboard, SystemControlPayload, SystemHullStatus, SystemId, TeamSlot,
 };
 use crate::modifiers::ShipModifiers;
 use crate::repair_teams::RepairTeams;
@@ -52,7 +52,7 @@ impl Plugin for RepairPlugin {
 /// on the LocalShip entity, falling back to the global Resource for tests.
 pub fn repair_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
-        Audience::Holding(Console::Repair),
+        Audience::Holding(StationId("repair".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {
             let mut q =
@@ -108,7 +108,7 @@ pub fn handle_dispatch_repair_team(
     >,
     teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Some((admitted, ship_config, control_sources, mut teams_comp, hull_opt)) =
+    let Some((admitted, _ship_config, control_sources, mut teams_comp, hull_opt)) =
         ship_query.iter_mut().next()
     else {
         return;
@@ -162,7 +162,7 @@ pub fn handle_dispatch_repair_team(
     let policy = control_sources.0.policy_for(&repair_system_id());
     if !policy.accept_human_input {
         for _ in reader.read() {}
-    } else if let Some(repair_token) = sessions.0.console_holder(&Console::Repair, &ship_config.0) {
+    } else if let Some(repair_token) = sessions.0.holder_for_station(&StationId("repair".into())) {
         for ev in reader.read() {
             let ClientMessage::DispatchRepairTeam { team_idx, console } = &ev.msg else {
                 continue;
@@ -334,28 +334,16 @@ fn publish_repair_blackboard(
         .map(|s| s.system_id.clone())
         .collect();
 
-    // Legacy `console_hull` derived from the SystemId-keyed side by mapping
-    // each SystemId back to a Console variant when possible.
-    let console_hull: Vec<ConsoleHullStatus> = system_hull
-        .iter()
-        .filter_map(|s| {
-            Console::from_console_id(s.system_id.0.as_str()).map(|c| ConsoleHullStatus {
-                console: c,
-                current: s.current,
-                max_hp: s.max_hp,
-                tier: s.tier,
-                debuff_magnitude: s.debuff_magnitude,
-            })
-        })
-        .collect();
-
-    let damageable_consoles: Vec<Console> = console_hull.iter().map(|c| c.console.clone()).collect();
-
+    // Legacy `console_hull` / `damageable_consoles` wire fields: emptied by
+    // the publisher post issue #618. Downstream clients read the SystemId-keyed
+    // side (`system_hull` + `damageable_systems`). The struct fields survive
+    // on the wire (with `#[serde(default)]` for compat) until removal in a
+    // later sub-PR.
     let bb = RepairBlackboard {
         teams: team_slots,
-        console_hull,
+        console_hull: Vec::new(),
         travel_duration_secs: teams.0.timings().travel_duration,
-        damageable_consoles,
+        damageable_consoles: Vec::new(),
         system_hull,
         damageable_systems,
     };
@@ -945,7 +933,7 @@ mod tests {
 
         let bb = repair_bb(&mut app);
         assert!(!bb.teams.is_empty(), "expected at least one team slot");
-        assert!(!bb.console_hull.is_empty(), "expected console_hull entries");
+        assert!(!bb.system_hull.is_empty(), "expected system_hull entries");
         assert!(
             bb.travel_duration_secs > 0.0,
             "expected positive travel duration"
@@ -974,23 +962,23 @@ mod tests {
     }
 
     #[test]
-    fn publish_repair_blackboard_contains_damageable_consoles() {
+    fn publish_repair_blackboard_contains_damageable_systems() {
         let mut app = test_app();
         start_game(&mut app);
         tick(&mut app);
 
         let bb = repair_bb(&mut app);
         assert!(
-            !bb.damageable_consoles.is_empty(),
-            "expected damageable_consoles"
+            !bb.damageable_systems.is_empty(),
+            "expected damageable_systems"
         );
         assert!(
-            bb.damageable_consoles.contains(&Console::Helm),
-            "Helm should appear in damageable_consoles"
+            bb.damageable_systems.contains(&SystemId("helm".into())),
+            "Helm should appear in damageable_systems"
         );
         assert!(
-            bb.damageable_consoles.contains(&Console::Core),
-            "Core should appear in damageable_consoles"
+            bb.damageable_systems.contains(&SystemId("core".into())),
+            "Core should appear in damageable_systems"
         );
     }
 

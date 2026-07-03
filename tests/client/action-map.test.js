@@ -257,10 +257,34 @@ describe('set_radar_view', () => {
 });
 
 describe('dispatch_repair_team', () => {
-  it('calls send DispatchRepairTeam with team_idx and console', () => {
+  it('sends ControlSystem envelope for a Station target (post issue #618)', () => {
     const send = mkSend();
-    ACTION_MAP.dispatch_repair_team({ action: 'dispatch_repair_team', team_idx: 0, target: 'Helm' }, send);
-    expect(send).toHaveBeenCalledWith('DispatchRepairTeam', { team_idx: 0, console: 'Helm' });
+    ACTION_MAP.dispatch_repair_team(
+      { action: 'dispatch_repair_team', team_idx: 0, target: 'helm' },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'repair',
+      payload: {
+        type: 'DispatchRepairTeam',
+        data: { team_idx: 0, target: { type: 'Station', data: 'helm' } },
+      },
+    });
+  });
+
+  it('sends ControlSystem envelope for the Core bucket', () => {
+    const send = mkSend();
+    ACTION_MAP.dispatch_repair_team(
+      { action: 'dispatch_repair_team', team_idx: 1, target: 'core' },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'repair',
+      payload: {
+        type: 'DispatchRepairTeam',
+        data: { team_idx: 1, target: { type: 'Core' } },
+      },
+    });
   });
 });
 

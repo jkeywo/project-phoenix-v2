@@ -261,7 +261,10 @@ describe('tabBarLayout — compactActive mode', () => {
   });
 
   it('preserves hullPct on the single compact button', () => {
-    const hull = [{ console: 'Helm', current: 40, max_hp: 100 }];
+    // Post issue #618: hull entries carry `.system_id` (lowercase station id),
+    // and tabBarLayout translates the PascalCase console names in `consoles`
+    // via CONSOLE_TO_STATION_ID before looking up the hull entry.
+    const hull = [{ system_id: 'helm', current: 40, max_hp: 100 }];
     const out = tabBarLayout(['CaptainChair', 'Helm', 'Tactical'], 'Helm', 'portrait', true, hull, true);
     expect(out.buttons).toHaveLength(1);
     expect(out.buttons[0].hullPct).toBe(40);

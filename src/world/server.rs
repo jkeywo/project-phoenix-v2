@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::comms_inbox::CommsInbox;
 use crate::lobby::{Sessions, Target, WorldResource};
-use crate::messages::{CommsContact, CommsMessage, Console, GamePhase, ServerMessage, ViewMode};
+use crate::messages::{CommsContact, CommsMessage, GamePhase, ServerMessage, StationId, ViewMode};
 use crate::objectives::ObjectiveManager;
 use crate::simulation::SimOutbox;
 use crate::world::content::{
@@ -1950,7 +1950,7 @@ fn update_comms_range_flags(
 /// or `WorldContentRuntime::needs_broadcast` is set.
 fn broadcast_comms_state(
     sessions: Res<Sessions>,
-    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::LocalShip>>,
+    ship_query: Query<(), With<crate::simulation::LocalShip>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
@@ -1961,10 +1961,10 @@ fn broadcast_comms_state(
         return;
     }
 
-    let Some(ship_config) = ship_query.iter().next() else {
+    let Some(()) = ship_query.iter().next() else {
         return;
     };
-    let Some(comms_token) = sessions.0.console_holder(&Console::Comms, &ship_config.0) else {
+    let Some(comms_token) = sessions.0.holder_for_station(&StationId("comms".into())) else {
         inbox.0.mark_clean();
         runtime.needs_broadcast = false;
         return;

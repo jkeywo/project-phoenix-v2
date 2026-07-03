@@ -5,7 +5,7 @@ use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::lobby::{InboundMessage, LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
-    SystemControlPayload,
+    StationId, SystemControlPayload,
 };
 use crate::shield::ShieldSystem;
 use rand::SeedableRng as _;
@@ -181,10 +181,14 @@ pub struct LastBroadcastEntityHealth(
     pub std::collections::HashMap<String, (Option<f32>, Option<f32>)>,
 );
 
-/// Last-broadcast per-console hull state. When the hull changes, a
-/// `ConsoleHullUpdate` event message is emitted and this cache is updated.
+/// Last-broadcast per-system hull state. When the hull changes, a
+/// `SystemHullUpdate` event message is emitted and this cache is updated.
+///
+/// Renamed from a `ConsoleHullStatus`-inner cache in issue #618; the wire
+/// message flipped from `ConsoleHullUpdate` to `SystemHullUpdate` in the
+/// same PR (publishers no longer emit legacy Console-keyed wire fields).
 #[derive(Resource, Default)]
-pub struct LastBroadcastHull(pub Vec<crate::messages::ConsoleHullStatus>);
+pub struct LastBroadcastHull(pub Vec<crate::messages::SystemHullStatus>);
 
 /// Last-broadcast shield facings. Used to suppress the per-tick `ShieldStatus`
 /// broadcast to all players when nothing has changed.
@@ -573,23 +577,25 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 
         let entity_states: Vec<_> = asteroid_states.into_iter().chain(npc_states).collect();
 
-        // ── Emit ConsoleHullUpdate only when hull HP changed.
+        // ── Emit SystemHullUpdate only when hull HP changed.
+        //
+        // Post issue #618: publisher no longer emits legacy Console-keyed
+        // `ConsoleHullUpdate` wire messages. `SystemHullStatus` carries the
+        // authoritative `SystemId`, human-readable display_name, and tier for
+        // every damageable system on the ship.
         {
-            let hull_current: Vec<crate::messages::ConsoleHullStatus> = world
+            let hull_current: Vec<crate::messages::SystemHullStatus> = world
                 .query_filtered::<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>()
                 .single(world)
                 .map(|h| {
                     h.0.iter()
-                        .filter_map(|(sid, entry)| {
-                            crate::messages::Console::from_console_id(sid.0.as_str()).map(|c| {
-                                crate::messages::ConsoleHullStatus {
-                                    console: c,
-                                    current: entry.current,
-                                    max_hp: entry.max,
-                                    tier: h.0.tier_for(sid),
-                                    debuff_magnitude: h.0.debuff_magnitude_for(sid),
-                                }
-                            })
+                        .map(|(sid, entry)| crate::messages::SystemHullStatus {
+                            system_id: sid.clone(),
+                            display_name: entry.display_name.clone(),
+                            current: entry.current,
+                            max_hp: entry.max,
+                            tier: h.0.tier_for(sid),
+                            debuff_magnitude: h.0.debuff_magnitude_for(sid),
                         })
                         .collect::<Vec<_>>()
                 })
@@ -601,7 +607,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 world
                     .resource_mut::<SimOutbox>()
                     .0
-                    .push((Target::All, ServerMessage::ConsoleHullUpdate { entries }));
+                    .push((Target::All, ServerMessage::SystemHullUpdate { entries }));
             }
         }
 
@@ -761,10 +767,10 @@ fn publish_viewscreen_blackboard(
 fn handle_set_sensors_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    ship_query: Query<&crate::ship_plugin::ShipConfigComponent, With<LocalShip>>,
+    ship_query: Query<(), With<LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    let Some(ship_config) = ship_query.iter().next() else {
+    let Some(()) = ship_query.iter().next() else {
         return;
     };
     for ev in reader.read() {
@@ -779,14 +785,14 @@ fn handle_set_sensors_target(
         };
 
         // Only the Sensors console holder may broadcast a target suggestion.
-        if sessions.0.console_holder(&Console::Sensors, &ship_config.0) != Some(ev.token.as_str()) {
+        if sessions.0.holder_for_station(&StationId("sensors".into())) != Some(ev.token.as_str()) {
             continue;
         }
 
         // Only broadcast if there is a Tactical console player to receive it.
         let Some(tactical_token) = sessions
             .0
-            .console_holder(&Console::Tactical, &ship_config.0)
+            .holder_for_station(&StationId("tactical".into()))
         else {
             continue;
         };
@@ -1069,10 +1075,10 @@ fn broadcast_shield_status(
     mut timer: ResMut<SimBroadcastTimer>,
     mut outbox: ResMut<SimOutbox>,
     sessions: Res<Sessions>,
-    ship_query: Query<(&ShipShields, &crate::ship_plugin::ShipConfigComponent), With<LocalShip>>,
+    ship_query: Query<&ShipShields, With<LocalShip>>,
     mut last: ResMut<LastBroadcastShields>,
 ) {
-    let Some((shields, ship_config)) = ship_query.iter().next() else {
+    let Some(shields) = ship_query.iter().next() else {
         return;
     };
     if !timer.0.tick(time.delta()).just_finished() {
@@ -1101,7 +1107,7 @@ fn broadcast_shield_status(
         outbox
             .0
             .push((Target::All, ServerMessage::ShieldStatus { facings }));
-    } else if let Some(token) = sessions.0.console_holder(&Console::Shields, &ship_config.0) {
+    } else if let Some(token) = sessions.0.holder_for_station(&StationId("shields".into())) {
         // Nothing changed but the Shields holder still gets a periodic refresh
         // so regenerating HP stays smooth on their panel.
         outbox.0.push((
@@ -1221,7 +1227,6 @@ fn admit_system_commands(
     mut ship_query: Query<
         (
             Entity,
-            &crate::ship_plugin::ShipConfigComponent,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut crate::messages::AdmittedCommands,
         ),
@@ -1230,7 +1235,7 @@ fn admit_system_commands(
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
 ) {
-    let Some((ship_entity, ship_config, control_sources, mut admitted)) =
+    let Some((ship_entity, control_sources, mut admitted)) =
         ship_query.iter_mut().next()
     else {
         return;
@@ -1261,7 +1266,6 @@ fn admit_system_commands(
             payload,
             control_sources,
             &sessions,
-            ship_config,
         ) {
             admitted.0.push(crate::messages::AdmittedCommand {
                 target: target.clone(),
@@ -1279,16 +1283,25 @@ fn admit_system_commands(
     }
 }
 
-/// Returns the `Console` that controls `target`, used for seat-holder checks.
-fn console_for_system(target: &crate::messages::SystemId) -> Option<Console> {
+/// Maps a `SystemId` to the `StationId` whose holder is authoritative for
+/// that system's admission. Returns `None` for systems with no owning
+/// station (either ship-wide or unknown), signalling a conservative allow
+/// at the caller.
+///
+/// After issue #618 the mapping targets lowercase `StationId` strings
+/// directly (e.g. `helm-engine-port` → `StationId("helm")`). The pass-through
+/// via `Console::station_console_id` keeps the source of truth for the
+/// `SystemId → station` mapping colocated with the `Console` enum until the
+/// enum is fully retired.
+fn station_for_system(target: &crate::messages::SystemId) -> Option<StationId> {
     use crate::system_registry::*;
     // Fine-grained shield arcs (issue #514) — variable count, matched by prefix.
     // Keep the coarse `SHIELDS_SYSTEM_ID` arm below as a legacy fallback for
     // the aggregate blackboard string.
     if target.0.starts_with("shield-arc-") {
-        return Some(Console::Shields);
+        return Some(StationId("shields".into()));
     }
-    match target.0.as_str() {
+    let console = match target.0.as_str() {
         CAPTAIN_SYSTEM_ID | RED_ALERT_SYSTEM_ID => Some(Console::CaptainChair),
         HELM_SYSTEM_ID
         | HELM_JOYSTICK_SYSTEM_ID
@@ -1310,7 +1323,8 @@ fn console_for_system(target: &crate::messages::SystemId) -> Option<Console> {
         COMMS_SYSTEM_ID => Some(Console::Comms),
         REPAIR_SYSTEM_ID => Some(Console::Repair),
         _ => None,
-    }
+    };
+    console.map(|c| StationId(c.station_console_id().to_string()))
 }
 
 fn is_command_authorized(
@@ -1319,7 +1333,6 @@ fn is_command_authorized(
     payload: &SystemControlPayload,
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
-    ship_config: &crate::ship_plugin::ShipConfigComponent,
 ) -> bool {
     // Viewscreen SetView: authority derives from the view mode's source system.
     let effective_target = if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID {
@@ -1344,9 +1357,9 @@ fn is_command_authorized(
         return false;
     }
 
-    // Human network token: must hold the console for the target system.
-    match console_for_system(&effective_target) {
-        Some(console) => sessions.0.console_holder(&console, &ship_config.0) == Some(token),
+    // Human network token: must hold the station for the target system.
+    match station_for_system(&effective_target) {
+        Some(station) => sessions.0.holder_for_station(&station) == Some(token),
         None => true, // Unknown system: conservative allow.
     }
 }
@@ -3725,11 +3738,11 @@ mod tests {
     }
 
     #[test]
-    fn hull_integrity_starts_at_100_and_appears_in_console_hull_update() {
+    fn hull_integrity_starts_at_100_and_appears_in_system_hull_update() {
         let mut app = test_app();
         start_game(&mut app);
         // The first InProgress tick (inside start_game) already emitted and consumed
-        // the initial ConsoleHullUpdate. Reset the cache to force re-emission.
+        // the initial SystemHullUpdate. Reset the cache to force re-emission.
         app.world_mut()
             .resource_mut::<LastBroadcastHull>()
             .0
@@ -3738,10 +3751,10 @@ mod tests {
         let entries = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::ConsoleHullUpdate { entries } => Some(entries.clone()),
+                ServerMessage::SystemHullUpdate { entries } => Some(entries.clone()),
                 _ => None,
             })
-            .expect("expected a ConsoleHullUpdate broadcast");
+            .expect("expected a SystemHullUpdate broadcast");
         let total: f32 = entries.iter().map(|c| c.current).sum();
         assert!((total - 100.0).abs() < 1e-6);
     }
@@ -3750,7 +3763,7 @@ mod tests {
     fn direct_damage_reduces_hull_integrity_in_broadcast() {
         let mut app = test_app();
         start_game(&mut app);
-        // Consume the initial ConsoleHullUpdate so LastBroadcastHull is seeded.
+        // Consume the initial SystemHullUpdate so LastBroadcastHull is seeded.
         let _ = tick(&mut app);
 
         // Directly apply damage to the EntitySystemHull component (simulates collision at ~half speed).
@@ -3760,10 +3773,10 @@ mod tests {
         let entries = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::ConsoleHullUpdate { entries } => Some(entries.clone()),
+                ServerMessage::SystemHullUpdate { entries } => Some(entries.clone()),
                 _ => None,
             })
-            .expect("expected a ConsoleHullUpdate after damage");
+            .expect("expected a SystemHullUpdate after damage");
         let total: f32 = entries.iter().map(|c| c.current).sum();
         assert!((total - 90.0).abs() < 1e-6);
     }
@@ -5312,10 +5325,10 @@ mod tests {
         let entries = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::ConsoleHullUpdate { entries } => Some(entries.clone()),
+                ServerMessage::SystemHullUpdate { entries } => Some(entries.clone()),
                 _ => None,
             })
-            .expect("expected ConsoleHullUpdate");
+            .expect("expected SystemHullUpdate");
         let total: f32 = entries.iter().map(|c| c.current).sum();
         assert!(
             near(total, 50.0),
@@ -5683,9 +5696,9 @@ mod tests {
     }
 
     #[test]
-    fn no_power_console_holder_no_power_state_broadcast() {
+    fn no_power_station_holder_no_power_state_broadcast() {
         let mut app = test_app();
-        // Only captain, no power console holder.
+        // Only captain, no power station holder.
         start_game(&mut app);
 
         let out = tick(&mut app);
@@ -5694,7 +5707,7 @@ mod tests {
             .any(|m| matches!(&m.msg, ServerMessage::PowerState { .. }));
         assert!(
             !any_power_state,
-            "no PowerState should be sent when no Power console holder exists"
+            "no PowerState should be sent when no Power station holder exists"
         );
     }
 

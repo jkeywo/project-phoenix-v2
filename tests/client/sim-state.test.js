@@ -64,10 +64,13 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.world.entities[0].hull_fraction).toBe(0.5);
   });
 
-  it('ConsoleHullUpdate replaces consoleHull', () => {
+  it('SystemHullUpdate replaces consoleHull with SystemId-keyed entries', () => {
+    // Post issue #618: publisher emits `SystemHullUpdate` not
+    // `ConsoleHullUpdate`; entries carry `.system_id` (lowercase station id)
+    // and `.display_name` instead of `.console` (PascalCase Console name).
     const s = new ClientSimState();
-    const entries = [{ console: 'Helm', current: 50, max_hp: 100 }];
-    s.apply({ type: 'ConsoleHullUpdate', data: { entries } });
+    const entries = [{ system_id: 'helm', display_name: 'Helm', current: 50, max_hp: 100 }];
+    s.apply({ type: 'SystemHullUpdate', data: { entries } });
     expect(s.consoleHull).toEqual(entries);
   });
 

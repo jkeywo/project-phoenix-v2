@@ -29,7 +29,7 @@ pub struct Player {
 }
 ```
 
-The former per-player console list has been retired. Console access is derived from `Player.station` plus the loaded `ShipConfig`: the station owns one console id, and `SessionManager::console_holder` / `player_has_console` resolve that id through the ship config.
+The former per-player console list has been retired. Console access is derived from `Player.station` plus the loaded `ShipConfig`: the station owns one console id, and `SessionManager::holder_for_station(&StationId)` (issue #618, replacing `console_holder` / `player_has_console` / `station_has_console` / `available_consoles`) resolves the current holder directly by station id. `Sessions::available_stations(&ShipConfig)` returns the unclaimed station ids in ship-config declaration order.
 
 ## Lifecycle
 

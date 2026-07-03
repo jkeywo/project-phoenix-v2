@@ -11,10 +11,21 @@
  * as `window.lobbyState` (singleton) for the inline script in client.html.
  */
 
-/** All consoles the lobby UI knows how to render, in display order. */
-export const ALL_CONSOLES = Object.freeze([
-  'CaptainChair', 'Helm', 'Tactical', 'Repair', 'Sensors',
-  'Shields', 'Navigation', 'Power', 'Comms',
+/** All ship stations the lobby UI knows how to render, in display order.
+ *
+ * Lowercase station ids (issue #618). Kept intentionally consistent with the
+ * server-side `StationId` newtype; the JS layer is migrating away from the
+ * PascalCase Console enum names it used pre-#618.
+ *
+ * NOTE: the `.isX(myToken)` helpers below still read the wire field
+ * `player.consoles` which currently carries PascalCase `Console` enum names
+ * from `ServerMessage::StationAssigned`. That wire shape is retained pending
+ * issue #619 (which deletes the field entirely). Do NOT change the
+ * `.includes('Helm')` comparisons until #619.
+ */
+export const ALL_STATIONS = Object.freeze([
+  'captain', 'helm', 'tactical', 'repair', 'sensors',
+  'shields', 'navigation', 'power', 'comms',
 ]);
 
 /**

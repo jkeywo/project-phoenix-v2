@@ -1009,7 +1009,7 @@ fn tick_boost(
     impulse_q: Query<&ShipImpulse, With<LocalShip>>,
     ship_components: Query<(&ShipConfigComponent, &ShipSystemControlSources), With<LocalShip>>,
 ) {
-    let Some((ship_config, control_sources)) = ship_components.iter().next() else {
+    let Some((_ship_config, control_sources)) = ship_components.iter().next() else {
         return;
     };
     // Per-entity component takes priority over the Resource fallback.
@@ -1027,7 +1027,7 @@ fn tick_boost(
     let policy = helm_control_policy(&control_sources);
     let has_helm = sessions
         .0
-        .console_holder(&crate::messages::Console::Helm, &ship_config.0)
+        .holder_for_station(&crate::messages::StationId("helm".into()))
         .is_some()
         || policy.operate_ai;
     let impulse_active = impulse_q
@@ -1244,17 +1244,11 @@ pub fn process_coordination_lag(
                     let station_opt = system.and_then(|s| s.station.as_ref());
 
                     if let Some(station_id) = station_opt {
-                        if let Some(station) = ship_config.0.station(station_id) {
-                            let console_id = &station.console;
-                            let token: Option<String> = crate::messages::Console::from_console_id(
-                                console_id,
-                            )
-                            .and_then(|console| {
-                                sessions
-                                    .0
-                                    .console_holder(&console, &ship_config.0)
-                                    .map(|t| t.to_string())
-                            });
+                        if ship_config.0.station(station_id).is_some() {
+                            let token: Option<String> = sessions
+                                .0
+                                .holder_for_station(station_id)
+                                .map(|t| t.to_string());
 
                             if let Some(token) = token {
                                 outbox.0.push((

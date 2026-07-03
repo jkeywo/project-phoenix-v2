@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    AdmittedCommands, Console, CoordinationPayload, ShieldArcBlackboard, ShieldFacingStatus,
-    ShieldsBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
+    AdmittedCommands, CoordinationPayload, ShieldArcBlackboard, ShieldFacingStatus,
+    ShieldsBlackboard, StationId, SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -109,7 +109,7 @@ pub fn tick_shields(
 
 pub fn shields_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
-        Audience::Holding(Console::Shields),
+        Audience::Holding(StationId("shields".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {
             let Ok(shields) = world

@@ -2,9 +2,9 @@
 //
 // Maps the currently-active console to which HTML <section> should be
 // visible. All nine consoles have HTML sections in client.html
-// (CaptainChair -> #captain-ui, Helm -> #helm-ui, Tactical -> #weapons-ui,
-// Repair -> #repair-ui, Power -> #power-ui, Shields -> #shields-ui,
-// Sensors -> #sensors-ui, Navigation -> #navigation-ui, Comms -> #comms-ui).
+// (captain -> #captain-ui, helm -> #helm-ui, tactical -> #weapons-ui,
+// repair -> #repair-ui, power -> #power-ui, shields -> #shields-ui,
+// sensors -> #sensors-ui, navigation -> #navigation-ui, comms -> #comms-ui).
 //
 // This module exports a pure function `consoleSections(activeConsole, inGame)`
 // returning a visibility map keyed by section id. The inline `<script>` in
@@ -18,9 +18,31 @@ import { REGISTRY } from './console-registry.js';
 
 // Console name -> HTML section id. Derived from REGISTRY so there is a single
 // source of truth for all HTML-panel consoles.
-export const CONSOLE_SECTION = Object.freeze(
-  Object.fromEntries(Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId]))
+//
+// Two-key map: the primary keys are the lowercase station ids (post issue
+// #618, matching REGISTRY). Extra PascalCase Console-enum aliases are added
+// so callers that still pass PascalCase names — chiefly
+// `sectionForConsole(activeConsole)` where `activeConsole` comes from
+// `player.consoles` (a PascalCase wire field retained pending issue #619) —
+// resolve to the same section id without any per-caller translation.
+const _LOWERCASE_SECTION = Object.fromEntries(
+  Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId])
 );
+const _PASCAL_TO_STATION = Object.freeze({
+  CaptainChair: 'captain',
+  Helm: 'helm',
+  Tactical: 'tactical',
+  Repair: 'repair',
+  Sensors: 'sensors',
+  Shields: 'shields',
+  Navigation: 'navigation',
+  Power: 'power',
+  Comms: 'comms',
+});
+const _PASCAL_SECTION = Object.fromEntries(
+  Object.entries(_PASCAL_TO_STATION).map(([pascal, station]) => [pascal, _LOWERCASE_SECTION[station]])
+);
+export const CONSOLE_SECTION = Object.freeze({ ..._LOWERCASE_SECTION, ..._PASCAL_SECTION });
 
 // Set of all known section ids that the switcher will reset.
 export const HTML_SECTION_IDS = Object.freeze(

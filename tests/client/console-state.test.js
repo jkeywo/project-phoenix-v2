@@ -565,24 +565,29 @@ describe('buildRepairConsoleState', () => {
     expect(parse(buildRepairConsoleState({ repairTeams: teams })).teams).toEqual(teams);
   });
 
-  it('damageable_consoles derives from consoleHull', () => {
+  it('damageable_systems derives from consoleHull (SystemId-keyed post issue #618)', () => {
+    // Post issue #618 hull entries carry `.system_id` (lowercase station id);
+    // the derived `damageable_systems` field replaces the legacy
+    // `damageable_consoles` Console-keyed field on the wire.
     const hull = [
-      { console: 'Helm',     current: 14, max_hp: 25 },
-      { console: 'Tactical', current: 25, max_hp: 25 },
-      { console: 'Power',    current:  6, max_hp: 25 },
+      { system_id: 'helm',     current: 14, max_hp: 25 },
+      { system_id: 'tactical', current: 25, max_hp: 25 },
+      { system_id: 'power',    current:  6, max_hp: 25 },
     ];
     const s = parse(buildRepairConsoleState({ consoleHull: hull }));
-    expect(s.damageable_consoles).toEqual(['Helm', 'Tactical', 'Power']);
+    expect(s.damageable_systems).toEqual(['helm', 'tactical', 'power']);
+    // Legacy Console-keyed field is emitted empty by the fallback.
+    expect(s.damageable_consoles).toEqual([]);
   });
 
-  it('damageable_consoles is empty when consoleHull is empty', () => {
+  it('damageable_systems is empty when consoleHull is empty', () => {
     const s = parse(buildRepairConsoleState({ consoleHull: [] }));
-    expect(s.damageable_consoles).toEqual([]);
+    expect(s.damageable_systems).toEqual([]);
   });
 
-  it('damageable_consoles is empty when consoleHull is absent', () => {
+  it('damageable_systems is empty when consoleHull is absent', () => {
     const s = parse(buildRepairConsoleState({}));
-    expect(s.damageable_consoles).toEqual([]);
+    expect(s.damageable_systems).toEqual([]);
   });
 });
 
@@ -609,6 +614,44 @@ describe('buildPowerConsoleState', () => {
     expect(s.sensors).toBe(1);
     expect(s.battery_charge).toBe(50);
     expect(s.locked).toBe(true);
+  });
+
+  it('prefers blackboard groups (post issue #618)', () => {
+    const s = parse(buildPowerConsoleState({
+      blackboards: {
+        power: {
+          groups: [
+            { id: 'helm',    label: 'HELM',    level: 3, max_level: 4 },
+            { id: 'weapons', label: 'WEAPONS', level: 1, max_level: 4 },
+          ],
+          consoles: [],
+          total: 4, total_max: 8, battery_charge: 25, battery_max: 100, locked: false,
+        },
+      },
+    }));
+    expect(s.consoles).toEqual([
+      { id: 'helm',    label: 'HELM',    level: 3, max_level: 4 },
+      { id: 'weapons', label: 'WEAPONS', level: 1, max_level: 4 },
+    ]);
+    expect(s.total).toBe(4);
+    expect(s.battery_charge).toBe(25);
+  });
+
+  it('falls back to legacy blackboard consoles when groups is empty', () => {
+    const s = parse(buildPowerConsoleState({
+      blackboards: {
+        power: {
+          groups: [],
+          consoles: [
+            { id: 'helm', label: 'HELM', level: 2, max_level: 4 },
+          ],
+          total: 2, total_max: 8, battery_charge: 0, battery_max: 100, locked: false,
+        },
+      },
+    }));
+    expect(s.consoles).toEqual([
+      { id: 'helm', label: 'HELM', level: 2, max_level: 4 },
+    ]);
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  LobbyState, lobbyState, reconcileActiveConsole, consolesOf, ALL_CONSOLES,
+  LobbyState, lobbyState, reconcileActiveConsole, consolesOf, ALL_STATIONS,
 } from '../../gui/lobby-state.js';
 
 function p(token, name, consoles) {
@@ -38,10 +38,10 @@ describe('LobbyState defaults', () => {
     expect(s.gameOverReason).toBeNull();
   });
 
-  it('exports a singleton and the canonical console list', () => {
+  it('exports a singleton and the canonical station list', () => {
     expect(lobbyState).toBeInstanceOf(LobbyState);
-    expect(ALL_CONSOLES).toHaveLength(9);
-    expect(ALL_CONSOLES[0]).toBe('CaptainChair');
+    expect(ALL_STATIONS).toHaveLength(9);
+    expect(ALL_STATIONS[0]).toBe('captain');
   });
 });
 

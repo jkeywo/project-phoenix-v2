@@ -33,15 +33,15 @@ Both plugins expose a builder-style `register()` method and implement `bevy::Plu
 ```rust
 pub enum Audience {
     All,                              // → Target::All
-    Holding(Console),                 // → Target::Token(holder) or None if vacant
+    Holding(StationId),               // → Target::Token(holder) or None if vacant
     Token(String),                    // → Target::Token(specific_player)
     AllExcept(String),                // → Target::AllExcept(specific_player)
 }
 ```
 
 - `All` — broadcast to every connected player. Used for `SimState`, `ModifierAdded`/`Removed`.
-- `Holding(Console::Power)` — target the current holder of a specific console. Returns `None` (skip) when the console is vacant. Used for per-console state pushes (`PowerState`, `WeaponsUpdate`, `RepairState`).
-- `Token(...)` — direct a message to one specific player regardless of console assignment.
+- `Holding(StationId("power".into()))` — target the current holder of a specific station. Returns `None` (skip) when the station is vacant. Used for per-station state pushes (`PowerState`, `WeaponsUpdate`, `RepairState`). Post issue #618 the variant carries a lowercase `StationId` directly (previously `Console`); `resolve()` calls `Sessions::holder_for_station(&StationId)` and no longer needs `ShipConfig`.
+- `Token(...)` — direct a message to one specific player regardless of station assignment.
 - `AllExcept(...)` — broadcast to everyone except one player (e.g. for `PlayerJoined` or `PlayerLeft`).
 
 ### Cadence (`src/core/broadcast/cadence.rs:3`)
@@ -69,7 +69,7 @@ A producer is registered by chaining `.register(audience, cadence, producer)` on
 ```rust
 pub fn power_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
-        Audience::Holding(Console::Power),
+        Audience::Holding(StationId("power".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {
             let power = world.resource::<ShipPowerSystem>();
@@ -100,10 +100,10 @@ All `ServerMessage` broadcasts are listed below. **Every** `OutboundMessage` wri
 
 | Producer | Message(s) | Audience | Cadence | Registered in |
 |---|---|---|---|---|
-| `power_state_broadcaster` | `PowerState` | `Holding(Console::Power)` | `Hz(10.0)` | `src/simulation.rs:384` |
-| `weapons_update_broadcaster` | `WeaponsUpdate` | `Holding(Console::Tactical)` | `Hz(10.0)` | `src/simulation.rs:405` |
-| `repair_state_broadcaster` | `RepairState` | `Holding(Console::Repair)` | `Hz(10.0)` | `src/simulation.rs:450` |
-| `sim_state_broadcaster` | `SimState` | `All` | `Hz(10.0)` | `src/simulation.rs:485` |
+| `power_state_broadcaster` | `PowerState` | `Holding(StationId("power"))` | `Hz(10.0)` | `src/simulation.rs:384` |
+| `weapons_update_broadcaster` | `WeaponsUpdate` | `Holding(StationId("tactical"))` | `Hz(10.0)` | `src/simulation.rs:405` |
+| `repair_state_broadcaster` | `RepairState` | `Holding(StationId("repair"))` | `Hz(10.0)` | `src/simulation.rs:450` |
+| `sim_state_broadcaster` | `SimState` + `SystemHullUpdate` | `All` | `Hz(10.0)` | `src/simulation.rs:485` |
 | `modifier_events_broadcaster` | `ModifierAdded` / `ModifierRemoved` | `All` | `OnEvent` | `src/simulation.rs:564` |
 | `sim_outbox_broadcaster` | Drain of `SimOutbox` (see below) | `All` (placeholder) | `OnEvent` | `src/simulation.rs:596` |
 
@@ -114,8 +114,8 @@ The `SimOutbox` producer (`sim_outbox_broadcaster`, `src/simulation.rs:596`) is 
 | `broadcast_shield_status` | `ShieldStatus` | `All` | `src/simulation.rs:1427` |
 | `broadcast_world_setup_on_start` | `WorldSetup` | `All` | `src/simulation.rs:1454` |
 | `broadcast_repair_icons` | `ShowRepairIcon` / `ClearRepairIcon` | holder of each damaged console | `src/simulation.rs:1469` |
-| `broadcast_comms_state` | `CommsState` | `Holding(Console::Comms)` | `src/world/server.rs:506` |
-| `broadcast_objective_summary` | `ObjectiveSummary` | `Holding(Console::CaptainChair)` | `src/world/server.rs:544` |
+| `broadcast_comms_state` | `CommsState` | `Holding(StationId("comms"))` | `src/world/server.rs:506` |
+| `broadcast_objective_summary` | `ObjectiveSummary` | `Holding(StationId("captain"))` | `src/world/server.rs:544` |
 | `handle_torpedo_launch` | `TorpedoLaunched` | `All` via `SimOutbox` | `simulation.rs` |
 | `asteroid_spawn` / `update_asteroid_window` | `EntitySpawned` / `EntityDespawned` | `All` via `SimOutbox` | `asteroids/lifecycle.rs` |
 | Phaser / damage systems | `PhaserFired`, `AsteroidDestroyed`, etc. | `All` via `SimOutbox` | `simulation.rs`, `weapons/phaser.rs` |

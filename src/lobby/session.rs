@@ -88,8 +88,10 @@ impl SessionManager {
         }
     }
 
-    /// Consoles not held by any connected player, derived from unclaimed stations.
-    pub fn available_consoles(&self, ship_config: &ShipConfig) -> Vec<Console> {
+    /// Station IDs not held by any connected player, in ship-config declaration
+    /// order. Sits alongside `holder_for_station` as the station-keyed
+    /// replacement for the legacy console-keyed API.
+    pub fn available_stations(&self, ship_config: &ShipConfig) -> Vec<StationId> {
         let held_stations: Vec<&StationId> = self
             .players
             .iter()
@@ -101,8 +103,7 @@ impl SessionManager {
             .stations
             .iter()
             .filter(|def| !held_stations.contains(&&def.id))
-            .filter_map(|def| Console::from_console_id(&def.console))
-            .filter(|console| *console != Console::Core)
+            .map(|def| def.id.clone())
             .collect()
     }
 
@@ -110,43 +111,17 @@ impl SessionManager {
         &self.players
     }
 
-    /// Check if a specific station (by StationId) owns the given console.
-    pub fn station_has_console(
-        &self,
-        station_id: &StationId,
-        console: &Console,
-        ship_config: &ShipConfig,
-    ) -> bool {
-        ship_config
-            .station(station_id)
-            .and_then(|station| Console::from_console_id(&station.console))
-            .as_ref()
-            == Some(console)
-    }
-
-    /// Get the connected player token holding a station that owns this console.
-    pub fn console_holder(&self, console: &Console, ship_config: &ShipConfig) -> Option<&str> {
-        let station_id = ship_config
-            .station_for_console(console.station_console_id())
-            .map(|station| &station.id)?;
-
+    /// Get the connected player token holding the given station id, or `None`
+    /// when the station is unclaimed or its holder is disconnected.
+    ///
+    /// Sole holder lookup after issue #618: takes a `StationId` directly and
+    /// no longer needs `ShipConfig` to translate a console variant into the
+    /// owning station.
+    pub fn holder_for_station(&self, station_id: &StationId) -> Option<&str> {
         self.players
             .iter()
             .find(|p| p.connected && p.station.as_ref() == Some(station_id))
             .map(|p| p.token.as_str())
-    }
-
-    /// Check if a specific token is assigned to a station that owns this console.
-    pub fn player_has_console(
-        &self,
-        token: &str,
-        console: &Console,
-        ship_config: &ShipConfig,
-    ) -> bool {
-        let Some(station_id) = self.station_for_token(token) else {
-            return false;
-        };
-        self.station_has_console(station_id, console, ship_config)
     }
 
     /// Append a token to the back of the spectator queue (if not already queued).
@@ -389,109 +364,89 @@ mod tests {
     }
 
     #[test]
-    fn console_holder_returns_player_at_captain_chair() {
-        let ship_config = test_ship_config();
+    fn holder_for_station_returns_player_at_captain_chair() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.register("t2".into(), "Bob".into()).unwrap();
         sm.set_station("t1", Some(StationId("captain".into())));
         assert_eq!(
-            sm.console_holder(&Console::CaptainChair, &ship_config),
+            sm.holder_for_station(&StationId("captain".into())),
             Some("t1")
         );
     }
 
     #[test]
-    fn console_holder_returns_none_when_no_captain_chair() {
-        let ship_config = test_ship_config();
+    fn holder_for_station_returns_none_when_unclaimed() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
+        assert_eq!(sm.holder_for_station(&StationId("captain".into())), None);
+    }
+
+    #[test]
+    fn holder_for_station_returns_correct_helm() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.set_station("t2", Some(StationId("helm".into())));
         assert_eq!(
-            sm.console_holder(&Console::CaptainChair, &ship_config),
-            None
+            sm.holder_for_station(&StationId("helm".into())),
+            Some("t2")
         );
     }
 
     #[test]
-    fn console_holder_returns_correct_helm() {
-        let ship_config = test_ship_config();
-        let mut sm = sm();
-        sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.set_station("t2", Some(StationId("helm".into())));
-        assert_eq!(sm.console_holder(&Console::Helm, &ship_config), Some("t2"));
-    }
-
-    #[test]
-    fn player_has_console_returns_true_when_assigned() {
-        let ship_config = test_ship_config();
+    fn holder_for_station_returns_none_when_holder_disconnected() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.set_station("t1", Some(StationId("captain".into())));
-        assert!(sm.player_has_console("t1", &Console::CaptainChair, &ship_config));
+        sm.disconnect("t1");
+        assert_eq!(sm.holder_for_station(&StationId("captain".into())), None);
     }
 
     #[test]
-    fn player_has_console_returns_false_when_not_assigned() {
-        let ship_config = test_ship_config();
-        let mut sm = sm();
-        sm.register("t1".into(), "Alice".into()).unwrap();
-        assert!(!sm.player_has_console("t1", &Console::CaptainChair, &ship_config));
-    }
-
-    #[test]
-    fn player_has_console_returns_false_for_different_station_console() {
-        let ship_config = test_ship_config();
-        let mut sm = sm();
-        sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.set_station("t1", Some(StationId("captain".into())));
-        assert!(!sm.player_has_console("t1", &Console::Helm, &ship_config));
-    }
-
-    #[test]
-    fn available_consoles_returns_all_when_none_claimed() {
+    fn available_stations_returns_all_when_none_claimed() {
         let ship_config = test_ship_config();
         let sm = sm();
-        let available = sm.available_consoles(&ship_config);
-        assert!(available.contains(&Console::CaptainChair));
-        assert!(available.contains(&Console::Helm));
-        assert!(available.contains(&Console::Tactical));
-        assert!(available.contains(&Console::Repair));
-        assert!(available.contains(&Console::Sensors));
-        assert!(available.contains(&Console::Shields));
-        assert!(available.contains(&Console::Navigation));
-        assert!(available.contains(&Console::Power));
-        assert!(available.contains(&Console::Comms));
+        let available = sm.available_stations(&ship_config);
+        assert!(available.contains(&StationId("captain".into())));
+        assert!(available.contains(&StationId("helm".into())));
+        assert!(available.contains(&StationId("tactical".into())));
+        assert!(available.contains(&StationId("repair".into())));
+        assert!(available.contains(&StationId("sensors".into())));
+        assert!(available.contains(&StationId("shields".into())));
+        assert!(available.contains(&StationId("navigation".into())));
+        assert!(available.contains(&StationId("power".into())));
+        assert!(available.contains(&StationId("comms".into())));
     }
 
     #[test]
-    fn available_consoles_excludes_claimed_stations() {
+    fn available_stations_excludes_claimed_stations() {
         let ship_config = test_ship_config();
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.set_station("t1", Some(StationId("captain".into())));
-        let available = sm.available_consoles(&ship_config);
-        assert!(!available.contains(&Console::CaptainChair));
-        assert!(available.contains(&Console::Helm));
+        let available = sm.available_stations(&ship_config);
+        assert!(!available.contains(&StationId("captain".into())));
+        assert!(available.contains(&StationId("helm".into())));
     }
 
     #[test]
-    fn available_consoles_reappears_on_disconnect() {
+    fn available_stations_reappears_on_disconnect() {
         let ship_config = test_ship_config();
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.set_station("t1", Some(StationId("captain".into())));
         assert!(!sm
-            .available_consoles(&ship_config)
-            .contains(&Console::CaptainChair));
+            .available_stations(&ship_config)
+            .contains(&StationId("captain".into())));
         sm.disconnect("t1");
         assert!(sm
-            .available_consoles(&ship_config)
-            .contains(&Console::CaptainChair));
+            .available_stations(&ship_config)
+            .contains(&StationId("captain".into())));
     }
 
     #[test]
-    fn available_consoles_excludes_disconnected_station_holders() {
+    fn available_stations_excludes_disconnected_station_holders() {
         let ship_config = test_ship_config();
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
@@ -499,13 +454,15 @@ mod tests {
         sm.set_station("t1", Some(StationId("captain".into())));
         sm.set_station("t2", Some(StationId("helm".into())));
         assert!(!sm
-            .available_consoles(&ship_config)
-            .contains(&Console::CaptainChair));
-        assert!(!sm.available_consoles(&ship_config).contains(&Console::Helm));
+            .available_stations(&ship_config)
+            .contains(&StationId("captain".into())));
+        assert!(!sm
+            .available_stations(&ship_config)
+            .contains(&StationId("helm".into())));
         sm.disconnect("t1");
         assert!(sm
-            .available_consoles(&ship_config)
-            .contains(&Console::CaptainChair));
+            .available_stations(&ship_config)
+            .contains(&StationId("captain".into())));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::lobby_handler::Target;
-use crate::messages::Console;
+use crate::messages::StationId;
 use crate::session::SessionManager;
 use crate::ship::config::ShipConfig;
 
@@ -7,28 +7,29 @@ use crate::ship::config::ShipConfig;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Audience {
     All,
-    Holding(Console),
+    Holding(StationId),
     Token(String),
     AllExcept(String),
 }
 
 impl Audience {
     /// Resolve this audience to a `Target` given current session state.
-    /// Returns `None` when `Holding` names a console with no current holder or
-    /// when `ship_config` is `None`, signalling the caller to skip this broadcast.
+    /// Returns `None` when `Holding` names a station with no current holder,
+    /// signalling the caller to skip this broadcast.
+    ///
+    /// The `ship_config` parameter is retained for API stability with the
+    /// broadcaster dispatchers but is unused for the new station-keyed
+    /// `Holding` variant.
     pub fn resolve(
         &self,
         sessions: &SessionManager,
-        ship_config: Option<&ShipConfig>,
+        _ship_config: Option<&ShipConfig>,
     ) -> Option<Target> {
         match self {
             Audience::All => Some(Target::All),
-            Audience::Holding(console) => {
-                let cfg = ship_config?;
-                sessions
-                    .console_holder(console, cfg)
-                    .map(|t| Target::Token(t.to_string()))
-            }
+            Audience::Holding(station_id) => sessions
+                .holder_for_station(station_id)
+                .map(|t| Target::Token(t.to_string())),
             Audience::Token(t) => Some(Target::Token(t.clone())),
             Audience::AllExcept(t) => Some(Target::AllExcept(t.clone())),
         }
@@ -86,14 +87,11 @@ mod tests {
         }
     }
 
-    fn sm_with_holder(token: &str, console: Console) -> SessionManager {
+    fn sm_with_holder(token: &str, station: StationId) -> SessionManager {
         let mut sm = SessionManager::new();
         sm.register(token.to_string(), "Player".to_string())
             .unwrap();
-        sm.set_station(
-            token,
-            Some(StationId(console.station_console_id().to_string())),
-        );
+        sm.set_station(token, Some(station));
         sm
     }
 
@@ -110,25 +108,25 @@ mod tests {
     fn audience_holding_returns_none_when_no_holder() {
         let sm = SessionManager::new();
         assert_eq!(
-            Audience::Holding(Console::Power).resolve(&sm, Some(&ship_config())),
+            Audience::Holding(StationId("power".into())).resolve(&sm, Some(&ship_config())),
             None
         );
     }
 
     #[test]
-    fn audience_holding_returns_token_when_console_held() {
-        let sm = sm_with_holder("tok1", Console::Power);
+    fn audience_holding_returns_token_when_station_held() {
+        let sm = sm_with_holder("tok1", StationId("power".into()));
         assert_eq!(
-            Audience::Holding(Console::Power).resolve(&sm, Some(&ship_config())),
+            Audience::Holding(StationId("power".into())).resolve(&sm, Some(&ship_config())),
             Some(Target::Token("tok1".to_string()))
         );
     }
 
     #[test]
-    fn audience_holding_returns_none_for_different_console() {
-        let sm = sm_with_holder("tok1", Console::Power);
+    fn audience_holding_returns_none_for_different_station() {
+        let sm = sm_with_holder("tok1", StationId("power".into()));
         assert_eq!(
-            Audience::Holding(Console::Helm).resolve(&sm, Some(&ship_config())),
+            Audience::Holding(StationId("helm".into())).resolve(&sm, Some(&ship_config())),
             None
         );
     }

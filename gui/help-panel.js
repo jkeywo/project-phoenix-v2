@@ -18,54 +18,54 @@
  */
 
 // ── Static help text (mirrors elements.rs help_sections) ────────────────────
-// Keyed by the PascalCase Console enum variant that each panel maps to. The
-// Rust enum `HelpPanel` is keyed by panel; the per-console mapping below
-// replicates the Console → HelpPanel relationship.
+// Keyed by the lowercase station id that each panel maps to. Pre-issue #618
+// these keys were PascalCase Console enum variant names; the JS layer is
+// migrating away from the Console enum toward the `StationId` newtype.
 
 /** @type {Record<string, Array<[string, string]>>} */
 const HELP_SECTIONS = {
-  CaptainChair: [
+  captain: [
     ['Command', 'You set the ship\'s posture. Coordinate the crew and call the shots — no one else has the full picture.'],
     ['Red Alert', 'Raises ship-wide combat readiness. Call it before entering a fight, not after taking the first hit.'],
     ['View Selector', 'Keep the main screen camera updated so the whole bridge sees what matters right now.'],
   ],
-  Helm: [
+  helm: [
     ['Pilot', 'Keep the ship moving and the target in arc for Tactical. You control where the fight happens.'],
     ['Thrust & Steering', 'Drag to accelerate, reverse, or steer.'],
     ['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel.'],
     ['On Screen', 'Push your radar to the viewscreen when someone needs to see your situation.'],
   ],
-  Tactical: [
+  tactical: [
     ['Weapons Officer', 'Deliver firepower to the enemy.'],
     ['Target Lock', 'Lock first — phasers and torpedoes both require an active lock by clicking on the target.'],
     ['Phasers', 'Fast and continuous but arc-limited. Enable Auto so they fire the instant the target crosses your fire arc.'],
     ['Torpedoes', 'Use them when on priority target. They do less damage to shields than hull, sensors can monitor target shields.'],
   ],
-  Repair: [
+  repair: [
     ['Damage Control', 'Keep the ship in the fight. Damaged systems degrade everyone\'s performance — act early.'],
     ['Hull Status', 'Your ship health gauge, it doesn\'t show where the damage is, the other bridge officers should ask for repairs.'],
     ['Repair Teams', 'Dispatch teams to damaged consoles, sooner rather than later.'],
   ],
-  Power: [
+  power: [
     ['Power Officer', 'You decide how much performance each system gets. Shift allocations as the battle changes.'],
     ['Power Allocation', 'Distribute 6 base points across systems. Higher level means better performance from that station.'],
     ['Battery Reserve', 'Holds up to 2 emergency power points. Let it drain completely and everyone gets locked out for a time.'],
   ],
-  Shields: [
+  shields: [
     ['Shield Officer', 'Absorb incoming fire and keep the ship alive.'],
     ['Shield Facings', 'Four quadrants: Fore, Aft, Port, Starboard.'],
     ['Focus', 'Concentrate capacity on one facing to tank heavy fire by tapping it. Tap again to rebalance shields'],
   ],
-  Sensors: [
+  sensors: [
     ['Sensors Officer', 'Extend the crew\'s awareness beyond visual range.'],
     ['Long-Range Scan', 'Detect contacts before they enter combat range and provides some extra information on their status'],
   ],
-  Navigation: [
+  navigation: [
     ['Navigator', 'Read the map to keep the ship heading in the right direction.'],
     ['System Chart', 'Overlay the nav chart on the main screen so the Captain and Helm see the strategic picture.'],
     ['Cancel Impulse', 'Abort an active impulse charge if Helm is about to overshoot or fly into a hazard.'],
   ],
-  Comms: [
+  comms: [
     ['Comms Officer', 'Connect the ship to the outside world. You are the first to know about orders, threats, and opportunities.'],
     ['Contacts', 'Track who is in hailing range.'],
     ['Messages', 'Incoming transmissions can carry mission-critical intelligence.'],
@@ -78,7 +78,7 @@ const HELP_SECTIONS = {
  * Mirrors `help_sections(HelpPanel)` in elements.rs. Returns an empty array
  * for an unknown key rather than throwing.
  *
- * @param {string} panel — PascalCase HelpPanel key (e.g. 'Helm', 'Repair').
+ * @param {string} panel — lowercase station id (e.g. 'helm', 'repair').
  * @returns {Array<[string, string]>}
  */
 export function helpSections(panel) {
@@ -163,7 +163,7 @@ function renderOverlayContent(overlay, panel) {
  * Open the help modal for `panel` in `doc`. Builds the overlay on first use,
  * fills it with the panel's sections, and reveals it.
  *
- * @param {string} panel — PascalCase HelpPanel key.
+ * @param {string} panel — lowercase station id (e.g. 'helm').
  * @param {Document} [doc=document]
  */
 export function openHelp(panel, doc) {
@@ -202,7 +202,7 @@ export function isHelpOpen(doc) {
  * Create a "?" help button element wired to open `panel`'s help modal.
  * The caller appends it wherever it wants the trigger to live.
  *
- * @param {string} panel — PascalCase HelpPanel key.
+ * @param {string} panel — lowercase station id (e.g. 'helm').
  * @param {Document} [doc=document]
  * @returns {HTMLButtonElement|null}
  */
@@ -232,7 +232,7 @@ export function createHelpButton(panel, doc) {
  *
  * Returns the trigger element (or null when no document is available).
  *
- * @param {string} panel — PascalCase HelpPanel key.
+ * @param {string} panel — lowercase station id (e.g. 'helm').
  * @param {Document} [doc=document]
  * @returns {HTMLElement|null}
  */
@@ -269,7 +269,7 @@ export function mountHelp(panel, doc) {
  * when a console is selected and non-selected tabs are hidden.
  *
  * @param {HTMLElement} root - the container element to populate
- * @param {string[]} consoles - array of console PascalCase names
+ * @param {string[]} consoles - array of console names (see caller for casing)
  */
 export function renderInlineHelp(root, consoles) {
   if (!root) return;

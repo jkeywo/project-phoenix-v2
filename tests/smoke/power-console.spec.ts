@@ -12,11 +12,13 @@ const CONSOLE_URL = '/gui/power-console.html';
 test('power console: __updateConsole renders power entries and battery', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
+  // Post issue #618: the `id` on each PowerConsoleEntry is a lowercase
+  // PowerGroupId (matches the Rust `PowerGroupId(String)` newtype).
   const state = {
     consoles: [
-      { id: 'Helm',     label: 'HELM',    level: 2, max_level: 4 },
-      { id: 'Tactical', label: 'WEAPONS', level: 1, max_level: 4 },
-      { id: 'Sensors',  label: 'SENSORS', level: 3, max_level: 4 },
+      { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },
+      { id: 'weapons', label: 'WEAPONS', level: 1, max_level: 4 },
+      { id: 'sensors', label: 'SENSORS', level: 3, max_level: 4 },
     ],
     total:          6,
     total_max:      8,
@@ -25,20 +27,20 @@ test('power console: __updateConsole renders power entries and battery', async (
     locked:         false,
   };
 
-  await page.evaluate((s) => (window as any).__updateConsole('Power', JSON.stringify(s)), state);
+  await page.evaluate((s) => (window as any).__updateConsole('power', JSON.stringify(s)), state);
 
   // Three entries rendered in #power-data.
   await expect(page.locator('#power-data .power-entry')).toHaveCount(3);
 
   // Each entry carries correct data attrs.
-  const helm = page.locator('.power-entry[data-id="Helm"]');
+  const helm = page.locator('.power-entry[data-id="helm"]');
   await expect(helm).toHaveAttribute('data-level', '2');
   await expect(helm).toHaveAttribute('data-max-level', '4');
 
-  const tactical = page.locator('.power-entry[data-id="Tactical"]');
-  await expect(tactical).toHaveAttribute('data-level', '1');
+  const weapons = page.locator('.power-entry[data-id="weapons"]');
+  await expect(weapons).toHaveAttribute('data-level', '1');
 
-  const sensors = page.locator('.power-entry[data-id="Sensors"]');
+  const sensors = page.locator('.power-entry[data-id="sensors"]');
   await expect(sensors).toHaveAttribute('data-level', '3');
 
   // #power-data carries pool totals and lock flag.
@@ -56,9 +58,9 @@ test('power console: __updateConsole reflects locked state', async ({ page }) =>
 
   const state = {
     consoles: [
-      { id: 'Helm',     label: 'HELM',    level: 2, max_level: 4 },
-      { id: 'Tactical', label: 'WEAPONS', level: 2, max_level: 4 },
-      { id: 'Sensors',  label: 'SENSORS', level: 2, max_level: 4 },
+      { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },
+      { id: 'weapons', label: 'WEAPONS', level: 2, max_level: 4 },
+      { id: 'sensors', label: 'SENSORS', level: 2, max_level: 4 },
     ],
     total:          6,
     total_max:      8,
@@ -67,7 +69,7 @@ test('power console: __updateConsole reflects locked state', async ({ page }) =>
     locked:         true,
   };
 
-  await page.evaluate((s) => (window as any).__updateConsole('Power', JSON.stringify(s)), state);
+  await page.evaluate((s) => (window as any).__updateConsole('power', JSON.stringify(s)), state);
 
   await expect(page.locator('#power-data')).toHaveAttribute('data-locked', 'true');
   await expect(page.locator('#bat-val')).toHaveText('40%');
@@ -84,9 +86,9 @@ test('power console: +/- buttons call __sendAction with correct envelopes', asyn
 
   const state = {
     consoles: [
-      { id: 'Helm',     label: 'HELM',    level: 2, max_level: 4 },
-      { id: 'Tactical', label: 'WEAPONS', level: 2, max_level: 4 },
-      { id: 'Sensors',  label: 'SENSORS', level: 2, max_level: 4 },
+      { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },
+      { id: 'weapons', label: 'WEAPONS', level: 2, max_level: 4 },
+      { id: 'sensors', label: 'SENSORS', level: 2, max_level: 4 },
     ],
     total:          6,
     total_max:      8,
@@ -95,27 +97,27 @@ test('power console: +/- buttons call __sendAction with correct envelopes', asyn
     locked:         false,
   };
 
-  await page.evaluate((s) => (window as any).__updateConsole('Power', JSON.stringify(s)), state);
+  await page.evaluate((s) => (window as any).__updateConsole('power', JSON.stringify(s)), state);
 
-  // Click the increment button for Helm.
-  await page.locator('#inc-Helm').click();
+  // Click the increment button for helm.
+  await page.locator('#inc-helm').click();
 
-  // Click the decrement button for Sensors.
-  await page.locator('#dec-Sensors').click();
+  // Click the decrement button for sensors.
+  await page.locator('#dec-sensors').click();
 
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(2);
 
   expect(JSON.parse(sent[0])).toEqual({
     action: 'set_power',
-    console: 'Power',
-    target: 'Helm',
+    console: 'power',
+    target: 'helm',
     level: expect.any(Number),
   });
   expect(JSON.parse(sent[1])).toEqual({
     action: 'set_power',
-    console: 'Power',
-    target: 'Sensors',
+    console: 'power',
+    target: 'sensors',
     level: expect.any(Number),
   });
 });

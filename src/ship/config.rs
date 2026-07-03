@@ -168,12 +168,6 @@ impl ShipConfig {
             .filter(move |system| system.station.as_ref() == Some(id))
     }
 
-    /// Find the station whose `console` field matches the given string.
-    /// Used to map a `Console` variant back to the owning station config.
-    pub fn station_for_console(&self, console_id: &str) -> Option<&StationConfig> {
-        self.stations.iter().find(|s| s.console == console_id)
-    }
-
     /// Look up a named rating for a station.
     pub fn rating_for_station<'a>(
         &'a self,

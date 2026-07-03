@@ -837,7 +837,7 @@
   <script type="module">
     import { initConsole, renderDamageBar } from './console-core.js';
     import { setAutoState } from './console-ui.js';
-    var _c = initConsole({ name: 'Sensors', render: function(s) {
+    var _c = initConsole({ name: 'sensors', render: function(s) {
       _apply(s);
       renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
       // AUTO badge: show when sensors station is AI-controlled (Backfill rating).

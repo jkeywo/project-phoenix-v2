@@ -61,7 +61,7 @@ Tests live in `src/power_plugin.rs` under `#[cfg(test)] mod tests`.
 | `power_sender_increase_reflected_in_next_power_state` | Power holder increasing Helm shows helm=3 in next `PowerState` |
 | `power_sender_decrease_reflected_in_next_power_state` | Power holder decreasing Tactical shows weapons=1 in next `PowerState` |
 | `power_state_only_sent_to_power_holder` | All `PowerState` messages are targeted to the Power console holder |
-| `no_power_console_holder_no_power_state_broadcast` | No `PowerState` sent when no player holds the Power console |
+| `no_power_station_holder_no_power_state_broadcast` | No `PowerState` sent when no player holds the Power station (issue #618 rename) |
 | `sim_state_includes_power_levels` | `SimState.power_levels` reflects the current power system state |
 | `power_increase_respects_bounds_noop_at_four` | Increasing past level 4 is a no-op |
 | `increasing_helm_power_updates_max_speed_via_modifiers` | Helm power 3 with custom multipliers yields the expected MaxSpeed modifier |

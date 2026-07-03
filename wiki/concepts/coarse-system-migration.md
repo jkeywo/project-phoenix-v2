@@ -50,7 +50,7 @@ Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) is 
 | #512 | Tactical | `phaser_bank` (fore + aft), `torpedo_tube` (fore-port + fore-starboard + aft), `torpedo_magazine` |
 | #513 | Power | `power_reactor`, `power_battery` |
 | #514 | Shields | `shield_arc` (variable count, per `[[shield_arc]]` TOML block; player ship = 4 arcs fore/port/aft/starboard; NPCs = 1 omni arc) |
-| #515 | Sensors | not yet |
+| #515 | Comms / Captain / Viewscreen | closed as substantially done — Captain / Red-Alert / Viewscreen shipped via PRD #487; Comms deliberately left coarse (single narrow console; splitting into inbox/transmitter/scanner deferred pending a damage-driven rationale) |
 
 Under #512, the coarse `tactical` `[[system]]` block was **deleted** from all 5 ship TOMLs (player_ship + 4 NPC ships). `TACTICAL_SYSTEM_ID = "tactical"` is retained as a coordination surface for ship-level operations (SetTarget / SetPhaserMode / SetPhaserFrequency); their authorisation gate is "any phaser bank accepts human input" (option c in the issue), so no coarse block is needed. Fine kinds registered but not present on a given ship default to a fallback coarse-tactical gate — this preserves NPC behaviour where a ship declares bank ids that don't match the player-ship convention (`"port"`/`"starboard"` versus `"fore"`/`"aft"`).
 

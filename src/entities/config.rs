@@ -1314,13 +1314,17 @@ impl EntityConfig {
             let has_ops_group = ship_config.power_groups.contains_key(&ops_group);
 
             for arc in &config.shield_arcs {
-                let sid = crate::system_registry::shield_arc_system_id(&arc.id)
-                    .ok_or_else(|| SerdeError::custom(
-                        format!("shield_arc id {:?} is empty", arc.id),
-                    ))?;
+                let sid =
+                    crate::system_registry::shield_arc_system_id(&arc.id).ok_or_else(|| {
+                        SerdeError::custom(format!("shield_arc id {:?} is empty", arc.id))
+                    })?;
                 let mut synthesised_config = toml::value::Table::new();
-                synthesised_config.insert("center_deg".into(), toml::Value::Float(arc.center_deg as f64));
-                synthesised_config.insert("width_deg".into(), toml::Value::Float(arc.width_deg as f64));
+                synthesised_config.insert(
+                    "center_deg".into(),
+                    toml::Value::Float(arc.center_deg as f64),
+                );
+                synthesised_config
+                    .insert("width_deg".into(), toml::Value::Float(arc.width_deg as f64));
                 if let Some(max_hp) = arc.max_hp {
                     synthesised_config.insert("max_hp".into(), toml::Value::Integer(max_hp as i64));
                 }
@@ -2661,7 +2665,10 @@ automated_systems = []
         let ship_config = config.ship_config.expect("ship_config present");
         assert_eq!(ship_config.systems.len(), 2);
         for sys in &ship_config.systems {
-            assert!(!sys.ai_only, "with a shields station, arcs are player-controlled");
+            assert!(
+                !sys.ai_only,
+                "with a shields station, arcs are player-controlled"
+            );
             assert_eq!(
                 sys.station,
                 Some(crate::messages::StationId("shields".into()))

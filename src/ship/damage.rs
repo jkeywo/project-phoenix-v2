@@ -377,7 +377,10 @@ impl ShipArcHull {
             }
             map.insert(id, entry);
         }
-        Self { entries: map, order }
+        Self {
+            entries: map,
+            order,
+        }
     }
 
     /// True when the tracker has no arcs (NPCs, empty TOMLs).
@@ -1008,10 +1011,38 @@ mod tests {
     fn four_arc_hull() -> ShipArcHull {
         let tc = ConsoleTierConfig::default();
         ShipArcHull::from_entries(vec![
-            ("fore".into(), ArcHullEntry { current: 6.0, max: 6.0, tier_config: tc }),
-            ("port".into(), ArcHullEntry { current: 6.0, max: 6.0, tier_config: tc }),
-            ("aft".into(), ArcHullEntry { current: 6.0, max: 6.0, tier_config: tc }),
-            ("starboard".into(), ArcHullEntry { current: 7.0, max: 7.0, tier_config: tc }),
+            (
+                "fore".into(),
+                ArcHullEntry {
+                    current: 6.0,
+                    max: 6.0,
+                    tier_config: tc,
+                },
+            ),
+            (
+                "port".into(),
+                ArcHullEntry {
+                    current: 6.0,
+                    max: 6.0,
+                    tier_config: tc,
+                },
+            ),
+            (
+                "aft".into(),
+                ArcHullEntry {
+                    current: 6.0,
+                    max: 6.0,
+                    tier_config: tc,
+                },
+            ),
+            (
+                "starboard".into(),
+                ArcHullEntry {
+                    current: 7.0,
+                    max: 7.0,
+                    tier_config: tc,
+                },
+            ),
         ])
     }
 
@@ -1031,7 +1062,10 @@ mod tests {
         let before: f32 = hull.iter().map(|(_, e)| e.current).sum();
         hull.apply_damage(10.0, &mut rng);
         let after: f32 = hull.iter().map(|(_, e)| e.current).sum();
-        assert!((before - after - 10.0).abs() < 1e-3, "10 hp should have been absorbed");
+        assert!(
+            (before - after - 10.0).abs() < 1e-3,
+            "10 hp should have been absorbed"
+        );
     }
 
     #[test]
@@ -1082,8 +1116,22 @@ mod tests {
         // Fore has 1 hp, aft has 99 hp — aft should absorb most tiny hits.
         let tc = ConsoleTierConfig::default();
         let mut hull = ShipArcHull::from_entries(vec![
-            ("fore".into(), ArcHullEntry { current: 1.0, max: 1.0, tier_config: tc }),
-            ("aft".into(), ArcHullEntry { current: 99.0, max: 99.0, tier_config: tc }),
+            (
+                "fore".into(),
+                ArcHullEntry {
+                    current: 1.0,
+                    max: 1.0,
+                    tier_config: tc,
+                },
+            ),
+            (
+                "aft".into(),
+                ArcHullEntry {
+                    current: 99.0,
+                    max: 99.0,
+                    tier_config: tc,
+                },
+            ),
         ]);
         let mut rng = rand::rng();
         let mut aft_hits = 0u32;

@@ -168,7 +168,8 @@ pub fn handle_shields_messages(
                 if f.id.is_empty() {
                     None
                 } else {
-                    crate::system_registry::shield_arc_system_id(&f.id).map(|sid| (f.id.clone(), sid))
+                    crate::system_registry::shield_arc_system_id(&f.id)
+                        .map(|sid| (f.id.clone(), sid))
                 }
             })
             .collect();
@@ -532,8 +533,7 @@ mod tests {
                     // arc's SystemId. `ShieldSystem::new` populates arc ids
                     // "fore"/"aft" for a 2-facing default.
                     cs.0.set(
-                        crate::system_registry::shield_arc_system_id("fore")
-                            .expect("fore"),
+                        crate::system_registry::shield_arc_system_id("fore").expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
@@ -679,8 +679,7 @@ mod tests {
                     // arc's SystemId as sender_origin. Set "fore" for the
                     // 4-facing default (Fore, Port, Aft, Starboard).
                     cs.0.set(
-                        crate::system_registry::shield_arc_system_id("fore")
-                            .expect("fore"),
+                        crate::system_registry::shield_arc_system_id("fore").expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
@@ -787,8 +786,7 @@ mod tests {
                     // that's "fore" and "aft". Set the first arc to Ai so the
                     // test asserts continue to hold.
                     cs.0.set(
-                        crate::system_registry::shield_arc_system_id("fore")
-                            .expect("fore"),
+                        crate::system_registry::shield_arc_system_id("fore").expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
@@ -1114,8 +1112,7 @@ mod tests {
         let mut app = test_app();
         // Manually admit the command (bypasses the full authorisation stack).
         let se = ship_e(&mut app);
-        let arc_sid = crate::system_registry::shield_arc_system_id("fore")
-            .expect("fore");
+        let arc_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
         app.world_mut()
             .entity_mut(se)
             .get_mut::<crate::messages::AdmittedCommands>()
@@ -1174,10 +1171,12 @@ mod tests {
             .expect("ShipSystemBlackboards");
         // 2-facing default: fore + aft.
         for arc_id in &["fore", "aft"] {
-            let sid = crate::system_registry::shield_arc_system_id(arc_id)
-                .expect("arc id");
+            let sid = crate::system_registry::shield_arc_system_id(arc_id).expect("arc id");
             let bb = bbs.0.get(&sid).unwrap_or_else(|| {
-                panic!("expected ShieldArc blackboard under {sid:?}, got {:?}", bbs.0.keys().collect::<Vec<_>>())
+                panic!(
+                    "expected ShieldArc blackboard under {sid:?}, got {:?}",
+                    bbs.0.keys().collect::<Vec<_>>()
+                )
             });
             match bb {
                 SystemBlackboard::ShieldArc(arc_bb) => {

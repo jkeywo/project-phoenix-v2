@@ -523,7 +523,7 @@ pub fn spawn_entity(
         // Ships that declare `[[shield_arc]]` blocks without a
         // `[shields_console]` block (some legacy paths). Still build the
         // shield system from arcs, using default focus config.
-        use crate::weapons::shield::{ShieldSystem};
+        use crate::weapons::shield::ShieldSystem;
         let ship_wide = crate::shield::ShieldConfig::default();
         let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
         let shield_system = ShieldSystem::from_arcs(&arcs, &ship_wide);
@@ -555,9 +555,9 @@ pub fn spawn_entity(
             })
             .collect();
         if !arc_entries.is_empty() {
-            entity_commands.insert(EntityShipArcHull(
-                crate::damage::ShipArcHull::from_entries(arc_entries),
-            ));
+            entity_commands.insert(EntityShipArcHull(crate::damage::ShipArcHull::from_entries(
+                arc_entries,
+            )));
         }
     }
 

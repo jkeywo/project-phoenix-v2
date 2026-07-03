@@ -496,7 +496,10 @@ impl ShieldSystem {
     ///    signed delta is more negative (clockwise from bearing) to match
     ///    the historical convention that -π/2 → Port(1) rather than Fore(0).
     pub fn facing_index_for_bearing(&self, bearing_relative: f32) -> usize {
-        assert!(!self.facings.is_empty(), "shield system must have >= 1 facing");
+        assert!(
+            !self.facings.is_empty(),
+            "shield system must have >= 1 facing"
+        );
         // Convert relative bearing (-π..π] to world-bearing degrees
         // (0..360) with fore=0 and starboard=90 (i.e. clockwise from fore).
         let deg = bearing_relative.to_degrees().rem_euclid(360.0);

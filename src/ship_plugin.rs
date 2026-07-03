@@ -3655,9 +3655,7 @@ station = "helm"
                 },
             ),
         ]);
-        let hull_config = &[
-            (crate::messages::Console::Helm, 25.0_f32),
-        ];
+        let hull_config = &[(crate::messages::Console::Helm, 25.0_f32)];
         app.world_mut().spawn((
             (
                 Ship,
@@ -3671,9 +3669,9 @@ station = "helm"
                 crate::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ai_plugin::ShipAiMemory::default(),
-                crate::entity_spawner::EntityConsoleHull(
-                    crate::damage::ConsoleHull::from_config(hull_config),
-                ),
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                    hull_config,
+                )),
                 crate::entity_spawner::EntityShipArcHull(arc_hull),
                 LastHelmInput::default(),
                 crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),

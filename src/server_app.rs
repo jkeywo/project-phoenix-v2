@@ -1300,9 +1300,7 @@ fn console_for_system(target: &crate::messages::SystemId) -> Option<Console> {
         | TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID
         | TORPEDO_TUBE_AFT_SYSTEM_ID
         | TORPEDO_MAGAZINE_SYSTEM_ID => Some(Console::Tactical),
-        POWER_SYSTEM_ID | POWER_REACTOR_SYSTEM_ID | POWER_BATTERY_SYSTEM_ID => {
-            Some(Console::Power)
-        }
+        POWER_SYSTEM_ID | POWER_REACTOR_SYSTEM_ID | POWER_BATTERY_SYSTEM_ID => Some(Console::Power),
         SENSORS_SYSTEM_ID => Some(Console::Sensors),
         NAVIGATION_SYSTEM_ID => Some(Console::Navigation),
         SHIELDS_SYSTEM_ID => Some(Console::Shields),
@@ -2031,8 +2029,7 @@ fn spawn_game_start_entities(
             if let Some(sc) = &config.shields_console {
                 let ship_wide = sc.base.as_ref().map(|b| b.to_runtime()).unwrap_or_default();
                 let shield_system = if !config.shield_arcs.is_empty() {
-                    let arcs: Vec<_> =
-                        config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
+                    let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
                     ShieldSystem::from_arcs(&arcs, &ship_wide)
                 } else {
                     ShieldSystem::new(&ship_wide)
@@ -2048,11 +2045,10 @@ fn spawn_game_start_entities(
                 commands.entity(spawned).insert(shields);
             } else if !config.shield_arcs.is_empty() {
                 let ship_wide = crate::shield::ShieldConfig::default();
-                let arcs: Vec<_> =
-                    config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
-                commands.entity(spawned).insert(ShipShields(
-                    ShieldSystem::from_arcs(&arcs, &ship_wide),
-                ));
+                let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
+                commands
+                    .entity(spawned)
+                    .insert(ShipShields(ShieldSystem::from_arcs(&arcs, &ship_wide)));
             } else {
                 // Default shields on the ship entity when no TOML shields_console block.
                 commands
@@ -6211,8 +6207,7 @@ mod tests {
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("fore")
-                    .expect("fore"),
+                target: crate::system_registry::shield_arc_system_id("fore").expect("fore"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -6234,8 +6229,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("port")
-                    .expect("port"),
+                target: crate::system_registry::shield_arc_system_id("port").expect("port"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -6261,8 +6255,7 @@ mod tests {
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("fore")
-                    .expect("fore"),
+                target: crate::system_registry::shield_arc_system_id("fore").expect("fore"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -6275,8 +6268,7 @@ mod tests {
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("fore")
-                    .expect("fore"),
+                target: crate::system_registry::shield_arc_system_id("fore").expect("fore"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: false },
             },
         );
@@ -6318,8 +6310,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("aft")
-                    .expect("aft"),
+                target: crate::system_registry::shield_arc_system_id("aft").expect("aft"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -6345,8 +6336,7 @@ mod tests {
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("fore")
-                    .expect("fore"),
+                target: crate::system_registry::shield_arc_system_id("fore").expect("fore"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );

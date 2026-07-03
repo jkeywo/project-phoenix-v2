@@ -1509,10 +1509,7 @@ mod tests {
         );
 
         // Now mark the reactor offline and try to change sensors back to 1.
-        mark_offline(
-            &mut app,
-            crate::system_registry::power_reactor_system_id(),
-        );
+        mark_offline(&mut app, crate::system_registry::power_reactor_system_id());
         push_msg(
             &mut app,
             "power",
@@ -1536,10 +1533,7 @@ mod tests {
     fn battery_offline_refuses_drain_from_channel_2() {
         let mut app = inter_system_test_app_with_control_sources();
         // Mark battery offline via offline_systems (mirrors sync_console_damage_tiers).
-        mark_offline(
-            &mut app,
-            crate::system_registry::power_battery_system_id(),
-        );
+        mark_offline(&mut app, crate::system_registry::power_battery_system_id());
 
         set_beam_target_on(&mut app, Some("target-asteroid".into()));
         // Snapshot both the Resource and the per-entity Component charge; the

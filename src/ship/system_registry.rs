@@ -542,10 +542,7 @@ pub fn shield_arc_system_id(arc_id: &str) -> Option<SystemId> {
     if arc_id.is_empty() {
         return None;
     }
-    Some(SystemId(format!(
-        "shield-arc-{}",
-        arc_id.replace('_', "-")
-    )))
+    Some(SystemId(format!("shield-arc-{}", arc_id.replace('_', "-"))))
 }
 
 #[cfg(test)]
@@ -1205,7 +1202,10 @@ mod tests {
                 !sid.0.contains('_'),
                 "SystemId {sid:?} for arc {arc_id:?} contains underscore (use hyphen)"
             );
-            assert!(sid.0.starts_with("shield-arc-"), "SystemId {sid:?} must start with shield-arc-");
+            assert!(
+                sid.0.starts_with("shield-arc-"),
+                "SystemId {sid:?} must start with shield-arc-"
+            );
         }
     }
 }

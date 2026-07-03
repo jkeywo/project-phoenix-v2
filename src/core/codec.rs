@@ -1074,8 +1074,7 @@ mod tests {
     fn control_system_set_shield_arc_focus_true_round_trips() {
         // Per-arc target with boolean payload (issue #514).
         let msg = ClientMessage::ControlSystem {
-            target: crate::system_registry::shield_arc_system_id("fore")
-                .expect("non-empty arc id"),
+            target: crate::system_registry::shield_arc_system_id("fore").expect("non-empty arc id"),
             payload: SystemControlPayload::SetShieldArcFocus { focused: true },
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -1085,8 +1084,7 @@ mod tests {
     #[test]
     fn control_system_set_shield_arc_focus_false_round_trips() {
         let msg = ClientMessage::ControlSystem {
-            target: crate::system_registry::shield_arc_system_id("port")
-                .expect("non-empty arc id"),
+            target: crate::system_registry::shield_arc_system_id("port").expect("non-empty arc id"),
             payload: SystemControlPayload::SetShieldArcFocus { focused: false },
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -1111,7 +1109,8 @@ mod tests {
         assert_eq!(msg, decoded);
         // Wire compat: pre-#514 payloads without center_deg/width_deg/arc_id
         // must still deserialize with the defaults filled in.
-        let legacy_json = r#"{"label":"Fore","hp":100,"max_hp":100,"online":true,"offline_remaining":0.0}"#;
+        let legacy_json =
+            r#"{"label":"Fore","hp":100,"max_hp":100,"online":true,"offline_remaining":0.0}"#;
         let legacy_decoded: ShieldFacingStatus = serde_json::from_str(legacy_json).unwrap();
         assert_eq!(legacy_decoded.center_deg, 0.0);
         assert_eq!(legacy_decoded.width_deg, 90.0);

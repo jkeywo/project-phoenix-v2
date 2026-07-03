@@ -61,14 +61,17 @@ test('Engineering player receives ConsoleHullUpdate after game start', async ({ 
   await engineer.close();
 });
 
-test('total hull starts at 150 in first ConsoleHullUpdate', async ({ context }) => {
+test('total hull starts at 211 in first ConsoleHullUpdate', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
   const msg = await engineer.waitForMessage('ConsoleHullUpdate', 2_000) as any;
   const hull = msg.data.entries;
   const total = hull.reduce((sum: number, e: any) => sum + e.current, 0);
 
-  expect(total).toBe(150);
+  // 150 (post-#511) + 86 (fine Tactical banks/tubes/magazine added in #512,
+  // alongside the retained coarse "Tactical" entry) - 25 (Shields hull moved
+  // out of console_hull into per-arc ShipArcHull in #514) = 211.
+  expect(total).toBe(211);
 
   await captain.close();
   await engineer.close();

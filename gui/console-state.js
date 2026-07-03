@@ -814,14 +814,8 @@ export function buildNavigationConsoleState(state) {
       selects: navSelects,
       extra: (e) => {
         const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
-        // Objective-marker beacons (e.g. nav_beacon.toml) render as the
-        // synthetic waypoint marker rather than their authored icon — a
-        // UI affordance for "ring the active objective", not an icon
-        // resolution rule.
-        const kindOverride = tags.includes('objective_marker') ? { kind: 'waypoint' } : {};
         return {
           name: e.name || null,
-          ...kindOverride,
           world_x: entityX(e),
           world_z: entityZ(e),
           stance:  e.stance  || 'neutral',

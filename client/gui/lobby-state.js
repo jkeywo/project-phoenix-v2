@@ -169,7 +169,10 @@ export class LobbyState {
   showLobbyPanel(myToken) {
     if (this.phase === 'Lobby') return true;
     if (this.phase === 'Loading') return true;
-    if (this.phase === 'InProgress') return this.isSpectator(myToken);
+    if (this.phase === 'InProgress') {
+      const player = this.players.find(p => p.token === myToken);
+      return this.isSpectator(myToken) || !!(player && !player.ready);
+    }
     return false; // GameOver
   }
 

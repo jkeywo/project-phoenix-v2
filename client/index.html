@@ -913,6 +913,7 @@
     /// Console selected in the lobby detail panel. Null until the player picks one.
     /// Resets when the player releases their station.
     let lobbyConsole = null;
+    let pendingMidGameClaim = false;
 
     // Single source of truth for changing the active console. Called by
     // the render() reconciler, the tab-bar onPress handler, and the swipe
@@ -1005,8 +1006,10 @@
             game: s.phase === 'InProgress' || s.phase === 'GameOver',
             bezel: s.phase === 'InProgress' || s.phase === 'GameOver' };
       const mine = myConsoles(s);
-      // Spectators / new joiners see the lobby even during InProgress
-      if (s.phase === 'InProgress' && !mine.length) {
+      const myPlayer = me(s);
+      // Spectators and pending mid-game claimants stay in the lobby. Ready is
+      // the point where the server actually hands the station over from AI.
+      if (s.phase === 'InProgress' && (pendingMidGameClaim || !mine.length || (myPlayer && !myPlayer.ready))) {
         vis.lobby = true; vis.game = false; vis.bezel = false;
       }
       const inGame = vis.game;
@@ -1188,7 +1191,10 @@
         if (isMine) {
           btn.className = 'mine-btn';
           btn.textContent = 'RELEASE';
-          btn.addEventListener('click', () => { console.log('[client] RELEASE click'); send('ReleaseStation'); });
+          btn.addEventListener('click', () => {
+            pendingMidGameClaim = false;
+            send('ReleaseStation');
+          });
         } else if (st.holder_name) {
           btn.className = 'taken-btn';
           btn.textContent = 'TAKEN';
@@ -1196,8 +1202,11 @@
         } else {
           btn.className = 'claim-btn';
           btn.textContent = 'CLAIM';
-          btn.addEventListener('pointerdown', () => console.log('[client] CLAIM pointerdown', st.name));
-          btn.addEventListener('click', () => { console.log('[client] CLAIM click', st.name); send('SelectStation', { station: st.name }); });
+          btn.addEventListener('click', () => {
+            if (state.phase === 'InProgress') pendingMidGameClaim = true;
+            send('SelectStation', { station: st.name });
+            scheduleRender();
+          });
         }
         action.appendChild(btn);
         row.appendChild(action);
@@ -1218,7 +1227,10 @@
           const releaseBtn = document.createElement('button');
           releaseBtn.className = 'detail-release-btn';
           releaseBtn.textContent = 'LEAVE';
-          releaseBtn.addEventListener('click', () => send('ReleaseStation'));
+          releaseBtn.addEventListener('click', () => {
+            pendingMidGameClaim = false;
+            send('ReleaseStation');
+          });
           detailHeader.appendChild(releaseBtn);
           const consolesArea = detail.querySelector('.detail-consoles');
           consolesArea.innerHTML = '';
@@ -1810,6 +1822,9 @@
           rebuildStations();
           break;
         case 'StationAssigned': {
+          if (msg.data.token === myToken && !(msg.data.consoles || []).length) {
+            pendingMidGameClaim = false;
+          }
           if (window.lobbyState) {
             state.players = window.lobbyState.players;
           } else {
@@ -2138,6 +2153,7 @@
           break;
         }
         case 'ReadyChanged':
+          if (msg.data.token === myToken && msg.data.ready) pendingMidGameClaim = false;
           if (window.lobbyState) {
             state.players = window.lobbyState.players;
           } else {

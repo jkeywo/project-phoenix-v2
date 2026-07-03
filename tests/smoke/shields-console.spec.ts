@@ -4,6 +4,11 @@
 // copied into dist/gui/ by Trunk. It exercises the ADR-0001 bridge contract:
 //   - window.__updateConsole(name, stateJson) renders ShieldsConsoleState into DOM.
 //   - Focus buttons call window.__sendAction(...) with the action envelope.
+//
+// Issue #514 — Shields decomposed into per-arc fine systems. Facings now
+// carry `arc_id`, `center_deg`, `width_deg`; the panel renders arcs
+// dynamically from the facings list; focus button clicks send
+// `set_shield_focus` with the `arc_id` string.
 
 import { test, expect } from './fixtures';
 
@@ -11,10 +16,10 @@ const CONSOLE_URL = '/gui/shield-console.html';
 
 const NOMINAL_STATE = {
   facings: [
-    { label: 'Fore', hp: 100, max_hp: 100, online: true, offline_remaining: 0, is_focused: true },
-    { label: 'Port', hp: 72, max_hp: 100, online: true, offline_remaining: 0, is_focused: false },
-    { label: 'Aft', hp: 0, max_hp: 100, online: false, offline_remaining: 8, is_focused: false },
-    { label: 'Starboard', hp: 88, max_hp: 100, online: true, offline_remaining: 0, is_focused: false },
+    { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true, offline_remaining: 0, is_focused: true, center_deg: 0, width_deg: 90 },
+    { arc_id: 'port', label: 'Port', hp: 72, max_hp: 100, online: true, offline_remaining: 0, is_focused: false, center_deg: 270, width_deg: 90 },
+    { arc_id: 'aft', label: 'Aft', hp: 0, max_hp: 100, online: false, offline_remaining: 8, is_focused: false, center_deg: 180, width_deg: 90 },
+    { arc_id: 'starboard', label: 'Starboard', hp: 88, max_hp: 100, online: true, offline_remaining: 0, is_focused: false, center_deg: 90, width_deg: 90 },
   ],
   hull_integrity_pct: 78,
   focused_facing: 'Fore',
@@ -22,12 +27,29 @@ const NOMINAL_STATE = {
   grid_status: 'GRID NOMINAL',
 };
 
-test('shields console: __updateConsole renders four quadrant cards', async ({ page }) => {
+test('shields console: __updateConsole renders one card per facing', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
   await page.evaluate((s) => (window as any).__updateConsole('Shields', JSON.stringify(s)), NOMINAL_STATE);
 
   await expect(page.locator('.quad-card')).toHaveCount(4);
+});
+
+test('shields console: variable arc count renders correctly', async ({ page }) => {
+  // Single omni arc (NPC-style ship shape).
+  const omniState = {
+    facings: [
+      { arc_id: 'all', label: 'All', hp: 15, max_hp: 15, online: true, offline_remaining: 0, is_focused: false, center_deg: 0, width_deg: 360 },
+    ],
+    hull_integrity_pct: 100,
+    focused_facing: null,
+    target_bearing: null,
+    grid_status: 'GRID NOMINAL',
+  };
+  await page.goto(CONSOLE_URL);
+  await page.evaluate((s) => (window as any).__updateConsole('Shields', JSON.stringify(s)), omniState);
+  await expect(page.locator('.quad-card')).toHaveCount(1);
+  await expect(page.locator('.quad-card .qc-name')).toHaveText('ALL');
 });
 
 test('shields console: facing values render from state', async ({ page }) => {
@@ -39,7 +61,7 @@ test('shields console: facing values render from state', async ({ page }) => {
   const foreCard = page.locator('.quad-card').nth(0);
   await expect(foreCard.locator('.qc-name')).toHaveText('FORE');
 
-  // AFT = 0% (down)
+  // AFT (third in the facings order) = 0% (down)
   const aftCard = page.locator('.quad-card').nth(2);
   await expect(aftCard.locator('.qc-name')).toHaveText('AFT');
 });
@@ -81,43 +103,47 @@ test('shields console: threat indicator hidden when no target', async ({ page })
   await expect(page.locator('#threat-row')).not.toHaveClass(/active/);
 });
 
-test('shields console: shield segment click sends set_shield_focus', async ({ page }) => {
+test('shields console: shield segment click sends set_shield_focus with arc_id', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
+  await page.evaluate((s) => (window as any).__updateConsole('Shields', JSON.stringify(s)), NOMINAL_STATE);
   await page.evaluate(() => {
     (window as any).__sent = [];
     (window as any).__sendAction = (json: string) => (window as any).__sent.push(json);
   });
 
-  // Click Port segment (non-focused in demo state) to set focus to Port.
-  await page.locator('.shield-segment[data-facing="Port"]').click();
+  // Click Port segment (non-focused in nominal state) to set focus to Port.
+  await page.locator('.shield-segment[data-arc-id="port"]').click();
 
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(1);
   expect(JSON.parse(sent[0])).toEqual({
     action: 'set_shield_focus',
     console: 'Shields',
-    facing: 'Port',
+    arc_id: 'port',
+    focused: true,
   });
 });
 
-test('shields console: clicking focused facing clears focus via null', async ({ page }) => {
+test('shields console: clicking focused facing clears focus via focused=false', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
+  await page.evaluate((s) => (window as any).__updateConsole('Shields', JSON.stringify(s)), NOMINAL_STATE);
   await page.evaluate(() => {
     (window as any).__sent = [];
     (window as any).__sendAction = (json: string) => (window as any).__sent.push(json);
   });
 
-  // Click Fore segment (focused in demo state) — toggles to null.
-  await page.locator('.shield-segment[data-facing="Fore"]').click();
+  // Click Fore segment (focused in nominal state) — toggles focus off.
+  await page.locator('.shield-segment[data-arc-id="fore"]').click();
 
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(1);
   expect(JSON.parse(sent[0])).toEqual({
     action: 'set_shield_focus',
     console: 'Shields',
-    facing: null,
+    arc_id: 'fore',
+    focused: false,
   });
 });
 

@@ -865,6 +865,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             faction: None,
             hull: None,
             weapons_console: Some(make_weapons_console_config(80.0)),

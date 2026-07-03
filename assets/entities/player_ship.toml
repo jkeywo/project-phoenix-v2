@@ -45,12 +45,9 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
 
-[[hull.console_hull]]
-console = "Shields"
-max_hp = 25
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
+# Coarse `Shields` hull entry retired (issue #514). Per-arc hull HP lives on
+# the `[[shield_arc]] hull_max_hp` fields below; total preserved at 25 HP
+# (7 + 6 + 6 + 6 = 25).
 
 [[hull.console_hull]]
 console = "Core"
@@ -253,11 +250,46 @@ focus_penalty_max_hp = 25
 focus_penalty_regen = 1.0
 focus_decay_rate = 10
 
+# Ship-wide defaults for [[shield_arc]] blocks below (issue #514).
+# Per-arc overrides on individual [[shield_arc]] blocks take precedence.
 [shields_console.base]
-num_facings = 4
 max_hp = 100
 regen_per_sec = 2
 offline_duration = 10
+
+# ── Shield arcs (issue #514) ────────────────────────────────────────────
+# Four evenly-spaced arcs. Each auto-generates a `[[system]]` entry with
+# `id = "shield-arc-<id>"` and `kind = "shield_arc"`, plus per-arc hull HP
+# tracked in `ShipArcHull` (7+6+6+6 = 25 total, preserving the retired
+# `[[hull.console_hull]] console = "Shields"` budget).
+
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 90
+hull_max_hp = 7
+
+[[shield_arc]]
+id = "port"
+label = "Port"
+center_deg = 270
+width_deg = 90
+hull_max_hp = 6
+
+[[shield_arc]]
+id = "aft"
+label = "Aft"
+center_deg = 180
+width_deg = 90
+hull_max_hp = 6
+
+[[shield_arc]]
+id = "starboard"
+label = "Starboard"
+center_deg = 90
+width_deg = 90
+hull_max_hp = 6
 
 [engineering_console]
 [radar_appearance]
@@ -521,11 +553,10 @@ kind = "sensors"
 station = "sensors"
 power_group = "sensors"
 
-[[system]]
-id = "shields"
-kind = "shields"
-station = "shields"
-power_group = "ops"
+# Shields fine systems (issue #514) are auto-generated from `[[shield_arc]]`
+# blocks above. Each arc synthesises a `[[system]]` entry with
+# `kind = "shield_arc"` and `SystemId("shield-arc-<id>")`, station = "shields",
+# power_group = "ops".
 
 [[system]]
 id = "navigation"

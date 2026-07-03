@@ -87,6 +87,26 @@ pub struct ShieldFacingStatus {
     /// Whether this facing is the currently focused arc.
     #[serde(default)]
     pub is_focused: bool,
+    /// Arc centre bearing in degrees (0 = fore, 90 = starboard, 180 = aft, 270 = port).
+    /// Present so the JS panel can draw arbitrary-width / arbitrary-count arcs
+    /// without needing separate config. Defaults to 0 for wire compatibility
+    /// with pre-#514 payloads.
+    #[serde(default)]
+    pub center_deg: f32,
+    /// Angular width of the arc in degrees. Defaults to 90 for wire
+    /// compatibility with pre-#514 payloads (four evenly-spaced facings).
+    #[serde(default = "default_arc_width_deg")]
+    pub width_deg: f32,
+    /// Stable arc id from the ship TOML `[[shield_arc]]` block (e.g. `"fore"`,
+    /// `"all"`). Used to correlate the aggregate facings list with the
+    /// per-arc fine blackboards under `SystemId("shield-arc-<id>")`.
+    /// Defaults to empty for wire compatibility with pre-#514 payloads.
+    #[serde(default)]
+    pub arc_id: String,
+}
+
+fn default_arc_width_deg() -> f32 {
+    90.0
 }
 
 /// String identifier for a phaser bank, matching the `id` field of the
@@ -1016,8 +1036,12 @@ pub enum SystemControlPayload {
     ShowOnScreen {
         message_id: String,
     },
-    SetShieldFocus {
-        facing: Option<ViewDirection>,
+    SetShieldArcFocus {
+        /// True when this arc becomes the focused facing (bonus + penalty
+        /// to the other arcs); false to clear focus. Each button press
+        /// targets a specific `shield-arc-<id>` SystemId and sends the
+        /// desired new focus state for that arc.
+        focused: bool,
     },
     SetNavigationWaypoint {
         x: f32,
@@ -1681,6 +1705,41 @@ pub struct PowerBatteryBlackboard {
     pub emergency_threshold: f32,
 }
 
+/// Raw sim truth for a single Shield Arc fine system, published each tick
+/// into the ship blackboard (issue #514).
+///
+/// One entry per arc under `SystemId("shield-arc-<arc_id>")`. The aggregate
+/// `ShieldsBlackboard` continues to be published under `SystemId("shields")`
+/// for legacy JS readers; per-arc AI or per-arc UI consumers use these
+/// fine blackboards instead of unpacking the aggregate facings vec.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ShieldArcBlackboard {
+    /// Human-readable arc label (e.g. `"Fore"`, `"All"`).
+    pub label: String,
+    /// Current HP for this arc.
+    pub hp: i32,
+    /// Effective max HP (after focus bonus/penalty).
+    pub max_hp: i32,
+    /// True when this arc is operational — derived from
+    /// `ShipSystemControlSources.offline_systems` on this ship (i.e. hull
+    /// damage on the arc's console entry has not pushed it into the
+    /// Disabled/Destroyed tier) AND the arc's HP-timer is not currently
+    /// offline. Matches the derivation pattern used by
+    /// `PowerReactorBlackboard.is_online` / `PhaserBankBlackboard.is_online`.
+    pub is_online: bool,
+    /// True when this arc is the currently focused facing.
+    pub is_focused: bool,
+    /// Seconds remaining on the shield-HP offline timer (0.0 when online).
+    /// Distinct from `is_online == false` due to hull damage: an arc can
+    /// be shield-online (HP > 0, this field is 0) yet hull-offline (its
+    /// `SystemId` is in `offline_systems`).
+    pub offline_remaining: f32,
+    /// Arc centre bearing in degrees.
+    pub center_deg: f32,
+    /// Arc angular width in degrees.
+    pub width_deg: f32,
+}
+
 /// Raw sim truth for the Weapons (Tactical) system, published each tick into
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -1734,6 +1793,10 @@ pub enum SystemBlackboard {
     PowerReactor(PowerReactorBlackboard),
     /// Power Battery fine-system blackboard (issue #513). One entry per ship.
     PowerBattery(PowerBatteryBlackboard),
+    /// Per-arc fine-system blackboard (issue #514). One entry per shield arc
+    /// instance under `SystemId("shield-arc-<arc_id>")`. Coexists with the
+    /// aggregate `Shields` blackboard under `SystemId("shields")`.
+    ShieldArc(ShieldArcBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship

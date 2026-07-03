@@ -174,13 +174,35 @@ pub const POWER_REACTOR_AI_CONTROLLER: &str = "power_reactor_ai";
 
 /// Wire `SystemId` for the Power Battery fine system.
 ///
-/// The battery is the drain target for `InterSystemPayload::DrainWeaponsBattery`
+/// The battery is the target for `InterSystemPayload::DrainWeaponsBattery`
 /// (channel-2). A Disabled/Destroyed battery refuses the drain — the pool
 /// is treated as immovable/0-reserves so magazine-style weapons draws
 /// (phaser beams) cannot consume from it.
 pub const POWER_BATTERY_KIND: &str = "power_battery";
 pub const POWER_BATTERY_SYSTEM_ID: &str = "power-battery";
 pub const POWER_BATTERY_AI_CONTROLLER: &str = "power_battery_ai";
+
+// ── Fine-grained Shields systems (issue #514) ────────────────────────────────
+//
+// The coarse `shields` kind is DELETED from `player_ship.toml`, but
+// `SHIELDS_SYSTEM_ID = "shields"` remains as a stable string constant so
+// tests and legacy readers (e.g. the JS panel's aggregate
+// `blackboards['shields']` entry) can still address the aggregate surface.
+// All per-arc admission and per-arc damage now target `shield_arc` fine
+// systems registered per-instance in TOML (e.g. `"shield-arc-fore"`).
+//
+// Ships may declare any number of `[[shield_arc]]` blocks; each block
+// auto-generates a corresponding `[[system]]` entry with
+// `kind = "shield_arc"` at TOML-parse time.
+
+/// Wire `SystemId` for the Shield Arc fine systems.
+///
+/// Registered per-instance in TOML (e.g. `"shield-arc-fore"`,
+/// `"shield-arc-aft"`). Arc count is variable — a ship declares one
+/// `[[shield_arc]]` block per arc, from which the parser synthesises a
+/// matching `[[system]]` entry.
+pub const SHIELD_ARC_KIND: &str = "shield_arc";
+pub const SHIELD_ARC_AI_CONTROLLER: &str = "shield_arc_ai";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
@@ -321,6 +343,11 @@ impl SystemKindRegistry {
         registry.register(
             POWER_BATTERY_KIND,
             AiControllerRegistration::new(POWER_BATTERY_AI_CONTROLLER)?,
+        )?;
+        // Fine-grained Shields systems (issue #514)
+        registry.register(
+            SHIELD_ARC_KIND,
+            AiControllerRegistration::new(SHIELD_ARC_AI_CONTROLLER)?,
         )?;
         Ok(registry)
     }
@@ -501,6 +528,23 @@ pub fn torpedo_tube_system_id(tube_id: &str) -> Option<SystemId> {
     Some(SystemId(format!(
         "torpedo-tube-{}",
         tube_id.replace('_', "-")
+    )))
+}
+
+/// Resolve the `SystemId` for a shield arc by its TOML `id`.
+///
+/// The convention is `"shield-arc-<arc_id_with_underscores_to_hyphens>"`,
+/// so `"fore"` → `"shield-arc-fore"`, `"all"` → `"shield-arc-all"`.
+/// Returns `Some` for every non-empty arc id. NPCs that declare a single
+/// omni arc (id = "all") get their own fine SystemId without needing a
+/// match-arm update.
+pub fn shield_arc_system_id(arc_id: &str) -> Option<SystemId> {
+    if arc_id.is_empty() {
+        return None;
+    }
+    Some(SystemId(format!(
+        "shield-arc-{}",
+        arc_id.replace('_', "-")
     )))
 }
 
@@ -1088,5 +1132,80 @@ mod tests {
     fn fine_power_system_id_helpers_return_expected_values() {
         assert_eq!(power_reactor_system_id().0, POWER_REACTOR_SYSTEM_ID);
         assert_eq!(power_battery_system_id().0, POWER_BATTERY_SYSTEM_ID);
+    }
+
+    // ── Fine Shields system tests (issue #514) ────────────────────────────────
+
+    #[test]
+    fn shield_arcs_registered_in_system_kind_registry() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+        assert!(
+            registry.contains(SHIELD_ARC_KIND),
+            "shield_arc not registered"
+        );
+        assert_eq!(
+            registry
+                .registration(SHIELD_ARC_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            SHIELD_ARC_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn shield_arc_kind_string_is_lowercase_snake() {
+        // Kind key uses snake_case per registry convention (matches
+        // `phaser_bank`, `power_reactor` etc.).
+        assert_eq!(SHIELD_ARC_KIND, "shield_arc");
+    }
+
+    #[test]
+    fn shield_arc_system_id_helper_returns_expected_shape() {
+        assert_eq!(
+            shield_arc_system_id("fore"),
+            Some(SystemId("shield-arc-fore".into()))
+        );
+        assert_eq!(
+            shield_arc_system_id("port"),
+            Some(SystemId("shield-arc-port".into()))
+        );
+        assert_eq!(
+            shield_arc_system_id("aft"),
+            Some(SystemId("shield-arc-aft".into()))
+        );
+        assert_eq!(
+            shield_arc_system_id("starboard"),
+            Some(SystemId("shield-arc-starboard".into()))
+        );
+        // Single-omni NPC arc id
+        assert_eq!(
+            shield_arc_system_id("all"),
+            Some(SystemId("shield-arc-all".into()))
+        );
+        // Underscore-to-hyphen conversion is the convention.
+        assert_eq!(
+            shield_arc_system_id("dorsal_upper"),
+            Some(SystemId("shield-arc-dorsal-upper".into()))
+        );
+        assert_eq!(shield_arc_system_id(""), None);
+    }
+
+    #[test]
+    fn shield_arc_kebab_case_conformance() {
+        // Every SystemId synthesised for shield arcs must be lowercase kebab.
+        for arc_id in &["fore", "port", "aft", "starboard", "all", "dorsal_upper"] {
+            let sid = shield_arc_system_id(arc_id).expect("non-empty id should synthesise");
+            assert_eq!(
+                sid.0,
+                sid.0.to_lowercase(),
+                "SystemId {sid:?} for arc {arc_id:?} is not lowercase"
+            );
+            assert!(
+                !sid.0.contains('_'),
+                "SystemId {sid:?} for arc {arc_id:?} contains underscore (use hyphen)"
+            );
+            assert!(sid.0.starts_with("shield-arc-"), "SystemId {sid:?} must start with shield-arc-");
+        }
     }
 }

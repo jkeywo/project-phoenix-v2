@@ -170,6 +170,7 @@ fn apply_damage_zone_damage(
             Option<&mut crate::simulation::ShipShields>,
             Option<&EntityUuid>,
             Has<LocalShip>,
+            Option<&mut crate::entity_spawner::EntityShipArcHull>,
         ),
         With<Ship>,
     >,
@@ -188,7 +189,9 @@ fn apply_damage_zone_damage(
         return;
     }
 
-    for (ship_entity, mut hull, mut shields_opt, ship_uuid, is_local) in ship_query.iter_mut() {
+    for (ship_entity, mut hull, mut shields_opt, ship_uuid, is_local, mut arc_hull_opt) in
+        ship_query.iter_mut()
+    {
         let Some(region_set) = membership.inside.get(&ship_entity) else {
             continue;
         };
@@ -228,7 +231,14 @@ fn apply_damage_zone_damage(
 
                 let mut rng = rand::rngs::SmallRng::from_os_rng();
                 let (hull_applied, ship_destroyed) = if hull_amount > 0.0 {
-                    crate::damage::apply_hull_damage(&mut hull.0, hull_amount, &mut rng)
+                    let result =
+                        crate::damage::apply_hull_damage(&mut hull.0, hull_amount, &mut rng);
+                    // Distribute the same absorbed amount across per-arc hull
+                    // (issue #514). Skipped for NPCs (no `EntityShipArcHull`).
+                    if let Some(ref mut arc_hull) = arc_hull_opt {
+                        arc_hull.0.apply_damage(result.0, &mut rng);
+                    }
+                    result
                 } else {
                     (0.0, false)
                 };
@@ -410,6 +420,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(shape),
             effects: None,
@@ -675,6 +686,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -724,6 +736,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1146,6 +1159,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1289,6 +1303,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1631,6 +1646,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1670,6 +1686,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {

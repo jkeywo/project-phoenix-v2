@@ -814,6 +814,7 @@ fn handle_collisions(
             Option<&ColliderSection>,
             Has<LocalShip>,
             Option<&mut ShipImpulse>,
+            Option<&mut crate::entity_spawner::EntityShipArcHull>,
         ),
         With<Ship>,
     >,
@@ -845,6 +846,7 @@ fn handle_collisions(
         ship_collider,
         is_local,
         mut impulse_opt,
+        mut arc_hull_opt,
     ) in ship_query.iter_mut()
     {
         cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
@@ -958,6 +960,12 @@ fn handle_collisions(
         let hull_applied = if total_hull > 0.0 {
             let rng = &mut rand::rngs::SmallRng::from_os_rng();
             let (applied, destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
+            // Distribute the same absorbed amount across the per-arc hull
+            // pool (issue #514) so arc tier tracking follows overall hull
+            // damage. Skipped when the ship has no `EntityShipArcHull` (NPCs).
+            if let Some(ref mut arc_hull) = arc_hull_opt {
+                arc_hull.0.apply_damage(applied, rng);
+            }
             ship_destroyed = destroyed;
             applied
         } else {
@@ -1078,6 +1086,9 @@ fn broadcast_shield_status(
             online: s.online,
             offline_remaining: s.offline_remaining,
             is_focused: s.is_focused,
+            center_deg: s.center_deg,
+            width_deg: s.width_deg,
+            arc_id: s.id,
         })
         .collect();
 
@@ -1268,6 +1279,12 @@ fn admit_system_commands(
 /// Returns the `Console` that controls `target`, used for seat-holder checks.
 fn console_for_system(target: &crate::messages::SystemId) -> Option<Console> {
     use crate::system_registry::*;
+    // Fine-grained shield arcs (issue #514) — variable count, matched by prefix.
+    // Keep the coarse `SHIELDS_SYSTEM_ID` arm below as a legacy fallback for
+    // the aggregate blackboard string.
+    if target.0.starts_with("shield-arc-") {
+        return Some(Console::Shields);
+    }
     match target.0.as_str() {
         CAPTAIN_SYSTEM_ID | RED_ALERT_SYSTEM_ID => Some(Console::CaptainChair),
         HELM_SYSTEM_ID
@@ -2005,14 +2022,22 @@ fn spawn_game_start_entities(
             }
 
             // Apply shield focus config + base shield-system values from TOML if present.
-            // The `[shields_console.base]` sub-block, when present, overrides
-            // the four hardcoded defaults in `ShieldConfig::default()`
-            // (num_facings, max_hp, regen_per_sec, offline_duration).
-            // When absent we keep the historical defaults (4 quadrants,
-            // 100 HP, 5 HP/s regen, 10 s offline).
+            // Post-#514: the `[shields_console.base]` sub-block still holds
+            // ship-wide defaults (max_hp, regen_per_sec, offline_duration)
+            // consumed as fallbacks by each `[[shield_arc]]` block. When
+            // shield_arcs are declared the runtime is built via
+            // `ShieldSystem::from_arcs`; otherwise fall back to
+            // `ShieldSystem::new` with historical evenly-spaced facings.
             if let Some(sc) = &config.shields_console {
-                let shield_config = sc.base.as_ref().map(|b| b.to_runtime()).unwrap_or_default();
-                let mut shields = ShipShields(ShieldSystem::new(&shield_config));
+                let ship_wide = sc.base.as_ref().map(|b| b.to_runtime()).unwrap_or_default();
+                let shield_system = if !config.shield_arcs.is_empty() {
+                    let arcs: Vec<_> =
+                        config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
+                    ShieldSystem::from_arcs(&arcs, &ship_wide)
+                } else {
+                    ShieldSystem::new(&ship_wide)
+                };
+                let mut shields = ShipShields(shield_system);
                 shields.0.focus_config = crate::shield::ShieldFocusConfig {
                     bonus_max_hp: sc.focus_bonus_max_hp,
                     bonus_regen: sc.focus_bonus_regen,
@@ -2021,11 +2046,52 @@ fn spawn_game_start_entities(
                     decay_rate: sc.focus_decay_rate,
                 };
                 commands.entity(spawned).insert(shields);
+            } else if !config.shield_arcs.is_empty() {
+                let ship_wide = crate::shield::ShieldConfig::default();
+                let arcs: Vec<_> =
+                    config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
+                commands.entity(spawned).insert(ShipShields(
+                    ShieldSystem::from_arcs(&arcs, &ship_wide),
+                ));
             } else {
                 // Default shields on the ship entity when no TOML shields_console block.
                 commands
                     .entity(spawned)
                     .insert(ShipShields(ShieldSystem::default()));
+            }
+
+            // Per-arc hull HP (issue #514). Attach `EntityShipArcHull`
+            // alongside the shield system so `sync_console_damage_tiers`
+            // can flip the fine `shield-arc-<id>` SystemIds into
+            // `offline_systems` when an arc's hull HP drops into the
+            // Disabled/Destroyed tier.
+            if !config.shield_arcs.is_empty() {
+                let arc_entries: Vec<(String, crate::damage::ArcHullEntry)> = config
+                    .shield_arcs
+                    .iter()
+                    .filter(|a| a.hull_max_hp > 0.0)
+                    .map(|a| {
+                        (
+                            a.id.clone(),
+                            crate::damage::ArcHullEntry {
+                                current: a.hull_max_hp,
+                                max: a.hull_max_hp,
+                                tier_config: crate::damage::ConsoleTierConfig {
+                                    damaged_threshold_pct: a.hull_damaged_threshold_pct,
+                                    disabled_threshold_pct: a.hull_disabled_threshold_pct,
+                                    debuff_magnitude: a.hull_debuff_magnitude,
+                                },
+                            },
+                        )
+                    })
+                    .collect();
+                if !arc_entries.is_empty() {
+                    commands
+                        .entity(spawned)
+                        .insert(crate::entity_spawner::EntityShipArcHull(
+                            crate::damage::ShipArcHull::from_entries(arc_entries),
+                        ));
+                }
             }
 
             if let Some(wc) = &config.weapons_console {
@@ -6145,10 +6211,9 @@ mod tests {
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shields_system_id(),
-                payload: SystemControlPayload::SetShieldFocus {
-                    facing: Some(ViewDirection::Fore),
-                },
+                target: crate::system_registry::shield_arc_system_id("fore")
+                    .expect("fore"),
+                payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
         tick(&mut app);
@@ -6169,10 +6234,9 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shields_system_id(),
-                payload: SystemControlPayload::SetShieldFocus {
-                    facing: Some(ViewDirection::Port),
-                },
+                target: crate::system_registry::shield_arc_system_id("port")
+                    .expect("port"),
+                payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
         tick(&mut app);
@@ -6197,10 +6261,9 @@ mod tests {
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shields_system_id(),
-                payload: SystemControlPayload::SetShieldFocus {
-                    facing: Some(ViewDirection::Fore),
-                },
+                target: crate::system_registry::shield_arc_system_id("fore")
+                    .expect("fore"),
+                payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
         tick(&mut app);
@@ -6212,8 +6275,9 @@ mod tests {
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shields_system_id(),
-                payload: SystemControlPayload::SetShieldFocus { facing: None },
+                target: crate::system_registry::shield_arc_system_id("fore")
+                    .expect("fore"),
+                payload: SystemControlPayload::SetShieldArcFocus { focused: false },
             },
         );
         tick(&mut app);
@@ -6249,15 +6313,14 @@ mod tests {
         );
         tick(&mut app);
 
-        // Still in Lobby — SetShieldFocus should be ignored.
+        // Still in Lobby — SetShieldArcFocus should be ignored.
         push(
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shields_system_id(),
-                payload: SystemControlPayload::SetShieldFocus {
-                    facing: Some(ViewDirection::Aft),
-                },
+                target: crate::system_registry::shield_arc_system_id("aft")
+                    .expect("aft"),
+                payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
         tick(&mut app);
@@ -6282,10 +6345,9 @@ mod tests {
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shields_system_id(),
-                payload: SystemControlPayload::SetShieldFocus {
-                    facing: Some(ViewDirection::Fore),
-                },
+                target: crate::system_registry::shield_arc_system_id("fore")
+                    .expect("fore"),
+                payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
         let _ = tick(&mut app);

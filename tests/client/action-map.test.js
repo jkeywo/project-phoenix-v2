@@ -297,16 +297,37 @@ describe('set_power', () => {
 });
 
 describe('set_shield_focus', () => {
-  it('calls send SetShieldFocus with facing', () => {
+  it('sends SetShieldArcFocus targeted at shield-arc-<arc_id> (issue #514)', () => {
     const send = mkSend();
-    ACTION_MAP.set_shield_focus({ action: 'set_shield_focus', facing: 'fore' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', { target: 'shields', payload: { type: 'SetShieldFocus', data: { facing: 'fore' } } });
+    ACTION_MAP.set_shield_focus({ action: 'set_shield_focus', arc_id: 'fore', focused: true }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'shield-arc-fore',
+      payload: { type: 'SetShieldArcFocus', data: { focused: true } },
+    });
   });
 
-  it('defaults facing to null when absent', () => {
+  it('defaults focused to true when the field is omitted', () => {
+    const send = mkSend();
+    ACTION_MAP.set_shield_focus({ action: 'set_shield_focus', arc_id: 'starboard' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'shield-arc-starboard',
+      payload: { type: 'SetShieldArcFocus', data: { focused: true } },
+    });
+  });
+
+  it('sends focused=false to clear focus on the currently-focused arc', () => {
+    const send = mkSend();
+    ACTION_MAP.set_shield_focus({ action: 'set_shield_focus', arc_id: 'aft', focused: false }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'shield-arc-aft',
+      payload: { type: 'SetShieldArcFocus', data: { focused: false } },
+    });
+  });
+
+  it('is a no-op when arc_id is missing', () => {
     const send = mkSend();
     ACTION_MAP.set_shield_focus({ action: 'set_shield_focus' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', { target: 'shields', payload: { type: 'SetShieldFocus', data: { facing: null } } });
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

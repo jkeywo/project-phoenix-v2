@@ -1097,12 +1097,15 @@ mod tests {
 
     fn make_snap(label: &str, hp: i32, max_hp: i32, focused: bool) -> ShieldFacingSnapshot {
         ShieldFacingSnapshot {
+            id: label.to_ascii_lowercase(),
             label: label.into(),
             hp,
             max_hp,
             online: hp > 0,
             offline_remaining: 0.0,
             is_focused: focused,
+            center_deg: 0.0,
+            width_deg: 90.0,
         }
     }
 

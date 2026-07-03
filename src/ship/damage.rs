@@ -2,6 +2,7 @@ use crate::messages::Console;
 use crate::shield::ShieldSystem;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ── DamageTier ────────────────────────────────────────────────────────────────
 
@@ -319,6 +320,178 @@ impl ConsoleHull {
     pub fn set_console_hp(&mut self, console: &Console, new_hp: f32) {
         if let Some(entry) = self.entries.iter_mut().find(|(c, _, _)| c == console) {
             entry.1 = new_hp.clamp(0.0, entry.2);
+        }
+    }
+}
+
+// ── ShipArcHull (issue #514) ──────────────────────────────────────────────────
+
+/// One entry in [`ShipArcHull`]: per-arc hull HP + tier thresholds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArcHullEntry {
+    /// Current hull HP for this arc.
+    pub current: f32,
+    /// Maximum hull HP for this arc.
+    pub max: f32,
+    /// Tier thresholds for damage-tier derivation.
+    pub tier_config: ConsoleTierConfig,
+}
+
+/// Per-arc hull tracker (issue #514).
+///
+/// Parallels [`ConsoleHull`] but keyed by arc id (string) instead of `Console`
+/// enum. Each shield arc declared via a `[[shield_arc]]` block in ship TOML
+/// gets a corresponding entry here. Damage is distributed proportionally to
+/// total hull damage on the ship (the arc HP pool tracks total ship hull
+/// damage, matching how `Console` hull entries behave).
+///
+/// `sync_console_damage_tiers` iterates this component alongside
+/// [`ConsoleHull`], deriving `SystemId("shield-arc-<id>")` offline states from
+/// each entry's tier.
+///
+/// Skipped on NPCs — NPCs use scalar `hull_integrity` and do not declare
+/// per-arc `[[hull.console_hull]]` entries (mirrors how #512 skipped
+/// per-bank/tube hull on NPCs).
+///
+/// Pure struct — `ship/damage.rs` is Bevy-free per AGENTS.md rule 9.
+/// The Bevy `Component` wrapper lives in `entities/spawner.rs` as
+/// `ShipArcHullComponent`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ShipArcHull {
+    entries: HashMap<String, ArcHullEntry>,
+    /// Ordered list of arc ids (matches TOML insertion order) — HashMap
+    /// alone would randomise iteration and break deterministic damage
+    /// distribution.
+    order: Vec<String>,
+}
+
+impl ShipArcHull {
+    /// Build from a list of `(arc_id, ArcHullEntry)` pairs. Preserves the
+    /// caller's order for deterministic iteration.
+    pub fn from_entries(entries: Vec<(String, ArcHullEntry)>) -> Self {
+        let mut order = Vec::with_capacity(entries.len());
+        let mut map = HashMap::with_capacity(entries.len());
+        for (id, entry) in entries {
+            if !map.contains_key(&id) {
+                order.push(id.clone());
+            }
+            map.insert(id, entry);
+        }
+        Self { entries: map, order }
+    }
+
+    /// True when the tracker has no arcs (NPCs, empty TOMLs).
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty()
+    }
+
+    /// Iterate `(arc_id, ArcHullEntry)` pairs in TOML declaration order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &ArcHullEntry)> {
+        self.order.iter().map(|id| {
+            let entry = self
+                .entries
+                .get(id)
+                .expect("ShipArcHull invariant: order and entries agree");
+            (id.as_str(), entry)
+        })
+    }
+
+    /// Look up an entry by arc id.
+    pub fn get(&self, arc_id: &str) -> Option<&ArcHullEntry> {
+        self.entries.get(arc_id)
+    }
+
+    /// Return the current [`DamageTier`] for the given arc.
+    ///
+    /// Returns `Operational` for arcs not tracked by this hull (mirrors
+    /// [`ConsoleHull::tier_for`]).
+    pub fn tier_for(&self, arc_id: &str) -> DamageTier {
+        let Some(entry) = self.entries.get(arc_id) else {
+            return DamageTier::Operational;
+        };
+        if entry.current == 0.0 {
+            return DamageTier::Destroyed;
+        }
+        let ratio = if entry.max > 0.0 {
+            entry.current / entry.max
+        } else {
+            0.0
+        };
+        if ratio < entry.tier_config.disabled_threshold_pct {
+            DamageTier::Disabled
+        } else if ratio < entry.tier_config.damaged_threshold_pct {
+            DamageTier::Damaged
+        } else {
+            DamageTier::Operational
+        }
+    }
+
+    /// Apply `amount` of damage distributed across arcs above 0 HP, weighted
+    /// by remaining HP — same policy as [`ConsoleHull::apply_damage`]. Damage
+    /// spills to further weighted selections when an arc is exhausted.
+    pub fn apply_damage(&mut self, mut amount: f32, rng: &mut impl Rng) {
+        while amount > 0.0 {
+            let total: f32 = self
+                .order
+                .iter()
+                .filter_map(|id| self.entries.get(id))
+                .filter(|entry| entry.current > 0.0)
+                .map(|entry| entry.current)
+                .sum();
+            if total == 0.0 {
+                break;
+            }
+            let mut r = rng.random::<f32>() * total;
+            let mut chosen_id: Option<String> = None;
+            for id in &self.order {
+                let entry = self
+                    .entries
+                    .get(id)
+                    .expect("ShipArcHull invariant: order and entries agree");
+                if entry.current <= 0.0 {
+                    continue;
+                }
+                r -= entry.current;
+                if r < 0.0 {
+                    chosen_id = Some(id.clone());
+                    break;
+                }
+            }
+            let idx = chosen_id.unwrap_or_else(|| {
+                self.order
+                    .iter()
+                    .rev()
+                    .find(|id| {
+                        self.entries
+                            .get(id.as_str())
+                            .is_some_and(|e| e.current > 0.0)
+                    })
+                    .cloned()
+                    .expect("total > 0.0 implies at least one live entry")
+            });
+            let entry = self
+                .entries
+                .get_mut(&idx)
+                .expect("ShipArcHull invariant: order and entries agree");
+            let absorbed = amount.min(entry.current);
+            entry.current -= absorbed;
+            amount -= absorbed;
+        }
+    }
+
+    /// Restore `amount` HP to a specific arc, clamped to its max. Arcs not
+    /// present are silently ignored.
+    pub fn restore(&mut self, arc_id: &str, amount: f32) {
+        if let Some(entry) = self.entries.get_mut(arc_id) {
+            entry.current = (entry.current + amount).min(entry.max);
+        }
+    }
+
+    /// Directly set the current HP for a given arc. No-op if the arc is not
+    /// tracked. Clamps to `[0.0, max]`. Test helper.
+    pub fn set_hp(&mut self, arc_id: &str, new_hp: f32) {
+        if let Some(entry) = self.entries.get_mut(arc_id) {
+            entry.current = new_hp.clamp(0.0, entry.max);
         }
     }
 }
@@ -827,6 +1000,107 @@ mod tests {
         assert!(
             (debuff - 0.0).abs() < 1e-6,
             "Destroyed console should have 0.0 debuff magnitude, got {debuff}"
+        );
+    }
+
+    // ── ShipArcHull tests (issue #514) ────────────────────────────────────────
+
+    fn four_arc_hull() -> ShipArcHull {
+        let tc = ConsoleTierConfig::default();
+        ShipArcHull::from_entries(vec![
+            ("fore".into(), ArcHullEntry { current: 6.0, max: 6.0, tier_config: tc }),
+            ("port".into(), ArcHullEntry { current: 6.0, max: 6.0, tier_config: tc }),
+            ("aft".into(), ArcHullEntry { current: 6.0, max: 6.0, tier_config: tc }),
+            ("starboard".into(), ArcHullEntry { current: 7.0, max: 7.0, tier_config: tc }),
+        ])
+    }
+
+    #[test]
+    fn arc_hull_starts_at_full_and_reports_operational() {
+        let hull = four_arc_hull();
+        assert_eq!(hull.tier_for("fore"), DamageTier::Operational);
+        assert_eq!(hull.tier_for("port"), DamageTier::Operational);
+        assert_eq!(hull.tier_for("aft"), DamageTier::Operational);
+        assert_eq!(hull.tier_for("starboard"), DamageTier::Operational);
+    }
+
+    #[test]
+    fn arc_hull_apply_damage_reduces_total_hp() {
+        let mut hull = four_arc_hull();
+        let mut rng = rand::rng();
+        let before: f32 = hull.iter().map(|(_, e)| e.current).sum();
+        hull.apply_damage(10.0, &mut rng);
+        let after: f32 = hull.iter().map(|(_, e)| e.current).sum();
+        assert!((before - after - 10.0).abs() < 1e-3, "10 hp should have been absorbed");
+    }
+
+    #[test]
+    fn arc_hull_tier_transitions_correctly_with_damage() {
+        let mut hull = ShipArcHull::from_entries(vec![(
+            "fore".into(),
+            ArcHullEntry {
+                current: 100.0,
+                max: 100.0,
+                tier_config: ConsoleTierConfig::default(),
+            },
+        )]);
+        assert_eq!(hull.tier_for("fore"), DamageTier::Operational);
+
+        hull.set_hp("fore", 60.0); // 0.6 < 0.75 → Damaged
+        assert_eq!(hull.tier_for("fore"), DamageTier::Damaged);
+
+        hull.set_hp("fore", 10.0); // 0.10 < 0.25 → Disabled
+        assert_eq!(hull.tier_for("fore"), DamageTier::Disabled);
+
+        hull.set_hp("fore", 0.0); // 0 → Destroyed
+        assert_eq!(hull.tier_for("fore"), DamageTier::Destroyed);
+    }
+
+    #[test]
+    fn arc_hull_tier_for_unknown_arc_is_operational() {
+        let hull = four_arc_hull();
+        assert_eq!(hull.tier_for("nonexistent"), DamageTier::Operational);
+    }
+
+    #[test]
+    fn arc_hull_restore_is_clamped_to_max() {
+        let mut hull = four_arc_hull();
+        hull.set_hp("fore", 3.0);
+        hull.restore("fore", 100.0);
+        assert_eq!(hull.get("fore").unwrap().current, 6.0);
+    }
+
+    #[test]
+    fn arc_hull_iter_preserves_toml_order() {
+        let hull = four_arc_hull();
+        let ids: Vec<&str> = hull.iter().map(|(id, _)| id).collect();
+        assert_eq!(ids, vec!["fore", "port", "aft", "starboard"]);
+    }
+
+    #[test]
+    fn arc_hull_apply_damage_favours_higher_hp_arc() {
+        // Fore has 1 hp, aft has 99 hp — aft should absorb most tiny hits.
+        let tc = ConsoleTierConfig::default();
+        let mut hull = ShipArcHull::from_entries(vec![
+            ("fore".into(), ArcHullEntry { current: 1.0, max: 1.0, tier_config: tc }),
+            ("aft".into(), ArcHullEntry { current: 99.0, max: 99.0, tier_config: tc }),
+        ]);
+        let mut rng = rand::rng();
+        let mut aft_hits = 0u32;
+        let trials = 10_000;
+        for _ in 0..trials {
+            let before_aft = hull.get("aft").unwrap().current;
+            hull.apply_damage(0.001, &mut rng);
+            let after_aft = hull.get("aft").unwrap().current;
+            if after_aft < before_aft {
+                aft_hits += 1;
+            }
+        }
+        let fraction = aft_hits as f32 / trials as f32;
+        assert!(
+            fraction > 0.90,
+            "Aft (99 hp) should absorb >90% of hits, got {:.1}%",
+            fraction * 100.0
         );
     }
 }

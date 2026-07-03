@@ -19,8 +19,13 @@ description = "Harrow Cruiser"
 [hull]
 hull_integrity = 120.0
 
-[shields_console.base]
-num_facings = 1
+# Single omni shield arc (issue #514). NPCs have no `[shields]` station so
+# the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
+[[shield_arc]]
+id = "all"
+label = "All"
+center_deg = 0
+width_deg = 360
 max_hp = 60
 regen_per_sec = 1.0
 

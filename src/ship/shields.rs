@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    AdmittedCommands, Console, CoordinationPayload, ShieldFacingStatus, ShieldsBlackboard,
-    SystemBlackboard, SystemControlPayload, SystemId, ViewDirection,
+    AdmittedCommands, Console, CoordinationPayload, ShieldArcBlackboard, ShieldFacingStatus,
+    ShieldsBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -129,6 +129,9 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
                     online: s.online,
                     offline_remaining: s.offline_remaining,
                     is_focused: s.is_focused,
+                    center_deg: s.center_deg,
+                    width_deg: s.width_deg,
+                    arc_id: s.id,
                 })
                 .collect();
             vec![crate::messages::ServerMessage::ShieldStatus { facings }]
@@ -138,26 +141,71 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 
 // ── Systems ────────────────────────────────────────────────────────────────────
 
-/// Handle `SetShieldFocus` messages from every ship's Shields console.
+/// Handle `SetShieldArcFocus` messages from every ship's Shields console.
 ///
 /// Iterates every ship (player + NPC) so both the player's Shields console
 /// commands and the future NPC `operate_shields_ai` writes into
 /// `AdmittedCommands` flip each ship's own shield focus.
+///
+/// Per-arc dispatch (#514): each `[[shield_arc]]` synthesises a
+/// `SystemId("shield-arc-<id>")`; the JS panel sends
+/// `SetShieldArcFocus { focused: bool }` targeted at that arc's SystemId.
+/// The handler iterates the facings on each ship and picks up admitted
+/// commands per arc target. Setting `focused = true` on one arc clears
+/// focus on any other arc (the shield system carries a single focus slot).
 pub fn handle_shields_messages(
     mut ship_query: Query<(&AdmittedCommands, &mut ShipShields), With<crate::server_app::Ship>>,
 ) {
     for (admitted, mut shields) in ship_query.iter_mut() {
-        for cmd in admitted.for_target(crate::system_registry::SHIELDS_SYSTEM_ID) {
-            let SystemControlPayload::SetShieldFocus { facing } = &cmd.payload else {
-                continue;
-            };
-            let idx = facing.as_ref().map(|d| match d {
-                ViewDirection::Fore => 0,
-                ViewDirection::Port => 1,
-                ViewDirection::Aft => 2,
-                ViewDirection::Starboard => 3,
-            });
-            shields.0.set_focused_facing(idx);
+        // Snapshot arc ids first so we don't hold an immutable borrow across
+        // the mutable `set_focused_facing` call.
+        let arc_targets: Vec<(String, crate::messages::SystemId)> = shields
+            .0
+            .facings
+            .iter()
+            .enumerate()
+            .filter_map(|(_, f)| {
+                if f.id.is_empty() {
+                    None
+                } else {
+                    crate::system_registry::shield_arc_system_id(&f.id).map(|sid| (f.id.clone(), sid))
+                }
+            })
+            .collect();
+
+        // Track the desired new focus: `Some(Some(idx))` = focus this idx,
+        // `Some(None)` = clear focus, `None` = no change.
+        let mut new_focus: Option<Option<usize>> = None;
+
+        for (arc_id, sid) in &arc_targets {
+            for cmd in admitted.for_target(&sid.0) {
+                let SystemControlPayload::SetShieldArcFocus { focused } = &cmd.payload else {
+                    continue;
+                };
+                if *focused {
+                    // Locate the arc index and mark it as the new focus.
+                    let idx = shields.0.facings.iter().position(|f| f.id == *arc_id);
+                    if let Some(i) = idx {
+                        new_focus = Some(Some(i));
+                    }
+                } else {
+                    // Clear focus only if the request is targeting the
+                    // currently focused arc — matches the "toggle off"
+                    // behaviour of the previous SetShieldFocus{ facing: None }
+                    // payload.
+                    let current_focus_arc_id = shields
+                        .0
+                        .focused_facing
+                        .and_then(|i| shields.0.facings.get(i).map(|f| f.id.clone()));
+                    if current_focus_arc_id.as_deref() == Some(arc_id.as_str()) {
+                        new_focus = Some(None);
+                    }
+                }
+            }
+        }
+
+        if let Some(focus) = new_focus {
+            shields.0.set_focused_facing(focus);
         }
     }
 }
@@ -187,9 +235,20 @@ pub fn emit_shields_coordination(
         coord_state.ensure_len(snapshots.len());
 
         let red_alert = red_alert.0;
-        let sender_origin = control_sources
-            .0
-            .source_for(&crate::system_registry::shields_system_id());
+        // Post-#514: the coarse `shields` SystemId is no longer a registered
+        // fine system. Coordination messages carry the sender's origin
+        // (Human vs AI); pick the *first* arc's control source as the
+        // representative sender origin — it matches the ship-wide
+        // coordination surface (a single shields console operator drives
+        // all arcs). Fall back to the default `ControlSource` if no arc is
+        // configured (very unusual).
+        let first_arc_sid = snapshots
+            .iter()
+            .find_map(|s| crate::system_registry::shield_arc_system_id(&s.id));
+        let sender_origin = first_arc_sid
+            .as_ref()
+            .map(|sid| control_sources.0.source_for(sid))
+            .unwrap_or_default();
 
         for (i, snap) in snapshots.iter().enumerate() {
             if !snap.online {
@@ -253,6 +312,10 @@ pub fn emit_shields_coordination(
 fn publish_shields_blackboard(
     shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
     hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
+    control_sources_q: Query<
+        &crate::ship_plugin::ShipSystemControlSources,
+        With<crate::server_app::LocalShip>,
+    >,
     physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>,
     weapons_target_q: Query<
         &crate::weapons_plugin::WeaponsTarget,
@@ -275,17 +338,23 @@ fn publish_shields_blackboard(
         return;
     };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
-    let facings: Vec<ShieldFacingStatus> = shields
-        .0
-        .snapshot()
-        .into_iter()
+    let control_sources = control_sources_q.single().ok();
+
+    // Snapshot facings once so we can reuse them for both the aggregate
+    // and per-arc blackboards.
+    let snapshots = shields.0.snapshot();
+    let facings: Vec<ShieldFacingStatus> = snapshots
+        .iter()
         .map(|s| ShieldFacingStatus {
-            label: s.label,
+            label: s.label.clone(),
             hp: s.hp,
             max_hp: s.max_hp,
             online: s.online,
             offline_remaining: s.offline_remaining,
             is_focused: s.is_focused,
+            center_deg: s.center_deg,
+            width_deg: s.width_deg,
+            arc_id: s.id.clone(),
         })
         .collect();
 
@@ -332,18 +401,53 @@ fn publish_shields_blackboard(
     });
 
     let bb = ShieldsBlackboard {
-        facings,
+        facings: facings.clone(),
         hull_integrity_pct,
         focused_facing,
         target_bearing,
         grid_status,
     };
 
+    // Per-arc fine blackboards (issue #514). One entry per arc under
+    // `SystemId("shield-arc-<id>")`. `is_online` combines hull-based
+    // offline (from `offline_systems`) with shield-timer offline
+    // (`snap.online`) — matches the pattern used by
+    // `PowerReactorBlackboard.is_online` derivation.
+    let per_arc: Vec<(SystemId, ShieldArcBlackboard)> = snapshots
+        .iter()
+        .filter_map(|snap| {
+            if snap.id.is_empty() {
+                return None;
+            }
+            let sid = crate::system_registry::shield_arc_system_id(&snap.id)?;
+            let hull_offline = control_sources
+                .map(|cs| cs.0.offline_systems.contains(&sid))
+                .unwrap_or(false);
+            let is_online = snap.online && !hull_offline;
+            Some((
+                sid,
+                ShieldArcBlackboard {
+                    label: snap.label.clone(),
+                    hp: snap.hp,
+                    max_hp: snap.max_hp,
+                    is_online,
+                    is_focused: snap.is_focused,
+                    offline_remaining: snap.offline_remaining,
+                    center_deg: snap.center_deg,
+                    width_deg: snap.width_deg,
+                },
+            ))
+        })
+        .collect();
+
     if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(crate::system_registry::SHIELDS_SYSTEM_ID.to_string()),
             SystemBlackboard::Shields(bb),
         );
+        for (sid, arc_bb) in per_arc {
+            bbs.0.insert(sid, SystemBlackboard::ShieldArc(arc_bb));
+        }
     }
 }
 
@@ -424,8 +528,12 @@ mod tests {
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
+                    // Post-#514: coordination emitter looks up the first
+                    // arc's SystemId. `ShieldSystem::new` populates arc ids
+                    // "fore"/"aft" for a 2-facing default.
                     cs.0.set(
-                        crate::system_registry::shields_system_id(),
+                        crate::system_registry::shield_arc_system_id("fore")
+                            .expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
@@ -567,8 +675,12 @@ mod tests {
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
+                    // Post-#514: emit_shields_coordination reads the first
+                    // arc's SystemId as sender_origin. Set "fore" for the
+                    // 4-facing default (Fore, Port, Aft, Starboard).
                     cs.0.set(
-                        crate::system_registry::shields_system_id(),
+                        crate::system_registry::shield_arc_system_id("fore")
+                            .expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
@@ -669,8 +781,14 @@ mod tests {
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
+                    // Post-#514: emit_shields_coordination looks up the first
+                    // arc's SystemId as the sender_origin. `ShieldSystem::new`
+                    // populates arc ids from `default_arc_id`; for 2-facing
+                    // that's "fore" and "aft". Set the first arc to Ai so the
+                    // test asserts continue to hold.
                     cs.0.set(
-                        crate::system_registry::shields_system_id(),
+                        crate::system_registry::shield_arc_system_id("fore")
+                            .expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
@@ -956,5 +1074,159 @@ mod tests {
                 .all(|m| m.target == crate::system_registry::helm_system_id()),
             "ShieldFacingDown should target the helm system"
         );
+    }
+
+    // ── Issue #514 tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn shield_facing_down_still_fires_for_variable_arc() {
+        // Regression: after the SystemId shape flipped from `shields` to
+        // per-arc `shield-arc-<id>`, coordination messages must still fire
+        // when an arc goes offline. The test app uses a 2-facing default so
+        // arc ids are "fore" and "aft".
+        let mut app = test_app_with_helm();
+        start_game_with_shields_and_helm(&mut app);
+
+        let se = ship_e(&mut app);
+        app.world_mut()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
+            .0
+            .apply_damage(9999, 0.0); // deplete facing 0 (fore)
+
+        tick(&mut app);
+        let coord_msgs = drain_coord(&mut app);
+        let down_msgs: Vec<_> = coord_msgs
+            .iter()
+            .filter(|m| matches!(&m.payload, CoordinationPayload::ShieldFacingDown { .. }))
+            .collect();
+        assert!(
+            !down_msgs.is_empty(),
+            "expected a ShieldFacingDown after arc depletion (variable-arc regression)"
+        );
+    }
+
+    #[test]
+    fn handle_set_shield_arc_focus_flips_focus() {
+        // Basic wire-shape assertion: a `SetShieldArcFocus { focused: true }`
+        // targeted at `shield-arc-fore` moves focus to that facing.
+        let mut app = test_app();
+        // Manually admit the command (bypasses the full authorisation stack).
+        let se = ship_e(&mut app);
+        let arc_sid = crate::system_registry::shield_arc_system_id("fore")
+            .expect("fore");
+        app.world_mut()
+            .entity_mut(se)
+            .get_mut::<crate::messages::AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::messages::AdmittedCommand {
+                target: arc_sid.clone(),
+                payload: SystemControlPayload::SetShieldArcFocus { focused: true },
+                response_token: None,
+            });
+        tick(&mut app);
+        let shields = app.world().entity(se).get::<ShipShields>().unwrap();
+        assert_eq!(shields.0.focused_facing, Some(0), "fore arc focused");
+    }
+
+    #[test]
+    fn handle_set_shield_arc_focus_clears_focus_when_target_matches_current() {
+        let mut app = test_app();
+        let se = ship_e(&mut app);
+        // Manually set focus first.
+        app.world_mut()
+            .entity_mut(se)
+            .get_mut::<ShipShields>()
+            .unwrap()
+            .0
+            .set_focused_facing(Some(0));
+        // Send `focused: false` targeted at fore → clears.
+        let arc_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        app.world_mut()
+            .entity_mut(se)
+            .get_mut::<crate::messages::AdmittedCommands>()
+            .unwrap()
+            .0
+            .push(crate::messages::AdmittedCommand {
+                target: arc_sid,
+                payload: SystemControlPayload::SetShieldArcFocus { focused: false },
+                response_token: None,
+            });
+        tick(&mut app);
+        let shields = app.world().entity(se).get::<ShipShields>().unwrap();
+        assert_eq!(shields.0.focused_facing, None);
+    }
+
+    #[test]
+    fn publish_writes_shield_arc_blackboard_per_arc() {
+        // The publish system emits one `SystemBlackboard::ShieldArc` entry
+        // per arc under `SystemId("shield-arc-<id>")`, alongside the
+        // aggregate `Shields` blackboard.
+        let mut app = test_app();
+        tick(&mut app);
+        let se = ship_e(&mut app);
+        let bbs = app
+            .world()
+            .entity(se)
+            .get::<crate::server_app::ShipSystemBlackboards>()
+            .expect("ShipSystemBlackboards");
+        // 2-facing default: fore + aft.
+        for arc_id in &["fore", "aft"] {
+            let sid = crate::system_registry::shield_arc_system_id(arc_id)
+                .expect("arc id");
+            let bb = bbs.0.get(&sid).unwrap_or_else(|| {
+                panic!("expected ShieldArc blackboard under {sid:?}, got {:?}", bbs.0.keys().collect::<Vec<_>>())
+            });
+            match bb {
+                SystemBlackboard::ShieldArc(arc_bb) => {
+                    assert_eq!(arc_bb.hp, 100, "arc {arc_id} starts full");
+                    assert!(arc_bb.is_online, "arc {arc_id} starts online");
+                }
+                other => panic!("expected ShieldArc variant, got {other:?}"),
+            }
+        }
+        // Aggregate `shields` blackboard also present.
+        assert!(
+            bbs.0.contains_key(&SystemId(
+                crate::system_registry::SHIELDS_SYSTEM_ID.to_string()
+            )),
+            "aggregate shields blackboard must still be published"
+        );
+    }
+
+    #[test]
+    fn publish_shield_arc_blackboard_is_online_reflects_offline_systems() {
+        // When a fine shield-arc-<id> SystemId is in offline_systems (via
+        // hull-damage sync), the arc's `is_online` in the per-arc
+        // blackboard must be false.
+        let mut app = test_app();
+        let se = ship_e(&mut app);
+        // Directly mark fore arc as offline via ControlSources.
+        let arc_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        app.world_mut()
+            .entity_mut(se)
+            .get_mut::<crate::ship_plugin::ShipSystemControlSources>()
+            .unwrap()
+            .0
+            .offline_systems
+            .insert(arc_sid.clone());
+        tick(&mut app);
+        let bbs = app
+            .world()
+            .entity(se)
+            .get::<crate::server_app::ShipSystemBlackboards>()
+            .expect("ShipSystemBlackboards");
+        let bb = bbs.0.get(&arc_sid).expect("fore arc blackboard");
+        match bb {
+            SystemBlackboard::ShieldArc(arc_bb) => {
+                assert!(
+                    !arc_bb.is_online,
+                    "fore arc must report is_online=false when in offline_systems"
+                );
+            }
+            other => panic!("expected ShieldArc variant, got {other:?}"),
+        }
     }
 }

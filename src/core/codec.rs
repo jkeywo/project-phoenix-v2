@@ -119,7 +119,9 @@ fn system_target_for_payload_type(type_name: &str) -> Option<&'static str> {
             Some(crate::system_registry::NAVIGATION_SYSTEM_ID)
         }
         "SetScienceTarget" | "SetSensorsTarget" => Some(crate::system_registry::SENSORS_SYSTEM_ID),
-        "SetShieldFocus" => Some(crate::system_registry::SHIELDS_SYSTEM_ID),
+        // `SetShieldArcFocus` (issue #514) intentionally omitted — arcs are
+        // variable and there is no single fallback target. The JS layer
+        // must always include an explicit `shield-arc-<id>` target.
         "SetPowerGroupAllocation" | "SetPower" => {
             Some(crate::system_registry::POWER_REACTOR_SYSTEM_ID)
         }
@@ -1025,6 +1027,9 @@ mod tests {
                     online: true,
                     offline_remaining: 0.0,
                     is_focused: false,
+                    center_deg: 0.0,
+                    width_deg: 90.0,
+                    arc_id: "fore".into(),
                 },
                 ShieldFacingStatus {
                     label: "Port".into(),
@@ -1033,6 +1038,9 @@ mod tests {
                     online: false,
                     offline_remaining: 7.5,
                     is_focused: false,
+                    center_deg: 270.0,
+                    width_deg: 90.0,
+                    arc_id: "port".into(),
                 },
                 ShieldFacingStatus {
                     label: "Aft".into(),
@@ -1041,6 +1049,9 @@ mod tests {
                     online: true,
                     offline_remaining: 0.0,
                     is_focused: false,
+                    center_deg: 180.0,
+                    width_deg: 90.0,
+                    arc_id: "aft".into(),
                 },
                 ShieldFacingStatus {
                     label: "Starboard".into(),
@@ -1049,6 +1060,9 @@ mod tests {
                     online: true,
                     offline_remaining: 0.0,
                     is_focused: false,
+                    center_deg: 90.0,
+                    width_deg: 90.0,
+                    arc_id: "starboard".into(),
                 },
             ],
         };
@@ -1057,29 +1071,30 @@ mod tests {
     }
 
     #[test]
-    fn control_system_set_shield_focus_some_round_trips() {
+    fn control_system_set_shield_arc_focus_true_round_trips() {
+        // Per-arc target with boolean payload (issue #514).
         let msg = ClientMessage::ControlSystem {
-            target: crate::system_registry::shields_system_id(),
-            payload: SystemControlPayload::SetShieldFocus {
-                facing: Some(ViewDirection::Fore),
-            },
+            target: crate::system_registry::shield_arc_system_id("fore")
+                .expect("non-empty arc id"),
+            payload: SystemControlPayload::SetShieldArcFocus { focused: true },
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
-    fn control_system_set_shield_focus_none_round_trips() {
+    fn control_system_set_shield_arc_focus_false_round_trips() {
         let msg = ClientMessage::ControlSystem {
-            target: crate::system_registry::shields_system_id(),
-            payload: SystemControlPayload::SetShieldFocus { facing: None },
+            target: crate::system_registry::shield_arc_system_id("port")
+                .expect("non-empty arc id"),
+            payload: SystemControlPayload::SetShieldArcFocus { focused: false },
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
-    fn shield_facing_status_with_focus_round_trips() {
+    fn shield_facing_status_with_arc_geometry_round_trips() {
         let msg = ShieldFacingStatus {
             label: "Fore".into(),
             hp: 150,
@@ -1087,10 +1102,21 @@ mod tests {
             online: true,
             offline_remaining: 0.0,
             is_focused: true,
+            center_deg: 0.0,
+            width_deg: 90.0,
+            arc_id: "fore".into(),
         };
         let encoded = serde_json::to_string(&msg).unwrap();
         let decoded: ShieldFacingStatus = serde_json::from_str(&encoded).unwrap();
         assert_eq!(msg, decoded);
+        // Wire compat: pre-#514 payloads without center_deg/width_deg/arc_id
+        // must still deserialize with the defaults filled in.
+        let legacy_json = r#"{"label":"Fore","hp":100,"max_hp":100,"online":true,"offline_remaining":0.0}"#;
+        let legacy_decoded: ShieldFacingStatus = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(legacy_decoded.center_deg, 0.0);
+        assert_eq!(legacy_decoded.width_deg, 90.0);
+        assert_eq!(legacy_decoded.arc_id, "");
+        assert!(!legacy_decoded.is_focused);
     }
 
     #[test]
@@ -2362,6 +2388,9 @@ mod tests {
                             online: false,
                             offline_remaining: 10.0,
                             is_focused: false,
+                            center_deg: 0.0,
+                            width_deg: 90.0,
+                            arc_id: "fore".into(),
                         },
                         ShieldFacingStatus {
                             label: "Aft".into(),
@@ -2370,6 +2399,9 @@ mod tests {
                             online: true,
                             offline_remaining: 0.0,
                             is_focused: false,
+                            center_deg: 180.0,
+                            width_deg: 90.0,
+                            arc_id: "aft".into(),
                         },
                         ShieldFacingStatus {
                             label: "Port".into(),
@@ -2378,6 +2410,9 @@ mod tests {
                             online: true,
                             offline_remaining: 0.0,
                             is_focused: false,
+                            center_deg: 270.0,
+                            width_deg: 90.0,
+                            arc_id: "port".into(),
                         },
                         ShieldFacingStatus {
                             label: "Starboard".into(),
@@ -2386,6 +2421,9 @@ mod tests {
                             online: true,
                             offline_remaining: 0.0,
                             is_focused: false,
+                            center_deg: 90.0,
+                            width_deg: 90.0,
+                            arc_id: "starboard".into(),
                         },
                     ]),
                     warp_out_remaining_secs: None,
@@ -2779,6 +2817,55 @@ mod tests {
         assert!(json.contains("\"kind\":\"PowerBattery\""), "got: {json}");
         assert!(json.contains("\"is_online\":false"), "got: {json}");
         assert!(json.contains("\"charge\":15"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+    }
+
+    // ── Fine Shield Arc blackboard (issue #514) ───────────────────────────────
+
+    #[test]
+    fn system_blackboard_shield_arc_round_trips_json_codec() {
+        use crate::messages::{ShieldArcBlackboard, SystemBlackboard, SystemId};
+        let bb = SystemBlackboard::ShieldArc(ShieldArcBlackboard {
+            label: "Fore".into(),
+            hp: 85,
+            max_hp: 150,
+            is_online: true,
+            is_focused: true,
+            offline_remaining: 0.0,
+            center_deg: 0.0,
+            width_deg: 90.0,
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("shield-arc-fore".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn system_blackboard_shield_arc_serde_fields() {
+        use crate::messages::{ShieldArcBlackboard, SystemBlackboard};
+        let bb = SystemBlackboard::ShieldArc(ShieldArcBlackboard {
+            label: "Aft".into(),
+            hp: 0,
+            max_hp: 75,
+            is_online: false,
+            is_focused: false,
+            offline_remaining: 4.5,
+            center_deg: 180.0,
+            width_deg: 90.0,
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"kind\":\"ShieldArc\""), "got: {json}");
+        assert!(json.contains("\"label\":\"Aft\""), "got: {json}");
+        assert!(json.contains("\"hp\":0"), "got: {json}");
+        assert!(json.contains("\"max_hp\":75"), "got: {json}");
+        assert!(json.contains("\"is_online\":false"), "got: {json}");
+        assert!(json.contains("\"is_focused\":false"), "got: {json}");
+        assert!(json.contains("\"offline_remaining\":4.5"), "got: {json}");
+        assert!(json.contains("\"center_deg\":180"), "got: {json}");
+        assert!(json.contains("\"width_deg\":90"), "got: {json}");
         let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
         assert_eq!(bb, decoded);
     }

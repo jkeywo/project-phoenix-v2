@@ -1306,13 +1306,19 @@ pub fn handle_coordination_messages(mut reader: MessageReader<InboundMessage>) {
 ///
 /// The `SystemId` for a console is derived from `Console::station_console_id()`,
 /// which matches the `id` field of the `[[system]]` entries in the TOML.
+///
+/// Post-#514: also iterates the ship's `ShipArcHull` (when present) and flips
+/// each arc's fine `SystemId("shield-arc-<id>")` in/out of `offline_systems`
+/// using the same tier-derivation policy. Ships without a `ShipArcHull` (NPCs,
+/// legacy fixtures) are unaffected.
 pub fn sync_console_damage_tiers(
     mut ships: Query<(
         &crate::entity_spawner::EntityConsoleHull,
+        Option<&crate::entity_spawner::EntityShipArcHull>,
         &mut ShipSystemControlSources,
     )>,
 ) {
-    for (hull_component, mut control_sources) in ships.iter_mut() {
+    for (hull_component, arc_hull_opt, mut control_sources) in ships.iter_mut() {
         let hull = &hull_component.0;
         for (console, _cur, _max) in hull.entries() {
             let system_id = crate::messages::SystemId(console.station_console_id().to_string());
@@ -1323,6 +1329,24 @@ pub fn sync_console_damage_tiers(
                 }
                 DamageTier::Operational | DamageTier::Damaged => {
                     control_sources.0.offline_systems.remove(&system_id);
+                }
+            }
+        }
+        // Per-arc hull tier sync (issue #514).
+        if let Some(arc_hull_component) = arc_hull_opt {
+            let arc_hull = &arc_hull_component.0;
+            for (arc_id, _entry) in arc_hull.iter() {
+                let Some(sid) = crate::system_registry::shield_arc_system_id(arc_id) else {
+                    continue;
+                };
+                let tier = arc_hull.tier_for(arc_id);
+                match tier {
+                    DamageTier::Disabled | DamageTier::Destroyed => {
+                        control_sources.0.offline_systems.insert(sid);
+                    }
+                    DamageTier::Operational | DamageTier::Damaged => {
+                        control_sources.0.offline_systems.remove(&sid);
+                    }
                 }
             }
         }
@@ -1823,6 +1847,7 @@ mod tests {
             name: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(RegionEffectsConfig {
@@ -3592,6 +3617,157 @@ station = "helm"
         assert!(
             control_sources.0.offline_systems.contains(&battery_id),
             "power-battery should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
+        );
+    }
+
+    // ── Issue #514 shield-arc hull tier sync tests ────────────────────────────
+
+    /// Build a test app with a shield-arc-hull equipped ship. Uses a
+    /// small hull budget so `set_arc_hp` is trivial for tests.
+    fn test_app_with_shield_arc_hull() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
+            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+            .insert_resource(ShipModifiers::new())
+            .add_plugins(ShipPlugin);
+
+        let tc = crate::damage::ConsoleTierConfig::default();
+        let arc_hull = crate::damage::ShipArcHull::from_entries(vec![
+            (
+                "fore".into(),
+                crate::damage::ArcHullEntry {
+                    current: 10.0,
+                    max: 10.0,
+                    tier_config: tc,
+                },
+            ),
+            (
+                "aft".into(),
+                crate::damage::ArcHullEntry {
+                    current: 10.0,
+                    max: 10.0,
+                    tier_config: tc,
+                },
+            ),
+        ]);
+        let hull_config = &[
+            (crate::messages::Console::Helm, 25.0_f32),
+        ];
+        app.world_mut().spawn((
+            (
+                Ship,
+                LocalShip,
+                Transform::default(),
+                ShipPhysics::default(),
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                ActiveStationRatings::default(),
+                CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                crate::ai_plugin::ShipAiMemory::default(),
+                crate::entity_spawner::EntityConsoleHull(
+                    crate::damage::ConsoleHull::from_config(hull_config),
+                ),
+                crate::entity_spawner::EntityShipArcHull(arc_hull),
+                LastHelmInput::default(),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+            ),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
+        ));
+        app
+    }
+
+    #[test]
+    fn sync_console_damage_tiers_flips_shield_arc_offline_on_disabled_hp() {
+        let mut app = test_app_with_shield_arc_hull();
+        // Zero the fore arc hull HP.
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut arc_hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .unwrap();
+            arc_hull.0.set_hp("fore", 0.0);
+        }
+        tick(&mut app);
+        // After sync, offline_systems must contain shield-arc-fore.
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let cs = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let fore_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        assert!(
+            cs.0.offline_systems.contains(&fore_sid),
+            "shield-arc-fore must be in offline_systems when its arc HP is 0"
+        );
+        let aft_sid = crate::system_registry::shield_arc_system_id("aft").expect("aft");
+        assert!(
+            !cs.0.offline_systems.contains(&aft_sid),
+            "shield-arc-aft must NOT be in offline_systems (still at full HP)"
+        );
+    }
+
+    #[test]
+    fn sync_console_damage_tiers_removes_shield_arc_from_offline_on_repair() {
+        let mut app = test_app_with_shield_arc_hull();
+        // Zero fore, tick to insert into offline_systems.
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut arc_hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .unwrap();
+            arc_hull.0.set_hp("fore", 0.0);
+        }
+        tick(&mut app);
+        // Restore fore to full.
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut arc_hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .unwrap();
+            arc_hull.0.set_hp("fore", 10.0);
+        }
+        tick(&mut app);
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let cs = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let fore_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        assert!(
+            !cs.0.offline_systems.contains(&fore_sid),
+            "shield-arc-fore must be removed from offline_systems after repair"
         );
     }
 }

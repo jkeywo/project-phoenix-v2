@@ -1053,6 +1053,7 @@ fn tick_beams(
         Option<&mut crate::server_app::ShipAttackedThisTick>,
         Option<&mut LastShipAttacker>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        Option<&mut crate::entity_spawner::EntityShipArcHull>,
     )>,
     // ShipModifiers Resource fallback used only by legacy test paths that
     // set the resource but don't insert the component on the ship entity.
@@ -1267,7 +1268,7 @@ fn tick_beams(
             let target_entity =
                 hull_q
                     .iter()
-                    .find_map(|(e, ast_uuid, ent_uuid, _, _, _, _, _, _, _)| {
+                    .find_map(|(e, ast_uuid, ent_uuid, _, _, _, _, _, _, _, _)| {
                         let asteroid_match =
                             ast_uuid.map(|u| u.0.as_str()) == Some(state.target_uuid.as_str());
                         let entity_match =
@@ -1280,7 +1281,7 @@ fn tick_beams(
                     });
             if let Some((te, is_asteroid)) = target_entity {
                 if !is_asteroid {
-                    if let Ok((_, _, _, _, _, _, _, attacked_opt, last_attacker_opt, _)) =
+                    if let Ok((_, _, _, _, _, _, _, attacked_opt, last_attacker_opt, _, _)) =
                         hull_q.get_mut(te)
                     {
                         if let Some(mut atk) = attacked_opt {
@@ -1320,6 +1321,7 @@ fn tick_beams(
             _attacked_opt,
             _last_attacker_opt,
             target_is_local,
+            mut target_arc_hull,
         ) in hull_q.iter_mut()
         {
             let uuid_matches = ast_uuid.map(|u| u.0.as_str()) == Some(state.target_uuid.as_str())
@@ -1373,6 +1375,12 @@ fn tick_beams(
                 let mut rng = rand::rng();
                 let (hull_applied, destroyed) =
                     crate::damage::apply_hull_damage(&mut hull_comp.0, damage_to_hull, &mut rng);
+                // Distribute the same absorbed amount across per-arc hull
+                // (issue #514). Skipped when the target has no
+                // `EntityShipArcHull` (NPCs, asteroids).
+                if let Some(ref mut arc_hull) = target_arc_hull {
+                    arc_hull.0.apply_damage(hull_applied, &mut rng);
+                }
                 // LocalShip: emit DamageTaken every hit; ShipDestroyed +
                 // GameOver on kill. Never despawn the LocalShip entity.
                 if target_is_local {
@@ -1991,6 +1999,7 @@ fn tick_torpedo_system(
         Option<&crate::entity_spawner::EntityUuid>,
         &mut EntityConsoleHull,
         Option<&mut crate::ship::shields::ShipShields>,
+        Option<&mut crate::entity_spawner::EntityShipArcHull>,
     )>,
     mut commands: Commands,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
@@ -2175,8 +2184,14 @@ fn tick_torpedo_system(
         let mut hit_x = 0.0_f32;
         let mut hit_z = 0.0_f32;
 
-        for (entity, asteroid_uuid, entity_uuid, mut hull_comp, mut shield_comp) in
-            hull_query.iter_mut()
+        for (
+            entity,
+            asteroid_uuid,
+            entity_uuid,
+            mut hull_comp,
+            mut shield_comp,
+            mut target_arc_hull,
+        ) in hull_query.iter_mut()
         {
             let uuid_matches = asteroid_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str())
                 || entity_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str());
@@ -2210,7 +2225,14 @@ fn tick_torpedo_system(
                 }
             }
             if hull_damage > 0.0 {
+                let before = hull_comp.0.total_current();
                 hull_comp.0.apply_damage(hull_damage, &mut rng);
+                let absorbed = before - hull_comp.0.total_current();
+                // Distribute the same absorbed amount across per-arc hull
+                // (issue #514).
+                if let Some(ref mut arc_hull) = target_arc_hull {
+                    arc_hull.0.apply_damage(absorbed, &mut rng);
+                }
             }
 
             if hull_comp.0.is_destroyed() {

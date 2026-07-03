@@ -104,6 +104,19 @@ pub struct EntityTarget(pub crate::entity_target::TargetSection);
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
+/// Bevy ECS component wrapping the pure [`crate::damage::ShipArcHull`]
+/// struct (issue #514). Attached to ship entities that declare
+/// `[[shield_arc]]` blocks with `hull_max_hp` fields. `ship/damage.rs` is
+/// Bevy-free per AGENTS.md rule 9, so the pure per-arc HP logic lives
+/// there and this component wraps it for ECS storage.
+///
+/// The rest of the codebase uses the type alias
+/// [`crate::damage::ShipArcHull`] for readability at call sites — this
+/// wrapper is a thin newtype that lets the pure struct participate in
+/// Bevy queries.
+#[derive(Component, Clone, Debug, Default)]
+pub struct EntityShipArcHull(pub crate::damage::ShipArcHull);
+
 // â”€â”€ Spawner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Spawn an entity from a resolved EntityConfig.
@@ -481,16 +494,23 @@ pub fn spawn_entity(
         entity_commands.insert(crate::comms::CommsRange(comms.range));
     }
 
-    // Shields — translate the [shields_console] config block into a
-    // ShipShields component with focus tuning. Uses the same code path
-    // the player ship uses in spawn_game_start_entities so both player
-    // and NPC ships read from one TOML section. Placed BEFORE the hull
-    // block: the hull block has an early-return for the empty-hull case,
-    // so anything after it could be skipped.
+    // Shields — translate the [shields_console] config block + designer
+    // `[[shield_arc]]` blocks into a `ShipShields` component with focus
+    // tuning. Uses the same code path the player ship uses in
+    // spawn_game_start_entities so both player and NPC ships read from one
+    // TOML section. Placed BEFORE the hull block: the hull block has an
+    // early-return for the empty-hull case, so anything after it could be
+    // skipped.
     if let Some(sc) = &config.shields_console {
         use crate::weapons::shield::{ShieldFocusConfig, ShieldSystem};
-        let shield_config = sc.base.as_ref().map(|b| b.to_runtime()).unwrap_or_default();
-        let mut shields = crate::ship::shields::ShipShields(ShieldSystem::new(&shield_config));
+        let ship_wide = sc.base.as_ref().map(|b| b.to_runtime()).unwrap_or_default();
+        let shield_system = if !config.shield_arcs.is_empty() {
+            let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
+            ShieldSystem::from_arcs(&arcs, &ship_wide)
+        } else {
+            ShieldSystem::new(&ship_wide)
+        };
+        let mut shields = crate::ship::shields::ShipShields(shield_system);
         shields.0.focus_config = ShieldFocusConfig {
             bonus_max_hp: sc.focus_bonus_max_hp,
             bonus_regen: sc.focus_bonus_regen,
@@ -499,6 +519,46 @@ pub fn spawn_entity(
             decay_rate: sc.focus_decay_rate,
         };
         entity_commands.insert(shields);
+    } else if !config.shield_arcs.is_empty() {
+        // Ships that declare `[[shield_arc]]` blocks without a
+        // `[shields_console]` block (some legacy paths). Still build the
+        // shield system from arcs, using default focus config.
+        use crate::weapons::shield::{ShieldSystem};
+        let ship_wide = crate::shield::ShieldConfig::default();
+        let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
+        let shield_system = ShieldSystem::from_arcs(&arcs, &ship_wide);
+        entity_commands.insert(crate::ship::shields::ShipShields(shield_system));
+    }
+
+    // Per-arc hull HP (issue #514) — populated from `[[shield_arc]].hull_max_hp`
+    // and companion threshold/debuff fields. Attaches `EntityShipArcHull`
+    // alongside the shield system so `sync_console_damage_tiers` can route arc
+    // damage → offline_systems per-arc. Skipped when no arc declares hull HP.
+    if !config.shield_arcs.is_empty() {
+        let arc_entries: Vec<(String, crate::damage::ArcHullEntry)> = config
+            .shield_arcs
+            .iter()
+            .filter(|a| a.hull_max_hp > 0.0)
+            .map(|a| {
+                (
+                    a.id.clone(),
+                    crate::damage::ArcHullEntry {
+                        current: a.hull_max_hp,
+                        max: a.hull_max_hp,
+                        tier_config: crate::damage::ConsoleTierConfig {
+                            damaged_threshold_pct: a.hull_damaged_threshold_pct,
+                            disabled_threshold_pct: a.hull_disabled_threshold_pct,
+                            debuff_magnitude: a.hull_debuff_magnitude,
+                        },
+                    },
+                )
+            })
+            .collect();
+        if !arc_entries.is_empty() {
+            entity_commands.insert(EntityShipArcHull(
+                crate::damage::ShipArcHull::from_entries(arc_entries),
+            ));
+        }
     }
 
     // Hull â€” attach an EntityConsoleHull component if the config has hull data.
@@ -581,6 +641,7 @@ mod tests {
             name: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             hull: None,
             collider: None,
@@ -622,6 +683,7 @@ mod tests {
             name: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             hull: None,
             collider: None,
@@ -660,6 +722,7 @@ mod tests {
             name: Some("Sun".to_string()),
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             hull: None,
             collider: None,
@@ -703,6 +766,7 @@ mod tests {
             name: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             hull: None,
             collider: None,
@@ -744,6 +808,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             collider: Some(ColliderConfig {
                 shape: ColliderShape::Ball,
@@ -828,6 +893,7 @@ mod tests {
             mesh: None,
             star: None,
             ship_config: None,
+            shield_arcs: Vec::new(),
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -849,6 +915,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["field".to_string()],
             asteroid_field: Some(AsteroidFieldConfig {
                 inner_radius: 100.0,
@@ -907,6 +974,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             appearance: Some(AppearanceConfig {
                 colour: "#ff0000".to_string(),
@@ -990,6 +1058,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string(), "nebula".to_string()],
             shape: Some(RegionShape::Sphere { radius: 150.0 }),
             effects: Some(crate::region_effects::RegionEffectsConfig {
@@ -1048,6 +1117,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius: 100.0 }),
             effects: None,
@@ -1096,6 +1166,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             faction: Some(faction_id),
             hull: None,
@@ -1168,6 +1239,7 @@ mod tests {
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
                 hull_integrity: 60.0,
@@ -1279,6 +1351,7 @@ hull_integrity = 60.0
             star: None,
             light: Vec::new(),
             ship_config: None,
+            shield_arcs: Vec::new(),
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
                 hull_integrity: 200.0,

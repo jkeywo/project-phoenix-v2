@@ -819,6 +819,75 @@ impl ShieldsBaseConfig {
     }
 }
 
+/// Designer-authored per-arc shield config (issue #514).
+///
+/// Loaded from top-level `[[shield_arc]]` blocks in the ship TOML. Every
+/// arc auto-generates a matching `[[system]]` entry with
+/// `kind = "shield_arc"` and `SystemId("shield-arc-<id>")` during
+/// `EntityConfig::from_toml`. See [`ShieldArcConfig::to_runtime`] for the
+/// runtime conversion consumed by [`crate::shield::ShieldSystem::from_arcs`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShieldArcConfig {
+    /// Stable arc id (kebab-case fragment used to build the fine SystemId).
+    pub id: String,
+    /// Display label shown in the JS panel (e.g. `"Fore"`, `"All"`).
+    pub label: String,
+    /// Arc centre bearing in degrees (0 = fore, 90 = starboard).
+    pub center_deg: f32,
+    /// Arc angular width in degrees.
+    pub width_deg: f32,
+    /// Per-arc override for max HP; falls back to `[shields_console.base] max_hp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_hp: Option<i32>,
+    /// Per-arc override for regen/sec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regen_per_sec: Option<f32>,
+    /// Per-arc override for offline duration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offline_duration: Option<f32>,
+    /// Per-arc hull HP for damage-tier tracking (fed into `ShipArcHull`).
+    #[serde(default)]
+    pub hull_max_hp: f32,
+    /// HP fraction below which the arc enters Damaged tier. Default 0.75.
+    #[serde(default = "default_arc_hull_damaged_threshold")]
+    pub hull_damaged_threshold_pct: f32,
+    /// HP fraction below which the arc enters Disabled tier. Default 0.25.
+    #[serde(default = "default_arc_hull_disabled_threshold")]
+    pub hull_disabled_threshold_pct: f32,
+    /// Debuff magnitude applied on Damaged/Disabled tier. Default 0.15.
+    #[serde(default = "default_arc_hull_debuff_magnitude")]
+    pub hull_debuff_magnitude: f32,
+}
+
+fn default_arc_hull_damaged_threshold() -> f32 {
+    0.75
+}
+
+fn default_arc_hull_disabled_threshold() -> f32 {
+    0.25
+}
+
+fn default_arc_hull_debuff_magnitude() -> f32 {
+    0.15
+}
+
+impl ShieldArcConfig {
+    /// Convert this TOML block into the runtime shape consumed by
+    /// [`crate::shield::ShieldSystem::from_arcs`].
+    pub fn to_runtime(&self) -> crate::shield::ArcRuntimeConfig {
+        crate::shield::ArcRuntimeConfig {
+            id: self.id.clone(),
+            label: self.label.clone(),
+            center_deg: self.center_deg,
+            width_deg: self.width_deg,
+            max_hp: self.max_hp,
+            regen_per_sec: self.regen_per_sec,
+            offline_duration: self.offline_duration,
+        }
+    }
+}
+
 /// Player-ship phaser combat tuning. All per-bank values (`beam_range`,
 /// `beam_damage_per_sec`, `beam_duration_secs`, `cooldown_secs`,
 /// `beam_color`, `shield_pierce`) live on each [`PhaserBankConfig`] entry.
@@ -1127,11 +1196,40 @@ pub struct EntityConfig {
     /// entity-type-specific branches.
     #[serde(skip)]
     pub ship_config: Option<crate::ship::config::ShipConfig>,
+    /// Designer-authored shield arcs (issue #514). Populated from
+    /// top-level `[[shield_arc]]` TOML blocks. When non-empty, the parser
+    /// auto-synthesises a matching `[[system]]` entry per arc with
+    /// `kind = "shield_arc"` and `SystemId("shield-arc-<id>")`. Consumed
+    /// by the runtime path (`ShieldSystem::from_arcs`) that spawns the
+    /// ship's `ShipShields` component.
+    #[serde(skip)]
+    pub shield_arcs: Vec<ShieldArcConfig>,
 }
 
 impl EntityConfig {
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
         let mut value: toml::Value = toml::from_str(s)?;
+        // Extract [[shield_arc]] blocks BEFORE stripping so we can populate
+        // `EntityConfig.shield_arcs` and synthesise matching `[[system]]`
+        // entries during ship-config parsing.
+        let shield_arcs_value = if let Some(table) = value.as_table_mut() {
+            table.remove("shield_arc")
+        } else {
+            None
+        };
+        let shield_arcs: Vec<ShieldArcConfig> = match shield_arcs_value {
+            Some(toml::Value::Array(arr)) => arr
+                .into_iter()
+                .map(|v| v.try_into::<ShieldArcConfig>())
+                .collect::<Result<_, _>>()?,
+            Some(other) => {
+                return Err(SerdeError::custom(format!(
+                    "[[shield_arc]] must be an array of tables, got {other:?}"
+                )));
+            }
+            None => Vec::new(),
+        };
+
         // Extract the ship-config sections BEFORE stripping so we can parse
         // them via ShipConfig::from_toml (the same path player_ship.toml uses).
         let ship_config_toml = if let Some(table) = value.as_table_mut() {
@@ -1163,21 +1261,111 @@ impl EntityConfig {
             None
         };
         let mut config: EntityConfig = value.try_into()?;
+        config.shield_arcs = shield_arcs;
 
         // Parse the ship_config sub-block via the shared ShipConfig code path.
-        if let Some(ship_toml_value) = ship_config_toml {
-            let ship_toml_str = toml::to_string(&ship_toml_value).map_err(|e| {
-                serde::de::Error::custom(format!("ship_config re-serialise failed: {e}"))
-            })?;
+        // If the ship declares `[[shield_arc]]` blocks, they auto-generate
+        // matching `[[system]]` entries with `kind = "shield_arc"` — appended
+        // to whatever the ship's TOML already declared before we re-validate.
+        if !config.shield_arcs.is_empty() || ship_config_toml.is_some() {
             let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
                 .map_err(|e| {
                     serde::de::Error::custom(format!("system registry init failed: {e:?}"))
                 })?;
             let kinds: Vec<&str> = registry.kinds().collect();
-            let ship_config = crate::ship::config::parse_and_validate(&ship_toml_str, &kinds)
-                .map_err(|e| {
-                    serde::de::Error::custom(format!("ship_config validation failed: {e:?}"))
+
+            let mut ship_config = if let Some(ship_toml_value) = ship_config_toml {
+                let ship_toml_str = toml::to_string(&ship_toml_value).map_err(|e| {
+                    serde::de::Error::custom(format!("ship_config re-serialise failed: {e}"))
                 })?;
+                // Parse only (no validation) so ships that declare stations
+                // but no `[[system]]` blocks (relying on `[[shield_arc]]`
+                // synthesis to populate systems) don't hit `EmptySystems`
+                // during the initial pass. Final validation runs after
+                // shield_arc synthesis below.
+                toml::from_str::<crate::ship::config::ShipConfig>(&ship_toml_str).map_err(|e| {
+                    serde::de::Error::custom(format!("ship_config parse failed: {e}"))
+                })?
+            } else {
+                // No station/system/power_groups TOML at all but we do have
+                // shield_arcs — synthesise a minimal ShipConfig so the
+                // per-arc systems have a home. This path is used by NPC
+                // ships that don't otherwise declare `[[system]]` blocks.
+                crate::ship::config::ShipConfig {
+                    stations: Vec::new(),
+                    systems: Vec::new(),
+                    power_groups: std::collections::HashMap::new(),
+                    coordination_lag_secs: 2.0,
+                }
+            };
+
+            // Synthesise `[[system]]` entries from `[[shield_arc]]` blocks.
+            //
+            // For player ships (has a `shields` station in `stations`), each
+            // arc is owned by that station with `ai_only = false`. For NPC
+            // ships (no `shields` station), arcs are ownerless AI-only
+            // systems, matching how NPC phaser banks / power reactors work.
+            let shields_station_id = crate::messages::StationId("shields".into());
+            let has_shields_station = ship_config
+                .stations
+                .iter()
+                .any(|s| s.id == shields_station_id);
+            let ops_group = crate::messages::PowerGroupId("ops".into());
+            let has_ops_group = ship_config.power_groups.contains_key(&ops_group);
+
+            for arc in &config.shield_arcs {
+                let sid = crate::system_registry::shield_arc_system_id(&arc.id)
+                    .ok_or_else(|| SerdeError::custom(
+                        format!("shield_arc id {:?} is empty", arc.id),
+                    ))?;
+                let mut synthesised_config = toml::value::Table::new();
+                synthesised_config.insert("center_deg".into(), toml::Value::Float(arc.center_deg as f64));
+                synthesised_config.insert("width_deg".into(), toml::Value::Float(arc.width_deg as f64));
+                if let Some(max_hp) = arc.max_hp {
+                    synthesised_config.insert("max_hp".into(), toml::Value::Integer(max_hp as i64));
+                }
+                if let Some(regen) = arc.regen_per_sec {
+                    synthesised_config
+                        .insert("regen_per_sec".into(), toml::Value::Float(regen as f64));
+                }
+                if let Some(offline) = arc.offline_duration {
+                    synthesised_config.insert(
+                        "offline_duration".into(),
+                        toml::Value::Float(offline as f64),
+                    );
+                }
+
+                ship_config
+                    .systems
+                    .push(crate::ship::config::SystemInstanceConfig {
+                        id: sid,
+                        kind: crate::system_registry::SHIELD_ARC_KIND.into(),
+                        station: if has_shields_station {
+                            Some(shields_station_id.clone())
+                        } else {
+                            None
+                        },
+                        ai_only: !has_shields_station,
+                        power_group: if has_ops_group {
+                            Some(ops_group.clone())
+                        } else {
+                            None
+                        },
+                        marker: None,
+                        config: Some(toml::Value::Table(synthesised_config)),
+                    });
+            }
+
+            // Re-run validation after synthesis (catches duplicate SystemIds,
+            // dangling rating refs, etc.).
+            if !ship_config.systems.is_empty() {
+                crate::ship::config::validate(&ship_config, &kinds).map_err(|e| {
+                    serde::de::Error::custom(format!(
+                        "ship_config revalidate after shield_arc synthesis failed: {e:?}"
+                    ))
+                })?;
+            }
+
             config.ship_config = Some(ship_config);
         }
 
@@ -2406,18 +2594,230 @@ base_priority = 35.0
         );
     }
 
+    // ── Shield arc auto-synthesis tests (issue #514) ─────────────────────────
+
+    #[test]
+    fn shield_arc_toml_block_synthesises_system_instance() {
+        // Minimal ship TOML with a single `[[shield_arc]]` block. The
+        // parser must synthesise a matching `[[system]]` entry with
+        // `kind = "shield_arc"` and `SystemId("shield-arc-<id>")`.
+        let toml_str = r#"
+tags = ["ship"]
+
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 90
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        assert_eq!(config.shield_arcs.len(), 1);
+        assert_eq!(config.shield_arcs[0].id, "fore");
+
+        let ship_config = config
+            .ship_config
+            .expect("shield_arc must synthesise a ship_config");
+        assert_eq!(ship_config.systems.len(), 1);
+        let sys = &ship_config.systems[0];
+        assert_eq!(sys.id.0, "shield-arc-fore");
+        assert_eq!(sys.kind, "shield_arc");
+        // No `[shields]` station on this bare ship → arc is ai_only + ownerless.
+        assert!(sys.ai_only, "ownerless arc must be ai_only");
+        assert!(sys.station.is_none());
+    }
+
+    #[test]
+    fn shield_arc_synthesises_with_shields_station_when_present() {
+        // A ship that declares a `shields` station gets arcs owned by that
+        // station with `ai_only = false`.
+        let toml_str = r#"
+tags = ["ship"]
+
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 180
+
+[[shield_arc]]
+id = "aft"
+label = "Aft"
+center_deg = 180
+width_deg = 180
+
+[[station]]
+id = "shields"
+name = "Shields"
+description = "Manage shield systems."
+rank = "Ens."
+short_code = "SHD"
+console = "shields"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let ship_config = config.ship_config.expect("ship_config present");
+        assert_eq!(ship_config.systems.len(), 2);
+        for sys in &ship_config.systems {
+            assert!(!sys.ai_only, "with a shields station, arcs are player-controlled");
+            assert_eq!(
+                sys.station,
+                Some(crate::messages::StationId("shields".into()))
+            );
+        }
+    }
+
+    #[test]
+    fn player_ship_toml_produces_four_shield_arcs() {
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("player_ship must parse");
+        assert_eq!(
+            config.shield_arcs.len(),
+            4,
+            "player ship has 4 evenly-spaced arcs"
+        );
+        let ids: Vec<&str> = config.shield_arcs.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["fore", "port", "aft", "starboard"]);
+
+        // Synthesised systems have the expected shape.
+        let ship_config = config.ship_config.expect("ship_config present");
+        let arc_systems: Vec<_> = ship_config
+            .systems
+            .iter()
+            .filter(|s| s.kind == "shield_arc")
+            .collect();
+        assert_eq!(arc_systems.len(), 4);
+        let sys_ids: Vec<&str> = arc_systems.iter().map(|s| s.id.0.as_str()).collect();
+        assert!(sys_ids.contains(&"shield-arc-fore"));
+        assert!(sys_ids.contains(&"shield-arc-port"));
+        assert!(sys_ids.contains(&"shield-arc-aft"));
+        assert!(sys_ids.contains(&"shield-arc-starboard"));
+        // Player ship has a shields station → arcs are player-controlled.
+        for sys in &arc_systems {
+            assert!(!sys.ai_only);
+            assert_eq!(
+                sys.station,
+                Some(crate::messages::StationId("shields".into()))
+            );
+            assert_eq!(
+                sys.power_group,
+                Some(crate::messages::PowerGroupId("ops".into()))
+            );
+        }
+    }
+
+    #[test]
+    fn npc_ship_with_single_shield_arc_produces_one_arc_system() {
+        // Verify each NPC TOML produces exactly one arc system, ai_only,
+        // ownerless (no `shields` station declared on NPCs).
+        for (path, expected_max_hp) in [
+            ("../../assets/entities/pirate_raider.toml", 15),
+            ("../../assets/entities/pirate_raider_reinforcement.toml", 15),
+            ("../../assets/entities/ship_harrow_patrol.toml", 60),
+            ("../../assets/entities/ship_harrow_warhawk.toml", 120),
+        ] {
+            let toml_str = match path {
+                "../../assets/entities/pirate_raider.toml" => {
+                    include_str!("../../assets/entities/pirate_raider.toml")
+                }
+                "../../assets/entities/pirate_raider_reinforcement.toml" => {
+                    include_str!("../../assets/entities/pirate_raider_reinforcement.toml")
+                }
+                "../../assets/entities/ship_harrow_patrol.toml" => {
+                    include_str!("../../assets/entities/ship_harrow_patrol.toml")
+                }
+                "../../assets/entities/ship_harrow_warhawk.toml" => {
+                    include_str!("../../assets/entities/ship_harrow_warhawk.toml")
+                }
+                _ => unreachable!(),
+            };
+            let config = EntityConfig::from_toml(toml_str)
+                .unwrap_or_else(|e| panic!("{path} must parse: {e}"));
+            assert_eq!(
+                config.shield_arcs.len(),
+                1,
+                "{path} must declare exactly one shield arc"
+            );
+            let arc = &config.shield_arcs[0];
+            assert_eq!(arc.id, "all", "{path} NPC arc id must be 'all'");
+            assert_eq!(arc.max_hp, Some(expected_max_hp), "{path} arc max_hp");
+
+            let ship_config = config
+                .ship_config
+                .unwrap_or_else(|| panic!("{path} must have ship_config after arc synthesis"));
+            let arc_systems: Vec<_> = ship_config
+                .systems
+                .iter()
+                .filter(|s| s.kind == "shield_arc")
+                .collect();
+            assert_eq!(arc_systems.len(), 1, "{path} exactly one arc system");
+            let sys = arc_systems[0];
+            assert_eq!(sys.id.0, "shield-arc-all", "{path} SystemId shape");
+            assert!(sys.ai_only, "{path} NPC arc must be ai_only");
+            assert!(sys.station.is_none(), "{path} NPC arc must be ownerless");
+        }
+    }
+
+    #[test]
+    fn shield_arc_with_hull_max_hp_captures_tier_config() {
+        let toml_str = r#"
+tags = ["ship"]
+
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 90
+hull_max_hp = 7
+hull_damaged_threshold_pct = 0.60
+hull_disabled_threshold_pct = 0.20
+hull_debuff_magnitude = 0.30
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let arc = &config.shield_arcs[0];
+        assert_eq!(arc.hull_max_hp, 7.0);
+        assert!((arc.hull_damaged_threshold_pct - 0.60).abs() < 1e-6);
+        assert!((arc.hull_disabled_threshold_pct - 0.20).abs() < 1e-6);
+        assert!((arc.hull_debuff_magnitude - 0.30).abs() < 1e-6);
+    }
+
+    #[test]
+    fn shield_arc_hull_thresholds_default_when_omitted() {
+        let toml_str = r#"
+tags = ["ship"]
+
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 90
+hull_max_hp = 6
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let arc = &config.shield_arcs[0];
+        assert!((arc.hull_damaged_threshold_pct - 0.75).abs() < 1e-6);
+        assert!((arc.hull_disabled_threshold_pct - 0.25).abs() < 1e-6);
+        assert!((arc.hull_debuff_magnitude - 0.15).abs() < 1e-6);
+    }
+
     #[test]
     fn pirate_raider_template_has_shields_block() {
         // (#474) Harrow Destroyer has a single-facing shield (#471).
+        // (#514) Migrated to `[[shield_arc]]` block; `[shields_console]`
+        // block was retired for NPCs.
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
-        let sc = config
-            .shields_console
-            .as_ref()
-            .expect("pirate_raider must have a [shields_console] block");
-        let base = sc.base.as_ref().expect("must have [shields_console.base]");
-        assert_eq!(base.max_hp, 15);
-        assert!((base.regen_per_sec - 0.5).abs() < 1e-6);
+        assert_eq!(
+            config.shield_arcs.len(),
+            1,
+            "pirate_raider must declare exactly one [[shield_arc]] block"
+        );
+        let arc = &config.shield_arcs[0];
+        assert_eq!(arc.id, "all");
+        assert_eq!(arc.max_hp, Some(15));
+        assert!((arc.regen_per_sec.expect("regen") - 0.5).abs() < 1e-6);
     }
 
     #[test]
@@ -2433,6 +2833,7 @@ base_priority = 35.0
     #[test]
     fn ship_harrow_patrol_template_has_two_phaser_banks_and_shields() {
         // (#474) Cruiser gained weapons + shields.
+        // (#514) Migrated to `[[shield_arc]]` block.
         let toml_str = include_str!("../../assets/entities/ship_harrow_patrol.toml");
         let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_patrol.toml must parse");
         let wc = config
@@ -2444,13 +2845,15 @@ base_priority = 35.0
             2,
             "cruiser must have port + starboard banks"
         );
-        let sc = config
-            .shields_console
-            .as_ref()
-            .expect("cruiser must have [shields_console] (#474)");
-        let base = sc.base.as_ref().expect("must have [shields_console.base]");
-        assert_eq!(base.max_hp, 60);
-        assert!((base.regen_per_sec - 1.0).abs() < 1e-6);
+        assert_eq!(
+            config.shield_arcs.len(),
+            1,
+            "cruiser must declare one [[shield_arc]] block"
+        );
+        let arc = &config.shield_arcs[0];
+        assert_eq!(arc.id, "all");
+        assert_eq!(arc.max_hp, Some(60));
+        assert!((arc.regen_per_sec.expect("regen") - 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -2468,12 +2871,15 @@ base_priority = 35.0
         let bank = &wc.phaser_banks[0];
         assert!((bank.beam_damage_per_sec - 12.0).abs() < 1e-6);
         assert!((bank.beam_range - 75.0).abs() < 1e-6);
-        let sc = config
-            .shields_console
-            .as_ref()
-            .expect("battleship must have [shields_console] (#474)");
-        let base = sc.base.as_ref().expect("must have [shields_console.base]");
-        assert_eq!(base.max_hp, 120);
+        // (#514) Battleship migrated to `[[shield_arc]]` block.
+        assert_eq!(
+            config.shield_arcs.len(),
+            1,
+            "battleship must declare one [[shield_arc]] block"
+        );
+        let arc = &config.shield_arcs[0];
+        assert_eq!(arc.id, "all");
+        assert_eq!(arc.max_hp, Some(120));
         let behaviour = config.behaviour.as_ref().expect("must have [behaviour]");
         let directive_kinds: Vec<Option<&str>> = behaviour
             .doctrine

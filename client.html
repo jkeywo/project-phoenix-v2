@@ -1993,6 +1993,15 @@
               }
             }
             pushCaptainConsoleState();
+            // Helm/Sensors/Comms/Navigation each derive their own "on screen"
+            // button state from state.currentView, so a view-mode change must
+            // refresh all of them too, not just the captain console — otherwise
+            // the button that requested the view change never reflects the
+            // toggle (see #on-screen-btn on Helm).
+            pushHelmConsoleState();
+            pushSensorsConsoleState();
+            pushCommsConsoleState();
+            pushNavigationConsoleState();
           }
           if (updatedSystems.has('navigation')) {
             const bb = state.blackboards['navigation'];

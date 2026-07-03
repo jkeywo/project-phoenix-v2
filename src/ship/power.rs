@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    Console, InterSystemPayload, InterSystemQueue, PowerBlackboard, PowerConsoleEntry,
-    ServerMessage, SystemBlackboard, SystemId,
+    Console, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard,
+    PowerConsoleEntry, PowerReactorBlackboard, ServerMessage, SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
     power_group_for_console, power_level_for_console, PowerConfig, PowerSystem,
@@ -191,8 +191,12 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 /// Handle `SetPower` messages from the Power console.
 ///
 /// Validates: sender holds `Console::Power`. Reads `ControlSystem` messages
-/// targeting the power system ID with a `SetPower` payload, and calls
-/// `PowerSystem::increase` / `decrease` to reach the requested level.
+/// targeting the **reactor** fine system (`POWER_REACTOR_SYSTEM_ID`) with a
+/// `SetPower` payload, and calls `PowerSystem::increase` / `decrease` to
+/// reach the requested level. Per issue #513 the reactor OWNS the allocation
+/// surface — a Disabled/Destroyed reactor's `accept_human_input` policy
+/// (populated by `sync_console_damage_tiers`) refuses these messages at
+/// admission, so the coarse `power` id no longer receives allocation input.
 ///
 /// After PR 6 (PRD #597): mutates the per-entity `ShipPowerSystem` component
 /// on the LocalShip entity when present, otherwise the global `ShipPowerSystem`
@@ -219,7 +223,7 @@ pub fn handle_power_messages(
     // `AdmittedCommands` re-allocate that ship's own power grid.
     for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
         let mut pending: Vec<PowerCmd> = Vec::new();
-        for cmd in admitted.for_target(crate::system_registry::POWER_SYSTEM_ID) {
+        for cmd in admitted.for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID) {
             match &cmd.payload {
                 crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
                     pending.push(PowerCmd::SetGroup(group.clone(), *level));
@@ -281,6 +285,16 @@ pub fn handle_power_messages(
 /// mutate that ship's own per-entity `ShipPowerSystem` component. Falls
 /// back to the LocalShip's Component (or the global Resource for legacy
 /// test paths) when `source_entity` is `None`.
+///
+/// **Issue #513 battery offline gate.** Drain messages target the
+/// [`crate::system_registry::POWER_BATTERY_SYSTEM_ID`] fine system. If the
+/// battery is in `ShipSystemControlSources.offline_systems` (i.e. hull
+/// damage put it into Disabled/Destroyed tier), the drain is refused —
+/// the reserve pool is treated as inaccessible so weapons draws cannot
+/// consume from it. The gate applies uniformly whether the mutation
+/// would land on a per-entity `ShipPowerSystem` component or on the
+/// fallback `ShipPowerSystem` Resource — `ShipSystemControlSources` is
+/// consulted on the same ship entity in both paths.
 pub fn handle_power_inter_system(
     queue: Res<InterSystemQueue>,
     mut ship_q: Query<
@@ -288,6 +302,15 @@ pub fn handle_power_inter_system(
             Entity,
             &mut ShipPowerSystem,
             Option<&PowerConfigResource>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
+            Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    cs_only_q: Query<
+        (
+            Entity,
+            &crate::ship_plugin::ShipSystemControlSources,
             Has<crate::server_app::LocalShip>,
         ),
         With<crate::server_app::Ship>,
@@ -296,21 +319,48 @@ pub fn handle_power_inter_system(
     config_res: Option<Res<PowerConfigResource>>,
 ) {
     let mut power_res = power_res;
+    let battery_id = crate::system_registry::power_battery_system_id();
     // Snapshot the LocalShip entity so `source_entity: None` (legacy path)
     // resolves to the player. Collect per-entity references once so we can
     // dispatch a mutable borrow per message inside the loop.
-    let local_ship_entity: Option<Entity> =
-        ship_q
-            .iter()
-            .find_map(|(e, _, _, is_local)| if is_local { Some(e) } else { None });
+    let local_ship_entity: Option<Entity> = ship_q
+        .iter()
+        .find_map(|(e, _, _, _, is_local)| if is_local { Some(e) } else { None })
+        .or_else(|| {
+            cs_only_q
+                .iter()
+                .find_map(|(e, _, is_local)| if is_local { Some(e) } else { None })
+        });
+    // Pre-collect the set of ships whose battery is offline (via the
+    // control-sources-only query). Used to gate both the per-entity path
+    // and the Resource fallback path so a Disabled/Destroyed battery
+    // refuses drains regardless of where the mutation would land.
+    let battery_offline_ships: std::collections::HashSet<Entity> = cs_only_q
+        .iter()
+        .filter_map(|(e, cs, _)| {
+            if cs.0.offline_systems.contains(&battery_id) {
+                Some(e)
+            } else {
+                None
+            }
+        })
+        .collect();
     let mut applied_local = false;
 
-    for msg in queue.for_target(crate::system_registry::POWER_SYSTEM_ID) {
+    for msg in queue.for_target(crate::system_registry::POWER_BATTERY_SYSTEM_ID) {
         let target_entity = msg.source_entity.or(local_ship_entity);
         match &msg.payload {
             InterSystemPayload::DrainWeaponsBattery { amount } => {
+                // Offline gate applies uniformly (per-entity + Resource paths).
                 if let Some(target) = target_entity {
-                    if let Ok((_, mut power_comp, cfg_comp, is_local)) = ship_q.get_mut(target) {
+                    if battery_offline_ships.contains(&target) {
+                        continue;
+                    }
+                }
+                if let Some(target) = target_entity {
+                    if let Ok((_, mut power_comp, cfg_comp, _cs_comp, is_local)) =
+                        ship_q.get_mut(target)
+                    {
                         let cfg_default;
                         let config: &PowerConfigResource = match cfg_comp {
                             Some(c) => c,
@@ -330,7 +380,8 @@ pub fn handle_power_inter_system(
                         continue;
                     }
                 }
-                // Resource-only fallback for tests without a Ship entity.
+                // Resource-only fallback for tests without a Ship entity
+                // (or without a ShipPowerSystem component on the ship).
                 let cfg_default;
                 let config: &PowerConfigResource = match config_res.as_deref() {
                     Some(c) => c,
@@ -357,7 +408,7 @@ pub fn handle_power_inter_system(
     // when both exist (legacy Resource path for tests).
     if applied_local {
         if let Some(local) = local_ship_entity {
-            if let Ok((_, pc, _, _)) = ship_q.get(local) {
+            if let Ok((_, pc, _, _, _)) = ship_q.get(local) {
                 if let Some(pr) = power_res.as_deref_mut() {
                     pr.0 = pc.0.clone();
                 }
@@ -502,7 +553,7 @@ pub fn operate_power_ai(
         }
         let policy = control_sources
             .0
-            .policy_for(&crate::system_registry::power_system_id());
+            .policy_for(&crate::system_registry::power_reactor_system_id());
         if !policy.operate_ai {
             continue;
         }
@@ -564,12 +615,18 @@ fn publish_power_blackboard(
         ),
         With<crate::server_app::LocalShip>,
     >,
+    control_sources_q: Query<
+        &crate::ship_plugin::ShipSystemControlSources,
+        With<crate::server_app::LocalShip>,
+    >,
     mut ship_bbs_q: Query<
         &mut crate::server_app::ShipSystemBlackboards,
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    use crate::system_registry::POWER_SYSTEM_ID;
+    use crate::system_registry::{
+        POWER_BATTERY_SYSTEM_ID, POWER_REACTOR_SYSTEM_ID, POWER_SYSTEM_ID,
+    };
 
     // Prefer per-entity components on LocalShip; fall back to global Resources.
     let entity_view = ship_q.single().ok();
@@ -607,6 +664,20 @@ fn publish_power_blackboard(
             }
         },
     };
+    // Per-fine-system online state, derived from offline_systems on the
+    // LocalShip's control sources. Read via a separate query so the
+    // fine-system online flags survive test setups that spawn a LocalShip
+    // with `ShipSystemControlSources` but no per-entity `ShipPowerSystem`
+    // component (the primary `ship_q` above requires the latter).
+    let control_sources = control_sources_q.single().ok();
+    let reactor_id = crate::system_registry::power_reactor_system_id();
+    let battery_id = crate::system_registry::power_battery_system_id();
+    let reactor_online = control_sources
+        .map(|cs| !cs.0.offline_systems.contains(&reactor_id))
+        .unwrap_or(true);
+    let battery_online = control_sources
+        .map(|cs| !cs.0.offline_systems.contains(&battery_id))
+        .unwrap_or(true);
 
     let entries: Vec<PowerConsoleEntry> = POWER_CONSOLE_ORDER
         .iter()
@@ -632,11 +703,39 @@ fn publish_power_blackboard(
         battery_max: config.0.capacity,
         locked: power.0.locked,
     };
+    // Fine blackboards (issue #513) — reactor owns the allocation surface,
+    // battery owns the emergency-reserve pool. Emitted alongside the legacy
+    // coarse `Power` blackboard so downstream JS panels can pick either or both.
+    let reactor_bb = PowerReactorBlackboard {
+        total_allocation: power.0.total(),
+        max_allocation: 8,
+        is_online: reactor_online,
+        locked: power.0.locked,
+    };
+    let emergency_threshold = if config.0.capacity > 0.0 {
+        (config.0.emergency_threshold / config.0.capacity).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let battery_bb = PowerBatteryBlackboard {
+        charge: power.0.battery_charge,
+        capacity: config.0.capacity,
+        is_online: battery_online,
+        emergency_threshold,
+    };
 
     if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(POWER_SYSTEM_ID.to_string()),
             SystemBlackboard::Power(bb),
+        );
+        bbs.0.insert(
+            SystemId(POWER_REACTOR_SYSTEM_ID.to_string()),
+            SystemBlackboard::PowerReactor(reactor_bb),
+        );
+        bbs.0.insert(
+            SystemId(POWER_BATTERY_SYSTEM_ID.to_string()),
+            SystemBlackboard::PowerBattery(battery_bb),
         );
     }
 }
@@ -1035,7 +1134,7 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
                     group: crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
                     level: 4,
@@ -1045,6 +1144,39 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(app.world().resource::<ShipPowerSystem>().0.sensors, 4);
+    }
+
+    /// Wire-string regression: JS clients send `target: 'power-reactor'`
+    /// (see `gui/action-map.js` `set_power` handler). This test pins the
+    /// exact string used on the wire, so if either the JS side or the
+    /// handler's `for_target(...)` argument drifts back to `"power"`,
+    /// this fails (the admitted command routes elsewhere and the
+    /// allocation never applies).
+    #[test]
+    fn set_power_group_allocation_wire_string_routes_to_reactor() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        push_msg(
+            &mut app,
+            "power",
+            ClientMessage::ControlSystem {
+                target: SystemId("power-reactor".to_string()),
+                payload: SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
+                    level: 4,
+                },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipPowerSystem>().0.sensors,
+            4,
+            "raw wire string \"power-reactor\" must reach handle_power_messages \
+             — if this fails, either the handler's for_target() argument or the \
+             JS action-map target has drifted from \"power-reactor\"."
+        );
     }
 
     // ── operate_power_ai tests ──────────────────────────────────────────────
@@ -1060,7 +1192,10 @@ mod tests {
 
         // Spawn a Ship entity with ShipPowerSystem component + AI power source.
         let mut resolver = ControlSourceResolver::new();
-        resolver.set(crate::system_registry::power_system_id(), ControlSource::Ai);
+        resolver.set(
+            crate::system_registry::power_reactor_system_id(),
+            ControlSource::Ai,
+        );
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,
@@ -1243,6 +1378,342 @@ mod tests {
         assert_eq!(
             charge, 0.0,
             "battery must clamp at zero, not go negative (got {charge})"
+        );
+    }
+
+    // ── Fine Power system tests (issue #513) ───────────────────────────────────
+    //
+    // Cover the reactor / battery offline gates and the fine-system blackboard
+    // publication. Uses the same inter_system_test_app scaffold but adds
+    // ShipSystemControlSources so `offline_systems` can be seeded.
+
+    /// Variant of `inter_system_test_app` whose Ship entity carries
+    /// `ShipSystemControlSources` so tests can seed `offline_systems`
+    /// (mirrors what `sync_console_damage_tiers` would do on Disabled hull).
+    fn inter_system_test_app_with_control_sources() -> App {
+        use crate::console::weapons::server::{drain_power_for_active_beam, ActiveBeam};
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(100),
+            ))
+            .insert_resource(ShipPowerSystem(PowerSystem::default()))
+            .init_resource::<PowerConfigResource>()
+            .init_resource::<crate::messages::InterSystemQueue>()
+            .add_systems(
+                Update,
+                (drain_power_for_active_beam, handle_power_inter_system).chain(),
+            );
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            crate::simulation::LocalShip,
+            ActiveBeam::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
+        app.update(); // warm up TimePlugin
+        app
+    }
+
+    fn set_beam_target_on(app: &mut App, uuid: Option<String>) {
+        use crate::console::weapons::server::ActiveBeam;
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ActiveBeam, With<crate::simulation::LocalShip>>();
+        if let Ok(mut b) = q.single_mut(app.world_mut()) {
+            b.target_uuid = uuid;
+        }
+    }
+
+    fn mark_offline(app: &mut App, system_id: SystemId) {
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let mut cs = app
+            .world_mut()
+            .entity_mut(ship)
+            .take::<crate::ship_plugin::ShipSystemControlSources>()
+            .unwrap();
+        cs.0.offline_systems.insert(system_id);
+        app.world_mut().entity_mut(ship).insert(cs);
+    }
+
+    #[test]
+    fn reactor_offline_refuses_allocation_input() {
+        // End-to-end path via handle_power_messages: the admission gate
+        // ensures a Disabled/Destroyed reactor's `accept_human_input` is
+        // false, but the direct test is that dispatching a SetPower to the
+        // reactor id when it's offline leaves battery/allocation untouched.
+        //
+        // We test the handler directly (bypassing admission which lives in
+        // server_app.rs) by seeding an AdmittedCommand targeting the
+        // reactor's id and verifying the mutation still applies when the
+        // system is online, then does NOT apply when offline_systems marks
+        // the reactor offline via the standard admission gate.
+        //
+        // Since `handle_power_messages` does not itself consult
+        // `offline_systems` (admission does), we cover this via the
+        // full admission chain in a mini test app that includes
+        // `AdmissionPlugin`.
+        use crate::lobby::LobbyPlugin;
+        use crate::messages::{ClientMessage, PowerGroupId, SystemControlPayload};
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
+            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+            .insert_resource(ShipModifiers::new())
+            .init_resource::<crate::lobby::WorldResource>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<LastBroadcastEntityPositions>()
+            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
+            .init_resource::<LastBroadcastHull>()
+            .init_resource::<LastBroadcastShields>()
+            .init_resource::<Outbox>()
+            .add_plugins(ShipPowerPlugin)
+            .add_plugins(crate::simulation::sim_state_broadcaster());
+        // Spawn the player ship with control sources so we can seed offline_systems.
+        app.world_mut().spawn((
+            crate::simulation::Ship,
+            crate::simulation::LocalShip,
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
+            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+        ));
+        start_game_with_power(&mut app);
+        // Baseline: reactor online — allocation should update.
+        push_msg(
+            &mut app,
+            "power",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_reactor_system_id(),
+                payload: SystemControlPayload::SetPowerGroupAllocation {
+                    group: PowerGroupId(SENSORS_POWER_GROUP.into()),
+                    level: 4,
+                },
+            },
+        );
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipPowerSystem>().0.sensors,
+            4,
+            "baseline sanity: online reactor should accept allocation input"
+        );
+
+        // Now mark the reactor offline and try to change sensors back to 1.
+        mark_offline(
+            &mut app,
+            crate::system_registry::power_reactor_system_id(),
+        );
+        push_msg(
+            &mut app,
+            "power",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::power_reactor_system_id(),
+                payload: SystemControlPayload::SetPowerGroupAllocation {
+                    group: PowerGroupId(SENSORS_POWER_GROUP.into()),
+                    level: 1,
+                },
+            },
+        );
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipPowerSystem>().0.sensors,
+            4,
+            "reactor offline must refuse allocation input (sensors should stay at 4)"
+        );
+    }
+
+    #[test]
+    fn battery_offline_refuses_drain_from_channel_2() {
+        let mut app = inter_system_test_app_with_control_sources();
+        // Mark battery offline via offline_systems (mirrors sync_console_damage_tiers).
+        mark_offline(
+            &mut app,
+            crate::system_registry::power_battery_system_id(),
+        );
+
+        set_beam_target_on(&mut app, Some("target-asteroid".into()));
+        // Snapshot both the Resource and the per-entity Component charge; the
+        // ship spawn used here has no ShipPowerSystem component so the fallback
+        // Resource path is what gets exercised. Set the resource charge to a
+        // known baseline so we can verify no change.
+        app.world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .battery_charge = 50.0;
+
+        // Also ensure the per-entity charge (if any) matches.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
+            if let Ok(mut pc) = q.single_mut(app.world_mut()) {
+                pc.0.battery_charge = 50.0;
+            }
+        }
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ShipPowerSystem>().0.battery_charge,
+            50.0,
+            "battery offline must refuse channel-2 drain (charge should stay at 50.0)"
+        );
+    }
+
+    #[test]
+    fn publish_writes_power_reactor_and_power_battery_blackboards() {
+        let mut app = test_app();
+        start_game(&mut app);
+        tick(&mut app);
+
+        use crate::server_app::{LocalShip, ShipSystemBlackboards};
+        use crate::system_registry::{POWER_BATTERY_SYSTEM_ID, POWER_REACTOR_SYSTEM_ID};
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let bbs = q.single(app.world()).unwrap();
+
+        let reactor = bbs.0.get(&SystemId(POWER_REACTOR_SYSTEM_ID.to_string()));
+        let battery = bbs.0.get(&SystemId(POWER_BATTERY_SYSTEM_ID.to_string()));
+        assert!(
+            matches!(reactor, Some(SystemBlackboard::PowerReactor(_))),
+            "expected PowerReactor blackboard under power-reactor system id, got {reactor:?}"
+        );
+        assert!(
+            matches!(battery, Some(SystemBlackboard::PowerBattery(_))),
+            "expected PowerBattery blackboard under power-battery system id, got {battery:?}"
+        );
+        if let Some(SystemBlackboard::PowerReactor(bb)) = reactor {
+            assert!(
+                bb.is_online,
+                "reactor is_online must default to true when nothing is marked offline"
+            );
+        }
+        if let Some(SystemBlackboard::PowerBattery(bb)) = battery {
+            assert!(
+                bb.is_online,
+                "battery is_online must default to true when nothing is marked offline"
+            );
+        }
+    }
+
+    #[test]
+    fn reactor_offline_blackboard_reports_is_online_false() {
+        let mut app = test_app();
+        start_game(&mut app);
+        // Seed offline_systems on the ship's control sources.
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut cs = app
+                .world_mut()
+                .entity_mut(ship)
+                .take::<crate::ship_plugin::ShipSystemControlSources>()
+                .unwrap();
+            cs.0.offline_systems
+                .insert(crate::system_registry::power_reactor_system_id());
+            app.world_mut().entity_mut(ship).insert(cs);
+        }
+        tick(&mut app);
+
+        use crate::server_app::{LocalShip, ShipSystemBlackboards};
+        use crate::system_registry::POWER_REACTOR_SYSTEM_ID;
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let bbs = q.single(app.world()).unwrap();
+        match bbs.0.get(&SystemId(POWER_REACTOR_SYSTEM_ID.to_string())) {
+            Some(SystemBlackboard::PowerReactor(bb)) => {
+                assert!(
+                    !bb.is_online,
+                    "reactor blackboard is_online must be false when offline_systems contains power-reactor"
+                );
+            }
+            other => panic!("expected PowerReactor blackboard, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn battery_offline_blackboard_reports_is_online_false() {
+        let mut app = test_app();
+        start_game(&mut app);
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut cs = app
+                .world_mut()
+                .entity_mut(ship)
+                .take::<crate::ship_plugin::ShipSystemControlSources>()
+                .unwrap();
+            cs.0.offline_systems
+                .insert(crate::system_registry::power_battery_system_id());
+            app.world_mut().entity_mut(ship).insert(cs);
+        }
+        tick(&mut app);
+
+        use crate::server_app::{LocalShip, ShipSystemBlackboards};
+        use crate::system_registry::POWER_BATTERY_SYSTEM_ID;
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let bbs = q.single(app.world()).unwrap();
+        match bbs.0.get(&SystemId(POWER_BATTERY_SYSTEM_ID.to_string())) {
+            Some(SystemBlackboard::PowerBattery(bb)) => {
+                assert!(
+                    !bb.is_online,
+                    "battery blackboard is_online must be false when offline_systems contains power-battery"
+                );
+            }
+            other => panic!("expected PowerBattery blackboard, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn power_state_broadcast_still_sends_to_power_holder_when_reactor_offline() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+        // Mark the reactor offline (audience routing should not care).
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut cs = app
+                .world_mut()
+                .entity_mut(ship)
+                .take::<crate::ship_plugin::ShipSystemControlSources>()
+                .unwrap();
+            cs.0.offline_systems
+                .insert(crate::system_registry::power_reactor_system_id());
+            app.world_mut().entity_mut(ship).insert(cs);
+        }
+
+        let out = tick(&mut app);
+        // At least one PowerState message should still be sent to the power holder.
+        let power_state_to_power_holder = out.iter().any(|m| {
+            matches!(&m.msg, ServerMessage::PowerState { .. })
+                && matches!(&m.target, Target::Token(t) if t == "power")
+        });
+        assert!(
+            power_state_to_power_holder,
+            "PowerState broadcast must still target the Power holder even when the reactor is offline"
         );
     }
 }

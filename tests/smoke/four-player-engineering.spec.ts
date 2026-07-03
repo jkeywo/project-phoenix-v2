@@ -57,7 +57,7 @@ async function waitForLastMessage(
 
 async function setHelmPower(client: TestClient, level: number) {
   await client.send('ControlSystem', {
-    target: 'power',
+    target: 'power-reactor',
     payload: {
       type: 'SetPowerGroupAllocation',
       data: { group: 'helm', level },

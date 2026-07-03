@@ -27,9 +27,20 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
 
+# Split power hull HP across the two fine power systems (issue #513).
+# Coarse `Power` block is retired; its 25 HP is split reactor 15 / battery 10
+# to reflect that the reactor is the larger/more critical component and to
+# preserve the sum at 25.
 [[hull.console_hull]]
-console = "Power"
-max_hp = 25
+console = "PowerReactor"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.console_hull]]
+console = "PowerBattery"
+max_hp = 10
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
@@ -522,9 +533,23 @@ kind = "navigation"
 station = "navigation"
 power_group = "ops"
 
+# ── Fine Power systems (issue #513) ─────────────────────────────────────
+# The coarse `power` system is DELETED — allocation input is now gated on
+# the reactor (`power-reactor`), and battery drain (channel-2
+# `DrainWeaponsBattery`) is targeted at the battery (`power-battery`).
+# Both live on the `power` station and are held by the single
+# `Console::Power` holder; the runtime `[power]` / `[power.ai]` config
+# blocks are still ship-wide (a per-instance config split is deferred).
+
 [[system]]
-id = "power"
-kind = "power"
+id = "power-reactor"
+kind = "power_reactor"
+station = "power"
+power_group = "ops"
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
 station = "power"
 power_group = "ops"
 

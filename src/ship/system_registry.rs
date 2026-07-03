@@ -149,6 +149,39 @@ pub const TORPEDO_MAGAZINE_KIND: &str = "torpedo_magazine";
 pub const TORPEDO_MAGAZINE_SYSTEM_ID: &str = "torpedo-magazine";
 pub const TORPEDO_MAGAZINE_AI_CONTROLLER: &str = "torpedo_magazine_ai";
 
+// ── Fine-grained Power systems (issue #513) ──────────────────────────────────
+//
+// The coarse `power` kind is DELETED from `player_ship.toml`, but
+// `POWER_SYSTEM_ID = "power"` remains as a stable string constant so tests
+// and legacy readers (e.g. the JS panel's aggregate `blackboards['power']`
+// entry) can still address the aggregate surface. All admission /
+// allocation logic now targets the fine `power_reactor` kind; battery drain
+// (channel-2 `DrainWeaponsBattery`) targets `power_battery`. Both fine
+// systems live on the `power` station and are held by the single
+// `Console::Power` holder — the split is invisible to the human but grants
+// per-instance damage semantics (reactor disabled → no allocation input;
+// battery disabled → no emergency reserves).
+
+/// Wire `SystemId` for the Power Reactor fine system.
+///
+/// The reactor OWNS the allocation surface: `SetPowerGroupAllocation` and
+/// `SetPower` payloads are gated on `policy_for(&power_reactor_system_id())`.
+/// A Disabled/Destroyed reactor refuses allocation input via the standard
+/// `accept_human_input` gate.
+pub const POWER_REACTOR_KIND: &str = "power_reactor";
+pub const POWER_REACTOR_SYSTEM_ID: &str = "power-reactor";
+pub const POWER_REACTOR_AI_CONTROLLER: &str = "power_reactor_ai";
+
+/// Wire `SystemId` for the Power Battery fine system.
+///
+/// The battery is the drain target for `InterSystemPayload::DrainWeaponsBattery`
+/// (channel-2). A Disabled/Destroyed battery refuses the drain — the pool
+/// is treated as immovable/0-reserves so magazine-style weapons draws
+/// (phaser beams) cannot consume from it.
+pub const POWER_BATTERY_KIND: &str = "power_battery";
+pub const POWER_BATTERY_SYSTEM_ID: &str = "power-battery";
+pub const POWER_BATTERY_AI_CONTROLLER: &str = "power_battery_ai";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
     name: String,
@@ -280,6 +313,15 @@ impl SystemKindRegistry {
             TORPEDO_MAGAZINE_KIND,
             AiControllerRegistration::new(TORPEDO_MAGAZINE_AI_CONTROLLER)?,
         )?;
+        // Fine-grained Power systems (issue #513)
+        registry.register(
+            POWER_REACTOR_KIND,
+            AiControllerRegistration::new(POWER_REACTOR_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            POWER_BATTERY_KIND,
+            AiControllerRegistration::new(POWER_BATTERY_AI_CONTROLLER)?,
+        )?;
         Ok(registry)
     }
 
@@ -339,9 +381,12 @@ pub fn tactical_system_id() -> SystemId {
     SystemId(TACTICAL_SYSTEM_ID.to_string())
 }
 
-pub fn power_system_id() -> SystemId {
-    SystemId(POWER_SYSTEM_ID.to_string())
-}
+// NOTE: There is no `power_system_id()` helper. The coarse `POWER_SYSTEM_ID`
+// string constant is retained only for the aggregate blackboard key (published
+// alongside the fine `power-reactor` / `power-battery` blackboards for legacy
+// JS readers). All control-input routing must use
+// `power_reactor_system_id()` (allocation surface) or
+// `power_battery_system_id()` (channel-2 drain target).
 
 pub fn sensors_system_id() -> SystemId {
     SystemId(SENSORS_SYSTEM_ID.to_string())
@@ -417,6 +462,16 @@ pub fn torpedo_tube_aft_system_id() -> SystemId {
 
 pub fn torpedo_magazine_system_id() -> SystemId {
     SystemId(TORPEDO_MAGAZINE_SYSTEM_ID.to_string())
+}
+
+// ── Fine Power system id helpers (issue #513) ─────────────────────────────────
+
+pub fn power_reactor_system_id() -> SystemId {
+    SystemId(POWER_REACTOR_SYSTEM_ID.to_string())
+}
+
+pub fn power_battery_system_id() -> SystemId {
+    SystemId(POWER_BATTERY_SYSTEM_ID.to_string())
 }
 
 /// Resolve the `SystemId` for a phaser bank by its TOML `id`.
@@ -506,7 +561,8 @@ mod tests {
         assert_eq!(red_alert_system_id().0, RED_ALERT_SYSTEM_ID);
         assert_eq!(helm_system_id().0, HELM_SYSTEM_ID);
         assert_eq!(tactical_system_id().0, TACTICAL_SYSTEM_ID);
-        assert_eq!(power_system_id().0, POWER_SYSTEM_ID);
+        // No `power_system_id()` helper — see note above the tactical helper.
+        // The coarse constant is still pinned by `coarse_system_id_values_are_stable`.
         assert_eq!(sensors_system_id().0, SENSORS_SYSTEM_ID);
         assert_eq!(navigation_system_id().0, NAVIGATION_SYSTEM_ID);
         assert_eq!(shields_system_id().0, SHIELDS_SYSTEM_ID);
@@ -974,5 +1030,63 @@ mod tests {
             Some(SystemId("torpedo-tube-dorsal-upper".into()))
         );
         assert_eq!(torpedo_tube_system_id(""), None);
+    }
+
+    // ── Fine Power system tests (issue #513) ──────────────────────────────────
+
+    #[test]
+    fn fine_power_kinds_are_registered() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(
+            registry.contains(POWER_REACTOR_KIND),
+            "power_reactor not registered"
+        );
+        assert!(
+            registry.contains(POWER_BATTERY_KIND),
+            "power_battery not registered"
+        );
+
+        assert_eq!(
+            registry
+                .registration(POWER_REACTOR_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            POWER_REACTOR_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry
+                .registration(POWER_BATTERY_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            POWER_BATTERY_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn fine_power_system_ids_are_lowercase_kebab() {
+        let ids = [POWER_REACTOR_SYSTEM_ID, POWER_BATTERY_SYSTEM_ID];
+        for id in ids {
+            assert_eq!(
+                id,
+                id.to_lowercase(),
+                "Fine power SystemId {id:?} is not lowercase"
+            );
+            assert!(
+                !id.contains('_'),
+                "Fine power SystemId {id:?} contains underscore (use hyphen)"
+            );
+            assert!(!id.is_empty(), "Fine power SystemId must not be empty");
+        }
+        assert_eq!(POWER_REACTOR_SYSTEM_ID, "power-reactor");
+        assert_eq!(POWER_BATTERY_SYSTEM_ID, "power-battery");
+    }
+
+    #[test]
+    fn fine_power_system_id_helpers_return_expected_values() {
+        assert_eq!(power_reactor_system_id().0, POWER_REACTOR_SYSTEM_ID);
+        assert_eq!(power_battery_system_id().0, POWER_BATTERY_SYSTEM_ID);
     }
 }

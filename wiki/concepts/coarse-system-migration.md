@@ -42,19 +42,23 @@ The registry kind key uses `"red_alert"` (snake_case, `RED_ALERT_KIND`) for lega
 
 ## Fine-system ids (in-flight, PRD C)
 
-Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) is tracked by issues #511–#515. Two have shipped:
+Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) is tracked by issues #511–#515. Three have shipped:
 
 | Issue | Coarse system | Shipped fine kinds |
 |-------|---------------|--------------------|
 | #511 | Helm | `helm_joystick`, `helm_engine` (port + starboard), `helm_radar`, `helm_impulse` |
 | #512 | Tactical | `phaser_bank` (fore + aft), `torpedo_tube` (fore-port + fore-starboard + aft), `torpedo_magazine` |
-| #513 | Sensors | not yet |
+| #513 | Power | `power_reactor`, `power_battery` |
 | #514 | Shields | not yet |
-| #515 | Power | not yet |
+| #515 | Sensors | not yet |
 
 Under #512, the coarse `tactical` `[[system]]` block was **deleted** from all 5 ship TOMLs (player_ship + 4 NPC ships). `TACTICAL_SYSTEM_ID = "tactical"` is retained as a coordination surface for ship-level operations (SetTarget / SetPhaserMode / SetPhaserFrequency); their authorisation gate is "any phaser bank accepts human input" (option c in the issue), so no coarse block is needed. Fine kinds registered but not present on a given ship default to a fallback coarse-tactical gate — this preserves NPC behaviour where a ship declares bank ids that don't match the player-ship convention (`"port"`/`"starboard"` versus `"fore"`/`"aft"`).
 
 Tube-to-magazine communication uses [`InterSystemPayload::ClaimTorpedoRound { tube }`](../../src/core/messages.rs) on channel 2, mirroring the `DrainWeaponsBattery` pattern from #559. The magazine consumer refuses claims when its `[[hull.console_hull]] console = "TorpedoMagazine"` entry is at Disabled/Destroyed tier.
+
+Under #513, the coarse `power` `[[system]]` block was **deleted** from all 6 ship TOMLs (player_ship + 5 NPC ships). Both `power_reactor` and `power_battery` live on the `power` station (single `Console::Power` holder). Allocation input (`SetPower` / `SetPowerGroupAllocation`) targets `power-reactor`; channel-2 battery drain (`DrainWeaponsBattery` from active phaser beams) targets `power-battery`. Both fine systems read shared state via the same per-entity `ShipPowerSystem` component (option (a) — same-ship, same-tick), which is why no inter-system messaging is required *between* reactor and battery. `POWER_SYSTEM_ID = "power"` is retained as a stable string only so the JS panel can continue to read the aggregate `blackboards['power']` entry.
+
+**Deferred (issue #513):** the ship TOML's `[power] capacity/rates/emergency_threshold` and `[power.ai]` blocks remain ship-wide rather than being split into per-fine-system config blocks. Runtime `ShipPowerSystem` is still per-ship; a designer-facing knob split (reactor-specific capacity vs battery-specific capacity, etc.) is a future PRD.
 
 ## Key files
 

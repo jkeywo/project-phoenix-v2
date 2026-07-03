@@ -269,7 +269,7 @@ describe('set_power', () => {
     const send = mkSend();
     ACTION_MAP.set_power({ action: 'set_power', target: 'helm', level: 3 }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'power',
+      target: 'power-reactor',
       payload: { type: 'SetPowerGroupAllocation', data: { group: 'helm', level: 3 } },
     });
   });
@@ -290,7 +290,7 @@ describe('set_power', () => {
     const send = mkSend();
     ACTION_MAP.set_power({ action: 'set_power', target: 'weapons', level: 1 }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'power',
+      target: 'power-reactor',
       payload: { type: 'SetPowerGroupAllocation', data: { group: 'weapons', level: 1 } },
     });
   });

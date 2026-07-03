@@ -1283,7 +1283,9 @@ fn console_for_system(target: &crate::messages::SystemId) -> Option<Console> {
         | TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID
         | TORPEDO_TUBE_AFT_SYSTEM_ID
         | TORPEDO_MAGAZINE_SYSTEM_ID => Some(Console::Tactical),
-        POWER_SYSTEM_ID => Some(Console::Power),
+        POWER_SYSTEM_ID | POWER_REACTOR_SYSTEM_ID | POWER_BATTERY_SYSTEM_ID => {
+            Some(Console::Power)
+        }
         SENSORS_SYSTEM_ID => Some(Console::Sensors),
         NAVIGATION_SYSTEM_ID => Some(Console::Navigation),
         SHIELDS_SYSTEM_ID => Some(Console::Shields),
@@ -5455,7 +5457,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPower {
                     target: Console::Helm,
                     level: 2,
@@ -5481,7 +5483,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPower {
                     target: Console::Sensors,
                     level: 1,
@@ -5507,7 +5509,7 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPower {
                     target: Console::Helm,
                     level: 3,
@@ -5540,7 +5542,7 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPower {
                     target: Console::Tactical,
                     level: 1,
@@ -5611,7 +5613,7 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPower {
                     target: Console::Helm,
                     level: 4,
@@ -5652,7 +5654,7 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPower {
                     target: Console::Helm,
                     level: 3,
@@ -5688,7 +5690,7 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPower {
                     target: Console::Tactical,
                     level: 1,
@@ -5778,7 +5780,7 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPower {
                     target: Console::Sensors,
                     level: 3,

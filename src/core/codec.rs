@@ -120,7 +120,9 @@ fn system_target_for_payload_type(type_name: &str) -> Option<&'static str> {
         }
         "SetScienceTarget" | "SetSensorsTarget" => Some(crate::system_registry::SENSORS_SYSTEM_ID),
         "SetShieldFocus" => Some(crate::system_registry::SHIELDS_SYSTEM_ID),
-        "SetPowerGroupAllocation" | "SetPower" => Some(crate::system_registry::POWER_SYSTEM_ID),
+        "SetPowerGroupAllocation" | "SetPower" => {
+            Some(crate::system_registry::POWER_REACTOR_SYSTEM_ID)
+        }
         _ => None,
     }
 }
@@ -325,7 +327,7 @@ mod tests {
     #[test]
     fn client_control_system_power_group_allocation_round_trips() {
         let msg = ClientMessage::ControlSystem {
-            target: SystemId("power".into()),
+            target: SystemId("power-reactor".into()),
             payload: SystemControlPayload::SetPowerGroupAllocation {
                 group: PowerGroupId("weapons".into()),
                 level: 3,
@@ -338,7 +340,7 @@ mod tests {
     #[test]
     fn client_control_system_json_shape_uses_string_ids() {
         let msg = ClientMessage::ControlSystem {
-            target: SystemId("power".into()),
+            target: SystemId("power-reactor".into()),
             payload: SystemControlPayload::SetPowerGroupAllocation {
                 group: PowerGroupId("weapons".into()),
                 level: 3,
@@ -349,7 +351,7 @@ mod tests {
 
         assert_eq!(
             encoded,
-            r#"{"type":"ControlSystem","data":{"target":"power","payload":{"type":"SetPowerGroupAllocation","data":{"group":"weapons","level":3}}}}"#
+            r#"{"type":"ControlSystem","data":{"target":"power-reactor","payload":{"type":"SetPowerGroupAllocation","data":{"group":"weapons","level":3}}}}"#
         );
     }
 
@@ -1437,7 +1439,7 @@ mod tests {
     #[test]
     fn client_set_power_round_trips() {
         let msg = ClientMessage::ControlSystem {
-            target: crate::system_registry::power_system_id(),
+            target: crate::system_registry::power_reactor_system_id(),
             payload: crate::messages::SystemControlPayload::SetPower {
                 target: Console::Helm,
                 level: 3,
@@ -2708,6 +2710,75 @@ mod tests {
         assert!(json.contains("\"kind\":\"TorpedoMagazine\""), "got: {json}");
         assert!(json.contains("\"is_online\":false"), "got: {json}");
         assert!(json.contains("\"torpedoes_remaining\":3"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+    }
+
+    // ── Fine Power blackboards (issue #513) ───────────────────────────────────
+
+    #[test]
+    fn system_blackboard_power_reactor_round_trips_json_codec() {
+        use crate::messages::{PowerReactorBlackboard, SystemBlackboard, SystemId};
+        let bb = SystemBlackboard::PowerReactor(PowerReactorBlackboard {
+            total_allocation: 6,
+            max_allocation: 8,
+            is_online: true,
+            locked: false,
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("power-reactor".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn system_blackboard_power_battery_round_trips_json_codec() {
+        use crate::messages::{PowerBatteryBlackboard, SystemBlackboard, SystemId};
+        let bb = SystemBlackboard::PowerBattery(PowerBatteryBlackboard {
+            charge: 42.5,
+            capacity: 100.0,
+            is_online: true,
+            emergency_threshold: 0.25,
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("power-battery".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn system_blackboard_power_reactor_serde_fields() {
+        use crate::messages::{PowerReactorBlackboard, SystemBlackboard};
+        let bb = SystemBlackboard::PowerReactor(PowerReactorBlackboard {
+            total_allocation: 5,
+            max_allocation: 8,
+            is_online: false,
+            locked: true,
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"kind\":\"PowerReactor\""), "got: {json}");
+        assert!(json.contains("\"is_online\":false"), "got: {json}");
+        assert!(json.contains("\"total_allocation\":5"), "got: {json}");
+        assert!(json.contains("\"locked\":true"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+    }
+
+    #[test]
+    fn system_blackboard_power_battery_serde_fields() {
+        use crate::messages::{PowerBatteryBlackboard, SystemBlackboard};
+        let bb = SystemBlackboard::PowerBattery(PowerBatteryBlackboard {
+            charge: 15.0,
+            capacity: 100.0,
+            is_online: false,
+            emergency_threshold: 0.25,
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"kind\":\"PowerBattery\""), "got: {json}");
+        assert!(json.contains("\"is_online\":false"), "got: {json}");
+        assert!(json.contains("\"charge\":15"), "got: {json}");
         let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
         assert_eq!(bb, decoded);
     }

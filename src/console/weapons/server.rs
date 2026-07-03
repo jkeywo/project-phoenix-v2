@@ -1858,7 +1858,9 @@ fn handle_fire_torpedo(
 /// consumes the drain in `SimSet::Modifiers` per-entity via `source_entity`.
 ///
 /// Iterates every ship so NPC beams drain their own power grid the same
-/// way the player's do.
+/// way the player's do. The target is the **battery** fine system
+/// (`POWER_BATTERY_SYSTEM_ID` — issue #513); a Disabled/Destroyed battery
+/// refuses the drain via `handle_power_inter_system`'s offline gate.
 pub fn drain_power_for_active_beam(
     beam_q: Query<(Entity, &ActiveBeam), With<crate::server_app::Ship>>,
     time: Res<Time>,
@@ -1868,7 +1870,7 @@ pub fn drain_power_for_active_beam(
     for (source_entity, beam) in beam_q.iter() {
         if beam.target_uuid.is_some() {
             inter_system.0.push(InterSystemMsg {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_battery_system_id(),
                 payload: InterSystemPayload::DrainWeaponsBattery { amount },
                 source_entity: Some(source_entity),
             });

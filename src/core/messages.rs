@@ -277,6 +277,8 @@ mod console_id_tests {
             Console::TorpedoTubeForeStarboard,
             Console::TorpedoTubeAft,
             Console::TorpedoMagazine,
+            Console::PowerReactor,
+            Console::PowerBattery,
         ];
         for console in &consoles {
             assert_eq!(
@@ -333,6 +335,13 @@ pub enum Console {
     /// A Disabled/Destroyed magazine refuses tube-load claims and blocks
     /// torpedo fire regardless of tube state.
     TorpedoMagazine,
+    // ── Fine-grained Power sub-systems (issue #513) ───────────────────────
+    /// Per-instance hull target for the power reactor (damageable, #513).
+    /// A Disabled/Destroyed reactor refuses allocation input.
+    PowerReactor,
+    /// Per-instance hull target for the power battery (damageable, #513).
+    /// A Disabled/Destroyed battery refuses drains from `DrainWeaponsBattery`.
+    PowerBattery,
 }
 
 impl Console {
@@ -357,6 +366,8 @@ impl Console {
             Console::TorpedoTubeForeStarboard => "Torpedo Tube (Fore Starboard)",
             Console::TorpedoTubeAft => "Torpedo Tube (Aft)",
             Console::TorpedoMagazine => "Torpedo Magazine",
+            Console::PowerReactor => "Power Reactor",
+            Console::PowerBattery => "Power Battery",
         }
     }
 
@@ -383,6 +394,8 @@ impl Console {
             Console::TorpedoTubeForeStarboard => "torpedo-tube-fore-starboard",
             Console::TorpedoTubeAft => "torpedo-tube-aft",
             Console::TorpedoMagazine => "torpedo-magazine",
+            Console::PowerReactor => "power-reactor",
+            Console::PowerBattery => "power-battery",
         }
     }
 
@@ -409,6 +422,8 @@ impl Console {
             "torpedo-tube-fore-starboard" => Some(Console::TorpedoTubeForeStarboard),
             "torpedo-tube-aft" => Some(Console::TorpedoTubeAft),
             "torpedo-magazine" => Some(Console::TorpedoMagazine),
+            "power-reactor" => Some(Console::PowerReactor),
+            "power-battery" => Some(Console::PowerBattery),
             _ => None,
         }
     }
@@ -433,6 +448,8 @@ impl Console {
             Console::TorpedoTubeForeStarboard => "TS",
             Console::TorpedoTubeAft => "TA",
             Console::TorpedoMagazine => "TM",
+            Console::PowerReactor => "PR",
+            Console::PowerBattery => "PB",
         }
     }
 }
@@ -1620,6 +1637,50 @@ pub struct TorpedoMagazineBlackboard {
     pub capacity: u32,
 }
 
+/// Raw sim truth for the Power Reactor fine system, published each tick into
+/// the ship blackboard (issue #513).
+///
+/// The reactor owns the allocation surface — the current pool total and cap
+/// live here. `is_online: false` reflects a Disabled/Destroyed reactor whose
+/// allocation input is refused via the standard `accept_human_input` gate.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PowerReactorBlackboard {
+    /// Sum of current per-group allocations (mirrors `PowerBlackboard::total`).
+    pub total_allocation: u8,
+    /// Maximum total allocation the pool can carry.
+    pub max_allocation: u8,
+    /// True when the reactor is operational (not disabled or destroyed).
+    /// When `false`, `SetPower` / `SetPowerGroupAllocation` messages are
+    /// refused at admission.
+    pub is_online: bool,
+    /// True when the power system is in the locked (battery-exhausted) state.
+    /// Mirrors `PowerBlackboard::locked` for reactor-scoped readers.
+    pub locked: bool,
+}
+
+/// Raw sim truth for the Power Battery fine system, published each tick into
+/// the ship blackboard (issue #513).
+///
+/// The battery is the target for channel-2 drain messages (e.g. active
+/// phaser beams via `InterSystemPayload::DrainWeaponsBattery`). When
+/// `is_online: false` the battery refuses drains — the emergency reserve
+/// pool is effectively 0 and downstream consumers cannot pull from it.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PowerBatteryBlackboard {
+    /// Current battery charge (0.0 – `capacity`).
+    pub charge: f32,
+    /// Maximum battery capacity (from ship TOML `[power] capacity`).
+    pub capacity: f32,
+    /// True when the battery is operational (not disabled or destroyed).
+    /// When `false`, channel-2 drain messages are refused.
+    pub is_online: bool,
+    /// Emergency-reserve threshold expressed as a fraction of `capacity`
+    /// (0.0 – 1.0). Sourced from ship TOML `[power] emergency_threshold`
+    /// divided by capacity; the panel can highlight the bar when charge
+    /// drops below this line.
+    pub emergency_threshold: f32,
+}
+
 /// Raw sim truth for the Weapons (Tactical) system, published each tick into
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -1669,6 +1730,10 @@ pub enum SystemBlackboard {
     TorpedoTube(TorpedoTubeBlackboard),
     /// Shared torpedo magazine blackboard (issue #512). One entry per ship.
     TorpedoMagazine(TorpedoMagazineBlackboard),
+    /// Power Reactor fine-system blackboard (issue #513). One entry per ship.
+    PowerReactor(PowerReactorBlackboard),
+    /// Power Battery fine-system blackboard (issue #513). One entry per ship.
+    PowerBattery(PowerBatteryBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -2088,7 +2153,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             },
         },
         UiAction::SetPower { target, level } => ClientMessage::ControlSystem {
-            target: crate::system_registry::power_system_id(),
+            target: crate::system_registry::power_reactor_system_id(),
             payload: SystemControlPayload::SetPowerGroupAllocation {
                 group: crate::power_system::power_group_for_console(target)
                     .unwrap_or_else(|| PowerGroupId(target.station_console_id().into())),
@@ -2317,7 +2382,7 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&action),
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_system_id(),
+                target: crate::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
                     group: PowerGroupId("helm".into()),
                     level: 3,

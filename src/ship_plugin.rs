@@ -3503,4 +3503,95 @@ station = "helm"
              with both engines online ({speed_both:.4})"
         );
     }
+
+    // ── Fine Power system → offline_systems tests (issue #513) ────────────────
+
+    /// Build an app whose ship carries PowerReactor + PowerBattery hull
+    /// entries. Used to exercise the hull → offline_systems chain for the
+    /// fine power kinds.
+    fn test_app_with_power_hull() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
+            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+            .insert_resource(ShipModifiers::new())
+            .add_plugins(ShipPlugin);
+        let hull_config = &[
+            (crate::messages::Console::Helm, 25.0_f32),
+            (crate::messages::Console::Tactical, 25.0),
+            (crate::messages::Console::PowerReactor, 15.0),
+            (crate::messages::Console::PowerBattery, 10.0),
+            (crate::messages::Console::Shields, 25.0),
+        ];
+        app.world_mut().spawn((
+            Ship,
+            LocalShip,
+            Transform::default(),
+            ShipPhysics::default(),
+            ShipConfigComponent::default(),
+            ShipSystemControlSources::default(),
+            ActiveStationRatings::default(),
+            CoordinationQueue::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::ai_plugin::ShipAiMemory::default(),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                hull_config,
+            )),
+            LastHelmInput::default(),
+            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
+        ));
+        app
+    }
+
+    #[test]
+    fn damaging_power_reactor_hull_to_disabled_puts_power_reactor_in_offline_systems() {
+        let mut app = test_app_with_power_hull();
+        set_console_hp_direct(&mut app, crate::messages::Console::PowerReactor, 0.0);
+        tick(&mut app);
+
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let control_sources = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let reactor_id = crate::system_registry::power_reactor_system_id();
+        assert!(
+            control_sources.0.offline_systems.contains(&reactor_id),
+            "power-reactor should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
+        );
+    }
+
+    #[test]
+    fn damaging_power_battery_hull_to_disabled_puts_power_battery_in_offline_systems() {
+        let mut app = test_app_with_power_hull();
+        set_console_hp_direct(&mut app, crate::messages::Console::PowerBattery, 0.0);
+        tick(&mut app);
+
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let control_sources = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let battery_id = crate::system_registry::power_battery_system_id();
+        assert!(
+            control_sources.0.offline_systems.contains(&battery_id),
+            "power-battery should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
+        );
+    }
 }

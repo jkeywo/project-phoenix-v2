@@ -292,6 +292,11 @@ impl Plugin for WeaponsPlugin {
                     tick_beams.in_set(crate::sim_sets::SimSet::Damage),
                     drain_power_for_active_beam.in_set(crate::sim_sets::SimSet::Physics),
                     tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
+                    // Magazine consumer runs in Physics — reads channel-2 claims
+                    // that handle_load_tube emitted in Input this tick, so the
+                    // load starts same-tick (issue #512). Ordered after
+                    // tick_torpedo_system so its own state mutations are seen.
+                    handle_torpedo_magazine_inter_system.in_set(crate::sim_sets::SimSet::Physics),
                 ),
             )
             .add_systems(
@@ -330,21 +335,37 @@ fn live_entity_xz(
 }
 
 fn handle_set_target(
-    ship_query: Query<(&AdmittedCommands, &ShipPhysics), With<crate::server_app::LocalShip>>,
+    ship_query: Query<
+        (
+            &AdmittedCommands,
+            &ShipPhysics,
+            &ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
     modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
     modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     mut outbox: ResMut<SimOutbox>,
-    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    let Some((admitted, physics)) = ship_query.iter().next() else {
+    let Some((admitted, physics, control_sources, ship_config)) = ship_query.iter().next() else {
         return;
     };
     let Some(mut weapons_target) = weapons_target_q.iter_mut().next() else {
         return;
     };
+    // Ship-level authorisation (issue #512, option c): SetTarget is a ship-wide
+    // concern, not per-bank. Accept the message if ANY phaser bank on the ship
+    // is currently human-operable — that mirrors the "fire when at least one
+    // bank is alive" semantic. If no banks are declared in the ship config
+    // (legacy / test ship), fall back to the coarse tactical policy.
+    if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
+        return;
+    }
     // Per-entity modifiers component takes priority; fall back to Resource.
     let default_modifiers;
     let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
@@ -363,7 +384,7 @@ fn handle_set_target(
         };
 
         let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-        let base_range = ship_config.0.tactical_radar_range;
+        let base_range = ship_client_config.0.tactical_radar_range;
         let effective_weapons_range = base_range * radar_range_mult;
         let live_pos = live_entity_xz(uuid.as_str(), &asteroid_q, &entity_q);
         let locked = match live_pos {
@@ -409,6 +430,126 @@ fn tactical_authorized(
         .console_holder(&Console::Tactical, &ship_config.0)
         == Some(token)
         || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
+}
+
+/// Ship-level Tactical concerns (SetTarget, SetPhaserMode, SetPhaserFrequency,
+/// ToggleAutoFire) are gated on "any phaser bank accepts human input"
+/// (issue #512, option c). This preserves the "fire when only one bank is
+/// alive" semantic without giving the coarse `tactical` system its own
+/// `[[system]]` block.
+///
+/// Returns `true` when:
+/// - Any bank in the ship's `phaser_banks` config has an operable fine
+///   system (`accept_human_input == true`), OR
+/// - The ship config has no `phaser_banks` declared at all (legacy /
+///   test-ship path) — in that case we fall back to the coarse tactical
+///   policy so existing tests keep passing.
+fn any_bank_accepts_human_input(
+    control_sources: &ShipSystemControlSources,
+    ship_config: &crate::ship::config::ShipConfig,
+) -> bool {
+    // Find bank ids from the systems list (fine `phaser_bank` kinds).
+    let bank_system_ids: Vec<SystemId> = ship_config
+        .systems
+        .iter()
+        .filter(|s| s.kind == crate::system_registry::PHASER_BANK_KIND)
+        .map(|s| s.id.clone())
+        .collect();
+    if bank_system_ids.is_empty() {
+        // Legacy fallback: no fine banks declared → gate on coarse tactical.
+        return control_sources
+            .0
+            .policy_for(&crate::system_registry::tactical_system_id())
+            .accept_human_input;
+    }
+    bank_system_ids
+        .iter()
+        .any(|id| control_sources.0.policy_for(id).accept_human_input)
+}
+
+/// True when ANY phaser bank on the ship has an operable fine system whose
+/// policy has `operate_ai == true`.
+///
+/// Used as the ship-level early-skip gate in `tick_phaser_auto_fire` after
+/// issue #512 deleted the coarse `[[system]] id = "tactical"` block. Before
+/// the fix, the auto-fire loop gated on `policy_for(&tactical_system_id())
+/// .operate_ai` — that always returned the default `Human` policy for any
+/// ship whose config no longer declared the coarse system, so NPCs with
+/// fine phaser banks silently stopped auto-firing.
+///
+/// Fallback: when the ship config declares NO `phaser_bank` fine systems
+/// (legacy / test ship path), returns the coarse `tactical.operate_ai`
+/// policy so existing tests that seed only the coarse SystemId continue
+/// to pass.
+fn any_bank_operates_ai(
+    control_sources: &ShipSystemControlSources,
+    ship_config: &crate::ship::config::ShipConfig,
+) -> bool {
+    let bank_system_ids: Vec<SystemId> = ship_config
+        .systems
+        .iter()
+        .filter(|s| s.kind == crate::system_registry::PHASER_BANK_KIND)
+        .map(|s| s.id.clone())
+        .collect();
+    if bank_system_ids.is_empty() {
+        return control_sources
+            .0
+            .policy_for(&crate::system_registry::tactical_system_id())
+            .operate_ai;
+    }
+    bank_system_ids
+        .iter()
+        .any(|id| control_sources.0.policy_for(id).operate_ai)
+}
+
+/// True when ANY tactical fine system (phaser bank, torpedo tube, or the
+/// torpedo magazine) has an operable fine system whose policy has
+/// `operate_ai == true`.
+///
+/// Used as the ship-level early-skip gate in `operate_tactical_ai` after
+/// issue #512 deleted the coarse `[[system]] id = "tactical"` block.
+/// Mirrors the shape of `any_bank_operates_ai` but covers the full tactical
+/// surface (weapons_target sync + torpedo auto-fire both need to run when
+/// any tactical fine system is AI-driven).
+///
+/// Fallback: when the ship config declares NO tactical fine systems at all
+/// (legacy / test ship path), returns the coarse `tactical.operate_ai`
+/// policy so existing tests that seed only the coarse SystemId continue
+/// to pass.
+fn any_tactical_system_operates_ai(
+    control_sources: &ShipSystemControlSources,
+    ship_config: &crate::ship::config::ShipConfig,
+) -> bool {
+    let tactical_fine_kinds = [
+        crate::system_registry::PHASER_BANK_KIND,
+        crate::system_registry::TORPEDO_TUBE_KIND,
+        crate::system_registry::TORPEDO_MAGAZINE_KIND,
+    ];
+    let tactical_fine_ids: Vec<SystemId> = ship_config
+        .systems
+        .iter()
+        .filter(|s| tactical_fine_kinds.contains(&s.kind.as_str()))
+        .map(|s| s.id.clone())
+        .collect();
+    if tactical_fine_ids.is_empty() {
+        return control_sources
+            .0
+            .policy_for(&crate::system_registry::tactical_system_id())
+            .operate_ai;
+    }
+    tactical_fine_ids
+        .iter()
+        .any(|id| control_sources.0.policy_for(id).operate_ai)
+}
+
+/// True when `system_id` is registered on this ship's `ControlSourceResolver`
+/// (either in the `sources` map or in the damage-driven `offline_systems`
+/// set). Used to decide whether per-fine-instance gating applies to a
+/// message, or whether we should fall back to the coarse tactical policy for
+/// NPC ships that haven't opted into the fine-system decomposition.
+fn system_is_registered(control_sources: &ShipSystemControlSources, system_id: &SystemId) -> bool {
+    control_sources.0.entries().any(|(id, _)| id == system_id)
+        || control_sources.0.offline_systems.contains(system_id)
 }
 
 /// Unified `FirePhaser` handler for every ship (player + NPC).
@@ -509,9 +650,22 @@ fn handle_fire_phaser(
 
         // Authorize the shooter per its own ControlSource. Human tokens
         // require `accept_human_input`; `ai:` tokens require `operate_ai`.
-        let policy = control_sources
-            .0
-            .policy_for(&crate::system_registry::tactical_system_id());
+        // Per-bank gate (issue #512): resolve the SystemId for this bank's
+        // fine system and gate on its own policy. Falls back to the coarse
+        // tactical policy when the bank id doesn't resolve to a known fine
+        // system OR when the ship hasn't registered a fine system for this
+        // bank (NPC path — NPC ships declare fine `phaser_bank` systems in
+        // their TOML but use different bank ids like "port"/"starboard" that
+        // don't match the `fore`/`aft` fine SystemId constants). The
+        // fallback preserves the coarse-tactical AI semantic for NPCs.
+        let bank_system_id = crate::system_registry::phaser_bank_system_id(bank)
+            .filter(|id| system_is_registered(control_sources, id));
+        let policy = match &bank_system_id {
+            Some(id) => control_sources.0.policy_for(id),
+            None => control_sources
+                .0
+                .policy_for(&crate::system_registry::tactical_system_id()),
+        };
         let is_ai_token = ev.token.starts_with("ai:");
         let authorized = if is_ai_token {
             policy.operate_ai
@@ -659,12 +813,16 @@ fn tick_phaser_auto_fire(
     mut commands: Commands,
     phaser_mode: Res<CurrentPhaserMode>,
     // Every ship with weapons state. `ShipAiMemory` is `Option` because
-    // pre-`AiPlugin` test apps may spawn ships without it.
+    // pre-`AiPlugin` test apps may spawn ships without it. `ShipConfigComponent`
+    // is `Option` for the same reason — some legacy tests spawn NPCs without
+    // a ship config; those ships fall back to the coarse `tactical.operate_ai`
+    // gate (preserving pre-#512 behaviour).
     mut ship_q: Query<
         (
             Entity,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &ShipSystemControlSources,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
             &ShipPhysics,
             &WeaponsTarget,
             &mut ActiveBeam,
@@ -685,6 +843,7 @@ fn tick_phaser_auto_fire(
         ship_entity,
         is_local,
         control_sources,
+        ship_config_opt,
         physics,
         weapons_target,
         mut beam,
@@ -694,14 +853,29 @@ fn tick_phaser_auto_fire(
         ai_memory_opt,
     ) in ship_q.iter_mut()
     {
-        // Gate: auto-fire only when Tactical is AI-controlled on this ship,
-        // OR the player globally toggled phaser mode to Auto (LocalShip-only
-        // signal that is irrelevant for NPCs — they always satisfy the
-        // operate_ai leg because their Tactical system is Ai by default).
-        let policy = control_sources
-            .0
-            .policy_for(&crate::system_registry::tactical_system_id());
-        let auto_fire = policy.operate_ai || (is_local && phaser_mode.0 == PhaserMode::Auto);
+        // Gate: auto-fire only when at least one phaser bank on this ship is
+        // AI-driven (per its own fine-system policy — issue #512), OR the
+        // player globally toggled phaser mode to Auto (LocalShip-only signal
+        // that is irrelevant for NPCs — they always satisfy the operate_ai
+        // leg because their fine phaser bank systems are Ai by default).
+        //
+        // Per-bank gate: each bank's own policy is checked inside the
+        // find_map below when choosing which bank to fire, so that AI can
+        // auto-fire from one bank even when another is offline. This
+        // ship-level `any_bank_operates_ai` predicate is only an early skip.
+        // Ships whose config declares no `phaser_bank` fine systems (or
+        // whose entity has no `ShipConfigComponent` at all — legacy test
+        // path) fall back to the coarse `tactical.operate_ai` policy.
+        let bank_ai_available = match ship_config_opt {
+            Some(cfg) => any_bank_operates_ai(control_sources, &cfg.0),
+            None => {
+                control_sources
+                    .0
+                    .policy_for(&crate::system_registry::tactical_system_id())
+                    .operate_ai
+            }
+        };
+        let auto_fire = bank_ai_available || (is_local && phaser_mode.0 == PhaserMode::Auto);
         if !auto_fire {
             continue;
         }
@@ -736,6 +910,9 @@ fn tick_phaser_auto_fire(
         };
 
         // Find the first bank that is off-cooldown and has the target in its auto arc.
+        // Per-bank policy gate (issue #512): skip banks whose fine system is
+        // offline (damaged/destroyed) — auto-fire uses the same operate_ai
+        // predicate as manual fire.
         let bank_id: Option<String> = if combat_config.0.banks.is_empty() {
             let effective_range =
                 PhaserCombatConfig::DEFAULT_PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
@@ -750,6 +927,14 @@ fn tick_phaser_auto_fire(
             (ready && !cooldown.is_bank_active("")).then(String::new)
         } else {
             combat_config.0.banks.iter().find_map(|b| {
+                // Per-bank fine-system gate — skip offline banks.
+                if let Some(bank_id) = crate::system_registry::phaser_bank_system_id(&b.id) {
+                    if system_is_registered(control_sources, &bank_id)
+                        && !control_sources.0.policy_for(&bank_id).operate_ai
+                    {
+                        return None;
+                    }
+                }
                 if cooldown.is_bank_active(&b.id) {
                     return None;
                 }
@@ -1321,12 +1506,23 @@ fn tick_beams(
     }
 }
 fn handle_set_phaser_mode(
-    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
+    ship_query: Query<
+        (
+            &AdmittedCommands,
+            &ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
+    let Some((admitted, control_sources, ship_config)) = ship_query.iter().next() else {
         return;
     };
+    // Ship-level gate (issue #512, option c): any bank human-operable.
+    if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
+        return;
+    }
     for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
         if let SystemControlPayload::SetPhaserMode { mode } = &cmd.payload {
             phaser_mode.0 = *mode;
@@ -1352,14 +1548,13 @@ fn handle_set_phaser_frequency(
     let Some((ship_config, control_sources)) = ship_query.iter().next() else {
         return;
     };
-    let tactical_policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::tactical_system_id());
+    // Ship-level gate (issue #512, option c): any bank human-operable.
+    let allowed = any_bank_accepts_human_input(control_sources, &ship_config.0);
     for ev in reader.read() {
         let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else {
             continue;
         };
-        if !tactical_policy.accept_human_input {
+        if !allowed {
             continue;
         }
         if sessions
@@ -1380,36 +1575,55 @@ fn handle_load_tube(
     sessions: Res<Sessions>,
     ship_query: Query<
         (
+            Entity,
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
+    mut inter_system: ResMut<InterSystemQueue>,
 ) {
-    let Some((ship_config, control_sources)) = ship_query.iter().next() else {
+    let Some((ship_entity, ship_config, control_sources)) = ship_query.iter().next() else {
         return;
     };
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::tactical_system_id());
     for ev in reader.read() {
         let ClientMessage::LoadTube { tube } = &ev.msg else {
             continue;
         };
-        if !policy.accept_human_input {
+        // Per-tube gate (issue #512): the tube's own fine-system policy
+        // decides whether human input can trigger a load. Fall back to
+        // coarse tactical gating when the tube id doesn't resolve OR
+        // when the ship hasn't registered a fine system for this tube.
+        let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
+            .filter(|id| system_is_registered(control_sources, id));
+        let tube_policy = match &tube_system_id {
+            Some(id) => control_sources.0.policy_for(id),
+            None => control_sources
+                .0
+                .policy_for(&crate::system_registry::tactical_system_id()),
+        };
+        if !tube_policy.accept_human_input {
             continue;
         }
         if !tactical_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
-        // Prefer per-entity component; fall back to global resource for test compat.
-        if let Some(mut ts) = torpedo_sys_q.iter_mut().next() {
-            ts.0.start_load(tube.as_str());
-        } else {
-            torpedo_sys_res.0.start_load(tube.as_str());
-        }
+        // Emit a channel-2 claim to the magazine. The magazine consumer
+        // (handle_torpedo_magazine_inter_system) decides whether to grant
+        // the round (magazine online + stock available) and, if so, begins
+        // the tube's loading via `start_load_reserved`. Sending the message
+        // is the only action the tube system takes here — the magazine owns
+        // both the counter mutation and the tube state transition.
+        //
+        // `source_entity: Some(ship_entity)` routes the claim to THIS
+        // ship's magazine — required by `handle_torpedo_magazine_inter_system`
+        // when multiple ships have magazines (mirrors the
+        // `handle_power_inter_system` pattern in `src/ship/power.rs`).
+        inter_system.0.push(InterSystemMsg {
+            target: crate::system_registry::torpedo_magazine_system_id(),
+            payload: InterSystemPayload::ClaimTorpedoRound { tube: tube.clone() },
+            source_entity: Some(ship_entity),
+        });
     }
 }
 
@@ -1429,14 +1643,22 @@ fn handle_unload_tube(
     let Some((ship_config, control_sources)) = ship_query.iter().next() else {
         return;
     };
-    let policy = control_sources
-        .0
-        .policy_for(&crate::system_registry::tactical_system_id());
     for ev in reader.read() {
         let ClientMessage::UnloadTube { tube } = &ev.msg else {
             continue;
         };
-        if !policy.accept_human_input {
+        // Per-tube gate (issue #512): the tube's own fine-system policy
+        // decides whether human input can trigger an unload. Falls back to
+        // coarse tactical when the ship hasn't registered a fine tube system.
+        let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
+            .filter(|id| system_is_registered(control_sources, id));
+        let tube_policy = match &tube_system_id {
+            Some(id) => control_sources.0.policy_for(id),
+            None => control_sources
+                .0
+                .policy_for(&crate::system_registry::tactical_system_id()),
+        };
+        if !tube_policy.accept_human_input {
             continue;
         }
         if !tactical_authorized(&sessions, ship_config, &ev.token) {
@@ -1537,9 +1759,18 @@ fn handle_fire_torpedo(
 
         // Authorize per the shooter's own ControlSource: human tokens need
         // `accept_human_input`; `ai:` tokens need `operate_ai`.
-        let policy = control_sources
-            .0
-            .policy_for(&crate::system_registry::tactical_system_id());
+        // Per-tube gate (issue #512): resolve the fine SystemId for this tube
+        // and gate on its own policy. Falls back to the coarse tactical policy
+        // when the tube id doesn't resolve to a fine system OR when the ship
+        // hasn't registered a fine system for this tube (NPC path).
+        let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
+            .filter(|id| system_is_registered(control_sources, id));
+        let policy = match &tube_system_id {
+            Some(id) => control_sources.0.policy_for(id),
+            None => control_sources
+                .0
+                .policy_for(&crate::system_registry::tactical_system_id()),
+        };
         let is_ai_token = ev.token.starts_with("ai:");
         let authorized = if is_ai_token {
             policy.operate_ai
@@ -1548,6 +1779,22 @@ fn handle_fire_torpedo(
         };
         if !authorized {
             continue;
+        }
+        // Magazine-online gate (issue #512): a Disabled/Destroyed magazine
+        // blocks fire even when the tube is loaded. Only enforced when the
+        // ship actually declares a torpedo magazine fine system (player
+        // ship path). NPCs without a magazine system are unaffected.
+        let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+        let magazine_declared = control_sources
+            .0
+            .entries()
+            .any(|(id, _)| id == &magazine_id)
+            || control_sources.0.offline_systems.contains(&magazine_id);
+        if magazine_declared {
+            let magazine_policy = control_sources.0.policy_for(&magazine_id);
+            if !magazine_policy.accept_human_input && !magazine_policy.operate_ai {
+                continue;
+            }
         }
 
         // Per-entity `TorpedoSystemResource` first; fall back to the global
@@ -1625,6 +1872,107 @@ pub fn drain_power_for_active_beam(
                 payload: InterSystemPayload::DrainWeaponsBattery { amount },
                 source_entity: Some(source_entity),
             });
+        }
+    }
+}
+
+/// Consumer for the Torpedo Magazine's inbound channel-2 `ClaimTorpedoRound`
+/// messages (issue #512).
+///
+/// Runs in `SimSet::Physics` on ANY ship carrying a `TorpedoSystemResource`
+/// component (`With<Ship>`) — routing by `source_entity` mirrors the
+/// [`crate::ship::power::handle_power_inter_system`] pattern so multiple
+/// ships with magazines each mutate their own state. Falls back to the
+/// LocalShip when `source_entity` is `None` (legacy path), and to the
+/// global `TorpedoSystemResource` when no matching Ship entity exists at
+/// all (legacy test paths without a Ship entity).
+///
+/// For every `ClaimTorpedoRound` targeted at
+/// [`crate::system_registry::torpedo_magazine_system_id`]:
+///
+/// 1. Refuse the claim (no-op) when the magazine is offline (Disabled /
+///    Destroyed hull tier — reflected as `!accept_human_input && !operate_ai`
+///    in the control-source resolver).
+/// 2. Refuse the claim when the shared magazine counter is zero.
+/// 3. Otherwise decrement the counter and start loading the named tube via
+///    [`crate::torpedo::TorpedoSystem::start_load_reserved`].
+///
+/// This is the sole path the Bevy weapons handler uses to consume from the
+/// magazine — the tube handler (`handle_load_tube`) only *sends* the claim.
+pub fn handle_torpedo_magazine_inter_system(
+    queue: Res<InterSystemQueue>,
+    mut ship_q: Query<
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &mut TorpedoSystemResource,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
+) {
+    let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+    // Collect targeted claims: (source_entity, tube_id). Only claims for the
+    // magazine system are relevant here — everything else is ignored.
+    let claims: Vec<(Option<Entity>, String)> = queue
+        .0
+        .iter()
+        .filter(|m| m.target == magazine_id)
+        .filter_map(|m| match &m.payload {
+            InterSystemPayload::ClaimTorpedoRound { tube } => Some((m.source_entity, tube.clone())),
+            _ => None,
+        })
+        .collect();
+    if claims.is_empty() {
+        return;
+    }
+
+    // Snapshot the LocalShip entity once so `source_entity: None` (legacy
+    // path) resolves to the player ship consistently across the loop.
+    let local_ship_entity: Option<Entity> =
+        ship_q
+            .iter()
+            .find_map(|(e, _, _, is_local)| if is_local { Some(e) } else { None });
+
+    for (source_entity, tube_id) in claims {
+        let target_entity = source_entity.or(local_ship_entity);
+        if let Some(target) = target_entity {
+            if let Ok((_e, control_sources, mut torpedo_sys, _is_local)) = ship_q.get_mut(target) {
+                // Gate: magazine must be online (or absent → treat as online for
+                // ships that don't declare a magazine fine system, preserving
+                // legacy behaviour). The `torpedo_magazine` system is added to
+                // the resolver by lobby setup when the ship TOML declares it.
+                let magazine_declared = control_sources
+                    .0
+                    .entries()
+                    .any(|(id, _)| id == &magazine_id)
+                    || control_sources.0.offline_systems.contains(&magazine_id);
+                if magazine_declared {
+                    let policy = control_sources.0.policy_for(&magazine_id);
+                    if !policy.accept_human_input && !policy.operate_ai {
+                        // This ship's magazine is offline — refuse this claim.
+                        // Other ships' claims (different `source_entity`) are
+                        // still handled below in subsequent iterations.
+                        continue;
+                    }
+                }
+                if !torpedo_sys.0.claim_magazine_round() {
+                    continue; // magazine empty — refuse this claim.
+                }
+                if !torpedo_sys.0.start_load_reserved(&tube_id) {
+                    // Tube already loaded / unknown — return the round to the magazine.
+                    torpedo_sys.0.torpedoes_remaining += 1;
+                }
+                continue;
+            }
+        }
+        // Resource-only fallback (no Ship entity with the component).
+        if !torpedo_sys_res.0.claim_magazine_round() {
+            continue;
+        }
+        if !torpedo_sys_res.0.start_load_reserved(&tube_id) {
+            torpedo_sys_res.0.torpedoes_remaining += 1;
         }
     }
 }
@@ -1958,7 +2306,6 @@ fn operate_tactical_ai(
         Without<crate::simulation::Asteroid>,
     >,
 ) {
-    let tactical_system = crate::system_registry::tactical_system_id();
     let tactical_station = crate::messages::StationId("tactical".into());
 
     for (
@@ -1974,12 +2321,17 @@ fn operate_tactical_ai(
         blackboards,
     ) in ship_query.iter_mut()
     {
-        // Only run for ships whose Tactical system is AI-controlled.
-        // The player ship's Tactical may be human — skip in that case; the
-        // human operator drives via WeaponsTarget directly through the
-        // handle_set_target handler.
-        let policy = control_sources.0.policy_for(&tactical_system);
-        if !policy.operate_ai {
+        // Only run for ships whose Tactical surface is AI-controlled.
+        // Post-#512, "tactical is AI-controlled" means "at least one
+        // tactical fine system (phaser bank, torpedo tube, or the torpedo
+        // magazine) has `operate_ai == true` on its own policy". Ships that
+        // declare no tactical fine systems (test / legacy) fall back to
+        // the coarse `tactical.operate_ai` policy.
+        //
+        // The player ship's Tactical fine systems may be human — skip in
+        // that case; the human operator drives via WeaponsTarget directly
+        // through the handle_set_target handler.
+        if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
             continue;
         }
 
@@ -2415,6 +2767,7 @@ fn publish_weapons_blackboard(
     )>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    control_sources_q: Query<&ShipSystemControlSources, With<crate::server_app::LocalShip>>,
     mut ship_blackboards_q: Query<
         &mut crate::server_app::ShipSystemBlackboards,
         With<crate::server_app::LocalShip>,
@@ -2670,7 +3023,76 @@ fn publish_weapons_blackboard(
     if let Ok(mut entity_bbs) = ship_blackboards_q.single_mut() {
         entity_bbs.0.insert(
             SystemId(TACTICAL_SYSTEM_ID.to_string()),
-            SystemBlackboard::Weapons(bb),
+            SystemBlackboard::Weapons(bb.clone()),
+        );
+
+        // ── Per-bank blackboards (issue #512) ────────────────────────────
+        // Emit one PhaserBank entry per bank in the ship config, keyed by
+        // the fine SystemId (e.g. "phaser-fore"). Consumers gate on their
+        // own bank without unpacking the whole weapons blackboard.
+        //
+        // `is_online` is derived from `ShipSystemControlSources.offline_systems`
+        // (populated by `sync_console_damage_tiers` during `SimSet::Damage`).
+        // This matches the same surface all message handlers gate on, so
+        // damage-driven offline state is reflected everywhere consistently.
+        // Falls back to `true` when the ship has no ControlSources (test
+        // paths that don't spawn a Ship entity with the component).
+        let offline_systems_opt = control_sources_q
+            .single()
+            .ok()
+            .map(|cs| &cs.0.offline_systems);
+        for bank_state in &bb.banks {
+            let Some(bank_sysid) = crate::system_registry::phaser_bank_system_id(&bank_state.id)
+            else {
+                continue;
+            };
+            let is_online = offline_systems_opt
+                .map(|set| !set.contains(&bank_sysid))
+                .unwrap_or(true);
+            entity_bbs.0.insert(
+                bank_sysid,
+                SystemBlackboard::PhaserBank(crate::messages::PhaserBankBlackboard {
+                    is_online,
+                    on_cooldown: bank_state.on_cooldown,
+                    cooldown_remaining: bank_state.cooldown_remaining,
+                    fire_ready: bank_state.fire_ready,
+                }),
+            );
+        }
+
+        // ── Per-tube blackboards (issue #512) ────────────────────────────
+        for tube_state in &bb.tubes {
+            let Some(tube_sysid) = crate::system_registry::torpedo_tube_system_id(&tube_state.id)
+            else {
+                continue;
+            };
+            let is_online = offline_systems_opt
+                .map(|set| !set.contains(&tube_sysid))
+                .unwrap_or(true);
+            entity_bbs.0.insert(
+                tube_sysid,
+                SystemBlackboard::TorpedoTube(crate::messages::TorpedoTubeBlackboard {
+                    is_online,
+                    loaded: tube_state.loaded,
+                    state: tube_state.state.clone(),
+                    progress: tube_state.progress,
+                    load_time: tube_state.load_time,
+                }),
+            );
+        }
+
+        // ── Magazine blackboard (issue #512) ─────────────────────────────
+        let magazine_sysid = crate::system_registry::torpedo_magazine_system_id();
+        let magazine_online = offline_systems_opt
+            .map(|set| !set.contains(&magazine_sysid))
+            .unwrap_or(true);
+        entity_bbs.0.insert(
+            magazine_sysid,
+            SystemBlackboard::TorpedoMagazine(crate::messages::TorpedoMagazineBlackboard {
+                is_online: magazine_online,
+                torpedoes_remaining: torpedo_sys.0.torpedoes_remaining,
+                capacity: torpedo_sys.0.config.count,
+            }),
         );
     }
 }
@@ -2821,6 +3243,12 @@ mod tests {
 
     /// Build a minimal `ShipConfigComponent` with a tactical station that has an
     /// "Assisted" rating containing `torpedo_auto_fire` in its ai_tuning table.
+    ///
+    /// Post-#512 this now uses fine Tactical `[[system]]` blocks matching
+    /// `player_ship.toml` (phaser-fore/aft, torpedo-tube-fore-port/aft, etc.)
+    /// so tests exercise the production per-fine-system gate paths rather
+    /// than the legacy fallback-to-coarse-tactical path. The coarse
+    /// `[[system]] id = "tactical"` block is DELETED to match production.
     fn test_ship_config() -> crate::ship_plugin::ShipConfigComponent {
         const TOML: &str = r#"
 [[station]]
@@ -2843,13 +3271,41 @@ automated_systems = []
 torpedo_auto_fire = {}
 
 [[system]]
-id = "tactical"
-kind = "tactical"
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+
+[[system]]
+id = "phaser-aft"
+kind = "phaser_bank"
+station = "tactical"
+
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+station = "tactical"
+
+[[system]]
+id = "torpedo-tube-fore-port"
+kind = "torpedo_tube"
+station = "tactical"
+
+[[system]]
+id = "torpedo-tube-fore-starboard"
+kind = "torpedo_tube"
+station = "tactical"
+
+[[system]]
+id = "torpedo-tube-aft"
+kind = "torpedo_tube"
 station = "tactical"
 "#;
         crate::ship_plugin::ShipConfigComponent(
-            crate::ship::config::parse_and_validate(TOML, &["tactical"])
-                .expect("test ship config must be valid"),
+            crate::ship::config::parse_and_validate(
+                TOML,
+                &["phaser_bank", "torpedo_tube", "torpedo_magazine"],
+            )
+            .expect("test ship config must be valid"),
         )
     }
 
@@ -2959,6 +3415,15 @@ station = "tactical"
                     (Console::Tactical, 25.0),
                     (Console::Power, 25.0),
                     (Console::Shields, 25.0),
+                    // Fine Tactical hull entries (issue #512) so tests can drive
+                    // sync_console_damage_tiers → offline_systems for the fine
+                    // systems declared in the updated test_ship_config().
+                    (Console::PhaserFore, 15.0),
+                    (Console::PhaserAft, 15.0),
+                    (Console::TorpedoTubeForePort, 12.0),
+                    (Console::TorpedoTubeForeStarboard, 12.0),
+                    (Console::TorpedoTubeAft, 12.0),
+                    (Console::TorpedoMagazine, 20.0),
                 ])),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::entity_spawner::EntityUuid("test-local-ship".to_string()),
@@ -6119,6 +6584,14 @@ station = "tactical"
 
     // ── TacticalAiController tests ─────────────────────────────────────────
 
+    /// Set the ControlSource for the coarse tactical system AND every
+    /// tactical fine system on the LocalShip.
+    ///
+    /// Post-#512 the coarse `tactical` no longer has a `[[system]]` block,
+    /// so gating in production reads per-fine-system policies. This helper
+    /// updates every tactical surface so tests that intended "Tactical is
+    /// AI-controlled" behave the same way through both the fine-system
+    /// path and the legacy coarse-tactical fallback path.
     fn set_tactical_control_source(
         app: &mut App,
         source: crate::ship::control_source::ControlSource,
@@ -6127,7 +6600,21 @@ station = "tactical"
         let mut q = world
             .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
         for mut cs in q.iter_mut(world) {
+            // Coarse (fallback for ships without fine systems).
             cs.0.set(crate::system_registry::tactical_system_id(), source);
+            // Fine tactical systems (production path — mirrors what happens
+            // when a station rating flips to Backfill, which triggers AI
+            // control of every fine system owned by the station).
+            for sysid in [
+                crate::system_registry::phaser_fore_system_id(),
+                crate::system_registry::phaser_aft_system_id(),
+                crate::system_registry::torpedo_tube_fore_port_system_id(),
+                crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+                crate::system_registry::torpedo_tube_aft_system_id(),
+                crate::system_registry::torpedo_magazine_system_id(),
+            ] {
+                cs.0.set(sysid, source);
+            }
         }
     }
 
@@ -6304,13 +6791,997 @@ station = "tactical"
         // Switch to Std rating (no torpedo_auto_fire in ai_tuning).
         set_tactical_station_rating(&mut app, "Std");
 
-        // Second tick — AI must not fire.
+        // Second tick - AI must not fire.
         let out2 = tick(&mut app);
         assert!(
             !out2
                 .iter()
                 .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
             "AI must not fire TorpedoLaunched when rating is Std"
+        );
+    }
+
+    // ── Fine-Tactical decomposition tests (issue #512) ─────────────────────
+    //
+    // Every new fine SystemId, blackboard, and gate has coverage here. The
+    // channel-2 `ClaimTorpedoRound` transaction is exercised via
+    // `handle_load_tube` → `handle_torpedo_magazine_inter_system`. Firing
+    // gates are exercised via `handle_fire_torpedo` and `handle_fire_phaser`.
+
+    /// Helper: mark a fine system Offline (Disabled/Destroyed) on the LocalShip
+    /// by inserting it into `ControlSourceResolver.offline_systems`. Mirrors
+    /// what `sync_console_damage_tiers` would do after a damage tick — the
+    /// direct-insert avoids needing to spawn a hull component just to test
+    /// the gate.
+    fn mark_system_offline(app: &mut App, system_id: SystemId) {
+        let world = app.world_mut();
+        let mut q = world
+            .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+        for mut cs in q.iter_mut(world) {
+            cs.0.offline_systems.insert(system_id.clone());
+        }
+    }
+
+    /// Helper: register a fine system on the LocalShip's ControlSourceResolver
+    /// with a specific ControlSource. Used to simulate the ship having declared
+    /// a fine `[[system]]` block in its TOML.
+    fn register_fine_system(
+        app: &mut App,
+        system_id: SystemId,
+        source: crate::ship::control_source::ControlSource,
+    ) {
+        let world = app.world_mut();
+        let mut q = world
+            .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+        for mut cs in q.iter_mut(world) {
+            cs.0.set(system_id.clone(), source);
+        }
+    }
+
+    // ── Registered-system predicate ───────────────────────────────────────
+
+    #[test]
+    fn system_is_registered_returns_true_after_set() {
+        let mut sources = ShipSystemControlSources::default();
+        let sysid = crate::system_registry::phaser_fore_system_id();
+        sources.0.set(
+            sysid.clone(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+        assert!(system_is_registered(&sources, &sysid));
+    }
+
+    #[test]
+    fn system_is_registered_returns_true_after_offline_insert() {
+        let mut sources = ShipSystemControlSources::default();
+        let sysid = crate::system_registry::phaser_fore_system_id();
+        sources.0.offline_systems.insert(sysid.clone());
+        assert!(system_is_registered(&sources, &sysid));
+    }
+
+    #[test]
+    fn system_is_registered_returns_false_when_absent() {
+        let sources = ShipSystemControlSources::default();
+        let sysid = crate::system_registry::phaser_fore_system_id();
+        assert!(!system_is_registered(&sources, &sysid));
+    }
+
+    // ── Per-bank fire gate ────────────────────────────────────────────────
+
+    #[test]
+    fn fire_phaser_refused_when_bank_fine_system_offline() {
+        let mut app = test_app();
+        let _ = lock_and_fire(&mut app, 0.0, -20.0);
+
+        // Reset beam / cooldown so the only variable is the bank gate.
+        set_active_beam_target(&mut app, None);
+        start_phaser_cooldown(&mut app, "port", 0.0);
+
+        // Register the port bank as Human, then mark it offline (as
+        // sync_console_damage_tiers would do on Disabled hull).
+        register_fine_system(
+            &mut app,
+            SystemId("phaser-port".into()),
+            crate::ship::control_source::ControlSource::Human,
+        );
+        mark_system_offline(&mut app, SystemId("phaser-port".into()));
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
+        let out = tick(&mut app);
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "FirePhaser must be refused when the bank's fine system is offline"
+        );
+    }
+
+    #[test]
+    fn fire_phaser_allowed_when_other_bank_offline_but_this_one_online() {
+        let mut app = test_app();
+        let _ = lock_and_fire(&mut app, 0.0, -20.0);
+        set_active_beam_target(&mut app, None);
+        start_phaser_cooldown(&mut app, "port", 0.0);
+        start_phaser_cooldown(&mut app, "starboard", 0.0);
+
+        // Only starboard offline; port stays online.
+        mark_system_offline(&mut app, SystemId("phaser-starboard".into()));
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
+        let out = tick(&mut app);
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "Firing port must succeed when only starboard is offline"
+        );
+    }
+
+    // ── Per-tube load/unload gate ─────────────────────────────────────────
+
+    #[test]
+    fn load_tube_emits_claim_torpedo_round_via_channel_2() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::LoadTube {
+                tube: "fore_port".to_string(),
+            },
+        );
+        // Run one tick to admit the command → handle_load_tube emits the claim.
+        tick(&mut app);
+
+        let queue = &app.world().resource::<InterSystemQueue>().0;
+        let claim_present = queue.iter().any(|m| {
+            m.target == crate::system_registry::torpedo_magazine_system_id()
+                && matches!(
+                    &m.payload,
+                    InterSystemPayload::ClaimTorpedoRound { tube } if tube == "fore_port"
+                )
+        });
+        assert!(
+            claim_present,
+            "handle_load_tube should emit ClaimTorpedoRound on channel-2"
+        );
+    }
+
+    #[test]
+    fn load_tube_refused_when_tube_fine_system_offline() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+
+        mark_system_offline(
+            &mut app,
+            crate::system_registry::torpedo_tube_fore_port_system_id(),
+        );
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::LoadTube {
+                tube: "fore_port".to_string(),
+            },
+        );
+        tick(&mut app);
+
+        // No claim should have been emitted this tick.
+        let queue = &app.world().resource::<InterSystemQueue>().0;
+        assert!(
+            !queue
+                .iter()
+                .any(|m| matches!(&m.payload, InterSystemPayload::ClaimTorpedoRound { .. })),
+            "load must not emit a magazine claim when the tube system is offline"
+        );
+    }
+
+    // ── Magazine claim transaction ────────────────────────────────────────
+    //
+    // Directly exercise `handle_torpedo_magazine_inter_system` by pushing
+    // a claim into the queue and asserting the same-tick effect on the
+    // magazine counter and the tube state.
+
+    #[test]
+    fn magazine_claim_decrements_counter_by_one_when_online() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+
+        // Snapshot the magazine counter (starts at 10 from TorpedoConfig::default).
+        let before = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|ts| ts.0.torpedoes_remaining)
+            .unwrap();
+        assert!(before > 0, "test precondition: magazine must have stock");
+
+        // Drive the end-to-end path: `handle_load_tube` (Input) emits the
+        // channel-2 claim, and `handle_torpedo_magazine_inter_system` (Physics)
+        // consumes it — both happen within a single `app.update()` after
+        // `clear_inter_system_queue` runs.
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::LoadTube {
+                tube: "fore_port".to_string(),
+            },
+        );
+        let _ = tick(&mut app);
+
+        let after = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|ts| ts.0.torpedoes_remaining)
+            .unwrap();
+        assert_eq!(
+            after,
+            before - 1,
+            "magazine counter must decrement by exactly one after a granted claim"
+        );
+
+        // The tube should now be Loading.
+        let tube_loading = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|ts| {
+                matches!(
+                    ts.0.tube("fore_port").map(|t| &t.load_state),
+                    Some(crate::torpedo::TubeLoadState::Loading { .. })
+                )
+            })
+            .unwrap();
+        assert!(
+            tube_loading,
+            "granted claim must start loading the target tube via start_load_reserved"
+        );
+    }
+
+    #[test]
+    fn magazine_claim_refused_when_magazine_offline() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        // Register magazine as human, then mark it offline (Disabled tier).
+        register_fine_system(
+            &mut app,
+            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+        mark_system_offline(
+            &mut app,
+            crate::system_registry::torpedo_magazine_system_id(),
+        );
+
+        let before = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|ts| ts.0.torpedoes_remaining)
+            .unwrap();
+
+        // End-to-end: LoadTube tries to emit a claim — but the tube gate uses
+        // the coarse tactical policy (test ship doesn't declare fine tube
+        // systems either), which passes, then the claim goes to the magazine
+        // consumer which refuses because the magazine is offline.
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::LoadTube {
+                tube: "fore_port".to_string(),
+            },
+        );
+        let _ = tick(&mut app);
+
+        let after = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|ts| ts.0.torpedoes_remaining)
+            .unwrap();
+        assert_eq!(
+            after, before,
+            "offline magazine must refuse the claim — counter unchanged"
+        );
+    }
+
+    #[test]
+    fn magazine_claim_refused_when_empty() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+
+        // Drain the magazine.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+            let mut ts = q.single_mut(app.world_mut()).unwrap();
+            ts.0.torpedoes_remaining = 0;
+        }
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::LoadTube {
+                tube: "fore_port".to_string(),
+            },
+        );
+        let _ = tick(&mut app);
+
+        // Tube must still be Unloaded — no start_load_reserved happened.
+        let tube_state = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|ts| ts.0.tube("fore_port").map(|t| t.load_state.clone()))
+            .unwrap();
+        assert_eq!(
+            tube_state,
+            Some(crate::torpedo::TubeLoadState::Unloaded),
+            "empty magazine must not begin loading the tube"
+        );
+    }
+
+    // ── Fire torpedo: magazine-online gate ────────────────────────────────
+
+    #[test]
+    fn fire_torpedo_refused_when_magazine_offline_even_if_tube_loaded() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        // Load the tube directly (bypass channel-2 to isolate the fire gate).
+        load_tube_now(&mut app, "fore_port");
+
+        // Register magazine as offline.
+        register_fine_system(
+            &mut app,
+            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+        mark_system_offline(
+            &mut app,
+            crate::system_registry::torpedo_magazine_system_id(),
+        );
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: "fore_port".to_string(),
+                target_uuid: None,
+            },
+        );
+        let out = tick(&mut app);
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            "disabled magazine must block fire even from a loaded tube"
+        );
+    }
+
+    #[test]
+    fn fire_torpedo_refused_when_tube_fine_system_offline() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        load_tube_now(&mut app, "fore_port");
+        mark_system_offline(
+            &mut app,
+            crate::system_registry::torpedo_tube_fore_port_system_id(),
+        );
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: "fore_port".to_string(),
+                target_uuid: None,
+            },
+        );
+        let out = tick(&mut app);
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            "disabled tube fine system must block its fire"
+        );
+    }
+
+    // ── Ship-level option (c) gate ────────────────────────────────────────
+
+    #[test]
+    fn set_target_refused_when_all_banks_offline() {
+        let mut app = test_app();
+        setup_weapons_world(&mut app, 30.0, 0.0);
+        start_game_with_weapons(&mut app);
+        // The updated `test_ship_config()` declares two fine phaser banks
+        // ("phaser-fore", "phaser-aft"). `any_bank_accepts_human_input`
+        // iterates them and returns true if ANY bank accepts human input.
+        // So to refuse SetTarget, EVERY fine bank must be offline.
+        // Mark both fine banks offline; the coarse tactical is only used as
+        // a fallback when the ship declares no fine banks (which the test
+        // config now does).
+        mark_system_offline(&mut app, crate::system_registry::phaser_fore_system_id());
+        mark_system_offline(&mut app, crate::system_registry::phaser_aft_system_id());
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
+            },
+        );
+        let out = tick(&mut app);
+        let has_lock = out
+            .iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TargetLock { .. }));
+        assert!(
+            !has_lock,
+            "SetTarget must be refused when every phaser bank fine system is offline"
+        );
+    }
+
+    // ── Blackboards ───────────────────────────────────────────────────────
+
+    #[test]
+    fn publish_writes_phaser_fore_blackboard_when_bank_configured() {
+        let mut app = test_app();
+        // The test app config has "port"/"starboard" banks — no "fore" bank.
+        // Insert a fresh combat config with a "fore" bank so publish emits an entry.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
+            if let Ok(mut cc) = q.single_mut(app.world_mut()) {
+                cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
+                    id: "fore".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 270.0,
+                    auto_arc_deg: 180.0,
+                    beam_range: 50.0,
+                    beam_damage_per_sec: 5.0,
+                    beam_duration_secs: 6.0,
+                    cooldown_secs: 6.0,
+                    beam_color: vec![],
+                    shield_pierce: None,
+                    marker: None,
+                }];
+            }
+        }
+        // Publish runs in SimSet::Publish — one full update ticks it.
+        app.update();
+
+        let key = crate::system_registry::phaser_fore_system_id();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<
+                &crate::server_app::ShipSystemBlackboards,
+                With<crate::server_app::LocalShip>,
+            >();
+        let bbs = q.single(app.world()).unwrap();
+        let bb = bbs
+            .0
+            .get(&key)
+            .expect("expected phaser-fore in blackboards");
+        assert!(matches!(bb, SystemBlackboard::PhaserBank(_)));
+    }
+
+    #[test]
+    fn publish_writes_torpedo_magazine_blackboard() {
+        let mut app = test_app();
+        app.update();
+
+        let key = crate::system_registry::torpedo_magazine_system_id();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<
+                &crate::server_app::ShipSystemBlackboards,
+                With<crate::server_app::LocalShip>,
+            >();
+        let bbs = q.single(app.world()).unwrap();
+        let SystemBlackboard::TorpedoMagazine(mag_bb) = bbs
+            .0
+            .get(&key)
+            .expect("expected torpedo-magazine in blackboards")
+            .clone()
+        else {
+            panic!("expected TorpedoMagazine blackboard");
+        };
+        assert!(
+            mag_bb.is_online,
+            "fresh test ship magazine should be online"
+        );
+        assert_eq!(mag_bb.torpedoes_remaining, mag_bb.capacity);
+    }
+
+    #[test]
+    fn publish_writes_torpedo_tube_blackboards_per_tube() {
+        let mut app = test_app();
+        app.update();
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<
+                &crate::server_app::ShipSystemBlackboards,
+                With<crate::server_app::LocalShip>,
+            >();
+        let bbs = q.single(app.world()).unwrap();
+        for tube_key in [
+            crate::system_registry::torpedo_tube_fore_port_system_id(),
+            crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+            crate::system_registry::torpedo_tube_aft_system_id(),
+        ] {
+            let bb = bbs
+                .0
+                .get(&tube_key)
+                .unwrap_or_else(|| panic!("expected {tube_key:?} in blackboards"));
+            assert!(matches!(bb, SystemBlackboard::TorpedoTube(_)));
+        }
+    }
+
+    // ── Ship-level AI early-skip regression tests (issue #512, findings 1 & 2) ─
+    //
+    // These tests cover the specific production path the reviewer flagged as
+    // dead code: after #512 deleted `[[system]] id = "tactical" kind = "tactical"`
+    // from every ship TOML, the coarse tactical SystemId is not registered
+    // in any ship's ControlSourceResolver. Every code path that gated on
+    // `policy_for(&tactical_system_id()).operate_ai` would therefore see the
+    // default `Human` policy (`operate_ai = false`) and never run.
+    //
+    // These tests DO NOT touch the coarse `tactical` SystemId — they set
+    // AI only on a fine phaser bank / torpedo tube and assert the
+    // ship-level AI paths still activate.
+
+    /// Finding 1 regression: `tick_phaser_auto_fire` used to gate its
+    /// early skip on the coarse `tactical` policy. Post-fix, it uses
+    /// `any_bank_operates_ai` which iterates the ship config's `phaser_bank`
+    /// fine systems. This test seeds AI on ONE fine bank on an NPC — no
+    /// coarse tactical touching — and asserts a beam still activates.
+    #[test]
+    fn tick_phaser_auto_fire_activates_when_any_bank_operates_ai() {
+        use crate::ai_plugin::AiTokenRegistry;
+        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+
+        let npc_uuid = "cc000000-0000-0000-0000-000000000001";
+        let target_uuid = "cc000000-0000-0000-0000-000000000002";
+
+        // The NPC has a `phaser_bank` fine system ("phaser-port") declared
+        // in its ShipConfigComponent — matching what the ship_harrow_*.toml
+        // NPC TOMLs do. Its policy is Ai. The coarse `tactical` SystemId
+        // is INTENTIONALLY untouched — the test would fail before finding 1
+        // was fixed because the early-skip in `tick_phaser_auto_fire` would
+        // read `policy_for(&tactical_system_id()).operate_ai == false` and
+        // `continue`.
+        const NPC_TOML: &str = r#"
+[[system]]
+id = "phaser-port"
+kind = "phaser_bank"
+ai_only = true
+"#;
+        let npc_ship_config = crate::ship_plugin::ShipConfigComponent(
+            crate::ship::config::parse_and_validate(NPC_TOML, &["phaser_bank"])
+                .expect("NPC ship config must be valid"),
+        );
+
+        let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        sources.set(
+            SystemId("phaser-port".into()),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        // NOTE: coarse tactical NOT set — this is the whole point of the test.
+
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid(npc_uuid.to_string()),
+                crate::ai_plugin::AiControllerComponent,
+                crate::ai_plugin::ShipAiMemory::default(),
+                crate::ship_plugin::ShipSystemControlSources(sources),
+                npc_ship_config,
+                WeaponsTarget(Some(target_uuid.to_string())),
+                ActiveBeam::default(),
+                PhaserCooldown::default(),
+                ShipPhysics::default(),
+                PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                    banks: vec![crate::entity_config::PhaserBankConfig {
+                        id: "port".into(),
+                        facing_deg: 0.0,
+                        fire_arc_deg: 360.0,
+                        auto_arc_deg: 360.0,
+                        beam_range: 50.0,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 3.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    }],
+                }),
+                Transform::default(),
+            ))
+            .id();
+
+        // Target directly ahead of NPC (yaw=0, forward=-Z).
+        app.world_mut().spawn((
+            EntityUuid(target_uuid.to_string()),
+            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                Console::CaptainChair,
+                50.0,
+            )])),
+            Transform::from_xyz(0.0, 0.0, -20.0),
+        ));
+
+        app.update();
+
+        let beam = app
+            .world()
+            .get::<ActiveBeam>(npc_entity)
+            .expect("NPC entity must have ActiveBeam component");
+        assert!(
+            beam.target_uuid.is_some(),
+            "tick_phaser_auto_fire must activate the beam when ANY phaser bank fine \
+             system has operate_ai=true, even without the coarse tactical SystemId"
+        );
+        assert_eq!(
+            beam.bank.as_deref(),
+            Some("port"),
+            "NPC should fire the port bank whose fine system is AI-operated"
+        );
+    }
+
+    /// Finding 2 regression: `operate_tactical_ai` used to gate its
+    /// early skip on the coarse `tactical` policy. Post-fix, it uses
+    /// `any_tactical_system_operates_ai` which iterates the ship config's
+    /// phaser_bank / torpedo_tube / torpedo_magazine fine systems. This
+    /// test seeds AI on `torpedo-magazine` alone (no coarse tactical) and
+    /// asserts the AI's WeaponsTarget sync path fires.
+    #[test]
+    fn operate_tactical_ai_runs_when_any_tactical_system_operates_ai() {
+        let mut app = test_app();
+
+        // Set the LocalShip's active rating to Assisted so torpedo_auto_fire is enabled.
+        set_tactical_station_rating(&mut app, "Assisted");
+
+        // Set torpedo-magazine to Ai on the LocalShip. Do NOT touch coarse tactical.
+        {
+            let world = app.world_mut();
+            let mut q = world
+                .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+            for mut cs in q.iter_mut(world) {
+                cs.0.set(
+                    crate::system_registry::torpedo_magazine_system_id(),
+                    crate::ship::control_source::ControlSource::Ai,
+                );
+                // Confirm coarse tactical is NOT set — this is what makes
+                // the test cover the finding.
+                assert!(
+                    !cs.0
+                        .entries()
+                        .any(|(id, _)| { id == &crate::system_registry::tactical_system_id() }),
+                    "test invariant: coarse tactical must NOT be registered"
+                );
+            }
+        }
+
+        // Simulate a Destroy objective so operate_tactical_ai has something
+        // to lock onto (the AI target-sync leg exercises the early-skip we're
+        // testing).
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        spawn_entity_target(&mut app, &target_uuid, 0.0, -30.0);
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(target_uuid.as_str()),
+            "operate_tactical_ai must run and lock the objective target when ANY \
+             tactical fine system has operate_ai=true, even without the coarse tactical SystemId"
+        );
+    }
+
+    // ── Finding 5 regression: publish gates on offline_systems, not hardcoded Console match ──
+
+    /// If an unknown / non-standard bank id ends up in the bank blackboard,
+    /// the previous hardcoded `match "fore" | "aft"` returned `None` and
+    /// silently reported `is_online: true` regardless of hull state.
+    ///
+    /// Post-fix, `is_online` is derived from `offline_systems` — so a bank
+    /// whose fine SystemId lives in `offline_systems` reports `is_online: false`
+    /// no matter whether the id matches a Console variant.
+    #[test]
+    fn publish_marks_bank_offline_when_fine_system_in_offline_set() {
+        let mut app = test_app();
+        // Swap in a bank config whose id is NOT in the hardcoded match
+        // (e.g. "dorsal"), so the old bug's hardcoded id→Console arms
+        // would default to online.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
+            if let Ok(mut cc) = q.single_mut(app.world_mut()) {
+                cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
+                    id: "dorsal".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 270.0,
+                    auto_arc_deg: 180.0,
+                    beam_range: 50.0,
+                    beam_damage_per_sec: 5.0,
+                    beam_duration_secs: 6.0,
+                    cooldown_secs: 6.0,
+                    beam_color: vec![],
+                    shield_pierce: None,
+                    marker: None,
+                }];
+            }
+        }
+        // Mark the corresponding fine SystemId offline via offline_systems.
+        mark_system_offline(&mut app, SystemId("phaser-dorsal".into()));
+
+        app.update();
+
+        let key = SystemId("phaser-dorsal".into());
+        let mut q = app
+            .world_mut()
+            .query_filtered::<
+                &crate::server_app::ShipSystemBlackboards,
+                With<crate::server_app::LocalShip>,
+            >();
+        let bbs = q.single(app.world()).unwrap();
+        let SystemBlackboard::PhaserBank(bb) = bbs
+            .0
+            .get(&key)
+            .expect("expected phaser-dorsal blackboard entry")
+            .clone()
+        else {
+            panic!("expected PhaserBank blackboard variant");
+        };
+        assert!(
+            !bb.is_online,
+            "bank must report is_online: false when its fine SystemId is in \
+             offline_systems (regardless of whether the id matches a Console variant)"
+        );
+    }
+
+    // ── Finding 7 regression: end-to-end hull → offline_systems → PhaserBankBlackboard ──
+    //
+    // Ties together sync_console_damage_tiers (in ship_plugin) and
+    // publish_weapons_blackboard (in this module). A hull entry for
+    // Console::PhaserFore below the disabled threshold should end up as
+    // `phaser-fore ∈ offline_systems` after one tick, and the emitted
+    // blackboard should reflect `is_online: false`.
+
+    #[test]
+    fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
+        let mut app = test_app();
+        // Register the sync system directly (test_app doesn't include ShipPlugin).
+        app.add_systems(
+            Update,
+            crate::ship_plugin::sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
+        );
+
+        // Insert a "fore" bank so publish emits a `phaser-fore` blackboard.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
+            if let Ok(mut cc) = q.single_mut(app.world_mut()) {
+                cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
+                    id: "fore".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 270.0,
+                    auto_arc_deg: 180.0,
+                    beam_range: 50.0,
+                    beam_damage_per_sec: 5.0,
+                    beam_duration_secs: 6.0,
+                    cooldown_secs: 6.0,
+                    beam_color: vec![],
+                    shield_pierce: None,
+                    marker: None,
+                }];
+            }
+        }
+
+        // Damage the PhaserFore console to 0 HP (Destroyed tier → offline).
+        {
+            let world = app.world_mut();
+            let ship = world
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+                .single(world)
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntityConsoleHull>()
+                .unwrap();
+            hull.0.set_console_hp(&Console::PhaserFore, 0.0);
+        }
+
+        // One update: sync_console_damage_tiers (Damage) writes offline_systems,
+        // publish_weapons_blackboard (Publish) reads it and emits the entry.
+        app.update();
+
+        // Step 1 verify: offline_systems contains `phaser-fore`.
+        let phaser_fore_id = crate::system_registry::phaser_fore_system_id();
+        let is_in_offline = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+            let cs = q.single(app.world()).unwrap();
+            cs.0.offline_systems.contains(&phaser_fore_id)
+        };
+        assert!(
+            is_in_offline,
+            "sync_console_damage_tiers must add phaser-fore to offline_systems \
+             when Console::PhaserFore hull is at Disabled/Destroyed tier"
+        );
+
+        // Step 2 verify: blackboard reports is_online: false for phaser-fore.
+        let mut q = app
+            .world_mut()
+            .query_filtered::<
+                &crate::server_app::ShipSystemBlackboards,
+                With<crate::server_app::LocalShip>,
+            >();
+        let bbs = q.single(app.world()).unwrap();
+        let SystemBlackboard::PhaserBank(bb) = bbs
+            .0
+            .get(&phaser_fore_id)
+            .expect("expected phaser-fore blackboard entry")
+            .clone()
+        else {
+            panic!("expected PhaserBank blackboard variant");
+        };
+        assert!(
+            !bb.is_online,
+            "PhaserBankBlackboard.is_online must be false end-to-end when the \
+             console hull is disabled (hull → offline_systems → blackboard chain)"
+        );
+    }
+
+    // ── Finding 8 regression: magazine claim routes by source_entity ──────
+    //
+    // Before the fix, `handle_load_tube` emitted `source_entity: None` on
+    // its `ClaimTorpedoRound` message. `handle_torpedo_magazine_inter_system`
+    // then queried `With<LocalShip>` only, so an NPC's claim would either
+    // be ignored entirely or misroute to the player ship. Post-fix, both
+    // sides route by source_entity (mirroring `handle_power_inter_system`)
+    // so each ship's claims mutate that ship's own magazine.
+
+    #[test]
+    fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
+        let mut app = test_app();
+
+        // Snapshot the LocalShip's magazine counter.
+        let localship_before = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|ts| ts.0.torpedoes_remaining)
+            .unwrap();
+
+        // Spawn a second Ship (NOT LocalShip) that also has a magazine. Give
+        // it a fully-declared torpedo_magazine fine system with Human
+        // policy so the online gate passes, and its own TorpedoSystemResource
+        // with 10 torpedoes and a "fore_port" tube.
+        let mut npc_sources = crate::ship::control_source::ControlSourceResolver::new();
+        npc_sources.set(
+            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+        npc_sources.set(
+            crate::system_registry::torpedo_tube_fore_port_system_id(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+        let npc_torpedo_sys = TorpedoSystem::from_configs(
+            &[crate::entity_config::TorpedoTubeConfig {
+                id: "fore_port".into(),
+                facing_deg: -30.0,
+                fire_arc_deg: 90.0,
+                load_time: None,
+                marker: None,
+            }],
+            TorpedoConfig {
+                count: 10,
+                ..Default::default()
+            },
+        );
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship, // NOT LocalShip
+                crate::entity_spawner::EntityUuid("npc-with-magazine".into()),
+                crate::ship_plugin::ShipSystemControlSources(npc_sources),
+                TorpedoSystemResource(npc_torpedo_sys),
+                Transform::default(),
+            ))
+            .id();
+
+        let npc_before = 10u32;
+
+        // Install a one-shot system in `SimSet::Input` that pushes a claim
+        // for the NPC entity into the queue every tick. This mirrors what
+        // `handle_load_tube` would do if it ran for NPC ships — the point
+        // of the test is that `handle_torpedo_magazine_inter_system` in
+        // Physics routes the claim to the ship named by `source_entity`,
+        // NOT to `With<LocalShip>` only.
+        //
+        // The queue is cleared by `clear_inter_system_queue` before
+        // `SimSet::Input`, so pushing during Input survives to Physics.
+        let claim_target_entity = npc_entity;
+        app.add_systems(
+            Update,
+            (move |mut queue: ResMut<InterSystemQueue>| {
+                queue.0.push(InterSystemMsg {
+                    target: crate::system_registry::torpedo_magazine_system_id(),
+                    payload: InterSystemPayload::ClaimTorpedoRound {
+                        tube: "fore_port".into(),
+                    },
+                    source_entity: Some(claim_target_entity),
+                });
+            })
+            .in_set(crate::sim_sets::SimSet::Input),
+        );
+
+        app.update();
+
+        // LocalShip magazine must be UNCHANGED — the claim was for the NPC.
+        let localship_after = app
+            .world_mut()
+            .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .map(|ts| ts.0.torpedoes_remaining)
+            .unwrap();
+        assert_eq!(
+            localship_after, localship_before,
+            "LocalShip magazine must NOT be decremented when the claim was \
+             attributed to a different ship"
+        );
+
+        // NPC magazine must have decremented by 1.
+        let npc_after = app
+            .world()
+            .get::<TorpedoSystemResource>(npc_entity)
+            .unwrap()
+            .0
+            .torpedoes_remaining;
+        assert_eq!(
+            npc_after,
+            npc_before - 1,
+            "NPC magazine must decrement by 1 when its own claim is granted"
+        );
+
+        // NPC tube must be Loading.
+        let npc_tube_loading = app
+            .world()
+            .get::<TorpedoSystemResource>(npc_entity)
+            .unwrap()
+            .0
+            .tube("fore_port")
+            .map(|t| matches!(t.load_state, crate::torpedo::TubeLoadState::Loading { .. }))
+            .unwrap_or(false);
+        assert!(
+            npc_tube_loading,
+            "NPC's own tube must transition to Loading after its claim is granted"
         );
     }
 }

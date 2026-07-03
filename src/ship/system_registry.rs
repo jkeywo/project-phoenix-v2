@@ -111,6 +111,44 @@ pub const HELM_IMPULSE_KIND: &str = "helm_impulse";
 pub const HELM_IMPULSE_SYSTEM_ID: &str = "helm-impulse";
 pub const HELM_IMPULSE_AI_CONTROLLER: &str = "helm_impulse_ai";
 
+// ── Fine-grained Tactical systems (issue #512) ────────────────────────────────
+//
+// The coarse `tactical` kind is DELETED from the runtime registry in favour of
+// three fine kinds. `TACTICAL_SYSTEM_ID = "tactical"` is retained purely as a
+// coordination surface — ship-level operations (SetTarget / SetPhaserMode /
+// SetPhaserFrequency / ToggleAutoFire) still address this string but their
+// authorisation gate is now "any bank policy accepts human input" (option (c)
+// in the issue), so the coarse system no longer needs its own `[[system]]`
+// block.
+
+/// Wire `SystemId` for the Phaser Bank fine systems.
+///
+/// Registered per-instance in TOML (e.g. `"phaser-fore"`, `"phaser-aft"`).
+pub const PHASER_BANK_KIND: &str = "phaser_bank";
+pub const PHASER_FORE_SYSTEM_ID: &str = "phaser-fore";
+pub const PHASER_AFT_SYSTEM_ID: &str = "phaser-aft";
+pub const PHASER_BANK_AI_CONTROLLER: &str = "phaser_bank_ai";
+
+/// Wire `SystemId` for the Torpedo Tube fine systems.
+///
+/// Registered per-instance in TOML (e.g. `"torpedo-tube-fore-port"`).
+pub const TORPEDO_TUBE_KIND: &str = "torpedo_tube";
+pub const TORPEDO_TUBE_FORE_PORT_SYSTEM_ID: &str = "torpedo-tube-fore-port";
+pub const TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID: &str = "torpedo-tube-fore-starboard";
+pub const TORPEDO_TUBE_AFT_SYSTEM_ID: &str = "torpedo-tube-aft";
+pub const TORPEDO_TUBE_AI_CONTROLLER: &str = "torpedo_tube_ai";
+
+/// Wire `SystemId` for the Torpedo Magazine fine system (single instance).
+///
+/// The magazine owns the shared torpedo `count`; tubes claim a round via
+/// the channel-2 [`crate::messages::InterSystemPayload::ClaimTorpedoRound`]
+/// message. A Disabled/Destroyed magazine refuses claims (no tubes can load
+/// even if a round would otherwise be available), and also blocks the fire
+/// path so loaded tubes cannot launch.
+pub const TORPEDO_MAGAZINE_KIND: &str = "torpedo_magazine";
+pub const TORPEDO_MAGAZINE_SYSTEM_ID: &str = "torpedo-magazine";
+pub const TORPEDO_MAGAZINE_AI_CONTROLLER: &str = "torpedo_magazine_ai";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiControllerRegistration {
     name: String,
@@ -229,6 +267,19 @@ impl SystemKindRegistry {
             HELM_IMPULSE_KIND,
             AiControllerRegistration::new(HELM_IMPULSE_AI_CONTROLLER)?,
         )?;
+        // Fine-grained Tactical systems (issue #512)
+        registry.register(
+            PHASER_BANK_KIND,
+            AiControllerRegistration::new(PHASER_BANK_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            TORPEDO_TUBE_KIND,
+            AiControllerRegistration::new(TORPEDO_TUBE_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            TORPEDO_MAGAZINE_KIND,
+            AiControllerRegistration::new(TORPEDO_MAGAZINE_AI_CONTROLLER)?,
+        )?;
         Ok(registry)
     }
 
@@ -340,6 +391,62 @@ pub fn helm_radar_system_id() -> SystemId {
 
 pub fn helm_impulse_system_id() -> SystemId {
     SystemId(HELM_IMPULSE_SYSTEM_ID.to_string())
+}
+
+// ── Fine Tactical system id helpers (issue #512) ──────────────────────────────
+
+pub fn phaser_fore_system_id() -> SystemId {
+    SystemId(PHASER_FORE_SYSTEM_ID.to_string())
+}
+
+pub fn phaser_aft_system_id() -> SystemId {
+    SystemId(PHASER_AFT_SYSTEM_ID.to_string())
+}
+
+pub fn torpedo_tube_fore_port_system_id() -> SystemId {
+    SystemId(TORPEDO_TUBE_FORE_PORT_SYSTEM_ID.to_string())
+}
+
+pub fn torpedo_tube_fore_starboard_system_id() -> SystemId {
+    SystemId(TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID.to_string())
+}
+
+pub fn torpedo_tube_aft_system_id() -> SystemId {
+    SystemId(TORPEDO_TUBE_AFT_SYSTEM_ID.to_string())
+}
+
+pub fn torpedo_magazine_system_id() -> SystemId {
+    SystemId(TORPEDO_MAGAZINE_SYSTEM_ID.to_string())
+}
+
+/// Resolve the `SystemId` for a phaser bank by its TOML `id`.
+///
+/// The convention is `"phaser-<bank_id>"`, so `"fore"` → `"phaser-fore"`,
+/// `"aft"` → `"phaser-aft"`, `"port"` → `"phaser-port"`, etc. Returns
+/// `Some` for every non-empty bank id — callers should combine with
+/// `system_is_registered` on the ship's `ControlSourceResolver` to
+/// distinguish "the fine system is offline" from "the ship never declared
+/// a fine system for this bank" (NPC path).
+pub fn phaser_bank_system_id(bank_id: &str) -> Option<SystemId> {
+    if bank_id.is_empty() {
+        return None;
+    }
+    Some(SystemId(format!("phaser-{bank_id}")))
+}
+
+/// Resolve the `SystemId` for a torpedo tube by its TOML `id`.
+///
+/// The convention is `"torpedo-tube-<tube_id_with_underscores_to_hyphens>"`,
+/// so `"fore_port"` → `"torpedo-tube-fore-port"`. Returns `Some` for every
+/// non-empty tube id.
+pub fn torpedo_tube_system_id(tube_id: &str) -> Option<SystemId> {
+    if tube_id.is_empty() {
+        return None;
+    }
+    Some(SystemId(format!(
+        "torpedo-tube-{}",
+        tube_id.replace('_', "-")
+    )))
 }
 
 #[cfg(test)]
@@ -733,5 +840,139 @@ mod tests {
         );
         assert_eq!(helm_radar_system_id().0, HELM_RADAR_SYSTEM_ID);
         assert_eq!(helm_impulse_system_id().0, HELM_IMPULSE_SYSTEM_ID);
+    }
+
+    // ── Fine Tactical system tests (issue #512) ───────────────────────────────
+
+    #[test]
+    fn fine_tactical_kinds_are_registered() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(
+            registry.contains(PHASER_BANK_KIND),
+            "phaser_bank not registered"
+        );
+        assert!(
+            registry.contains(TORPEDO_TUBE_KIND),
+            "torpedo_tube not registered"
+        );
+        assert!(
+            registry.contains(TORPEDO_MAGAZINE_KIND),
+            "torpedo_magazine not registered"
+        );
+
+        assert_eq!(
+            registry
+                .registration(PHASER_BANK_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            PHASER_BANK_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry
+                .registration(TORPEDO_TUBE_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            TORPEDO_TUBE_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry
+                .registration(TORPEDO_MAGAZINE_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            TORPEDO_MAGAZINE_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn fine_tactical_system_ids_are_lowercase_kebab() {
+        let ids = [
+            PHASER_FORE_SYSTEM_ID,
+            PHASER_AFT_SYSTEM_ID,
+            TORPEDO_TUBE_FORE_PORT_SYSTEM_ID,
+            TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID,
+            TORPEDO_TUBE_AFT_SYSTEM_ID,
+            TORPEDO_MAGAZINE_SYSTEM_ID,
+        ];
+        for id in ids {
+            assert_eq!(
+                id,
+                id.to_lowercase(),
+                "Fine tactical SystemId {id:?} is not lowercase"
+            );
+            assert!(
+                !id.contains('_'),
+                "Fine tactical SystemId {id:?} contains underscore (use hyphen)"
+            );
+            assert!(!id.is_empty(), "Fine tactical SystemId must not be empty");
+        }
+        assert_eq!(PHASER_FORE_SYSTEM_ID, "phaser-fore");
+        assert_eq!(PHASER_AFT_SYSTEM_ID, "phaser-aft");
+        assert_eq!(TORPEDO_TUBE_FORE_PORT_SYSTEM_ID, "torpedo-tube-fore-port");
+        assert_eq!(
+            TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID,
+            "torpedo-tube-fore-starboard"
+        );
+        assert_eq!(TORPEDO_TUBE_AFT_SYSTEM_ID, "torpedo-tube-aft");
+        assert_eq!(TORPEDO_MAGAZINE_SYSTEM_ID, "torpedo-magazine");
+    }
+
+    #[test]
+    fn fine_tactical_system_id_helpers_return_expected_values() {
+        assert_eq!(phaser_fore_system_id().0, PHASER_FORE_SYSTEM_ID);
+        assert_eq!(phaser_aft_system_id().0, PHASER_AFT_SYSTEM_ID);
+        assert_eq!(
+            torpedo_tube_fore_port_system_id().0,
+            TORPEDO_TUBE_FORE_PORT_SYSTEM_ID
+        );
+        assert_eq!(
+            torpedo_tube_fore_starboard_system_id().0,
+            TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID
+        );
+        assert_eq!(torpedo_tube_aft_system_id().0, TORPEDO_TUBE_AFT_SYSTEM_ID);
+        assert_eq!(torpedo_magazine_system_id().0, TORPEDO_MAGAZINE_SYSTEM_ID);
+    }
+
+    #[test]
+    fn phaser_bank_system_id_resolves_known_ids() {
+        assert_eq!(phaser_bank_system_id("fore"), Some(phaser_fore_system_id()));
+        assert_eq!(phaser_bank_system_id("aft"), Some(phaser_aft_system_id()));
+        // Derives arbitrary bank ids via the `phaser-<id>` naming convention;
+        // NPC ships that declare e.g. "port"/"starboard" get their own fine
+        // SystemIds without needing a match-arm update.
+        assert_eq!(
+            phaser_bank_system_id("port"),
+            Some(SystemId("phaser-port".into()))
+        );
+        assert_eq!(
+            phaser_bank_system_id("starboard"),
+            Some(SystemId("phaser-starboard".into()))
+        );
+        assert_eq!(phaser_bank_system_id(""), None);
+    }
+
+    #[test]
+    fn torpedo_tube_system_id_resolves_known_ids() {
+        assert_eq!(
+            torpedo_tube_system_id("fore_port"),
+            Some(torpedo_tube_fore_port_system_id())
+        );
+        assert_eq!(
+            torpedo_tube_system_id("fore_starboard"),
+            Some(torpedo_tube_fore_starboard_system_id())
+        );
+        assert_eq!(
+            torpedo_tube_system_id("aft"),
+            Some(torpedo_tube_aft_system_id())
+        );
+        // Underscore-to-hyphen conversion is the convention.
+        assert_eq!(
+            torpedo_tube_system_id("dorsal_upper"),
+            Some(SystemId("torpedo-tube-dorsal-upper".into()))
+        );
+        assert_eq!(torpedo_tube_system_id(""), None);
     }
 }

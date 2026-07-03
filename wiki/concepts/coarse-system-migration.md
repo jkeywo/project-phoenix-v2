@@ -40,9 +40,21 @@ The registry kind key uses `"red_alert"` (snake_case, `RED_ALERT_KIND`) for lega
 | Repair | ✅ `repair` | ✅ (#526) | ✅ (#526) | n/a | #525/#526 |
 | Navigation | ✅ `navigation` | ✅ (#527) | ✅ (#527) | n/a | #527 |
 
-## Fine-system ids (future, PRD C)
+## Fine-system ids (in-flight, PRD C)
 
-Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) is tracked by issues #511–#515. These are out of scope for the coarse-system migration. Do not create fine-system registrations until those issues land.
+Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) is tracked by issues #511–#515. Two have shipped:
+
+| Issue | Coarse system | Shipped fine kinds |
+|-------|---------------|--------------------|
+| #511 | Helm | `helm_joystick`, `helm_engine` (port + starboard), `helm_radar`, `helm_impulse` |
+| #512 | Tactical | `phaser_bank` (fore + aft), `torpedo_tube` (fore-port + fore-starboard + aft), `torpedo_magazine` |
+| #513 | Sensors | not yet |
+| #514 | Shields | not yet |
+| #515 | Power | not yet |
+
+Under #512, the coarse `tactical` `[[system]]` block was **deleted** from all 5 ship TOMLs (player_ship + 4 NPC ships). `TACTICAL_SYSTEM_ID = "tactical"` is retained as a coordination surface for ship-level operations (SetTarget / SetPhaserMode / SetPhaserFrequency); their authorisation gate is "any phaser bank accepts human input" (option c in the issue), so no coarse block is needed. Fine kinds registered but not present on a given ship default to a fallback coarse-tactical gate — this preserves NPC behaviour where a ship declares bank ids that don't match the player-ship convention (`"port"`/`"starboard"` versus `"fore"`/`"aft"`).
+
+Tube-to-magazine communication uses [`InterSystemPayload::ClaimTorpedoRound { tube }`](../../src/core/messages.rs) on channel 2, mirroring the `DrainWeaponsBattery` pattern from #559. The magazine consumer refuses claims when its `[[hull.console_hull]] console = "TorpedoMagazine"` entry is at Disabled/Destroyed tier.
 
 ## Key files
 

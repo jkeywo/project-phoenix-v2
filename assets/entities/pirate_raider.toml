@@ -110,7 +110,8 @@ id = "helm"
 kind = "helm"
 ai_only = true
 
+# Fine Tactical systems (issue #512): one phaser bank ("fore"). No torpedoes.
 [[system]]
-id = "tactical"
-kind = "tactical"
+id = "phaser-fore"
+kind = "phaser_bank"
 ai_only = true

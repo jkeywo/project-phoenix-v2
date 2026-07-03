@@ -354,6 +354,40 @@ impl TorpedoSystem {
         true
     }
 
+    /// Start loading a torpedo into the given tube *without* consuming from
+    /// the shared magazine (issue #512).
+    ///
+    /// Used by the Bevy `handle_torpedo_magazine_inter_system` consumer after
+    /// the magazine has already been decremented via the channel-2
+    /// [`crate::messages::InterSystemPayload::ClaimTorpedoRound`] transaction.
+    /// The caller is responsible for having granted the round.
+    ///
+    /// Returns `false` if the tube id is unknown or the tube is not in the
+    /// `Unloaded` state. Does NOT check magazine stock.
+    pub fn start_load_reserved(&mut self, tube_id: &str) -> bool {
+        let idx = self.tubes.iter().position(|t| t.id == tube_id);
+        let Some(idx) = idx else {
+            return false;
+        };
+        if self.tubes[idx].load_state != TubeLoadState::Unloaded {
+            return false;
+        }
+        self.tubes[idx].start_load();
+        true
+    }
+
+    /// Consume one round from the shared magazine without touching any tube
+    /// (issue #512). Used by the magazine consumer to enact a
+    /// [`crate::messages::InterSystemPayload::ClaimTorpedoRound`]. Returns
+    /// `false` when the magazine is empty (claim refused).
+    pub fn claim_magazine_round(&mut self) -> bool {
+        if self.torpedoes_remaining == 0 {
+            return false;
+        }
+        self.torpedoes_remaining -= 1;
+        true
+    }
+
     /// Start unloading (or cancel a load in progress).
     ///
     /// If the tube is `Loaded`, begins the unloading timer — the torpedo is
@@ -623,6 +657,55 @@ mod tests {
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
         assert!(!sys.start_load("fore_port"));
         assert_eq!(sys.torpedoes_remaining, 0);
+    }
+
+    // ── channel-2 magazine claim helpers (issue #512) ─────────────────────
+
+    #[test]
+    fn claim_magazine_round_decrements_when_available() {
+        let mut sys = default_system();
+        assert_eq!(sys.torpedoes_remaining, 10);
+        assert!(sys.claim_magazine_round());
+        assert_eq!(sys.torpedoes_remaining, 9);
+    }
+
+    #[test]
+    fn claim_magazine_round_returns_false_when_empty() {
+        let mut config = TorpedoConfig::default();
+        config.count = 0;
+        let tubes = vec![cfg("fore_port", -30.0, 90.0)];
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        assert!(!sys.claim_magazine_round());
+        assert_eq!(sys.torpedoes_remaining, 0);
+    }
+
+    #[test]
+    fn start_load_reserved_begins_loading_without_touching_magazine() {
+        let mut sys = default_system();
+        assert_eq!(sys.torpedoes_remaining, 10);
+        assert!(sys.start_load_reserved("fore_port"));
+        assert_eq!(
+            sys.torpedoes_remaining, 10,
+            "reserved load must not touch the magazine counter (caller decremented already)"
+        );
+        assert!(matches!(
+            sys.tube("fore_port").unwrap().load_state,
+            TubeLoadState::Loading { .. }
+        ));
+    }
+
+    #[test]
+    fn start_load_reserved_fails_for_unknown_tube() {
+        let mut sys = default_system();
+        assert!(!sys.start_load_reserved("dorsal"));
+    }
+
+    #[test]
+    fn start_load_reserved_fails_when_tube_not_unloaded() {
+        let mut sys = default_system();
+        assert!(sys.start_load_reserved("fore_port"));
+        // Second call must fail because tube is now Loading.
+        assert!(!sys.start_load_reserved("fore_port"));
     }
 
     #[test]

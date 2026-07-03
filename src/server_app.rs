@@ -1276,7 +1276,13 @@ fn console_for_system(target: &crate::messages::SystemId) -> Option<Console> {
         | HELM_ENGINE_STARBOARD_SYSTEM_ID
         | HELM_RADAR_SYSTEM_ID
         | HELM_IMPULSE_SYSTEM_ID => Some(Console::Helm),
-        TACTICAL_SYSTEM_ID => Some(Console::Tactical),
+        TACTICAL_SYSTEM_ID
+        | PHASER_FORE_SYSTEM_ID
+        | PHASER_AFT_SYSTEM_ID
+        | TORPEDO_TUBE_FORE_PORT_SYSTEM_ID
+        | TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID
+        | TORPEDO_TUBE_AFT_SYSTEM_ID
+        | TORPEDO_MAGAZINE_SYSTEM_ID => Some(Console::Tactical),
         POWER_SYSTEM_ID => Some(Console::Power),
         SENSORS_SYSTEM_ID => Some(Console::Sensors),
         NAVIGATION_SYSTEM_ID => Some(Console::Navigation),

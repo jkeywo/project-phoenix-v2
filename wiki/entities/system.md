@@ -12,10 +12,16 @@ A fine-grained capability instance on the ship. Systems are the addressable
 units for the wire protocol (`ControlSystem` envelope) and for AI/human gating
 (`ShipSystemControlSources`).
 
-The ship currently has **11 coarse systems**: captain, red-alert, helm,
-tactical, repair, sensors, shields, navigation, power, comms, viewscreen.
-Fine-grained per-bank and per-tube systems (phaser-fore, torpedo-tube-fore-port,
-etc.) are out of scope for PRD #518 and addressed in #511–515.
+The ship currently has **10 coarse systems declared per-ship in TOML**
+(station-owned or ownerless capability): captain, red-alert, helm, repair,
+sensors, shields, navigation, power, comms, viewscreen. (Tactical was the
+11th but its `[[system]]` block was removed in issue #512.) The Helm coarse
+kind was decomposed into fine kinds in issue #511, and the Tactical coarse
+`[[system]]` block was **deleted** in issue #512 in favour of `phaser_bank`,
+`torpedo_tube`, and `torpedo_magazine` fine kinds — see the
+[coarse-system migration](../concepts/coarse-system-migration.md#fine-system-ids-in-flight-prd-c)
+table for the status of each decomposition. Fine kinds for Sensors, Shields,
+and Power (#513–#515) are not yet decomposed.
 
 ## SystemId
 
@@ -113,7 +119,16 @@ Determines which plugin/handler owns the system. The ship registry
 validated — unknown kinds are rejected at startup.
 
 Current coarse kinds: `captain`, `red_alert`, `helm`, `tactical`, `repair`,
-`sensors`, `shields`, `navigation`, `power`, `comms`, `viewscreen`.
+`sensors`, `shields`, `navigation`, `power`, `comms`, `viewscreen`. (The
+`tactical` kind is still registered in the runtime registry, but under #512
+no `[[system]] kind = "tactical"` block exists on any ship — the kind is
+retained as a coordination surface for ship-level Tactical operations
+(SetTarget / SetPhaserMode / SetPhaserFrequency), gated on "any phaser bank
+accepts human input".)
+
+Current fine kinds registered in `SystemKindRegistry::with_core_systems`:
+`helm_joystick`, `helm_engine`, `helm_radar`, `helm_impulse` (from #511);
+`phaser_bank`, `torpedo_tube`, `torpedo_magazine` (from #512).
 
 ## Related
 

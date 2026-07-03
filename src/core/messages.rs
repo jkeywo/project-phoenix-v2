@@ -271,6 +271,12 @@ mod console_id_tests {
             Console::Core,
             Console::HelmEnginePort,
             Console::HelmEngineStarboard,
+            Console::PhaserFore,
+            Console::PhaserAft,
+            Console::TorpedoTubeForePort,
+            Console::TorpedoTubeForeStarboard,
+            Console::TorpedoTubeAft,
+            Console::TorpedoMagazine,
         ];
         for console in &consoles {
             assert_eq!(
@@ -312,6 +318,21 @@ pub enum Console {
     HelmEnginePort,
     /// Per-instance hull target for the starboard engine (damageable, #511).
     HelmEngineStarboard,
+    // ── Fine-grained Tactical sub-systems (issue #512) ────────────────────
+    /// Per-instance hull target for the fore phaser bank (damageable, #512).
+    PhaserFore,
+    /// Per-instance hull target for the aft phaser bank (damageable, #512).
+    PhaserAft,
+    /// Per-instance hull target for the fore-port torpedo tube (damageable, #512).
+    TorpedoTubeForePort,
+    /// Per-instance hull target for the fore-starboard torpedo tube (damageable, #512).
+    TorpedoTubeForeStarboard,
+    /// Per-instance hull target for the aft torpedo tube (damageable, #512).
+    TorpedoTubeAft,
+    /// Per-instance hull target for the shared torpedo magazine (damageable, #512).
+    /// A Disabled/Destroyed magazine refuses tube-load claims and blocks
+    /// torpedo fire regardless of tube state.
+    TorpedoMagazine,
 }
 
 impl Console {
@@ -330,6 +351,12 @@ impl Console {
             Console::Core => "Core",
             Console::HelmEnginePort => "Engine (Port)",
             Console::HelmEngineStarboard => "Engine (Starboard)",
+            Console::PhaserFore => "Phaser Bank (Fore)",
+            Console::PhaserAft => "Phaser Bank (Aft)",
+            Console::TorpedoTubeForePort => "Torpedo Tube (Fore Port)",
+            Console::TorpedoTubeForeStarboard => "Torpedo Tube (Fore Starboard)",
+            Console::TorpedoTubeAft => "Torpedo Tube (Aft)",
+            Console::TorpedoMagazine => "Torpedo Magazine",
         }
     }
 
@@ -350,6 +377,12 @@ impl Console {
             Console::Core => "core",
             Console::HelmEnginePort => "helm-engine-port",
             Console::HelmEngineStarboard => "helm-engine-starboard",
+            Console::PhaserFore => "phaser-fore",
+            Console::PhaserAft => "phaser-aft",
+            Console::TorpedoTubeForePort => "torpedo-tube-fore-port",
+            Console::TorpedoTubeForeStarboard => "torpedo-tube-fore-starboard",
+            Console::TorpedoTubeAft => "torpedo-tube-aft",
+            Console::TorpedoMagazine => "torpedo-magazine",
         }
     }
 
@@ -370,6 +403,12 @@ impl Console {
             "core" => Some(Console::Core),
             "helm-engine-port" => Some(Console::HelmEnginePort),
             "helm-engine-starboard" => Some(Console::HelmEngineStarboard),
+            "phaser-fore" => Some(Console::PhaserFore),
+            "phaser-aft" => Some(Console::PhaserAft),
+            "torpedo-tube-fore-port" => Some(Console::TorpedoTubeForePort),
+            "torpedo-tube-fore-starboard" => Some(Console::TorpedoTubeForeStarboard),
+            "torpedo-tube-aft" => Some(Console::TorpedoTubeAft),
+            "torpedo-magazine" => Some(Console::TorpedoMagazine),
             _ => None,
         }
     }
@@ -388,6 +427,12 @@ impl Console {
             Console::Core => "CO",
             Console::HelmEnginePort => "EP",
             Console::HelmEngineStarboard => "ES",
+            Console::PhaserFore => "PF",
+            Console::PhaserAft => "PA",
+            Console::TorpedoTubeForePort => "TP",
+            Console::TorpedoTubeForeStarboard => "TS",
+            Console::TorpedoTubeAft => "TA",
+            Console::TorpedoMagazine => "TM",
         }
     }
 }
@@ -1526,6 +1571,55 @@ pub struct HelmEngineBlackboard {
     pub is_online: bool,
 }
 
+/// Raw sim truth for a single Phaser Bank fine system, published each tick
+/// into the ship blackboard (issue #512).
+///
+/// This is the per-instance state that the coarse `WeaponsBlackboard` also
+/// aggregates in its `banks` field; the per-bank blackboard is emitted so
+/// individual system consumers (e.g. bank-level AI) can gate on their own
+/// bank without unpacking the whole weapons blackboard.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PhaserBankBlackboard {
+    /// True when the bank is operational (not disabled or destroyed by hull damage).
+    pub is_online: bool,
+    /// True while the bank is in its post-shot cooldown.
+    pub on_cooldown: bool,
+    /// Seconds remaining on the cooldown timer (0.0 when ready).
+    pub cooldown_remaining: f32,
+    /// True when the bank can fire this tick (target in arc, off cooldown, online).
+    pub fire_ready: bool,
+}
+
+/// Raw sim truth for a single Torpedo Tube fine system, published each tick
+/// into the ship blackboard (issue #512).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TorpedoTubeBlackboard {
+    /// True when the tube is operational (not disabled or destroyed by hull damage).
+    pub is_online: bool,
+    /// True when the tube is loaded and ready to fire.
+    pub loaded: bool,
+    /// Load state label: "loaded" | "unloaded" | "loading" | "unloading".
+    pub state: String,
+    /// Completion fraction `[0.0, 1.0]` for the current load/unload operation.
+    pub progress: f32,
+    /// Tube-specific load/unload duration in seconds.
+    pub load_time: f32,
+}
+
+/// Raw sim truth for the shared Torpedo Magazine fine system, published each
+/// tick into the ship blackboard (issue #512).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TorpedoMagazineBlackboard {
+    /// True when the magazine is operational. When `false`, tube-load claims
+    /// are refused (see [`InterSystemPayload::ClaimTorpedoRound`]) and the
+    /// fire path is also blocked so loaded tubes cannot launch.
+    pub is_online: bool,
+    /// Remaining torpedoes in the shared magazine.
+    pub torpedoes_remaining: u32,
+    /// Maximum magazine capacity (from ship TOML `[torpedoes] count`).
+    pub capacity: u32,
+}
+
 /// Raw sim truth for the Weapons (Tactical) system, published each tick into
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -1569,6 +1663,12 @@ pub enum SystemBlackboard {
     Viewscreen(ViewscreenBlackboard),
     /// Per-engine fine-system blackboard (issue #511). One entry per engine instance.
     HelmEngine(HelmEngineBlackboard),
+    /// Per-bank fine-system blackboard (issue #512). One entry per phaser bank instance.
+    PhaserBank(PhaserBankBlackboard),
+    /// Per-tube fine-system blackboard (issue #512). One entry per torpedo tube instance.
+    TorpedoTube(TorpedoTubeBlackboard),
+    /// Shared torpedo magazine blackboard (issue #512). One entry per ship.
+    TorpedoMagazine(TorpedoMagazineBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -1637,6 +1737,20 @@ pub enum InterSystemPayload {
     /// for consumption by each Helm Engine fine system. Channels thrust and
     /// steering so each engine can independently gate on its own online state.
     JoystickState { thrust: f32, steering: f32 },
+    /// A torpedo tube is requesting a round from the shared magazine (issue #512).
+    ///
+    /// Sent by the tube's `handle_load_tube` handler during `SimSet::Input`
+    /// and consumed by the magazine handler `handle_torpedo_magazine_inter_system`
+    /// during `SimSet::Physics` on the same tick. The magazine consumer:
+    ///
+    /// 1. Refuses the claim (no-op) if the magazine is offline (Disabled /
+    ///    Destroyed hull tier), leaving the tube unloaded.
+    /// 2. Refuses the claim if the magazine's `torpedoes_remaining == 0`.
+    /// 3. Otherwise decrements the magazine counter and begins loading the
+    ///    named tube (via `TorpedoSystem::start_load_reserved`).
+    ///
+    /// The `tube` field carries the tube's TOML `id` (e.g. `"fore_port"`).
+    ClaimTorpedoRound { tube: TorpedoTube },
 }
 
 /// An inter-system command: one system commanding another to mutate its own

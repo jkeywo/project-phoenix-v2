@@ -2630,6 +2630,88 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    // ── Fine Tactical blackboards (issue #512) ────────────────────────────────
+
+    #[test]
+    fn system_blackboard_phaser_bank_round_trips_json_codec() {
+        use crate::messages::{PhaserBankBlackboard, SystemBlackboard, SystemId};
+        let bb = SystemBlackboard::PhaserBank(PhaserBankBlackboard {
+            is_online: true,
+            on_cooldown: true,
+            cooldown_remaining: 2.5,
+            fire_ready: false,
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("phaser-fore".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn system_blackboard_torpedo_tube_round_trips_json_codec() {
+        use crate::messages::{SystemBlackboard, SystemId, TorpedoTubeBlackboard};
+        let bb = SystemBlackboard::TorpedoTube(TorpedoTubeBlackboard {
+            is_online: true,
+            loaded: false,
+            state: "loading".into(),
+            progress: 0.4,
+            load_time: 10.0,
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("torpedo-tube-fore-port".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn system_blackboard_torpedo_magazine_round_trips_json_codec() {
+        use crate::messages::{SystemBlackboard, SystemId, TorpedoMagazineBlackboard};
+        let bb = SystemBlackboard::TorpedoMagazine(TorpedoMagazineBlackboard {
+            is_online: true,
+            torpedoes_remaining: 7,
+            capacity: 10,
+        });
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("torpedo-magazine".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn system_blackboard_phaser_bank_serde_fields() {
+        use crate::messages::{PhaserBankBlackboard, SystemBlackboard};
+        let bb = SystemBlackboard::PhaserBank(PhaserBankBlackboard {
+            is_online: true,
+            on_cooldown: false,
+            cooldown_remaining: 0.0,
+            fire_ready: true,
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"kind\":\"PhaserBank\""), "got: {json}");
+        assert!(json.contains("\"fire_ready\":true"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+    }
+
+    #[test]
+    fn system_blackboard_torpedo_magazine_serde_fields() {
+        use crate::messages::{SystemBlackboard, TorpedoMagazineBlackboard};
+        let bb = SystemBlackboard::TorpedoMagazine(TorpedoMagazineBlackboard {
+            is_online: false,
+            torpedoes_remaining: 3,
+            capacity: 10,
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"kind\":\"TorpedoMagazine\""), "got: {json}");
+        assert!(json.contains("\"is_online\":false"), "got: {json}");
+        assert!(json.contains("\"torpedoes_remaining\":3"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+    }
+
     #[test]
     fn radar_blip_with_new_fields_round_trips() {
         let blip = RadarBlip {

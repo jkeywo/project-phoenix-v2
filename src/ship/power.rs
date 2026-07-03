@@ -347,6 +347,9 @@ pub fn handle_power_inter_system(
             // JoystickState messages are produced by the Helm fine systems (issue #511)
             // and are not relevant to the Power system — ignore them.
             InterSystemPayload::JoystickState { .. } => {}
+            // ClaimTorpedoRound messages are produced by the Torpedo Tube fine systems
+            // (issue #512) and consumed by the magazine handler — ignore them here.
+            InterSystemPayload::ClaimTorpedoRound { .. } => {}
         }
     }
 

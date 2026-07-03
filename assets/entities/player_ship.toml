@@ -62,6 +62,52 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
+# ── Fine Tactical hull entries (issue #512) ──────────────────────────────
+# Per-bank / per-tube / magazine hull HP so damage tiers apply per-instance.
+# Values chosen from the issue's suggested 10-20 range (banks/tubes) and
+# 15-25 (magazine).
+[[hull.console_hull]]
+console = "PhaserFore"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.console_hull]]
+console = "PhaserAft"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.console_hull]]
+console = "TorpedoTubeForePort"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.console_hull]]
+console = "TorpedoTubeForeStarboard"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.console_hull]]
+console = "TorpedoTubeAft"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.console_hull]]
+console = "TorpedoMagazine"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
@@ -411,9 +457,44 @@ kind = "helm_impulse"
 station = "helm"
 power_group = "helm"
 
+# ── Fine Tactical systems (issue #512) ──────────────────────────────────
+# The coarse `tactical` system is DELETED — its ship-level concerns
+# (SetTarget / SetPhaserMode / SetPhaserFrequency) are now gated on
+# "any phaser bank human-operable" (option c in the issue).
+
 [[system]]
-id = "tactical"
-kind = "tactical"
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "phaser-aft"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-fore-port"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-fore-starboard"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-aft"
+kind = "torpedo_tube"
 station = "tactical"
 power_group = "weapons"
 

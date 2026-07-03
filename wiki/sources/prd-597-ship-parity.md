@@ -3,7 +3,7 @@ title: PRD #597 — Ship Parity: Eliminate All Player/NPC Divergences
 type: source
 tags: [ship, npc, parity, refactor, unification]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/597
-updated: 2026-07-02
+updated: 2026-07-04
 ---
 
 ## Status
@@ -59,7 +59,7 @@ Fix all bugs introduced when NPCs gained the `Ship` marker (PRD #581) but code w
 Region effects (damage zones, slow zones, blocks-impulse, comms-jam, sensor-blind, radar dampening) apply to every ship, not just the LocalShip. Region membership tracked per-entity in `RegionMembership.inside` (HashMap keyed by ship Entity).
 
 - `update_region_membership` (`src/regions/server.rs:73`) iterates `With<Ship>` and computes membership per ship; stale-ship cleanup emits implicit `RegionExited` when a ship despawns while inside a region.
-- `apply_damage_zone_damage` (`src/regions/server.rs:162`) iterates all ships in the damage zone, applying damage to each ship's own `EntityConsoleHull` + optional `ShipShields`. Player-only side effects (`DamageTaken`, `ShipDestroyed`, `GameOver`, debug log) are gated on `Has<LocalShip>`. NPC destruction mirrors the beam-kill path: `AiEntityDestroyed` + `EntityDespawned` + `WorldResource` cleanup + entity despawn.
+- `apply_damage_zone_damage` (`src/regions/server.rs:162`) iterates all ships in the damage zone, applying damage to each ship's own `EntitySystemHull` (renamed from `EntityConsoleHull` in #617) + optional `ShipShields`. Player-only side effects (`DamageTaken`, `ShipDestroyed`, `GameOver`, debug log) are gated on `Has<LocalShip>`. NPC destruction mirrors the beam-kill path: `AiEntityDestroyed` + `EntityDespawned` + `WorldResource` cleanup + entity despawn.
 - `handle_slow_zone_speed_clamp` observer (already fixed in PR 1) uses `trigger.subject` — now correctly clamps any ship (player or NPC) with its own `ShipModifiers` component driving the effective max.
 - Modifier-side effects (`RadarDampening`, `SlowZone`, `CommsJam`, `SensorBlind`) go through the `on_region_entered` / `on_region_exited` observers in `src/modifiers/coordination.rs`, which already use `trigger.subject` and write to the subject entity's `ShipModifiers` component.
 - `handle_region_entered_event` / `handle_region_exited_event` (`src/world/server.rs:280`, `:310`) filter on `LocalShip` so world-scenario triggers remain player-driven (NPC crossings do not fire `OnEnteredRegion` triggers).
@@ -96,9 +96,9 @@ Readers/writers updated:
 - `ShipHullIntegrity` struct definition deleted from `src/server_app.rs`.
 - `sync_player_hull_to_resource` and `sync_resource_hull_to_entity` bridge systems deleted.
 - All `init_resource::<ShipHullIntegrity>()` / `insert_resource(ShipHullIntegrity(...))` calls removed from production (`add_simulation_plugins`, `spawn_game_start_entities`) and from every test builder (`server_app`, `ship_plugin`, `ship/power`, `ship/sensors`, `ship/shields`, `regions/server`, `console/captain`, `console/weapons`, `console/repair`, `console/navigation`, `ship/combat_activity`).
-- `debug_overlay::update_entity_inspector` migrated from `Res<ShipHullIntegrity>` to `Query<&EntityConsoleHull, With<LocalShip>>`.
-- Comment in `entities/spawner.rs` and `server/viewscreen_border.rs` updated to reflect that `EntityConsoleHull` is the sole hull store.
-- `spawn_game_start_entities` no longer synthesises a hull resource when the config has an empty `[hull]` block — `EntityConsoleHull` is always inserted by `entity_spawner::spawn_entity` from the ship TOML.
+- `debug_overlay::update_entity_inspector` migrated from `Res<ShipHullIntegrity>` to `Query<&EntitySystemHull, With<LocalShip>>`.
+- Comment in `entities/spawner.rs` and `server/viewscreen_border.rs` updated to reflect that `EntitySystemHull` is the sole hull store.
+- `spawn_game_start_entities` no longer synthesises a hull resource when the config has an empty `[hull]` block — `EntitySystemHull` is always inserted by `entity_spawner::spawn_entity` from the ship TOML.
 
 **Goal C — Delete dead code**
 

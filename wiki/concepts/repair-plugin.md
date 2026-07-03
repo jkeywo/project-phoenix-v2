@@ -8,40 +8,41 @@ Server-side logic for the Repair console lives in `src/console/repair/server.rs`
 
 ## Overview
 
-The current repair model is **direct team dispatch**: the Repair console operator selects a team (0–N) and a `RepairTarget` (a station or Core), and the server dispatches that team to repair all damaged systems owned by the target console. There is no shape-matching minigame — that was removed in an earlier refactor (PRD #272-era). The human UX is `gui/repair-console.html` sending `dispatch_repair_team` actions via `gui/action-map.js:136`.
+The current repair model is **direct team dispatch**: the Repair console operator selects a team (0–N) and a `RepairTarget` (a station or Core), and the server dispatches that team to repair all damaged systems owned by the target station. There is no shape-matching minigame — that was removed in an earlier refactor (PRD #272-era). The human UX is `gui/repair-console.html` sending `dispatch_repair_team` actions via `gui/action-map.js`, which encodes them as `ControlSystem { target: SystemId("repair"), payload: DispatchRepairTeam { .. } }` after #619 deleted the legacy `ClientMessage::DispatchRepairTeam { console }` wire path.
 
 ## Key types
 
 | Type | Location | Purpose |
 |---|---|---|
-| `RepairTeams` | `src/modifiers/repair_teams.rs` | Pure-Rust state machine: N slots of Idle / Travelling / Repairing / Cooldown |
+| `RepairTeams` | `src/modifiers/repair_teams.rs` | Pure-Rust state machine: N slots of Idle / Travelling / Repairing / Cooldown, keyed on `SystemId` |
 | `ShipRepairTeams` | `src/console/repair/server.rs` | Bevy `Resource` + `Component` wrapping `RepairTeams`; seeded from TOML `[repair]` block |
-| `RepairBlackboard` | `src/core/messages.rs:1653-1663` | Snapshot broadcast to the Repair console holder |
-| `RepairTarget` | `src/core/messages.rs:867-870` | `Station(StationId)` or `Core` |
+| `RepairBlackboard` | `src/core/messages.rs` | Snapshot broadcast to the Repair console holder |
+| `RepairTarget` | `src/core/messages.rs` | `Station(StationId)` or `Core` |
 
 ## Systems
 
 | System | SimSet | Responsibility |
 |---|---|---|
-| `handle_dispatch_repair_team` | `SimSet::Input` | Processes `ControlSystem { target: repair, payload: DispatchRepairTeam { team_idx, target } }` and legacy `ClientMessage::DispatchRepairTeam`; maps `RepairTarget::Station(id)` via `Console::from_console_id` and `RepairTarget::Core` via `Console::Core`, then calls `teams.dispatch(team_idx, console)` |
-| `tick_repair_teams` | `SimSet::Modifiers` | Advances team progress each frame; restores hull HP for completed teams |
-| `operate_repair_ai` | `SimSet::Input` | Runs AI-controlled repair dispatch when the repair station is in `Backfill` or `Ai` mode; iterates all entities with `ShipSystemControlSources` gated on `policy.operate_ai` |
+| `handle_dispatch_repair_team` | `SimSet::Input` | Processes `ControlSystem { target: repair, payload: DispatchRepairTeam { team_idx, target } }`; resolves `RepairTarget::Station(id)` to the matching `SystemId` on the ship's `EntitySystemHull` and `RepairTarget::Core` to `SystemId("core")`, then calls `teams.dispatch(team_idx, system_id, display_name)`. Post-#619 the legacy `ClientMessage::DispatchRepairTeam { console: Console }` wire path is gone — only the admission-gated `ControlSystem` envelope survives. |
+| `tick_repair_teams` | `SimSet::Modifiers` | Advances team progress each frame; restores hull HP for completed teams on the per-entity `EntitySystemHull` |
+| `operate_repair_ai` | `SimSet::Input` | Runs AI-controlled repair dispatch when the repair station is in `Backfill` or `Ai` mode; iterates all entities with `ShipSystemControlSources` gated on `policy.operate_ai`, picks the system with the largest HP deficit on that ship's hull |
 | `publish_repair_blackboard` | `SimSet::Broadcast` | Writes a `RepairBlackboard` into `ShipSystemBlackboards` for the repair system key |
-| `repair_state_broadcaster` | `PostUpdate` | Reads the blackboard and broadcasts `SystemBlackboard::Repair` to the console holder at 10 Hz |
+| `repair_state_broadcaster` | `PostUpdate` | Reads the blackboard and broadcasts `SystemBlackboard::Repair` to the station holder at 10 Hz |
 
 ## RepairBlackboard
 
 ```rust
 pub struct RepairBlackboard {
     pub teams: Vec<TeamSlot>,
-    pub console_hull: Vec<ConsoleHullStatus>,
+    pub system_hull: Vec<SystemHullStatus>,
     pub travel_duration_secs: f32,
-    pub damageable_consoles: Vec<Console>,
+    pub damageable_systems: Vec<SystemId>,
 }
 ```
 
-- `damageable_consoles` derives from `ConsoleHull.entries()` (`src/console/repair/server.rs:167`). Core appears in this list when `[[hull.console_hull]]` declares a `Core` entry in `player_ship.toml`.
-- `console_hull` is the per-console HP/tier snapshot sent to the client so the Repair screen can show live damage bars.
+- `damageable_systems` derives from `SystemHull.entries()` (`src/console/repair/server.rs`). Core appears in this list when `[[hull.system_hull]] system_id = "core"` is declared in `player_ship.toml`.
+- `system_hull` is the per-`SystemId` HP/tier snapshot (`SystemHullStatus { system_id, display_name, current, max, tier }`) sent to the client so the Repair screen can show live damage bars with human-readable labels.
+- `TeamSlot::{Travelling,Repairing,Returning}` carry `system_id: SystemId` + `display_name: String` in-slot, so the client renders the target label directly without a Console-enum lookup.
 
 ## TOML configuration
 
@@ -54,16 +55,19 @@ travel_duration_secs = 5
 repair_rate_hp_per_sec = 0.5
 ```
 
-Core hull is declared as a `[[hull.console_hull]]` entry:
+Core hull is declared as a `[[hull.system_hull]]` entry (post-#619 TOML shape):
 
 ```toml
-[[hull.console_hull]]
-console = "Core"
+[[hull.system_hull]]
+system_id = "core"
+display_name = "Core"
 max_hp = 20
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.10
 ```
+
+`display_name` is optional — when omitted the wire falls back to the raw `system_id` string. It exists so designer-facing labels (`"Engine (Port)"`, `"Phaser Bank (Fore)"`, etc.) survive the removal of the `Console::display_name()` lookup.
 
 ## Per-entity migration (PRD #597 PR 6)
 
@@ -73,10 +77,11 @@ debuff_magnitude = 0.10
 
 ```
 gui/repair-console.html
-  → action-map.js:136  dispatch_repair_team({ team_idx, target })
-  → client.html JS: ControlSystem envelope
-  → wasm_receive_message / handle_dispatch_repair_team (src/console/repair/server.rs:77-133)
-  → RepairTeams.dispatch(team_idx, console)
+  → action-map.js  dispatch_repair_team({ team_idx, target })
+  → client.html JS: ControlSystem { target: SystemId("repair"),
+                                     payload: DispatchRepairTeam { team_idx, target } } envelope
+  → wasm_receive_message / handle_dispatch_repair_team (src/console/repair/server.rs)
+  → RepairTeams.dispatch(team_idx, system_id, display_name)
   → tick_repair_teams advances progress, restores hull HP on completion
 ```
 
@@ -88,9 +93,9 @@ Notable tests:
 
 | Test | What it checks |
 |---|---|
-| `dispatch_repair_target_station_maps_helm` | `RepairTarget::Station("helm")` dispatches to `Console::Helm` |
-| `dispatch_repair_target_core_dispatches_to_core` | `RepairTarget::Core` dispatches team 0 to `Console::Core` |
-| `publish_repair_blackboard_contains_damageable_consoles` | `damageable_consoles` contains both `Console::Helm` and `Console::Core` |
+| `dispatch_repair_target_station_maps_helm` | `RepairTarget::Station("helm")` dispatches to `SystemId("helm")` |
+| `dispatch_repair_target_core_dispatches_to_core` | `RepairTarget::Core` dispatches team 0 to `SystemId("core")` |
+| `publish_repair_blackboard_contains_damageable_systems` | `damageable_systems` contains both `SystemId("helm")` and `SystemId("core")` |
 | `player_ship_toml_repair_block_matches_runtime_default_values` | Drift guard: TOML repair values match `RepairTimings::default()` |
 | `repair_teams_resource_reflects_player_ship_toml_repair_block` | Drift guard: TOML→runtime wiring for repair timings |
 
@@ -100,10 +105,11 @@ Five additional tests were added by issue #526. See the source file for the full
 
 - `src/console/repair/server.rs`
 - `src/modifiers/repair_teams.rs`
-- `src/core/messages.rs` (RepairBlackboard, RepairTarget)
-- `assets/entities/player_ship.toml` ([repair] block, [[hull.console_hull]] Core entry)
+- `src/core/messages.rs` (RepairBlackboard, RepairTarget, SystemHullStatus)
+- `assets/entities/player_ship.toml` ([repair] block, [[hull.system_hull]] entries)
 - `gui/repair-console.html`, `gui/action-map.js`
 - Issue [#508](https://github.com/jkeywo/project-phoenix-v2/issues/508)
 - Issue [#526](https://github.com/jkeywo/project-phoenix-v2/issues/526)
+- Issue [#619](https://github.com/jkeywo/project-phoenix-v2/issues/619) — Console enum + legacy `console_hull` / `damageable_consoles` fields deleted; `system_hull` / `damageable_systems` are the survivors
 - [Console Plugin Pattern](./console-plugin-pattern.md)
 - [Broadcaster Seam](./broadcaster-seam.md)

@@ -3,7 +3,7 @@ title: System
 type: entity
 tags: [system, systemid, control-source, ai, wire-protocol, damage-tier]
 sources: [src/ship/config.rs, src/ship/system_registry.rs, src/ship_plugin.rs, src/ship/damage.rs, src/ship/control_source.rs, assets/entities/player_ship.toml]
-updated: 2026-07-02
+updated: 2026-07-03
 ---
 
 # System
@@ -97,12 +97,14 @@ HP to a `DamageTier` (`src/ship/damage.rs`):
 | `Disabled` | `0 < ratio < disabled_threshold_pct` |
 | `Destroyed` | `current == 0` |
 
-Default thresholds (TOML `[[hull.console_hull]]`): `damaged_threshold_pct = 0.75`,
-`disabled_threshold_pct = 0.25`. Overridable per console.
+Default thresholds (TOML `[[hull.system_hull]]`): `damaged_threshold_pct = 0.75`,
+`disabled_threshold_pct = 0.25`. Overridable per system. The block also carries
+an optional `display_name = "..."` string used for wire labels; when omitted
+the wire falls back to the raw `system_id`.
 
-`tier_for(console)` is the public API on `ConsoleHull`. The tier is also
-included in `ConsoleHullStatus.tier` on the wire so clients can render tier
-badges.
+`tier_for(system_id)` is the public API on `SystemHull` (the post-#619
+replacement for `ConsoleHull`). The tier is also included in
+`SystemHullStatus.tier` on the wire so clients can render tier badges.
 
 ## ActiveStationRatings
 

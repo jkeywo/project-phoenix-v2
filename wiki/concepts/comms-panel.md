@@ -273,9 +273,9 @@ pub struct CommsMessage {
 ### Visibility rules (`comms_panel_visible`)
 
 1. Phase must be `InProgress`.
-2. Local player must hold `Console::Comms`.
+2. Local player must hold the `"comms"` station (`Player.station == "comms"`).
 3. One-console player → always visible.
-4. Multi-console player → visible only when `ActiveConsole == Some(Comms)`.
+4. Multi-console player → visible only when `ActiveConsole == Some("comms")`.
 
 ## Tests
 

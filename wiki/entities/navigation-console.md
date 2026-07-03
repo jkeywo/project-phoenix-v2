@@ -73,7 +73,7 @@ Option<WaypointSnapshot>` where `WaypointSnapshot { x, z, source_uuid:
 Option<String> }`. `source_uuid` is omitted on the wire (and on the
 client) for free waypoints; present for anchored ones.
 
-Only the player holding `Console::Navigation` may set or clear the
+Only the player whose `Player.station == "navigation"` may set or clear the
 waypoint (`navigation_authorized` in `src/console/navigation/mod.rs`).
 NaN/Inf coordinates are rejected.
 
@@ -124,7 +124,7 @@ bearing.
 ## Wire surface
 
 - `ClientMessage::SetNavigationWaypoint { x: f32, z: f32, source_uuid:
-  Option<String> }` — sender must hold `Console::Navigation`. Adding a
+  Option<String> }` — sender must hold the `"navigation"` station. Adding a
   non-empty `source_uuid` switches into anchored mode.
 - `ClientMessage::ClearNavigationWaypoint` — also navigation-gated.
 - `SimSnapshot.navigation_waypoint: Option<WaypointSnapshot>` — present

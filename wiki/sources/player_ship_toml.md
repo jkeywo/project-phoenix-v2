@@ -23,7 +23,7 @@ parsed into `EntityConfig` (`src/entities/config.rs`), and consumed by:
 
 | Block | Consumed by | Notes |
 |---|---|---|
-| `[hull]` + `[[hull.console_hull]]` | `ship/damage.rs::HullIntegrity`, `modifiers/repair_teams.rs` | Per-console HP slots; total HP = sum of slots. |
+| `[hull]` + `[[hull.system_hull]]` | `ship/damage.rs::SystemHull`, `modifiers/repair_teams.rs` | Per-`SystemId` HP slots keyed on `system_id = "..."`; optional `display_name = "..."` for wire labels; total HP = sum of slots. Pre-#619 this block was spelled `[[hull.console_hull]] console = "..."`. |
 | `[repair]` | `RepairPlugin`, broadcast via `ShipClientConfig` | Travel duration + repair rate; clients derive bar timings. |
 | `[weapons_console]` | `WeaponsPlugin`, `PhaserCombatConfigResource` | `beam_range`, `beam_damage_per_sec`, `beam_duration_secs`, `cooldown_secs`, `beam_color`, `torpedo_arc_color`. |
 | `[[weapons_console.phaser_banks]]` | `validate_phaser_banks`, `PhaserSystem`, client radar arcs | `id`, `facing_deg`, `fire_arc_deg`, `auto_arc_deg` (≤ `fire_arc_deg`), optional `beam_range` override. |

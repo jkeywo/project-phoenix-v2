@@ -3,7 +3,7 @@ title: PRD #581 — Unified Ship Entity Model
 type: source
 tags: [ai, ship, unification, npc, refactor]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/581
-updated: 2026-07-01
+updated: 2026-07-04
 ---
 
 ## Status
@@ -28,7 +28,7 @@ Unify player and NPC ships into one ECS entity model. `LocalShip` is the sole vi
 - **`ShipSystemBlackboards` per-entity (W3 complete)**: all 10 `publish_*_blackboard` systems (helm, captain, repair, weapons, power, shields, sensors, navigation, comms, viewscreen) write directly to the component on the `LocalShip` entity. `SystemBlackboards`, `FrozenBlackboards` resources and `dual_publish_blackboards`, `snapshot_blackboards` systems deleted. `broadcast_blackboard_updates` reads from `ShipSystemBlackboards` component. `LastBroadcastBlackboards` kept as broadcaster change-cache.
 - **`ShipState` resource deleted (W1 complete)**: all readers migrated to per-entity `ShipRedAlert`, `ShipViewMode`, `ShipPhaserFrequency` components.
 - **`LastHelmInput` per-entity only (W4 complete)**: `Resource` derive removed; `process_helm_inputs`, `operate_helm_ai`, `tick_boost`, `operate_power_ai` all read/write via `Query<&LastHelmInput, With<LocalShip>>`.
-- **`EntityConsoleHull` is primary hull store (W2 complete)**: all production systems read/write hull HP via `EntityConsoleHull` on `LocalShip`. `ShipHullIntegrity` resource and its bridge systems still exist but are no longer the production path.
+- **`EntitySystemHull` is primary hull store (W2 complete)**: all production systems read/write hull HP via `EntitySystemHull` on `LocalShip`. `ShipHullIntegrity` resource and its bridge systems still exist but are no longer the production path. (The component was named `EntityConsoleHull` in the original PRD text; renamed to `EntitySystemHull` in #617 and the old name deleted in #619 as part of the Console-enum removal batch.)
 - **`With<Ship>` → `With<LocalShip>` in world/server.rs (W5 complete)**: `handle_comms_channel2` fixed; all single-entity ship handlers now use `With<LocalShip>`.
 - **`tick_ai_controllers` deleted**: replaced by `register_npc_tokens_on_spawn` and `process_attacker_this_tick`.
 - **`AiControllerComponent` empty marker**: kept as query filter marker for NPC entities.
@@ -41,7 +41,7 @@ Unify player and NPC ships into one ECS entity model. `LocalShip` is the sole vi
 
 ### Dual-Write Bridges (Remaining)
 
-- `ShipHullIntegrity` resource ↔ `EntityConsoleHull` component: `sync_player_hull_to_resource` / `sync_resource_hull_to_entity` still run. `ShipHullIntegrity` is kept because some smoke tests and the legacy bridge systems reference it. Can be deleted once verified smoke tests don't rely on the resource.
+- `ShipHullIntegrity` resource ↔ `EntitySystemHull` component: `sync_player_hull_to_resource` / `sync_resource_hull_to_entity` still run. `ShipHullIntegrity` is kept because some smoke tests and the legacy bridge systems reference it. Can be deleted once verified smoke tests don't rely on the resource.
 
 ### Remaining Work
 

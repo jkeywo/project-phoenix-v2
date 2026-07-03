@@ -12,8 +12,8 @@ const CONSOLE_URL = '/gui/power-console.html';
 test('power console: __updateConsole renders power entries and battery', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
-  // Post issue #618: the `id` on each PowerConsoleEntry is a lowercase
-  // PowerGroupId (matches the Rust `PowerGroupId(String)` newtype).
+  // The `id` on each PowerGroupEntry is a lowercase PowerGroupId (matches
+  // the Rust `PowerGroupId(String)` newtype).
   const state = {
     consoles: [
       { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },

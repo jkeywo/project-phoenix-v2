@@ -3139,20 +3139,19 @@ mod tests {
 
     #[test]
     fn power_blackboard_with_groups_round_trips() {
-        let entry = PowerConsoleEntry {
+        let entry = PowerGroupEntry {
             id: "helm".into(),
             label: "HELM".into(),
             level: 2,
             max_level: 4,
         };
         let bb = SystemBlackboard::Power(PowerBlackboard {
-            consoles: vec![entry.clone()],
+            groups: vec![entry],
             total: 2,
             total_max: 8,
             battery_charge: 50.0,
             battery_max: 100.0,
             locked: false,
-            groups: vec![entry],
         });
         let msg = ServerMessage::BlackboardUpdate {
             updates: vec![(SystemId("power".into()), bb)],
@@ -3163,8 +3162,10 @@ mod tests {
 
     #[test]
     fn power_blackboard_legacy_wire_shape_defaults_groups_field() {
-        // Pre-#616 blackboard payload without groups must still deserialize
-        // with the new field defaulting to empty.
+        // Pre-#616 blackboard payload without `groups` must still deserialize
+        // (post-#516 sub-PR-follow-up the `consoles` field is gone from the
+        // struct entirely; the legacy field is now an "unknown field" that
+        // serde silently ignores, and `groups` defaults to the empty vec).
         let legacy_json = r#"{
             "kind": "Power",
             "data": {
@@ -3180,25 +3181,25 @@ mod tests {
         match decoded {
             SystemBlackboard::Power(bb) => {
                 assert!(bb.groups.is_empty(), "groups defaults to empty vec");
-                assert!(bb.consoles.is_empty());
             }
             other => panic!("expected Power blackboard, got {other:?}"),
         }
     }
 
     #[test]
-    fn power_group_entry_is_alias_of_power_console_entry() {
-        // Compile-time / runtime confirmation that PowerGroupEntry is a type
-        // alias (introduced by issue #616): a value of one type is directly
-        // assignable to a Vec of the other.
-        let entry = PowerConsoleEntry {
+    fn power_group_entry_round_trips() {
+        // PowerGroupEntry became a dedicated struct after the parent-issue
+        // #516 cleanup (previously a type alias for the deleted
+        // `PowerConsoleEntry`). Sanity: it constructs and round-trips through
+        // JSON with the same field shape.
+        let entry = PowerGroupEntry {
             id: "helm".into(),
             label: "HELM".into(),
             level: 1,
             max_level: 4,
         };
-        let groups: Vec<PowerGroupEntry> = vec![entry.clone()];
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].id, entry.id);
+        let json = serde_json::to_string(&entry).unwrap();
+        let decoded: PowerGroupEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, entry);
     }
 }

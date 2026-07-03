@@ -78,14 +78,17 @@ All three translators are registered in `SimulationPlugin` at
 | System | `src/modifiers/coordination.rs:43` |
 | Pure helper | `apply_power_modifiers` at `src/modifiers/coordination.rs:62` |
 | Reads | `ShipPowerSystem` (the `PowerSystem` struct) + `PowerMultiplierResource` |
-| Writes | `ModifierSource::Console(Console::Helm)` → `MaxSpeed`, `MaxYawRate` |
-|   | `ModifierSource::Console(Console::Tactical)` → `PhaserDamage` |
-|   | `ModifierSource::Console(Console::Sensors)` → `RadarRange` |
+| Writes | `ModifierSource::PowerGroup(PowerGroupId::helm())` → `MaxSpeed`, `MaxYawRate` |
+|   | `ModifierSource::PowerGroup(PowerGroupId::weapons())` → `PhaserDamage` |
+|   | `ModifierSource::PowerGroup(PowerGroupId::sensors())` → `RadarRange` |
 | Ordering | `.after(handle_power_messages).after(tick_power_system)` |
 
-Each console's power level (1–4) is mapped through a per-console multiplier
+Each power group's level (1–4) is mapped through a per-group multiplier
 array indexed by `level - 1`. The default array is `[-0.5, 0.0, 0.25, 0.5]`.
-Level 2 gives zero bonus; level 1 is a penalty; levels 3 and 4 are buffs.
+Level 2 gives zero bonus; level 1 is a penalty; levels 3 and 4 are buffs. Prior
+to #617/#619 this source variant was `ModifierSource::Console(Console::*)`
+keyed on the Console enum; the enum is deleted, `PowerGroupId` is the
+survivor.
 
 ### Region translator (`translate_region_modifiers`)
 
@@ -277,13 +280,17 @@ All six modifier slots, defined in `src/core/messages.rs:11`:
 
 ## ModifierSource catalogue
 
-All three source variants, defined in `src/core/messages.rs:22`:
+All three source variants, defined in `src/core/messages.rs`:
 
 | Variant | Identity | Used by |
 |---|---|---|
-| `Console(Console)` | Per-console variant | Power translator |
+| `PowerGroup(PowerGroupId)` | Per-power-group id (`"helm"`, `"weapons"`, `"sensors"`) | Power translator |
 | `ImpulseDrive` | Singleton | Impulse translator |
 | `RegionEffect { uuid }` | Per-region UUID | Region translator |
+
+The `Console(Console)` variant that appeared here pre-#619 was deleted with
+the Console enum; `PowerGroup(PowerGroupId)` is the survivor for power-driven
+modifiers.
 
 ## Files
 

@@ -10,7 +10,7 @@ updated: 2026-06-22
 
 ## Summary
 
-Project Phoenix has a strong simulation and UI shell, but the moment-to-moment feedback layer is still thin. The game already exposes rich event messages (`DamageTaken`, `PhaserFired`, `TorpedoLaunched`, `ObjectiveSummary`, `CommsState`, `GameOver`, `ConsoleHullUpdate`, `ShieldStatus`, `PowerState`) and already has basic viewscreen and phone feedback. The missing polish is a coherent presentation pass: event-specific audio, better game-over and objective ceremonies, clearer crew guidance, richer status transitions, and tactile/visual feedback for each console.
+Project Phoenix has a strong simulation and UI shell, but the moment-to-moment feedback layer is still thin. The game already exposes rich event messages (`DamageTaken`, `PhaserFired`, `TorpedoLaunched`, `ObjectiveSummary`, `CommsState`, `GameOver`, `SystemHullUpdate`, `ShieldStatus`, `PowerState`) and already has basic viewscreen and phone feedback. The missing polish is a coherent presentation pass: event-specific audio, better game-over and objective ceremonies, clearer crew guidance, richer status transitions, and tactile/visual feedback for each console.
 
 ## Existing polish foundation
 
@@ -74,7 +74,7 @@ Per-console hull damage exists, but players need stronger cues about "my station
 
 Needed:
 
-- Phone-local damage overlay driven by `ConsoleHullUpdate`: cracked glass/noise layer, red flash, warning chirp, vibration pattern per severity.
+- Phone-local damage overlay driven by `SystemHullUpdate`: cracked glass/noise layer, red flash, warning chirp, vibration pattern per severity.
 - Console disable/critical state language: when a console is at 0 HP, show a persistent "offline / repair required" overlay and suppress misleading ready buttons.
 - Repair loop celebration: team dispatched, en route, repairing, complete, failed/cancelled, with sound and small animation.
 - Host damage attribution: when a console is damaged, the viewscreen HUD can briefly call out `HELM DAMAGE`, `TACTICAL DAMAGE`, etc.

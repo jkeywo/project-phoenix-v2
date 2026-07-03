@@ -614,7 +614,7 @@ describe('buildPowerConsoleState', () => {
     expect(s.locked).toBe(true);
   });
 
-  it('prefers blackboard groups (post issue #618)', () => {
+  it('reads blackboard groups (PowerGroupId-keyed)', () => {
     const s = parse(buildPowerConsoleState({
       blackboards: {
         power: {
@@ -622,7 +622,6 @@ describe('buildPowerConsoleState', () => {
             { id: 'helm',    label: 'HELM',    level: 3, max_level: 4 },
             { id: 'weapons', label: 'WEAPONS', level: 1, max_level: 4 },
           ],
-          consoles: [],
           total: 4, total_max: 8, battery_charge: 25, battery_max: 100, locked: false,
         },
       },
@@ -635,21 +634,17 @@ describe('buildPowerConsoleState', () => {
     expect(s.battery_charge).toBe(25);
   });
 
-  it('falls back to legacy blackboard consoles when groups is empty', () => {
+  it('falls back to empty consoles when groups is missing', () => {
+    // A blackboard object without a `groups` field (legacy or upstream bug)
+    // must still produce a valid, non-throwing panel state.
     const s = parse(buildPowerConsoleState({
       blackboards: {
         power: {
-          groups: [],
-          consoles: [
-            { id: 'helm', label: 'HELM', level: 2, max_level: 4 },
-          ],
           total: 2, total_max: 8, battery_charge: 0, battery_max: 100, locked: false,
         },
       },
     }));
-    expect(s.consoles).toEqual([
-      { id: 'helm', label: 'HELM', level: 2, max_level: 4 },
-    ]);
+    expect(s.consoles).toEqual([]);
   });
 });
 

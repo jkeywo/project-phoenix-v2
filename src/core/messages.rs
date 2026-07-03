@@ -1621,9 +1621,13 @@ pub enum SystemBlackboard {
 /// blackboard (issue #561).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct PowerBlackboard {
-    /// Per-console power allocation entries (data-driven from ship config).
-    pub consoles: Vec<PowerConsoleEntry>,
-    /// Sum of current allocations across all powered consoles.
+    /// Per-power-group allocation entries, keyed on `PowerGroupId` (data-driven
+    /// from ship config). `#[serde(default)]` lets pre-#616 payloads (which
+    /// carried a `consoles` field instead) round-trip cleanly — the missing
+    /// `groups` field decodes to an empty vec.
+    #[serde(default)]
+    pub groups: Vec<PowerGroupEntry>,
+    /// Sum of current allocations across all power groups.
     pub total: u8,
     /// Maximum total allocation (pool cap).
     pub total_max: u8,
@@ -1633,13 +1637,6 @@ pub struct PowerBlackboard {
     pub battery_max: f32,
     /// Whether the power system is locked (battery exhausted).
     pub locked: bool,
-    /// PowerGroupId-keyed mirror of `consoles` (parent issue #516 sub-issue
-    /// #616). Populated alongside the legacy field during the additive
-    /// migration; consumers may read either. `PowerGroupEntry` is currently a
-    /// type alias for `PowerConsoleEntry` since the entry shape is already
-    /// string-keyed; a later sub-PR renames the type.
-    #[serde(default)]
-    pub groups: Vec<PowerGroupEntry>,
 }
 
 /// An authority-checked intra-system command produced by `admit_system_commands`.
@@ -1751,26 +1748,19 @@ pub struct ShieldsBlackboard {
     pub target_bearing: Option<f32>,
 }
 
-/// A single entry in [`PowerBlackboard::consoles`].
+/// A single entry in [`PowerBlackboard::groups`], one per `PowerGroupId`
+/// registered on the ship.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PowerConsoleEntry {
-    /// Console identifier — the `Console` enum variant name (e.g. `"Helm"`).
+pub struct PowerGroupEntry {
+    /// Power group identifier — the `PowerGroupId` string (e.g. `"helm"`).
     pub id: String,
     /// Display label shown in the HTML panel (e.g. `"HELM"`, `"WEAPONS"`).
     pub label: String,
     /// Current power level (1 – `max_level`).
     pub level: u8,
-    /// Maximum power level for this console.
+    /// Maximum power level for this power group.
     pub max_level: u8,
 }
-
-/// A single entry in [`PowerBlackboard::groups`] — the PowerGroupId-keyed
-/// successor of [`PowerConsoleEntry`] introduced by parent issue #516
-/// sub-issue #616. Currently a type alias since the entry shape (string-keyed
-/// `id`, `label`, `level`, `max_level`) is already appropriate for
-/// PowerGroupId identity; a later sub-PR will rename this to a dedicated
-/// type once the console-keyed field is removed.
-pub type PowerGroupEntry = PowerConsoleEntry;
 
 /// Raw sim truth for the Repair system, published each tick into the ship
 /// blackboard (issue #564).

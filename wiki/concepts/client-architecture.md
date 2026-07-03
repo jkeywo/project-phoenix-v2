@@ -28,7 +28,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 
 | Module | Owns |
 |---|---|
-| `console-registry.js` | **Single source of truth** for HTML-panel consoles: Console enum variant → section id + iframe id |
+| `console-registry.js` | **Single source of truth** for HTML-panel consoles: lowercase station id → section id + iframe id |
 | `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders |
 | `lobby-state.js` | Lobby view-model (stations, players, ready states) |
 | `comms-state.js` | Comms inbox/contact view-model |

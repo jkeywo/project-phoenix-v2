@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
     InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard,
-    PowerConsoleEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage, StationId,
+    PowerGroupEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage, StationId,
     SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
@@ -649,7 +649,7 @@ fn publish_power_blackboard(
         .map(|cs| !cs.0.offline_systems.contains(&battery_id))
         .unwrap_or(true);
 
-    let entries: Vec<PowerConsoleEntry> = POWER_GROUP_ORDER
+    let entries: Vec<PowerGroupEntry> = POWER_GROUP_ORDER
         .iter()
         .map(|name| PowerGroupId(name.to_string()))
         .filter(|gid| multipliers.multipliers.contains_key(gid))
@@ -659,7 +659,7 @@ fn publish_power_blackboard(
                 .get(&gid)
                 .map(|arr| arr.len() as u8)
                 .unwrap_or(4);
-            PowerConsoleEntry {
+            PowerGroupEntry {
                 id: gid.0.clone(),
                 label: power_group_label(gid.0.as_str()).into(),
                 level: power_level_for(&power.0, &gid),
@@ -669,20 +669,12 @@ fn publish_power_blackboard(
         .collect();
 
     let bb = PowerBlackboard {
-        // Legacy `consoles` wire field: emptied by the publisher post issue
-        // #618. The struct field survives the wire (with `#[serde(default)]`
-        // for compat) until its removal in a later sub-PR.
-        consoles: Vec::new(),
+        groups: entries,
         total: power.0.total(),
         total_max: 8,
         battery_charge: power.0.battery_charge,
         battery_max: config.0.capacity,
         locked: power.0.locked,
-        // Additive-only PowerGroupId-keyed mirror (parent issue #516 sub-issue
-        // #616). `PowerGroupEntry` is currently a type alias for
-        // `PowerConsoleEntry` since the entry shape is already string-keyed;
-        // downstream consumers may read either. A later sub-PR renames.
-        groups: entries,
     };
     // Fine blackboards (issue #513) — reactor owns the allocation surface,
     // battery owns the emergency-reserve pool. Emitted alongside the legacy

@@ -328,6 +328,7 @@ pub fn add_simulation_plugins(app: &mut App) {
         Update,
         refresh_caches_on_midgame_reconnect
             .after(crate::lobby::process_lobby)
+            .before(crate::lobby::server::drain_lobby_outbox)
             .before(crate::sim_sets::SimSet::Broadcast),
     )
     .add_systems(
@@ -1365,7 +1366,7 @@ fn is_command_authorized(
 }
 
 /// When a player reconnects mid-game (Identify during InProgress), `process_lobby`
-/// queues a Welcome into LobbyOutbox. Detect this and clear hull/shields/weapons
+/// queues a Welcome into LobbyOutbox. Detect this and clear all broadcast delta
 /// caches so the next 10 Hz tick sends a full state update to all players
 /// (including the reconnecting player).
 fn refresh_caches_on_midgame_reconnect(
@@ -1374,6 +1375,9 @@ fn refresh_caches_on_midgame_reconnect(
     mut hull: ResMut<LastBroadcastHull>,
     mut shields: ResMut<LastBroadcastShields>,
     mut weapons: ResMut<LastWeaponsUpdate>,
+    mut positions: ResMut<LastBroadcastEntityPositions>,
+    mut health: ResMut<LastBroadcastEntityHealth>,
+    mut last_bb: ResMut<LastBroadcastBlackboards>,
 ) {
     if *state.get() != GamePhase::InProgress {
         return;
@@ -1386,6 +1390,9 @@ fn refresh_caches_on_midgame_reconnect(
         *hull = LastBroadcastHull::default();
         *shields = LastBroadcastShields::default();
         *weapons = LastWeaponsUpdate::default();
+        *positions = LastBroadcastEntityPositions::default();
+        *health = LastBroadcastEntityHealth::default();
+        *last_bb = LastBroadcastBlackboards::default();
     }
 }
 
@@ -2816,6 +2823,7 @@ mod tests {
                 crate::sim_sets::SimSet::Damage,
                 crate::sim_sets::SimSet::Modifiers,
                 crate::sim_sets::SimSet::Publish,
+                crate::sim_sets::SimSet::PublishAggregate,
                 crate::sim_sets::SimSet::Broadcast,
             )
                 .chain(),
@@ -2887,7 +2895,10 @@ mod tests {
             crate::modifier_coordination::translate_impulse_modifiers
                 .after(handle_impulse_messages),
         )
-        .add_systems(Update, sim_processing_anchor)
+        .add_systems(Update, (
+            sim_processing_anchor,
+            broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),
+        ))
         .add_plugins(weapons_update_broadcaster())
         .add_plugins(sim_state_broadcaster())
         .add_plugins(modifier_events_broadcaster())
@@ -6078,6 +6089,68 @@ mod tests {
         assert!(
             found,
             "runtime entity must appear in WorldResource for Welcome reconnects"
+        );
+    }
+
+    #[test]
+    fn midgame_reconnect_resets_blackboard_cache() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        let helm_id = SystemId("helm".into());
+        let helm_bb = SystemBlackboard::Helm(HelmBlackboard {
+            yaw: 1.0,
+            forward_speed: 50.0,
+            x: 100.0,
+            z: 200.0,
+            impulse_charge: 0.5,
+            boost_battery: 0.8,
+            boost_active: false,
+            boost_enabled: true,
+        });
+
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemBlackboards, With<LocalShip>>();
+            if let Ok(mut bbs) = q.single_mut(app.world_mut()) {
+                bbs.0.insert(helm_id.clone(), helm_bb.clone());
+            }
+        }
+
+        // Tick: broadcast_blackboard_updates caches the blackboard and emits it.
+        let out1 = tick(&mut app);
+        assert!(
+            out1
+                .iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BlackboardUpdate { .. })),
+            "first tick after seeding must emit BlackboardUpdate"
+        );
+
+        // Simulate reconnect: push Identify with same token -> Welcome emitted.
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
+        let out2 = tick(&mut app);
+        let out3 = tick(&mut app);
+
+        let has_bb_for_helm = |out: &[OutboundMessage]| -> bool {
+            out.iter().any(|m| match &m.msg {
+                ServerMessage::BlackboardUpdate { updates } => {
+                    updates.iter().any(|(id, _)| id.0 == "helm")
+                }
+                _ => false,
+            })
+        };
+
+        assert!(
+            has_bb_for_helm(&out2) || has_bb_for_helm(&out3),
+            "must emit BlackboardUpdate with helm data within one tick of reconnect Welcome"
         );
     }
 

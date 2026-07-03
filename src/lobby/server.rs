@@ -486,7 +486,7 @@ impl Plugin for LobbyOutboxPlugin {
     }
 }
 
-fn drain_lobby_outbox(world: &mut World) {
+pub(crate) fn drain_lobby_outbox(world: &mut World) {
     let entries = std::mem::take(&mut world.resource_mut::<LobbyOutbox>().0);
     for (target, msg) in entries {
         world.write_message(OutboundMessage { target, msg });

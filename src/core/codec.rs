@@ -129,6 +129,40 @@ fn system_target_for_payload_type(type_name: &str) -> Option<&'static str> {
     }
 }
 
+// ── Batch inbound decode (issue #602) ───────────────────────────────────────
+
+/// A single decode failure from the bridge inbound drain, with truncated
+/// fields for safe logging.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DecodeError {
+    pub token: String,
+    pub payload_snippet: String,
+}
+
+/// Batch-decode a list of `(token, json)` pairs into successful
+/// `ClientMessage` values and `DecodeError` failures. Truncates
+/// token to 12 chars and payload snippet to 80 chars at collection time.
+pub fn decode_bridge_client_messages(
+    entries: Vec<(String, String)>,
+) -> (Vec<(String, ClientMessage)>, Vec<DecodeError>) {
+    let mut successes = Vec::new();
+    let mut failures = Vec::new();
+    for (token, json) in entries {
+        match decode_bridge_client_message(&json) {
+            Ok(msg) => successes.push((token, msg)),
+            Err(_) => {
+                let truncated_token: String = token.chars().take(12).collect();
+                let payload_snippet: String = json.chars().take(80).collect();
+                failures.push(DecodeError {
+                    token: truncated_token,
+                    payload_snippet,
+                });
+            }
+        }
+    }
+    (successes, failures)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3201,5 +3235,53 @@ mod tests {
         let json = serde_json::to_string(&entry).unwrap();
         let decoded: PowerGroupEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, entry);
+    }
+
+    // ── Batch inbound decode (issue #602) ────────────────────────────────
+
+    #[test]
+    fn decode_bridge_client_messages_passes_valid_json() {
+        let entries = vec![(
+            "t1".into(),
+            r#"{"type":"SetReady","data":{"ready":true}}"#.into(),
+        )];
+        let (successes, failures) = decode_bridge_client_messages(entries);
+        assert_eq!(successes.len(), 1);
+        assert!(failures.is_empty());
+        assert_eq!(successes[0].0, "t1");
+        assert_eq!(successes[0].1, ClientMessage::SetReady { ready: true });
+    }
+
+    #[test]
+    fn decode_bridge_client_messages_logs_garbage_with_truncated_fields() {
+        let entries = vec![
+            ("t1".into(), "{{{bogus}}}".into()),
+            (
+                "this-is-a-very-long-token-value-that-exceeds-twelve".into(),
+                "x".repeat(200),
+            ),
+        ];
+        let (successes, failures) = decode_bridge_client_messages(entries);
+        assert!(successes.is_empty());
+        assert_eq!(failures.len(), 2);
+        // Token truncated to 12 chars
+        assert_eq!(failures[0].token, "t1");
+        assert_eq!(failures[1].token, "this-is-a-ve");
+        // Payload truncated to 80 chars
+        assert_eq!(failures[0].payload_snippet.len(), 11);
+        assert_eq!(failures[1].payload_snippet.len(), 80);
+    }
+
+    #[test]
+    fn decode_bridge_client_messages_mixed_valid_and_invalid() {
+        let entries = vec![
+            ("t1".into(), r#"{"type":"SetReady","data":{"ready":true}}"#.into()),
+            ("t2".into(), "{{{garbage}}}".into()),
+        ];
+        let (successes, failures) = decode_bridge_client_messages(entries);
+        assert_eq!(successes.len(), 1);
+        assert_eq!(failures.len(), 1);
+        assert_eq!(successes[0].0, "t1");
+        assert_eq!(failures[0].token, "t2");
     }
 }

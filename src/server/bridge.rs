@@ -651,14 +651,20 @@ pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
 // ── Bevy bridge systems ────────────────────────────────────────────────────
 
 /// Drains the inbound queue each frame and injects messages into Bevy.
+/// Decode failures are logged as warnings with truncated token/payload.
 #[cfg(target_arch = "wasm32")]
 fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
     let pending: Vec<(String, String)> = INBOUND_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
-
-    for (token, json) in pending {
-        if let Ok(msg) = codec::decode_bridge_client_message(&json) {
-            writer.write(InboundMessage { token, msg });
-        }
+    let (successes, failures) = codec::decode_bridge_client_messages(pending);
+    for err in &failures {
+        bevy::log::warn!(
+            "decode failure from token={}: payload={}",
+            err.token,
+            err.payload_snippet
+        );
+    }
+    for (token, msg) in successes {
+        writer.write(InboundMessage { token, msg });
     }
 }
 
@@ -824,18 +830,23 @@ fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
 /// Drains the UI-action queue each frame: decodes each `__sendAction` envelope
 /// into a `UiAction`, maps it to the corresponding `ClientMessage`, and injects
 /// it as an `InboundMessage` from the local console token so the existing
-/// weapons handlers process it. Decode failures are ignored (matching
-/// `drain_inbound`).
+/// weapons handlers process it. Decode failures are logged as warnings.
 #[cfg(target_arch = "wasm32")]
 fn drain_ui_actions(mut writer: MessageWriter<InboundMessage>) {
     let pending: Vec<String> = UI_ACTION_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
     for json in pending {
-        if let Ok(action) = codec::decode_ui_action(&json) {
-            let msg = messages::ui_action_to_client_message(&action);
-            writer.write(InboundMessage {
-                token: LOCAL_CONSOLE_TOKEN.to_string(),
-                msg,
-            });
+        match codec::decode_ui_action(&json) {
+            Ok(action) => {
+                let msg = messages::ui_action_to_client_message(&action);
+                writer.write(InboundMessage {
+                    token: LOCAL_CONSOLE_TOKEN.to_string(),
+                    msg,
+                });
+            }
+            Err(_) => {
+                let snippet: String = json.chars().take(80).collect();
+                bevy::log::warn!("decode failure from local console: payload={}", snippet);
+            }
         }
     }
 }

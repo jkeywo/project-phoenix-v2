@@ -69,7 +69,10 @@ pub fn process_message(
             token: id_token,
             name,
         } => {
-            let is_reconnect = sessions.reconnect(id_token).is_some();
+            // Clamp token to 64 chars and name to 32 chars (issue #602).
+            let id_token = id_token.chars().take(64).collect::<String>();
+            let name = name.chars().take(32).collect::<String>();
+            let is_reconnect = sessions.reconnect(&id_token).is_some();
             let joined = if is_reconnect {
                 true
             } else {
@@ -82,7 +85,7 @@ pub fn process_message(
                 // their seat and broadcast the pre-disconnect rating.
                 let mut reconnect_station_update: Option<(StationId, String)> = None;
                 if is_reconnect && !ship_stations.stations.is_empty() {
-                    let station_id = sessions.station_for_token(id_token).cloned();
+                    let station_id = sessions.station_for_token(&id_token).cloned();
                     if let Some(ref sid) = station_id {
                         let occupied = sessions.players().iter().any(|p| {
                             p.connected && p.token != *id_token && p.station.as_ref() == Some(sid)
@@ -97,7 +100,7 @@ pub fn process_message(
                             let rating = last_rating.unwrap_or_else(|| "Std".to_string());
                             reconnect_station_update = Some((sid.clone(), rating));
                         } else {
-                            sessions.set_station(id_token, None);
+                            sessions.set_station(&id_token, None);
                         }
                     }
                 }
@@ -147,7 +150,7 @@ pub fn process_message(
                             },
                         ));
                         // Clear last_rating now that it has been applied.
-                        sessions.set_last_rating(id_token, None);
+                        sessions.set_last_rating(&id_token, None);
                         station_rating_update = reconnect_station_update;
                     }
                 }
@@ -172,7 +175,7 @@ pub fn process_message(
                         .find(|p| p.token == *id_token)
                         .map(|p| p.station.is_some())
                         .unwrap_or(false);
-                    let is_already_spectator = sessions.spectator_queue().contains(id_token);
+                    let is_already_spectator = sessions.spectator_queue().contains(&id_token);
                     if !player_has_station && !is_already_spectator {
                         let capacity = ship_stations.stations.len() as u32;
                         let at_capacity = connected_with_stations >= capacity;
@@ -2121,5 +2124,65 @@ max_level = 4
             "t1 must NOT get Captain back when t2 has claimed it"
         );
         let _ = reconnect_result;
+    }
+
+    // ── Identify field clamping (issue #602) ─────────────────────────────
+
+    #[test]
+    fn identify_clamps_token_to_64_chars() {
+        let mut sessions = SessionManager::new();
+        let long_token = "a".repeat(100);
+        let msg = ClientMessage::Identify {
+            token: long_token.clone(),
+            name: "Bob".into(),
+        };
+        let _result = pm("peer", &msg, &mut sessions, GamePhase::Lobby, None);
+        let player = sessions.players().iter().find(|p| p.name == "Bob").unwrap();
+        assert_eq!(player.token.len(), 64);
+        assert_eq!(player.token, "a".repeat(64));
+    }
+
+    #[test]
+    fn identify_clamps_name_to_32_chars() {
+        let mut sessions = SessionManager::new();
+        let long_name = "b".repeat(50);
+        let msg = ClientMessage::Identify {
+            token: "t1".into(),
+            name: long_name.clone(),
+        };
+        let _result = pm("peer", &msg, &mut sessions, GamePhase::Lobby, None);
+        let player = sessions.players().iter().find(|p| p.token == "t1").unwrap();
+        assert_eq!(player.name.len(), 32);
+        assert_eq!(player.name, "b".repeat(32));
+    }
+
+    #[test]
+    fn identify_passes_short_token_and_name_unchanged() {
+        let mut sessions = SessionManager::new();
+        let msg = ClientMessage::Identify {
+            token: "t1".into(),
+            name: "Bob".into(),
+        };
+        let _result = pm("peer", &msg, &mut sessions, GamePhase::Lobby, None);
+        let player = sessions.players().iter().find(|p| p.token == "t1").unwrap();
+        assert_eq!(player.token, "t1");
+        assert_eq!(player.name, "Bob");
+    }
+
+    #[test]
+    fn identify_clamped_token_still_reconnects() {
+        let clamped_token = "a".repeat(64);
+        let long_token = "a".repeat(100);
+        let mut sessions = SessionManager::new();
+        sessions.register(clamped_token.clone(), "Alice".into()).unwrap();
+        sessions.set_ready(&clamped_token, true);
+        sessions.disconnect(&clamped_token);
+        // Reconnect with the long token → clamped to 64 chars → matches stored session.
+        let msg = ClientMessage::Identify {
+            token: long_token.clone(),
+            name: "Alice".into(),
+        };
+        let _result = pm("peer", &msg, &mut sessions, GamePhase::Lobby, None);
+        assert!(sessions.players().iter().any(|p| p.token == clamped_token && p.connected));
     }
 }

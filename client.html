@@ -937,6 +937,20 @@
       const m = me(s);
       return m ? consolesOf(m, s.shipStations) : [];
     }
+
+    /// True while the lobby/station-select panel is being shown over an
+    /// in-progress game: true spectators, and mid-game claimants who have
+    /// picked a station but not yet pressed Ready. Single source of truth for
+    /// render()'s vis.lobby override and the SimState/BlackboardUpdate
+    /// render guards below — those messages arrive at ~10Hz and must skip the
+    /// lobby DOM rebuild in this state, or a click on Ready/Leave can land
+    /// between the old button being torn down and the new one's listener
+    /// being attached.
+    function showingLobbyDuringGame(s) {
+      if (s.phase !== 'InProgress') return false;
+      const player = me(s);
+      return pendingMidGameClaim || !myConsoles(s).length || !!(player && !player.ready);
+    }
     function hasConsole(s, c) { return myConsoles(s).includes(c); }
     function isCaptain(s)     { return hasConsole(s, 'CaptainChair'); }
     function isHelm(s)        { return hasConsole(s, 'Helm'); }
@@ -1009,7 +1023,7 @@
       const myPlayer = me(s);
       // Spectators and pending mid-game claimants stay in the lobby. Ready is
       // the point where the server actually hands the station over from AI.
-      if (s.phase === 'InProgress' && (pendingMidGameClaim || !mine.length || (myPlayer && !myPlayer.ready))) {
+      if (showingLobbyDuringGame(s)) {
         vis.lobby = true; vis.game = false; vis.bezel = false;
       }
       const inGame = vis.game;
@@ -1894,10 +1908,11 @@
           pushRepairConsoleState();
           pushSensorsConsoleState();
           pushNavigationConsoleState();
-          // Don't re-render the full lobby at 10Hz when spectator — it
-          // destroys CSS hover state on station selection buttons.
+          // Don't re-render the full lobby at 10Hz when spectating or when a
+          // mid-game station claim is still pending Ready — it destroys CSS
+          // hover state and tears down the Ready/Leave button listeners.
           // The push calls are no-ops when no game console is active.
-          if (!myConsoles(state).length) return;
+          if (showingLobbyDuringGame(state)) return;
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state.
           break;
@@ -1987,9 +2002,10 @@
           if (updatedSystems.has('comms'))      pushCommsConsoleState();
           if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
           // Same guard as SimState: don't re-render the lobby at 10 Hz while
-          // spectating — it rebuilds the station list every frame, destroying
-          // button listeners before a click can register.
-          if (!myConsoles(state).length) return;
+          // spectating or mid-game-claim-pending — it rebuilds the station
+          // list every frame, destroying button listeners before a click can
+          // register.
+          if (showingLobbyDuringGame(state)) return;
           break;
         }
         case 'WeaponsUpdate': {

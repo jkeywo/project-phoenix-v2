@@ -847,22 +847,6 @@ export function buildNavigationConsoleState(state) {
   );
   if (waypoint) blips.push(waypoint);
 
-  // Shared target markers (world-axis, north-up)
-  const allEntities = state.asteroids || [];
-  const tacBb = state.blackboards?.['tactical'];
-  const sensBb = state.blackboards?.['sensors'];
-  const tacMarker = buildTargetBlip(
-    tacBb?.target_uuid, allEntities, state.shipX || 0, state.shipZ || 0, 0, range,
-    { rotate: false, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: 'TACTICAL TARGET' }
-  );
-  if (tacMarker) blips.push(tacMarker);
-  const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
-  const sciMarker = buildTargetBlip(
-    sciTargetUuid, allEntities, state.shipX || 0, state.shipZ || 0, 0, range,
-    { rotate: false, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: 'SCIENCE TARGET' }
-  );
-  if (sciMarker) blips.push(sciMarker);
-
   const charge = state.impulseChargeProgress || 0;
   const onScreen = state.currentView === 'NavigationChart';
 

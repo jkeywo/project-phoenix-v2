@@ -93,6 +93,8 @@ This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anch
 
 Directive selection distinguishes unresolved directives from resolved idle commands. `operate_helm` tries lower-priority directives only when a directive returns `None` (for example, a Destroy target name that is not yet visible); `Some((0.0, 0.0))` means the directive resolved and intentionally wants the ship to hold station. This prevents a high-priority Destroy objective that has reached weapons range from falling through to a lower-priority Patrol objective and sharply steering away from the target.
 
+`operate_helm_ai` caps its physics integration step to the same `1/30s` maximum used by the human helm timer. AI helm still runs every frame, but a long browser frame cannot be consumed as one oversized yaw step, so Backfill/NPC steering cannot visibly rotate faster than joystick-driven helm input.
+
 ## NPC ship spawn
 
 When `spawn_entity` in `src/entities/spawner.rs` detects a TOML `[behaviour]` section, it inserts:

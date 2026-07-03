@@ -28,6 +28,8 @@ use crate::simulation::{ShipBoost, ShipImpulse};
 #[derive(Resource)]
 struct HelmInputTimer(Timer);
 
+const HELM_AI_MAX_DT_SECS: f32 = 1.0 / 30.0;
+
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct LastHelmInput {
     pub thrust: f32,
@@ -539,7 +541,7 @@ fn operate_helm_ai(
         Has<crate::server_app::LocalShip>,
     )>,
 ) {
-    let dt = time.delta_secs();
+    let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
     let anchors = world_config
         .as_ref()
         .map(|wc| wc.anchors.clone())
@@ -3012,6 +3014,34 @@ station = "helm"
              got thrust={}, steering={}",
             last.thrust,
             last.steering
+        );
+    }
+
+    #[test]
+    fn player_ship_backfill_helm_ai_caps_long_frame_yaw_step() {
+        let mut app = test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(target_uuid),
+            crate::entities::spawner::EntityName("enemy_fighter".into()),
+            Transform::from_xyz(80.0, 0.0, 0.0),
+        ));
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![destroy_scored_objective("enemy_fighter", 60.0)],
+        );
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        let before = get_ship_physics(&mut app);
+        tick(&mut app);
+        let after = get_ship_physics(&mut app);
+
+        let max_step = ShipPhysicsConfig::new().max_yaw_rate * HELM_AI_MAX_DT_SECS;
+        let yaw_delta = (after.yaw - before.yaw).abs();
+        assert!(
+            yaw_delta <= max_step + 0.0001,
+            "AI helm must not consume a long frame as one oversized yaw step; \
+             yaw_delta={yaw_delta}, max_step={max_step}"
         );
     }
 

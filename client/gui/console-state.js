@@ -57,8 +57,12 @@ function entityMatchesObjectiveTarget(entity, targets) {
   return [entity.name, entity.id, entity.uuid].some(v => v != null && targets.has(String(v)));
 }
 
-function ownHull(consoleName, state) {
-  return (state.consoleHull || []).find(h => h.console === consoleName) || null;
+function ownHull(stationId, state) {
+  // Post issue #618: hull entries carry `.system_id` (lowercase, matches the
+  // stable Rust `SystemId` newtype) rather than the legacy `.console`
+  // PascalCase Console enum name. Callers pass the lowercase station id (see
+  // buildConsoleState dispatch and each build*ConsoleState call).
+  return (state.consoleHull || []).find(h => h.system_id === stationId) || null;
 }
 
 function withObjectiveTargets(entities, objectives) {
@@ -408,7 +412,7 @@ export function buildWeaponsConsoleState(state) {
     regions,
     phaser_arcs:   mappedPhaserArcs,
     torpedo_arcs:  torpedoArcs,
-    own_hull:      ownHull('Tactical', state),
+    own_hull:      ownHull('tactical', state),
     tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
   });
 }
@@ -432,7 +436,7 @@ export function buildCaptainConsoleState(state) {
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
-      own_hull:              ownHull('CaptainChair', state),
+      own_hull:              ownHull('captain', state),
     });
   }
   // Legacy fallback.
@@ -454,7 +458,7 @@ export function buildCaptainConsoleState(state) {
                              ? 'RED ALERT — All hands to battlestations.'
                              : 'Standing by. All systems nominal.',
     blips:                 state.blips       || [],
-    own_hull:              ownHull('CaptainChair', state),
+    own_hull:              ownHull('captain', state),
   });
 }
 
@@ -518,7 +522,7 @@ export function buildHelmConsoleState(state) {
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
-    own_hull:                ownHull('Helm', state),
+    own_hull:                ownHull('helm', state),
     boost_enabled:           !!boostEnabled,
     boost_battery:           boostBattery,
     boost_active:            !!boostActive,
@@ -540,18 +544,20 @@ export function buildRepairConsoleState(state) {
   if (bb) {
     return JSON.stringify({
       teams:                bb.teams                ?? [],
-      console_hull:         bb.console_hull         ?? [],
+      // SystemId-keyed fields (post issues #618/#619).
+      system_hull:          bb.system_hull          ?? [],
+      damageable_systems:   bb.damageable_systems   ?? [],
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
-      damageable_consoles:  bb.damageable_consoles  ?? [],
       repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
     });
   }
-  // Legacy fallback.
+  // Legacy fallback: derive damageable_systems from consoleHull (SystemId-keyed
+  // after issue #618) so the repair panel renders even without the blackboard.
   return JSON.stringify({
     teams:                state.repairTeams || [],
-    console_hull:         state.consoleHull || [],
+    system_hull:          state.consoleHull || [],
+    damageable_systems:   (state.consoleHull || []).map(h => h.system_id),
     travel_duration_secs: 5.0,
-    damageable_consoles:  (state.consoleHull || []).map(h => h.console),
     repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
   });
 }
@@ -577,7 +583,11 @@ export function buildPowerConsoleState(state) {
   const batteryOnline = batteryBb ? !!batteryBb.is_online : true;
   if (bb) {
     return JSON.stringify({
-      consoles:       bb.consoles       || [],
+      // Post issue #618: prefer the new PowerGroupId-keyed `groups` field
+      // authored by the publisher; fall back to the legacy `consoles` field
+      // for pre-#618 payloads still in flight. Mirrors the pattern used in
+      // buildRepairConsoleState (system_hull || console_hull).
+      consoles:       (bb.groups && bb.groups.length) ? bb.groups : (bb.consoles || []),
       total:          bb.total          ?? 0,
       total_max:      bb.total_max      ?? 8,
       battery_charge: bb.battery_charge ?? 0,
@@ -585,7 +595,7 @@ export function buildPowerConsoleState(state) {
       locked:         bb.locked         || false,
       reactor_online: reactorOnline,
       battery_online: batteryOnline,
-      own_hull:       ownHull('Power', state),
+      own_hull:       ownHull('power', state),
       power_auto:     state.stationRatings?.['power'] === 'Backfill',
     });
   }
@@ -598,7 +608,7 @@ export function buildPowerConsoleState(state) {
     locked:         state.powerLocked  || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
-    own_hull:       ownHull('Power', state),
+    own_hull:       ownHull('power', state),
     power_auto:     state.stationRatings?.['power'] === 'Backfill',
   });
 }
@@ -616,7 +626,7 @@ export function buildShieldsConsoleState(state) {
       focused_facing:     bb.focused_facing     ?? null,
       target_bearing:     bb.target_bearing     ?? null,
       grid_status:        bb.grid_status        ?? 'GRID NOMINAL',
-      own_hull: ownHull('Shields', state),
+      own_hull: ownHull('shields', state),
       shields_auto: state.stationRatings?.['shields'] === 'Backfill',
     });
   }
@@ -637,7 +647,7 @@ export function buildShieldsConsoleState(state) {
     target_bearing:     targetBearing,
     grid_status:        (state.shieldFacings && state.shieldFacings.length > 0)
                           ? 'GRID NOMINAL' : 'GRID OFFLINE',
-    own_hull: ownHull('Shields', state),
+    own_hull: ownHull('shields', state),
     shields_auto: state.stationRatings?.['shields'] === 'Backfill',
   });
 }
@@ -752,7 +762,7 @@ export function buildSensorsConsoleState(state) {
     target_shield_freq: targetShieldFreq,
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
-    own_hull: ownHull('Sensors', state),
+    own_hull: ownHull('sensors', state),
     sensors_auto: state.stationRatings?.['sensors'] === 'Backfill',
   });
 }
@@ -769,7 +779,7 @@ export function buildCommsConsoleState(state) {
       objectives: bb.objectives ?? [],
       contacts:   bb.contacts   ?? [],
       on_screen:  state.currentView === 'Comms',
-      own_hull:   ownHull('Comms', state),
+      own_hull:   ownHull('comms', state),
       comms_auto: state.stationRatings?.['comms'] === 'Backfill',
     });
   }
@@ -778,7 +788,7 @@ export function buildCommsConsoleState(state) {
     messages:  state.commsMessages || [],
     contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
-    own_hull:  ownHull('Comms', state),
+    own_hull:  ownHull('comms', state),
     comms_auto: state.stationRatings?.['comms'] === 'Backfill',
   });
 }
@@ -856,7 +866,7 @@ export function buildNavigationConsoleState(state) {
     ship_x:                  state.shipX || 0,
     ship_z:                  state.shipZ || 0,
     ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
-    own_hull: ownHull('Navigation', state),
+    own_hull: ownHull('navigation', state),
     ship_speed:              state.forwardSpeed || 0,
     impulse_charge_progress: charge,
     cancel_visible:          charge > 0,
@@ -871,17 +881,21 @@ export function buildNavigationConsoleState(state) {
 
 if (typeof window !== 'undefined') {
   window.buildConsoleState = function buildConsoleState(consoleName, state) {
+    // Post issue #618: `consoleName` is a lowercase station id (from each
+    // per-console iframe's `initConsole({ name: '...' })` and from
+    // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase
+    // Console enum names.
     switch (consoleName) {
-      case 'Tactical':     return buildWeaponsConsoleState(state);
-      case 'CaptainChair': return buildCaptainConsoleState(state);
-      case 'Helm':         return buildHelmConsoleState(state);
-      case 'Repair':       return buildRepairConsoleState(state);
-      case 'Power':        return buildPowerConsoleState(state);
-      case 'Shields':      return buildShieldsConsoleState(state);
-      case 'Sensors':      return buildSensorsConsoleState(state);
-      case 'Comms':        return buildCommsConsoleState(state);
-      case 'Navigation':   return buildNavigationConsoleState(state);
-      default:             return '{}';
+      case 'tactical':   return buildWeaponsConsoleState(state);
+      case 'captain':    return buildCaptainConsoleState(state);
+      case 'helm':       return buildHelmConsoleState(state);
+      case 'repair':     return buildRepairConsoleState(state);
+      case 'power':      return buildPowerConsoleState(state);
+      case 'shields':    return buildShieldsConsoleState(state);
+      case 'sensors':    return buildSensorsConsoleState(state);
+      case 'comms':      return buildCommsConsoleState(state);
+      case 'navigation': return buildNavigationConsoleState(state);
+      default:           return '{}';
     }
   };
 }

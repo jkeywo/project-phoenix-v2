@@ -132,9 +132,25 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
-  /** Dispatch a repair team to a console. */
+  /**
+   * Dispatch a repair team to a system on the ship.
+   *
+   * Post issue #618: sends via the `ControlSystem` envelope targeting the
+   * `repair` system. `a.target` is a lowercase station id (e.g. `'helm'`,
+   * `'power'`); the `'core'` bucket for ownerless ship-wide systems maps to
+   * `RepairTarget::Core` and is sent as `{ type: 'Core' }`.
+   */
   dispatch_repair_team: (a, send) => {
-    send('DispatchRepairTeam', { team_idx: a.team_idx, console: a.target });
+    const target = a.target === 'core'
+      ? { type: 'Core' }
+      : { type: 'Station', data: a.target };
+    send('ControlSystem', {
+      target: 'repair',
+      payload: {
+        type: 'DispatchRepairTeam',
+        data: { team_idx: a.team_idx, target },
+      },
+    });
   },
 
   /**

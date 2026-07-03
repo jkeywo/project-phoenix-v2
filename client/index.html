@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -9,10 +9,10 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>Project Phoenix — Console</title>
+  <title>Project Phoenix � Console</title>
   <!-- Keep rAF-driven UI (scheduleRender, radar sweeps, joystick decay in
        the console iframes) running at full rate even when this tab loses
-       focus — see gui/bg-raf-keepalive.js. Must load before any other
+       focus � see gui/bg-raf-keepalive.js. Must load before any other
        script calls requestAnimationFrame. -->
   <script src="gui/bg-raf-keepalive.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -42,7 +42,7 @@
   <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
   <style>
-    /* ── CSS variables (lobby + shared) ──────────────────────────────── */
+    /* -- CSS variables (lobby + shared) -------------------------------- */
     :root {
       --signal-cyan: #5fd8e8;
       --alert-red: #ff3344;
@@ -81,7 +81,7 @@
     }
     /* View selector cross and Red Alert button moved to Bevy WASM (#48). */
     /* Console container: full-screen flex layout host for the tab bar and
-        all console sections. Always column layout — tab bar at top,
+        all console sections. Always column layout � tab bar at top,
         console content below. */
     #console-container {
       position: fixed;
@@ -135,14 +135,14 @@
       border: none;
       display: block;
     }
-    /* ─── Phone bezel frame (issue #439) ────────────────────────────────────
+    /* --- Phone bezel frame (issue #439) ------------------------------------
        Eight fixed-position pieces (4 corners + 4 edges) overlay the canvas /
        weapons iframe and form the diegetic phone-console border. Corners are
        <img>; edges are <div> with a repeating background. Red alert toggles
        the `.alert-on` class on #phone-bezel which swaps every -alert variant
        via CSS (and JS re-sets the four <img> srcs via bezelSrc()).
 
-       z-index: 15 — above the weapons iframe (10) and canvas (0), below the
+       z-index: 15 � above the weapons iframe (10) and canvas (0), below the
        top-bar status overlay (20) and the loading spinner (200). The bezel
        is purely cosmetic; pointer-events: none lets clicks through. */
     :root { --bezel-inset: 22px; }
@@ -152,13 +152,13 @@
       z-index: 15;
       display: block;
     }
-    /* Hidden by default and during lobby — the lobby is borderless. render()
+    /* Hidden by default and during lobby � the lobby is borderless. render()
        flips aria-hidden to 'false' once state.phase is in-game. Using an
        attribute selector (not `style.display = ''`) so the stylesheet's
        default state actually applies. */
     #phone-bezel[aria-hidden="true"] { display: none; }
 
-    /* ── Coordination popup overlay (issue #494) ────────────────────── */
+    /* -- Coordination popup overlay (issue #494) ---------------------- */
     #coordination-popup {
       display: none;
       position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
@@ -191,7 +191,7 @@
       color: #a0b8c8;
     }
 
-    /* ── Asset loading overlay (shown during Loading phase) ────────── */
+    /* -- Asset loading overlay (shown during Loading phase) ---------- */
     #asset-loading {
       display: none;
       position: fixed; inset: 0; z-index: 200;
@@ -214,7 +214,7 @@
     }
     #asset-loading .pct { font-size: 1.4rem; font-weight: 600; }
 
-    /* ── Game-over overlay (shown when GamePhase::GameOver) ────────── */
+    /* -- Game-over overlay (shown when GamePhase::GameOver) ---------- */
     #game-over-overlay {
       display: none;
       position: fixed; inset: 0; z-index: 190;
@@ -278,7 +278,7 @@
     #phone-bezel.alert-on .bezel-edge.right  { background-image: url("gui/borders/phone-edge-right-alert.png"); }
 
     /* Iframe content sits inside the bezel safe zone.
-       No top padding — the container's padding-top + the tab bar already
+       No top padding � the container's padding-top + the tab bar already
        clear the top bezel edge. Side + bottom still needed for most consoles.
        Radar consoles (helm/weapons/sensors) get no padding so the iframe
        fills to the screen edge, letting the radar circle meet the bezel. */
@@ -291,12 +291,12 @@
     #shields-ui.active,
     #comms-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
 
-    /* ── Console tab bar (issue #441) ──────────────────────────────────
+    /* -- Console tab bar (issue #441) ----------------------------------
        First flex child of #console-container. In-flow so it takes up
        space and the console content below it is not obscured.
        pointer-events: auto so taps are received.
-       In landscape: single row — buttons left, console title right.
-       In portrait: wraps — buttons on first row, title on second row. */
+       In landscape: single row � buttons left, console title right.
+       In portrait: wraps � buttons on first row, title on second row. */
     #console-tab-bar {
       pointer-events: auto;
       display: flex;
@@ -309,7 +309,7 @@
       padding: 0.25rem clamp(50px, 20vw, 120px);
     }
     /* Visibility driven by aria-hidden, not inline style. renderTabBar()
-       toggles the attribute and the cascade does the rest — avoids the
+       toggles the attribute and the cascade does the rest � avoids the
        trap where `style.display = ''` removes the override and the
        stylesheet's `display: none` rule wins. */
     #console-tab-bar[aria-hidden="true"] { display: none; }
@@ -352,7 +352,7 @@
       border-color: var(--signal-cyan);
       color: var(--signal-cyan);
     }
-    /* Hull damage bar — slim strip at the bottom of damageable tab buttons. */
+    /* Hull damage bar � slim strip at the bottom of damageable tab buttons. */
     #console-tab-bar .tab-button {
       display: flex;
       flex-direction: column;
@@ -373,7 +373,7 @@
         rgba(255,255,255,0.12) var(--hull-pct, 100%)
       );
     }
-    /* Inline help area — shows help text for all owned consoles under the
+    /* Inline help area � shows help text for all owned consoles under the
        tab bar when compact mode hides non-selected console buttons. */
     #console-help-area {
       pointer-events: auto;
@@ -425,7 +425,7 @@
       #console-help-area .help-section-body { font-size: 0.8rem; }
     }
 
-    /* Console title label — appended to the tab bar by render() */
+    /* Console title label � appended to the tab bar by render() */
     #phase-title {
       font-family: 'Chakra Petch', monospace;
       font-size: 0.8rem;
@@ -456,7 +456,7 @@
       }
     }
 
-    /* ── Lobby section: full-viewport when active ──────────────────────── */
+    /* -- Lobby section: full-viewport when active ------------------------ */
     #lobby-ui.active {
       display: flex !important;
       flex-direction: column;
@@ -501,7 +501,7 @@
     /* Station list */
     #station-list { flex: 1; overflow-y: auto; padding: 8px 0; display: flex;
       flex-direction: column; gap: 6px; }
-    /* Tutorial text — replaces station list when player has a station */
+    /* Tutorial text � replaces station list when player has a station */
     #lobby-tutorial { flex: 1; overflow-y: auto; padding: 8px 0; display: none;
       flex-direction: column; gap: 12px; }
     #lobby-tutorial[aria-hidden="false"] { display: flex; }
@@ -606,7 +606,7 @@
 
   <!-- This is a pure-JS console (issue #463): no client-side WASM. The page
        and its assets are shipped to dist/client/ by scripts/build-client.mjs
-       (npm run build:client) — a plain file copy, NOT a Trunk build, because
+       (npm run build:client) � a plain file copy, NOT a Trunk build, because
        Trunk would implicitly compile the crate's default (server) lib into a
        WASM bundle and inject a loader even with no `rel="rust"` link.
        All client state lives in the gui/*.js modules loaded in <head>. -->
@@ -664,7 +664,7 @@
 
       <!-- Footer -->
       <div id="lobby-footer">
-        <span id="status-line">Connecting to host…</span>
+        <span id="status-line">Connecting to host�</span>
         <button id="ready-btn">READY</button>
       </div>
     </section>
@@ -725,7 +725,7 @@
     </section>
   </div>
 
-  <div id="status">Connecting…</div>
+  <div id="status">Connecting�</div>
 
   <!-- #phase-title lives outside the DOM flow; render() moves it into the tab bar each frame -->
   <span id="phase-title"></span>
@@ -733,7 +733,7 @@
   <div id="top-bar">
     <span id="conn-label"></span>
     <span id="conn-dot"></span>
-    <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+    <button id="fullscreen-btn" title="Toggle fullscreen">?</button>
   </div>
 
   <!-- Asset loading overlay: shown during GamePhase::Loading while the
@@ -772,7 +772,7 @@
   </div>
 
   <script>
-    // ── Click sound ────────────────────────────────────────────────────────
+    // -- Click sound --------------------------------------------------------
     // Message types that should NOT trigger a click (continuous / connection
     // setup messages that are not the result of a deliberate button press).
     const NO_CLICK = new Set(['HelmInput', 'Identify', 'SetName']);
@@ -784,7 +784,7 @@
       el.play().catch(() => {});
     }
 
-    // ── Phone bezel red-alert swap (issue #439) ───────────────────────────
+    // -- Phone bezel red-alert swap (issue #439) ---------------------------
     // Drives the .alert-on class on #phone-bezel (which CSS uses to swap
     // edge background-images) and re-sets the <img> src for each corner via
     // the bezelSrc() pure function exported by gui/phone-bezel.js.
@@ -807,24 +807,24 @@
       }
     }
 
-    // ── Connection status ──────────────────────────────────────────────────
+    // -- Connection status --------------------------------------------------
 
     function setConnectionStatus(state) {
       const dot = document.getElementById('conn-dot');
       const label = document.getElementById('conn-label');
       if (state === 'disconnected') {
         dot.style.background = '#f44';
-        label.textContent = 'Disconnected — reconnecting…';
+        label.textContent = 'Disconnected � reconnecting�';
       } else if (state === 'error') {
         dot.style.background = '#f44';
-        label.textContent = 'Error — refresh to retry';
+        label.textContent = 'Error � refresh to retry';
       } else {
         dot.style.background = '#4c4';
         label.textContent = '';
       }
     }
 
-    // ── Screen Wake Lock (keep screen on when active) ─────────────────
+    // -- Screen Wake Lock (keep screen on when active) -----------------
     let wakeLockSentinel = null;
 
     async function acquireWakeLock() {
@@ -843,11 +843,11 @@
       if (document.visibilityState === 'visible') acquireWakeLock();
     });
 
-    // ── Fullscreen controller ──────────────────────────────────────────────
+    // -- Fullscreen controller ----------------------------------------------
 
     (function initFullscreen() {
       const btn = document.getElementById('fullscreen-btn');
-      function syncIcon() { btn.textContent = document.fullscreenElement ? '✕' : '⛶'; }
+      function syncIcon() { btn.textContent = document.fullscreenElement ? '?' : '?'; }
       btn.addEventListener('click', () => {
         const p = document.fullscreenElement
           ? document.exitFullscreen()
@@ -859,7 +859,7 @@
 
     setConnectionStatus('connecting');
 
-    // ── Persistence ─────────────────────────────────────────────
+    // -- Persistence ---------------------------------------------
 
     const NAMES = ['Vega', 'Altair', 'Rigel', 'Deneb', 'Sirius', 'Nova', 'Quasar', 'Nebula', 'Pulsar', 'Proxima'];
 
@@ -868,7 +868,7 @@
     }
 
     // Session identity is resolved per-tab by gui/session-token.js
-    // (installSessionToken) just before we Identify — see the connection block
+    // (installSessionToken) just before we Identify � see the connection block
     // below. It is not resolved here because that module is deferred and has
     // not executed yet at parse time. Resolving per-tab (sessionStorage) rather
     // than per-origin (localStorage) is what lets several console tabs run on
@@ -878,11 +878,11 @@
     // Display name is per-tab (sessionStorage), not per-origin (localStorage):
     // several clients on one desktop must not all default to the same name, or
     // they look like one another in the lobby. Falls back to a fresh random
-    // name per tab. (Identity is the token, not the name — see myToken.)
+    // name per tab. (Identity is the token, not the name � see myToken.)
     let myName = sessionStorage.getItem('player-name') || randomName();
     sessionStorage.setItem('player-name', myName);
 
-    // ── State ───────────────────────────────────────────────────
+    // -- State ---------------------------------------------------
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
       shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, boostEnabled: false, boostBattery: 0, boostActive: false, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
@@ -923,7 +923,7 @@
     // Single source of truth for changing the active console. Called by
     // the render() reconciler, the tab-bar onPress handler, and the swipe
     // gesture. No-op if the value is already current. Delegates the
-    // null/undefined/"" → next sentinel mapping to gui/active-console.js so
+    // null/undefined/"" ? next sentinel mapping to gui/active-console.js so
     // the contract is locked by Vitest.
     function setActiveConsole(name) {
       const step = (typeof window.nextActiveConsole === 'function')
@@ -933,48 +933,40 @@
       activeConsole = step.next;
     }
 
-    // ── Helpers ─────────────────────────────────────────────────
+    // -- Helpers -------------------------------------------------
 
     const $ = id => document.getElementById(id);
 
     function me(s) { return s.players.find(p => p.token === myToken); }
-    function myConsoles(s) {
+    function playerStation(s) {
       const m = me(s);
-      return m ? consolesOf(m, s.shipStations) : [];
+      if (!m) return null;
+      return typeof m.station === 'string' ? m.station
+        : (m.station && typeof m.station.id === 'string' ? m.station.id : null);
+    }
+    function myConsoles(s) {
+      // Post issue #619 a player owns exactly one station id (or none).
+      // Callers that historically wanted a "consoles" list (for the tab bar)
+      // treat this as a one-element list.
+      const sid = playerStation(s);
+      return sid ? [sid] : [];
     }
 
     /// True while the lobby/station-select panel is being shown over an
     /// in-progress game: true spectators, and mid-game claimants who have
     /// picked a station but not yet pressed Ready. Single source of truth for
     /// render()'s vis.lobby override and the SimState/BlackboardUpdate
-    /// render guards below — those messages arrive at ~10Hz and must skip the
+    /// render guards below � those messages arrive at ~10Hz and must skip the
     /// lobby DOM rebuild in this state, or a click on Ready/Leave can land
     /// between the old button being torn down and the new one's listener
     /// being attached.
     function showingLobbyDuringGame(s) {
       if (s.phase !== 'InProgress') return false;
       const player = me(s);
-      return pendingMidGameClaim || !myConsoles(s).length || !!(player && !player.ready);
+      return pendingMidGameClaim || !playerStation(s) || !!(player && !player.ready);
     }
-    function hasConsole(s, c) { return myConsoles(s).includes(c); }
-    function isCaptain(s)     { return hasConsole(s, 'CaptainChair'); }
-    function isHelm(s)        { return hasConsole(s, 'Helm'); }
-
-    /// Returns the consoles list for any player, normalising old single-console
-    /// fields and deriving current wire payloads from Player.station.
-    function consolesOf(p, shipStations) {
-      const stationId = typeof p.station === 'string'
-        ? p.station
-        : (p.station && p.station.id) || null;
-      if (stationId) {
-        const station = (((shipStations || state.shipStations) || {}).stations || [])
-          .find(s => s.id === stationId || s.name === stationId);
-        if (station && Array.isArray(station.consoles)) return station.consoles;
-      }
-      if (Array.isArray(p.consoles)) return p.consoles;
-      if (p.console) return [p.console];
-      return [];
-    }
+    function isCaptain(s)     { return playerStation(s) === 'captain'; }
+    function isHelm(s)        { return playerStation(s) === 'helm'; }
 
     function send(type, data) {
       if (!conn || !conn.open) return;
@@ -989,20 +981,20 @@
 
     function setStatus(text) { $('status').textContent = text; }
 
-    // ── Rendering ───────────────────────────────────────────────
+    // -- Rendering -----------------------------------------------
 
-    const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Sensors', 'Shields', 'Navigation', 'Power', 'Comms'];
+    const CONSOLES = ['captain', 'helm', 'tactical', 'repair', 'sensors', 'shields', 'navigation', 'power', 'comms'];
 
-    // Console display name → human label. Reads the single source from
+    // Console display name ? human label. Reads the single source from
     // gui/tab-bar.js (window.CONSOLE_LABEL, frozen). Falls back to the
     // raw console name when the module hasn't loaded yet so the first
-    // paint never blanks out — same race-safety pattern as render()
+    // paint never blanks out � same race-safety pattern as render()
     // uses for sectionVisibility / consoleSections / tabBarLayout.
     function consoleLabel(name) {
       return (window.CONSOLE_LABEL && window.CONSOLE_LABEL[name]) || name;
     }
 
-    // Persistent reference to the console title label — moved into the tab
+    // Persistent reference to the console title label � moved into the tab
     // bar on each render() so it survives renderTabBar's innerHTML clear.
     const _consoleTitleEl = document.getElementById('phase-title');
 
@@ -1020,9 +1012,9 @@
     window.scheduleRender = scheduleRender;
 
     function render(s) {
-      // Phase → section visibility (pure JS module, gui/phase-toggle.js).
+      // Phase ? section visibility (pure JS module, gui/phase-toggle.js).
       // Falls back to a local check if the module hasn't loaded yet so the
-      // first paint isn't blank — module load races init on slow networks.
+      // first paint isn't blank � module load races init on slow networks.
       const vis = (typeof window.sectionVisibility === 'function')
         ? window.sectionVisibility(s.phase)
         : { lobby: s.phase !== 'InProgress' && s.phase !== 'GameOver',
@@ -1037,14 +1029,14 @@
       }
       const inGame = vis.game;
       $('lobby-ui').className = vis.lobby ? 'active' : '';
-      // Phone bezel (issue #439) is part of the game shell only — the lobby
+      // Phone bezel (issue #439) is part of the game shell only � the lobby
       // is borderless. Toggle visibility via aria-hidden so the CSS
       // [aria-hidden="true"] { display: none } rule drives the cascade.
       const bezel = $('phone-bezel');
       if (bezel) bezel.setAttribute('aria-hidden', vis.bezel ? 'false' : 'true');
 
       // Reconcile activeConsole with current consoles list (port of the
-      // deleted Bevy reconcile_active_console — see gui/lobby-state.js).
+      // deleted Bevy reconcile_active_console � see gui/lobby-state.js).
       if (inGame) {
         const next = (typeof window.reconcileActiveConsole === 'function')
           ? window.reconcileActiveConsole(activeConsole, mine)
@@ -1054,21 +1046,21 @@
         setActiveConsole(null);
       }
 
-      // Console sections (issue #441): map activeConsole → HTML section id
+      // Console sections (issue #441): map activeConsole ? HTML section id
       // via gui/content-switcher.js. Only the matching section gets `.active`.
       // Every console (including Helm and Navigation) is an HTML iframe with
       // its own section entry like weapons-ui.
       const sections = (typeof window.consoleSections === 'function')
         ? window.consoleSections(activeConsole, inGame)
-        : { 'captain-ui': inGame && activeConsole === 'CaptainChair',
-            'helm-ui':   inGame && activeConsole === 'Helm',
-            'weapons-ui': inGame && activeConsole === 'Tactical',
-            'repair-ui': inGame && activeConsole === 'Repair',
-            'power-ui':  inGame && activeConsole === 'Power',
-            'shields-ui': inGame && activeConsole === 'Shields',
-            'sensors-ui': inGame && activeConsole === 'Sensors',
-             'comms-ui':  inGame && activeConsole === 'Comms',
-             'navigation-ui': inGame && activeConsole === 'Navigation' };
+        : { 'captain-ui': inGame && activeConsole === 'captain',
+            'helm-ui':   inGame && activeConsole === 'helm',
+            'weapons-ui': inGame && activeConsole === 'tactical',
+            'repair-ui': inGame && activeConsole === 'repair',
+            'power-ui':  inGame && activeConsole === 'power',
+            'shields-ui': inGame && activeConsole === 'shields',
+            'sensors-ui': inGame && activeConsole === 'sensors',
+             'comms-ui':  inGame && activeConsole === 'comms',
+             'navigation-ui': inGame && activeConsole === 'navigation' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
@@ -1108,7 +1100,7 @@
           scheduleRender();
         }});
         // Append title into the bar so it sits inline (landscape) or wraps
-        // below the buttons (portrait) — CSS handles the two layouts.
+        // below the buttons (portrait) � CSS handles the two layouts.
         if (inGame) tabRoot.appendChild(titleEl);
       }
 
@@ -1193,10 +1185,12 @@
           rankEl.textContent = st.rank;
           meta.appendChild(rankEl);
         }
-        for (const c of (st.consoles || [])) {
+        // Post issue #619 a station carries a single (lowercase) id — the
+        // station itself is the "console" for chip-rendering purposes.
+        if (st.id) {
           const chip = document.createElement('span');
           chip.className = 'cons';
-          chip.textContent = consoleLabel(c);
+          chip.textContent = consoleLabel(st.id);
           meta.appendChild(chip);
         }
         info.appendChild(meta);
@@ -1257,8 +1251,8 @@
           detailHeader.appendChild(releaseBtn);
           const consolesArea = detail.querySelector('.detail-consoles');
           consolesArea.innerHTML = '';
-          const stationConsoles = myStation.consoles || [];
-          // Auto-select when there is only one console
+          // Post issue #619: one station == one console. Auto-select it.
+          const stationConsoles = myStation.id ? [myStation.id] : [];
           if (stationConsoles.length === 1 && lobbyConsole !== stationConsoles[0]) {
             lobbyConsole = stationConsoles[0];
           }
@@ -1300,7 +1294,7 @@
           readyBtn.style.display = 'block';
           const isReady = !!myPlayer.ready;
           if (isReady) {
-            readyBtn.textContent = '✔ READY';
+            readyBtn.textContent = '? READY';
             readyBtn.className = 'armed glow';
             readyBtn.disabled = false;
             readyBtn.onclick = () => send('SetReady', { ready: false });
@@ -1323,11 +1317,11 @@
         } else if (!lobbyConsole) {
           statusLine.textContent = 'Select a console at ' + myStation.name + ' to continue';
         } else if (s.allReady) {
-          statusLine.textContent = 'All crew ready — launching!';
+          statusLine.textContent = 'All crew ready � launching!';
         } else if (myPlayer.ready) {
-          statusLine.textContent = 'Waiting for the rest of the crew…';
+          statusLine.textContent = 'Waiting for the rest of the crew�';
         } else {
-          statusLine.textContent = 'Standing by at ' + myStation.name + ' — press READY when ready';
+          statusLine.textContent = 'Standing by at ' + myStation.name + ' � press READY when ready';
         }
       }
     }
@@ -1336,15 +1330,18 @@
       const defs = (state.shipStations && state.shipStations.stations) || [];
       state.maxPlayers = defs.length;
       state.stations = defs.map(def => {
-        const defConsoles = def.consoles || [];
-        const holder = state.players.find(p =>
-          p.connected && consolesOf(p, state.shipStations).some(c => defConsoles.includes(c))
-        );
+        // Post issue #619 a player holds a lowercase station id directly.
+        const holder = state.players.find(p => {
+          if (!p.connected) return false;
+          const held = typeof p.station === 'string' ? p.station
+            : (p.station && typeof p.station.id === 'string' ? p.station.id : null);
+          return held === def.id;
+        });
         return {
+          id: def.id,
           name: def.name || '',
           short_code: def.short_code || '',
           rank: def.rank || '',
-          consoles: defConsoles,
           holder_name: holder ? holder.name : null,
           holder_token: holder ? holder.token : null,
         };
@@ -1365,7 +1362,7 @@
     // HTML ids that were never added (orphaned Bevy-era remnants) and were
     // removed here; the iframe supersedes them.
 
-    // ── iframe state-push helper (wraps gui/iframe-bridge.js) ────────────────
+    // -- iframe state-push helper (wraps gui/iframe-bridge.js) ----------------
     // Delegates to window.iframeBridgePush when the module is loaded; falls back
     // to the same inline logic for the rare race where the module hasn't run yet.
     function _pushIframe(iframeEl, consoleName, stateJson) {
@@ -1380,154 +1377,154 @@
       } catch (_) {}
     }
 
-    // ── Weapons console iframe bridge (issue #422) ──────────────────────────
+    // -- Weapons console iframe bridge (issue #422) --------------------------
     // Builds a WeaponsConsoleState JSON from client state and pushes it to the
     // gui/weapons-console.html iframe via its window.__updateConsole function.
     // The iframe's __sendAction postMessages back; we forward those to the server.
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildWeaponsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Tactical', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('tactical', state);
       return JSON.stringify({ target_uuid: null, target_name: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto', blips: [], phaser_arcs: [], torpedo_arcs: [] });
     }
 
     function pushWeaponsConsoleState() {
-      if (activeConsole !== 'Tactical') return;
-      _pushIframe($('weapons-iframe'), 'Tactical', buildWeaponsConsoleState());
+      if (activeConsole !== 'tactical') return;
+      _pushIframe($('weapons-iframe'), 'tactical', buildWeaponsConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
     if ($('weapons-iframe')) $('weapons-iframe').addEventListener('load', () => { pushWeaponsConsoleState(); injectSwipeRelay($('weapons-iframe')); });
 
     function renderGame(s) {
-      if (activeConsole === 'CaptainChair') {
+      if (activeConsole === 'captain') {
         pushCaptainConsoleState();
       }
-      if (activeConsole === 'Helm') {
+      if (activeConsole === 'helm') {
         pushHelmConsoleState();
       }
-      if (activeConsole === 'Repair') {
+      if (activeConsole === 'repair') {
         pushRepairConsoleState();
       }
-      if (activeConsole === 'Power') {
+      if (activeConsole === 'power') {
         pushPowerConsoleState();
       }
-      if (activeConsole === 'Shields') {
+      if (activeConsole === 'shields') {
         pushShieldsConsoleState();
       }
-      if (activeConsole === 'Sensors') {
+      if (activeConsole === 'sensors') {
         pushSensorsConsoleState();
       }
-      if (activeConsole === 'Comms') {
+      if (activeConsole === 'comms') {
         pushCommsConsoleState();
       }
-      if (activeConsole === 'Navigation') {
+      if (activeConsole === 'navigation') {
         pushNavigationConsoleState();
       }
     }
 
-    // ── Captain console iframe bridge (issue #428) ───────────────────────────
+    // -- Captain console iframe bridge (issue #428) ---------------------------
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildCaptainConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('CaptainChair', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('captain', state);
       return JSON.stringify({ red_alert: false, view_direction: 'Fore', view_mode: 'Camera', objectives: [], hull_integrity_pct: 100, game_status: '', blips: [] });
     }
 
     function pushCaptainConsoleState() {
-      _pushIframe($('captain-iframe'), 'CaptainChair', buildCaptainConsoleState());
+      _pushIframe($('captain-iframe'), 'captain', buildCaptainConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
     if ($('captain-iframe')) $('captain-iframe').addEventListener('load', () => { pushCaptainConsoleState(); injectSwipeRelay($('captain-iframe')); });
 
-    // ── Helm console iframe bridge (issue #423) ──────────────────────────────
+    // -- Helm console iframe bridge (issue #423) ------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildHelmConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Helm', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('helm', state);
       return JSON.stringify({ heading: 0, speed: 0, x: 0, z: 0, yaw: 0, impulse_charge_progress: 0, on_screen: false, lock_id: null, blips: [] });
     }
 
     function pushHelmConsoleState() {
-      if (activeConsole !== 'Helm') return;
-      _pushIframe($('helm-iframe'), 'Helm', buildHelmConsoleState());
+      if (activeConsole !== 'helm') return;
+      _pushIframe($('helm-iframe'), 'helm', buildHelmConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
     if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState(); injectSwipeRelay($('helm-iframe')); });
 
-    // ── Repair console iframe bridge (issue #425) ────────────────────────────
+    // -- Repair console iframe bridge (issue #425) ----------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildRepairConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Repair', state);
-      return JSON.stringify({ teams: [], console_hull: [], travel_duration_secs: 5.0, damageable_consoles: [] });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('repair', state);
+      return JSON.stringify({ teams: [], system_hull: [], damageable_systems: [], travel_duration_secs: 5.0 });
     }
 
     function pushRepairConsoleState() {
-      if (activeConsole !== 'Repair') return;
-      _pushIframe($('repair-iframe'), 'Repair', buildRepairConsoleState());
+      if (activeConsole !== 'repair') return;
+      _pushIframe($('repair-iframe'), 'repair', buildRepairConsoleState());
     }
 
     if ($('repair-iframe')) $('repair-iframe').addEventListener('load', () => { pushRepairConsoleState(); injectSwipeRelay($('repair-iframe')); });
 
-    // ── Power console iframe bridge (issue #425) ─────────────────────────────
+    // -- Power console iframe bridge (issue #425) -----------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildPowerConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Power', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('power', state);
       return JSON.stringify({ helm: 0, weapons: 0, sensors: 0, battery_charge: 0, locked: false });
     }
 
     function pushPowerConsoleState() {
-      if (activeConsole !== 'Power') return;
-      _pushIframe($('power-iframe'), 'Power', buildPowerConsoleState());
+      if (activeConsole !== 'power') return;
+      _pushIframe($('power-iframe'), 'power', buildPowerConsoleState());
     }
 
     if ($('power-iframe')) $('power-iframe').addEventListener('load', () => { pushPowerConsoleState(); injectSwipeRelay($('power-iframe')); });
 
-    // ── Shields console iframe bridge (issue #423) ───────────────────────────
+    // -- Shields console iframe bridge (issue #423) ---------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildShieldsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Shields', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('shields', state);
       return JSON.stringify({ facings: [], hull_integrity_pct: 100, focused_facing: null, target_bearing: null, grid_status: 'GRID OFFLINE' });
     }
 
     function pushShieldsConsoleState() {
-      if (activeConsole !== 'Shields') return;
-      _pushIframe($('shields-iframe'), 'Shields', buildShieldsConsoleState());
+      if (activeConsole !== 'shields') return;
+      _pushIframe($('shields-iframe'), 'shields', buildShieldsConsoleState());
     }
 
     if ($('shields-iframe')) $('shields-iframe').addEventListener('load', () => { pushShieldsConsoleState(); injectSwipeRelay($('shields-iframe')); });
 
-    // ── Sensors console iframe bridge ─────────────────────────────────────────
+    // -- Sensors console iframe bridge -----------------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildSensorsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Sensors', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('sensors', state);
       return JSON.stringify({ scan_range: 2000, complexity: 'full', impulse_charge_progress: 0, regions: [], blips: [], target_uuid: null, target_name: null, target_kind: null, target_stance: null, target_faction: null, target_bearing: null, target_range: null, target_class: null, target_hull_pct: null, target_heading: null, target_speed: null, target_threat: null, target_shield_freq: null, target_shields: [] });
     }
 
     function pushSensorsConsoleState() {
-      if (activeConsole !== 'Sensors') return;
-      _pushIframe($('sensors-iframe'), 'Sensors', buildSensorsConsoleState());
+      if (activeConsole !== 'sensors') return;
+      _pushIframe($('sensors-iframe'), 'sensors', buildSensorsConsoleState());
     }
 
     if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); injectSwipeRelay($('sensors-iframe')); });
 
-    // ── Comms console iframe bridge ────────────────────────────────────────────
+    // -- Comms console iframe bridge --------------------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildCommsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Comms', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('comms', state);
       return JSON.stringify({ messages: [], contacts: [] });
     }
 
     function pushCommsConsoleState() {
-      if (activeConsole !== 'Comms') return;
-      _pushIframe($('comms-iframe'), 'Comms', buildCommsConsoleState());
+      if (activeConsole !== 'comms') return;
+      _pushIframe($('comms-iframe'), 'comms', buildCommsConsoleState());
     }
 
     if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); injectSwipeRelay($('comms-iframe')); });
 
-    // ── Coordination popup (issue #494) ───────────────────────────────────────
+    // -- Coordination popup (issue #494) ---------------------------------------
     let coordinationPopupTimer = null;
     function showCoordinationPopup(payload, sender_label) {
       const el = document.getElementById('coordination-popup');
@@ -1538,7 +1535,7 @@
       if (!senderEl || !titleEl || !bodyEl) return;
       const label = sender_label || 'AI';
       if (payload.target) {
-        senderEl.textContent = label + ' → ' + payload.target;
+        senderEl.textContent = label + ' ? ' + payload.target;
       } else {
         senderEl.textContent = label;
       }
@@ -1581,21 +1578,21 @@
       }
     }
 
-    // ── Navigation console iframe bridge (issue #458) ─────────────────────────
+    // -- Navigation console iframe bridge (issue #458) -------------------------
     // State builder extracted to gui/console-state.js.
     function buildNavigationConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Navigation', state);
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('navigation', state);
       return JSON.stringify({ blips: [], ship_x: 0, ship_z: 0, impulse_charge_progress: 0, cancel_visible: false, on_screen: false, radar_range: 5000 });
     }
 
     function pushNavigationConsoleState() {
-      if (activeConsole !== 'Navigation') return;
-      _pushIframe($('navigation-iframe'), 'Navigation', buildNavigationConsoleState());
+      if (activeConsole !== 'navigation') return;
+      _pushIframe($('navigation-iframe'), 'navigation', buildNavigationConsoleState());
     }
 
     if ($('navigation-iframe')) $('navigation-iframe').addEventListener('load', () => { pushNavigationConsoleState(); injectSwipeRelay($('navigation-iframe')); });
 
-    // ── Console action postMessage bridge (issue #422) ────────────────────────
+    // -- Console action postMessage bridge (issue #422) ------------------------
     // All iframe consoles send {type:'console_action', payload:json} via
     // postMessage.  Dispatch is table-driven via gui/action-map.js (issue #455).
     window.addEventListener('message', (event) => {
@@ -1609,7 +1606,7 @@
       }
       // Fallback for the rare race window before module scripts load.
       // Only covers set_sensors_target (mutates local state); other actions
-      // are silently deferred (non-critical — they arrive after module load).
+      // are silently deferred (non-critical � they arrive after module load).
       if (action.action === 'set_sensors_target' && action.uuid) {
         state.sensorsTarget = action.uuid;
         send('SetScienceTarget', { uuid: action.uuid });
@@ -1622,7 +1619,7 @@
       }
     });
 
-    // ── Event wiring ────────────────────────────────────────────
+    // -- Event wiring --------------------------------------------
 
     $('name-input').value = myName;
 
@@ -1640,14 +1637,14 @@
 
     // Engage button, view selector, Red Alert button, and helm joystick all
     // live in the per-console iframe pages (gui/*-console.html); the old
-    // Bevy WASM client console UIs (#47–#49) were retired with the pure-JS
+    // Bevy WASM client console UIs (#47�#49) were retired with the pure-JS
     // client migration.
 
-    // Orientation watching (resize + orientationchange → recompute the
+    // Orientation watching (resize + orientationchange ? recompute the
     // singleton and rerender so the tab bar flips) lives in
     // gui/device-orientation.js, which owns window.currentOrientation().
 
-    // ── Swipe to switch console tabs (when 2+ consoles assigned) ───────
+    // -- Swipe to switch console tabs (when 2+ consoles assigned) -------
     (function initSwipe() {
       const root = document.body;
       let startX = 0, startY = 0, startT = 0, swiping = false, swipeCommitted = false;
@@ -1696,14 +1693,14 @@
         const next = (dx < 0)
           ? (idx - 1 + mine.length) % mine.length
           : (idx + 1) % mine.length;
-        // setActiveConsole() is the single source of truth — also called by
+        // setActiveConsole() is the single source of truth � also called by
         // the tab-bar onPress handler (issue #441) and the render() reconciler.
         setActiveConsole(mine[next]);
         scheduleRender();
       }, { passive: true });
     })();
 
-    // ── Swipe relay for console iframes ──────────────────────────
+    // -- Swipe relay for console iframes --------------------------
     // Console UIs run in iframes; touch events inside them don't reach the
     // body-level listeners above. After each iframe loads we inject a tiny
     // detector that posts SwipeConsole messages back to this window.
@@ -1753,10 +1750,10 @@
       scheduleRender();
     });
 
-    // ── Incoming message handler ────────────────────────────────
+    // -- Incoming message handler --------------------------------
 
     function handleMessage(msg) {
-      // JS state modules (issue #460) — every inbound ServerMessage is applied
+      // JS state modules (issue #460) � every inbound ServerMessage is applied
       // to the pure state modules first; they are the source of truth that the
       // inline `state` object mirrors below. Guards cover the brief window
       // before the module scripts have executed.
@@ -1774,10 +1771,7 @@
           } else {
             state.phase   = msg.data.state.phase;
             state.shipStations = msg.data.ship_stations || { stations: [] };
-            state.players = msg.data.state.players.map(p => ({
-              ...p,
-              consoles: consolesOf(p, state.shipStations),
-            }));
+            state.players = msg.data.state.players.map(p => ({ ...p }));
           }
           if (window.simState) {
             // Share the module's entity array so in-place SimState position
@@ -1794,7 +1788,7 @@
             state.tacticalRadarSelects = window.simState.tacticalRadarSelects;
             state.sensorsRadarShows    = window.simState.sensorsRadarShows;
             state.sensorsRadarSelects  = window.simState.sensorsRadarSelects;
-            // Navigation chart filter inputs — the Navigation builder has a
+            // Navigation chart filter inputs � the Navigation builder has a
             // two-stage filter (outer entity filter on `navChartShows`, then
             // the inner `buildBlips` filter), so omitting these silently
             // drops every non-objective entity from the nav chart.
@@ -1806,7 +1800,7 @@
             state.navigationWaypoint = window.simState.navigationWaypoint;
             state.controlSources = window.simState.controlSources || {};
             state.stationRatings = window.simState.stationRatings || {};
-            // Live blackboard reference — simState.blackboards is mutated in-place
+            // Live blackboard reference � simState.blackboards is mutated in-place
             // each tick so this reference assignment keeps state.blackboards current.
             state.blackboards = window.simState.blackboards;
             // Push the pre-seeded repair teams so the Repair console renders its
@@ -1830,8 +1824,8 @@
           } else {
             const p = msg.data.player;
             const existing = state.players.findIndex(x => x.token === p.token);
-            if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p, state.shipStations) };
-            else state.players.push({ ...p, consoles: consolesOf(p, state.shipStations) });
+            if (existing >= 0) state.players[existing] = { ...p };
+            else state.players.push({ ...p });
           }
           rebuildStations();
           break;
@@ -1845,25 +1839,27 @@
           rebuildStations();
           break;
         case 'StationAssigned': {
-          if (msg.data.token === myToken && !(msg.data.consoles || []).length) {
+          const stationId = msg.data.station_id
+            ? (typeof msg.data.station_id === 'string' ? msg.data.station_id : msg.data.station_id.id)
+            : null;
+          if (msg.data.token === myToken && !stationId) {
             pendingMidGameClaim = false;
           }
           if (window.lobbyState) {
             state.players = window.lobbyState.players;
           } else {
-            const { token, station, station_id, consoles } = msg.data;
-            // Clear these consoles from any other player who held them.
-            for (const c of (consoles || [])) {
+            const { token, station } = msg.data;
+            // A station is held by at most one player — clear any other holder first.
+            if (stationId) {
               for (const p of state.players) {
-                if (p.token !== token) {
-                  p.consoles = consolesOf(p, state.shipStations).filter(x => x !== c);
+                if (p.token !== token && (typeof p.station === 'string' ? p.station : (p.station && p.station.id)) === stationId) {
+                  p.station = null;
                 }
               }
             }
             const target = state.players.find(p => p.token === token);
             if (target) {
-              target.consoles = consoles || [];
-              target.station = station_id || station || null;
+              target.station = stationId || station || null;
             }
           }
           rebuildStations();
@@ -1909,7 +1905,7 @@
           }
           // Refresh every radar-bearing console each tick. The tactical radar
           // blips are built client-side from ship_x/z/yaw + the entity array
-          // (same as sensors), so the weapons console must be pushed here too —
+          // (same as sensors), so the weapons console must be pushed here too �
           // otherwise it only refreshes on the sparse WeaponsUpdate/TargetLock
           // events and the radar appears to crawl at ~1 Hz while sensors is
           // smooth at the 10 Hz SimState cadence.
@@ -1918,7 +1914,7 @@
           pushSensorsConsoleState();
           pushNavigationConsoleState();
           // Don't re-render the full lobby at 10Hz when spectating or when a
-          // mid-game station claim is still pending Ready — it destroys CSS
+          // mid-game station claim is still pending Ready � it destroys CSS
           // hover state and tears down the Ready/Leave button listeners.
           // The push calls are no-ops when no game console is active.
           if (showingLobbyDuringGame(state)) return;
@@ -2000,7 +1996,7 @@
             pushCaptainConsoleState();
             // Helm/Sensors/Comms/Navigation each derive their own "on screen"
             // button state from state.currentView, so a view-mode change must
-            // refresh all of them too, not just the captain console — otherwise
+            // refresh all of them too, not just the captain console � otherwise
             // the button that requested the view change never reflects the
             // toggle (see #on-screen-btn on Helm).
             pushHelmConsoleState();
@@ -2020,7 +2016,7 @@
           if (updatedSystems.has('comms'))      pushCommsConsoleState();
           if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
           // Same guard as SimState: don't re-render the lobby at 10 Hz while
-          // spectating or mid-game-claim-pending — it rebuilds the station
+          // spectating or mid-game-claim-pending � it rebuilds the station
           // list every frame, destroying button listeners before a click can
           // register.
           if (showingLobbyDuringGame(state)) return;
@@ -2065,7 +2061,7 @@
           pushWeaponsConsoleState();
           break;
         }
-        case 'ConsoleHullUpdate': {
+        case 'SystemHullUpdate': {
           state.consoleHull = window.simState
             ? window.simState.consoleHull
             : (msg.data.entries || []);
@@ -2144,7 +2140,7 @@
           const { hull } = msg.data;
           if (hull > 0) {
             const clamped = Math.min(hull, 30);
-            const duration = Math.round(50 + (clamped / 30) * 250); // 50–300 ms
+            const duration = Math.round(50 + (clamped / 30) * 250); // 50�300 ms
             if (navigator.vibrate) navigator.vibrate(duration);
           }
           return;
@@ -2199,12 +2195,12 @@
         case 'ObjectiveSummary':
           break; // fall through to scheduleRender
         default:
-          return; // unknown — skip re-render
+          return; // unknown � skip re-render
       }
       scheduleRender();
     }
 
-    // ── PeerJS connection ───────────────────────────────────────
+    // -- PeerJS connection ---------------------------------------
 
     const hostPeerId = location.hash.slice(1);
 
@@ -2224,12 +2220,12 @@
             const r = await fetch('https://phoenix-turn-credentials.project-phoenix.workers.dev');
             if (r.ok) {
               const extra = await r.json();
-              console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
+              console.log(`[ICE] Metered.ca returned ${extra.length} server(s) � appending to base list`);
               return [...base, ...extra];
             }
-            console.warn('[ICE] Metered.ca fetch returned', r.status, '— using OpenRelay only');
+            console.warn('[ICE] Metered.ca fetch returned', r.status, '� using OpenRelay only');
           } catch (e) {
-            console.warn('[ICE] Metered.ca fetch failed (placeholder or network error) — using OpenRelay only:', e.message);
+            console.warn('[ICE] Metered.ca fetch failed (placeholder or network error) � using OpenRelay only:', e.message);
           }
           return base;
         }
@@ -2238,7 +2234,7 @@
         // The IIFE runs during HTML parsing; <script type="module"> tags are
         // deferred and only execute after parsing completes. If getIceServers()
         // fails fast (Cloudflare blocked, offline), it resolves as a microtask
-        // that fires BEFORE deferred modules run as tasks — leaving
+        // that fires BEFORE deferred modules run as tasks � leaving
         // window.lobbyState and window.installSessionToken undefined. That
         // causes Welcome to use the inline fallback while lobbyState stays empty,
         // and StationAssigned then overwrites state.players with that empty list,
@@ -2268,46 +2264,46 @@
               }
               return t;
             })();
-        console.log(`[client] session token ${myToken.slice(0, 8)}…`);
+        console.log(`[client] session token ${myToken.slice(0, 8)}�`);
 
-        console.log('[PeerJS] fetching ICE servers…');
+        console.log('[PeerJS] fetching ICE servers�');
         const iceServers = await getIceServers();
         console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
         console.log(`[PeerJS] connecting to host peer ID: ${hostPeerId}`);
         const clientPeer = new Peer({ config: { iceServers } });
 
         clientPeer.on('open', () => {
-          console.log('[PeerJS] client peer open — starting DataChannel connect');
+          console.log('[PeerJS] client peer open � starting DataChannel connect');
           let connectTimeout;
           let connectAttempts = 0;
 
           function startConnect() {
-            console.log(`[PeerJS] connect attempt ${connectAttempts + 1}…`);
-            setStatus('Connecting to host…');
+            console.log(`[PeerJS] connect attempt ${connectAttempts + 1}�`);
+            setStatus('Connecting to host�');
             conn = clientPeer.connect(hostPeerId, { reliable: true });
 
             // Hook ICE state immediately so we see gathering/checking/connected
             const pc = conn.peerConnection;
             if (pc) {
               pc.addEventListener('iceconnectionstatechange', () =>
-                console.log(`[ICE] state → ${pc.iceConnectionState}`));
+                console.log(`[ICE] state ? ${pc.iceConnectionState}`));
               pc.addEventListener('icegatheringstatechange', () =>
-                console.log(`[ICE] gathering → ${pc.iceGatheringState}`));
+                console.log(`[ICE] gathering ? ${pc.iceGatheringState}`));
             }
 
-            // If the DataConnection doesn't open within 8 s, retry — PeerJS
+            // If the DataConnection doesn't open within 8 s, retry � PeerJS
             // can silently stall when NAT traversal fails or the host is
             // temporarily unreachable.
             connectTimeout = setTimeout(() => {
               if (conn && !conn.open) {
-                console.warn(`[PeerJS] ICE timed out on attempt ${connectAttempts + 1} — closing and retrying`);
+                console.warn(`[PeerJS] ICE timed out on attempt ${connectAttempts + 1} � closing and retrying`);
                 conn.close();
                 conn = null;
                 connectAttempts++;
                 if (connectAttempts >= 3) {
                   console.error('[PeerJS] giving up after 3 failed ICE attempts');
                   setConnectionStatus('error');
-                  setStatus('Cannot reach host after 3 attempts — the network may be blocking WebRTC relay traffic. Try a different network.');
+                  setStatus('Cannot reach host after 3 attempts � the network may be blocking WebRTC relay traffic. Try a different network.');
                   return;
                 }
                 startConnect();
@@ -2339,7 +2335,7 @@
               setConnectionStatus('ready');
               acquireWakeLock();
               send('Identify', { token: myToken, name: myName });
-              setStatus('Waiting for server…');
+              setStatus('Waiting for server�');
             });
 
             conn.on('data', raw => {
@@ -2368,7 +2364,7 @@
         });
 
         clientPeer.on('disconnected', () => {
-          console.warn('[PeerJS] signaling disconnected — reconnecting…');
+          console.warn('[PeerJS] signaling disconnected � reconnecting�');
           setConnectionStatus('disconnected');
           clientPeer.reconnect();
         });
@@ -2377,7 +2373,7 @@
           console.error(`[PeerJS] client error (type: ${e.type})`, e);
           setConnectionStatus('error');
           if (e.type === 'peer-unavailable') {
-            setStatus('Host not found — rescan the QR code on the view screen.');
+            setStatus('Host not found � rescan the QR code on the view screen.');
           } else {
             setStatus('Peer error: ' + e.type);
           }

@@ -2,9 +2,9 @@
 //
 // Maps the currently-active console to which HTML <section> should be
 // visible. All nine consoles have HTML sections in client.html
-// (CaptainChair -> #captain-ui, Helm -> #helm-ui, Tactical -> #weapons-ui,
-// Repair -> #repair-ui, Power -> #power-ui, Shields -> #shields-ui,
-// Sensors -> #sensors-ui, Navigation -> #navigation-ui, Comms -> #comms-ui).
+// (captain -> #captain-ui, helm -> #helm-ui, tactical -> #weapons-ui,
+// repair -> #repair-ui, power -> #power-ui, shields -> #shields-ui,
+// sensors -> #sensors-ui, navigation -> #navigation-ui, comms -> #comms-ui).
 //
 // This module exports a pure function `consoleSections(activeConsole, inGame)`
 // returning a visibility map keyed by section id. The inline `<script>` in
@@ -18,8 +18,14 @@ import { REGISTRY } from './console-registry.js';
 
 // Console name -> HTML section id. Derived from REGISTRY so there is a single
 // source of truth for all HTML-panel consoles.
+//
+// Keys are the lowercase station ids (matching `StationId` on the wire after
+// issues #618/#619). `sectionForConsole(activeConsole)` expects `activeConsole`
+// to be a lowercase station id.
 export const CONSOLE_SECTION = Object.freeze(
-  Object.fromEntries(Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId]))
+  Object.fromEntries(
+    Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId])
+  )
 );
 
 // Set of all known section ids that the switcher will reset.

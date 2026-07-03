@@ -354,11 +354,14 @@
     function _normalise(s) {
       /* data-driven format: { consoles:[{id,label,level,max_level}], total, total_max, battery_charge, battery_max, locked } */
       if (s.consoles) return s;
-      /* Legacy PowerState: { helm, weapons, sensors, battery_charge, locked } */
+      /* Legacy PowerState: { helm, weapons, sensors, battery_charge, locked }.
+         Post issue #618 the `id` is the lowercase power group id (matches the
+         Rust `PowerGroupId(String)` newtype), consistent with the
+         SystemId-keyed wire the server now emits on `PowerBlackboard.groups`. */
       var cons = [];
-      if (s.helm     !== undefined) cons.push({ id: 'Helm',     label: 'HELM',    level: s.helm,    max_level: 4 });
-      if (s.weapons  !== undefined) cons.push({ id: 'Tactical', label: 'WEAPONS', level: s.weapons, max_level: 4 });
-      if (s.sensors  !== undefined) cons.push({ id: 'Sensors',  label: 'SENSORS', level: s.sensors, max_level: 4 });
+      if (s.helm     !== undefined) cons.push({ id: 'helm',    label: 'HELM',    level: s.helm,    max_level: 4 });
+      if (s.weapons  !== undefined) cons.push({ id: 'weapons', label: 'WEAPONS', level: s.weapons, max_level: 4 });
+      if (s.sensors  !== undefined) cons.push({ id: 'sensors', label: 'SENSORS', level: s.sensors, max_level: 4 });
       var tot = cons.reduce(function(a, c) { return a + c.level; }, 0);
       return {
         consoles:       cons,
@@ -599,9 +602,9 @@
     function _initDemo() {
       _demoState = {
         consoles: [
-          { id: 'Helm',     label: 'HELM',    level: 2, max_level: 4 },
-          { id: 'Tactical', label: 'WEAPONS', level: 2, max_level: 4 },
-          { id: 'Sensors',  label: 'SENSORS', level: 2, max_level: 4 }
+          { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },
+          { id: 'weapons', label: 'WEAPONS', level: 2, max_level: 4 },
+          { id: 'sensors', label: 'SENSORS', level: 2, max_level: 4 }
         ],
         total:          6,
         total_max:      8,
@@ -614,7 +617,7 @@
     }
 
     var sendAction = initConsole({
-      name: 'Power',
+      name: 'power',
       render: function(s) { _demoMode = false; _apply(s); }
     }).sendAction;
 

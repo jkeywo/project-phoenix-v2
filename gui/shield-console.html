@@ -672,7 +672,7 @@
   <script type="module">
     import { initConsole } from './console-core.js';
     import { setAutoState } from './console-ui.js';
-    var _c = initConsole({ name: 'Shields', render: function(s) {
+    var _c = initConsole({ name: 'shields', render: function(s) {
       _apply(s);
       // AUTO badge: show when shields station is AI-controlled (Backfill rating).
       setAutoState(null, document.getElementById('shields-auto-badge'), !!s.shields_auto);

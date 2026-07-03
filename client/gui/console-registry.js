@@ -1,8 +1,10 @@
 /**
  * gui/console-registry.js — Single source of truth for all HTML-panel consoles.
  *
- * Maps each PascalCase Console enum variant (those backed by an HTML iframe in
- * client.html) to its section id and iframe element id.
+ * Maps each lowercase station id (issue #618) to its section id and iframe
+ * element id. Prior to #618 the keys were PascalCase Console variant names;
+ * the JS layer now works in lowercase station-id space alongside the Rust
+ * `StationId` newtype.
 
  *
  * Used by:
@@ -11,15 +13,15 @@
  *  - client.html inline script (via window.CONSOLE_REGISTRY fallback)
  */
 export const REGISTRY = Object.freeze({
-  CaptainChair: { sectionId: 'captain-ui',    iframeId: 'captain-iframe'    },
-  Helm:         { sectionId: 'helm-ui',       iframeId: 'helm-iframe'       },
-  Tactical:     { sectionId: 'weapons-ui',    iframeId: 'weapons-iframe'    },
-  Repair:       { sectionId: 'repair-ui',     iframeId: 'repair-iframe'     },
-  Power:        { sectionId: 'power-ui',      iframeId: 'power-iframe'      },
-  Shields:      { sectionId: 'shields-ui',    iframeId: 'shields-iframe'    },
-  Sensors:      { sectionId: 'sensors-ui',    iframeId: 'sensors-iframe'    },
-  Navigation:   { sectionId: 'navigation-ui', iframeId: 'navigation-iframe' },
-  Comms:        { sectionId: 'comms-ui',      iframeId: 'comms-iframe'      },
+  captain:    { sectionId: 'captain-ui',    iframeId: 'captain-iframe'    },
+  helm:       { sectionId: 'helm-ui',       iframeId: 'helm-iframe'       },
+  tactical:   { sectionId: 'weapons-ui',    iframeId: 'weapons-iframe'    },
+  repair:     { sectionId: 'repair-ui',     iframeId: 'repair-iframe'     },
+  power:      { sectionId: 'power-ui',      iframeId: 'power-iframe'      },
+  shields:    { sectionId: 'shields-ui',    iframeId: 'shields-iframe'    },
+  sensors:    { sectionId: 'sensors-ui',    iframeId: 'sensors-iframe'    },
+  navigation: { sectionId: 'navigation-ui', iframeId: 'navigation-iframe' },
+  comms:      { sectionId: 'comms-ui',      iframeId: 'comms-iframe'      },
 });
 
 // Expose for non-module inline scripts (client.html).

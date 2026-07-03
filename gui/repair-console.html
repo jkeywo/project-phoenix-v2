@@ -320,7 +320,9 @@
     /* ── Constants ─────────────────────────────────────────────── */
     var NAMES    = ['ALPHA', 'BETA', 'GAMMA', 'DELTA', 'EPSILON', 'ZETA'];
     var DEF_DUR  = 5.0;
-    var DEF_CONS = ['Helm', 'Tactical', 'Power', 'Shields'];
+    // Lowercase station ids post issue #618 — matches the `SystemId`-keyed
+    // wire fields `system_hull` / `damageable_systems` on RepairBlackboard.
+    var DEF_CONS = ['helm', 'tactical', 'power', 'shields'];
 
     /* ── Runtime state ─────────────────────────────────────────── */
     var _state     = null;
@@ -389,10 +391,13 @@
     /* ── Full render ────────────────────────────────────────────── */
     function _render(s) {
       var dur   = s.travel_duration_secs || DEF_DUR;
-      var hull  = s.console_hull || [];
+      // Post issue #619: only the SystemId-keyed side (`system_hull` /
+      // `damageable_systems`) exists on the wire; the legacy Console-keyed
+      // fields were retired along with the enum.
+      var hull  = s.system_hull || [];
       var teams = s.teams || [];
-      var tgts  = s.damageable_consoles ||
-        (hull.length ? hull.map(function(h) { return h.console; }) : DEF_CONS);
+      var tgts  = s.damageable_systems ||
+        (hull.length ? hull.map(function(h) { return h.system_id; }) : DEF_CONS);
 
       /* ─ Hull aggregate ─────────────────────────────────────── */
       var totC = 0, totM = 0;
@@ -424,9 +429,9 @@
           var d = document.createElement('div'); d.className = 'team-slot';
           d.dataset.idx   = i;
           d.dataset.state = typeof slot === 'string' ? slot : Object.keys(slot)[0];
-          if (slot.Travelling) d.dataset.console = slot.Travelling.console;
-          if (slot.Repairing)  d.dataset.console = slot.Repairing.console;
-          if (slot.Returning && slot.Returning.queued) d.dataset.queued = slot.Returning.queued;
+          if (slot.Travelling) d.dataset.console = slot.Travelling.system_id || '';
+          if (slot.Repairing)  d.dataset.console = slot.Repairing.system_id || '';
+          if (slot.Returning && slot.Returning.queued_system_id) d.dataset.queued = slot.Returning.queued_system_id;
           td.appendChild(d);
         });
       }
@@ -507,24 +512,27 @@
         var el  = _elapsed[i] !== undefined ? _elapsed[i] : slot.Travelling.elapsed;
         var p   = dur > 0 ? Math.min(el / dur * 100, 100) : 0;
         var rem = Math.max(dur - el, 0);
-        active = slot.Travelling.console;
+        active = slot.Travelling.system_id;
+        var travName = (slot.Travelling.display_name || slot.Travelling.system_id || '').toUpperCase();
         led.className = 'led amber';
-        st.textContent  = '→ ' + slot.Travelling.console.toUpperCase(); st.className  = 'team-status-text s-travel';
+        st.textContent  = '→ ' + travName; st.className  = 'team-status-text s-travel';
         tim.textContent = rem.toFixed(1) + 's';                         tim.className = 'team-timer s-travel';
         bar.className   = 'fill s-travel'; bar.style.width = p.toFixed(1) + '%';
 
       } else if (slot.Repairing) {
-        active = slot.Repairing.console;
+        active = slot.Repairing.system_id;
+        var repName = (slot.Repairing.display_name || slot.Repairing.system_id || '').toUpperCase();
         led.className = 'led on';
-        st.textContent  = 'REPAIRING ' + slot.Repairing.console.toUpperCase(); st.className  = 'team-status-text s-repair';
+        st.textContent  = 'REPAIRING ' + repName; st.className  = 'team-status-text s-repair';
         tim.textContent = '●';                                                  tim.className = 'team-timer s-repair';
         bar.className   = 'fill s-repair'; bar.style.width = '100%';
 
       } else if (slot.Returning) {
         var remaining = _remaining[i] !== undefined ? _remaining[i] : slot.Returning.remaining;
         var rp  = dur > 0 ? Math.min(remaining / dur * 100, 100) : 0;
-        active  = slot.Returning.queued || null;
-        var qs  = slot.Returning.queued ? ' → ' + slot.Returning.queued.toUpperCase() : '';
+        active  = slot.Returning.queued_system_id || null;
+        var queuedName = slot.Returning.queued_display_name || slot.Returning.queued_system_id;
+        var qs  = queuedName ? ' → ' + queuedName.toUpperCase() : '';
         led.className = 'led cyan';
         st.textContent  = 'RETURNING' + qs;        st.className  = 'team-status-text s-returning';
         tim.textContent = remaining.toFixed(1) + 's'; tim.className = 'team-timer s-returning';
@@ -566,17 +574,17 @@
       var dur   = _demoState.travel_duration_secs;
 
       if (slot === 'Idle') {
-        teams[teamIdx] = { Travelling: { console: cn, elapsed: 0 } };
+        teams[teamIdx] = { Travelling: { system_id: cn, display_name: cn.toUpperCase(), elapsed: 0 } };
         _elapsed[teamIdx] = 0;
-      } else if (slot.Travelling && slot.Travelling.console !== cn) {
+      } else if (slot.Travelling && slot.Travelling.system_id !== cn) {
         var el = _elapsed[teamIdx] !== undefined ? _elapsed[teamIdx] : slot.Travelling.elapsed;
-        teams[teamIdx] = { Returning: { remaining: el, queued: cn } };
+        teams[teamIdx] = { Returning: { remaining: el, queued_system_id: cn, queued_display_name: cn.toUpperCase() } };
         _remaining[teamIdx] = el;
-      } else if (slot.Repairing && slot.Repairing.console !== cn) {
-        teams[teamIdx] = { Returning: { remaining: dur, queued: cn } };
+      } else if (slot.Repairing && slot.Repairing.system_id !== cn) {
+        teams[teamIdx] = { Returning: { remaining: dur, queued_system_id: cn, queued_display_name: cn.toUpperCase() } };
         _remaining[teamIdx] = dur;
       } else if (slot.Returning) {
-        teams[teamIdx] = { Returning: { remaining: slot.Returning.remaining, queued: cn } };
+        teams[teamIdx] = { Returning: { remaining: slot.Returning.remaining, queued_system_id: cn, queued_display_name: cn.toUpperCase() } };
       }
 
       _demoState = Object.assign({}, _demoState, { teams: teams });
@@ -589,37 +597,37 @@
       if (!_demoMode || !_demoState) return;
       var dur   = _demoState.travel_duration_secs;
       var teams = _demoState.teams.slice();
-      var hull  = _demoState.console_hull.map(function(h) { return Object.assign({}, h); });
+      var hull  = _demoState.system_hull.map(function(h) { return Object.assign({}, h); });
       var dirty = false;
 
       teams.forEach(function(slot, i) {
         if (slot.Travelling) {
           var el = _elapsed[i] !== undefined ? _elapsed[i] : slot.Travelling.elapsed;
           if (el >= dur) {
-            teams[i] = { Repairing: { console: slot.Travelling.console } }; dirty = true;
+            teams[i] = { Repairing: { system_id: slot.Travelling.system_id, display_name: slot.Travelling.display_name } }; dirty = true;
           }
         } else if (slot.Repairing) {
-          var h = hull.find(function(x) { return x.console === slot.Repairing.console; });
+          var h = hull.find(function(x) { return x.system_id === slot.Repairing.system_id; });
           if (h) {
             h.current = Math.min(h.current + 0.28, h.max_hp);
             if (Math.round(h.current * 10) >= Math.round(h.max_hp * 10)) {
-              teams[i] = { Returning: { remaining: dur, queued: null } };
+              teams[i] = { Returning: { remaining: dur } };
               _remaining[i] = dur; dirty = true;
             }
           }
         } else if (slot.Returning) {
           var rem = _remaining[i] !== undefined ? _remaining[i] : slot.Returning.remaining;
           if (rem <= 0) {
-            teams[i] = slot.Returning.queued
-              ? { Travelling: { console: slot.Returning.queued, elapsed: 0 } }
+            teams[i] = slot.Returning.queued_system_id
+              ? { Travelling: { system_id: slot.Returning.queued_system_id, display_name: slot.Returning.queued_display_name, elapsed: 0 } }
               : 'Idle';
-            if (slot.Returning.queued) _elapsed[i] = 0;
+            if (slot.Returning.queued_system_id) _elapsed[i] = 0;
             dirty = true;
           }
         }
       });
 
-      _demoState = Object.assign({}, _demoState, { teams: teams, console_hull: hull });
+      _demoState = Object.assign({}, _demoState, { teams: teams, system_hull: hull });
       _state = _demoState;
       /* Always re-render so hull bars animate smoothly during Repairing */
       _render(_state);
@@ -627,25 +635,27 @@
 
     function _initDemo() {
       _demoState = {
-        console_hull: [
-          { console: 'Helm',     current: 14.0, max_hp: 25.0 },
-          { console: 'Tactical', current: 25.0, max_hp: 25.0 },
-          { console: 'Power',    current:  6.0, max_hp: 25.0 },
-          { console: 'Shields',  current: 19.0, max_hp: 25.0 }
+        // Post issue #618 shape: SystemId-keyed hull entries. `.system_id`
+        // is a lowercase station id matching the wire `SystemHullStatus`.
+        system_hull: [
+          { system_id: 'helm',     current: 14.0, max_hp: 25.0 },
+          { system_id: 'tactical', current: 25.0, max_hp: 25.0 },
+          { system_id: 'power',    current:  6.0, max_hp: 25.0 },
+          { system_id: 'shields',  current: 19.0, max_hp: 25.0 }
         ],
         teams: [
-          { Travelling: { console: 'Power', elapsed: 1.4 } },
+          { Travelling: { system_id: 'power', display_name: 'POWER', elapsed: 1.4 } },
           'Idle'
         ],
         travel_duration_secs: 5.0,
-        damageable_consoles: ['Helm', 'Tactical', 'Power', 'Shields']
+        damageable_systems: ['helm', 'tactical', 'power', 'shields']
       };
       _apply(_demoState);
       setInterval(_demoTick, 400);
     }
 
     var sendAction = initConsole({
-      name: 'Repair',
+      name: 'repair',
       render: function(s) { _demoMode = false; _apply(s); }
     }).sendAction;
 

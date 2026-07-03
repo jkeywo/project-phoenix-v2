@@ -139,7 +139,11 @@ export class ClientSimState {
     if (!msg || !msg.type) return;
     const d = msg.data || {};
     switch (msg.type) {
-      case 'ConsoleHullUpdate':
+      case 'SystemHullUpdate':
+        // Post issue #618: publisher no longer emits legacy Console-keyed
+        // `ConsoleHullUpdate`. Entries carry `{ system_id, display_name,
+        // current, max_hp, tier, debuff_magnitude }` — see SystemHullStatus
+        // in src/core/messages.rs.
         this.consoleHull = d.entries || [];
         break;
       case 'SimState': {
@@ -327,19 +331,6 @@ export function fireTorpedoMessage(tube, targetUuid) {
   return { type: 'FireTorpedo', data: { tube, target_uuid: targetUuid != null ? targetUuid : null } };
 }
 
-export function dispatchRepairTeamMessage(teamIdx, console) {
-  return { type: 'DispatchRepairTeam', data: { team_idx: teamIdx, console } };
-}
-
-/**
- * Default repair dispatch message — team 0 → Helm. Mirrors `repair_message()`
- * in src/client_sim.rs. The shell-level repair button uses this when the UI
- * does not select a specific team/console.
- */
-export function repairMessage() {
-  return dispatchRepairTeamMessage(0, 'Helm');
-}
-
 export function setTargetMessage(uuid) {
   return { type: 'SetTarget', data: { uuid } };
 }
@@ -359,14 +350,6 @@ export function setPhaserModeMessage(mode) {
 /** Auto → Manual, Manual → Auto. */
 export function togglePhaserModeMessage(current) {
   return setPhaserModeMessage(current === 'Auto' ? 'Manual' : 'Auto');
-}
-
-export function increasePowerMessage(console) {
-  return { type: 'IncreasePower', data: { console } };
-}
-
-export function decreasePowerMessage(console) {
-  return { type: 'DecreasePower', data: { console } };
 }
 
 /** Frequency is clamped to [0, 1] before wrapping. */

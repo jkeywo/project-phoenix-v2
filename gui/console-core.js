@@ -11,7 +11,7 @@
  *   <script type="module">
  *     import { initConsole } from './console-core.js';
  *     const { sendAction } = initConsole({
- *       name: 'Repair',          // PascalCase Console enum variant
+ *       name: 'repair',          // lowercase station id (issue #618)
  *       render: function(state) { ... },  // receives the parsed state object
  *     });
  *     // Use sendAction('action_name', { ...payload }) instead of
@@ -30,7 +30,8 @@
  *    `name` — for same-origin separate-tab mode (ADR-0001 §3 target 4).
  *
  * @param {{ name: string, render: function(state: object): void }} opts
- *   name   — PascalCase Console enum variant (e.g. 'Repair', 'Helm').
+ *   name   — lowercase station id (e.g. 'repair', 'helm'). Pre-issue #618
+ *            these were PascalCase Console enum variant names.
  *   render — Called with the parsed state object on every inbound push.
  *
  * @returns {{ sendAction: function(action: string, payload?: object): void }}
@@ -122,10 +123,10 @@ export function initConsole({ name, render }) {
 
   // ── Help system (issue #462) ───────────────────────────────────────────
   // Mount the shared "?" help button + click-to-dismiss modal for this
-  // console. `name` is the PascalCase Console variant, which doubles as the
-  // HelpPanel key. Runs only in a real DOM (guarded inside mountHelp); a no-op
-  // in Node tests. Deferred until the DOM is ready so the trigger host
-  // (`.frame`) exists.
+  // console. `name` is the lowercase station id (post issue #618), which
+  // doubles as the HelpPanel key. Runs only in a real DOM (guarded inside
+  // mountHelp); a no-op in Node tests. Deferred until the DOM is ready so
+  // the trigger host (`.frame`) exists.
   if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function() { mountHelp(name); });

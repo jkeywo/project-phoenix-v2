@@ -17,7 +17,9 @@
  * Push a state snapshot to a console iframe.
  *
  * @param {HTMLIFrameElement|null} iframeEl
- * @param {string} consoleName  PascalCase Console enum variant (e.g. 'Tactical')
+ * @param {string} consoleName  Lowercase station id (e.g. 'tactical'), matches
+ *                              the `name` passed to `initConsole` inside each
+ *                              per-console iframe post issue #618.
  * @param {string} stateJson    JSON-serialised console state
  */
 export function push(iframeEl, consoleName, stateJson) {

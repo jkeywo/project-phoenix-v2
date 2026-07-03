@@ -59,14 +59,14 @@ export const SYSTEM_REGISTRY = Object.freeze({
   [RED_ALERT_KIND]: Object.freeze({
     kind: RED_ALERT_KIND,
     systemId: RED_ALERT_SYSTEM_ID,
-    console: 'CaptainChair',
+    station: 'captain',
     fragmentId: 'red-alert-btn',
     render: renderRedAlertFragment,
   }),
   [VIEWSCREEN_KIND]: Object.freeze({
     kind: VIEWSCREEN_KIND,
     systemId: VIEWSCREEN_SYSTEM_ID,
-    console: 'CaptainChair',
+    station: 'captain',
     fragmentId: 'viewscreen-auto-badge',
     render: renderViewscreenFragment,
   }),

@@ -10,29 +10,32 @@
 // This module exports both pure functions (testable with no DOM) and a
 // DOM-mutating renderer. The pure functions feed Vitest tests; the renderer
 // is consumed by the inline `<script>` in `client.html`.
+//
+// Post issue #619 the `consoles` input list carries lowercase station ids
+// (matching `StationId`). Pre-#619 it carried PascalCase Console enum names.
 
 export const CONSOLE_LABEL = Object.freeze({
-  CaptainChair: "Captain's Chair",
-  Helm: 'Helm',
-  Tactical: 'Tactical',
-  Repair: 'Repair',
-  Sensors: 'Sensors',
-  Shields: 'Shields',
-  Navigation: 'Navigation',
-  Power: 'Power',
-  Comms: 'Comms',
+  captain: "Captain's Chair",
+  helm: 'Helm',
+  tactical: 'Tactical',
+  repair: 'Repair',
+  sensors: 'Sensors',
+  shields: 'Shields',
+  navigation: 'Navigation',
+  power: 'Power',
+  comms: 'Comms',
 });
 
 export const CONSOLE_INITIAL = Object.freeze({
-  CaptainChair: 'CC',
-  Helm: 'H',
-  Tactical: 'T',
-  Repair: 'R',
-  Sensors: 'S',
-  Shields: 'SH',
-  Navigation: 'N',
-  Power: 'P',
-  Comms: 'C',
+  captain: 'CC',
+  helm: 'H',
+  tactical: 'T',
+  repair: 'R',
+  sensors: 'S',
+  shields: 'SH',
+  navigation: 'N',
+  power: 'P',
+  comms: 'C',
 });
 
 // Threshold at which the portrait bar collapses to initials. Matches the
@@ -59,11 +62,12 @@ export function useInitials(consoles, orientation) {
 }
 
 // Pure: produce a description of the tab bar to render.
-//   consoles    — string[] of Console enum names owned by the local player
-//   active      — currently-selected console name (or null)
+//   consoles    — string[] of lowercase station ids owned by the local player
+//   active      — currently-selected station id (or null)
 //   orientation — 'portrait' | 'landscape'
 //   inGame      — boolean; tab bar is hidden in the lobby
-//   consoleHull — optional [{ console, current, max_hp }] from server state
+//   consoleHull — optional [{ system_id, current, max_hp, ... }] from server
+//                 state (post issue #618).
 //   compactActive — boolean; when true and a console is active, only show
 //                   the active console's button (others are hidden)
 // Returns:
@@ -83,12 +87,14 @@ export function tabBarLayout(consoles, active, orientation, inGame, consoleHull,
   // Hide when not in-game or when there are no consoles.
   // Single-console players still see the bar (for the title label).
   const hidden = !inGame || list.length === 0;
-  // Build a lookup from console name → hull pct for damageable consoles.
+  // Build a lookup from station id (lowercase) → hull pct for damageable
+  // systems. Both the `consoles` list and the `system_id` on each hull
+  // entry are lowercase station ids.
   const hullMap = {};
   if (Array.isArray(consoleHull)) {
     for (const h of consoleHull) {
-      if (h && h.console && h.max_hp > 0) {
-        hullMap[h.console] = Math.max(0, Math.min(100, (h.current / h.max_hp) * 100));
+      if (h && h.system_id && h.max_hp > 0) {
+        hullMap[h.system_id] = Math.max(0, Math.min(100, (h.current / h.max_hp) * 100));
       }
     }
   }
@@ -101,12 +107,15 @@ export function tabBarLayout(consoles, active, orientation, inGame, consoleHull,
   } else if (list.length >= 2) {
     namesForButtons = list;
   }
-  const buttons = namesForButtons.map((c) => ({
-    console: c,
-    label: initials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c),
-    active: c === active,
-    hullPct: hullMap[c] !== undefined ? hullMap[c] : null,
-  }));
+  const buttons = namesForButtons.map((c) => {
+    const hullPct = hullMap[c] !== undefined ? hullMap[c] : null;
+    return {
+      console: c,
+      label: initials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c),
+      active: c === active,
+      hullPct,
+    };
+  });
   return { hidden, orientation: orient, useInitials: initials, buttons };
 }
 

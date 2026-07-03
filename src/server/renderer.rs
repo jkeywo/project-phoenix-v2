@@ -350,9 +350,20 @@ fn update_camera_aspect(
 fn toggle_cameras(
     state: Res<State<GamePhase>>,
     view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    view_mode_changed: Query<
+        (),
+        (
+            With<crate::simulation::LocalShip>,
+            Changed<crate::ship_state::ShipViewMode>,
+        ),
+    >,
     mut game: Query<&mut Camera, With<GameCamera>>,
 ) {
-    if !state.is_changed() {
+    // Must also re-run on a view-mode change, not just a GamePhase transition —
+    // otherwise the 3D camera stays active/inactive forever based on whatever
+    // view was set at the single Lobby→InProgress transition (e.g. it never
+    // deactivates when Helm/Sensors/Navigation later switch to a radar view).
+    if !state.is_changed() && view_mode_changed.is_empty() {
         return;
     }
     let in_game = state.get() == &GamePhase::InProgress;
@@ -440,11 +451,20 @@ fn hull_camera(
 
 fn update_view_direction_label(
     view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    view_mode_changed: Query<
+        (),
+        (
+            With<crate::simulation::LocalShip>,
+            Changed<crate::ship_state::ShipViewMode>,
+        ),
+    >,
     state: Res<State<GamePhase>>,
     mut label_query: Query<(&Children, &mut Visibility), With<ViewDirectionLabel>>,
     mut text_query: Query<&mut Text>,
 ) {
-    if !state.is_changed() {
+    // Same rationale as toggle_cameras: a view-mode change mid-game must also
+    // refresh the label, not just a GamePhase transition.
+    if !state.is_changed() && view_mode_changed.is_empty() {
         return;
     }
     let Ok((children, mut vis)) = label_query.single_mut() else {

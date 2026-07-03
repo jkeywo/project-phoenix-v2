@@ -276,17 +276,28 @@ fn toggle_viewscreen_radar_widgets(
     view_mode_q: Option<
         Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
     >,
+    view_mode_changed: Query<
+        (),
+        (
+            With<crate::simulation::LocalShip>,
+            Changed<crate::ship_state::ShipViewMode>,
+        ),
+    >,
     state: Res<State<GamePhase>>,
     mut containers: Query<(&RadarContainerMode, &mut Visibility)>,
 ) {
+    // Must also re-run on a view-mode change, not just a GamePhase transition —
+    // otherwise a radar container's visibility is set once at the single
+    // Lobby→InProgress transition and never reflects a later SetView (e.g.
+    // Helm's ON SCREEN button) requesting Radar/SensorsRadar/NavigationChart.
+    if !state.is_changed() && view_mode_changed.is_empty() {
+        return;
+    }
     let view_mode = view_mode_q
         .and_then(|q| q.single().ok().map(|vm| vm.view_mode.clone()))
         .unwrap_or(crate::messages::ViewMode::Camera(
             crate::messages::ViewDirection::Fore,
         ));
-    if !state.is_changed() {
-        return;
-    }
 
     let in_game = state.get() == &GamePhase::InProgress;
 
@@ -304,5 +315,68 @@ fn toggle_viewscreen_radar_widgets(
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simulation::LocalShip;
+    use crate::ship_state::ShipViewMode;
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_systems(Update, toggle_viewscreen_radar_widgets);
+        app.world_mut().spawn((LocalShip, ShipViewMode::default()));
+        app.world_mut()
+            .spawn((RadarContainerMode::Helm, Visibility::Hidden));
+        app
+    }
+
+    fn helm_container_visibility(app: &mut App) -> Visibility {
+        let mut q = app
+            .world_mut()
+            .query::<(&RadarContainerMode, &Visibility)>();
+        q.iter(app.world())
+            .find(|(m, _)| **m == RadarContainerMode::Helm)
+            .map(|(_, v)| *v)
+            .unwrap()
+    }
+
+    /// Regression test: a SetView request arriving mid-game (e.g. Helm's ON
+    /// SCREEN button) must flip the matching radar container's visibility even
+    /// though the `GamePhase` state itself hasn't changed since the single
+    /// Lobby→InProgress transition. Before this fix, `toggle_viewscreen_radar_widgets`
+    /// only re-ran on `state.is_changed()`, so the viewscreen never actually
+    /// switched to radar no matter how many times a console requested it.
+    #[test]
+    fn radar_container_becomes_visible_on_mid_game_view_mode_change() {
+        let mut app = test_app();
+
+        // Lobby → InProgress transition, still on the default Camera(Fore) view.
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+        assert_eq!(helm_container_visibility(&mut app), Visibility::Hidden);
+
+        // A later, unrelated frame with no state change and no view-mode change
+        // must leave the container exactly as it was.
+        app.update();
+        assert_eq!(helm_container_visibility(&mut app), Visibility::Hidden);
+
+        // Mid-game SetView request (what handle_set_view does when Helm clicks
+        // ON SCREEN): mutate ShipViewMode directly, GamePhase does NOT change.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipViewMode, With<LocalShip>>();
+            q.single_mut(app.world_mut()).unwrap().view_mode = ViewMode::Radar;
+        }
+        app.update();
+
+        assert_eq!(helm_container_visibility(&mut app), Visibility::Visible);
     }
 }

@@ -270,33 +270,8 @@ pub struct LightConfig {
     pub face_player: bool,
 }
 
-/// One entry in the `[[hull.console_hull]]` TOML array.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConsoleHullEntry {
-    /// Console name matching the `Console` enum variant (e.g. `"Helm"`).
-    pub console: crate::messages::Console,
-    /// Maximum (and starting) HP for this console.
-    pub max_hp: f32,
-    /// HP fraction below which the console enters the `Damaged` tier.
-    /// Defaults to `0.75` (below 75 % → Damaged).
-    #[serde(default = "default_damaged_threshold_pct")]
-    pub damaged_threshold_pct: f32,
-    /// HP fraction below which the console enters the `Disabled` tier.
-    /// Defaults to `0.25` (below 25 % → Disabled).
-    #[serde(default = "default_disabled_threshold_pct")]
-    pub disabled_threshold_pct: f32,
-    /// Performance reduction applied when the console is in the `Damaged` or
-    /// `Disabled` tier (fraction, e.g. `0.15` = 15 % reduction).
-    /// Defaults to `0.15`.
-    #[serde(default = "default_debuff_magnitude")]
-    pub debuff_magnitude: f32,
-}
-
 /// One entry in the `[[hull.system_hull]]` TOML array — the SystemId-keyed
-/// successor of [`ConsoleHullEntry`] introduced by parent issue #516
-/// sub-issue #616. TOML authors may populate either array during the
-/// additive migration; the entity loader accepts both.
+/// hull config entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemHullEntry {
@@ -343,13 +318,7 @@ pub struct HullConfig {
     /// HP for entities with a single hull slot (stations, asteroids, NPC ships).
     #[serde(default)]
     pub hull_integrity: f32,
-    /// Per-console hull entries. When present, replaces `hull_integrity`.
-    #[serde(default)]
-    pub console_hull: Vec<ConsoleHullEntry>,
-    /// SystemId-keyed successor of `console_hull` introduced by parent issue
-    /// #516 sub-issue #616. Populated alongside `console_hull` during the
-    /// additive migration; the spawner accepts either shape. Left as an empty
-    /// vec when the TOML author only supplied `console_hull`.
+    /// Per-system hull entries. When present, replaces `hull_integrity`.
     #[serde(default)]
     pub system_hull: Vec<SystemHullEntry>,
 }

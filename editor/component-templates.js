@@ -90,7 +90,7 @@ export const COMBO_TEMPLATES = {
       },
       {
         key: 'hull',
-        defaults: { hull_integrity: 100.0, repair_team_count: 0, console_hull: [] },
+        defaults: { hull_integrity: 100.0, system_hull: [] },
       },
       {
         key: 'helm_console',
@@ -161,7 +161,7 @@ export const COMBO_TEMPLATES = {
       },
       {
         key: 'hull',
-        defaults: { hull_integrity: 60.0, repair_team_count: 0, console_hull: [] },
+        defaults: { hull_integrity: 60.0, system_hull: [] },
       },
       {
         key: 'helm_console',
@@ -200,7 +200,7 @@ export const COMBO_TEMPLATES = {
       },
       {
         key: 'hull',
-        defaults: { hull_integrity: 50.0, repair_team_count: 0, console_hull: [] },
+        defaults: { hull_integrity: 50.0, system_hull: [] },
       },
     ],
   },

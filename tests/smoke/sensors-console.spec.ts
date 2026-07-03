@@ -217,7 +217,7 @@ test('sensors console: on-screen button calls __sendAction with set_view', async
   expect(sent).toHaveLength(1);
   const parsed = JSON.parse(sent[0]);
   expect(parsed.action).toBe('set_view');
-  expect(parsed.console).toBe('Sensors');
+  expect(parsed.console).toBe('sensors');
   expect(parsed.direction).toBe('SensorsRadar');
 });
 
@@ -243,5 +243,5 @@ test('sensors console: cancel impulse button calls __sendAction with cancel_impu
   expect(sent).toHaveLength(1);
   const parsed = JSON.parse(sent[0]);
   expect(parsed.action).toBe('cancel_impulse');
-  expect(parsed.console).toBe('Sensors');
+  expect(parsed.console).toBe('sensors');
 });

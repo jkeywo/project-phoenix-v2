@@ -331,29 +331,6 @@ export function fireTorpedoMessage(tube, targetUuid) {
   return { type: 'FireTorpedo', data: { tube, target_uuid: targetUuid != null ? targetUuid : null } };
 }
 
-/**
- * Legacy client → server DispatchRepairTeam message.
- *
- * Retained for callers that still target the legacy Rust handler at
- * `src/console/repair/server.rs:161-184`. The main client flow now dispatches
- * via `gui/action-map.js:dispatch_repair_team` which wraps the intent in a
- * `ControlSystem` envelope (issue #618). The `console` argument here is the
- * PascalCase Console enum name still expected by the legacy wire message
- * (retained pending issue #619).
- */
-export function dispatchRepairTeamMessage(teamIdx, console) {
-  return { type: 'DispatchRepairTeam', data: { team_idx: teamIdx, console } };
-}
-
-/**
- * Default repair dispatch message — team 0 → Helm. Mirrors `repair_message()`
- * in src/client_sim.rs. The shell-level repair button uses this when the UI
- * does not select a specific team/console.
- */
-export function repairMessage() {
-  return dispatchRepairTeamMessage(0, 'Helm');
-}
-
 export function setTargetMessage(uuid) {
   return { type: 'SetTarget', data: { uuid } };
 }
@@ -373,14 +350,6 @@ export function setPhaserModeMessage(mode) {
 /** Auto → Manual, Manual → Auto. */
 export function togglePhaserModeMessage(current) {
   return setPhaserModeMessage(current === 'Auto' ? 'Manual' : 'Auto');
-}
-
-export function increasePowerMessage(console) {
-  return { type: 'IncreasePower', data: { console } };
-}
-
-export function decreasePowerMessage(console) {
-  return { type: 'DecreasePower', data: { console } };
 }
 
 /** Frequency is clamped to [0, 1] before wrapping. */

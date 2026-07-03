@@ -1,4 +1,4 @@
-use crate::messages::{Console, StationId};
+use crate::messages::StationId;
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
@@ -12,7 +12,6 @@ pub struct StationDef {
     pub id: StationId,
     pub name: String,
     pub description: String,
-    pub consoles: Vec<Console>,
     pub rank: String,
     #[serde(default)]
     pub short_code: String,
@@ -34,25 +33,19 @@ impl Default for ShipStations {
 }
 
 /// Build a `ShipStations` from the new `ShipConfig` station list.
-/// Each `StationConfig.console` string is resolved to a `Console` variant;
-/// stations whose console string is unrecognised are silently skipped.
+///
+/// Core stations (id == "core") are forbidden by `ShipConfig::validate` via
+/// `ReservedCoreStationId`, so we never see them here.
 pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> ShipStations {
     let stations = config
         .stations
         .iter()
-        .filter_map(|sc| {
-            let console = Console::from_console_id(&sc.console)?;
-            if console == Console::Core {
-                return None; // Core is not a player-selectable station
-            }
-            Some(StationDef {
-                id: sc.id.clone(),
-                name: sc.name.clone(),
-                description: sc.description.clone(),
-                consoles: vec![console],
-                rank: sc.rank.clone(),
-                short_code: sc.short_code.clone(),
-            })
+        .map(|sc| StationDef {
+            id: sc.id.clone(),
+            name: sc.name.clone(),
+            description: sc.description.clone(),
+            rank: sc.rank.clone(),
+            short_code: sc.short_code.clone(),
         })
         .collect();
     ShipStations { stations }
@@ -60,13 +53,10 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
 
 /// Look up a station by name. Returns `None` if not found.
 pub fn get_station<'a>(stations: &'a ShipStations, name: &str) -> Option<&'a StationDef> {
-    stations.stations.iter().find(|d| {
-        d.name == name
-            || d.id.0 == name
-            || d.consoles
-                .iter()
-                .any(|console| console.display_name() == name)
-    })
+    stations
+        .stations
+        .iter()
+        .find(|d| d.name == name || d.id.0 == name)
 }
 
 /// Maps session token → station name.  A token absent from this map is a spectator.

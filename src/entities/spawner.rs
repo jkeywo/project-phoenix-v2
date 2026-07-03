@@ -91,16 +91,6 @@ pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfi
 #[derive(Component, Clone, Debug)]
 pub struct EntityTarget(pub crate::entity_target::TargetSection);
 
-/// Legacy console-keyed hull tracker retained only as a struct definition
-/// for any test fixture that still constructs it directly. As of the fix to
-/// issue #617 the spawner no longer inserts this component onto entities —
-/// all readers and writers were switched to [`EntitySystemHull`] after the
-/// reviewer caught that damage-application only mutated one of the two
-/// components, silently breaking damage-based system offlining every tick
-/// that `sync_console_damage_tiers` ran.
-#[derive(Component, Clone, Debug)]
-pub struct EntityConsoleHull(pub crate::damage::SystemHull);
-
 /// Hull tracker attached to any entity (NPC ship, asteroid) that carries a
 /// `[hull]` section in its TOML config. For NPC ships the HP is placed in a
 /// single `CaptainChair` console slot; asteroids use the same single-slot
@@ -111,8 +101,7 @@ pub struct EntityConsoleHull(pub crate::damage::SystemHull);
 /// (parent issue #516 sub-issue #616). It is the sole per-ship hull store
 /// after PRD #597 PR 10 (the retired `ShipHullIntegrity` global resource
 /// that used to hold the player-ship copy was deleted along with its
-/// dual-write bridge). It fully supersedes the previous
-/// [`EntityConsoleHull`] component after the #617 fix.
+/// dual-write bridge).
 #[derive(Component, Clone, Debug)]
 pub struct EntitySystemHull(pub crate::damage::SystemHull);
 
@@ -606,16 +595,9 @@ pub fn spawn_entity(
     }
 
     // Hull -- attach an EntitySystemHull component if the config has hull data.
-    // Per-system entries take precedence; if absent we fall back to per-console
-    // entries (translated via `Console::station_console_id()`), and if that too
-    // is empty we use the legacy scalar `hull_integrity` value mapped to a
-    // single `SystemId("captain")` slot.
-    //
-    // After the fix to issue #617 the spawner only inserts `EntitySystemHull` --
-    // the console-keyed `EntityConsoleHull` sibling was dropped when the
-    // reviewer caught that damage-application only wrote to one of the two
-    // components, silently breaking damage-based system offlining every tick
-    // that `sync_console_damage_tiers` ran.
+    // Per-system entries take precedence; if absent we fall back to the
+    // legacy scalar `hull_integrity` value mapped to a single `SystemId("captain")`
+    // slot (used by simple entities like asteroids and station spawns).
     if let Some(hull) = &config.hull {
         let system_hull: crate::damage::SystemHull = if !hull.system_hull.is_empty() {
             // Explicit `[[hull.system_hull]]` entries — new authoring path.
@@ -631,36 +613,6 @@ pub fn spawn_entity(
                     let display = e.display_name.clone().unwrap_or_else(|| e.system_id.0.clone());
                     (
                         e.system_id.clone(),
-                        display,
-                        e.max_hp,
-                        crate::damage::ConsoleTierConfig {
-                            damaged_threshold_pct: e.damaged_threshold_pct,
-                            disabled_threshold_pct: e.disabled_threshold_pct,
-                            debuff_magnitude: e.debuff_magnitude,
-                        },
-                    )
-                })
-                .collect();
-            crate::damage::SystemHull::from_config_with_display_names(entries)
-        } else if !hull.console_hull.is_empty() {
-            // Legacy `[[hull.console_hull]]` entries (player_ship.toml path).
-            // Translate each `console` field to a `SystemId` via
-            // `console.station_console_id().to_string()`.
-            let entries: Vec<(
-                crate::messages::SystemId,
-                String,
-                f32,
-                crate::damage::ConsoleTierConfig,
-            )> = hull
-                .console_hull
-                .iter()
-                .map(|e| {
-                    let sid = crate::messages::SystemId(
-                        e.console.station_console_id().to_string(),
-                    );
-                    let display = e.console.display_name().to_string();
-                    (
-                        sid,
                         display,
                         e.max_hp,
                         crate::damage::ConsoleTierConfig {

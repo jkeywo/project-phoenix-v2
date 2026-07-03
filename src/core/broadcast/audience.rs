@@ -51,7 +51,6 @@ mod tests {
                     description: "Power".into(),
                     rank: "".into(),
                     short_code: "P".into(),
-                    console: "power".into(),
                     ratings: vec![],
                 },
                 StationConfig {
@@ -60,7 +59,6 @@ mod tests {
                     description: "Helm".into(),
                     rank: "".into(),
                     short_code: "H".into(),
-                    console: "helm".into(),
                     ratings: vec![],
                 },
             ],

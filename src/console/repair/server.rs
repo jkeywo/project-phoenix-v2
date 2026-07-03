@@ -1,10 +1,9 @@
 use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::ModifierSlot;
 use crate::messages::{
-    AdmittedCommands, ClientMessage, Console, RepairBlackboard, RepairTarget, ServerMessage,
+    AdmittedCommands, RepairBlackboard, RepairTarget, ServerMessage,
     StationId, SystemBlackboard, SystemControlPayload, SystemHullStatus, SystemId, TeamSlot,
 };
 use crate::modifiers::ShipModifiers;
@@ -78,15 +77,16 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 
 /// Handle `DispatchRepairTeam` messages from the Repair console.
 ///
-/// Accepts both the legacy `ClientMessage::DispatchRepairTeam` path and the
-/// new `ClientMessage::ControlSystem { target: "repair", payload:
-/// DispatchRepairTeam { .. } }` path. Both are gated on:
+/// Reads `ClientMessage::ControlSystem { target: "repair", payload:
+/// DispatchRepairTeam { .. } }` messages from `AdmittedCommands`. Admission
+/// upstream (`admit_system_commands` / `is_command_authorized`) has already
+/// checked:
 ///
 /// 1. `ControlSourceResolver::policy_for(&repair_system_id()).accept_human_input`
 ///    (rejects when the system is under AI control)
-/// 2. Sender holds `Console::Repair`.
+/// 2. Sender holds the `repair` station.
 ///
-/// `RepairTarget::Core` dispatches to `Console::Core`, the repair bucket for
+/// `RepairTarget::Core` dispatches to `SystemId("core")`, the repair bucket for
 /// ownerless ship-wide systems.
 ///
 /// After PR 6 (PRD #597): prefers the per-entity `ShipRepairTeams` component
@@ -94,13 +94,10 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 /// for tests. Dual-writes to the Resource so legacy Resource-based readers
 /// stay in sync.
 pub fn handle_dispatch_repair_team(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
     mut ship_query: Query<
         (
             &AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
-            &ShipSystemControlSources,
             Option<&mut ShipRepairTeams>,
             Option<&crate::entity_spawner::EntitySystemHull>,
         ),
@@ -108,7 +105,7 @@ pub fn handle_dispatch_repair_team(
     >,
     teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Some((admitted, _ship_config, control_sources, mut teams_comp, hull_opt)) =
+    let Some((admitted, _ship_config, mut teams_comp, hull_opt)) =
         ship_query.iter_mut().next()
     else {
         return;
@@ -117,23 +114,14 @@ pub fn handle_dispatch_repair_team(
 
     // Look up a human-readable display name for a SystemId. Prefer the
     // ship's `EntitySystemHull` entry (populated from TOML with the
-    // designer-authored display name), fall back to `Console::from_console_id`
-    // when the SystemId maps to a well-known console, and finally fall back
-    // to the raw SystemId string.
-    //
-    // The reviewer flagged that the pre-fix code passed the raw SystemId
-    // string as the display name for the legacy `Console`-keyed wire path,
-    // which regressed `TeamSlot.display_name` from "Engine (Port)" to
-    // "helm-engine-port" for every legacy `DispatchRepairTeam` message.
+    // designer-authored display name), and fall back to the raw SystemId
+    // string when the hull has no entry for that id.
     let hull_ref = hull_opt.map(|h| &h.0);
     let display_name_for = |sid: &SystemId| -> String {
         if let Some(hull) = hull_ref {
             if let Some(entry) = hull.get(sid) {
                 return entry.display_name.clone();
             }
-        }
-        if let Some(console) = Console::from_console_id(sid.0.as_str()) {
-            return console.display_name().to_string();
         }
         sid.0.clone()
     };
@@ -142,7 +130,6 @@ pub fn handle_dispatch_repair_team(
     // closure-captures-borrow tangle when routing between Component and Resource.
     let mut pending: Vec<(usize, SystemId, String)> = Vec::new();
 
-    // ── ControlSystem path (authority already checked at admission) ────────
     for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
         if let SystemControlPayload::DispatchRepairTeam {
             team_idx,
@@ -156,31 +143,6 @@ pub fn handle_dispatch_repair_team(
             let display = display_name_for(&sid);
             pending.push((*team_idx as usize, sid, display));
         }
-    }
-
-    // ── Legacy path (DispatchRepairTeam message type, still auth-gated here) ─
-    let policy = control_sources.0.policy_for(&repair_system_id());
-    if !policy.accept_human_input {
-        for _ in reader.read() {}
-    } else if let Some(repair_token) = sessions.0.holder_for_station(&StationId("repair".into())) {
-        for ev in reader.read() {
-            let ClientMessage::DispatchRepairTeam { team_idx, console } = &ev.msg else {
-                continue;
-            };
-            if ev.token.as_str() != repair_token {
-                continue;
-            }
-            let sid = SystemId(console.station_console_id().to_string());
-            // For the legacy Console-keyed path we always have the Console
-            // in hand, so use its display_name directly. This is the exact
-            // behaviour the reviewer's finding requires: the legacy wire
-            // message must produce the human-readable name, not the raw
-            // SystemId string.
-            let display = console.display_name().to_string();
-            pending.push((*team_idx as usize, sid, display));
-        }
-    } else {
-        for _ in reader.read() {}
     }
 
     if pending.is_empty() {
@@ -308,12 +270,8 @@ fn publish_repair_blackboard(
     let hull_ref = entity_view.map(|(_, h)| h);
     let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
-    // Build the new `SystemHullStatus` list first from the authoritative
-    // `SystemHull` iteration; the legacy `console_hull`/`damageable_consoles`
-    // wire fields are derived from it by mapping each SystemId back to a
-    // Console variant. SystemIds that don't map to a Console variant (custom
-    // designer-authored systems) are dropped from the legacy list but still
-    // emitted in the new list.
+    // Build the SystemHullStatus list from the authoritative `SystemHull`
+    // iteration.
     let system_hull: Vec<SystemHullStatus> = hull_ref
         .map(|h| {
             h.0.iter()
@@ -334,16 +292,11 @@ fn publish_repair_blackboard(
         .map(|s| s.system_id.clone())
         .collect();
 
-    // Legacy `console_hull` / `damageable_consoles` wire fields: emptied by
-    // the publisher post issue #618. Downstream clients read the SystemId-keyed
-    // side (`system_hull` + `damageable_systems`). The struct fields survive
-    // on the wire (with `#[serde(default)]` for compat) until removal in a
-    // later sub-PR.
+    // Emit the new SystemId-keyed hull + damageable list only (legacy
+    // `console_hull` / `damageable_consoles` wire fields were dropped in #619).
     let bb = RepairBlackboard {
         teams: team_slots,
-        console_hull: Vec::new(),
         travel_duration_secs: teams.0.timings().travel_duration,
-        damageable_consoles: Vec::new(),
         system_hull,
         damageable_systems,
     };
@@ -434,7 +387,7 @@ pub fn operate_repair_ai(
 mod tests {
     use super::*;
     use crate::damage::SystemHull;
-    use crate::lobby::{LobbyPlugin, OutboundMessage};
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::shield::ShieldSystem;
     use crate::ship_plugin::ShipSystemControlSources;
@@ -550,7 +503,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -598,9 +551,12 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
             },
         );
         tick(&mut app);
@@ -621,9 +577,12 @@ mod tests {
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
             },
         );
         tick(&mut app);
@@ -645,18 +604,24 @@ mod tests {
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
             },
         );
         tick(&mut app);
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 1,
-                console: Console::Tactical,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 1,
+                    target: RepairTarget::Station(StationId("tactical".into())),
+                },
             },
         );
         tick(&mut app);
@@ -665,9 +630,12 @@ mod tests {
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Power,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("power".into())),
+                },
             },
         );
         tick(&mut app);
@@ -690,9 +658,12 @@ mod tests {
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
             },
         );
         let out1 = tick(&mut app);
@@ -823,74 +794,6 @@ mod tests {
         assert!(
             team_is_travelling(teams, 0),
             "team 0 should be travelling to Core after RepairTarget::Core dispatch"
-        );
-    }
-
-    /// Legacy `ClientMessage::DispatchRepairTeam` still works.
-    #[test]
-    fn legacy_dispatch_still_works_after_control_system_migration() {
-        let mut app = test_app();
-        start_game(&mut app);
-
-        push(
-            &mut app,
-            "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Tactical,
-            },
-        );
-        tick(&mut app);
-
-        let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(
-            team_is_travelling(teams, 0),
-            "legacy DispatchRepairTeam should still dispatch team 0"
-        );
-    }
-
-    /// Regression test for the reviewer's second finding on issue #617.
-    ///
-    /// Pre-#617 the legacy `ClientMessage::DispatchRepairTeam { console:
-    /// Console::HelmEnginePort }` wire message produced a
-    /// `TeamSlot::Travelling` with `display_name: Some("Engine (Port)")`
-    /// (the `Console::display_name()` for that variant). The initial
-    /// #617 implementation regressed this to `Some("helm-engine-port")`
-    /// (the raw SystemId string) because `RepairTeams::dispatch` had
-    /// dropped the display-name parameter and defaulted to
-    /// `new_system.0.clone()`.
-    ///
-    /// This test sends the exact legacy wire message the reviewer called
-    /// out and asserts the resulting `TeamSlot.display_name` is the
-    /// human-readable label, matching pre-#617 behaviour.
-    #[test]
-    fn legacy_dispatch_preserves_console_display_name_on_team_slot() {
-        let mut app = test_app();
-        start_game(&mut app);
-
-        push(
-            &mut app,
-            "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
-            },
-        );
-        tick(&mut app);
-
-        let teams = app.world().resource::<ShipRepairTeams>();
-        let slot = &teams.0.slots()[0];
-        assert!(
-            matches!(
-                slot,
-                TeamSlot::Travelling { display_name: Some(d), .. }
-                    if d == Console::Helm.display_name()
-            ),
-            "legacy DispatchRepairTeam {{ console: Helm }} must produce \
-             TeamSlot::Travelling with display_name = Some(\"{}\") \
-             (Console::display_name()); got {:?}",
-            Console::Helm.display_name(),
-            slot
         );
     }
 

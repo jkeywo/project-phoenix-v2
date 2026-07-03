@@ -176,7 +176,7 @@ describe('initConsole — BroadcastChannel name filtering', () => {
   });
 
   it('calls render when name matches', () => {
-    const state = { teams: [], console_hull: [], travel_duration_secs: 5 };
+    const state = { teams: [], system_hull: [], travel_duration_secs: 5 };
     emit({ type: 'console_state', name: 'Repair', json: JSON.stringify(state) });
     expect(renderCalls).toHaveLength(1);
     expect(renderCalls[0]).toEqual(state);

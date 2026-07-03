@@ -9,58 +9,47 @@ import {
 
 describe('CONSOLE_SECTION map', () => {
   it('keys all nine HTML-panel consoles by lowercase station id', () => {
-    // Post issue #618: `CONSOLE_SECTION` is dual-keyed — lowercase station
-    // ids (the primary keys, sourced from `REGISTRY`) and PascalCase Console
-    // enum aliases (retained so callers passing wire-field values from
-    // `player.consoles` still resolve). The lowercase side must expose all
-    // nine consoles.
+    // Post issues #618/#619 the map is single-keyed on lowercase station ids
+    // (matching the Rust `StationId` newtype); the PascalCase Console aliases
+    // are gone along with the enum.
     const lowercase = ['captain', 'comms', 'helm', 'navigation', 'power', 'repair', 'sensors', 'shields', 'tactical'];
     for (const id of lowercase) {
       expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, id)).toBe(true);
     }
   });
 
-  it('exposes PascalCase Console-enum aliases for wire-field compatibility', () => {
-    const pascal = ['CaptainChair', 'Comms', 'Helm', 'Navigation', 'Power', 'Repair', 'Sensors', 'Shields', 'Tactical'];
+  it('does NOT expose PascalCase Console-enum aliases (retired in #619)', () => {
+    const pascal = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power', 'Sensors', 'Shields', 'Comms', 'Navigation'];
     for (const name of pascal) {
-      expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, name)).toBe(true);
+      expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, name)).toBe(false);
     }
   });
 
-  it('maps captain to captain-ui (both cases)', () => {
+  it('maps captain to captain-ui', () => {
     expect(CONSOLE_SECTION.captain).toBe('captain-ui');
-    expect(CONSOLE_SECTION.CaptainChair).toBe('captain-ui');
   });
 
-  it('maps helm to helm-ui (both cases)', () => {
+  it('maps helm to helm-ui', () => {
     expect(CONSOLE_SECTION.helm).toBe('helm-ui');
-    expect(CONSOLE_SECTION.Helm).toBe('helm-ui');
   });
 
-  it('maps tactical to weapons-ui (both cases)', () => {
+  it('maps tactical to weapons-ui', () => {
     expect(CONSOLE_SECTION.tactical).toBe('weapons-ui');
-    expect(CONSOLE_SECTION.Tactical).toBe('weapons-ui');
   });
 
-  it('maps repair to repair-ui (both cases)', () => {
+  it('maps repair to repair-ui', () => {
     expect(CONSOLE_SECTION.repair).toBe('repair-ui');
-    expect(CONSOLE_SECTION.Repair).toBe('repair-ui');
   });
 
-  it('maps power to power-ui (both cases)', () => {
+  it('maps power to power-ui', () => {
     expect(CONSOLE_SECTION.power).toBe('power-ui');
-    expect(CONSOLE_SECTION.Power).toBe('power-ui');
   });
 
-  it('maps sensors, shields, comms, and navigation (both cases)', () => {
+  it('maps sensors, shields, comms, and navigation', () => {
     expect(CONSOLE_SECTION.sensors).toBe('sensors-ui');
-    expect(CONSOLE_SECTION.Sensors).toBe('sensors-ui');
     expect(CONSOLE_SECTION.shields).toBe('shields-ui');
-    expect(CONSOLE_SECTION.Shields).toBe('shields-ui');
     expect(CONSOLE_SECTION.comms).toBe('comms-ui');
-    expect(CONSOLE_SECTION.Comms).toBe('comms-ui');
     expect(CONSOLE_SECTION.navigation).toBe('navigation-ui');
-    expect(CONSOLE_SECTION.Navigation).toBe('navigation-ui');
   });
 
   it('CONSOLE_SECTION and HTML_SECTION_IDS are frozen', () => {
@@ -78,15 +67,15 @@ describe('CONSOLE_SECTION map', () => {
 
 describe('sectionForConsole', () => {
   it('returns the right id for all HTML-section consoles', () => {
-    expect(sectionForConsole('CaptainChair')).toBe('captain-ui');
-    expect(sectionForConsole('Helm')).toBe('helm-ui');
-    expect(sectionForConsole('Tactical')).toBe('weapons-ui');
-    expect(sectionForConsole('Repair')).toBe('repair-ui');
-    expect(sectionForConsole('Power')).toBe('power-ui');
-    expect(sectionForConsole('Sensors')).toBe('sensors-ui');
-    expect(sectionForConsole('Shields')).toBe('shields-ui');
-    expect(sectionForConsole('Comms')).toBe('comms-ui');
-    expect(sectionForConsole('Navigation')).toBe('navigation-ui');
+    expect(sectionForConsole('captain')).toBe('captain-ui');
+    expect(sectionForConsole('helm')).toBe('helm-ui');
+    expect(sectionForConsole('tactical')).toBe('weapons-ui');
+    expect(sectionForConsole('repair')).toBe('repair-ui');
+    expect(sectionForConsole('power')).toBe('power-ui');
+    expect(sectionForConsole('sensors')).toBe('sensors-ui');
+    expect(sectionForConsole('shields')).toBe('shields-ui');
+    expect(sectionForConsole('comms')).toBe('comms-ui');
+    expect(sectionForConsole('navigation')).toBe('navigation-ui');
   });
 
   it('returns null for empty / null / undefined', () => {
@@ -97,6 +86,11 @@ describe('sectionForConsole', () => {
 
   it('returns null for unknown console strings', () => {
     expect(sectionForConsole('NotAConsole')).toBeNull();
+  });
+
+  it('returns null for retired PascalCase Console-enum names', () => {
+    expect(sectionForConsole('CaptainChair')).toBeNull();
+    expect(sectionForConsole('Helm')).toBeNull();
   });
 });
 
@@ -114,7 +108,7 @@ describe('consoleSections', () => {
   }
 
   it('returns all-false when not in-game (lobby)', () => {
-    const out = consoleSections('CaptainChair', false);
+    const out = consoleSections('captain', false);
     expect(out).toEqual(allFalse());
   });
 
@@ -123,48 +117,48 @@ describe('consoleSections', () => {
     expect(out).toEqual(allFalse());
   });
 
-  it('shows only captain-ui for CaptainChair', () => {
-    const out = consoleSections('CaptainChair', true);
+  it('shows only captain-ui for captain', () => {
+    const out = consoleSections('captain', true);
     expect(out).toEqual(withTrue('captain-ui'));
   });
 
-  it('shows only helm-ui for Helm', () => {
-    const out = consoleSections('Helm', true);
+  it('shows only helm-ui for helm', () => {
+    const out = consoleSections('helm', true);
     expect(out).toEqual(withTrue('helm-ui'));
   });
 
-  it('shows only weapons-ui for Tactical', () => {
-    const out = consoleSections('Tactical', true);
+  it('shows only weapons-ui for tactical', () => {
+    const out = consoleSections('tactical', true);
     expect(out).toEqual(withTrue('weapons-ui'));
   });
 
-  it('shows only repair-ui for Repair', () => {
-    const out = consoleSections('Repair', true);
+  it('shows only repair-ui for repair', () => {
+    const out = consoleSections('repair', true);
     expect(out).toEqual(withTrue('repair-ui'));
   });
 
-  it('shows only power-ui for Power', () => {
-    const out = consoleSections('Power', true);
+  it('shows only power-ui for power', () => {
+    const out = consoleSections('power', true);
     expect(out).toEqual(withTrue('power-ui'));
   });
 
-  it('shows only sensors-ui for Sensors', () => {
-    const out = consoleSections('Sensors', true);
+  it('shows only sensors-ui for sensors', () => {
+    const out = consoleSections('sensors', true);
     expect(out).toEqual(withTrue('sensors-ui'));
   });
 
-  it('shows only shields-ui for Shields', () => {
-    const out = consoleSections('Shields', true);
+  it('shows only shields-ui for shields', () => {
+    const out = consoleSections('shields', true);
     expect(out).toEqual(withTrue('shields-ui'));
   });
 
-  it('shows only comms-ui for Comms', () => {
-    const out = consoleSections('Comms', true);
+  it('shows only comms-ui for comms', () => {
+    const out = consoleSections('comms', true);
     expect(out).toEqual(withTrue('comms-ui'));
   });
 
-  it('shows only navigation-ui for Navigation', () => {
-    const out = consoleSections('Navigation', true);
+  it('shows only navigation-ui for navigation', () => {
+    const out = consoleSections('navigation', true);
     expect(out).toEqual(withTrue('navigation-ui'));
   });
 
@@ -176,7 +170,7 @@ describe('consoleSections', () => {
 
 describe('isBevyConsole', () => {
   it('returns false for all nine HTML-section consoles', () => {
-    for (const c of ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power', 'Sensors', 'Shields', 'Comms', 'Navigation']) {
+    for (const c of ['captain', 'helm', 'tactical', 'repair', 'power', 'sensors', 'shields', 'comms', 'navigation']) {
       expect(isBevyConsole(c)).toBe(false);
     }
   });

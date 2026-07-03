@@ -34,8 +34,8 @@ test('SelectStation — claims station and both clients receive StationAssigned'
     clientA.token,
   ) as any;
   expect(selA.data.station).toBe('Helm');
-  expect(Array.isArray(selA.data.consoles)).toBe(true);
-  expect(selA.data.consoles.length).toBeGreaterThan(0);
+  // Station holder: `station_id` is the lowercase station id (bare string).
+  expect(selA.data.station_id).toBe('helm');
 
   // Client B should also receive the StationAssigned broadcast
   const selAonB = await clientB.page.evaluate(

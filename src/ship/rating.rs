@@ -112,7 +112,6 @@ name = "Captain"
 description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
-console = "captain"
 
 [[station.rating]]
 name = "Assisted"
@@ -128,7 +127,6 @@ name = "Tactical"
 description = "Weapons and threat response."
 rank = "Ltn."
 short_code = "TAC"
-console = "tactical"
 
 [[station.rating]]
 name = "Assisted"

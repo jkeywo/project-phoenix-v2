@@ -12,16 +12,15 @@ const CONSOLE_URL = '/gui/repair-console.html';
 test('repair console: __updateConsole renders team slots with correct states', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
-  // Post issue #618: RepairBlackboard emits SystemId-keyed fields
-  // (`system_hull` + `damageable_systems`) with lowercase station ids.
-  // The `TeamSlot::Travelling.console` field is a display name (populated
-  // via EntitySystemHull.display_name) — the smoke test keeps display
-  // names as authored (title-cased) since that's what the wire produces.
+  // Post issue #619: `TeamSlot` variants carry SystemId-keyed fields
+  // (`system_id`, `queued_system_id`) plus their display-name mirrors.
+  // The repair console HTML populates `data-console` / `data-queued` from
+  // the `system_id` (lowercase station id), not the display name.
   const state = {
     teams: [
       'Idle',
-      { Travelling: { console: 'Helm', elapsed: 1.0 } },
-      { Repairing:  { console: 'Tactical' } },
+      { Travelling: { system_id: 'helm', display_name: 'Helm', elapsed: 1.0 } },
+      { Repairing:  { system_id: 'tactical', display_name: 'Tactical' } },
     ],
     damageable_systems: ['helm', 'tactical', 'sensors', 'shields'],
     system_hull: [
@@ -42,15 +41,15 @@ test('repair console: __updateConsole renders team slots with correct states', a
   const slot0 = page.locator('.team-slot[data-idx="0"]');
   await expect(slot0).toHaveAttribute('data-state', 'Idle');
 
-  // Slot 1: Travelling to Helm (display name, wire field is a string).
+  // Slot 1: Travelling to helm (data-console is the lowercase system_id).
   const slot1 = page.locator('.team-slot[data-idx="1"]');
   await expect(slot1).toHaveAttribute('data-state', 'Travelling');
-  await expect(slot1).toHaveAttribute('data-console', 'Helm');
+  await expect(slot1).toHaveAttribute('data-console', 'helm');
 
-  // Slot 2: Repairing Tactical (display name).
+  // Slot 2: Repairing tactical (data-console is the lowercase system_id).
   const slot2 = page.locator('.team-slot[data-idx="2"]');
   await expect(slot2).toHaveAttribute('data-state', 'Repairing');
-  await expect(slot2).toHaveAttribute('data-console', 'Tactical');
+  await expect(slot2).toHaveAttribute('data-console', 'tactical');
 });
 
 test('repair console: __updateConsole renders Returning slot with queued console', async ({ page }) => {
@@ -58,7 +57,13 @@ test('repair console: __updateConsole renders Returning slot with queued console
 
   const state = {
     teams: [
-      { Returning: { remaining: 3.0, queued: 'Sensors' } },
+      { Returning: {
+        remaining: 3.0,
+        system_id: null,
+        display_name: null,
+        queued_system_id: 'sensors',
+        queued_display_name: 'Sensors',
+      } },
     ],
     damageable_systems: ['helm', 'tactical', 'sensors'],
     system_hull: [
@@ -73,7 +78,8 @@ test('repair console: __updateConsole renders Returning slot with queued console
 
   const slot0 = page.locator('.team-slot[data-idx="0"]');
   await expect(slot0).toHaveAttribute('data-state', 'Returning');
-  await expect(slot0).toHaveAttribute('data-queued', 'Sensors');
+  // data-queued is populated from the lowercase queued_system_id.
+  await expect(slot0).toHaveAttribute('data-queued', 'sensors');
 });
 
 test('repair console: dispatch buttons call __sendAction with correct envelope', async ({ page }) => {

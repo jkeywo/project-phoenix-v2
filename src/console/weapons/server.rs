@@ -3655,7 +3655,7 @@ station = "tactical"
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -3714,7 +3714,7 @@ station = "tactical"
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -4935,7 +4935,7 @@ station = "tactical"
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);

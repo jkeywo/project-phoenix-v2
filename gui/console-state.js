@@ -544,13 +544,9 @@ export function buildRepairConsoleState(state) {
   if (bb) {
     return JSON.stringify({
       teams:                bb.teams                ?? [],
-      // Prefer the SystemId-keyed side authored post issue #618.
+      // SystemId-keyed fields (post issues #618/#619).
       system_hull:          bb.system_hull          ?? [],
       damageable_systems:   bb.damageable_systems   ?? [],
-      // Legacy Console-keyed fields retained on the wire until issue #619.
-      // Publisher now emits empty vectors; downstream JS may ignore them.
-      console_hull:         bb.console_hull         ?? [],
-      damageable_consoles:  bb.damageable_consoles  ?? [],
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
       repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
     });
@@ -561,8 +557,6 @@ export function buildRepairConsoleState(state) {
     teams:                state.repairTeams || [],
     system_hull:          state.consoleHull || [],
     damageable_systems:   (state.consoleHull || []).map(h => h.system_id),
-    console_hull:         [],
-    damageable_consoles:  [],
     travel_duration_secs: 5.0,
     repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
   });

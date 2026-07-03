@@ -4,9 +4,9 @@ import {
   helmRadarConfig, weaponsRadarConfig, scienceRadarConfig, systemChartConfig,
   HELM_RADAR_RANGE, WEAPONS_RADAR_RANGE, SCIENCE_RADAR_RANGE, SYSTEM_CHART_RANGE,
   redAlertToggleMessage, firePhaserMessage, fireTorpedoMessage,
-  dispatchRepairTeamMessage, setTargetMessage, setScienceTargetMessage,
+  setTargetMessage, setScienceTargetMessage,
   setSensorsTargetMessage, setPhaserModeMessage, togglePhaserModeMessage,
-  increasePowerMessage, decreasePowerMessage, setPhaserFrequencyMessage,
+  setPhaserFrequencyMessage,
   nearestEntityToPoint,
   isFireButtonEnabled, isTubeLoaded, tubeReloadSecs, phaserModeLabel,
   shieldStatusView, powerTotal, canIncreasePower, canDecreasePower,
@@ -78,7 +78,6 @@ describe('apply WorldSetup / SimState', () => {
     const s = new ClientSimState();
     s.world.entities = [asteroid('a', 7, 8)];
     s.apply({ type: 'SimState', data: { snapshot: {
-      console_hull: [],
       entity_states: [{ uuid: 'a', hull_fraction: 0.25 }],
     } } });
     expect(s.world.entities[0].position).toEqual([7, 0, 8]);
@@ -373,7 +372,7 @@ describe('apply entity lifecycle', () => {
     const s = new ClientSimState();
     s.world.entities = [asteroid('a', 0, 0)];
     const before = JSON.stringify({ ...s, modifiers: undefined });
-    s.apply({ type: 'PlayerJoined', data: { player: { token: 'x', name: 'Y', consoles: ['Helm'], connected: true } } });
+    s.apply({ type: 'PlayerJoined', data: { player: { token: 'x', name: 'Y', station: 'helm', connected: true } } });
     expect(JSON.stringify({ ...s, modifiers: undefined })).toBe(before);
   });
 });
@@ -402,13 +401,10 @@ describe('message builders', () => {
     expect(firePhaserMessage('port')).toEqual({ type: 'FirePhaser', data: { bank: 'port' } });
     expect(fireTorpedoMessage('fore', 'tgt')).toEqual({ type: 'FireTorpedo', data: { tube: 'fore', target_uuid: 'tgt' } });
     expect(fireTorpedoMessage('fore')).toEqual({ type: 'FireTorpedo', data: { tube: 'fore', target_uuid: null } });
-    expect(dispatchRepairTeamMessage(1, 'Helm')).toEqual({ type: 'DispatchRepairTeam', data: { team_idx: 1, console: 'Helm' } });
     expect(setTargetMessage('u')).toEqual({ type: 'SetTarget', data: { uuid: 'u' } });
     expect(setScienceTargetMessage('u')).toEqual({ type: 'SetScienceTarget', data: { uuid: 'u' } });
     expect(setSensorsTargetMessage('u')).toEqual({ type: 'SetSensorsTarget', data: { uuid: 'u' } });
     expect(setPhaserModeMessage('Manual')).toEqual({ type: 'SetPhaserMode', data: { mode: 'Manual' } });
-    expect(increasePowerMessage('Helm')).toEqual({ type: 'IncreasePower', data: { console: 'Helm' } });
-    expect(decreasePowerMessage('Sensors')).toEqual({ type: 'DecreasePower', data: { console: 'Sensors' } });
   });
 
   it('togglePhaserModeMessage flips Auto <-> Manual', () => {

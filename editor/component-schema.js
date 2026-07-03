@@ -78,7 +78,7 @@ export const COMPONENT_SCHEMA = {
     label: 'Hull',
     fields: [
       { key: 'hull_integrity', type: 'number', default: 0, optional: true },
-      { key: 'console_hull', type: 'array', items: 'object', optional: true, default: [] },
+      { key: 'system_hull', type: 'array', items: 'object', optional: true, default: [] },
     ],
   },
 

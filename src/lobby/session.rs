@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::messages::{Console, Player, StationId};
+use crate::messages::{Player, StationId};
 use crate::ship::config::ShipConfig;
 
 #[derive(Debug)]
@@ -194,7 +194,6 @@ mod tests {
                     id: StationId("captain".into()),
                     name: "Captain".into(),
                     description: "".into(),
-                    consoles: vec![Console::CaptainChair],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -202,7 +201,6 @@ mod tests {
                     id: StationId("helm".into()),
                     name: "Helm".into(),
                     description: "".into(),
-                    consoles: vec![Console::Helm],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -210,7 +208,6 @@ mod tests {
                     id: StationId("tactical".into()),
                     name: "Tactical".into(),
                     description: "".into(),
-                    consoles: vec![Console::Tactical],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -218,7 +215,6 @@ mod tests {
                     id: StationId("repair".into()),
                     name: "Repair".into(),
                     description: "".into(),
-                    consoles: vec![Console::Repair],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -226,7 +222,6 @@ mod tests {
                     id: StationId("sensors".into()),
                     name: "Sensors".into(),
                     description: "".into(),
-                    consoles: vec![Console::Sensors],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -234,7 +229,6 @@ mod tests {
                     id: StationId("shields".into()),
                     name: "Shields".into(),
                     description: "".into(),
-                    consoles: vec![Console::Shields],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -242,7 +236,6 @@ mod tests {
                     id: StationId("navigation".into()),
                     name: "Navigation".into(),
                     description: "".into(),
-                    consoles: vec![Console::Navigation],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -250,7 +243,6 @@ mod tests {
                     id: StationId("power".into()),
                     name: "Power".into(),
                     description: "".into(),
-                    consoles: vec![Console::Power],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -258,7 +250,6 @@ mod tests {
                     id: StationId("comms".into()),
                     name: "Comms".into(),
                     description: "".into(),
-                    consoles: vec![Console::Comms],
                     rank: "".into(),
                     short_code: "".into(),
                 },
@@ -277,12 +268,6 @@ mod tests {
                     description: station.description,
                     rank: station.rank,
                     short_code: station.short_code,
-                    console: station
-                        .consoles
-                        .first()
-                        .map(Console::station_console_id)
-                        .unwrap_or("core")
-                        .to_string(),
                     ratings: vec![],
                 })
                 .collect(),

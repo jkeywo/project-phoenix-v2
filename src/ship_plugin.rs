@@ -1476,7 +1476,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -3197,7 +3197,7 @@ station = "helm"
             .policy_for(&crate::messages::SystemId(system_id.into()))
     }
 
-    fn set_hp(app: &mut App, console: crate::messages::Console, hp: f32) {
+    fn set_hp(app: &mut App, system_id: crate::messages::SystemId, hp: f32) {
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
@@ -3207,10 +3207,9 @@ station = "helm"
         let mut hull_component = binding
             .get_mut::<crate::entity_spawner::EntitySystemHull>()
             .unwrap();
-        let sid = crate::messages::SystemId(console.station_console_id().to_string());
         // Wipe then restore to exact HP.
         hull_component.0.apply_damage(1_000_000.0, &mut rand::rng());
-        hull_component.0.restore(&sid, hp);
+        hull_component.0.restore(&system_id, hp);
     }
 
     #[test]
@@ -3218,7 +3217,7 @@ station = "helm"
         let mut app = test_app();
         // Helm console max_hp = 25. Disabled threshold = 25 % = 6.25 HP.
         // Set Helm to 5 HP (below disabled threshold) → Disabled tier.
-        set_hp(&mut app, crate::messages::Console::Helm, 5.0);
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 5.0);
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -3233,7 +3232,7 @@ station = "helm"
     fn destroyed_console_gates_human_and_ai_input() {
         let mut app = test_app();
         // Wipe helm to 0 HP → Destroyed tier.
-        set_hp(&mut app, crate::messages::Console::Helm, 0.0);
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 0.0);
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -3248,13 +3247,13 @@ station = "helm"
     fn restored_console_re_enables_input() {
         let mut app = test_app();
         // First disable helm.
-        set_hp(&mut app, crate::messages::Console::Helm, 5.0);
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 5.0);
         tick(&mut app);
         // Verify it is gated.
         assert!(!get_policy(&mut app, "helm").accept_human_input);
 
         // Now restore to operational HP.
-        set_hp(&mut app, crate::messages::Console::Helm, 25.0);
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 25.0);
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -3269,7 +3268,7 @@ station = "helm"
         let mut app = test_app();
         // Helm at 50% = 12.5 HP → Damaged tier (25 % < 50 % < 75 %).
         // Damaged tier must NOT block input — only Disabled and Destroyed do.
-        set_hp(&mut app, crate::messages::Console::Helm, 12.5);
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 12.5);
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -3374,9 +3373,9 @@ station = "helm"
         app
     }
 
-    /// Set the HP of a specific console on the LocalShip hull to `new_hp`.
+    /// Set the HP of a specific system on the LocalShip hull to `new_hp`.
     /// Delegates to `SystemHull::set_hp` which directly sets the value.
-    fn set_console_hp_direct(app: &mut App, console: crate::messages::Console, new_hp: f32) {
+    fn set_console_hp_direct(app: &mut App, system_id: crate::messages::SystemId, new_hp: f32) {
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
@@ -3386,8 +3385,7 @@ station = "helm"
         let mut hull = entity_mut
             .get_mut::<crate::entity_spawner::EntitySystemHull>()
             .unwrap();
-        let sid = crate::messages::SystemId(console.station_console_id().to_string());
-        hull.0.set_hp(&sid, new_hp);
+        hull.0.set_hp(&system_id, new_hp);
     }
 
     #[test]
@@ -3444,7 +3442,7 @@ station = "helm"
         let mut app = test_app_with_engine_hull();
 
         // Zero out the port engine HP (destroyed tier).
-        set_console_hp_direct(&mut app, crate::messages::Console::HelmEnginePort, 0.0);
+        set_console_hp_direct(&mut app, crate::messages::SystemId("helm-engine-port".into()), 0.0);
         tick(&mut app);
 
         // After sync_console_damage_tiers, offline_systems should contain helm-engine-port.
@@ -3581,7 +3579,7 @@ station = "helm"
         // Zero the port engine HP, tick once so sync_console_damage_tiers runs
         // (populating offline_systems), then drive at full thrust for TICKS more.
         let mut app_one = make_app();
-        set_console_hp_direct(&mut app_one, crate::messages::Console::HelmEnginePort, 0.0);
+        set_console_hp_direct(&mut app_one, crate::messages::SystemId("helm-engine-port".into()), 0.0);
         tick(&mut app_one); // let Damage tier propagate
         set_last_helm_input(
             &mut app_one,
@@ -3656,7 +3654,7 @@ station = "helm"
     #[test]
     fn damaging_power_reactor_hull_to_disabled_puts_power_reactor_in_offline_systems() {
         let mut app = test_app_with_power_hull();
-        set_console_hp_direct(&mut app, crate::messages::Console::PowerReactor, 0.0);
+        set_console_hp_direct(&mut app, crate::messages::SystemId("power-reactor".into()), 0.0);
         tick(&mut app);
 
         let ship = app
@@ -3679,7 +3677,7 @@ station = "helm"
     #[test]
     fn damaging_power_battery_hull_to_disabled_puts_power_battery_in_offline_systems() {
         let mut app = test_app_with_power_hull();
-        set_console_hp_direct(&mut app, crate::messages::Console::PowerBattery, 0.0);
+        set_console_hp_direct(&mut app, crate::messages::SystemId("power-battery".into()), 0.0);
         tick(&mut app);
 
         let ship = app

@@ -320,7 +320,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);

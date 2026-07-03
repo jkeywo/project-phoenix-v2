@@ -86,10 +86,10 @@ test('weapons console: FIRE buttons call __sendAction with correct envelopes', a
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(2);
 
-  expect(JSON.parse(sent[0])).toEqual({ action: 'fire_phaser', console: 'Tactical', bank: 'fore' });
+  expect(JSON.parse(sent[0])).toEqual({ action: 'fire_phaser', console: 'tactical', bank: 'fore' });
   expect(JSON.parse(sent[1])).toEqual({
     action: 'fire_torpedo',
-    console: 'Tactical',
+    console: 'tactical',
     tube: 'fore',
     target_uuid: null,
   });

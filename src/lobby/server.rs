@@ -79,7 +79,6 @@ impl Plugin for LobbyPlugin {
         let initial_cache = GameStateCache(GameState {
             phase: GamePhase::Lobby,
             players: vec![],
-            complexity: std::collections::HashMap::new(),
             world: None,
         });
         app.insert_resource(Sessions(SessionManager::new()))
@@ -578,7 +577,6 @@ mod tests {
                 StationConfig {
                     id: StationId("helm".into()),
                     name: "Helm".into(),
-                    console: "helm".into(),
                     description: "Helm station".into(),
                     rank: "Crew".into(),
                     short_code: "H".into(),
@@ -591,7 +589,6 @@ mod tests {
                 StationConfig {
                     id: StationId("tactical".into()),
                     name: "Tactical".into(),
-                    console: "tactical".into(),
                     description: "Tactical station".into(),
                     rank: "Crew".into(),
                     short_code: "T".into(),
@@ -696,7 +693,6 @@ mod tests {
             stations: vec![StationConfig {
                 id: StationId("helm".into()),
                 name: "Helm".into(),
-                console: "helm".into(),
                 description: "Helm station".into(),
                 rank: "Crew".into(),
                 short_code: "H".into(),

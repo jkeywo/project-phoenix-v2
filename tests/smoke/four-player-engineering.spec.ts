@@ -93,7 +93,7 @@ test('Power station is assigned correctly at 6P layout', async ({ context }) => 
 
   const a3 = await lastAssignment(c3, c3.token);
   expect(a3.data.station).toBe('Power');
-  expect([...a3.data.consoles].sort()).toEqual(['Power']);
+  expect(a3.data.station_id).toBe('power');
 
   await c1.close();
   await c2.close();
@@ -149,7 +149,13 @@ test('Repair player can dispatch a repair team', async ({ context }) => {
     'data && Array.isArray(data.teams) && data.teams[0] === "Idle"',
   );
 
-  await c3.send('DispatchRepairTeam', { team_idx: 0, console: 'Power' });
+  await c3.send('ControlSystem', {
+    target: 'repair',
+    payload: {
+      type: 'DispatchRepairTeam',
+      data: { team_idx: 0, target: { type: 'Station', data: 'power' } },
+    },
+  });
   await waitForLastMessage(
     c3,
     'RepairState',
@@ -177,7 +183,7 @@ test('Power acts when all four connect before selecting', async ({ context }) =>
   await selectAndWait(c4, 'Sensors');
 
   const a3 = await lastAssignment(c3, c3.token);
-  expect([...a3.data.consoles].sort()).toEqual(['Power']);
+  expect(a3.data.station_id).toBe('power');
 
   await c1.send('SetReady', { ready: true });
   await c2.send('SetReady', { ready: true });

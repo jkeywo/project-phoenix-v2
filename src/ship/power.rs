@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    Console, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard,
+    InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard,
     PowerConsoleEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage, StationId,
     SystemBlackboard, SystemId,
 };
@@ -172,12 +172,12 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 
 // ── Systems ────────────────────────────────────────────────────────────────────
 
-/// Handle `SetPower` messages from the Power console.
+/// Handle `SetPowerGroupAllocation` messages from the Power console.
 ///
-/// Validates: sender holds `Console::Power`. Reads `ControlSystem` messages
+/// Validates: sender holds the `power` station. Reads `ControlSystem` messages
 /// targeting the **reactor** fine system (`POWER_REACTOR_SYSTEM_ID`) with a
-/// `SetPower` payload, and calls `PowerSystem::increase` / `decrease` to
-/// reach the requested level. Per issue #513 the reactor OWNS the allocation
+/// `SetPowerGroupAllocation` payload, and calls `PowerSystem::increase` / `decrease`
+/// to reach the requested level. Per issue #513 the reactor OWNS the allocation
 /// surface — a Disabled/Destroyed reactor's `accept_human_input` policy
 /// (populated by `sync_console_damage_tiers`) refuses these messages at
 /// admission, so the coarse `power` id no longer receives allocation input.
@@ -196,21 +196,6 @@ pub fn handle_power_messages(
     >,
     power_res: Option<ResMut<ShipPowerSystem>>,
 ) {
-    // After issue #617 the power system speaks only `PowerGroupId`. Legacy
-    // `SetPower { target: Console, .. }` messages from the wire are
-    // translated to a group id at the message-handler edge (inline the
-    // three-branch mapping formerly in `power_group_for_console`); anything
-    // that doesn't map (e.g. `Console::Shields`) is silently dropped, as it
-    // was before this refactor.
-    fn console_to_group(console: &Console) -> Option<crate::messages::PowerGroupId> {
-        match console {
-            Console::Helm => Some(crate::messages::PowerGroupId(HELM_POWER_GROUP.into())),
-            Console::Tactical => Some(crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into())),
-            Console::Sensors => Some(crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into())),
-            _ => None,
-        }
-    }
-
     let mut power_res = power_res;
     // Iterate every ship (player + NPC) so both the player's Power console
     // commands and the future NPC `operate_power_ai` writes into
@@ -218,19 +203,12 @@ pub fn handle_power_messages(
     for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
         let mut pending: Vec<(crate::messages::PowerGroupId, u8)> = Vec::new();
         for cmd in admitted.for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID) {
-            match &cmd.payload {
-                crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
-                    pending.push((group.clone(), *level));
-                }
-                crate::messages::SystemControlPayload::SetPower {
-                    target: console,
-                    level,
-                } => {
-                    if let Some(group) = console_to_group(console) {
-                        pending.push((group, *level));
-                    }
-                }
-                _ => {}
+            if let crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                group,
+                level,
+            } = &cmd.payload
+            {
+                pending.push((group.clone(), *level));
             }
         }
         if pending.is_empty() {
@@ -843,7 +821,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -865,7 +843,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -1446,8 +1424,8 @@ mod tests {
     fn reactor_offline_refuses_allocation_input() {
         // End-to-end path via handle_power_messages: the admission gate
         // ensures a Disabled/Destroyed reactor's `accept_human_input` is
-        // false, but the direct test is that dispatching a SetPower to the
-        // reactor id when it's offline leaves battery/allocation untouched.
+        // false, but the direct test is that dispatching a SetPowerGroupAllocation
+        // to the reactor id when it's offline leaves battery/allocation untouched.
         //
         // We test the handler directly (bypassing admission which lives in
         // server_app.rs) by seeding an AdmittedCommand targeting the

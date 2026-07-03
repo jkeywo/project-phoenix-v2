@@ -28,7 +28,6 @@ pub struct StationConfig {
     pub rank: String,
     #[serde(default)]
     pub short_code: String,
-    pub console: String,
     #[serde(default, rename = "rating")]
     pub ratings: Vec<StationRatingConfig>,
 }
@@ -377,7 +376,6 @@ name = "Captain"
 description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
-console = "captain"
 
 [[station.rating]]
 name = "Assisted"
@@ -393,7 +391,6 @@ name = "Tactical"
 description = "Weapons and threat response."
 rank = "Ltn."
 short_code = "TAC"
-console = "tactical"
 
 [[station.rating]]
 name = "Assisted"

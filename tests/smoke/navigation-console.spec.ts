@@ -24,7 +24,7 @@ test('navigation console: placing a waypoint sends set_navigation_waypoint', asy
 
   const parsed = JSON.parse(sent[0]);
   expect(parsed.action).toBe('set_navigation_waypoint');
-  expect(parsed.console).toBe('Navigation');
+  expect(parsed.console).toBe('navigation');
   expect(typeof parsed.x).toBe('number');
   expect(typeof parsed.z).toBe('number');
 });
@@ -56,7 +56,7 @@ test('navigation console: clear waypoint sends clear_navigation_waypoint', async
 
   const parsed = JSON.parse(sent[0]);
   expect(parsed.action).toBe('clear_navigation_waypoint');
-  expect(parsed.console).toBe('Navigation');
+  expect(parsed.console).toBe('navigation');
 });
 
 test('navigation console: ADD WAYPOINT button is hidden until an entity is selected', async ({ page }) => {
@@ -146,7 +146,7 @@ test('navigation console: ADD WAYPOINT sends source_uuid for selected entity', a
 
   const parsed = JSON.parse(sent[sent.length - 1]);
   expect(parsed.action).toBe('set_navigation_waypoint');
-  expect(parsed.console).toBe('Navigation');
+  expect(parsed.console).toBe('navigation');
   expect(parsed.source_uuid).toBe('station-alpha');
   expect(typeof parsed.x).toBe('number');
   expect(typeof parsed.z).toBe('number');

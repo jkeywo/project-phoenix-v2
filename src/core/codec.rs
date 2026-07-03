@@ -122,7 +122,7 @@ fn system_target_for_payload_type(type_name: &str) -> Option<&'static str> {
         // `SetShieldArcFocus` (issue #514) intentionally omitted — arcs are
         // variable and there is no single fallback target. The JS layer
         // must always include an explicit `shield-arc-<id>` target.
-        "SetPowerGroupAllocation" | "SetPower" => {
+        "SetPowerGroupAllocation" => {
             Some(crate::system_registry::POWER_REACTOR_SYSTEM_ID)
         }
         _ => None,
@@ -186,7 +186,6 @@ mod tests {
         GameState {
             phase: GamePhase::Lobby,
             players: vec![player()],
-            complexity: HashMap::new(),
             world: None,
         }
     }
@@ -722,7 +721,6 @@ mod tests {
             state: GameState {
                 phase: GamePhase::InProgress,
                 players: vec![player()],
-                complexity: HashMap::new(),
                 world: Some(WorldData {
                     entities: vec![EntitySnapshot {
                         uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(),
@@ -964,36 +962,22 @@ mod tests {
     }
 
     #[test]
-    fn client_dispatch_repair_team_round_trips() {
-        use crate::messages::Console;
-        let msg = ClientMessage::DispatchRepairTeam {
-            team_idx: 0,
-            console: Console::Helm,
-        };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
     fn server_repair_state_round_trips() {
-        use crate::messages::{Console, SystemId, TeamSlot};
+        use crate::messages::{SystemId, TeamSlot};
         let msg = ServerMessage::RepairState {
             teams: vec![
                 TeamSlot::Idle,
                 TeamSlot::Travelling {
-                    console: Some(Console::Helm),
                     system_id: Some(SystemId("helm".into())),
                     display_name: Some("Helm".into()),
                     elapsed: 2.5,
                 },
                 TeamSlot::Repairing {
-                    console: Some(Console::Tactical),
                     system_id: Some(SystemId("tactical".into())),
                     display_name: Some("Tactical".into()),
                 },
                 TeamSlot::Returning {
                     remaining: 3.0,
-                    queued: None,
                     system_id: None,
                     display_name: None,
                     queued_system_id: None,
@@ -1198,17 +1182,6 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
-    #[test]
-    fn server_modifier_added_console_source_round_trips() {
-        let msg = ServerMessage::ModifierAdded {
-            source: crate::messages::ModifierSource::Console(crate::messages::Console::Sensors),
-            slot: crate::messages::ModifierSlot::RadarRange,
-            bonus: 1.0,
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
     /// After issue #617 the coordination producer registers modifiers with a
     /// [`ModifierSource::PowerGroup`] variant. The wire format must
     /// round-trip that new discriminant unchanged.
@@ -1356,7 +1329,6 @@ mod tests {
         let msg = ServerMessage::StationAssigned {
             token: "tok".into(),
             station: Some("Captain".into()),
-            consoles: vec![Console::CaptainChair],
             station_id: Some(StationId("captain".into())),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1368,7 +1340,6 @@ mod tests {
         let msg = ServerMessage::StationAssigned {
             token: "tok".into(),
             station: None,
-            consoles: vec![],
             station_id: None,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1385,7 +1356,6 @@ mod tests {
                 id: StationId("captain".into()),
                 name: "Captain".into(),
                 description: "The big chair".into(),
-                consoles: vec![Console::CaptainChair],
                 rank: "Cpt.".into(),
                 short_code: "CAP".into(),
             }],
@@ -1486,11 +1456,11 @@ mod tests {
     }
 
     #[test]
-    fn client_set_power_round_trips() {
+    fn client_set_power_group_allocation_round_trips() {
         let msg = ClientMessage::ControlSystem {
             target: crate::system_registry::power_reactor_system_id(),
-            payload: crate::messages::SystemControlPayload::SetPower {
-                target: Console::Helm,
+            payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                group: PowerGroupId("helm".into()),
                 level: 3,
             },
         };
@@ -2987,20 +2957,6 @@ mod tests {
         assert_eq!(action, UiAction::SetBoost { active: false });
     }
 
-    #[test]
-    fn decode_ui_action_dispatch_repair_team() {
-        let json =
-            r#"{"action":"dispatch_repair_team","console":"Repair","team_idx":1,"target":"Helm"}"#;
-        let action = decode_ui_action(json).expect("decode dispatch_repair_team");
-        assert_eq!(
-            action,
-            UiAction::DispatchRepairTeam {
-                team_idx: 1,
-                target: Console::Helm
-            }
-        );
-    }
-
     // ── issue #616 (parent #516): SystemId-keyed hull + Power group additive shapes ──
     // These tests cover the new-shape wire types introduced alongside the
     // legacy `Console`-keyed shapes. Publishers emit both; consumers may read
@@ -3065,7 +3021,6 @@ mod tests {
     fn team_slot_travelling_with_new_fields_round_trips() {
         let msg = ServerMessage::RepairState {
             teams: vec![TeamSlot::Travelling {
-                console: Some(Console::Helm),
                 system_id: Some(SystemId("helm".into())),
                 display_name: Some("Helm".into()),
                 elapsed: 1.5,
@@ -3079,7 +3034,6 @@ mod tests {
     fn team_slot_repairing_with_new_fields_round_trips() {
         let msg = ServerMessage::RepairState {
             teams: vec![TeamSlot::Repairing {
-                console: Some(Console::PhaserFore),
                 system_id: Some(SystemId("phaser-fore".into())),
                 display_name: Some("Phaser Bank (Fore)".into()),
             }],
@@ -3093,7 +3047,6 @@ mod tests {
         let msg = ServerMessage::RepairState {
             teams: vec![TeamSlot::Returning {
                 remaining: 3.5,
-                queued: Some(Console::Tactical),
                 system_id: Some(SystemId("helm".into())),
                 display_name: Some("Helm".into()),
                 queued_system_id: Some(SystemId("tactical".into())),
@@ -3105,84 +3058,10 @@ mod tests {
     }
 
     #[test]
-    fn team_slot_legacy_wire_shape_still_decodes_with_defaults() {
-        // Pre-#616 wire form: no system_id / display_name fields on any variant.
-        // Both old and new fields are `#[serde(default)]` so a legacy payload
-        // decodes with the new fields as None.
-        let legacy_json = r#"{
-            "type": "RepairState",
-            "data": {
-                "teams": [
-                    "Idle",
-                    { "Travelling": { "console": "Helm", "elapsed": 1.2 } },
-                    { "Repairing": { "console": "Tactical" } },
-                    { "Returning": { "remaining": 4.0, "queued": null } }
-                ]
-            }
-        }"#;
-        let decoded = JsonCodec.decode_server(legacy_json).unwrap();
-        match decoded {
-            ServerMessage::RepairState { teams } => {
-                assert_eq!(teams.len(), 4);
-                assert!(matches!(teams[0], TeamSlot::Idle));
-                match &teams[1] {
-                    TeamSlot::Travelling {
-                        console,
-                        system_id,
-                        display_name,
-                        elapsed,
-                    } => {
-                        assert_eq!(*console, Some(Console::Helm));
-                        assert!(system_id.is_none(), "legacy payload -> system_id None");
-                        assert!(
-                            display_name.is_none(),
-                            "legacy payload -> display_name None"
-                        );
-                        assert!((*elapsed - 1.2).abs() < 1e-4);
-                    }
-                    other => panic!("expected Travelling, got {other:?}"),
-                }
-                match &teams[2] {
-                    TeamSlot::Repairing {
-                        console,
-                        system_id,
-                        display_name,
-                    } => {
-                        assert_eq!(*console, Some(Console::Tactical));
-                        assert!(system_id.is_none());
-                        assert!(display_name.is_none());
-                    }
-                    other => panic!("expected Repairing, got {other:?}"),
-                }
-                match &teams[3] {
-                    TeamSlot::Returning {
-                        remaining,
-                        queued,
-                        system_id,
-                        display_name,
-                        queued_system_id,
-                        queued_display_name,
-                    } => {
-                        assert!((*remaining - 4.0).abs() < 1e-4);
-                        assert!(queued.is_none());
-                        assert!(system_id.is_none());
-                        assert!(display_name.is_none());
-                        assert!(queued_system_id.is_none());
-                        assert!(queued_display_name.is_none());
-                    }
-                    other => panic!("expected Returning, got {other:?}"),
-                }
-            }
-            other => panic!("expected RepairState, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn team_slot_new_wire_shape_decodes_without_legacy_console_field() {
-        // Post-#619 wire form: no `console` field at all. Since it's marked
-        // `#[serde(default)]`, decoding must succeed with the field as None.
-        // This is the forward-compatibility guarantee that lets a later PR
-        // drop the field cleanly.
+        // Post-#619 wire form: no `console` / `queued` fields at all.
+        // Unknown fields (if a legacy payload sends them) are silently
+        // ignored by serde since the struct no longer declares them.
         let new_json = r#"{
             "type": "RepairState",
             "data": {
@@ -3198,12 +3077,10 @@ mod tests {
             ServerMessage::RepairState { teams } => {
                 match &teams[0] {
                     TeamSlot::Travelling {
-                        console,
                         system_id,
                         display_name,
                         ..
                     } => {
-                        assert!(console.is_none(), "no legacy console field in payload");
                         assert_eq!(*system_id, Some(SystemId("helm".into())));
                         assert_eq!(display_name.as_deref(), Some("Helm"));
                     }
@@ -3211,11 +3088,9 @@ mod tests {
                 }
                 match &teams[1] {
                     TeamSlot::Repairing {
-                        console,
                         system_id,
                         display_name,
                     } => {
-                        assert!(console.is_none());
                         assert_eq!(*system_id, Some(SystemId("phaser-fore".into())));
                         assert_eq!(display_name.as_deref(), Some("Phaser Bank (Fore)"));
                     }
@@ -3223,12 +3098,10 @@ mod tests {
                 }
                 match &teams[2] {
                     TeamSlot::Returning {
-                        queued,
                         queued_system_id,
                         queued_display_name,
                         ..
                     } => {
-                        assert!(queued.is_none());
                         assert_eq!(*queued_system_id, Some(SystemId("tactical".into())));
                         assert_eq!(queued_display_name.as_deref(), Some("Tactical"));
                     }
@@ -3243,15 +3116,7 @@ mod tests {
     fn repair_blackboard_with_system_hull_round_trips() {
         let bb = SystemBlackboard::Repair(RepairBlackboard {
             teams: vec![TeamSlot::Idle],
-            console_hull: vec![ConsoleHullStatus {
-                console: Console::Helm,
-                current: 20.0,
-                max_hp: 25.0,
-                tier: crate::damage::DamageTier::Operational,
-                debuff_magnitude: 0.0,
-            }],
             travel_duration_secs: 5.0,
-            damageable_consoles: vec![Console::Helm, Console::Tactical],
             system_hull: vec![SystemHullStatus {
                 system_id: SystemId("helm".into()),
                 display_name: "Helm".into(),
@@ -3270,30 +3135,6 @@ mod tests {
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn repair_blackboard_legacy_wire_shape_defaults_new_fields() {
-        // Pre-#616 blackboard payload without system_hull / damageable_systems
-        // must still deserialize; the new fields default to empty.
-        let legacy_json = r#"{
-            "kind": "Repair",
-            "data": {
-                "teams": [],
-                "console_hull": [],
-                "travel_duration_secs": 5.0,
-                "damageable_consoles": ["Helm"]
-            }
-        }"#;
-        let decoded: SystemBlackboard = serde_json::from_str(legacy_json).unwrap();
-        match decoded {
-            SystemBlackboard::Repair(bb) => {
-                assert!(bb.system_hull.is_empty());
-                assert!(bb.damageable_systems.is_empty());
-                assert_eq!(bb.damageable_consoles, vec![Console::Helm]);
-            }
-            other => panic!("expected Repair blackboard, got {other:?}"),
-        }
     }
 
     #[test]

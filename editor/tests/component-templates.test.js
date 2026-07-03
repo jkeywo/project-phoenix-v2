@@ -85,16 +85,19 @@ describe('getComboTemplate', () => {
     expect(getComboTemplate('UnknownThing')).toBeNull();
   });
 
-  it('every section in every combo has a non-empty key and defaults defined', () => {
+  it('every hull section in every combo only uses valid HullConfig fields', () => {
+    // HullConfig (src/entities/config.rs) has #[serde(deny_unknown_fields)]
+    // and accepts only `hull_integrity` and `system_hull`. `repair_team_count`
+    // belongs to RepairConfig, not HullConfig — emitting it here would make
+    // the generated TOML fail to load into Rust.
+    const HULL_FIELDS = new Set(['hull_integrity', 'system_hull']);
     for (const name of getAllComboNames()) {
       const tpl = getComboTemplate(name);
       for (const sec of tpl.sections) {
-        expect(sec.key, `${name}: section missing key`).toBeTruthy();
-        // Defaults may be a bare scalar (e.g. `name = "Sun"`), an array
-        // (e.g. `tags = [...]`, `[[light]]` entries), or an object (e.g.
-        // `hull`, `helm_console`). All three shapes are valid; we just
-        // require that defaults is defined.
-        expect(sec.defaults, `${name}.${sec.key} defaults is undefined`).toBeDefined();
+        if (sec.key !== 'hull') continue;
+        for (const field of Object.keys(sec.defaults)) {
+          expect(HULL_FIELDS.has(field), `${name}.hull: unexpected field '${field}'`).toBe(true);
+        }
       }
     }
   });

@@ -4,7 +4,7 @@ use bevy_rapier3d::prelude::*;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::lobby::{InboundMessage, LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
+    ClientMessage, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
     StationId, SystemControlPayload,
 };
 use crate::shield::ShieldSystem;
@@ -184,9 +184,9 @@ pub struct LastBroadcastEntityHealth(
 /// Last-broadcast per-system hull state. When the hull changes, a
 /// `SystemHullUpdate` event message is emitted and this cache is updated.
 ///
-/// Renamed from a `ConsoleHullStatus`-inner cache in issue #618; the wire
-/// message flipped from `ConsoleHullUpdate` to `SystemHullUpdate` in the
-/// same PR (publishers no longer emit legacy Console-keyed wire fields).
+/// SystemId-keyed successor of the retired console-keyed cache; the wire
+/// message flipped from `ConsoleHullUpdate` to `SystemHullUpdate` in #618
+/// and the legacy variant was removed entirely in #619.
 #[derive(Resource, Default)]
 pub struct LastBroadcastHull(pub Vec<crate::messages::SystemHullStatus>);
 
@@ -1287,12 +1287,12 @@ fn admit_system_commands(
 /// that system's admission. Returns `None` for systems with no owning
 /// station (either ship-wide or unknown), signalling a conservative allow
 /// at the caller.
+/// Resolve a `SystemId` to the `StationId` that owns it.
 ///
-/// After issue #618 the mapping targets lowercase `StationId` strings
-/// directly (e.g. `helm-engine-port` → `StationId("helm")`). The pass-through
-/// via `Console::station_console_id` keeps the source of truth for the
-/// `SystemId → station` mapping colocated with the `Console` enum until the
-/// enum is fully retired.
+/// After issue #619 the mapping is a direct match to lowercase station id
+/// strings — the pass-through via `Console` is gone. Fine-grained system ids
+/// like `helm-engine-port` and `phaser-fore` map back to their coarse-grained
+/// station (`helm` and `tactical` respectively).
 fn station_for_system(target: &crate::messages::SystemId) -> Option<StationId> {
     use crate::system_registry::*;
     // Fine-grained shield arcs (issue #514) — variable count, matched by prefix.
@@ -1301,30 +1301,30 @@ fn station_for_system(target: &crate::messages::SystemId) -> Option<StationId> {
     if target.0.starts_with("shield-arc-") {
         return Some(StationId("shields".into()));
     }
-    let console = match target.0.as_str() {
-        CAPTAIN_SYSTEM_ID | RED_ALERT_SYSTEM_ID => Some(Console::CaptainChair),
+    let station_id_str = match target.0.as_str() {
+        CAPTAIN_SYSTEM_ID | RED_ALERT_SYSTEM_ID => "captain",
         HELM_SYSTEM_ID
         | HELM_JOYSTICK_SYSTEM_ID
         | HELM_ENGINE_PORT_SYSTEM_ID
         | HELM_ENGINE_STARBOARD_SYSTEM_ID
         | HELM_RADAR_SYSTEM_ID
-        | HELM_IMPULSE_SYSTEM_ID => Some(Console::Helm),
+        | HELM_IMPULSE_SYSTEM_ID => "helm",
         TACTICAL_SYSTEM_ID
         | PHASER_FORE_SYSTEM_ID
         | PHASER_AFT_SYSTEM_ID
         | TORPEDO_TUBE_FORE_PORT_SYSTEM_ID
         | TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID
         | TORPEDO_TUBE_AFT_SYSTEM_ID
-        | TORPEDO_MAGAZINE_SYSTEM_ID => Some(Console::Tactical),
-        POWER_SYSTEM_ID | POWER_REACTOR_SYSTEM_ID | POWER_BATTERY_SYSTEM_ID => Some(Console::Power),
-        SENSORS_SYSTEM_ID => Some(Console::Sensors),
-        NAVIGATION_SYSTEM_ID => Some(Console::Navigation),
-        SHIELDS_SYSTEM_ID => Some(Console::Shields),
-        COMMS_SYSTEM_ID => Some(Console::Comms),
-        REPAIR_SYSTEM_ID => Some(Console::Repair),
-        _ => None,
+        | TORPEDO_MAGAZINE_SYSTEM_ID => "tactical",
+        POWER_SYSTEM_ID | POWER_REACTOR_SYSTEM_ID | POWER_BATTERY_SYSTEM_ID => "power",
+        SENSORS_SYSTEM_ID => "sensors",
+        NAVIGATION_SYSTEM_ID => "navigation",
+        SHIELDS_SYSTEM_ID => "shields",
+        COMMS_SYSTEM_ID => "comms",
+        REPAIR_SYSTEM_ID => "repair",
+        _ => return None,
     };
-    console.map(|c| StationId(c.station_console_id().to_string()))
+    Some(StationId(station_id_str.to_string()))
 }
 
 fn is_command_authorized(
@@ -2013,11 +2013,7 @@ fn spawn_game_start_entities(
 
             // Ship-specific resource setup
             if let Some(hc) = &config.hull {
-                let _entries: Vec<(Console, f32)> = hc
-                    .console_hull
-                    .iter()
-                    .map(|e| (e.console.clone(), e.max_hp))
-                    .collect();
+                let _hc = hc; // hull is set up via EntitySystemHull in the spawner
                 // [repair] block — overrides default RepairTimings if present.
                 // Absent block keeps the same defaults the hardcoded constants
                 // used to provide (5.0s travel, 0.5 HP/s repair rate).
@@ -3128,7 +3124,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -3151,7 +3147,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -3191,7 +3187,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -3231,7 +3227,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -3482,7 +3478,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -3664,7 +3660,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(&mut app);
@@ -3726,7 +3722,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         let out = tick(&mut app);
@@ -3849,7 +3845,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -4483,7 +4479,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -4529,9 +4525,12 @@ mod tests {
         push(
             &mut app,
             "captain",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: crate::messages::RepairTarget::Station(StationId("helm".into())),
+                },
             },
         );
         tick(&mut app);
@@ -4549,9 +4548,12 @@ mod tests {
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: crate::messages::RepairTarget::Station(StationId("helm".into())),
+                },
             },
         );
         tick(&mut app);
@@ -4569,18 +4571,24 @@ mod tests {
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: crate::messages::RepairTarget::Station(StationId("helm".into())),
+                },
             },
         );
         tick(&mut app);
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 1,
-                console: Console::Tactical,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 1,
+                    target: crate::messages::RepairTarget::Station(StationId("tactical".into())),
+                },
             },
         );
         tick(&mut app);
@@ -4588,9 +4596,12 @@ mod tests {
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Power,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: crate::messages::RepairTarget::Station(StationId("power".into())),
+                },
             },
         );
         tick(&mut app);
@@ -4609,9 +4620,12 @@ mod tests {
         push(
             &mut app,
             "eng",
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 0,
-                console: Console::Helm,
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: crate::messages::RepairTarget::Station(StationId("helm".into())),
+                },
             },
         );
         let out = tick(&mut app);
@@ -4703,7 +4717,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -5528,7 +5542,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -5568,8 +5582,8 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Helm,
+                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
                     level: 2,
                 },
             },
@@ -5594,8 +5608,8 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Sensors,
+                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
                     level: 1,
                 },
             },
@@ -5620,8 +5634,8 @@ mod tests {
             "power",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Helm,
+                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
                     level: 3,
                 },
             },
@@ -5653,8 +5667,8 @@ mod tests {
             "power",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Tactical,
+                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
                     level: 1,
                 },
             },
@@ -5724,8 +5738,8 @@ mod tests {
             "power",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Helm,
+                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
                     level: 4,
                 },
             },
@@ -5765,8 +5779,8 @@ mod tests {
             "power",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Helm,
+                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
                     level: 3,
                 },
             },
@@ -5801,8 +5815,8 @@ mod tests {
             "power",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Tactical,
+                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
                     level: 1,
                 },
             },
@@ -5891,8 +5905,8 @@ mod tests {
             "power",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPower {
-                    target: Console::Sensors,
+                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
                     level: 3,
                 },
             },
@@ -6220,7 +6234,7 @@ mod tests {
             app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(app);
@@ -6348,7 +6362,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
+                station: "Captain".into(),
             },
         );
         tick(&mut app);

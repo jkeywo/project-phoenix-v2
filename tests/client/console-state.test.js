@@ -566,9 +566,9 @@ describe('buildRepairConsoleState', () => {
   });
 
   it('damageable_systems derives from consoleHull (SystemId-keyed post issue #618)', () => {
-    // Post issue #618 hull entries carry `.system_id` (lowercase station id);
-    // the derived `damageable_systems` field replaces the legacy
-    // `damageable_consoles` Console-keyed field on the wire.
+    // Post issue #618 hull entries carry `.system_id` (lowercase station id).
+    // Post issue #619 the legacy `damageable_consoles` Console-keyed wire
+    // field is gone entirely.
     const hull = [
       { system_id: 'helm',     current: 14, max_hp: 25 },
       { system_id: 'tactical', current: 25, max_hp: 25 },
@@ -576,8 +576,6 @@ describe('buildRepairConsoleState', () => {
     ];
     const s = parse(buildRepairConsoleState({ consoleHull: hull }));
     expect(s.damageable_systems).toEqual(['helm', 'tactical', 'power']);
-    // Legacy Console-keyed field is emitted empty by the fallback.
-    expect(s.damageable_consoles).toEqual([]);
   });
 
   it('damageable_systems is empty when consoleHull is empty', () => {

@@ -9,9 +9,9 @@ import {
 
 // TeamSlot wire shape: 'Idle' string, or { Travelling|Repairing|Returning: {...} }.
 const IDLE = 'Idle';
-const TRAVEL = { Travelling: { console: 'Helm', elapsed: 1.2 } };
-const REPAIR = { Repairing: { console: 'Power' } };
-const RETURN = { Returning: { remaining: 2.0, queued: null } };
+const TRAVEL = { Travelling: { system_id: 'helm', display_name: 'Helm', elapsed: 1.2 } };
+const REPAIR = { Repairing: { system_id: 'power', display_name: 'Power' } };
+const RETURN = { Returning: { remaining: 2.0 } };
 
 // ── busy / active predicates ─────────────────────────────────────────────────
 
@@ -52,18 +52,26 @@ describe('anyTeamActive', () => {
 // ── repairButtonPress (message shape + all-busy guard) ───────────────────────
 
 describe('repairButtonPress', () => {
-  it('returns the default DispatchRepairTeam message when a team is free', () => {
+  it('returns the default ControlSystem/DispatchRepairTeam message when a team is free', () => {
     expect(repairButtonPress([IDLE, TRAVEL])).toEqual({
-      type: 'DispatchRepairTeam',
-      data: { team_idx: 0, console: 'Helm' },
+      type: 'ControlSystem',
+      data: {
+        target: 'repair',
+        payload: {
+          type: 'DispatchRepairTeam',
+          data: { team_idx: 0, target: { type: 'Station', data: 'helm' } },
+        },
+      },
     });
   });
 
-  it('returns the same shape as repair_message() (team 0 -> Helm)', () => {
+  it('targets team 0 → helm station in the default press', () => {
     const msg = repairButtonPress([IDLE]);
-    expect(msg.type).toBe('DispatchRepairTeam');
-    expect(msg.data.team_idx).toBe(0);
-    expect(msg.data.console).toBe('Helm');
+    expect(msg.type).toBe('ControlSystem');
+    expect(msg.data.target).toBe('repair');
+    expect(msg.data.payload.type).toBe('DispatchRepairTeam');
+    expect(msg.data.payload.data.team_idx).toBe(0);
+    expect(msg.data.payload.data.target).toEqual({ type: 'Station', data: 'helm' });
   });
 
   it('suppresses (returns null) when all teams are busy', () => {

@@ -20,8 +20,6 @@
  * button/readout elements there.
  */
 
-import { repairMessage } from './sim-state.js';
-
 /** True when a single team slot is not the 'Idle' string (i.e. active/busy). */
 export function isTeamBusy(slot) {
   return slot !== 'Idle';
@@ -51,7 +49,8 @@ export function anyTeamActive(repairTeams) {
 /**
  * Decide whether pressing the shell repair button should send a message, and
  * if so, which one. Mirrors `handle_repair_button_press`: suppress when all
- * teams are busy, otherwise emit the default `repair_message()` (team 0 → Helm).
+ * teams are busy, otherwise emit the default `dispatch_repair_team` action
+ * (team 0 → helm station) wrapped in a `ControlSystem` envelope.
  *
  * @param {Array<string|object>} repairTeams
  * @returns {{ type: string, data?: object } | null}  message to send, or null
@@ -59,7 +58,16 @@ export function anyTeamActive(repairTeams) {
  */
 export function repairButtonPress(repairTeams) {
   if (allTeamsBusy(repairTeams)) return null;
-  return repairMessage();
+  return {
+    type: 'ControlSystem',
+    data: {
+      target: 'repair',
+      payload: {
+        type: 'DispatchRepairTeam',
+        data: { team_idx: 0, target: { type: 'Station', data: 'helm' } },
+      },
+    },
+  };
 }
 
 /**

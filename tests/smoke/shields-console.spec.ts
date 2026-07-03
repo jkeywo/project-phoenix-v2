@@ -119,7 +119,7 @@ test('shields console: shield segment click sends set_shield_focus with arc_id',
   expect(sent).toHaveLength(1);
   expect(JSON.parse(sent[0])).toEqual({
     action: 'set_shield_focus',
-    console: 'Shields',
+    console: 'shields',
     arc_id: 'port',
     focused: true,
   });
@@ -141,7 +141,7 @@ test('shields console: clicking focused facing clears focus via focused=false', 
   expect(sent).toHaveLength(1);
   expect(JSON.parse(sent[0])).toEqual({
     action: 'set_shield_focus',
-    console: 'Shields',
+    console: 'shields',
     arc_id: 'fore',
     focused: false,
   });

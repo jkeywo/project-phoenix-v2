@@ -403,7 +403,6 @@ impl ShipModifiers {
 /// Formats a `ModifierSource` as a human-readable string for the debug overlay.
 fn format_source(source: &ModifierSource) -> String {
     match source {
-        ModifierSource::Console(c) => format!("Console({c:?})"),
         ModifierSource::ImpulseDrive => "ImpulseDrive".to_string(),
         ModifierSource::RegionEffect { uuid } => format!("Region({})", &uuid.to_string()[..8]),
         ModifierSource::World { id, tag } => format!("World({id}/{tag})"),
@@ -414,7 +413,6 @@ fn format_source(source: &ModifierSource) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::Console;
 
     fn ms(source: ModifierSource, slot: ModifierSlot, bonus: f32) -> Modifier {
         Modifier {
@@ -584,13 +582,13 @@ mod tests {
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
     }
 
-    // ── 11. Console source stacks per-console ────────────────────────────────
+    // ── 11. PowerGroup source stacks per-group ───────────────────────────────
 
     #[test]
-    fn console_source_uses_console_variant() {
+    fn power_group_source_uses_group_id() {
         let mut mods = ShipModifiers::new();
         mods.add_or_update(ms(
-            ModifierSource::Console(Console::Sensors),
+            ModifierSource::PowerGroup(crate::messages::PowerGroupId("sensors".into())),
             ModifierSlot::RadarRange,
             1.0,
         ));

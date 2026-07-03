@@ -19,30 +19,14 @@ import { REGISTRY } from './console-registry.js';
 // Console name -> HTML section id. Derived from REGISTRY so there is a single
 // source of truth for all HTML-panel consoles.
 //
-// Two-key map: the primary keys are the lowercase station ids (post issue
-// #618, matching REGISTRY). Extra PascalCase Console-enum aliases are added
-// so callers that still pass PascalCase names — chiefly
-// `sectionForConsole(activeConsole)` where `activeConsole` comes from
-// `player.consoles` (a PascalCase wire field retained pending issue #619) —
-// resolve to the same section id without any per-caller translation.
-const _LOWERCASE_SECTION = Object.fromEntries(
-  Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId])
+// Keys are the lowercase station ids (matching `StationId` on the wire after
+// issues #618/#619). `sectionForConsole(activeConsole)` expects `activeConsole`
+// to be a lowercase station id.
+export const CONSOLE_SECTION = Object.freeze(
+  Object.fromEntries(
+    Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId])
+  )
 );
-const _PASCAL_TO_STATION = Object.freeze({
-  CaptainChair: 'captain',
-  Helm: 'helm',
-  Tactical: 'tactical',
-  Repair: 'repair',
-  Sensors: 'sensors',
-  Shields: 'shields',
-  Navigation: 'navigation',
-  Power: 'power',
-  Comms: 'comms',
-});
-const _PASCAL_SECTION = Object.fromEntries(
-  Object.entries(_PASCAL_TO_STATION).map(([pascal, station]) => [pascal, _LOWERCASE_SECTION[station]])
-);
-export const CONSOLE_SECTION = Object.freeze({ ..._LOWERCASE_SECTION, ..._PASCAL_SECTION });
 
 // Set of all known section ids that the switcher will reset.
 export const HTML_SECTION_IDS = Object.freeze(

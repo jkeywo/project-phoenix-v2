@@ -21,7 +21,6 @@ pub enum ModifierSlot {
 /// Who or what applied a modifier.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ModifierSource {
-    Console(Console),
     ImpulseDrive,
     RegionEffect {
         uuid: Uuid,
@@ -33,10 +32,8 @@ pub enum ModifierSource {
         id: String,
         tag: String,
     },
-    /// A modifier attributed to a power group (issue #617). Successor of the
-    /// `Console` variant for power-derived modifiers; kept alongside `Console`
-    /// during the additive migration since the `Console` variant is still a
-    /// valid wire shape.
+    /// A modifier attributed to a power group (issue #617). The
+    /// SystemId-keyed successor of the retired `Console` variant.
     PowerGroup(PowerGroupId),
 }
 
@@ -45,10 +42,6 @@ impl Eq for ModifierSource {}
 impl std::hash::Hash for ModifierSource {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            ModifierSource::Console(c) => {
-                0u8.hash(state);
-                std::mem::discriminant(c).hash(state);
-            }
             ModifierSource::ImpulseDrive => {
                 1u8.hash(state);
             }
@@ -69,26 +62,8 @@ impl std::hash::Hash for ModifierSource {
     }
 }
 
-/// Per-console hull integrity snapshot broadcast in `SimSnapshot`.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ConsoleHullStatus {
-    pub console: Console,
-    pub current: f32,
-    pub max_hp: f32,
-    /// Derived damage tier for this console.
-    pub tier: crate::damage::DamageTier,
-    /// Active debuff magnitude for this console (0.0 when Operational or
-    /// Destroyed, tier_config.debuff_magnitude when Damaged or Disabled).
-    /// Clients can use this to render a debuff indicator on the repair panel.
-    #[serde(default)]
-    pub debuff_magnitude: f32,
-}
-
-/// Per-system hull integrity snapshot — the SystemId-keyed successor of
-/// [`ConsoleHullStatus`] (parent issue #516, sub-issue #616). Publishers
-/// emit both shapes during the additive transition so downstream consumers
-/// can migrate independently; the console-keyed field will be removed in a
-/// later sub-PR.
+/// Per-system hull integrity snapshot broadcast in `SimSnapshot` — the
+/// SystemId-keyed hull status type (parent issue #516, sub-issue #616).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SystemHullStatus {
     /// Stable, ship-wide system identifier (e.g. `"helm"`, `"phaser-fore"`).
@@ -241,50 +216,43 @@ pub enum PhaserMode {
 
 /// The state of a single repair team, broadcast as part of `RepairState`.
 ///
-/// Additive migration for parent issue #516 sub-issue #616:
-/// `Travelling`, `Repairing`, and `Returning` all carry both the legacy
-/// `Console` fields and the new `SystemId` / `display_name` fields. Publishers
-/// populate both; consumers may read either. The legacy fields are wrapped in
-/// `Option` and marked `#[serde(default)]` so the field can be dropped cleanly
-/// in a later sub-PR without wire-compat pain (both sides tolerate absence).
+/// SystemId-keyed after issue #619 — the legacy `console` / `queued` fields
+/// were retired along with the `Console` enum. Every non-Idle variant carries
+/// `system_id` + `display_name`; `Returning` additionally carries
+/// `queued_system_id` + `queued_display_name` for the auto-dispatch target.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub enum TeamSlot {
     #[default]
     Idle,
-    /// Team is en route to the target console. `elapsed` counts up toward the
+    /// Team is en route to the target system. `elapsed` counts up toward the
     /// configured travel duration.
     Travelling {
-        #[serde(default)]
-        console: Option<Console>,
         #[serde(default)]
         system_id: Option<SystemId>,
         #[serde(default)]
         display_name: Option<String>,
         elapsed: f32,
     },
-    /// Team is at the console performing repairs.
+    /// Team is at the system performing repairs.
     Repairing {
-        #[serde(default)]
-        console: Option<Console>,
         #[serde(default)]
         system_id: Option<SystemId>,
         #[serde(default)]
         display_name: Option<String>,
     },
     /// Team has finished and is returning to engineering.
-    /// `remaining` counts down from the travel duration. `queued` holds the
-    /// next console to dispatch to automatically on arrival (if any).
+    /// `remaining` counts down from the travel duration.
+    /// `queued_system_id` holds the next system to dispatch to
+    /// automatically on arrival (if any).
     Returning {
         remaining: f32,
-        #[serde(default)]
-        queued: Option<Console>,
         /// System id we are returning FROM (populated when known).
         #[serde(default)]
         system_id: Option<SystemId>,
         /// Display name for the system we are returning FROM.
         #[serde(default)]
         display_name: Option<String>,
-        /// System id of the queued next target (mirrors `queued`).
+        /// System id of the queued next target.
         #[serde(default)]
         queued_system_id: Option<SystemId>,
         /// Display name of the queued next target.
@@ -335,208 +303,6 @@ mod view_mode_tests {
     #[test]
     fn default_view_mode_is_camera_fore() {
         assert_eq!(ViewMode::default(), ViewMode::Camera(ViewDirection::Fore));
-    }
-}
-
-#[cfg(test)]
-mod console_id_tests {
-    use super::*;
-
-    #[test]
-    fn station_console_id_round_trips() {
-        let consoles = [
-            Console::CaptainChair,
-            Console::Helm,
-            Console::Tactical,
-            Console::Repair,
-            Console::Sensors,
-            Console::Shields,
-            Console::Navigation,
-            Console::Power,
-            Console::Comms,
-            Console::Core,
-            Console::HelmEnginePort,
-            Console::HelmEngineStarboard,
-            Console::PhaserFore,
-            Console::PhaserAft,
-            Console::TorpedoTubeForePort,
-            Console::TorpedoTubeForeStarboard,
-            Console::TorpedoTubeAft,
-            Console::TorpedoMagazine,
-            Console::PowerReactor,
-            Console::PowerBattery,
-        ];
-        for console in &consoles {
-            assert_eq!(
-                Console::from_console_id(console.station_console_id()),
-                Some(console.clone()),
-                "round-trip failed for {:?}",
-                console
-            );
-        }
-    }
-
-    #[test]
-    fn from_console_id_rejects_unknown() {
-        assert_eq!(Console::from_console_id("unknown"), None);
-        assert_eq!(Console::from_console_id(""), None);
-        assert_eq!(Console::from_console_id("HELM"), None);
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum Console {
-    CaptainChair,
-    Helm,
-    Tactical,
-    Repair,
-    /// Long-range radar and advisory target suggestion (was part of Science).
-    Sensors,
-    /// Four-quadrant shield status and focus mechanic (was part of Science).
-    Shields,
-    /// System chart and impulse-cancel control (was part of Science).
-    Navigation,
-    Power,
-    Comms,
-    /// Ownerless AI-only systems (viewscreen etc.). Not player-selectable;
-    /// used as a repair target for ship-wide core systems.
-    Core,
-    // ── Fine-grained Helm sub-systems (issue #511) ────────────────────────
-    /// Per-instance hull target for the port engine (damageable, #511).
-    HelmEnginePort,
-    /// Per-instance hull target for the starboard engine (damageable, #511).
-    HelmEngineStarboard,
-    // ── Fine-grained Tactical sub-systems (issue #512) ────────────────────
-    /// Per-instance hull target for the fore phaser bank (damageable, #512).
-    PhaserFore,
-    /// Per-instance hull target for the aft phaser bank (damageable, #512).
-    PhaserAft,
-    /// Per-instance hull target for the fore-port torpedo tube (damageable, #512).
-    TorpedoTubeForePort,
-    /// Per-instance hull target for the fore-starboard torpedo tube (damageable, #512).
-    TorpedoTubeForeStarboard,
-    /// Per-instance hull target for the aft torpedo tube (damageable, #512).
-    TorpedoTubeAft,
-    /// Per-instance hull target for the shared torpedo magazine (damageable, #512).
-    /// A Disabled/Destroyed magazine refuses tube-load claims and blocks
-    /// torpedo fire regardless of tube state.
-    TorpedoMagazine,
-    // ── Fine-grained Power sub-systems (issue #513) ───────────────────────
-    /// Per-instance hull target for the power reactor (damageable, #513).
-    /// A Disabled/Destroyed reactor refuses allocation input.
-    PowerReactor,
-    /// Per-instance hull target for the power battery (damageable, #513).
-    /// A Disabled/Destroyed battery refuses drains from `DrainWeaponsBattery`.
-    PowerBattery,
-}
-
-impl Console {
-    /// Human-readable name suitable for display in UI.
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Console::CaptainChair => "Captain's Chair",
-            Console::Helm => "Helm",
-            Console::Tactical => "Tactical",
-            Console::Repair => "Repair",
-            Console::Sensors => "Sensors",
-            Console::Shields => "Shields",
-            Console::Navigation => "Navigation",
-            Console::Power => "Power",
-            Console::Comms => "Comms",
-            Console::Core => "Core",
-            Console::HelmEnginePort => "Engine (Port)",
-            Console::HelmEngineStarboard => "Engine (Starboard)",
-            Console::PhaserFore => "Phaser Bank (Fore)",
-            Console::PhaserAft => "Phaser Bank (Aft)",
-            Console::TorpedoTubeForePort => "Torpedo Tube (Fore Port)",
-            Console::TorpedoTubeForeStarboard => "Torpedo Tube (Fore Starboard)",
-            Console::TorpedoTubeAft => "Torpedo Tube (Aft)",
-            Console::TorpedoMagazine => "Torpedo Magazine",
-            Console::PowerReactor => "Power Reactor",
-            Console::PowerBattery => "Power Battery",
-        }
-    }
-
-    /// Short abbreviation for use when the tab bar is crowded (5+ consoles).
-    /// Console identifier string used in `StationConfig.console` TOML field
-    /// to associate a station config with a console variant.
-    pub fn station_console_id(&self) -> &'static str {
-        match self {
-            Console::CaptainChair => "captain",
-            Console::Helm => "helm",
-            Console::Tactical => "tactical",
-            Console::Repair => "repair",
-            Console::Sensors => "sensors",
-            Console::Shields => "shields",
-            Console::Navigation => "navigation",
-            Console::Power => "power",
-            Console::Comms => "comms",
-            Console::Core => "core",
-            Console::HelmEnginePort => "helm-engine-port",
-            Console::HelmEngineStarboard => "helm-engine-starboard",
-            Console::PhaserFore => "phaser-fore",
-            Console::PhaserAft => "phaser-aft",
-            Console::TorpedoTubeForePort => "torpedo-tube-fore-port",
-            Console::TorpedoTubeForeStarboard => "torpedo-tube-fore-starboard",
-            Console::TorpedoTubeAft => "torpedo-tube-aft",
-            Console::TorpedoMagazine => "torpedo-magazine",
-            Console::PowerReactor => "power-reactor",
-            Console::PowerBattery => "power-battery",
-        }
-    }
-
-    /// Resolves a station console id string back to the matching [`Console`] variant.
-    /// Returns `None` if `id` does not match any known console.
-    /// Symmetric with [`Console::station_console_id`].
-    pub fn from_console_id(id: &str) -> Option<Console> {
-        match id {
-            "captain" => Some(Console::CaptainChair),
-            "helm" => Some(Console::Helm),
-            "tactical" => Some(Console::Tactical),
-            "repair" => Some(Console::Repair),
-            "sensors" => Some(Console::Sensors),
-            "shields" => Some(Console::Shields),
-            "navigation" => Some(Console::Navigation),
-            "power" => Some(Console::Power),
-            "comms" => Some(Console::Comms),
-            "core" => Some(Console::Core),
-            "helm-engine-port" => Some(Console::HelmEnginePort),
-            "helm-engine-starboard" => Some(Console::HelmEngineStarboard),
-            "phaser-fore" => Some(Console::PhaserFore),
-            "phaser-aft" => Some(Console::PhaserAft),
-            "torpedo-tube-fore-port" => Some(Console::TorpedoTubeForePort),
-            "torpedo-tube-fore-starboard" => Some(Console::TorpedoTubeForeStarboard),
-            "torpedo-tube-aft" => Some(Console::TorpedoTubeAft),
-            "torpedo-magazine" => Some(Console::TorpedoMagazine),
-            "power-reactor" => Some(Console::PowerReactor),
-            "power-battery" => Some(Console::PowerBattery),
-            _ => None,
-        }
-    }
-
-    pub fn initial(&self) -> &'static str {
-        match self {
-            Console::CaptainChair => "CC",
-            Console::Helm => "H",
-            Console::Tactical => "T",
-            Console::Repair => "R",
-            Console::Sensors => "S",
-            Console::Shields => "SH",
-            Console::Navigation => "N",
-            Console::Power => "P",
-            Console::Comms => "C",
-            Console::Core => "CO",
-            Console::HelmEnginePort => "EP",
-            Console::HelmEngineStarboard => "ES",
-            Console::PhaserFore => "PF",
-            Console::PhaserAft => "PA",
-            Console::TorpedoTubeForePort => "TP",
-            Console::TorpedoTubeForeStarboard => "TS",
-            Console::TorpedoTubeAft => "TA",
-            Console::TorpedoMagazine => "TM",
-            Console::PowerReactor => "PR",
-            Console::PowerBattery => "PB",
-        }
     }
 }
 
@@ -639,9 +405,6 @@ pub struct Player {
 pub struct GameState {
     pub phase: GamePhase,
     pub players: Vec<Player>,
-    /// Current per-console complexity preset selection.
-    #[serde(default)]
-    pub complexity: HashMap<Console, String>,
     /// Static world data — `Some` only after game start has populated the
     /// world; `None` while in Lobby or before world initialisation.
     #[serde(default)]
@@ -1084,10 +847,6 @@ pub enum SystemControlPayload {
         group: PowerGroupId,
         level: u8,
     },
-    SetPower {
-        target: Console,
-        level: u8,
-    },
     Hail {
         target_uuid: String,
     },
@@ -1147,12 +906,6 @@ pub enum ClientMessage {
     },
     FirePhaser {
         bank: PhaserBank,
-    },
-    /// Dispatch a specific repair team (by index) to the named console.
-    /// Supports redirect and recall (see PRD #305).
-    DispatchRepairTeam {
-        team_idx: u8,
-        console: Console,
     },
     /// Fire a torpedo from the specified tube. `target_uuid` is optional homing target.
     FireTorpedo {
@@ -1241,7 +994,6 @@ pub enum ServerMessage {
     StationAssigned {
         token: String,
         station: Option<String>,
-        consoles: Vec<Console>,
         /// C1: stable station ID carried alongside the legacy name string.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         station_id: Option<StationId>,
@@ -1440,14 +1192,8 @@ pub enum ServerMessage {
         station_id: StationId,
         rating_name: String,
     },
-    /// Sent once at game start and whenever per-console hull HP changes.
-    /// Replaces the `console_hull` field that was previously embedded in every `SimState`.
-    ConsoleHullUpdate {
-        entries: Vec<ConsoleHullStatus>,
-    },
-    /// SystemId-keyed successor of [`ServerMessage::ConsoleHullUpdate`] (parent
-    /// issue #516 sub-issue #616). Publishers emit both during the additive
-    /// transition so downstream consumers can migrate independently.
+    /// Sent once at game start and whenever per-system hull HP changes.
+    /// SystemId-keyed successor of the retired `ConsoleHullUpdate` variant.
     SystemHullUpdate {
         entries: Vec<SystemHullStatus>,
     },
@@ -1746,7 +1492,7 @@ pub struct PowerReactorBlackboard {
     /// Maximum total allocation the pool can carry.
     pub max_allocation: u8,
     /// True when the reactor is operational (not disabled or destroyed).
-    /// When `false`, `SetPower` / `SetPowerGroupAllocation` messages are
+    /// When `false`, `SetPowerGroupAllocation` messages are
     /// refused at admission.
     pub is_online: bool,
     /// True when the power system is in the locked (battery-exhausted) state.
@@ -2032,20 +1778,12 @@ pub type PowerGroupEntry = PowerConsoleEntry;
 pub struct RepairBlackboard {
     /// Current team slot states (one entry per repair team).
     pub teams: Vec<TeamSlot>,
-    /// Per-console hull status. Drives the hull bar and team-destination labels.
-    pub console_hull: Vec<ConsoleHullStatus>,
     /// Travel duration in seconds (from ship TOML `[repair]` block).
     pub travel_duration_secs: f32,
-    /// Consoles that can be targeted for repair dispatch (in display order).
-    pub damageable_consoles: Vec<Console>,
-    /// SystemId-keyed mirror of `console_hull` (parent issue #516 sub-issue
-    /// #616). Populated alongside the legacy field during the additive
-    /// migration; consumers may read either.
+    /// Per-system hull status. Drives the hull bar and team-destination labels.
     #[serde(default)]
     pub system_hull: Vec<SystemHullStatus>,
-    /// SystemId-keyed mirror of `damageable_consoles` (parent issue #516
-    /// sub-issue #616). Populated alongside the legacy field during the
-    /// additive migration; consumers may read either.
+    /// Systems that can be targeted for repair dispatch (in display order).
     #[serde(default)]
     pub damageable_systems: Vec<SystemId>,
 }
@@ -2193,22 +1931,6 @@ pub enum UiAction {
     },
     /// Switch the viewscreen to radar mode (helm ON SCREEN button).
     SetRadarView,
-    /// Set power to an explicit level for the named powered console.
-    ///
-    /// The HTML power panel sends
-    /// `{ action: "set_power", console: "Power", target: "helm", level: 3 }`.
-    SetPower {
-        target: Console,
-        level: u8,
-    },
-    /// Dispatch a repair team to a console (repair console).
-    ///
-    /// The HTML repair panel sends
-    /// `{ action: "dispatch_repair_team", console: "Repair", team_idx: 0, target: "Helm" }`.
-    DispatchRepairTeam {
-        team_idx: u8,
-        target: Console,
-    },
     /// Hail a contact (comms console).
     ///
     /// The HTML comms panel sends `{ action: "hail", console: "Comms", target_uuid: "..." }`.
@@ -2311,28 +2033,6 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             payload: SystemControlPayload::SetView {
                 mode: ViewMode::Radar,
             },
-        },
-        UiAction::SetPower { target, level } => ClientMessage::ControlSystem {
-            target: crate::system_registry::power_reactor_system_id(),
-            payload: SystemControlPayload::SetPowerGroupAllocation {
-                group: match target {
-                    Console::Helm => {
-                        PowerGroupId(crate::power_system::HELM_POWER_GROUP.into())
-                    }
-                    Console::Tactical => {
-                        PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into())
-                    }
-                    Console::Sensors => {
-                        PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into())
-                    }
-                    other => PowerGroupId(other.station_console_id().into()),
-                },
-                level: *level,
-            },
-        },
-        UiAction::DispatchRepairTeam { team_idx, target } => ClientMessage::DispatchRepairTeam {
-            team_idx: *team_idx,
-            console: target.clone(),
         },
         UiAction::Hail { target_uuid } => ClientMessage::ControlSystem {
             target: crate::system_registry::comms_system_id(),
@@ -2544,39 +2244,6 @@ mod ui_action_tests {
     }
 
     #[test]
-    fn set_power_maps_to_control_system_message() {
-        let action = UiAction::SetPower {
-            target: Console::Helm,
-            level: 3,
-        };
-        assert_eq!(
-            ui_action_to_client_message(&action),
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: PowerGroupId("helm".into()),
-                    level: 3,
-                }
-            }
-        );
-    }
-
-    #[test]
-    fn dispatch_repair_team_maps_to_client_message() {
-        let action = UiAction::DispatchRepairTeam {
-            team_idx: 1,
-            target: Console::Power,
-        };
-        assert_eq!(
-            ui_action_to_client_message(&action),
-            ClientMessage::DispatchRepairTeam {
-                team_idx: 1,
-                console: Console::Power
-            }
-        );
-    }
-
-    #[test]
     fn set_navigation_waypoint_maps_to_client_message() {
         let action = UiAction::SetNavigationWaypoint {
             x: 12.5,
@@ -2744,7 +2411,6 @@ pub struct StationPayload {
     pub name: String,
     pub short_code: String,
     pub rank: String,
-    pub consoles: Vec<Console>,
     pub holder_name: Option<String>,
     pub is_mine: bool,
     pub preset_names: Vec<String>,

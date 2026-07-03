@@ -41,7 +41,7 @@ pub struct ConsoleTierConfig {
     pub disabled_threshold_pct: f32,
     /// Performance reduction applied when the console is in the `Damaged` or
     /// `Disabled` tier (e.g. `0.15` = 15 % reduction). Sourced from
-    /// `debuff_magnitude` in the `[[hull.console_hull]]` TOML block.
+    /// `debuff_magnitude` in the `[[hull.system_hull]]` TOML block.
     /// Default: `0.15`.
     pub debuff_magnitude: f32,
 }
@@ -134,7 +134,7 @@ pub struct SystemHullEntry {
 }
 
 /// Per-system hull tracker keyed by [`SystemId`] (parent issue #516,
-/// sub-issue #617). Successor of the retired `ConsoleHull` type.
+/// sub-issue #617).
 ///
 /// Stores `(SystemId, entry)` pairs plus a parallel insertion-order `order`
 /// vec so iteration is deterministic (a bare HashMap would randomise iteration
@@ -458,7 +458,7 @@ pub struct ArcHullEntry {
 /// each entry's tier.
 ///
 /// Skipped on NPCs — NPCs use scalar `hull_integrity` and do not declare
-/// per-arc `[[hull.console_hull]]` entries (mirrors how #512 skipped
+/// per-arc `[[hull.system_hull]]` entries (mirrors how #512 skipped
 /// per-bank/tube hull on NPCs).
 ///
 /// Pure struct — `ship/damage.rs` is Bevy-free per AGENTS.md rule 9.

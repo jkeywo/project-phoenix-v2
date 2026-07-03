@@ -10,56 +10,32 @@
 // This module exports both pure functions (testable with no DOM) and a
 // DOM-mutating renderer. The pure functions feed Vitest tests; the renderer
 // is consumed by the inline `<script>` in `client.html`.
+//
+// Post issue #619 the `consoles` input list carries lowercase station ids
+// (matching `StationId`). Pre-#619 it carried PascalCase Console enum names.
 
 export const CONSOLE_LABEL = Object.freeze({
-  CaptainChair: "Captain's Chair",
-  Helm: 'Helm',
-  Tactical: 'Tactical',
-  Repair: 'Repair',
-  Sensors: 'Sensors',
-  Shields: 'Shields',
-  Navigation: 'Navigation',
-  Power: 'Power',
-  Comms: 'Comms',
+  captain: "Captain's Chair",
+  helm: 'Helm',
+  tactical: 'Tactical',
+  repair: 'Repair',
+  sensors: 'Sensors',
+  shields: 'Shields',
+  navigation: 'Navigation',
+  power: 'Power',
+  comms: 'Comms',
 });
 
 export const CONSOLE_INITIAL = Object.freeze({
-  CaptainChair: 'CC',
-  Helm: 'H',
-  Tactical: 'T',
-  Repair: 'R',
-  Sensors: 'S',
-  Shields: 'SH',
-  Navigation: 'N',
-  Power: 'P',
-  Comms: 'C',
-});
-
-/**
- * PascalCase Console enum variant → lowercase station id.
- *
- * Post issue #618 hull entries carry `.system_id` (lowercase station id,
- * matches the Rust `SystemId`/`StationId` newtypes) rather than the legacy
- * `.console` PascalCase Console enum name. The tab bar's `consoles` input
- * still arrives PascalCase — it flows from `StationAssigned.consoles`, a
- * wire field that stays Console-keyed pending issue #619 — so we translate
- * PascalCase → lowercase only for the hull lookup below.
- *
- * Exported so client.html (which drives `activeConsole` from
- * `player.consoles`, PascalCase) can call
- * `CONSOLE_TO_STATION_ID[activeConsole]` when it needs the lowercase form
- * (e.g. before invoking `buildConsoleState(stationId, state)`).
- */
-export const CONSOLE_TO_STATION_ID = Object.freeze({
-  CaptainChair: 'captain',
-  Helm: 'helm',
-  Tactical: 'tactical',
-  Repair: 'repair',
-  Sensors: 'sensors',
-  Shields: 'shields',
-  Navigation: 'navigation',
-  Power: 'power',
-  Comms: 'comms',
+  captain: 'CC',
+  helm: 'H',
+  tactical: 'T',
+  repair: 'R',
+  sensors: 'S',
+  shields: 'SH',
+  navigation: 'N',
+  power: 'P',
+  comms: 'C',
 });
 
 // Threshold at which the portrait bar collapses to initials. Matches the
@@ -86,14 +62,12 @@ export function useInitials(consoles, orientation) {
 }
 
 // Pure: produce a description of the tab bar to render.
-//   consoles    — string[] of Console enum names owned by the local player
-//   active      — currently-selected console name (or null)
+//   consoles    — string[] of lowercase station ids owned by the local player
+//   active      — currently-selected station id (or null)
 //   orientation — 'portrait' | 'landscape'
 //   inGame      — boolean; tab bar is hidden in the lobby
 //   consoleHull — optional [{ system_id, current, max_hp, ... }] from server
-//                 state (post issue #618). Pre-#618 entries carried `.console`
-//                 (PascalCase Console enum name) instead of `.system_id`
-//                 (lowercase station id).
+//                 state (post issue #618).
 //   compactActive — boolean; when true and a console is active, only show
 //                   the active console's button (others are hidden)
 // Returns:
@@ -114,9 +88,8 @@ export function tabBarLayout(consoles, active, orientation, inGame, consoleHull,
   // Single-console players still see the bar (for the title label).
   const hidden = !inGame || list.length === 0;
   // Build a lookup from station id (lowercase) → hull pct for damageable
-  // systems. The upstream `consoles` list is still PascalCase Console names
-  // (StationAssigned.consoles wire field), so we translate via
-  // CONSOLE_TO_STATION_ID at button build time.
+  // systems. Both the `consoles` list and the `system_id` on each hull
+  // entry are lowercase station ids.
   const hullMap = {};
   if (Array.isArray(consoleHull)) {
     for (const h of consoleHull) {
@@ -135,10 +108,7 @@ export function tabBarLayout(consoles, active, orientation, inGame, consoleHull,
     namesForButtons = list;
   }
   const buttons = namesForButtons.map((c) => {
-    const stationId = CONSOLE_TO_STATION_ID[c];
-    const hullPct = stationId !== undefined && hullMap[stationId] !== undefined
-      ? hullMap[stationId]
-      : null;
+    const hullPct = hullMap[c] !== undefined ? hullMap[c] : null;
     return {
       console: c,
       label: initials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c),
@@ -211,5 +181,4 @@ if (typeof window !== 'undefined') {
   window.currentOrientation = currentOrientation;
   window.CONSOLE_LABEL = CONSOLE_LABEL;
   window.CONSOLE_INITIAL = CONSOLE_INITIAL;
-  window.CONSOLE_TO_STATION_ID = CONSOLE_TO_STATION_ID;
 }

@@ -12,7 +12,7 @@ describe('SYSTEM_REGISTRY', () => {
     expect(SYSTEM_REGISTRY[RED_ALERT_KIND]).toMatchObject({
       kind: RED_ALERT_KIND,
       systemId: RED_ALERT_SYSTEM_ID,
-      console: 'CaptainChair',
+      station: 'captain',
       fragmentId: 'red-alert-btn',
     });
     expect(typeof SYSTEM_REGISTRY[RED_ALERT_KIND].render).toBe('function');

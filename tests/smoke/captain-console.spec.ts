@@ -95,11 +95,11 @@ test('captain console: dir pad buttons call __sendAction with correct envelopes'
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(5);
 
-  expect(JSON.parse(sent[0])).toEqual({ action: 'set_view', console: 'CaptainChair', direction: 'Fore' });
-  expect(JSON.parse(sent[1])).toEqual({ action: 'set_view', console: 'CaptainChair', direction: 'Port' });
-  expect(JSON.parse(sent[2])).toEqual({ action: 'set_view', console: 'CaptainChair', direction: 'Starboard' });
-  expect(JSON.parse(sent[3])).toEqual({ action: 'set_view', console: 'CaptainChair', direction: 'Aft' });
-  expect(JSON.parse(sent[4])).toEqual({ action: 'toggle_red_alert', console: 'CaptainChair' });
+  expect(JSON.parse(sent[0])).toEqual({ action: 'set_view', console: 'captain', direction: 'Fore' });
+  expect(JSON.parse(sent[1])).toEqual({ action: 'set_view', console: 'captain', direction: 'Port' });
+  expect(JSON.parse(sent[2])).toEqual({ action: 'set_view', console: 'captain', direction: 'Starboard' });
+  expect(JSON.parse(sent[3])).toEqual({ action: 'set_view', console: 'captain', direction: 'Aft' });
+  expect(JSON.parse(sent[4])).toEqual({ action: 'toggle_red_alert', console: 'captain' });
 });
 
 test('captain console: AI-run Red Alert renders read-only with AUTO badge', async ({ page }) => {

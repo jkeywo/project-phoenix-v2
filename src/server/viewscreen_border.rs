@@ -195,7 +195,6 @@ pub(crate) fn push_lobby_state(
             name: def.name.clone(),
             short_code: def.short_code.clone(),
             rank: def.rank.clone(),
-            consoles: def.consoles.clone(),
             holder_name: holder.map(|p| p.name.clone()),
             is_mine: false,
             preset_names: vec![],

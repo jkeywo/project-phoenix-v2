@@ -13,15 +13,10 @@
 
 /** All ship stations the lobby UI knows how to render, in display order.
  *
- * Lowercase station ids (issue #618). Kept intentionally consistent with the
- * server-side `StationId` newtype; the JS layer is migrating away from the
- * PascalCase Console enum names it used pre-#618.
- *
- * NOTE: the `.isX(myToken)` helpers below still read the wire field
- * `player.consoles` which currently carries PascalCase `Console` enum names
- * from `ServerMessage::StationAssigned`. That wire shape is retained pending
- * issue #619 (which deletes the field entirely). Do NOT change the
- * `.includes('Helm')` comparisons until #619.
+ * Lowercase station ids (issue #618). Consistent with the server-side
+ * `StationId` newtype; after issue #619 the client no longer speaks the
+ * legacy PascalCase Console enum names — every station-facing wire field
+ * (`Player.station`, `StationAssigned.station_id`) is a lowercase id.
  */
 export const ALL_STATIONS = Object.freeze([
   'captain', 'helm', 'tactical', 'repair', 'sensors',
@@ -29,26 +24,20 @@ export const ALL_STATIONS = Object.freeze([
 ]);
 
 /**
- * Normalise a player's console list.
- * Legacy wire payloads carried `consoles` or `console`; current payloads carry
- * `station`, and consoles are derived from shipStations.stations.
+ * Normalise a player's station id.
+ * Reads the lowercase station id from `player.station` (or the legacy
+ * `station.id` if the wire has the object shape). Returns null when no
+ * station is held (spectator).
  */
-export function consolesOf(player, shipStations) {
-  const stationId = typeof player.station === 'string'
-    ? player.station
-    : (player.station && player.station.id) || null;
-  if (stationId) {
-    const station = ((shipStations && shipStations.stations) || [])
-      .find(s => s.id === stationId || s.name === stationId);
-    if (station && Array.isArray(station.consoles)) return station.consoles;
-  }
-  if (Array.isArray(player.consoles)) return player.consoles;
-  if (player.console) return [player.console];
-  return [];
+export function playerStationId(player) {
+  if (!player) return null;
+  if (typeof player.station === 'string') return player.station;
+  if (player.station && typeof player.station.id === 'string') return player.station.id;
+  return null;
 }
 
-function normalisePlayer(p, shipStations) {
-  return { ready: false, ...p, consoles: consolesOf(p, shipStations) };
+function normalisePlayer(p) {
+  return { ready: false, ...p, station: playerStationId(p) };
 }
 
 function defaultShipStations() {
@@ -67,7 +56,7 @@ export class LobbyState {
   reset() {
     /** GamePhase: 'Lobby' | 'Loading' | 'InProgress' | 'GameOver' */
     this.phase = 'Lobby';
-    /** Array of { token, name, consoles: [...], connected } */
+    /** Array of { token, name, station: string|null, connected } */
     this.players = [];
     /** ShipStations: { stations: [StationDef] } */
     this.shipStations = defaultShipStations();
@@ -86,7 +75,7 @@ export class LobbyState {
   replaceFrom(state, shipStations, shipConfig) {
     this.phase = state.phase || 'Lobby';
     this.shipStations = shipStations || defaultShipStations();
-    this.players = (state.players || []).map(p => normalisePlayer(p, this.shipStations));
+    this.players = (state.players || []).map(p => normalisePlayer(p));
     this.shipConfig = shipConfig || {};
     this.scenarioTitle = (state.world && state.world.scenario_title) || '';
     this.scenarioBody = (state.world && state.world.scenario_description) || '';
@@ -104,7 +93,7 @@ export class LobbyState {
         this.replaceFrom(d.state || {}, d.ship_stations, d.ship_config);
         break;
       case 'PlayerJoined': {
-        const player = normalisePlayer(d.player || {}, this.shipStations);
+        const player = normalisePlayer(d.player || {});
         const idx = this.players.findIndex(p => p.token === player.token);
         if (idx >= 0) this.players[idx] = player;
         else this.players.push(player);
@@ -124,21 +113,21 @@ export class LobbyState {
         break;
       }
       case 'StationAssigned': {
-        // The same console can only be held by one player — first clear any
-        // other player who used to hold any of these consoles, then assign
-        // to the named token.
-        const consoles = d.consoles || [];
-        for (const c of consoles) {
+        // Post issue #619: StationAssigned carries `station_id` (lowercase
+        // station id) and the legacy `station` (display name). A station is
+        // held by at most one player at a time — clear it from anyone else
+        // first, then assign to the named token.
+        const stationId = (d.station_id && (typeof d.station_id === 'string' ? d.station_id : d.station_id.id)) || null;
+        if (stationId) {
           for (const p of this.players) {
-            if (p.token !== d.token) {
-              p.consoles = consolesOf(p, this.shipStations).filter(existing => existing !== c);
+            if (p.token !== d.token && p.station === stationId) {
+              p.station = null;
             }
           }
         }
         const target = this.players.find(p => p.token === d.token);
         if (target) {
-          target.consoles = consoles.slice();
-          target.station = d.station_id || d.station || null;
+          target.station = stationId;
         }
         break;
       }
@@ -157,23 +146,23 @@ export class LobbyState {
 
   // ── LobbyView derivations (token-parameterised) ───────────────────────────
 
-  /** Consoles held by the local player (empty if no matching token). */
-  myConsoles(myToken) {
+  /** Station id held by the local player (null if no matching token or spectator). */
+  playerStation(myToken) {
     const p = this.players.find(p => p.token === myToken);
-    return p ? consolesOf(p, this.shipStations) : [];
+    return p ? p.station : null;
   }
 
-  isCaptain(myToken)    { return this.myConsoles(myToken).includes('CaptainChair'); }
-  isHelm(myToken)       { return this.myConsoles(myToken).includes('Helm'); }
-  isSensors(myToken)    { return this.myConsoles(myToken).includes('Sensors'); }
-  isShields(myToken)    { return this.myConsoles(myToken).includes('Shields'); }
-  isNavigation(myToken) { return this.myConsoles(myToken).includes('Navigation'); }
-  isRepair(myToken)     { return this.myConsoles(myToken).includes('Repair'); }
-  isPower(myToken)      { return this.myConsoles(myToken).includes('Power'); }
+  isCaptain(myToken)    { return this.playerStation(myToken) === 'captain'; }
+  isHelm(myToken)       { return this.playerStation(myToken) === 'helm'; }
+  isSensors(myToken)    { return this.playerStation(myToken) === 'sensors'; }
+  isShields(myToken)    { return this.playerStation(myToken) === 'shields'; }
+  isNavigation(myToken) { return this.playerStation(myToken) === 'navigation'; }
+  isRepair(myToken)     { return this.playerStation(myToken) === 'repair'; }
+  isPower(myToken)      { return this.playerStation(myToken) === 'power'; }
 
-  /** True if the local player is a spectator (no consoles assigned). */
+  /** True if the local player is a spectator (no station assigned). */
   isSpectator(myToken) {
-    return this.myConsoles(myToken).length === 0;
+    return this.playerStation(myToken) == null;
   }
 
   /** True when the lobby panel should be visible. */
@@ -203,26 +192,23 @@ export class LobbyState {
    *
    * Returns: array of
    *   { kind: 'available'|'occupied'|'mine', station, short_code, description,
-   *     rank, consoles, holder_name? }
+   *     rank, holder_name? }
    *   | { kind: 'spectator', player_name }
    */
   stationSlots(myToken) {
     const defs = this.shipStations.stations || [];
 
-    // Build the set of all consoles that appear in any station definition.
-    const stationConsoles = new Set(defs.flatMap(d => d.consoles || []));
+    // Set of all station ids that appear in the current ship config.
+    const stationIds = new Set(defs.map(d => d.id));
 
     const slots = [];
     for (const def of defs) {
-      const defConsoles = def.consoles || [];
-      const holder = this.players.find(p =>
-        consolesOf(p, this.shipStations).some(c => defConsoles.includes(c)));
+      const holder = this.players.find(p => p.station === def.id);
       const base = {
         station: def.name || '',
         short_code: def.short_code || '',
         description: def.description || '',
         rank: def.rank || '',
-        consoles: defConsoles,
       };
       if (holder && holder.token === myToken) {
         slots.push({ kind: 'mine', ...base });
@@ -233,10 +219,10 @@ export class LobbyState {
       }
     }
 
-    // Spectator rows: players whose consoles are not in any station definition.
+    // Spectator rows: players whose station id is not in any station definition.
     for (const p of this.players) {
-      const hasStation = consolesOf(p, this.shipStations).some(c => stationConsoles.has(c));
-      if (!hasStation) {
+      const held = p.station;
+      if (!held || !stationIds.has(held)) {
         slots.push({ kind: 'spectator', player_name: p.name });
       }
     }
@@ -251,21 +237,27 @@ export class LobbyState {
   allStationsFilled() {
     const defs = this.shipStations.stations || [];
     if (!defs.length) return false;
-    const allHeld = this.players.flatMap(p => consolesOf(p, this.shipStations));
-    return defs.every(def => (def.consoles || []).some(c => allHeld.includes(c)));
+    const heldStationIds = new Set(this.players
+      .filter(p => p.connected !== false)
+      .map(p => p.station)
+      .filter(Boolean));
+    return defs.every(def => heldStationIds.has(def.id));
   }
 }
 
 /**
- * Decides which console to land on after a StationAssigned update.
- * Returns `current` if present in `newConsoles`, else `newConsoles[0]`.
- * Returns null if `newConsoles` is empty (spectator assignment).
- * Port of `reconcile_active_console` (JS guard instead of Rust panic).
+ * Decides which station id to land on after a StationAssigned update.
+ * Returns `current` if it is still owned per the roster; otherwise the new
+ * assigned station id if present, else null.
+ *
+ * The current signature (`current`, `newStationIds`) preserves the historical
+ * shape from the pre-#619 PascalCase consoles list. When `newStationIds` is
+ * empty (spectator assignment) returns null.
  */
-export function reconcileActiveConsole(current, newConsoles) {
-  if (!newConsoles || newConsoles.length === 0) return null;
-  if (current && newConsoles.includes(current)) return current;
-  return newConsoles[0];
+export function reconcileActiveConsole(current, newStationIds) {
+  if (!newStationIds || newStationIds.length === 0) return null;
+  if (current && newStationIds.includes(current)) return current;
+  return newStationIds[0];
 }
 
 /** Singleton used by client.html. */
@@ -275,4 +267,5 @@ if (typeof window !== 'undefined') {
   window.lobbyState = lobbyState;
   window.reconcileActiveConsole = reconcileActiveConsole;
   window.isLoadingPhase = () => lobbyState.isLoading();
+  window.playerStationId = playerStationId;
 }

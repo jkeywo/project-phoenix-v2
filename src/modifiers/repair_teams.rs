@@ -29,9 +29,9 @@ impl Default for RepairTimings {
 /// Teams are identified by slot index. The number of teams is set at
 /// construction time from the ship config (`repair_team_count`).
 ///
-/// After issue #617 the dispatch API keys on [`SystemId`] rather than
-/// `Console`; the legacy `Console` field on `TeamSlot` variants is left as
-/// `None` (kept on the wire for downstream compat; will disappear in #619).
+/// After issue #619 the dispatch API keys on [`SystemId`] and every non-Idle
+/// variant carries a `system_id` + `display_name`. The legacy `console` /
+/// `queued` fields on `TeamSlot` were removed along with the `Console` enum.
 #[derive(Debug, Clone)]
 pub struct RepairTeams {
     slots: Vec<TeamSlot>,
@@ -74,18 +74,16 @@ impl RepairTeams {
     /// `display_name` is the human-readable label for the target used to
     /// populate `TeamSlot::{Travelling,Repairing,Returning}.display_name`
     /// on the wire. Callers must pass a value derived from the caller's
-    /// domain knowledge (e.g. `Console::display_name()` for the legacy
-    /// wire path, or the target system's `SystemHull` entry's
-    /// `display_name` field for the new path). Passing the raw SystemId
-    /// string is a fallback of last resort; do not do it if a proper
-    /// display name is reachable.
+    /// domain knowledge (e.g. the target system's `SystemHull` entry's
+    /// `display_name` field). Passing the raw SystemId string is a fallback
+    /// of last resort; do not do it if a proper display name is reachable.
     ///
     /// Transition rules:
     /// - `Idle` → `Travelling { system_id, elapsed: 0.0 }`.
     /// - `Travelling { elapsed: t }` to a **different** system (redirect):
-    ///   → `Returning { remaining: t, queued: Some(...) }`.
+    ///   → `Returning { remaining: t, queued_system_id: Some(...) }`.
     /// - `Travelling { elapsed: t }` to the **same** system (recall):
-    ///   → `Returning { remaining: t, queued: None }`.
+    ///   → `Returning { remaining: t, queued_system_id: None }`.
     /// - `Repairing` to any system (redirect): `remaining = travel_duration`, queued.
     /// - `Repairing` to same system (recall): `remaining = travel_duration`, no queue.
     /// - `Returning` with a queued system: replace the queued system.
@@ -99,7 +97,6 @@ impl RepairTeams {
         match slot.clone() {
             TeamSlot::Idle => {
                 *slot = TeamSlot::Travelling {
-                    console: None,
                     system_id: Some(new_system),
                     display_name: Some(new_label),
                     elapsed: 0.0,
@@ -119,7 +116,6 @@ impl RepairTeams {
                 };
                 *slot = TeamSlot::Returning {
                     remaining: elapsed,
-                    queued: None,
                     system_id: current,
                     display_name: current_label,
                     queued_system_id: queued_sid,
@@ -139,7 +135,6 @@ impl RepairTeams {
                 };
                 *slot = TeamSlot::Returning {
                     remaining: travel_duration,
-                    queued: None,
                     system_id: current,
                     display_name: current_label,
                     queued_system_id: queued_sid,
@@ -156,7 +151,6 @@ impl RepairTeams {
                 let queued_label = Some(new_label);
                 *slot = TeamSlot::Returning {
                     remaining,
-                    queued: None,
                     system_id,
                     display_name,
                     queued_system_id: queued_sid,
@@ -194,7 +188,6 @@ impl RepairTeams {
                         let Some(sid) = system_id.clone() else {
                             *slot = TeamSlot::Returning {
                                 remaining: 0.0,
-                                queued: None,
                                 system_id: None,
                                 display_name: None,
                                 queued_system_id: None,
@@ -218,7 +211,6 @@ impl RepairTeams {
                         if is_full || is_destroyed {
                             *slot = TeamSlot::Returning {
                                 remaining: 0.0,
-                                queued: None,
                                 system_id: Some(sid),
                                 display_name: label,
                                 queued_system_id: None,
@@ -226,7 +218,6 @@ impl RepairTeams {
                             };
                         } else {
                             *slot = TeamSlot::Repairing {
-                                console: None,
                                 system_id: Some(sid),
                                 display_name: label,
                             };
@@ -241,7 +232,6 @@ impl RepairTeams {
                     let Some(sid) = system_id.clone() else {
                         *slot = TeamSlot::Returning {
                             remaining: travel_duration,
-                            queued: None,
                             system_id: None,
                             display_name: None,
                             queued_system_id: None,
@@ -260,7 +250,6 @@ impl RepairTeams {
                     if hull.tier_for(&sid) == crate::damage::DamageTier::Destroyed {
                         *slot = TeamSlot::Returning {
                             remaining: travel_duration,
-                            queued: None,
                             system_id: Some(sid),
                             display_name: carried_label,
                             queued_system_id: None,
@@ -273,7 +262,6 @@ impl RepairTeams {
                     if hull.is_at_max(&sid) {
                         *slot = TeamSlot::Returning {
                             remaining: travel_duration,
-                            queued: None,
                             system_id: Some(sid),
                             display_name: carried_label,
                             queued_system_id: None,
@@ -292,7 +280,6 @@ impl RepairTeams {
                         if let Some(sid) = queued_system_id.take() {
                             let label = queued_display_name.take().unwrap_or_else(|| sid.0.clone());
                             *slot = TeamSlot::Travelling {
-                                console: None,
                                 system_id: Some(sid),
                                 display_name: Some(label),
                                 elapsed: 0.0,

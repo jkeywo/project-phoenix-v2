@@ -22,11 +22,11 @@ test('Welcome includes ship_stations', async ({ context }) => {
   expect(typeof ss).toBe('object');
   expect(Array.isArray(ss.stations)).toBe(true);
   expect(ss.stations.length).toBeGreaterThan(0);
-  // Each station has an id, name, and consoles
+  // Each station has an id, name, and rank (flat StationDef post-#619).
   const first = ss.stations[0];
   expect(typeof first.id).toBe('string');
   expect(typeof first.name).toBe('string');
-  expect(Array.isArray(first.consoles)).toBe(true);
+  expect(typeof first.rank).toBe('string');
 
   await client.close();
 });
@@ -44,7 +44,7 @@ test('SelectStation for empty station claims it and broadcasts StationAssigned',
   const msg = await client.waitForMessage('StationAssigned', 5_000) as any;
   expect(msg.data.token).toBe(client.token);
   expect(msg.data.station).toBe('Captain');
-  expect(msg.data.consoles).toContain('CaptainChair');
+  expect(msg.data.station_id).toBe('captain');
 
   await client.close();
 });
@@ -125,7 +125,8 @@ test('ReleaseStation returns player to spectator', async ({ context }) => {
   const msg = await client.waitForMessage('StationAssigned', 5_000) as any;
   expect(msg.data.token).toBe(client.token);
   expect(msg.data.station).toBeNull();
-  expect(msg.data.consoles).toHaveLength(0);
+  // Spectator: serde omits `station_id` when None, so the field is undefined.
+  expect(msg.data.station_id).toBeUndefined();
 
   await client.close();
 });
@@ -163,7 +164,8 @@ test('10th connector when all 9 stations are filled becomes spectator', async ({
 
   expect(spectatorMsg2).not.toBeNull();
   expect(spectatorMsg2.data.station).toBeNull();
-  expect(spectatorMsg2.data.consoles).toHaveLength(0);
+  // Spectator: serde omits `station_id` when None, so the field is undefined.
+  expect(spectatorMsg2.data.station_id).toBeUndefined();
 
   for (const c of clients) { await c.close(); }
   await c10.close();

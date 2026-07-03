@@ -40,7 +40,6 @@ pub fn derive_game_state(
     GameState {
         phase: phase.clone(),
         players: sessions.players().to_vec(),
-        complexity: HashMap::new(),
         world,
     }
 }
@@ -137,7 +136,6 @@ pub fn process_message(
                             ServerMessage::StationAssigned {
                                 token: id_token.clone(),
                                 station: Some(station_def.name.clone()),
-                                consoles: station_def.consoles.clone(),
                                 station_id: Some(restored_sid.clone()),
                             },
                         ));
@@ -185,7 +183,6 @@ pub fn process_message(
                                 ServerMessage::StationAssigned {
                                     token: id_token.clone(),
                                     station: None,
-                                    consoles: vec![],
                                     station_id: None,
                                 },
                             ));
@@ -265,7 +262,6 @@ pub fn process_message(
                     ServerMessage::StationAssigned {
                         token: token.to_string(),
                         station: None,
-                        consoles: vec![],
                         station_id: None,
                     },
                 ));
@@ -289,7 +285,6 @@ pub fn process_message(
                 ServerMessage::StationAssigned {
                     token: token.to_string(),
                     station: Some(station.clone()),
-                    consoles: station_def.consoles.clone(),
                     station_id: Some(station_def.id.clone()),
                 },
             ));
@@ -310,7 +305,6 @@ pub fn process_message(
                 ServerMessage::StationAssigned {
                     token: token.to_string(),
                     station: None,
-                    consoles: vec![],
                     station_id: None,
                 },
             ));
@@ -369,7 +363,6 @@ pub fn process_message(
         // SetReady IS handled above (not a no-op in lobby).
         ClientMessage::FirePhaser { .. }
         | ClientMessage::SetPhaserFrequency { .. }
-        | ClientMessage::DispatchRepairTeam { .. }
         | ClientMessage::FireTorpedo { .. }
         | ClientMessage::ControlSystem { .. }
         | ClientMessage::SetStationRating { .. }
@@ -460,7 +453,7 @@ pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{Console, EntitySnapshot, StationId, WorldData};
+    use crate::messages::{EntitySnapshot, StationId, WorldData};
     use crate::ship::control_source::ControlSourceResolver;
     use crate::stations_config::{ShipStations, StationDef};
 
@@ -487,7 +480,6 @@ name = "Captain"
 description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
-console = "captain"
 
 [[station.rating]]
 name = "Manual"
@@ -695,7 +687,6 @@ max_level = 4
                     id: StationId("captain".into()),
                     name: "Captain".into(),
                     description: "Command the bridge.".into(),
-                    consoles: vec![Console::CaptainChair],
                     rank: "Cpt.".into(),
                     short_code: "CPT".into(),
                 },
@@ -703,7 +694,6 @@ max_level = 4
                     id: StationId("helm".into()),
                     name: "Helm".into(),
                     description: "Pilot the ship.".into(),
-                    consoles: vec![Console::Helm],
                     rank: "Ltn.".into(),
                     short_code: "HLM".into(),
                 },
@@ -711,7 +701,6 @@ max_level = 4
                     id: StationId("tactical".into()),
                     name: "Tactical".into(),
                     description: "Manage weapons.".into(),
-                    consoles: vec![Console::Tactical],
                     rank: "Ltn.".into(),
                     short_code: "TAC".into(),
                 },
@@ -719,7 +708,6 @@ max_level = 4
                     id: StationId("repair".into()),
                     name: "Repair".into(),
                     description: "Repair systems.".into(),
-                    consoles: vec![Console::Repair],
                     rank: "Ltn.".into(),
                     short_code: "ENG".into(),
                 },
@@ -727,7 +715,6 @@ max_level = 4
                     id: StationId("sensors".into()),
                     name: "Sensors".into(),
                     description: "Monitor sensors.".into(),
-                    consoles: vec![Console::Sensors],
                     rank: "Ens.".into(),
                     short_code: "SCI".into(),
                 },
@@ -735,7 +722,6 @@ max_level = 4
                     id: StationId("shields".into()),
                     name: "Shields".into(),
                     description: "Manage shields.".into(),
-                    consoles: vec![Console::Shields],
                     rank: "Ens.".into(),
                     short_code: "SHD".into(),
                 },
@@ -743,7 +729,6 @@ max_level = 4
                     id: StationId("navigation".into()),
                     name: "Navigation".into(),
                     description: "Plot course.".into(),
-                    consoles: vec![Console::Navigation],
                     rank: "Ens.".into(),
                     short_code: "NAV".into(),
                 },
@@ -751,7 +736,6 @@ max_level = 4
                     id: StationId("power".into()),
                     name: "Power".into(),
                     description: "Manage power.".into(),
-                    consoles: vec![Console::Power],
                     rank: "Ltn.".into(),
                     short_code: "PWR".into(),
                 },
@@ -759,7 +743,6 @@ max_level = 4
                     id: StationId("comms".into()),
                     name: "Comms".into(),
                     description: "Hail contacts.".into(),
-                    consoles: vec![Console::Comms],
                     rank: "Ens.".into(),
                     short_code: "COM".into(),
                 },
@@ -827,14 +810,14 @@ max_level = 4
             ServerMessage::StationAssigned {
                 token,
                 station,
-                consoles,
+                station_id,
                 ..
-            } if token == "t1" => Some((station.clone(), consoles.clone())),
+            } if token == "t1" => Some((station.clone(), station_id.clone())),
             _ => None,
         });
-        let (station_name, consoles) = assigned.expect("StationAssigned not found");
+        let (station_name, station_id) = assigned.expect("StationAssigned not found");
         assert_eq!(station_name, Some("Captain".to_string()));
-        assert!(consoles.contains(&crate::messages::Console::CaptainChair));
+        assert_eq!(station_id, Some(crate::messages::StationId("captain".into())));
     }
 
     #[test]
@@ -1048,9 +1031,8 @@ max_level = 4
                 ServerMessage::StationAssigned {
                     token,
                     station,
-                    consoles,
                     ..
-                } if token == "t1" => Some((station.clone(), consoles.clone())),
+                } if token == "t1" => Some(station.clone()),
                 _ => None,
             })
             .collect();
@@ -1060,10 +1042,10 @@ max_level = 4
             "swap should produce exactly 2 StationAssigned messages"
         );
         // One release (station=None) and one claim
-        let has_release = assigned.iter().any(|(s, c)| s.is_none() && c.is_empty());
+        let has_release = assigned.iter().any(|s| s.is_none());
         let has_claim = assigned
             .iter()
-            .any(|(s, _)| s.as_deref() == Some("Tactical"));
+            .any(|s| s.as_deref() == Some("Tactical"));
         assert!(has_release, "swap must include a release StationAssigned");
         assert!(has_claim, "swap must include a claim StationAssigned");
     }
@@ -1262,11 +1244,11 @@ max_level = 4
             None,
         );
         let found = result.outbound.iter().any(|(_, m)| matches!(m,
-            ServerMessage::StationAssigned { token, station: None, consoles, .. } if token == "t1" && consoles.is_empty()
+            ServerMessage::StationAssigned { token, station: None, .. } if token == "t1"
         ));
         assert!(
             found,
-            "ReleaseStation must broadcast StationAssigned with station=None and empty consoles"
+            "ReleaseStation must broadcast StationAssigned with station=None"
         );
     }
 
@@ -1403,7 +1385,7 @@ max_level = 4
         // Should receive StationAssigned with station=None
         let got_spectator_assigned = result.outbound.iter().any(|(target, m)| {
             matches!(target, Target::Token(t) if t == "t10")
-                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles, .. } if token == "t10" && consoles.is_empty())
+                && matches!(m, ServerMessage::StationAssigned { token, station: None, .. } if token == "t10")
         });
         assert!(
             got_spectator_assigned,
@@ -1534,9 +1516,8 @@ max_level = 4
             ServerMessage::StationAssigned {
                 token,
                 station: Some(name),
-                consoles,
                 ..
-            } if token == "t10" => Some((name.clone(), consoles.clone())),
+            } if token == "t10" => Some(name.clone()),
             _ => None,
         });
         assert!(
@@ -1544,9 +1525,8 @@ max_level = 4
             "t10 should receive StationAssigned with station=Some(Shields); got outbound: {:?}",
             result.outbound
         );
-        let (name, consoles) = assigned.unwrap();
+        let name = assigned.unwrap();
         assert_eq!(name, "Shields");
-        assert!(!consoles.is_empty(), "consoles should not be empty");
     }
 
     #[test]

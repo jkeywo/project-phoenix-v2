@@ -58,13 +58,13 @@ test('3 players each claim a station at the fixed 6P layout', async ({ context }
   const a3 = await lastAssignment(c3, c3.token) as any;
 
   expect(a1.data.station).toBe('Captain');
-  expect(a1.data.consoles).toContain('CaptainChair');
+  expect(a1.data.station_id).toBe('captain');
 
   expect(a2.data.station).toBe('Helm');
-  expect(a2.data.consoles).toContain('Helm');
+  expect(a2.data.station_id).toBe('helm');
 
   expect(a3.data.station).toBe('Tactical');
-  expect(a3.data.consoles).toContain('Tactical');
+  expect(a3.data.station_id).toBe('tactical');
 
   await c1.close();
   await c2.close();
@@ -118,7 +118,7 @@ test('leaver station can be claimed by another player', async ({ context }) => {
 
   const a3 = await lastAssignment(c3, c3.token) as any;
   expect(a3.data.station).toBe('Captain');
-  expect(a3.data.consoles).toContain('CaptainChair');
+  expect(a3.data.station_id).toBe('captain');
 
   await c2.close();
   await c3.close();

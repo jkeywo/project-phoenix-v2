@@ -158,14 +158,14 @@ pub const TORPEDO_MAGAZINE_AI_CONTROLLER: &str = "torpedo_magazine_ai";
 // allocation logic now targets the fine `power_reactor` kind; battery drain
 // (channel-2 `DrainWeaponsBattery`) targets `power_battery`. Both fine
 // systems live on the `power` station and are held by the single
-// `Console::Power` holder — the split is invisible to the human but grants
+// power-station holder — the split is invisible to the human but grants
 // per-instance damage semantics (reactor disabled → no allocation input;
 // battery disabled → no emergency reserves).
 
 /// Wire `SystemId` for the Power Reactor fine system.
 ///
-/// The reactor OWNS the allocation surface: `SetPowerGroupAllocation` and
-/// `SetPower` payloads are gated on `policy_for(&power_reactor_system_id())`.
+/// The reactor OWNS the allocation surface: `SetPowerGroupAllocation`
+/// payloads are gated on `policy_for(&power_reactor_system_id())`.
 /// A Disabled/Destroyed reactor refuses allocation input via the standard
 /// `accept_human_input` gate.
 pub const POWER_REACTOR_KIND: &str = "power_reactor";

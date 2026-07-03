@@ -91,6 +91,8 @@ This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anch
 
 `operate_helm` in `src/ai/core.rs` uses the active Destroy target both as the facing target and as the range anchor. When the ship is already inside maintain range, thrust is zero and steering should only face the target. The active Destroy target is therefore excluded from `avoidance_steering`; otherwise a close enemy with a large collider can be treated as an obstacle and make an AI-controlled, stationary ship yaw left/right around the same target.
 
+Directive selection distinguishes unresolved directives from resolved idle commands. `operate_helm` tries lower-priority directives only when a directive returns `None` (for example, a Destroy target name that is not yet visible); `Some((0.0, 0.0))` means the directive resolved and intentionally wants the ship to hold station. This prevents a high-priority Destroy objective that has reached weapons range from falling through to a lower-priority Patrol objective and sharply steering away from the target.
+
 ## NPC ship spawn
 
 When `spawn_entity` in `src/entities/spawner.rs` detects a TOML `[behaviour]` section, it inserts:

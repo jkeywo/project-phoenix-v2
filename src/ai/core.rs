@@ -22,6 +22,7 @@ pub const PATROL_FULL_STEER_RAD: f32 = PI / 4.0;
 pub const AVOIDANCE_BUFFER: f32 = 5.0;
 /// Look-ahead horizon (seconds) for predictive collision avoidance.
 pub const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
+const AVOIDANCE_MIN_SPEED: f32 = 0.25;
 /// Proportional deceleration factor for approach: thrust begins ramping down
 /// when distance is within this multiple of the target stop-distance.
 /// At 1.5× the stop threshold the ship starts slowing; at the threshold it
@@ -166,6 +167,10 @@ fn avoidance_steering(
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
 ) -> f32 {
+    if self_speed.abs() < AVOIDANCE_MIN_SPEED {
+        return 0.0;
+    }
+
     let fwd_x = self_yaw.sin();
     let fwd_z = -self_yaw.cos();
     let proj_self_x = self_pos[0] + fwd_x * self_speed * avoidance_look_ahead_secs;
@@ -295,9 +300,11 @@ pub fn operate_helm(
     use crate::messages::{AiDirective, SystemAffinity};
 
     // Iterate directives in descending score order. A directive that cannot
-    // produce movement (e.g. Destroy with an unresolvable target, or Reach
-    // with an unknown anchor) returns (0, 0) — in that case we fall through
-    // to the next lower-priority directive rather than leaving the ship idle.
+    // resolve (e.g. Destroy with an unknown target, or Reach with an unknown
+    // anchor) returns `None`; in that case we fall through to the next
+    // lower-priority directive rather than leaving the ship idle.
+    // `Some((0, 0))` is intentional resolved idleness, such as holding station
+    // at weapons range, and must not fall through to Patrol.
     // This ensures a Patrol objective acts as a default when the higher-scored
     // Destroy target has not yet appeared in the world snapshot (as happens at
     // the start of combat_test.toml where wave objectives are added on the
@@ -344,7 +351,7 @@ pub fn operate_helm(
             }
             AiDirective::Reach { anchor } => {
                 let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.6);
-                if let Some(&pos) = anchors.get(anchor.as_str()) {
+                anchors.get(anchor.as_str()).and_then(|&pos| {
                     helm_navigate_to(
                         memory,
                         world_view,
@@ -355,13 +362,11 @@ pub fn operate_helm(
                         forward_speed,
                         target_speed,
                     )
-                } else {
-                    (0.0, 0.0)
-                }
+                })
             }
-            _ => (0.0, 0.0),
+            _ => None,
         };
-        if result != (0.0, 0.0) {
+        if let Some(result) = result {
             return result;
         }
     }
@@ -380,18 +385,18 @@ fn helm_destroy(
     directive_target: Option<&str>,
     target_speed: f32,
     maintain_range: f32,
-) -> (f32, f32) {
+) -> Option<(f32, f32)> {
     // Validate / refresh target.
     let target_uuid =
         resolve_destroy_target(memory, world_view, faction_registry, directive_target);
     let Some(target_uuid) = target_uuid else {
-        return (0.0, 0.0);
+        return None;
     };
     memory.target = Some(target_uuid);
 
     let Some(target_entity) = world_view.entities.iter().find(|e| e.uuid == target_uuid) else {
         memory.target = None;
-        return (0.0, 0.0);
+        return None;
     };
 
     let pos = world_view.entity_pos;
@@ -401,7 +406,7 @@ fn helm_destroy(
     let dist = (dx * dx + dz * dz).sqrt();
 
     if dist < 1.0 {
-        return (0.0, 0.0);
+        return Some((0.0, 0.0));
     }
 
     let effective_range = world_view.entity_weapons_range.unwrap_or(maintain_range);
@@ -458,7 +463,7 @@ fn helm_destroy(
             target_speed
         }
     };
-    (thrust, steering)
+    Some((thrust, steering))
 }
 
 /// Resolve which target to attack: existing (if still visible) > last_attacker > nearest hostile.
@@ -544,9 +549,9 @@ fn helm_patrol(
     forward_speed: f32,
     target_speed: f32,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
-) -> (f32, f32) {
+) -> Option<(f32, f32)> {
     if waypoints.is_empty() {
-        return (0.0, 0.0);
+        return None;
     }
 
     // Clamp index.
@@ -554,13 +559,13 @@ fn helm_patrol(
         if loop_path {
             memory.waypoint_index = 0;
         } else {
-            return (0.0, 0.0);
+            return Some((0.0, 0.0));
         }
     }
 
     let waypoint_name = &waypoints[memory.waypoint_index];
     let Some(&wp_pos) = anchors.get(waypoint_name.as_str()) else {
-        return (0.0, 0.0);
+        return None;
     };
 
     let pos = world_view.entity_pos;
@@ -575,9 +580,9 @@ fn helm_patrol(
         } else if loop_path {
             memory.waypoint_index = 0;
         } else {
-            return (0.0, 0.0);
+            return Some((0.0, 0.0));
         }
-        return (target_speed, 0.0);
+        return Some((target_speed, 0.0));
     }
 
     let dir = [dx / dist, dz / dist];
@@ -599,7 +604,7 @@ fn helm_patrol(
         PATROL_FULL_STEER_RAD,
     );
     let steering = (base_steer + avoidance).clamp(-1.0, 1.0);
-    (target_speed, steering)
+    Some((target_speed, steering))
 }
 
 /// Helm execute: navigate to a fixed position (for Reach directives).
@@ -612,14 +617,14 @@ fn helm_navigate_to(
     avoidance_look_ahead_secs: f32,
     forward_speed: f32,
     target_speed: f32,
-) -> (f32, f32) {
+) -> Option<(f32, f32)> {
     let pos = world_view.entity_pos;
     let dx = target_pos[0] - pos[0];
     let dz = target_pos[2] - pos[2];
     let dist = (dx * dx + dz * dz).sqrt();
 
     if dist < arrival_radius {
-        return (0.0, 0.0);
+        return Some((0.0, 0.0));
     }
 
     let dir = [dx / dist, dz / dist];
@@ -651,7 +656,7 @@ fn helm_navigate_to(
     } else {
         target_speed
     };
-    (thrust, steering)
+    Some((thrust, steering))
 }
 
 // ── operate_weapons ───────────────────────────────────────────────────────────
@@ -800,6 +805,32 @@ mod tests {
     #[test]
     fn should_emit_returns_false_when_equal() {
         assert!(!should_emit(0.3, 0.3, 0.0));
+    }
+
+    #[test]
+    fn avoidance_steering_is_zero_when_stationary() {
+        let obstacle = AiWorldEntity {
+            uuid: Uuid::from_u128(2),
+            position: [0.0, 0.0, -2.0],
+            radius: 20.0,
+            ..Default::default()
+        };
+
+        let steering = avoidance_steering(
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            2.0,
+            Uuid::nil(),
+            &[obstacle],
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+        );
+
+        assert_eq!(
+            steering, 0.0,
+            "stationary ships should not yaw away from nearby bodies"
+        );
     }
 
     // ── AiMemory ──────────────────────────────────────────────────────────
@@ -1376,6 +1407,63 @@ mod tests {
         assert_eq!(
             steering, 0.0,
             "active destroy target must not push avoidance steering while holding station"
+        );
+    }
+
+    #[test]
+    fn helm_destroy_holding_station_does_not_fall_through_to_patrol() {
+        let target_uuid = Uuid::new_v4();
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: target_uuid,
+                name: Some("enemy".into()),
+                position: [0.0, 0.0, -10.0],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut memory = AiMemory::default();
+        let (mut pool, doctrine) = destroy_pool_for("enemy", 0.8, 25.0);
+        pool.push(crate::messages::ScoredObjective {
+            id: "patrol-base".into(),
+            score: 10.0,
+            directive: crate::messages::AiDirective::Patrol {
+                anchors: vec!["alpha".into()],
+                loop_path: true,
+            },
+            source: crate::messages::ObjectiveSource::Doctrine,
+            relevance: vec![crate::messages::SystemAffinity::Helm],
+            snapshot: crate::messages::ObjectiveSnapshot {
+                id: "patrol-base".into(),
+                text: "Patrol".into(),
+                mandatory: false,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![],
+                source: crate::messages::ObjectiveSource::Doctrine,
+            },
+        });
+        let anchors = anchors_with_alpha();
+
+        let (thrust, steering) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+        );
+
+        assert_eq!(thrust, 0.0);
+        assert_eq!(
+            steering, 0.0,
+            "resolved Destroy should hold station instead of falling through to Patrol"
         );
     }
 

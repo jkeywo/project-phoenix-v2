@@ -46,7 +46,14 @@ impl Plugin for PfxPlugin {
                     spawn_engine_trails.run_if(in_state(GamePhase::InProgress)),
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),
                     tick_bursts.run_if(in_state(GamePhase::InProgress)),
-                ),
+                )
+                    // These read ship `Transform`/`ShipPhysics`, which
+                    // `sync_ship_position` (SimSet::Physics) writes each tick.
+                    // Without this, the two systems have a genuine read/write
+                    // conflict on `Transform` with no ordering constraint
+                    // between them, so PFX can read a stale pre-physics
+                    // transform depending on scheduler tie-breaking.
+                    .after(crate::sim_sets::SimSet::Physics),
             )
             .add_systems(OnExit(GamePhase::InProgress), cleanup_pfx);
     }

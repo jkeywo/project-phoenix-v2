@@ -10,6 +10,11 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Project Phoenix — Console</title>
+  <!-- Keep rAF-driven UI (scheduleRender, radar sweeps, joystick decay in
+       the console iframes) running at full rate even when this tab loses
+       focus — see gui/bg-raf-keepalive.js. Must load before any other
+       script calls requestAnimationFrame. -->
+  <script src="gui/bg-raf-keepalive.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- Pure-function helpers shared with Vitest unit tests (issue #439, #440, #441). -->

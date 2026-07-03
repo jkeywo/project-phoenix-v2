@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Project Phoenix — Repair Console</title>
+  <!-- Keep the countdown-timer rAF loop running at full rate even when this
+       console's tab loses focus — see gui/bg-raf-keepalive.js. Must load
+       before any requestAnimationFrame call. -->
+  <script src="bg-raf-keepalive.js"></script>
   <link rel="stylesheet" href="console.css">
   <style>
     body { font-size: 16px; }

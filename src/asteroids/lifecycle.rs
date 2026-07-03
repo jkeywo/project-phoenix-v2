@@ -937,7 +937,9 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&mut crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>();
-        let mut p = q.single_mut(app.world_mut()).expect("expected LocalShip with ShipPhysics");
+        let mut p = q
+            .single_mut(app.world_mut())
+            .expect("expected LocalShip with ShipPhysics");
         p.x = x;
         p.z = z;
     }

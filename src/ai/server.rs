@@ -245,9 +245,9 @@ fn build_world_snapshot(
 ) {
     snapshot.entities = query
         .iter()
-        .map(|(uuid, transform, name, faction, hull, collider, physics)| {
-            let hull_fraction = hull
-                .map(|h| {
+        .map(
+            |(uuid, transform, name, faction, hull, collider, physics)| {
+                let hull_fraction = hull.map(|h| {
                     let max = h.0.total_max();
                     if max > 0.0 {
                         h.0.total_current() / max
@@ -255,28 +255,27 @@ fn build_world_snapshot(
                         1.0
                     }
                 });
-            let radius = collider.map(|c| c.0.radius).unwrap_or(0.0);
-            // Prefer ShipPhysics.forward_speed (authoritative for all ships after #587);
-            // Use ShipPhysics.forward_speed (authoritative after #581).
-            let forward_speed = physics
-                .map(|p| p.forward_speed)
-                .unwrap_or(0.0);
-            crate::ai::AiWorldEntity {
-                uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
-                name: name.as_ref().map(|n| n.0.clone()),
-                position: [
-                    transform.translation.x,
-                    transform.translation.y,
-                    transform.translation.z,
-                ],
-                faction: faction.map(|f| f.0),
-                hull_fraction,
-                yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
-                radius,
-                forward_speed,
-                shields: None,
-            }
-        })
+                let radius = collider.map(|c| c.0.radius).unwrap_or(0.0);
+                // Prefer ShipPhysics.forward_speed (authoritative for all ships after #587);
+                // Use ShipPhysics.forward_speed (authoritative after #581).
+                let forward_speed = physics.map(|p| p.forward_speed).unwrap_or(0.0);
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
+                    name: name.as_ref().map(|n| n.0.clone()),
+                    position: [
+                        transform.translation.x,
+                        transform.translation.y,
+                        transform.translation.z,
+                    ],
+                    faction: faction.map(|f| f.0),
+                    hull_fraction,
+                    yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                    radius,
+                    forward_speed,
+                    shields: None,
+                }
+            },
+        )
         .collect();
 }
 
@@ -314,10 +313,7 @@ fn aggregate_doctrine_blackboards(
             red_alert,
             hull_fraction,
         };
-        let scored = crate::ai::score_doctrine_pool(
-            &behaviour.0.doctrine,
-            &conditions,
-        );
+        let scored = crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &conditions);
         let viewscreen_bb = crate::messages::ViewscreenBlackboard {
             red_alert,
             hull_integrity_pct: hull_fraction * 100.0,
@@ -398,7 +394,11 @@ fn register_ai_tokens_on_spawn(
     >,
 ) {
     for (entity, uuid, transform, existing_mem) in &query {
-        let home = [transform.translation.x, transform.translation.y, transform.translation.z];
+        let home = [
+            transform.translation.x,
+            transform.translation.y,
+            transform.translation.z,
+        ];
         registry.register_with_entity(&uuid.0, entity);
         let mut cmd = commands.entity(entity);
         cmd.insert(AiControllerComponent);
@@ -423,12 +423,7 @@ fn register_ai_tokens_on_spawn(
 /// be processed on the following frame.
 fn process_attacker_this_tick(
     mut commands: Commands,
-    mut query: Query<(
-        Entity,
-        &EntityUuid,
-        &AttackerThisTick,
-        &mut ShipAiMemory,
-    )>,
+    mut query: Query<(Entity, &EntityUuid, &AttackerThisTick, &mut ShipAiMemory)>,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
 ) {
     for (entity, uuid, attacker, mut ai_mem) in query.iter_mut() {
@@ -444,7 +439,6 @@ fn process_attacker_this_tick(
         commands.entity(entity).remove::<AttackerThisTick>();
     }
 }
-
 
 /// Unregister synthetic tokens when AI-controlled entities are despawned.
 fn unregister_on_despawn(
@@ -567,11 +561,11 @@ mod tests {
 
     // ── Bevy integration tests ─────────────────────────────────────────────
 
+    use crate::config_cache::FactionRegistryResource;
     use crate::entity_config::BehaviourConfig;
     use crate::entity_spawner::EntityUuid;
     use crate::lobby::LobbyPlugin;
     use crate::messages::GamePhase;
-    use crate::config_cache::FactionRegistryResource;
 
     #[derive(Resource, Default)]
     struct AttackedBox(Vec<AiEntityAttacked>);
@@ -973,18 +967,15 @@ mod tests {
 
         app.update();
 
-        let mut q = app
-            .world_mut()
-            .query::<&ShipSystemBlackboards>();
+        let mut q = app.world_mut().query::<&ShipSystemBlackboards>();
         let bb = q
             .iter(app.world())
             .next()
             .expect("entity must have ShipSystemBlackboards");
 
-        let viewscreen = bb
-            .0
-            .get(&crate::messages::SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
-            .expect("viewscreen entry must be present after aggregate_doctrine_blackboards");
+        let viewscreen =
+            bb.0.get(&crate::messages::SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
+                .expect("viewscreen entry must be present after aggregate_doctrine_blackboards");
 
         let scored = match viewscreen {
             crate::messages::SystemBlackboard::Viewscreen(v) => &v.scored_objectives,

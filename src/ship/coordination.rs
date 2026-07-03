@@ -27,7 +27,8 @@ pub fn route_coordination(
     match (target_control, sender_origin) {
         (ControlSource::Ai, _) | (ControlSource::Offline, _) => DeliverAction::Consume,
         (ControlSource::Human, ControlSource::Ai) => DeliverAction::Popup,
-        (ControlSource::Human, ControlSource::Human) | (ControlSource::Human, ControlSource::Offline) => DeliverAction::Suppress,
+        (ControlSource::Human, ControlSource::Human)
+        | (ControlSource::Human, ControlSource::Offline) => DeliverAction::Suppress,
     }
 }
 

@@ -344,8 +344,7 @@ pub fn process_lobby(
         .cloned()
         .collect();
     for ev in events {
-        if let Ok((ship_config, mut control_sources, mut active_ratings)) =
-            ship_query.single_mut()
+        if let Ok((ship_config, mut control_sources, mut active_ratings)) = ship_query.single_mut()
         {
             let ratings_snapshot = active_ratings.0.clone();
             let result = lobby_handler::process_message(
@@ -611,7 +610,10 @@ mod tests {
         // Verify stations are populated
         {
             let stations = app.world().resource::<ShipStations>();
-            assert!(!stations.stations.is_empty(), "ShipStations must be non-empty");
+            assert!(
+                !stations.stations.is_empty(),
+                "ShipStations must be non-empty"
+            );
             assert_eq!(stations.stations.len(), 2, "expected 2 stations");
         }
 
@@ -651,18 +653,12 @@ mod tests {
         }));
 
         // Start the game — both ready triggers auto-start from Lobby
-        push(
-            &mut app,
-            "t1",
-            ClientMessage::SetReady { ready: true },
-        );
-        push(
-            &mut app,
-            "t2",
-            ClientMessage::SetReady { ready: true },
-        );
+        push(&mut app, "t1", ClientMessage::SetReady { ready: true });
+        push(&mut app, "t2", ClientMessage::SetReady { ready: true });
         let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
+        assert!(out
+            .iter()
+            .any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
 
         // Now in InProgress: Player2 claims Tactical (was unclaimed)
         push(
@@ -737,20 +733,14 @@ mod tests {
         tick(&mut app);
 
         // Start the game — single player ready triggers auto-start from Lobby
-        push(
-            &mut app,
-            "t1",
-            ClientMessage::SetReady { ready: true },
-        );
+        push(&mut app, "t1", ClientMessage::SetReady { ready: true });
         let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
+        assert!(out
+            .iter()
+            .any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
 
         // Now in InProgress: Player1 releases Helm
-        push(
-            &mut app,
-            "t1",
-            ClientMessage::ReleaseStation,
-        );
+        push(&mut app, "t1", ClientMessage::ReleaseStation);
         let out = tick(&mut app);
         assert!(
             out.iter().any(|m| {

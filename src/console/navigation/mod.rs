@@ -10,27 +10,26 @@ pub struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_systems(
-                Update,
-                handle_navigation_waypoint.in_set(crate::sim_sets::SimSet::Input),
-            )
-            // Refresh anchored waypoints from the parent entity's live
-            // Transform every tick, before the broadcaster reads the
-            // waypoint into the SimSnapshot. Auto-clear when the parent
-            // entity is no longer present.
-            .add_systems(
-                Update,
-                refresh_anchored_waypoint.in_set(crate::sim_sets::SimSet::Modifiers),
-            )
-            .add_systems(
-                Update,
-                operate_navigation_ai.in_set(crate::sim_sets::SimSet::Physics),
-            )
-            .add_systems(
-                Update,
-                publish_navigation_blackboard.in_set(crate::sim_sets::SimSet::Publish),
-            );
+        app.add_systems(
+            Update,
+            handle_navigation_waypoint.in_set(crate::sim_sets::SimSet::Input),
+        )
+        // Refresh anchored waypoints from the parent entity's live
+        // Transform every tick, before the broadcaster reads the
+        // waypoint into the SimSnapshot. Auto-clear when the parent
+        // entity is no longer present.
+        .add_systems(
+            Update,
+            refresh_anchored_waypoint.in_set(crate::sim_sets::SimSet::Modifiers),
+        )
+        .add_systems(
+            Update,
+            operate_navigation_ai.in_set(crate::sim_sets::SimSet::Physics),
+        )
+        .add_systems(
+            Update,
+            publish_navigation_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+        );
     }
 }
 
@@ -162,7 +161,10 @@ fn refresh_anchored_waypoint(
 fn publish_navigation_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     waypoint_q: Query<&NavigationWaypoint, With<crate::server_app::LocalShip>>,
-    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
+    mut ship_bbs_q: Query<
+        &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let cfg = &ship_config.0;
     let navigation_waypoint = waypoint_q.single().ok().and_then(|w| w.snapshot());
@@ -188,9 +190,7 @@ fn publish_navigation_blackboard(
 ///
 /// Currently a compile-verified stub — Navigation AI sets waypoints based on
 /// doctrine objectives (deferred to later fine-grained decomposition).
-pub fn operate_navigation_ai(
-    ships: Query<&crate::ship_plugin::ShipSystemControlSources>,
-) {
+pub fn operate_navigation_ai(ships: Query<&crate::ship_plugin::ShipSystemControlSources>) {
     for sources in &ships {
         let policy = sources
             .0
@@ -211,7 +211,7 @@ mod tests {
         sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull,
         LastBroadcastShields, ShipImpulse,
     };
-    
+
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
@@ -823,7 +823,10 @@ mod tests {
         let policy = ai_sources
             .0
             .policy_for(&crate::system_registry::navigation_system_id());
-        assert!(policy.operate_ai, "AI Navigation must gate through operate_ai");
+        assert!(
+            policy.operate_ai,
+            "AI Navigation must gate through operate_ai"
+        );
 
         // Human-controlled navigation must not operate AI.
         let mut human_resolver = ControlSourceResolver::new();
@@ -835,6 +838,9 @@ mod tests {
         let human_policy = human_sources
             .0
             .policy_for(&crate::system_registry::navigation_system_id());
-        assert!(!human_policy.operate_ai, "Human Navigation must not operate AI");
+        assert!(
+            !human_policy.operate_ai,
+            "Human Navigation must not operate AI"
+        );
     }
 }

@@ -13,6 +13,7 @@ use crate::messages::{
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
+use crate::server_app::{LocalShip, Ship};
 use crate::ship::config::ShipConfig;
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
@@ -21,7 +22,6 @@ use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{ShipBoost, ShipImpulse};
-use crate::server_app::{LocalShip, Ship};
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Resources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -219,7 +219,11 @@ struct HelmDriveParams<'w, 's> {
 impl HelmDriveParams<'_, '_> {
     /// Effective impulse config: per-entity component takes priority over Resource.
     fn impulse_cfg(&self) -> ImpulseConfigResource {
-        let entity = self.config_q.single().ok().and_then(|(_, ic, _, _)| ic.cloned());
+        let entity = self
+            .config_q
+            .single()
+            .ok()
+            .and_then(|(_, ic, _, _)| ic.cloned());
         entity
             .or_else(|| self.impulse_cfg_res.as_deref().cloned())
             .unwrap_or_default()
@@ -227,7 +231,11 @@ impl HelmDriveParams<'_, '_> {
 
     /// Effective boost config: per-entity component takes priority over Resource.
     fn boost_cfg(&self) -> BoostConfigResource {
-        let entity = self.config_q.single().ok().and_then(|(_, _, bc, _)| bc.cloned());
+        let entity = self
+            .config_q
+            .single()
+            .ok()
+            .and_then(|(_, _, bc, _)| bc.cloned());
         entity
             .or_else(|| self.boost_cfg_res.as_deref().cloned())
             .unwrap_or_default()
@@ -235,7 +243,11 @@ impl HelmDriveParams<'_, '_> {
 
     /// Effective bank config: per-entity component takes priority over Resource.
     fn bank_cfg(&self) -> BankConfigResource {
-        let entity = self.config_q.single().ok().and_then(|(_, _, _, bk)| bk.cloned());
+        let entity = self
+            .config_q
+            .single()
+            .ok()
+            .and_then(|(_, _, _, bk)| bk.cloned());
         entity
             .or_else(|| self.bank_cfg_res.as_deref().cloned())
             .unwrap_or_default()
@@ -243,7 +255,11 @@ impl HelmDriveParams<'_, '_> {
 
     /// Effective physics config: per-entity component takes priority over Resource.
     fn physics_cfg(&self) -> Option<ShipPhysicsConfigResource> {
-        let entity = self.config_q.single().ok().and_then(|(pc, _, _, _)| pc.cloned());
+        let entity = self
+            .config_q
+            .single()
+            .ok()
+            .and_then(|(pc, _, _, _)| pc.cloned());
         entity.or_else(|| self.physics_cfg_res.as_deref().cloned())
     }
 }
@@ -325,7 +341,11 @@ fn process_helm_inputs(
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
     // last cached helm input so a stale steering/thrust value can't
     // resurface the moment impulse cancels or the autopilot disengages.
-    let current_phase = drive.impulse_q.iter().next().map(|i| i.0.phase)
+    let current_phase = drive
+        .impulse_q
+        .iter()
+        .next()
+        .map(|i| i.0.phase)
         .unwrap_or(crate::impulse::ImpulsePhase::Idle);
     if Some(current_phase) != *prev_phase {
         if current_phase == crate::impulse::ImpulsePhase::Charging {
@@ -377,7 +397,12 @@ fn process_helm_inputs(
         yaw: physics.yaw,
         forward_speed: physics.forward_speed,
     };
-    let impulse_active = drive.impulse_q.iter().next().map(|i| i.0.is_active()).unwrap_or(false);
+    let impulse_active = drive
+        .impulse_q
+        .iter()
+        .next()
+        .map(|i| i.0.is_active())
+        .unwrap_or(false);
     let input = if impulse_active {
         // Autopilot: full forward thrust, zero steering. Player input is ignored.
         ShipPhysicsInput {
@@ -396,12 +421,14 @@ fn process_helm_inputs(
     // removes 50% of the computed thrust. If both engines are offline, thrust
     // is zeroed. Uses `offline_systems` set on `ShipSystemControlSources`
     // (populated by `sync_console_damage_tiers` in `SimSet::Damage`).
-    let port_offline = sources.0.offline_systems.contains(
-        &crate::system_registry::helm_engine_port_system_id(),
-    );
-    let stbd_offline = sources.0.offline_systems.contains(
-        &crate::system_registry::helm_engine_starboard_system_id(),
-    );
+    let port_offline = sources
+        .0
+        .offline_systems
+        .contains(&crate::system_registry::helm_engine_port_system_id());
+    let stbd_offline = sources
+        .0
+        .offline_systems
+        .contains(&crate::system_registry::helm_engine_starboard_system_id());
     // Fraction of engines online: 0 engines = 0.0, 1 engine = 0.5, 2 = 1.0.
     // Only scale when at least one fine engine system is known (i.e. both IDs
     // are registered in the control sources; if neither ID is present in
@@ -521,40 +548,40 @@ fn operate_helm_ai(
 
     // Snapshot world entities for avoidance (read-only pass before mutating ships).
     // Use WorldSnapshot when available (production); fall back to inline query (tests).
-    let snapshot_entities: Vec<crate::ai::AiWorldEntity> =
-        if let Some(ws) = world_snapshot.as_ref() {
-            ws.entities.clone()
-        } else {
-            // Fallback path for tests that don't register AiPlugin.
-            entity_fallback_q
-                .iter()
-                .map(|(uuid, transform, name, faction, hull, collider)| {
-                    let runtime_name = runtime_ref.and_then(|rt| {
-                        rt.name_to_uuid.iter().find_map(|(n, mapped)| {
-                            (mapped == &uuid.0).then(|| n.clone())
-                        })
-                    });
-                    let hull_fraction = hull.and_then(|h| {
-                        let max = h.0.total_max();
-                        (max > 0.0).then(|| h.0.total_current() / max)
-                    });
-                    crate::ai::AiWorldEntity {
-                        uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
-                        name: runtime_name.or_else(|| name.map(|n| n.0.clone())),
-                        position: [
-                            transform.translation.x,
-                            transform.translation.y,
-                            transform.translation.z,
-                        ],
-                        faction: faction.map(|f| f.0),
-                        hull_fraction,
-                        yaw: Some(transform.rotation.to_euler(EulerRot::YXZ).0),
-                        radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
-                        ..Default::default()
-                    }
-                })
-                .collect()
-        };
+    let snapshot_entities: Vec<crate::ai::AiWorldEntity> = if let Some(ws) = world_snapshot.as_ref()
+    {
+        ws.entities.clone()
+    } else {
+        // Fallback path for tests that don't register AiPlugin.
+        entity_fallback_q
+            .iter()
+            .map(|(uuid, transform, name, faction, hull, collider)| {
+                let runtime_name = runtime_ref.and_then(|rt| {
+                    rt.name_to_uuid
+                        .iter()
+                        .find_map(|(n, mapped)| (mapped == &uuid.0).then(|| n.clone()))
+                });
+                let hull_fraction = hull.and_then(|h| {
+                    let max = h.0.total_max();
+                    (max > 0.0).then(|| h.0.total_current() / max)
+                });
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
+                    name: runtime_name.or_else(|| name.map(|n| n.0.clone())),
+                    position: [
+                        transform.translation.x,
+                        transform.translation.y,
+                        transform.translation.z,
+                    ],
+                    faction: faction.map(|f| f.0),
+                    hull_fraction,
+                    yaw: Some(transform.rotation.to_euler(EulerRot::YXZ).0),
+                    radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+                    ..Default::default()
+                }
+            })
+            .collect()
+    };
 
     for (
         _entity,
@@ -685,7 +712,11 @@ fn detect_reached_objective_completion(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     objectives: Option<ResMut<crate::world::server::ObjectiveManagerRes>>,
     ships: Query<
-        (&ShipSystemControlSources, &ShipPhysics, &crate::server_app::ShipSystemBlackboards),
+        (
+            &ShipSystemControlSources,
+            &ShipPhysics,
+            &crate::server_app::ShipSystemBlackboards,
+        ),
         With<crate::server_app::Ship>,
     >,
 ) {
@@ -706,9 +737,7 @@ fn detect_reached_objective_completion(
             .0
             .get(&crate::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
-                bb.scored_objectives.clone()
-            }
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
             _ => continue,
         };
 
@@ -823,9 +852,7 @@ fn operate_helm_engine_ai(
     }
 }
 
-fn sync_ship_position(
-    mut ship_query: Query<(&ShipPhysics, &mut Transform)>,
-) {
+fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     for (physics, mut transform) in ship_query.iter_mut() {
         transform.translation.x = physics.x;
         transform.translation.z = physics.z;
@@ -848,7 +875,10 @@ pub fn handle_impulse_messages(
     let Some(mut impulse) = impulse_q.iter_mut().next() else {
         return;
     };
-    let hull_total = hull_q.single().map(|h| (h.0.total_current(), h.0.total_max())).unwrap_or((100.0, 100.0));
+    let hull_total = hull_q
+        .single()
+        .map(|h| (h.0.total_current(), h.0.total_max()))
+        .unwrap_or((100.0, 100.0));
     if *last_hull_hp == 0.0 && (hull_total.0 - hull_total.1).abs() < 1e-6 {
         *last_hull_hp = hull_total.1;
     }
@@ -896,7 +926,11 @@ fn tick_impulse(
 /// the feature is disabled.
 pub fn handle_boost_messages(
     mut ship_query: Query<
-        (&AdmittedCommands, Option<&BoostConfigResource>, Option<&mut ShipBoost>),
+        (
+            &AdmittedCommands,
+            Option<&BoostConfigResource>,
+            Option<&mut ShipBoost>,
+        ),
         With<LocalShip>,
     >,
     mut boost_res: ResMut<ShipBoost>,
@@ -963,7 +997,10 @@ fn tick_boost(
     time: Res<Time>,
     mut boost_res: ResMut<ShipBoost>,
     // Per-entity component takes priority; Resource is the fallback.
-    mut boost_entity_q: Query<(Option<&BoostConfigResource>, Option<&mut ShipBoost>), With<LocalShip>>,
+    mut boost_entity_q: Query<
+        (Option<&BoostConfigResource>, Option<&mut ShipBoost>),
+        With<LocalShip>,
+    >,
     boost_cfg_res: Option<Res<BoostConfigResource>>,
     last_input_q: Query<&LastHelmInput, With<LocalShip>>,
     sessions: Res<Sessions>,
@@ -991,7 +1028,11 @@ fn tick_boost(
         .console_holder(&crate::messages::Console::Helm, &ship_config.0)
         .is_some()
         || policy.operate_ai;
-    let impulse_active = impulse_q.iter().next().map(|i| i.0.is_active()).unwrap_or(false);
+    let impulse_active = impulse_q
+        .iter()
+        .next()
+        .map(|i| i.0.is_active())
+        .unwrap_or(false);
     let drain_factor = if !has_helm {
         0.0
     } else if impulse_active {
@@ -1272,9 +1313,7 @@ pub fn sync_console_damage_tiers(
     for (hull_component, mut control_sources) in ships.iter_mut() {
         let hull = &hull_component.0;
         for (console, _cur, _max) in hull.entries() {
-            let system_id = crate::messages::SystemId(
-                console.station_console_id().to_string(),
-            );
+            let system_id = crate::messages::SystemId(console.station_console_id().to_string());
             let tier = hull.tier_for(console.clone());
             match tier {
                 DamageTier::Disabled | DamageTier::Destroyed => {
@@ -1336,9 +1375,9 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntityConsoleHull(
-                crate::damage::ConsoleHull::from_config(hull_config),
-            ),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                hull_config,
+            )),
             LastHelmInput::default(),
             crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
             ShipImpulse(crate::impulse::ImpulseState::new()),
@@ -1446,9 +1485,7 @@ mod tests {
     }
 
     fn get_ship_physics(app: &mut App) -> ShipPhysics {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&ShipPhysics, With<Ship>>();
+        let mut q = app.world_mut().query_filtered::<&ShipPhysics, With<Ship>>();
         q.single(app.world())
             .expect("expected Ship entity with ShipPhysics")
             .clone()
@@ -1458,7 +1495,9 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&mut ShipPhysics, With<Ship>>();
-        let mut p = q.single_mut(app.world_mut()).expect("expected Ship with ShipPhysics");
+        let mut p = q
+            .single_mut(app.world_mut())
+            .expect("expected Ship with ShipPhysics");
         *p = physics;
     }
 
@@ -1571,10 +1610,7 @@ mod tests {
 
         // Human input must be ignored when policy is AI; no AiControllerComponent
         // on the player ship yet, so LastHelmInput stays at default.
-        assert_eq!(
-            get_last_helm_input(&mut app),
-            LastHelmInput::default()
-        );
+        assert_eq!(get_last_helm_input(&mut app), LastHelmInput::default());
     }
 
     #[test]
@@ -1584,10 +1620,7 @@ mod tests {
 
         tick(&mut app);
 
-        assert_eq!(
-            get_last_helm_input(&mut app),
-            LastHelmInput::default()
-        );
+        assert_eq!(get_last_helm_input(&mut app), LastHelmInput::default());
         assert_eq!(get_ship_physics(&mut app).forward_speed, 0.0);
     }
 
@@ -1695,10 +1728,7 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(
-            get_ship_impulse(&mut app).phase,
-            ImpulsePhase::Charging,
-        );
+        assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Charging,);
     }
 
     #[test]
@@ -1716,10 +1746,7 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(
-            get_ship_impulse(&mut app).phase,
-            ImpulsePhase::Charging,
-        );
+        assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Charging,);
     }
 
     #[test]
@@ -1746,10 +1773,7 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(
-            get_ship_impulse(&mut app).phase,
-            ImpulsePhase::Idle,
-        );
+        assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Idle,);
     }
 
     #[test]
@@ -1776,10 +1800,7 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(
-            get_ship_impulse(&mut app).phase,
-            ImpulsePhase::Idle,
-        );
+        assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Idle,);
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ BlocksImpulse region gating tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -2136,7 +2157,13 @@ mod tests {
             boost.0.toggle();
         }
         {
-            set_last_helm_input(&mut app, LastHelmInput { thrust: 1.0, steering: 1.0 });
+            set_last_helm_input(
+                &mut app,
+                LastHelmInput {
+                    thrust: 1.0,
+                    steering: 1.0,
+                },
+            );
         }
 
         tick(&mut app);
@@ -2666,10 +2693,7 @@ station = "helm"
         let mut app = test_app();
         // Place anchor 100 units ahead (positive X) — ship starts at origin.
         let anchor = "station-alpha";
-        set_ship_blackboard_objectives(
-            &mut app,
-            vec![reach_scored_objective(anchor, 10.0)],
-        );
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
         set_helm_control_source(&mut app, ControlSource::Ai);
 
@@ -2686,10 +2710,7 @@ station = "helm"
     fn player_ship_helm_ai_patrols_from_viewscreen_objective() {
         let mut app = test_app();
         let anchor = "starbase_patrol_east";
-        set_ship_blackboard_objectives(
-            &mut app,
-            vec![patrol_scored_objective(vec![anchor], 20.0)],
-        );
+        set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec![anchor], 20.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
         set_helm_control_source(&mut app, ControlSource::Ai);
 
@@ -2714,10 +2735,7 @@ station = "helm"
         let mut runtime = crate::world::server::WorldContentRuntime::default();
         runtime.name_to_uuid.insert("wave_1".into(), target_uuid);
         app.insert_resource(runtime);
-        set_ship_blackboard_objectives(
-            &mut app,
-            vec![destroy_scored_objective("wave_1", 80.0)],
-        );
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
         set_helm_control_source(&mut app, ControlSource::Ai);
 
         tick(&mut app);
@@ -2733,10 +2751,7 @@ station = "helm"
     fn player_ship_helm_ai_does_nothing_when_helm_human() {
         let mut app = test_app();
         let anchor = "station-alpha";
-        set_ship_blackboard_objectives(
-            &mut app,
-            vec![reach_scored_objective(anchor, 10.0)],
-        );
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
         // helm stays Human (default)
 
@@ -3014,14 +3029,12 @@ station = "helm"
     fn npc_helm_finds_hostile_via_faction_registry() {
         use crate::faction::{FactionConfig, FactionRegistry};
         use crate::messages::{
-            AiDirective, ObjectiveSource, ObjectiveSnapshot, ObjectiveStatus, ScoredObjective,
+            AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
             SystemAffinity,
         };
 
-        let fed_uuid =
-            uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
-        let harrow_uuid =
-            uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap();
+        let fed_uuid = uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
+        let harrow_uuid = uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap();
         let target_uuid = uuid::Uuid::new_v4();
 
         // Registry: Harrow lists Federation as an enemy (matches combat_test.toml
@@ -3044,7 +3057,9 @@ station = "helm"
         let scored_pool = vec![ScoredObjective {
             id: "destroy-hostiles".into(),
             score: 35.0,
-            directive: AiDirective::Destroy { target: String::new() },
+            directive: AiDirective::Destroy {
+                target: String::new(),
+            },
             source: ObjectiveSource::Doctrine,
             relevance: vec![SystemAffinity::Helm, SystemAffinity::Weapons],
             snapshot: ObjectiveSnapshot {
@@ -3118,8 +3133,12 @@ station = "helm"
         let mut q = app
             .world_mut()
             .query_filtered::<&ShipSystemControlSources, With<Ship>>();
-        let sources = q.single(app.world()).expect("Ship with ShipSystemControlSources");
-        sources.0.policy_for(&crate::messages::SystemId(system_id.into()))
+        let sources = q
+            .single(app.world())
+            .expect("Ship with ShipSystemControlSources");
+        sources
+            .0
+            .policy_for(&crate::messages::SystemId(system_id.into()))
     }
 
     fn set_console_hp(app: &mut App, console: crate::messages::Console, hp: f32) {
@@ -3150,10 +3169,7 @@ station = "helm"
             !policy.accept_human_input,
             "Disabled console must not accept human input"
         );
-        assert!(
-            !policy.operate_ai,
-            "Disabled console must not operate AI"
-        );
+        assert!(!policy.operate_ai, "Disabled console must not operate AI");
     }
 
     #[test]
@@ -3168,10 +3184,7 @@ station = "helm"
             !policy.accept_human_input,
             "Destroyed console must not accept human input"
         );
-        assert!(
-            !policy.operate_ai,
-            "Destroyed console must not operate AI"
-        );
+        assert!(!policy.operate_ai, "Destroyed console must not operate AI");
     }
 
     #[test]
@@ -3229,7 +3242,13 @@ station = "helm"
 
         // Set a non-zero last input so that if process_helm_inputs incorrectly
         // runs compute_physics it will produce a non-trivial displacement.
-        set_last_helm_input(&mut app, LastHelmInput { thrust: 1.0, steering: 0.0 });
+        set_last_helm_input(
+            &mut app,
+            LastHelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+            },
+        );
 
         // Snapshot physics before the tick.
         let before = get_ship_physics(&mut app);
@@ -3288,9 +3307,9 @@ station = "helm"
             crate::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntityConsoleHull(
-                crate::damage::ConsoleHull::from_config(hull_config),
-            ),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                hull_config,
+            )),
             LastHelmInput::default(),
             crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
             ShipImpulse(crate::impulse::ImpulseState::new()),
@@ -3334,12 +3353,8 @@ station = "helm"
         let port_id = crate::system_registry::helm_engine_port_system_id();
         let stbd_id = crate::system_registry::helm_engine_starboard_system_id();
 
-        let port_msgs: Vec<_> = queue
-            .for_target(port_id.0.as_str())
-            .collect();
-        let stbd_msgs: Vec<_> = queue
-            .for_target(stbd_id.0.as_str())
-            .collect();
+        let port_msgs: Vec<_> = queue.for_target(port_id.0.as_str()).collect();
+        let stbd_msgs: Vec<_> = queue.for_target(stbd_id.0.as_str()).collect();
 
         // `publish_joystick_to_engines` and `operate_helm_engine_ai` may both push.
         // At least one message must arrive for each engine.
@@ -3353,9 +3368,7 @@ station = "helm"
         );
 
         // The first message should carry the joystick values.
-        let InterSystemPayload::JoystickState { thrust, steering } =
-            &port_msgs[0].payload
-        else {
+        let InterSystemPayload::JoystickState { thrust, steering } = &port_msgs[0].payload else {
             panic!("expected JoystickState payload for port engine");
         };
         assert!(
@@ -3413,8 +3426,16 @@ station = "helm"
 
         // ── Both engines online ────────────────────────────────────────────
         let mut app_both = make_app();
-        set_last_helm_input(&mut app_both, LastHelmInput { thrust: 1.0, steering: 0.0 });
-        for _ in 0..TICKS { tick(&mut app_both); }
+        set_last_helm_input(
+            &mut app_both,
+            LastHelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+            },
+        );
+        for _ in 0..TICKS {
+            tick(&mut app_both);
+        }
         let speed_both = app_both
             .world_mut()
             .query_filtered::<&ShipPhysics, With<LocalShip>>()
@@ -3428,8 +3449,16 @@ station = "helm"
         let mut app_one = make_app();
         set_console_hp_direct(&mut app_one, crate::messages::Console::HelmEnginePort, 0.0);
         tick(&mut app_one); // let Damage tier propagate
-        set_last_helm_input(&mut app_one, LastHelmInput { thrust: 1.0, steering: 0.0 });
-        for _ in 0..TICKS { tick(&mut app_one); }
+        set_last_helm_input(
+            &mut app_one,
+            LastHelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+            },
+        );
+        for _ in 0..TICKS {
+            tick(&mut app_one);
+        }
         let speed_one = app_one
             .world_mut()
             .query_filtered::<&ShipPhysics, With<LocalShip>>()
@@ -3445,4 +3474,3 @@ station = "helm"
         );
     }
 }
-

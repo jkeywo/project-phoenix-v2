@@ -485,10 +485,18 @@ fn recompute_hud_state(
     let Some(phase) = phase else { return };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
     let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
-    let (hull_current, hull_max) = hull_q.single()
+    let (hull_current, hull_max) = hull_q
+        .single()
         .map(|h| (h.0.total_current(), h.0.total_max()))
         .unwrap_or((100.0, 100.0));
-    let next = compute_hud_state(red_alert, &physics, hull_current, hull_max, phase.get(), game_over_reason.as_deref());
+    let next = compute_hud_state(
+        red_alert,
+        &physics,
+        hull_current,
+        hull_max,
+        phase.get(),
+        game_over_reason.as_deref(),
+    );
     for mut hud in hud_q.iter_mut() {
         if hud.0 != next {
             hud.0 = next.clone();
@@ -507,7 +515,8 @@ fn push_game_over_hud_state(
 ) {
     let physics = physics_q.single().ok().copied().unwrap_or_default();
     let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
-    let (hull_current, hull_max) = hull_q.single()
+    let (hull_current, hull_max) = hull_q
+        .single()
         .map(|h| (h.0.total_current(), h.0.total_max()))
         .unwrap_or((100.0, 100.0));
     let next = compute_hud_state(
@@ -580,7 +589,14 @@ mod tests {
         use crate::server_app::GameOverReason;
         let physics = ShipPhysics::default();
         let reason = GameOverReason(Some("All consoles destroyed".into()));
-        let state = compute_hud_state(false, &physics, 0.0, 100.0, &GamePhase::GameOver, Some(&reason));
+        let state = compute_hud_state(
+            false,
+            &physics,
+            0.0,
+            100.0,
+            &GamePhase::GameOver,
+            Some(&reason),
+        );
         assert_eq!(state.game_over_message.as_deref(), Some("Ship Destroyed"));
     }
 
@@ -589,7 +605,14 @@ mod tests {
         use crate::server_app::GameOverReason;
         let physics = ShipPhysics::default();
         let reason = GameOverReason(Some("VICTORY: All enemies eliminated.".into()));
-        let state = compute_hud_state(false, &physics, 50.0, 100.0, &GamePhase::GameOver, Some(&reason));
+        let state = compute_hud_state(
+            false,
+            &physics,
+            50.0,
+            100.0,
+            &GamePhase::GameOver,
+            Some(&reason),
+        );
         assert_eq!(
             state.game_over_message.as_deref(),
             Some("VICTORY: All enemies eliminated.")

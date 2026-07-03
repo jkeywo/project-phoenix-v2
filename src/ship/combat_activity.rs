@@ -85,7 +85,10 @@ mod tests {
     }
 
     fn activity_for(app: &mut App, ship: Entity) -> RecentCombatActivity {
-        app.world().get::<RecentCombatActivity>(ship).unwrap().clone()
+        app.world()
+            .get::<RecentCombatActivity>(ship)
+            .unwrap()
+            .clone()
     }
 
     fn test_hull(current_damage: f32) -> ConsoleHull {
@@ -127,12 +130,7 @@ mod tests {
         app.update();
 
         assert_eq!(activity_for(&mut app, ship).last_weapon_fired, Some(0.0));
-        assert!(
-            !app.world()
-                .get::<WeaponFiredThisTick>(ship)
-                .unwrap()
-                .0
-        );
+        assert!(!app.world().get::<WeaponFiredThisTick>(ship).unwrap().0);
     }
 
     #[test]
@@ -150,11 +148,6 @@ mod tests {
             activity_for(&mut app, ship).last_hostile_fire_taken,
             Some(0.0)
         );
-        assert!(
-            !app.world()
-                .get::<ShipAttackedThisTick>(ship)
-                .unwrap()
-                .0
-        );
+        assert!(!app.world().get::<ShipAttackedThisTick>(ship).unwrap().0);
     }
 }

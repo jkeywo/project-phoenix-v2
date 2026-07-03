@@ -11,8 +11,7 @@ use crate::messages::GamePhase;
 use crate::model_rig::ModelMarkers;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{
-    ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig,
-    TorpedoSystemResource,
+    ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, TorpedoSystemResource,
 };
 use crate::weapons_plugin::PhaserCombatConfigResource;
 
@@ -200,15 +199,8 @@ fn sync_phaser_beams(
         .ok()
         .and_then(|(_, _, uuid)| uuid.map(|u| u.0.clone()));
 
-    for (
-        src_t,
-        src_markers,
-        beam,
-        src_uuid_opt,
-        render_cfg_opt,
-        combat_cfg_opt,
-        is_local,
-    ) in beam_ships_q.iter()
+    for (src_t, src_markers, beam, src_uuid_opt, render_cfg_opt, combat_cfg_opt, is_local) in
+        beam_ships_q.iter()
     {
         let Some(target_uuid) = beam.target_uuid.clone() else {
             continue;
@@ -230,9 +222,11 @@ fn sync_phaser_beams(
         // Per-entity component paths (preferred). Fall back to the global
         // Resource so pre-PR-5 test paths still render.
         let render_cfg: &PhaserRenderConfig = render_cfg_opt.unwrap_or(&render_cfg_res);
-        let combat_cfg: &PhaserCombatConfigResource =
-            combat_cfg_opt.unwrap_or(&combat_cfg_res);
-        let bank_cfg = beam.bank.as_deref().and_then(|id| combat_cfg.0.bank_by_id(id));
+        let combat_cfg: &PhaserCombatConfigResource = combat_cfg_opt.unwrap_or(&combat_cfg_res);
+        let bank_cfg = beam
+            .bank
+            .as_deref()
+            .and_then(|id| combat_cfg.0.bank_by_id(id));
 
         let target_point_index = choose_target_point_index(
             &key,

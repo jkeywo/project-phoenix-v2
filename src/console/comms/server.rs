@@ -27,7 +27,10 @@ fn publish_comms_blackboard(
     inbox: Option<Res<CommsInboxRes>>,
     runtime: Option<Res<WorldContentRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
-    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
+    mut ship_bbs_q: Query<
+        &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let mut messages = inbox.as_ref().map(|r| r.0.messages()).unwrap_or_default();
 
@@ -102,16 +105,18 @@ mod tests {
             .insert_resource(WorldContentRuntime::default())
             .add_systems(Update, publish_comms_blackboard);
         // Spawn a LocalShip entity so the query in publish_comms_blackboard resolves.
-        app.world_mut().spawn((
-            LocalShip,
-            ShipSystemBlackboards::default(),
-        ));
+        app.world_mut()
+            .spawn((LocalShip, ShipSystemBlackboards::default()));
         app
     }
 
     fn comms_bb(app: &mut App) -> CommsBlackboard {
-        let mut q = app.world_mut().query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-        let bbs = q.single(app.world()).expect("no LocalShip with ShipSystemBlackboards");
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let bbs = q
+            .single(app.world())
+            .expect("no LocalShip with ShipSystemBlackboards");
         let key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
         let SystemBlackboard::Comms(bb) =
             bbs.0.get(&key).expect("comms blackboard missing").clone()
@@ -142,15 +147,15 @@ mod tests {
         use crate::ship_plugin::ShipSystemControlSources;
 
         let mut ai_resolver = ControlSourceResolver::new();
-        ai_resolver.set(
-            crate::system_registry::comms_system_id(),
-            ControlSource::Ai,
-        );
+        ai_resolver.set(crate::system_registry::comms_system_id(), ControlSource::Ai);
         let ai_sources = ShipSystemControlSources(ai_resolver);
         let ai_policy = ai_sources
             .0
             .policy_for(&crate::system_registry::comms_system_id());
-        assert!(ai_policy.operate_ai, "AI Comms must gate through operate_ai");
+        assert!(
+            ai_policy.operate_ai,
+            "AI Comms must gate through operate_ai"
+        );
 
         let mut human_resolver = ControlSourceResolver::new();
         human_resolver.set(
@@ -161,10 +166,7 @@ mod tests {
         let human_policy = human_sources
             .0
             .policy_for(&crate::system_registry::comms_system_id());
-        assert!(
-            !human_policy.operate_ai,
-            "Human Comms must not operate AI"
-        );
+        assert!(!human_policy.operate_ai, "Human Comms must not operate AI");
     }
 }
 

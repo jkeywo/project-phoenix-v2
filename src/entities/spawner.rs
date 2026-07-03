@@ -104,7 +104,6 @@ pub struct EntityTarget(pub crate::entity_target::TargetSection);
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
-
 // â”€â”€ Spawner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Spawn an entity from a resolved EntityConfig.
@@ -223,12 +222,7 @@ pub fn spawn_entity(
             x: position.x,
             z: position.z,
             yaw: {
-                let rot = bevy::math::Quat::from_euler(
-                    bevy::math::EulerRot::YXZ,
-                    0.0,
-                    0.0,
-                    0.0,
-                );
+                let rot = bevy::math::Quat::from_euler(bevy::math::EulerRot::YXZ, 0.0, 0.0, 0.0);
                 let _ = rot;
                 0.0 // initial yaw; updated each tick by operate_helm_ai
             },
@@ -268,9 +262,9 @@ pub fn spawn_entity(
         // `CoordinationEnqueue.source_entity`.
         entity_commands.insert(crate::ship::shields::ShieldsCoordinationState::default());
         entity_commands.insert(crate::ship::sensors::SensorsFrequencyState::default());
-        entity_commands.insert(
-            crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
-        );
+        entity_commands.insert(crate::power_plugin::ShipPowerSystem(
+            crate::modifiers::power_system::PowerSystem::default(),
+        ));
         // Per-entity power config (PRD #597 gap-4 closure). NPCs without a
         // `[power]` TOML block get `PowerConfigResource::default()` /
         // `PowerAiConfigResource::default()` so `translate_power_modifiers`,
@@ -398,7 +392,9 @@ pub fn spawn_entity(
         entity_commands.insert(WeaponsConsoleSection(wc.clone()));
         // PhaserCombatConfig is built directly from the [[weapons_console.phaser_banks]] list.
         let combat_config = crate::entity_config::PhaserCombatConfig::from_weapons_console(wc);
-        entity_commands.insert(crate::weapons_plugin::PhaserCombatConfigResource(combat_config));
+        entity_commands.insert(crate::weapons_plugin::PhaserCombatConfigResource(
+            combat_config,
+        ));
         // PhaserRenderConfig: take the first bank's beam_color if any, else default.
         let render_config = if let Some(first_bank) = wc.phaser_banks.first() {
             crate::weapons_plugin::PhaserRenderConfig {
@@ -511,18 +507,24 @@ pub fn spawn_entity(
     if let Some(hull) = &config.hull {
         let console_hull = if !hull.console_hull.is_empty() {
             // Explicit per-console entries (player ship path).
-            let entries: Vec<(crate::messages::Console, f32, crate::damage::ConsoleTierConfig)> = hull
+            let entries: Vec<(
+                crate::messages::Console,
+                f32,
+                crate::damage::ConsoleTierConfig,
+            )> = hull
                 .console_hull
                 .iter()
-                .map(|e| (
-                    e.console.clone(),
-                    e.max_hp,
-                    crate::damage::ConsoleTierConfig {
-                        damaged_threshold_pct: e.damaged_threshold_pct,
-                        disabled_threshold_pct: e.disabled_threshold_pct,
-                        debuff_magnitude: e.debuff_magnitude,
-                    },
-                ))
+                .map(|e| {
+                    (
+                        e.console.clone(),
+                        e.max_hp,
+                        crate::damage::ConsoleTierConfig {
+                            damaged_threshold_pct: e.damaged_threshold_pct,
+                            disabled_threshold_pct: e.disabled_threshold_pct,
+                            debuff_magnitude: e.debuff_magnitude,
+                        },
+                    )
+                })
                 .collect();
             crate::damage::ConsoleHull::from_config_with_tiers(&entries)
         } else if hull.hull_integrity > 0.0 {
@@ -547,7 +549,6 @@ pub fn spawn_entity(
 mod tests {
     use super::*;
     use crate::entity_config::*;
-
 
     /// Helper: build a minimal Bevy app for spawning tests.
     fn test_app() -> App {
@@ -1262,7 +1263,9 @@ hull_integrity = 60.0
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         assert!(
-            app.world().get::<crate::ship::shields::ShipShields>(spawned).is_none(),
+            app.world()
+                .get::<crate::ship::shields::ShipShields>(spawned)
+                .is_none(),
             "entity without [shields_console] block must not have ShipShields"
         );
     }
@@ -1433,7 +1436,10 @@ kind = "tactical"
 ai_only = true
 "#;
         let config = EntityConfig::from_toml(toml).expect("toml must parse");
-        assert!(config.ship_config.is_some(), "EntityConfig.ship_config must be populated from [[system]] blocks");
+        assert!(
+            config.ship_config.is_some(),
+            "EntityConfig.ship_config must be populated from [[system]] blocks"
+        );
         let sc = config.ship_config.as_ref().unwrap();
         assert_eq!(sc.systems.len(), 2, "expected two systems (helm, tactical)");
         assert_eq!(sc.stations.len(), 0, "NPCs have no stations");
@@ -1454,10 +1460,16 @@ ai_only = true
             .world()
             .get::<crate::ship_plugin::ShipConfigComponent>(entity)
             .expect("NPC ship must have ShipConfigComponent");
-        assert_eq!(comp.0.systems.len(), 2, "spawned NPC entity carries its two declared systems");
+        assert_eq!(
+            comp.0.systems.len(),
+            2,
+            "spawned NPC entity carries its two declared systems"
+        );
         let system_ids: Vec<&str> = comp.0.systems.iter().map(|s| s.id.0.as_str()).collect();
         assert!(system_ids.contains(&"helm"), "helm system must be present");
-        assert!(system_ids.contains(&"tactical"), "tactical system must be present");
+        assert!(
+            system_ids.contains(&"tactical"),
+            "tactical system must be present"
+        );
     }
 }
-

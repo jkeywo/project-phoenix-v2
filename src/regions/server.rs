@@ -384,7 +384,7 @@ mod tests {
     use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
     use crate::region_shape::RegionShape;
     use crate::ship_physics::ShipPhysicsConfig;
-    use crate::simulation::{ShipImpulse};
+    use crate::simulation::ShipImpulse;
 
     /// Build a minimal Bevy app with the region plugin.
     fn test_app() -> App {
@@ -393,8 +393,12 @@ mod tests {
             .add_plugins(RegionPlugin)
             .insert_resource(ShipModifiers::new());
         // Spawn the ship entity with ShipPhysics so region systems can query it.
-        app.world_mut()
-            .spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
+        app.world_mut().spawn((
+            LocalShip,
+            crate::simulation::Ship,
+            Transform::default(),
+            crate::ship_state::ShipPhysics::default(),
+        ));
         app
     }
 
@@ -453,7 +457,9 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&mut crate::ship_state::ShipPhysics, With<LocalShip>>();
-        let mut physics = q.single_mut(app.world_mut()).expect("expected LocalShip with ShipPhysics");
+        let mut physics = q
+            .single_mut(app.world_mut())
+            .expect("expected LocalShip with ShipPhysics");
         physics.x = x;
         physics.z = z;
     }
@@ -790,11 +796,17 @@ mod tests {
         // Override shields with custom config via entity component
         use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        let ship = app.world_mut().query_filtered::<Entity, With<LocalShip>>().single(&app.world()).unwrap();
-        app.world_mut().entity_mut(ship).insert(ShipShields(ShieldSystem::new(&ShieldConfig {
-            max_hp: 100,
-            ..Default::default()
-        })));
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(&app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
+                max_hp: 100,
+                ..Default::default()
+            })));
 
         spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 50.0);
         tick_with_dt(&mut app, 0.1);
@@ -819,11 +831,17 @@ mod tests {
         let mut app = damage_test_app();
         use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        let ship = app.world_mut().query_filtered::<Entity, With<LocalShip>>().single(&app.world()).unwrap();
-        app.world_mut().entity_mut(ship).insert(ShipShields(ShieldSystem::new(&ShieldConfig {
-            max_hp: 1000,
-            ..Default::default()
-        })));
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(&app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
+                max_hp: 1000,
+                ..Default::default()
+            })));
 
         // 100 dps for 1s = 100 damage. shield_pierce = 0.3 →
         // pierced = 30 (to hull), absorbed = 70 (to fore shield).
@@ -852,11 +870,17 @@ mod tests {
         let mut app = damage_test_app();
         use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        let ship = app.world_mut().query_filtered::<Entity, With<LocalShip>>().single(&app.world()).unwrap();
-        app.world_mut().entity_mut(ship).insert(ShipShields(ShieldSystem::new(&ShieldConfig {
-            max_hp: 1000,
-            ..Default::default()
-        })));
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(&app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
+                max_hp: 1000,
+                ..Default::default()
+            })));
 
         // shield_pierce = 0.0: all damage absorbed by fore shield, hull untouched.
         spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 50.0, 0.0);
@@ -1101,7 +1125,12 @@ mod tests {
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default());
-        app.world_mut().spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
+        app.world_mut().spawn((
+            LocalShip,
+            crate::simulation::Ship,
+            Transform::default(),
+            crate::ship_state::ShipPhysics::default(),
+        ));
         app
     }
 
@@ -1237,7 +1266,12 @@ mod tests {
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default());
-        app.world_mut().spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
+        app.world_mut().spawn((
+            LocalShip,
+            crate::simulation::Ship,
+            Transform::default(),
+            crate::ship_state::ShipPhysics::default(),
+        ));
         app
     }
 
@@ -1353,14 +1387,18 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&crate::ship_state::ShipPhysics, With<LocalShip>>();
-        q.single(app.world()).expect("expected LocalShip with ShipPhysics").clone()
+        q.single(app.world())
+            .expect("expected LocalShip with ShipPhysics")
+            .clone()
     }
 
     fn set_physics(app: &mut App, f: impl FnOnce(&mut crate::ship_state::ShipPhysics)) {
         let mut q = app
             .world_mut()
             .query_filtered::<&mut crate::ship_state::ShipPhysics, With<LocalShip>>();
-        let mut p = q.single_mut(app.world_mut()).expect("expected LocalShip with ShipPhysics");
+        let mut p = q
+            .single_mut(app.world_mut())
+            .expect("expected LocalShip with ShipPhysics");
         f(&mut p);
     }
 
@@ -1371,7 +1409,10 @@ mod tests {
         spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
         // Set ship speed above the clamped limit
-        set_physics(&mut app, |p| { p.forward_speed = 50.0; p.x = 10.0; });
+        set_physics(&mut app, |p| {
+            p.forward_speed = 50.0;
+            p.x = 10.0;
+        });
 
         tick_with_dt(&mut app, 0.016);
 
@@ -1392,7 +1433,10 @@ mod tests {
         let mut app = slow_zone_test_app();
         spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
-        set_physics(&mut app, |p| { p.forward_speed = 5.0; p.x = 10.0; });
+        set_physics(&mut app, |p| {
+            p.forward_speed = 5.0;
+            p.x = 10.0;
+        });
 
         tick_with_dt(&mut app, 0.016);
 
@@ -1429,7 +1473,10 @@ mod tests {
         let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
         // Start with 50 speed, enter → clamped to ~16.667
-        set_physics(&mut app, |p| { p.forward_speed = 50.0; p.x = 10.0; });
+        set_physics(&mut app, |p| {
+            p.forward_speed = 50.0;
+            p.x = 10.0;
+        });
 
         tick_with_dt(&mut app, 0.016);
 
@@ -1465,14 +1512,20 @@ mod tests {
         let mut app = slow_zone_test_app();
 
         // Give the LocalShip high speed and place it inside the upcoming slow zone.
-        set_physics(&mut app, |p| { p.forward_speed = 50.0; p.x = 10.0; });
+        set_physics(&mut app, |p| {
+            p.forward_speed = 50.0;
+            p.x = 10.0;
+        });
 
         // Spawn a second NPC ship (now has Ship marker). Before the fix this made
         // single_mut() return Err and the player would not be clamped.
         app.world_mut().spawn((
             crate::simulation::Ship,
             Transform::from_xyz(200.0, 0.0, 0.0), // outside the zone
-            ShipPhysics { forward_speed: 50.0, ..Default::default() },
+            ShipPhysics {
+                forward_speed: 50.0,
+                ..Default::default()
+            },
         ));
 
         // Spawn slow zone around origin — the LocalShip is inside.
@@ -1534,7 +1587,8 @@ mod tests {
             .get::<ShipPhysics>(npc)
             .expect("NPC must retain ShipPhysics")
             .forward_speed;
-        let expected_clamped = crate::ship_physics::ShipPhysicsConfig::new().max_speed * (1.0 / 1.5);
+        let expected_clamped =
+            crate::ship_physics::ShipPhysicsConfig::new().max_speed * (1.0 / 1.5);
         assert!(
             (npc_speed - expected_clamped).abs() < 0.5,
             "NPC entering slow zone must be clamped to ~{}, got {}",
@@ -1551,7 +1605,6 @@ mod tests {
         );
     }
 
-
     // Ã¢â€â‚¬Ã¢â€â‚¬ Flag effect tests (CommsJam / SensorBlind) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     use crate::flag_kind::FlagKind;
@@ -1562,7 +1615,12 @@ mod tests {
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default());
-        app.world_mut().spawn((LocalShip, crate::simulation::Ship, Transform::default(), crate::ship_state::ShipPhysics::default()));
+        app.world_mut().spawn((
+            LocalShip,
+            crate::simulation::Ship,
+            Transform::default(),
+            crate::ship_state::ShipPhysics::default(),
+        ));
         app
     }
 

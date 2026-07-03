@@ -997,11 +997,14 @@ fn handle_respond_to_message(
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut commands: Commands,
-    mut ai_query: Query<(
-        &EntityUuid,
-        Option<&mut crate::ai_plugin::ShipAiMemory>,
-        Option<&crate::entities::spawner::FactionComponent>,
-    ), With<AiControllerComponent>>,
+    mut ai_query: Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<AiControllerComponent>,
+    >,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
@@ -1720,7 +1723,10 @@ fn handle_show_on_screen(
     ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
-    mut view_mode_q: Query<&mut crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    mut view_mode_q: Query<
+        &mut crate::ship_state::ShipViewMode,
+        With<crate::simulation::LocalShip>,
+    >,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
@@ -1761,7 +1767,10 @@ fn handle_show_on_screen(
 fn handle_comms_channel2(
     mut reader: MessageReader<CommsChannel2Event>,
     mut inbox: ResMut<CommsInboxRes>,
-    ship_query: Query<&crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::LocalShip>>,
+    ship_query: Query<
+        &crate::ship_plugin::ShipSystemControlSources,
+        With<crate::simulation::LocalShip>,
+    >,
 ) {
     let policy = if let Some(control_sources) = ship_query.iter().next() {
         control_sources
@@ -1800,7 +1809,9 @@ fn auto_clear_on_screen_message(
     let current_view = view_mode_q
         .single()
         .map(|vm| vm.view_mode.clone())
-        .unwrap_or(crate::messages::ViewMode::Camera(crate::messages::ViewDirection::Fore));
+        .unwrap_or(crate::messages::ViewMode::Camera(
+            crate::messages::ViewDirection::Fore,
+        ));
     // If the captain (or anyone) has switched away from Comms view, clear.
     if !matches!(current_view, ViewMode::Comms) {
         on_screen.0 = None;
@@ -1839,7 +1850,10 @@ fn auto_clear_on_screen_message(
 /// `runtime.needs_broadcast = true` if any flag flipped vs. the prior snapshot.
 fn update_comms_range_flags(
     mut runtime: ResMut<WorldContentRuntime>,
-    ship_q: Query<(&Transform, Option<&crate::comms::CommsRange>), With<crate::simulation::LocalShip>>,
+    ship_q: Query<
+        (&Transform, Option<&crate::comms::CommsRange>),
+        With<crate::simulation::LocalShip>,
+    >,
     entity_q: Query<(
         &crate::entities::spawner::EntityUuid,
         &Transform,
@@ -2026,11 +2040,14 @@ fn handle_ai_events(
     mut commands: Commands,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
-    mut ai_query: Query<(
-        &EntityUuid,
-        Option<&mut crate::ai_plugin::ShipAiMemory>,
-        Option<&crate::entities::spawner::FactionComponent>,
-    ), With<AiControllerComponent>>,
+    mut ai_query: Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<AiControllerComponent>,
+    >,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
@@ -2942,16 +2959,21 @@ pub struct FactionDispatchParams<'w, 's> {
 /// faction (factionless entities like the starbase or an asteroid) are
 /// left untouched.
 fn revalidate_ai_targets_after_faction_change(
-    ai_query: &mut Query<(
-        &EntityUuid,
-        Option<&mut crate::ai_plugin::ShipAiMemory>,
-        Option<&crate::entities::spawner::FactionComponent>,
-    ), With<AiControllerComponent>>,
+    ai_query: &mut Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<AiControllerComponent>,
+    >,
     registry: &crate::faction::FactionRegistry,
     uuid_to_faction: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
 ) {
     for (_uid, ai_mem_opt, self_faction_comp) in ai_query.iter_mut() {
-        let Some(mut ai_mem) = ai_mem_opt else { continue; };
+        let Some(mut ai_mem) = ai_mem_opt else {
+            continue;
+        };
         let Some(target_uuid) = ai_mem.0.target else {
             continue;
         };
@@ -4475,7 +4497,12 @@ mod tests {
             .add_message::<CommsChannel2Event>()
             .add_systems(
                 Update,
-                (tick_pending_follow_ups, handle_ai_events, handle_comms_channel2).chain(),
+                (
+                    tick_pending_follow_ups,
+                    handle_ai_events,
+                    handle_comms_channel2,
+                )
+                    .chain(),
             );
         // Set phase to InProgress
         app.world_mut()
@@ -7029,7 +7056,12 @@ entity = "layer_npc"
         // then move the station far away to verify the flag flips.
         let ship_entity = app
             .world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)))
+            .spawn((
+                Ship,
+                crate::simulation::LocalShip,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                CommsRange(100.0),
+            ))
             .id();
         let station_entity = app
             .world_mut()
@@ -7099,8 +7131,12 @@ entity = "layer_npc"
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 
-        app.world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
@@ -7162,8 +7198,12 @@ entity = "layer_npc"
 
         // Spawn the ship so range tracking activates, but DO NOT spawn an
         // entity with `bogus_uuid` + CommsRange.
-        app.world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
 
         let out = tick(&mut app);
         let contacts = out
@@ -7196,8 +7236,12 @@ entity = "layer_npc"
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 
-        app.world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)));
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(100.0),
+        ));
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
             Transform::from_xyz(5000.0, 0.0, 0.0),
@@ -7243,8 +7287,12 @@ entity = "layer_npc"
         setup_game_with_comms(&mut app, station_uuid);
 
         // Start in range, hail, then move ship far away and respond.
-        app.world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
         let station_entity = app
             .world_mut()
             .spawn((
@@ -7322,8 +7370,12 @@ entity = "layer_npc"
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 
-        app.world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)));
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(1000.0),
+        ));
         let station_entity = app
             .world_mut()
             .spawn((
@@ -7391,8 +7443,12 @@ entity = "layer_npc"
             });
         }
 
-        app.world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
         app.world_mut().spawn((
             EntityUuid(near_uuid.into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
@@ -7442,7 +7498,12 @@ entity = "layer_npc"
 
         let ship_entity = app
             .world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)))
+            .spawn((
+                Ship,
+                crate::simulation::LocalShip,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                CommsRange(500.0),
+            ))
             .id();
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
@@ -7486,7 +7547,12 @@ entity = "layer_npc"
 
         let ship_entity = app
             .world_mut()
-            .spawn((Ship, crate::simulation::LocalShip, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)))
+            .spawn((
+                Ship,
+                crate::simulation::LocalShip,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                CommsRange(1000.0),
+            ))
             .id();
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
@@ -10386,7 +10452,11 @@ size_max = 2.0
                 crate::system_registry::comms_system_id(),
                 crate::control_source::ControlSource::Ai,
             );
-            app.world_mut().spawn((crate::simulation::Ship, crate::simulation::LocalShip, sources));
+            app.world_mut().spawn((
+                crate::simulation::Ship,
+                crate::simulation::LocalShip,
+                sources,
+            ));
         }
 
         // Install a template with a response, fired on WorldLoaded.

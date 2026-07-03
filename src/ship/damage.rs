@@ -140,7 +140,10 @@ impl ConsoleHull {
                 .iter()
                 .map(|(c, max)| (c.clone(), *max, *max))
                 .collect(),
-            tier_configs: config.iter().map(|_| ConsoleTierConfig::default()).collect(),
+            tier_configs: config
+                .iter()
+                .map(|_| ConsoleTierConfig::default())
+                .collect(),
         }
     }
 
@@ -681,7 +684,7 @@ mod tests {
         let mut rng = rand::rng();
         // Directly set HP to 74 by restoring after wiping.
         hull.apply_damage(100.0, &mut rng); // wipe to 0
-        hull.restore(Console::Helm, 74.0);  // 74/100 = 0.74 < 0.75 → Damaged
+        hull.restore(Console::Helm, 74.0); // 74/100 = 0.74 < 0.75 → Damaged
         assert_eq!(hull.tier_for(Console::Helm), DamageTier::Damaged);
     }
 
@@ -691,7 +694,7 @@ mod tests {
         let mut hull = ConsoleHull::from_config(&[(Console::Helm, 100.0)]);
         let mut rng = rand::rng();
         hull.apply_damage(100.0, &mut rng); // wipe to 0
-        hull.restore(Console::Helm, 24.0);  // 24/100 = 0.24 < 0.25 → Disabled
+        hull.restore(Console::Helm, 24.0); // 24/100 = 0.24 < 0.25 → Disabled
         assert_eq!(hull.tier_for(Console::Helm), DamageTier::Disabled);
     }
 

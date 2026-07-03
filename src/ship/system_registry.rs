@@ -644,25 +644,53 @@ mod tests {
     fn fine_helm_kinds_are_registered() {
         let registry = SystemKindRegistry::with_core_systems().unwrap();
 
-        assert!(registry.contains(HELM_JOYSTICK_KIND), "helm_joystick not registered");
-        assert!(registry.contains(HELM_ENGINE_KIND), "helm_engine not registered");
-        assert!(registry.contains(HELM_RADAR_KIND), "helm_radar not registered");
-        assert!(registry.contains(HELM_IMPULSE_KIND), "helm_impulse not registered");
+        assert!(
+            registry.contains(HELM_JOYSTICK_KIND),
+            "helm_joystick not registered"
+        );
+        assert!(
+            registry.contains(HELM_ENGINE_KIND),
+            "helm_engine not registered"
+        );
+        assert!(
+            registry.contains(HELM_RADAR_KIND),
+            "helm_radar not registered"
+        );
+        assert!(
+            registry.contains(HELM_IMPULSE_KIND),
+            "helm_impulse not registered"
+        );
 
         assert_eq!(
-            registry.registration(HELM_JOYSTICK_KIND).unwrap().ai_controller.name(),
+            registry
+                .registration(HELM_JOYSTICK_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
             HELM_JOYSTICK_AI_CONTROLLER
         );
         assert_eq!(
-            registry.registration(HELM_ENGINE_KIND).unwrap().ai_controller.name(),
+            registry
+                .registration(HELM_ENGINE_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
             HELM_ENGINE_AI_CONTROLLER
         );
         assert_eq!(
-            registry.registration(HELM_RADAR_KIND).unwrap().ai_controller.name(),
+            registry
+                .registration(HELM_RADAR_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
             HELM_RADAR_AI_CONTROLLER
         );
         assert_eq!(
-            registry.registration(HELM_IMPULSE_KIND).unwrap().ai_controller.name(),
+            registry
+                .registration(HELM_IMPULSE_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
             HELM_IMPULSE_AI_CONTROLLER
         );
     }
@@ -677,8 +705,15 @@ mod tests {
             HELM_IMPULSE_SYSTEM_ID,
         ];
         for id in ids {
-            assert_eq!(id, id.to_lowercase(), "Fine helm SystemId {id:?} is not lowercase");
-            assert!(!id.contains('_'), "Fine helm SystemId {id:?} contains underscore (use hyphen)");
+            assert_eq!(
+                id,
+                id.to_lowercase(),
+                "Fine helm SystemId {id:?} is not lowercase"
+            );
+            assert!(
+                !id.contains('_'),
+                "Fine helm SystemId {id:?} contains underscore (use hyphen)"
+            );
             assert!(!id.is_empty(), "Fine helm SystemId must not be empty");
         }
         assert_eq!(HELM_JOYSTICK_SYSTEM_ID, "helm-joystick");
@@ -692,7 +727,10 @@ mod tests {
     fn fine_helm_system_id_helpers_return_expected_values() {
         assert_eq!(helm_joystick_system_id().0, HELM_JOYSTICK_SYSTEM_ID);
         assert_eq!(helm_engine_port_system_id().0, HELM_ENGINE_PORT_SYSTEM_ID);
-        assert_eq!(helm_engine_starboard_system_id().0, HELM_ENGINE_STARBOARD_SYSTEM_ID);
+        assert_eq!(
+            helm_engine_starboard_system_id().0,
+            HELM_ENGINE_STARBOARD_SYSTEM_ID
+        );
         assert_eq!(helm_radar_system_id().0, HELM_RADAR_SYSTEM_ID);
         assert_eq!(helm_impulse_system_id().0, HELM_IMPULSE_SYSTEM_ID);
     }

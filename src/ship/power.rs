@@ -165,13 +165,13 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
         |world: &mut World| {
             // Prefer per-entity component on the LocalShip; fall back to the
             // global Resource for tests that only initialise the Resource.
-            let mut q = world
-                .query_filtered::<&ShipPowerSystem, With<crate::server_app::LocalShip>>();
-            let power_snapshot = q.iter(world).next().cloned().or_else(|| {
-                world
-                    .get_resource::<ShipPowerSystem>()
-                    .cloned()
-            });
+            let mut q =
+                world.query_filtered::<&ShipPowerSystem, With<crate::server_app::LocalShip>>();
+            let power_snapshot = q
+                .iter(world)
+                .next()
+                .cloned()
+                .or_else(|| world.get_resource::<ShipPowerSystem>().cloned());
             let Some(power) = power_snapshot else {
                 return vec![];
             };
@@ -284,7 +284,12 @@ pub fn handle_power_messages(
 pub fn handle_power_inter_system(
     queue: Res<InterSystemQueue>,
     mut ship_q: Query<
-        (Entity, &mut ShipPowerSystem, Option<&PowerConfigResource>, Has<crate::server_app::LocalShip>),
+        (
+            Entity,
+            &mut ShipPowerSystem,
+            Option<&PowerConfigResource>,
+            Has<crate::server_app::LocalShip>,
+        ),
         With<crate::server_app::Ship>,
     >,
     power_res: Option<ResMut<ShipPowerSystem>>,
@@ -294,9 +299,10 @@ pub fn handle_power_inter_system(
     // Snapshot the LocalShip entity so `source_entity: None` (legacy path)
     // resolves to the player. Collect per-entity references once so we can
     // dispatch a mutable borrow per message inside the loop.
-    let local_ship_entity: Option<Entity> = ship_q
-        .iter()
-        .find_map(|(e, _, _, is_local)| if is_local { Some(e) } else { None });
+    let local_ship_entity: Option<Entity> =
+        ship_q
+            .iter()
+            .find_map(|(e, _, _, is_local)| if is_local { Some(e) } else { None });
     let mut applied_local = false;
 
     for msg in queue.for_target(crate::system_registry::POWER_SYSTEM_ID) {
@@ -304,9 +310,7 @@ pub fn handle_power_inter_system(
         match &msg.payload {
             InterSystemPayload::DrainWeaponsBattery { amount } => {
                 if let Some(target) = target_entity {
-                    if let Ok((_, mut power_comp, cfg_comp, is_local)) =
-                        ship_q.get_mut(target)
-                    {
+                    if let Ok((_, mut power_comp, cfg_comp, is_local)) = ship_q.get_mut(target) {
                         let cfg_default;
                         let config: &PowerConfigResource = match cfg_comp {
                             Some(c) => c,
@@ -428,7 +432,10 @@ pub fn operate_power_ai(
     ai_config_res: Option<Res<PowerAiConfigResource>>,
     config_res: Option<Res<PowerConfigResource>>,
     sessions: Option<Res<crate::lobby::Sessions>>,
-    ship_comp_query: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>,
+    ship_comp_query: Query<
+        &crate::ship_plugin::ShipConfigComponent,
+        With<crate::server_app::LocalShip>,
+    >,
     mut ship_power_q: Query<
         (
             Entity,
@@ -446,16 +453,15 @@ pub fn operate_power_ai(
     // Yield to any human Power console holder on the player ship. NPC ships
     // have no human console holders, so they always run the AI branch when
     // their Power system is under AI control.
-    let human_holds_player_power = if let (Some(sessions), Some(ship_config)) =
-        (&sessions, ship_comp_query.iter().next())
-    {
-        sessions
-            .0
-            .console_holder(&Console::Power, &ship_config.0)
-            .is_some()
-    } else {
-        false
-    };
+    let human_holds_player_power =
+        if let (Some(sessions), Some(ship_config)) = (&sessions, ship_comp_query.iter().next()) {
+            sessions
+                .0
+                .console_holder(&Console::Power, &ship_config.0)
+                .is_some()
+        } else {
+            false
+        };
 
     let ai_cfg_default;
     let ai_cfg_fallback: &PowerAiConfigResource = match ai_config_res.as_deref() {
@@ -555,7 +561,10 @@ fn publish_power_blackboard(
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
+    mut ship_bbs_q: Query<
+        &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     use crate::system_registry::POWER_SYSTEM_ID;
 
@@ -567,7 +576,8 @@ fn publish_power_blackboard(
         None => match power_res.as_deref() {
             Some(p) => p,
             None => {
-                power_default = ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default());
+                power_default =
+                    ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default());
                 &power_default
             }
         },
@@ -639,8 +649,8 @@ mod tests {
     use crate::power_system::SENSORS_POWER_GROUP;
     use crate::shield::ShieldSystem;
     use crate::simulation::{
-        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields,
-        ShipImpulse, ShipShields, SimOutbox,
+        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipImpulse,
+        ShipShields, SimOutbox,
     };
 
     #[derive(Resource, Default)]
@@ -958,7 +968,9 @@ mod tests {
         use crate::messages::{SystemBlackboard, SystemId};
         use crate::server_app::{LocalShip, ShipSystemBlackboards};
         use crate::system_registry::POWER_SYSTEM_ID;
-        let mut q = app.world_mut().query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
         match bbs.0.get(&SystemId(POWER_SYSTEM_ID.to_string())) {
             Some(SystemBlackboard::Power(bb)) => bb.clone(),
@@ -1066,9 +1078,10 @@ mod tests {
             .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
             .single(app.world())
             .unwrap();
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(LastHelmInput { thrust: 0.9, steering: 0.0 });
+        app.world_mut().entity_mut(ship).insert(LastHelmInput {
+            thrust: 0.9,
+            steering: 0.0,
+        });
         // battery_pct = 100/100 = 1.0 >= 0.75 floor
         app.update();
         assert_eq!(app.world().resource::<ShipPowerSystem>().0.helm, 3);
@@ -1087,7 +1100,9 @@ mod tests {
         let mut app = ai_test_app();
         {
             let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
-            if let Ok(mut ra) = q.single_mut(app.world_mut()) { ra.toggle(); }
+            if let Ok(mut ra) = q.single_mut(app.world_mut()) {
+                ra.toggle();
+            }
         }
         app.update();
         assert_eq!(app.world().resource::<ShipPowerSystem>().0.weapons, 3);
@@ -1098,7 +1113,9 @@ mod tests {
         let mut app = ai_test_app();
         {
             let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
-            if let Ok(mut ra) = q.single_mut(app.world_mut()) { ra.toggle(); }
+            if let Ok(mut ra) = q.single_mut(app.world_mut()) {
+                ra.toggle();
+            }
         }
         // Set battery low on both the resource and the component.
         app.world_mut()

@@ -39,15 +39,19 @@ fn publish_helm_blackboard(
     boost_q: Query<&ShipBoost, With<crate::simulation::LocalShip>>,
     boost_res: Option<Res<ShipBoost>>,
     boost_config_res: Option<Res<BoostConfigResource>>,
-    hull_q: Query<
-        &crate::entity_spawner::EntityConsoleHull,
-        With<crate::simulation::LocalShip>,
-    >,
+    hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::simulation::LocalShip>>,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
     queue: Res<InterSystemQueue>,
-    mut ship_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::simulation::LocalShip>>,
+    mut ship_q: Query<
+        &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::simulation::LocalShip>,
+    >,
 ) {
-    let (physics, entity_boost_cfg) = physics_q.single().ok().map(|(p, c)| (*p, c.cloned())).unwrap_or_default();
+    let (physics, entity_boost_cfg) = physics_q
+        .single()
+        .ok()
+        .map(|(p, c)| (*p, c.cloned()))
+        .unwrap_or_default();
     // Prefer per-entity Component on LocalShip; fall back to Resource for
     // legacy test paths that still insert a global ShipImpulse.
     let impulse_charge = impulse_q
@@ -87,7 +91,10 @@ fn publish_helm_blackboard(
     let hull = hull_q.single().ok();
     let engine_entries = [
         (helm_engine_port_system_id(), Console::HelmEnginePort),
-        (helm_engine_starboard_system_id(), Console::HelmEngineStarboard),
+        (
+            helm_engine_starboard_system_id(),
+            Console::HelmEngineStarboard,
+        ),
     ];
 
     if let Some(mut bbs) = ship_q.iter_mut().next() {
@@ -108,7 +115,9 @@ fn publish_helm_blackboard(
             // before SimSet::Publish). Fall back to LastHelmInput if no
             // channel-1 message targeted this engine this tick.
             let last_input_thrust = last_input.thrust;
-            let joystick_thrust = queue.0.iter()
+            let joystick_thrust = queue
+                .0
+                .iter()
                 .filter(|m| m.target == system_id)
                 .filter_map(|m| {
                     if let InterSystemPayload::JoystickState { thrust, .. } = &m.payload {
@@ -119,7 +128,11 @@ fn publish_helm_blackboard(
                 })
                 .last()
                 .unwrap_or(last_input_thrust);
-            let thrust_fraction = if is_online { joystick_thrust.abs() } else { 0.0 };
+            let thrust_fraction = if is_online {
+                joystick_thrust.abs()
+            } else {
+                0.0
+            };
             bbs.0.insert(
                 system_id,
                 SystemBlackboard::HelmEngine(HelmEngineBlackboard {
@@ -161,7 +174,12 @@ mod tests {
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
-        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).expect("expected helm entry in blackboards").clone() else {
+        let SystemBlackboard::Helm(bb) = bbs
+            .0
+            .get(&key)
+            .expect("expected helm entry in blackboards")
+            .clone()
+        else {
             panic!("expected Helm blackboard")
         };
         bb
@@ -214,7 +232,9 @@ mod tests {
             let mut q = app
                 .world_mut()
                 .query_filtered::<&mut ShipImpulse, With<crate::simulation::LocalShip>>();
-            let mut imp = q.single_mut(app.world_mut()).expect("LocalShip must have ShipImpulse");
+            let mut imp = q
+                .single_mut(app.world_mut())
+                .expect("LocalShip must have ShipImpulse");
             imp.0.charge_progress = 0.5;
         }
         app.update();
@@ -267,7 +287,10 @@ mod tests {
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
-        assert!(bbs.0.contains_key(&key), "expected helm-engine-port in blackboards");
+        assert!(
+            bbs.0.contains_key(&key),
+            "expected helm-engine-port in blackboards"
+        );
     }
 
     #[test]
@@ -280,7 +303,10 @@ mod tests {
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
-        assert!(bbs.0.contains_key(&key), "expected helm-engine-starboard in blackboards");
+        assert!(
+            bbs.0.contains_key(&key),
+            "expected helm-engine-starboard in blackboards"
+        );
     }
 
     #[test]
@@ -301,7 +327,10 @@ mod tests {
         else {
             panic!("expected HelmEngine blackboard");
         };
-        assert!(engine_bb.is_online, "engine should be online when no hull damage");
+        assert!(
+            engine_bb.is_online,
+            "engine should be online when no hull damage"
+        );
     }
 
     #[test]
@@ -316,7 +345,10 @@ mod tests {
                 .unwrap();
             app.world_mut()
                 .entity_mut(ship)
-                .insert(crate::ship_plugin::LastHelmInput { thrust: 0.8, steering: 0.0 });
+                .insert(crate::ship_plugin::LastHelmInput {
+                    thrust: 0.8,
+                    steering: 0.0,
+                });
         }
         app.update();
 

@@ -140,7 +140,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         IsDefaultUiCamera,
     ));
 
-
     // 3D camera — active during in-game phase, positioned for ship view.
     // order: -1 so the 3D scene composites before the UI layer (LobbyCamera
     // order 0), keeping the viewscreen border in front of all 3D objects.
@@ -164,7 +163,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
         Transform::from_xyz(0.0, 2.0, -10.0),
     ));
-
 
     // Ambient light is now spawned by `spawn_world_ambient_light` in
     // `PostStartup`, which reads `WorldConfig.ambient_light` if present and
@@ -370,7 +368,6 @@ fn toggle_cameras(
     if let Ok(mut cam) = game.single_mut() {
         cam.is_active = game_active;
     } else {
-
     }
 }
 

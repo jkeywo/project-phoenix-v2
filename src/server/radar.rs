@@ -247,7 +247,9 @@ fn sync_server_radar_bridge(
     let view_mode = view_mode_q
         .single()
         .map(|vm| vm.view_mode.clone())
-        .unwrap_or(crate::messages::ViewMode::Camera(crate::messages::ViewDirection::Fore));
+        .unwrap_or(crate::messages::ViewMode::Camera(
+            crate::messages::ViewDirection::Fore,
+        ));
     let Some(active) = view_mode_to_console_radar(&view_mode) else {
         return;
     };
@@ -271,13 +273,17 @@ fn sync_server_radar_bridge(
 // ── Update: toggle radar container visibility ─────────────────────────────────
 
 fn toggle_viewscreen_radar_widgets(
-    view_mode_q: Option<Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>>,
+    view_mode_q: Option<
+        Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    >,
     state: Res<State<GamePhase>>,
     mut containers: Query<(&RadarContainerMode, &mut Visibility)>,
 ) {
     let view_mode = view_mode_q
         .and_then(|q| q.single().ok().map(|vm| vm.view_mode.clone()))
-        .unwrap_or(crate::messages::ViewMode::Camera(crate::messages::ViewDirection::Fore));
+        .unwrap_or(crate::messages::ViewMode::Camera(
+            crate::messages::ViewDirection::Fore,
+        ));
     if !state.is_changed() {
         return;
     }

@@ -280,7 +280,12 @@ fn update_entity_inspector(
     // Per-console hull from the LocalShip's EntityConsoleHull component.
     let hull_entries: Vec<(crate::messages::Console, f32, f32)> = player_hull_q
         .single()
-        .map(|h| h.0.entries().iter().map(|(c, cur, max)| (c.clone(), *cur, *max)).collect())
+        .map(|h| {
+            h.0.entries()
+                .iter()
+                .map(|(c, cur, max)| (c.clone(), *cur, *max))
+                .collect()
+        })
         .unwrap_or_default();
     if hull_entries.is_empty() {
         out.push_str("  hull: n/a\n");

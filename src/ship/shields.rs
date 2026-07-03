@@ -7,7 +7,6 @@ use crate::messages::{
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
-
 // ── Components ─────────────────────────────────────────────────────────────────
 
 /// The ship's shield system.
@@ -145,10 +144,7 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 /// commands and the future NPC `operate_shields_ai` writes into
 /// `AdmittedCommands` flip each ship's own shield focus.
 pub fn handle_shields_messages(
-    mut ship_query: Query<
-        (&AdmittedCommands, &mut ShipShields),
-        With<crate::server_app::Ship>,
-    >,
+    mut ship_query: Query<(&AdmittedCommands, &mut ShipShields), With<crate::server_app::Ship>>,
 ) {
     for (admitted, mut shields) in ship_query.iter_mut() {
         for cmd in admitted.for_target(crate::system_registry::SHIELDS_SYSTEM_ID) {
@@ -258,7 +254,10 @@ fn publish_shields_blackboard(
     shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
     hull_q: Query<&crate::entity_spawner::EntityConsoleHull, With<crate::server_app::LocalShip>>,
     physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>,
-    weapons_target_q: Query<&crate::weapons_plugin::WeaponsTarget, With<crate::server_app::LocalShip>>,
+    weapons_target_q: Query<
+        &crate::weapons_plugin::WeaponsTarget,
+        With<crate::server_app::LocalShip>,
+    >,
     asteroid_q: Query<
         (&crate::simulation::AsteroidUuid, &Transform),
         Without<crate::entity_spawner::EntityUuid>,
@@ -267,7 +266,10 @@ fn publish_shields_blackboard(
         (&crate::entity_spawner::EntityUuid, &Transform),
         Without<crate::simulation::AsteroidUuid>,
     >,
-    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
+    mut ship_bbs_q: Query<
+        &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let Some(shields) = shields_q.iter().next() else {
         return;
@@ -354,9 +356,7 @@ fn publish_shields_blackboard(
 /// Gated on policy.operate_ai for the Shields system. No behaviour is
 /// implemented yet — this is a compile-verified stub that will be filled in
 /// when the Shields AI controller is designed.
-fn operate_shields_ai(
-    ships: Query<&crate::ship_plugin::ShipSystemControlSources>,
-) {
+fn operate_shields_ai(ships: Query<&crate::ship_plugin::ShipSystemControlSources>) {
     for sources in &ships {
         let policy = sources
             .0
@@ -377,8 +377,8 @@ mod tests {
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::CoordinationEnqueue;
     use crate::simulation::{
-        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields,
-        ShipImpulse, ShipShields, SimOutbox,
+        LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipImpulse,
+        ShipShields, SimOutbox,
     };
     use crate::system_registry::SHIELDS_SYSTEM_ID;
 
@@ -424,7 +424,10 @@ mod tests {
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
-                    cs.0.set(crate::system_registry::shields_system_id(), ControlSource::Ai);
+                    cs.0.set(
+                        crate::system_registry::shields_system_id(),
+                        ControlSource::Ai,
+                    );
                     cs
                 },
                 crate::ship_plugin::ActiveStationRatings::default(),
@@ -524,9 +527,13 @@ mod tests {
     // ── Blackboard publish tests ─────────────────────────────────────────────
 
     fn shields_bb(app: &mut App) -> ShieldsBlackboard {
-        let mut q = app.world_mut().query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
         // Safety: test always spawns exactly one LocalShip entity.
-        let bbs = q.single(app.world()).expect("no LocalShip with ShipSystemBlackboards");
+        let bbs = q
+            .single(app.world())
+            .expect("no LocalShip with ShipSystemBlackboards");
         let key = SystemId(SHIELDS_SYSTEM_ID.to_string());
         let SystemBlackboard::Shields(bb) = bbs.0.get(&key).unwrap() else {
             panic!("expected Shields blackboard");
@@ -560,7 +567,10 @@ mod tests {
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
-                    cs.0.set(crate::system_registry::shields_system_id(), ControlSource::Ai);
+                    cs.0.set(
+                        crate::system_registry::shields_system_id(),
+                        ControlSource::Ai,
+                    );
                     cs
                 },
                 crate::ship_plugin::ActiveStationRatings::default(),
@@ -659,7 +669,10 @@ mod tests {
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
                     let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
-                    cs.0.set(crate::system_registry::shields_system_id(), ControlSource::Ai);
+                    cs.0.set(
+                        crate::system_registry::shields_system_id(),
+                        ControlSource::Ai,
+                    );
                     cs
                 },
                 crate::ship_plugin::ActiveStationRatings::default(),
@@ -822,7 +835,9 @@ mod tests {
         // Activate red alert via per-entity ShipRedAlert component.
         {
             let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
-            if let Ok(mut ra) = q.single_mut(app.world_mut()) { ra.toggle(); }
+            if let Ok(mut ra) = q.single_mut(app.world_mut()) {
+                ra.toggle();
+            }
         }
 
         // Mark down_notified on the per-ship ShieldsCoordinationState so

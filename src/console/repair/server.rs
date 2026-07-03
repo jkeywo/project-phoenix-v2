@@ -55,8 +55,8 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
         Audience::Holding(Console::Repair),
         Cadence::Hz(10.0),
         |world: &mut World| {
-            let mut q = world
-                .query_filtered::<&ShipRepairTeams, With<crate::server_app::LocalShip>>();
+            let mut q =
+                world.query_filtered::<&ShipRepairTeams, With<crate::server_app::LocalShip>>();
             let slots = q
                 .iter(world)
                 .next()
@@ -107,7 +107,8 @@ pub fn handle_dispatch_repair_team(
     >,
     teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Some((admitted, ship_config, control_sources, mut teams_comp)) = ship_query.iter_mut().next()
+    let Some((admitted, ship_config, control_sources, mut teams_comp)) =
+        ship_query.iter_mut().next()
     else {
         return;
     };
@@ -456,7 +457,9 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
-        let bbs = q.single(app.world()).expect("LocalShip must have ShipSystemBlackboards");
+        let bbs = q
+            .single(app.world())
+            .expect("LocalShip must have ShipSystemBlackboards");
         let key = SystemId(REPAIR_SYSTEM_ID.to_string());
         let SystemBlackboard::Repair(bb) = bbs.0.get(&key).unwrap() else {
             panic!("expected Repair blackboard");
@@ -923,10 +926,7 @@ mod tests {
         // Build a test app with operate_repair_ai registered.
         let mut app = bevy::prelude::App::new();
         app.add_plugins(bevy::time::TimePlugin)
-            .add_systems(
-                bevy::prelude::Update,
-                operate_repair_ai,
-            );
+            .add_systems(bevy::prelude::Update, operate_repair_ai);
 
         // Spawn an NPC entity (no Ship marker) with ShipSystemControlSources set to AI.
         let mut ai_resolver = ControlSourceResolver::new();
@@ -942,7 +942,9 @@ mod tests {
         // Should not panic.
         app.update();
         assert!(
-            app.world().get::<ShipSystemControlSources>(npc_entity).is_some(),
+            app.world()
+                .get::<ShipSystemControlSources>(npc_entity)
+                .is_some(),
             "NPC entity must still exist after operate_repair_ai runs"
         );
     }
@@ -1041,5 +1043,3 @@ mod tests {
         );
     }
 }
-
-

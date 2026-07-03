@@ -1140,9 +1140,15 @@ impl EntityConfig {
             let has_power_groups = table.contains_key("power_groups");
             let out = if has_station || has_system || has_power_groups {
                 let mut ship_table = toml::value::Table::new();
-                if let Some(v) = table.get("station").cloned() { ship_table.insert("station".to_string(), v); }
-                if let Some(v) = table.get("system").cloned() { ship_table.insert("system".to_string(), v); }
-                if let Some(v) = table.get("power_groups").cloned() { ship_table.insert("power_groups".to_string(), v); }
+                if let Some(v) = table.get("station").cloned() {
+                    ship_table.insert("station".to_string(), v);
+                }
+                if let Some(v) = table.get("system").cloned() {
+                    ship_table.insert("system".to_string(), v);
+                }
+                if let Some(v) = table.get("power_groups").cloned() {
+                    ship_table.insert("power_groups".to_string(), v);
+                }
                 Some(toml::Value::Table(ship_table))
             } else {
                 None
@@ -1160,13 +1166,18 @@ impl EntityConfig {
 
         // Parse the ship_config sub-block via the shared ShipConfig code path.
         if let Some(ship_toml_value) = ship_config_toml {
-            let ship_toml_str = toml::to_string(&ship_toml_value)
-                .map_err(|e| serde::de::Error::custom(format!("ship_config re-serialise failed: {e}")))?;
+            let ship_toml_str = toml::to_string(&ship_toml_value).map_err(|e| {
+                serde::de::Error::custom(format!("ship_config re-serialise failed: {e}"))
+            })?;
             let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
-                .map_err(|e| serde::de::Error::custom(format!("system registry init failed: {e:?}")))?;
+                .map_err(|e| {
+                    serde::de::Error::custom(format!("system registry init failed: {e:?}"))
+                })?;
             let kinds: Vec<&str> = registry.kinds().collect();
             let ship_config = crate::ship::config::parse_and_validate(&ship_toml_str, &kinds)
-                .map_err(|e| serde::de::Error::custom(format!("ship_config validation failed: {e:?}")))?;
+                .map_err(|e| {
+                    serde::de::Error::custom(format!("ship_config validation failed: {e:?}"))
+                })?;
             config.ship_config = Some(ship_config);
         }
 

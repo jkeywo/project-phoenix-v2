@@ -112,8 +112,7 @@ pub fn translate_power_modifiers(
 
     // Dual-write: mirror the LocalShip's per-entity ShipModifiers into the
     // global Resource so legacy Resource-based readers stay in sync.
-    if let (Some(local_mods), Some(mods_res)) =
-        (local_mods_snapshot, modifiers_res.as_deref_mut())
+    if let (Some(local_mods), Some(mods_res)) = (local_mods_snapshot, modifiers_res.as_deref_mut())
     {
         *mods_res = local_mods;
         return;
@@ -317,7 +316,12 @@ pub fn translate_impulse_modifiers(
         let speed_multiplier = impulse_cfg_q
             .single()
             .map(|c| c.speed_multiplier)
-            .or_else(|_| impulse_config.as_deref().map(|c| c.speed_multiplier).ok_or(()))
+            .or_else(|_| {
+                impulse_config
+                    .as_deref()
+                    .map(|c| c.speed_multiplier)
+                    .ok_or(())
+            })
             .unwrap_or(IMPULSE_SPEED_MULTIPLIER);
         let mut modifiers_res = modifiers_res;
         match modifiers_q.iter_mut().next() {
@@ -782,12 +786,7 @@ mod tests {
 
         let npc = app
             .world_mut()
-            .spawn((
-                Ship,
-                ShipPowerSystem(power),
-                mult,
-                ShipModifiers::new(),
-            ))
+            .spawn((Ship, ShipPowerSystem(power), mult, ShipModifiers::new()))
             .id();
 
         app.add_systems(Update, translate_power_modifiers);

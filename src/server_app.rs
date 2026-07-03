@@ -318,8 +318,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
-        broadcast_blackboard_updates
-            .in_set(crate::sim_sets::SimSet::PublishAggregate),
+        broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_systems(
         Update,
@@ -349,8 +348,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
-        publish_viewscreen_blackboard
-            .in_set(crate::sim_sets::SimSet::PublishAggregate),
+        publish_viewscreen_blackboard.in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_plugins(weapons_update_broadcaster())
     .add_plugins(sim_state_broadcaster())
@@ -410,7 +408,11 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     let shield_fraction = shield_comp.map(|s| {
                         let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
                         let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                        if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
+                        if total_max > 0 {
+                            total_hp as f32 / total_max as f32
+                        } else {
+                            0.0
+                        }
                     });
                     // Skip entirely when there are no health components (unbreakable asteroids).
                     if hull_fraction.is_none() && shield_fraction.is_none() {
@@ -431,7 +433,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     if !hull_changed && !shield_changed {
                         return None;
                     }
-                    health_cache.0.insert(uuid.clone(), (hull_fraction, shield_fraction));
+                    health_cache
+                        .0
+                        .insert(uuid.clone(), (hull_fraction, shield_fraction));
                     Some(crate::messages::EntityStateSnapshot {
                         uuid,
                         position: None,
@@ -469,7 +473,11 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     let shield_fraction = shield_comp.map(|s| {
                         let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
                         let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                        if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
+                        if total_max > 0 {
+                            total_hp as f32 / total_max as f32
+                        } else {
+                            0.0
+                        }
                     });
                     let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
                     (
@@ -491,7 +499,13 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         let npc_states: Vec<crate::messages::EntityStateSnapshot> = {
             // Borrow position cache, then health cache separately (both mut).
             // Collect diffs first to avoid holding multiple mut borrows.
-            type NpcDiff = (String, Option<[f32; 3]>, Option<f32>, Option<f32>, Option<f32>);
+            type NpcDiff = (
+                String,
+                Option<[f32; 3]>,
+                Option<f32>,
+                Option<f32>,
+                Option<f32>,
+            );
             let diffs: Vec<NpcDiff> = {
                 let mut pos_cache = world.resource_mut::<LastBroadcastEntityPositions>();
                 npc_raw
@@ -507,9 +521,19 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                         if moved {
                             pos_cache.0.insert(uuid.clone(), (*pos, *yaw));
                         }
-                        let out_pos = if moved { Some([pos.x, pos.y, pos.z]) } else { None };
+                        let out_pos = if moved {
+                            Some([pos.x, pos.y, pos.z])
+                        } else {
+                            None
+                        };
                         let out_yaw = if moved { Some(*yaw) } else { None };
-                        (uuid.clone(), out_pos, out_yaw, *hull_fraction, *shield_fraction)
+                        (
+                            uuid.clone(),
+                            out_pos,
+                            out_yaw,
+                            *hull_fraction,
+                            *shield_fraction,
+                        )
                     })
                     .collect()
             };
@@ -525,14 +549,20 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                         return None;
                     }
                     if hull_changed || shield_changed {
-                        health_cache.0.insert(uuid.clone(), (hull_fraction, shield_fraction));
+                        health_cache
+                            .0
+                            .insert(uuid.clone(), (hull_fraction, shield_fraction));
                     }
                     Some(crate::messages::EntityStateSnapshot {
                         uuid,
                         position: out_pos,
                         yaw: out_yaw,
                         hull_fraction: if hull_changed { hull_fraction } else { None },
-                        shield_fraction: if shield_changed { shield_fraction } else { None },
+                        shield_fraction: if shield_changed {
+                            shield_fraction
+                        } else {
+                            None
+                        },
                         flags: vec![],
                         shields: None,
                         warp_out_remaining_secs: None,
@@ -548,13 +578,18 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let hull_current: Vec<crate::messages::ConsoleHullStatus> = world
                 .query_filtered::<&crate::entity_spawner::EntityConsoleHull, With<LocalShip>>()
                 .single(world)
-                .map(|h| h.0.entries().iter().map(|(c, cur, max)| crate::messages::ConsoleHullStatus {
-                    console: c.clone(),
-                    current: *cur,
-                    max_hp: *max,
-                    tier: h.0.tier_for(c.clone()),
-                    debuff_magnitude: h.0.debuff_magnitude_for(c.clone()),
-                }).collect::<Vec<_>>())
+                .map(|h| {
+                    h.0.entries()
+                        .iter()
+                        .map(|(c, cur, max)| crate::messages::ConsoleHullStatus {
+                            console: c.clone(),
+                            current: *cur,
+                            max_hp: *max,
+                            tier: h.0.tier_for(c.clone()),
+                            debuff_magnitude: h.0.debuff_magnitude_for(c.clone()),
+                        })
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default();
             let hull_changed = world.resource::<LastBroadcastHull>().0 != hull_current;
             if hull_changed {
@@ -590,10 +625,8 @@ pub fn modifier_events_broadcaster() -> SimBroadcaster {
         // Prefer draining from the per-entity component on LocalShip; fall
         // back to the global Resource when the entity is absent.
         let events: Vec<ModifierEvent> = {
-            let mut q = world.query_filtered::<
-                &mut crate::modifiers::ShipModifiers,
-                With<LocalShip>,
-            >();
+            let mut q =
+                world.query_filtered::<&mut crate::modifiers::ShipModifiers, With<LocalShip>>();
             if let Some(mut mods_comp) = q.iter_mut(world).next() {
                 std::mem::take(&mut mods_comp.pending_events)
             } else if let Some(mut mods_res) =
@@ -682,7 +715,11 @@ fn publish_viewscreen_blackboard(
         .map(|h| {
             let max = h.0.total_max();
             let cur = h.0.total_current();
-            if max > 0.0 { (cur / max * 100.0).clamp(0.0, 100.0) } else { 100.0 }
+            if max > 0.0 {
+                (cur / max * 100.0).clamp(0.0, 100.0)
+            } else {
+                100.0
+            }
         })
         .unwrap_or(100.0);
 
@@ -1021,10 +1058,7 @@ fn broadcast_shield_status(
     mut timer: ResMut<SimBroadcastTimer>,
     mut outbox: ResMut<SimOutbox>,
     sessions: Res<Sessions>,
-    ship_query: Query<(
-        &ShipShields,
-        &crate::ship_plugin::ShipConfigComponent,
-    ), With<LocalShip>>,
+    ship_query: Query<(&ShipShields, &crate::ship_plugin::ShipConfigComponent), With<LocalShip>>,
     mut last: ResMut<LastBroadcastShields>,
 ) {
     let Some((shields, ship_config)) = ship_query.iter().next() else {
@@ -1112,12 +1146,11 @@ pub fn broadcast_blackboard_updates(
     let Some(bb) = ship_query.iter().next() else {
         return;
     };
-    let updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = bb
-        .0
-        .iter()
-        .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
-        .map(|(id, bb)| (id.clone(), bb.clone()))
-        .collect();
+    let updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> =
+        bb.0.iter()
+            .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
+            .map(|(id, bb)| (id.clone(), bb.clone()))
+            .collect();
 
     if !updates.is_empty() {
         for (id, bb) in &updates {
@@ -1183,7 +1216,8 @@ fn admit_system_commands(
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
 ) {
-    let Some((ship_entity, ship_config, control_sources, mut admitted)) = ship_query.iter_mut().next()
+    let Some((ship_entity, ship_config, control_sources, mut admitted)) =
+        ship_query.iter_mut().next()
     else {
         return;
     };
@@ -1497,7 +1531,11 @@ fn reconcile_runtime_entities(
                 let shield_fraction = shield_comp.map(|s| {
                     let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
                     let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                    if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
+                    if total_max > 0 {
+                        total_hp as f32 / total_max as f32
+                    } else {
+                        0.0
+                    }
                 });
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
@@ -1602,7 +1640,11 @@ fn reconcile_runtime_entities(
                 let shield_fraction = shield_comp.map(|s| {
                     let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
                     let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                    if total_max > 0 { total_hp as f32 / total_max as f32 } else { 0.0 }
+                    if total_max > 0 {
+                        total_hp as f32 / total_max as f32
+                    } else {
+                        0.0
+                    }
                 });
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
@@ -1894,7 +1936,9 @@ fn spawn_game_start_entities(
                 .insert(crate::ship_state::ShipViewMode::default())
                 .insert(crate::ship_state::ShipPhaserFrequency::default())
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
-                .insert(crate::power_plugin::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()))
+                .insert(crate::power_plugin::ShipPowerSystem(
+                    crate::modifiers::power_system::PowerSystem::default(),
+                ))
                 .insert(crate::ship_plugin::LastHelmInput::default())
                 // Per-ship impulse drive state (audit follow-up). Every
                 // ship carries its own; NPC ships get one via the spawner
@@ -1922,10 +1966,10 @@ fn spawn_game_start_entities(
                 .insert(WeaponFiredThisTick::default())
                 .insert(ShipAttackedThisTick::default())
                 .insert(crate::weapons_plugin::LastShipAttacker::default());
-                // The player ship's hull lives on its `EntityConsoleHull`
-                // component (PRD #581). All damage/repair paths write there
-                // directly; the old `ShipHullIntegrity` resource was retired
-                // in PRD #597 PR 10.
+            // The player ship's hull lives on its `EntityConsoleHull`
+            // component (PRD #581). All damage/repair paths write there
+            // directly; the old `ShipHullIntegrity` resource was retired
+            // in PRD #597 PR 10.
             ship_spawned = true;
 
             // Ship-specific resource setup
@@ -1944,9 +1988,9 @@ fn spawn_game_start_entities(
                     .filter(|&n| n > 0)
                     .unwrap_or(2);
                 let timings = repair.map(|rc| rc.to_runtime()).unwrap_or_default();
-                let teams = ShipRepairTeams(
-                    crate::repair_teams::RepairTeams::new_with_timings(team_count, timings),
-                );
+                let teams = ShipRepairTeams(crate::repair_teams::RepairTeams::new_with_timings(
+                    team_count, timings,
+                ));
                 // Insert as per-entity component AND global resource (dual-write migration).
                 commands.entity(spawned).insert(teams.clone());
                 commands.insert_resource(teams);
@@ -1971,7 +2015,9 @@ fn spawn_game_start_entities(
                 commands.entity(spawned).insert(shields);
             } else {
                 // Default shields on the ship entity when no TOML shields_console block.
-                commands.entity(spawned).insert(ShipShields(ShieldSystem::default()));
+                commands
+                    .entity(spawned)
+                    .insert(ShipShields(ShieldSystem::default()));
             }
 
             if let Some(wc) = &config.weapons_console {
@@ -2095,9 +2141,13 @@ fn spawn_game_start_entities(
                     multipliers.insert(Console::Sensors, pm);
                 }
             }
-            commands.insert_resource(PowerMultiplierResource { multipliers: multipliers.clone() });
+            commands.insert_resource(PowerMultiplierResource {
+                multipliers: multipliers.clone(),
+            });
             // Insert as per-entity component AND global resource (dual-write migration — PR 6).
-            commands.entity(spawned).insert(PowerMultiplierResource { multipliers });
+            commands
+                .entity(spawned)
+                .insert(PowerMultiplierResource { multipliers });
 
             // Ship physics config from [helm_console] TOML, or default
             let physics_cfg =
@@ -2118,16 +2168,15 @@ fn spawn_game_start_entities(
             commands.entity(spawned).insert(physics_cfg_resource);
 
             // Impulse config from [helm_console] TOML, or default
-            let impulse_cfg =
-                config
-                    .helm_console
-                    .as_ref()
-                    .map(|hc| crate::ship_plugin::ImpulseConfigResource {
-                        charge_duration: hc.impulse_charge_duration,
-                        speed_multiplier: hc.impulse_speed_multiplier,
-                        acceleration_multiplier: hc.impulse_acceleration_multiplier,
-                    })
-                    .unwrap_or_default();
+            let impulse_cfg = config
+                .helm_console
+                .as_ref()
+                .map(|hc| crate::ship_plugin::ImpulseConfigResource {
+                    charge_duration: hc.impulse_charge_duration,
+                    speed_multiplier: hc.impulse_speed_multiplier,
+                    acceleration_multiplier: hc.impulse_acceleration_multiplier,
+                })
+                .unwrap_or_default();
             commands.insert_resource(impulse_cfg.clone());
             commands.entity(spawned).insert(impulse_cfg);
 
@@ -2149,15 +2198,14 @@ fn spawn_game_start_entities(
             commands.entity(spawned).insert(boost_cfg);
 
             // Bank config from [helm_console] TOML, or default
-            let bank_cfg =
-                config
-                    .helm_console
-                    .as_ref()
-                    .map(|hc| crate::ship_plugin::BankConfigResource {
-                        max_bank_deg: hc.max_bank_deg,
-                        bank_lerp_rate: hc.bank_lerp_rate,
-                    })
-                    .unwrap_or_default();
+            let bank_cfg = config
+                .helm_console
+                .as_ref()
+                .map(|hc| crate::ship_plugin::BankConfigResource {
+                    max_bank_deg: hc.max_bank_deg,
+                    bank_lerp_rate: hc.bank_lerp_rate,
+                })
+                .unwrap_or_default();
             commands.insert_resource(bank_cfg.clone());
             commands.entity(spawned).insert(bank_cfg);
         }
@@ -2750,12 +2798,14 @@ mod tests {
                 crate::ship_state::ShipViewMode::default(),
                 crate::ship_state::ShipPhaserFrequency::default(),
                 bevy::prelude::Transform::default(),
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[
-                    (Console::Helm, 25.0),
-                    (Console::Tactical, 25.0),
-                    (Console::Power, 25.0),
-                    (Console::Shields, 25.0),
-                ])),
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                    &[
+                        (Console::Helm, 25.0),
+                        (Console::Tactical, 25.0),
+                        (Console::Power, 25.0),
+                        (Console::Shields, 25.0),
+                    ],
+                )),
             ))
             .id();
         // Insert per-entity weapon configs as a separate insert (Bundle limit).
@@ -2765,9 +2815,9 @@ mod tests {
         // tests are observed by the systems (which fall back to Resource when
         // the Component is absent — PR 6, PRD #597).
         app.world_mut().entity_mut(ship).insert((
-            crate::weapons_plugin::TorpedoSystemResource(
-                crate::torpedo::TorpedoSystem::new(crate::torpedo::TorpedoConfig::default())
-            ),
+            crate::weapons_plugin::TorpedoSystemResource(crate::torpedo::TorpedoSystem::new(
+                crate::torpedo::TorpedoConfig::default(),
+            )),
             crate::weapons_plugin::PhaserCombatConfigResource::default(),
             PhaserRenderConfig::default(),
             // PR 7 (issue #597) — per-entity beam / target / cooldown / sensors / waypoint.
@@ -2797,7 +2847,9 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
-        q.single(app.world()).ok().and_then(|b| b.target_uuid.clone())
+        q.single(app.world())
+            .ok()
+            .and_then(|b| b.target_uuid.clone())
     }
 
     fn active_beam_target_is_none(app: &mut App) -> bool {
@@ -2878,7 +2930,9 @@ mod tests {
             .query_filtered::<&crate::ship_state::ShipViewMode, With<LocalShip>>();
         q.single(app.world())
             .map(|vm| vm.view_mode.clone())
-            .unwrap_or(crate::messages::ViewMode::Camera(crate::messages::ViewDirection::Fore))
+            .unwrap_or(crate::messages::ViewMode::Camera(
+                crate::messages::ViewDirection::Fore,
+            ))
     }
 
     fn set_ship_view_mode(app: &mut App, mode: crate::messages::ViewMode) {
@@ -2936,7 +2990,9 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&mut ShipPhysicsComponent, With<crate::simulation::Ship>>();
-        let mut p = q.single_mut(app.world_mut()).expect("expected Ship with ShipPhysics");
+        let mut p = q
+            .single_mut(app.world_mut())
+            .expect("expected Ship with ShipPhysics");
         p.yaw = yaw;
     }
 
@@ -3154,10 +3210,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::ScienceRadar
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::ScienceRadar);
     }
     #[test]
     fn sensors_can_switch_view_to_sensors_radar() {
@@ -3174,10 +3227,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::SensorsRadar
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::SensorsRadar);
     }
 
     #[test]
@@ -3216,10 +3266,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::SystemChart
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::SystemChart);
     }
 
     #[test]
@@ -3279,10 +3326,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::NavigationChart
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::NavigationChart);
     }
 
     #[test]
@@ -3361,10 +3405,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::Comms
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::Comms);
     }
 
     #[test]
@@ -3436,10 +3477,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::Radar
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
     }
 
     #[test]
@@ -3749,10 +3787,7 @@ mod tests {
         assert!(lock.1, "expected locked=true for in-range asteroid");
 
         // Server state should record the lock.
-        assert_eq!(
-            get_weapons_target(&mut app).as_deref(),
-            Some("target-uuid")
-        );
+        assert_eq!(get_weapons_target(&mut app).as_deref(), Some("target-uuid"));
     }
 
     #[test]
@@ -4310,10 +4345,7 @@ mod tests {
                 .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
             "expected BeamStarted for new target after cooldown"
         );
-        assert_eq!(
-            get_active_beam_target(&mut app).as_deref(),
-            Some("t2")
-        );
+        assert_eq!(get_active_beam_target(&mut app).as_deref(), Some("t2"));
     }
 
     // -- Repair helpers --------------------------------------------------
@@ -6115,10 +6147,7 @@ mod tests {
 
         let ship = app.world().resource::<ShipEntity>().0;
         let shields = app.world().entity(ship).get::<ShipShields>().unwrap();
-        assert_eq!(
-            shields.0.focused_facing,
-            Some(0)
-        );
+        assert_eq!(shields.0.focused_facing, Some(0));
         assert!(shields.0.facings[0].is_focused);
     }
 
@@ -6169,10 +6198,7 @@ mod tests {
         tick(&mut app);
         let ship = app.world().resource::<ShipEntity>().0;
         let shields = app.world().entity(ship).get::<ShipShields>().unwrap();
-        assert_eq!(
-            shields.0.focused_facing,
-            Some(0)
-        );
+        assert_eq!(shields.0.focused_facing, Some(0));
 
         push(
             &mut app,
@@ -6274,4 +6300,3 @@ mod tests {
         );
     }
 }
-

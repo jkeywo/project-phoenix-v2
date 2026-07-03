@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::lobby::Sessions;
 use crate::messages::{
-    Console, CoordinationPayload, SensorsBlackboard, ServerMessage,
-    SystemBlackboard, SystemControlPayload, SystemId,
+    Console, CoordinationPayload, SensorsBlackboard, ServerMessage, SystemBlackboard,
+    SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -38,16 +38,15 @@ pub struct ShipSensorsPlugin;
 
 impl Plugin for ShipSensorsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<CoordinationEnqueue>()
-            .add_systems(
-                Update,
-                (
-                    handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
-                    operate_sensors_ai.in_set(crate::sim_sets::SimSet::Input),
-                    tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
-                    publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
-                ),
-            );
+        app.add_message::<CoordinationEnqueue>().add_systems(
+            Update,
+            (
+                handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
+                operate_sensors_ai.in_set(crate::sim_sets::SimSet::Input),
+                tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
+                publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+            ),
+        );
     }
 }
 
@@ -162,7 +161,10 @@ pub fn tick_sensors_frequency_hint(
 pub fn publish_sensors_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     sensors_target_q: Query<&SensorsTarget, With<crate::server_app::LocalShip>>,
-    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
+    mut ship_bbs_q: Query<
+        &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let cfg = &ship_config.0;
     let science_target_uuid = sensors_target_q.single().ok().and_then(|st| st.0.clone());
@@ -188,9 +190,7 @@ pub fn publish_sensors_blackboard(
 /// the sensor AI produces no active decisions in the current game design
 /// (Sensors is purely advisory: the AI auto-suggests scan targets to Tactical
 /// via the coordination bus in `tick_sensors_frequency_hint`).
-pub fn operate_sensors_ai(
-    ships: Query<&crate::ship_plugin::ShipSystemControlSources>,
-) {
+pub fn operate_sensors_ai(ships: Query<&crate::ship_plugin::ShipSystemControlSources>) {
     for sources in &ships {
         let policy = sources
             .0
@@ -474,12 +474,14 @@ mod tests {
             crate::system_registry::sensors_system_id(),
             ControlSource::Human,
         );
-        let human_sources =
-            crate::ship_plugin::ShipSystemControlSources(human_resolver);
+        let human_sources = crate::ship_plugin::ShipSystemControlSources(human_resolver);
         let human_policy = human_sources
             .0
             .policy_for(&crate::system_registry::sensors_system_id());
-        assert!(!human_policy.operate_ai, "human Sensors should not operate AI");
+        assert!(
+            !human_policy.operate_ai,
+            "human Sensors should not operate AI"
+        );
 
         // AI-controlled: operate_sensors_ai must gate and proceed.
         let mut ai_resolver = ControlSourceResolver::new();
@@ -491,6 +493,9 @@ mod tests {
         let ai_policy = ai_sources
             .0
             .policy_for(&crate::system_registry::sensors_system_id());
-        assert!(ai_policy.operate_ai, "AI Sensors must gate through operate_ai");
+        assert!(
+            ai_policy.operate_ai,
+            "AI Sensors must gate through operate_ai"
+        );
     }
 }

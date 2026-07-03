@@ -145,7 +145,8 @@ impl RepairTeams {
                     if *elapsed >= travel_duration {
                         let console = console.clone();
                         let is_full = hull.is_at_max(&console);
-                        let is_destroyed = hull.tier_for(console.clone()) == crate::damage::DamageTier::Destroyed;
+                        let is_destroyed =
+                            hull.tier_for(console.clone()) == crate::damage::DamageTier::Destroyed;
                         if is_full || is_destroyed {
                             *slot = TeamSlot::Returning {
                                 remaining: 0.0,
@@ -544,7 +545,10 @@ mod tests {
         teams.tick(5.0, &mut hull); // travel → Repairing
         teams.tick(2.0, &mut hull); // restore 1 HP (0.5 HP/s * 2s = 1 HP → now 2 HP)
         let hp_before_recall = hull.current_for(Console::Helm).unwrap();
-        assert!((hp_before_recall - 2.0).abs() < 1e-4, "expected 2 HP before recall, got {hp_before_recall}");
+        assert!(
+            (hp_before_recall - 2.0).abs() < 1e-4,
+            "expected 2 HP before recall, got {hp_before_recall}"
+        );
         teams.dispatch(0, Console::Helm); // recall
                                           // HP should not have changed
         let hp_after_recall = hull.current_for(Console::Helm).unwrap();

@@ -79,7 +79,10 @@ fn view_request_from_admitted(
 
 fn handle_set_view(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
-    mut view_mode_q: Query<&mut crate::ship_state::ShipViewMode, With<crate::server_app::LocalShip>>,
+    mut view_mode_q: Query<
+        &mut crate::ship_state::ShipViewMode,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
@@ -93,7 +96,6 @@ fn handle_set_view(
         }
     }
 }
-
 
 /// Toggle the captain's priority boost for a doctrine objective.
 /// Sending the same id twice clears the boost.
@@ -146,10 +148,8 @@ fn operate_captain_ai(
         }
 
         // Read this ship's own combat activity.
-        let last_under_attack = most_recent(
-            activity.last_damage_taken,
-            activity.last_hostile_fire_taken,
-        );
+        let last_under_attack =
+            most_recent(activity.last_damage_taken, activity.last_hostile_fire_taken);
         let last_weapon_fired = activity.last_weapon_fired;
 
         if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, last_weapon_fired) {
@@ -188,7 +188,10 @@ fn publish_captain_blackboard(
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut ship_bbs_q: Query<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>,
+    mut ship_bbs_q: Query<
+        &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::server_app::LocalShip>,
+    >,
 ) {
     let (control_sources, red_alert_comp, view_mode_comp) = ship_query
         .single()
@@ -204,7 +207,11 @@ fn publish_captain_blackboard(
         .single()
         .map(|h| {
             let max = h.0.total_max();
-            if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+            if max > 0.0 {
+                h.0.total_current() / max
+            } else {
+                1.0
+            }
         })
         .unwrap_or(1.0);
     let red_alert_auto = control_sources.is_some_and(|cs| {
@@ -222,7 +229,10 @@ fn publish_captain_blackboard(
     }
     .to_string();
 
-    let conditions = WorldConditions { red_alert, hull_fraction };
+    let conditions = WorldConditions {
+        red_alert,
+        hull_fraction,
+    };
     let captain_boost = boost.as_ref().and_then(|b| {
         b.boosted_id
             .as_deref()
@@ -286,9 +296,9 @@ mod tests {
     use super::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions};
     use crate::messages::{ClientMessage, ViewDirection};
+    use crate::server_app::LocalShip;
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
-    use crate::server_app::LocalShip;
     use crate::simulation::Ship;
     use crate::system_registry::CAPTAIN_SYSTEM_ID;
 
@@ -308,7 +318,7 @@ mod tests {
             .add_plugins(CaptainPlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
             .init_resource::<Outbox>()
-                        .add_systems(PostUpdate, collect);
+            .add_systems(PostUpdate, collect);
         app.world_mut().spawn((
             Ship,
             LocalShip,
@@ -324,12 +334,10 @@ mod tests {
             RecentCombatActivity::default(),
             crate::server_app::WeaponFiredThisTick::default(),
             crate::server_app::ShipAttackedThisTick::default(),
-            crate::entity_spawner::EntityConsoleHull(
-                crate::damage::ConsoleHull::from_config(&[(
-                    crate::messages::Console::CaptainChair,
-                    100.0,
-                )]),
-            ),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                crate::messages::Console::CaptainChair,
+                100.0,
+            )])),
         ));
         app
     }
@@ -828,10 +836,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::Radar
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
         push(
             &mut app,
             "helm",
@@ -881,10 +886,7 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::Radar
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
     }
 
     #[test]
@@ -918,10 +920,7 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::Radar
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
     }
 
     #[test]
@@ -945,10 +944,7 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(
-            get_view_mode(&mut app),
-            ViewMode::Radar
-        );
+        assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
     }
 
     fn set_activity_last_damage(app: &mut App, secs: Option<f32>) {
@@ -994,7 +990,10 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
         // Put ship in red alert
-        { let cur = get_red_alert(&mut app); set_red_alert(&mut app, !cur); }
+        {
+            let cur = get_red_alert(&mut app);
+            set_red_alert(&mut app, !cur);
+        }
         assert!(get_red_alert(&mut app));
         // Set captain to AI mode with no recent activity
         set_control_source(
@@ -1103,7 +1102,10 @@ mod tests {
     #[test]
     fn publish_captain_blackboard_reflects_red_alert() {
         let mut app = bb_test_app();
-        { let cur = get_red_alert(&mut app); set_red_alert(&mut app, !cur); }
+        {
+            let cur = get_red_alert(&mut app);
+            set_red_alert(&mut app, !cur);
+        }
         app.update();
 
         let bb = captain_bb(&mut app);
@@ -1120,7 +1122,10 @@ mod tests {
                 .world_mut()
                 .query_filtered::<&mut ShipSystemControlSources, With<LocalShip>>();
             if let Ok(mut cs) = q.single_mut(app.world_mut()) {
-                cs.0.set(crate::system_registry::red_alert_system_id(), ControlSource::Ai);
+                cs.0.set(
+                    crate::system_registry::red_alert_system_id(),
+                    ControlSource::Ai,
+                );
             }
         }
         app.update();
@@ -1141,7 +1146,10 @@ mod tests {
                 .world_mut()
                 .query_filtered::<&mut ShipSystemControlSources, With<LocalShip>>();
             if let Ok(mut cs) = q.single_mut(app.world_mut()) {
-                cs.0.set(crate::system_registry::viewscreen_system_id(), ControlSource::Ai);
+                cs.0.set(
+                    crate::system_registry::viewscreen_system_id(),
+                    ControlSource::Ai,
+                );
             }
         }
         app.update();
@@ -1255,7 +1263,10 @@ mod tests {
     #[test]
     fn doctrine_objective_shown_in_captain_bb_when_score_positive() {
         let mut app = bb_test_app();
-        { let cur = get_red_alert(&mut app); set_red_alert(&mut app, !cur); }
+        {
+            let cur = get_red_alert(&mut app);
+            set_red_alert(&mut app, !cur);
+        }
         app.world_mut()
             .insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
         app.update();
@@ -1443,12 +1454,9 @@ mod tests {
                 },
                 crate::server_app::WeaponFiredThisTick::default(),
                 crate::server_app::ShipAttackedThisTick::default(),
-                crate::entity_spawner::EntityConsoleHull(
-                    crate::damage::ConsoleHull::from_config(&[(
-                        crate::messages::Console::CaptainChair,
-                        100.0,
-                    )]),
-                ),
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                    &[(crate::messages::Console::CaptainChair, 100.0)],
+                )),
             ))
             .id();
 
@@ -1499,12 +1507,9 @@ mod tests {
                 RecentCombatActivity::default(),
                 crate::server_app::WeaponFiredThisTick::default(),
                 crate::server_app::ShipAttackedThisTick::default(),
-                crate::entity_spawner::EntityConsoleHull(
-                    crate::damage::ConsoleHull::from_config(&[(
-                        crate::messages::Console::CaptainChair,
-                        100.0,
-                    )]),
-                ),
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                    &[(crate::messages::Console::CaptainChair, 100.0)],
+                )),
             ))
             .id();
 

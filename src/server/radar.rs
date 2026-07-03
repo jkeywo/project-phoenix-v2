@@ -47,6 +47,14 @@ enum RadarContainerMode {
     Nav,
 }
 
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum RadarBackdropMode {
+    CircularWidget,
+    FullScreen,
+}
+
+const VIEWSCREEN_OVERLAY_DIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.62);
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct ServerViewscreenRadarPlugin;
@@ -97,28 +105,49 @@ fn view_mode_to_console_radar(mode: &ViewMode) -> Option<ConsoleRadar> {
 ///
 /// The container starts hidden; `toggle_viewscreen_radar_widgets` shows/hides
 /// it based on the current view mode.
+fn backdrop_for_mode(mode: RadarContainerMode) -> RadarBackdropMode {
+    match mode {
+        RadarContainerMode::Helm | RadarContainerMode::Science => RadarBackdropMode::CircularWidget,
+        RadarContainerMode::SystemChart | RadarContainerMode::Nav => RadarBackdropMode::FullScreen,
+    }
+}
+
 fn spawn_radar_container(commands: &mut Commands, mode: RadarContainerMode, widget_entity: Entity) {
-    let container = commands
-        .spawn((
-            mode,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            Visibility::Hidden,
-            ZIndex(5),
-        ))
-        .id();
-    commands.entity(widget_entity).insert(Node {
+    let backdrop = backdrop_for_mode(mode);
+    let mut container = commands.spawn((
+        mode,
+        backdrop,
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        Visibility::Hidden,
+        ZIndex(5),
+    ));
+    if backdrop == RadarBackdropMode::FullScreen {
+        container.insert(BackgroundColor(VIEWSCREEN_OVERLAY_DIM));
+    }
+    let container = container.id();
+
+    let mut widget_node = Node {
         width: Val::Vh(80.0),
         aspect_ratio: Some(1.0),
         position_type: PositionType::Relative,
         ..default()
-    });
+    };
+    if backdrop == RadarBackdropMode::CircularWidget {
+        widget_node.border_radius = BorderRadius::all(Val::Percent(50.0));
+    }
+    commands.entity(widget_entity).insert(widget_node);
+    if backdrop == RadarBackdropMode::CircularWidget {
+        commands
+            .entity(widget_entity)
+            .insert(BackgroundColor(VIEWSCREEN_OVERLAY_DIM));
+    }
     commands.entity(container).add_child(widget_entity);
 }
 
@@ -321,8 +350,8 @@ fn toggle_viewscreen_radar_widgets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::LocalShip;
     use crate::ship_state::ShipViewMode;
+    use crate::simulation::LocalShip;
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -378,5 +407,25 @@ mod tests {
         app.update();
 
         assert_eq!(helm_container_visibility(&mut app), Visibility::Visible);
+    }
+
+    #[test]
+    fn backdrop_shape_matches_viewscreen_mode_family() {
+        assert_eq!(
+            backdrop_for_mode(RadarContainerMode::Helm),
+            RadarBackdropMode::CircularWidget
+        );
+        assert_eq!(
+            backdrop_for_mode(RadarContainerMode::Science),
+            RadarBackdropMode::CircularWidget
+        );
+        assert_eq!(
+            backdrop_for_mode(RadarContainerMode::SystemChart),
+            RadarBackdropMode::FullScreen
+        );
+        assert_eq!(
+            backdrop_for_mode(RadarContainerMode::Nav),
+            RadarBackdropMode::FullScreen
+        );
     }
 }

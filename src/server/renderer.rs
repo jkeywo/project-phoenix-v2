@@ -349,7 +349,6 @@ fn update_camera_aspect(
 
 fn toggle_cameras(
     state: Res<State<GamePhase>>,
-    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
     view_mode_changed: Query<
         (),
         (
@@ -360,18 +359,15 @@ fn toggle_cameras(
     mut game: Query<&mut Camera, With<GameCamera>>,
 ) {
     // Must also re-run on a view-mode change, not just a GamePhase transition —
-    // otherwise the 3D camera stays active/inactive forever based on whatever
-    // view was set at the single Lobby→InProgress transition (e.g. it never
-    // deactivates when Helm/Sensors/Navigation later switch to a radar view).
+    // camera activation is phase-driven, and overlay view changes must not
+    // accidentally freeze the last rendered 3D frame behind the UI layer.
     if !state.is_changed() && view_mode_changed.is_empty() {
         return;
     }
     let in_game = state.get() == &GamePhase::InProgress;
-    let view_mode = view_mode_q
-        .single()
-        .map(|vm| vm.view_mode.clone())
-        .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
-    let game_active = in_game && matches!(view_mode, ViewMode::Camera(_) | ViewMode::Comms);
+    // Overlay views (radars, charts, comms) dim the UI layer, but the space
+    // scene should continue rendering live underneath them.
+    let game_active = in_game;
 
     // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
     // in all phases so that UI nodes (FPS counter, radar widgets) continue to
@@ -521,16 +517,29 @@ fn sync_comms_overlay(
 
     let Some(ref msg) = on_screen.0 else { return };
 
-    // Semi-transparent dark panel, centred on screen, ~60% width.
+    // Full-screen translucent backing keeps the live space scene visible while
+    // giving the comms panel enough contrast to read at bridge distance.
     let overlay = commands
         .spawn((
             CommsOverlay,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Percent(10.0),
-                right: Val::Percent(10.0),
-                top: Val::Percent(15.0),
-                bottom: Val::Percent(15.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.62)),
+            ZIndex(5),
+        ))
+        .id();
+
+    let panel = commands
+        .spawn((
+            Node {
+                width: Val::Percent(80.0),
+                height: Val::Percent(70.0),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(16.0)),
                 row_gap: Val::Px(8.0),
@@ -539,9 +548,10 @@ fn sync_comms_overlay(
             BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.88)),
         ))
         .id();
+    commands.entity(overlay).add_child(panel);
 
     // Sender name header
-    commands.entity(overlay).with_children(|p| {
+    commands.entity(panel).with_children(|p| {
         p.spawn((
             Text::new(msg.sender_name.clone()),
             TextFont {
@@ -553,7 +563,7 @@ fn sync_comms_overlay(
     });
 
     // Divider label
-    commands.entity(overlay).with_children(|p| {
+    commands.entity(panel).with_children(|p| {
         p.spawn((
             Text::new(
                 "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
@@ -567,7 +577,7 @@ fn sync_comms_overlay(
     });
 
     // Message body
-    commands.entity(overlay).with_children(|p| {
+    commands.entity(panel).with_children(|p| {
         p.spawn((
             Text::new(msg.body.clone()),
             TextFont {
@@ -584,7 +594,7 @@ fn sync_comms_overlay(
 
     // Responses (read-only, labelled A, B, C…)
     if !msg.responses.is_empty() {
-        commands.entity(overlay).with_children(|p| {
+        commands.entity(panel).with_children(|p| {
             p.spawn((
                 Text::new("POSSIBLE RESPONSES:"),
                 TextFont {
@@ -597,7 +607,7 @@ fn sync_comms_overlay(
         for (idx, response) in msg.responses.iter().enumerate() {
             let letter = (b'A' + idx as u8) as char;
             let label = format!("{})  {}", letter, response);
-            commands.entity(overlay).with_children(|p| {
+            commands.entity(panel).with_children(|p| {
                 p.spawn((
                     Text::new(label),
                     TextFont {
@@ -908,5 +918,56 @@ fn draw_warp_exit_markers(query: Query<(&WarpOutMarker, &Transform)>, mut gizmos
             radius * 0.6,
             Color::srgba(0.5, 1.0, 1.0, pulse * 0.4),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ship_state::ShipViewMode;
+    use crate::simulation::LocalShip;
+
+    fn camera_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_systems(Update, toggle_cameras);
+        app.world_mut().spawn((LocalShip, ShipViewMode::default()));
+        app.world_mut().spawn((
+            GameCamera,
+            Camera {
+                is_active: false,
+                ..default()
+            },
+        ));
+        app
+    }
+
+    fn game_camera_active(app: &mut App) -> bool {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&Camera, With<GameCamera>>();
+        q.single(app.world()).unwrap().is_active
+    }
+
+    #[test]
+    fn overlay_view_modes_keep_game_camera_rendering() {
+        let mut app = camera_test_app();
+
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+        assert!(game_camera_active(&mut app));
+
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipViewMode, With<LocalShip>>();
+            q.single_mut(app.world_mut()).unwrap().view_mode = ViewMode::Radar;
+        }
+        app.update();
+
+        assert!(game_camera_active(&mut app));
     }
 }

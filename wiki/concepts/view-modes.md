@@ -2,8 +2,8 @@
 title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
-sources: [src/core/messages.rs, src/server/renderer.rs, PRD-036]
-updated: 2026-06-15
+sources: [src/core/messages.rs, src/server/renderer.rs, src/server/radar.rs, PRD-036]
+updated: 2026-07-03
 ---
 
 # View Modes
@@ -40,6 +40,12 @@ A top-centre text label on the viewscreen (`FORE` / `AFT` / `PORT` / `STARBOARD`
 ## Radar mode
 
 The viewscreen renders the asteroid field as a top-down map using [`radar_dots()`](./radar-projection.md). Useful as an alternative tactical view.
+
+## Live overlay backgrounds
+
+All in-game `ViewMode`s keep the 3D `GameCamera` active. Radar, chart, and Comms modes are UI overlays on top of the live space scene, not replacements for it.
+
+Helm and Sensors/Science radar modes use a semi-transparent circular black backing behind the radar widget. System Chart, Navigation Chart, and Comms use a semi-transparent full-screen black backing so the map/message remains readable while stars, ships, and effects continue updating underneath.
 
 ## Overlay toggle behaviour
 

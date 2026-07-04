@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -41,6 +41,8 @@
   <script type="module" src="gui/sim-state.js"></script>
   <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
+  <!-- Connection manager: PeerJS lifecycle extracted into a tested module (issue #603) -->
+  <script type="module" src="gui/connection-manager.js"></script>
   <style>
     /* -- CSS variables (lobby + shared) -------------------------------- */
     :root {
@@ -902,7 +904,6 @@
       // Shared Navigation waypoint from SimState
       navigationWaypoint: null,
       objectives: [] };
-    let conn = null;
 
     // DIAGNOSTIC: log every click at document level (capture phase) with target info
     document.addEventListener('pointerdown', (e) => {
@@ -969,14 +970,10 @@
     function isHelm(s)        { return playerStation(s) === 'helm'; }
 
     function send(type, data) {
-      if (!conn || !conn.open) return;
-      // ControlSystem messages wrap their real type in data.payload.type (see
-      // gui/action-map.js), so the NO_CLICK check on continuous inputs like
-      // HelmInput must look there rather than at the 'ControlSystem' envelope.
+      if (!window.connectionManager || !window.connectionManager.connected) return;
       const clickType = (type === 'ControlSystem' && data && data.payload) ? data.payload.type : type;
       if (!NO_CLICK.has(clickType)) playClick();
-      const msg = data !== undefined ? { type, data } : { type };
-      conn.send(JSON.stringify(msg));
+      window.connectionManager.send(type, data);
     }
 
     function setStatus(text) { $('status').textContent = text; }
@@ -2200,7 +2197,7 @@
       scheduleRender();
     }
 
-    // -- PeerJS connection ---------------------------------------
+    // -- PeerJS connection (extracted to gui/connection-manager.js, issue #603) --
 
     const hostPeerId = location.hash.slice(1);
 
@@ -2208,41 +2205,8 @@
       setStatus('No host ID in URL. Scan the QR code on the view screen.');
     } else {
       (async () => {
-        async function getIceServers() {
-          const base = [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
-          ];
-          try {
-            const r = await fetch('https://phoenix-turn-credentials.project-phoenix.workers.dev');
-            if (r.ok) {
-              const extra = await r.json();
-              console.log(`[ICE] Metered.ca returned ${extra.length} server(s) � appending to base list`);
-              return [...base, ...extra];
-            }
-            console.warn('[ICE] Metered.ca fetch returned', r.status, '� using OpenRelay only');
-          } catch (e) {
-            console.warn('[ICE] Metered.ca fetch failed (placeholder or network error) � using OpenRelay only:', e.message);
-          }
-          return base;
-        }
-
         // Gate on DOMContentLoaded before touching any module-dependent state.
-        // The IIFE runs during HTML parsing; <script type="module"> tags are
-        // deferred and only execute after parsing completes. If getIceServers()
-        // fails fast (Cloudflare blocked, offline), it resolves as a microtask
-        // that fires BEFORE deferred modules run as tasks � leaving
-        // window.lobbyState and window.installSessionToken undefined. That
-        // causes Welcome to use the inline fallback while lobbyState stays empty,
-        // and StationAssigned then overwrites state.players with that empty list,
-        // so the help panel and Ready button never appear. Waiting for
-        // DOMContentLoaded guarantees all modules have run before any PeerJS
-        // activity, and moving installSessionToken() here tightens the
-        // same-machine token-collision window (heartbeat fires before ICE
-        // negotiation, not after the Cloudflare fetch which can take seconds).
+        // See the comment above the original gate for the full rationale.
         if (document.readyState === 'loading') {
           await new Promise(resolve =>
             document.addEventListener('DOMContentLoaded', resolve, { once: true }));
@@ -2264,122 +2228,46 @@
               }
               return t;
             })();
-        console.log(`[client] session token ${myToken.slice(0, 8)}�`);
+        console.log(`[client] session token ${myToken.slice(0, 8)}`);
 
-        console.log('[PeerJS] fetching ICE servers�');
-        const iceServers = await getIceServers();
+        console.log('[PeerJS] fetching ICE servers');
+        const iceServers = await window.fetchIceServers();
         console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
-        console.log(`[PeerJS] connecting to host peer ID: ${hostPeerId}`);
-        const clientPeer = new Peer({ config: { iceServers } });
 
-        clientPeer.on('open', () => {
-          console.log('[PeerJS] client peer open � starting DataChannel connect');
-          let connectTimeout;
-          let connectAttempts = 0;
+        if (typeof window.connectionManager === 'undefined') {
+          console.warn('[client] connection-manager module not loaded; falling back to inline Peer setup');
+          return;
+        }
 
-          function startConnect() {
-            console.log(`[PeerJS] connect attempt ${connectAttempts + 1}�`);
-            setStatus('Connecting to host�');
-            conn = clientPeer.connect(hostPeerId, { reliable: true });
-
-            // Hook ICE state immediately so we see gathering/checking/connected
-            const pc = conn.peerConnection;
-            if (pc) {
-              pc.addEventListener('iceconnectionstatechange', () =>
-                console.log(`[ICE] state ? ${pc.iceConnectionState}`));
-              pc.addEventListener('icegatheringstatechange', () =>
-                console.log(`[ICE] gathering ? ${pc.iceGatheringState}`));
-            }
-
-            // If the DataConnection doesn't open within 8 s, retry � PeerJS
-            // can silently stall when NAT traversal fails or the host is
-            // temporarily unreachable.
-            connectTimeout = setTimeout(() => {
-              if (conn && !conn.open) {
-                console.warn(`[PeerJS] ICE timed out on attempt ${connectAttempts + 1} � closing and retrying`);
-                conn.close();
-                conn = null;
-                connectAttempts++;
-                if (connectAttempts >= 3) {
-                  console.error('[PeerJS] giving up after 3 failed ICE attempts');
-                  setConnectionStatus('error');
-                  setStatus('Cannot reach host after 3 attempts � the network may be blocking WebRTC relay traffic. Try a different network.');
-                  return;
-                }
-                startConnect();
-              }
-            }, 8000);
-
-            conn.on('open', () => {
-              clearTimeout(connectTimeout);
-              console.log('[PeerJS] DataChannel open');
-              // Report the winning ICE candidate type so it's clear whether
-              // traffic is direct (host), STUN-reflexive (srflx), or relayed (relay/TURN)
-              const pc = conn.peerConnection;
-              if (pc) {
-                setTimeout(() => {
-                  pc.getStats().then(stats => {
-                    const vals = [...stats.values()];
-                    const pair = vals.find(r => r.type === 'candidate-pair' && r.nominated);
-                    if (pair) {
-                      const loc = vals.find(r => r.id === pair.localCandidateId);
-                      const rem = vals.find(r => r.id === pair.remoteCandidateId);
-                      console.log(`[ICE] active path: local=${loc?.candidateType} remote=${rem?.candidateType}`);
-                      if (loc?.candidateType === 'relay' || rem?.candidateType === 'relay') {
-                        console.log('[ICE] traffic is being relayed through a TURN server');
-                      }
-                    }
-                  }).catch(() => {});
-                }, 1500);
-              }
-              setConnectionStatus('ready');
+        window.connectionManager.connect(hostPeerId, {
+          iceServers,
+          getIdent: () => ({ token: myToken, name: myName }),
+          onData: handleMessage,
+          onStatus: (state) => {
+            setConnectionStatus(state);
+            if (state === 'ready') {
               acquireWakeLock();
-              send('Identify', { token: myToken, name: myName });
-              setStatus('Waiting for server�');
-            });
-
-            conn.on('data', raw => {
-              try {
-                const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-                handleMessage(JSON.parse(str));
-              } catch (e) { console.error('[client] bad message', e, raw); }
-            });
-
-            conn.on('close', () => {
-              clearTimeout(connectTimeout);
-              console.log('[PeerJS] DataChannel closed');
-              setConnectionStatus('disconnected');
-              setStatus('Disconnected');
-              conn = null;
+              setStatus('Waiting for server');
+            } else if (state === 'connecting') {
+              setStatus('Connecting to host');
+            } else if (state === 'disconnected') {
               releaseWakeLock();
-            });
-            conn.on('error', e => {
-              clearTimeout(connectTimeout);
-              console.error(`[PeerJS] connection error (type: ${e.type})`, e);
-              setStatus('Connection error: ' + e.type);
-            });
-          }
-
-          startConnect();
-        });
-
-        clientPeer.on('disconnected', () => {
-          console.warn('[PeerJS] signaling disconnected � reconnecting�');
-          setConnectionStatus('disconnected');
-          clientPeer.reconnect();
-        });
-
-        clientPeer.on('error', e => {
-          console.error(`[PeerJS] client error (type: ${e.type})`, e);
-          setConnectionStatus('error');
-          if (e.type === 'peer-unavailable') {
-            setStatus('Host not found � rescan the QR code on the view screen.');
-          } else {
-            setStatus('Peer error: ' + e.type);
-          }
+              setStatus('Disconnected');
+            } else if (state === 'error') {
+              releaseWakeLock();
+              setStatus('Cannot reach host - the network may be blocking WebRTC relay traffic. Try a different network.');
+            }
+          },
+          onError: (type) => {
+            if (type === 'peer-unavailable') {
+              setStatus('Host not found \u2014 rescan the QR code on the view screen.');
+            } else {
+              setStatus('Peer error: ' + type);
+            }
+          },
+          onLog: (msg) => console.log(msg),
         });
       })();
-    }
-  </script>
+    }</script>
 </body>
 </html>

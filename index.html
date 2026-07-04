@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-39ab680bc4b8a174.js" crossorigin="anonymous" integrity="sha384-sBDO6sP4mG88y3/fdGcBuXmB2eyCgA7BghLFQ9MizaBAZ5lyU7Xwsf47MS5QNDMo"><link rel="preload" href="./project-phoenix-39ab680bc4b8a174_bg.wasm" crossorigin="anonymous" integrity="sha384-pon2OvAeF1Ug7Tx7dn1UbuGKYvmrOrRGmwjHSQYXlCjv+Cb8nx7c0nsqRdSgCA4k" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b995c30565ebcdcc.js" crossorigin="anonymous" integrity="sha384-BYEapGerA86wVMwd+fkrCEi9WNtzc10d0rlaJkWYc/ViOuyz4qPpcODWMFt52i1E"><link rel="preload" href="./project-phoenix-b995c30565ebcdcc_bg.wasm" crossorigin="anonymous" integrity="sha384-Cb7ER1CbZbxSDG7cfuZYUs9cojPwFrW19UQfviT+Rss+6Ppmv5JUtonDAyszO0N7" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -862,8 +862,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-39ab680bc4b8a174.js';
-const wasm = await init({ module_or_path: './project-phoenix-39ab680bc4b8a174_bg.wasm' });
+import init, * as bindings from './project-phoenix-b995c30565ebcdcc.js';
+const wasm = await init({ module_or_path: './project-phoenix-b995c30565ebcdcc_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -904,6 +904,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
   };
 
+  let _hudPrevRedAlert = false;
   window.__updateHud = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
@@ -924,6 +925,16 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       condition.textContent = s.condition;
     }
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
+    // ── Red-alert siren on transition ───────────────────────────────────────
+    if (s.red_alert && !_hudPrevRedAlert) {
+      document.getElementById('red-alert-siren').play().catch(() => {});
+    }
+    _hudPrevRedAlert = !!s.red_alert;
+    // ── Engine hum volume from thrust ───────────────────────────────────────
+    if (typeof s.engine_thrust === 'number') {
+      const engine = document.getElementById('ship-engine');
+      if (engine) engine.volume = s.engine_thrust * 0.15;
+    }
     // ── 4-slot viewscreen status strip ──────────────────────────────────────
     const vNav = document.getElementById('v-nav');
     const vTac = document.getElementById('v-tac');
@@ -965,9 +976,33 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   // set_lobby_state_callback. We parse it and render the station grid,
   // crew counter, ready badge, and spectator list.
 
+  let _lobbyPrevPhase = '';
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+
+    // ── Loading overlay ────────────────────────────────────────────────
+    if (s.phase === 'Loading') {
+      const al = document.getElementById('asset-loading');
+      if (al) al.style.display = 'flex';
+      if (typeof s.loading_progress === 'number') {
+        const pct = Math.round(s.loading_progress * 100) + '%';
+        const el1 = document.getElementById('asset-loading-pct');
+        const el2 = document.getElementById('loading-progress-pct');
+        if (el1) el1.textContent = pct;
+        if (el2) el2.textContent = pct;
+      }
+    }
+
+    // ── Game-start cue (Loading → InProgress transition) ───────────────
+    if (s.phase === 'InProgress' && _lobbyPrevPhase === 'Loading') {
+      const al = document.getElementById('asset-loading');
+      if (al) al.style.display = 'none';
+      const qrOverlay = document.getElementById('overlay');
+      if (qrOverlay) qrOverlay.style.display = 'none';
+      startGameAudio();
+    }
+    _lobbyPrevPhase = s.phase;
 
     // ── Show/hide panel + canvas based on phase ───────────────────────
     const isLobby = s.phase === 'Lobby';
@@ -1446,7 +1481,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── Outbound routing ───────────────────────────────────────────────────
 
     // ── JS audio state ─────────────────────────────────────────────────────
-    let prevRedAlert = false;
     let gameAudioStarted = false;
 
     function startGameAudio() {
@@ -1461,39 +1495,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     function routeOutbound(target, payload) {
-      try {
-        const parsed = JSON.parse(payload);
-        if (parsed.type === 'GameStarted') {
-          qrVisible = false;
-          document.getElementById('overlay').style.display = 'none';
-          const al = document.getElementById('asset-loading');
-          if (al) al.style.display = 'none';
-          startGameAudio();
-        }
-        if (parsed.type === 'LoadingProgress') {
-          const frac = parsed.data?.fraction ?? 0;
-          const pct = Math.round(frac * 100);
-          const el = document.getElementById('loading-progress-text');
-          const pctEl = document.getElementById('loading-progress-pct');
-          if (el) el.style.display = '';
-          if (pctEl) pctEl.textContent = String(pct);
-          const al = document.getElementById('asset-loading');
-          const alPct = document.getElementById('asset-loading-pct');
-          if (al) al.style.display = 'flex';
-          if (alPct) alPct.textContent = String(pct);
-        }
-        if (parsed.type === 'SimState') {
-          const snapshot = parsed.data?.snapshot;
-          const redAlert = snapshot?.red_alert;
-          if (redAlert && !prevRedAlert) {
-            document.getElementById('red-alert-siren').play().catch(() => {});
-          }
-          prevRedAlert = redAlert;
-          const engine = document.getElementById('ship-engine');
-          engine.volume = (snapshot?.engine_thrust ?? 0) * 0.15;
-        }
-      } catch (_) {}
-
       if (target === 'all') {
         for (const conn of tokenConns.values()) { if (conn.open) conn.send(payload); }
       } else if (target.startsWith('token:')) {

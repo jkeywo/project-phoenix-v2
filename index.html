@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-b995c30565ebcdcc.js" crossorigin="anonymous" integrity="sha384-BYEapGerA86wVMwd+fkrCEi9WNtzc10d0rlaJkWYc/ViOuyz4qPpcODWMFt52i1E"><link rel="preload" href="./project-phoenix-b995c30565ebcdcc_bg.wasm" crossorigin="anonymous" integrity="sha384-Cb7ER1CbZbxSDG7cfuZYUs9cojPwFrW19UQfviT+Rss+6Ppmv5JUtonDAyszO0N7" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-19061cf43017d893.js" crossorigin="anonymous" integrity="sha384-HVuyzMtsnsGIRlRlnPChNMch7vhdwwm2xoArxo8bizR1hkDpqoM8zlvSRwfvp53v"><link rel="preload" href="./project-phoenix-19061cf43017d893_bg.wasm" crossorigin="anonymous" integrity="sha384-+Z2tXwyupiukHD5IAMqItyrywJ3a+JWcR3MPes/HuGnTmnPdyn0vZEIoFqtfaX0F" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -862,8 +862,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-b995c30565ebcdcc.js';
-const wasm = await init({ module_or_path: './project-phoenix-b995c30565ebcdcc_bg.wasm' });
+import init, * as bindings from './project-phoenix-19061cf43017d893.js';
+const wasm = await init({ module_or_path: './project-phoenix-19061cf43017d893_bg.wasm' });
 
 
 window.wasmBindings = bindings;

@@ -32,6 +32,7 @@ use crate::lobby::{OutboundMessage, Sessions, WorldResource};
 use crate::messages::{
     GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState,
 };
+use crate::server::asset_preload::AssetPreloadResource;
 use crate::server::renderer::GameCamera;
 use crate::server_app::GameOverReason;
 use crate::ship_state::ShipPhysics;
@@ -173,6 +174,7 @@ pub(crate) fn push_lobby_state(
     ship_stations: Option<Res<ShipStations>>,
     phase: Res<State<GamePhase>>,
     world_resource: Option<Res<WorldResource>>,
+    preload: Option<Res<AssetPreloadResource>>,
     mut writer: MessageWriter<LobbyStateChanged>,
 ) {
     let Some(sessions) = sessions else { return };
@@ -226,6 +228,15 @@ pub(crate) fn push_lobby_state(
 
     let all_ready = sessions.0.all_ready();
 
+    let loading_progress = if *phase.get() == GamePhase::Loading {
+        preload
+            .as_ref()
+            .filter(|p| p.started)
+            .map(|p| p.fraction())
+    } else {
+        None
+    };
+
     let payload = LobbyStatePayload {
         phase: format!("{:?}", phase.get()),
         scenario_title,
@@ -239,6 +250,7 @@ pub(crate) fn push_lobby_state(
         all_ready,
         stations: station_payloads,
         spectators,
+        loading_progress,
     };
 
     if let Ok(json) = codec::encode_lobby_state(&payload) {
@@ -428,6 +440,7 @@ fn spawn_hud_state_entity(mut commands: Commands) {
         hull_pct: 100,
         condition: "NOMINAL".to_string(),
         red_alert: false,
+        engine_thrust: 0.0,
         game_over_message: None,
     }));
 }
@@ -439,6 +452,7 @@ fn compute_hud_state(
     physics: &ShipPhysics,
     hull_current: f32,
     hull_max: f32,
+    engine_thrust: f32,
     phase: &GamePhase,
     game_over_reason: Option<&GameOverReason>,
 ) -> ViewscreenHudState {
@@ -466,6 +480,7 @@ fn compute_hud_state(
         hull_pct: hull_pct.round() as i32,
         condition: if alert { "ALERT" } else { "NOMINAL" }.to_string(),
         red_alert: alert,
+        engine_thrust,
         game_over_message,
     }
 }
@@ -479,6 +494,7 @@ fn recompute_hud_state(
     phase: Option<Res<State<GamePhase>>>,
     game_over_reason: Option<Res<GameOverReason>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
+    last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
     let Some(phase) = phase else { return };
@@ -488,11 +504,17 @@ fn recompute_hud_state(
         .single()
         .map(|h| (h.0.total_current(), h.0.total_max()))
         .unwrap_or((100.0, 100.0));
+    let engine_thrust = last_input_q
+        .iter()
+        .next()
+        .map(|li| li.thrust.abs())
+        .unwrap_or(0.0);
     let next = compute_hud_state(
         red_alert,
         &physics,
         hull_current,
         hull_max,
+        engine_thrust,
         phase.get(),
         game_over_reason.as_deref(),
     );
@@ -523,6 +545,7 @@ fn push_game_over_hud_state(
         &physics,
         hull_current,
         hull_max,
+        0.0,
         &GamePhase::GameOver,
         game_over_reason.as_deref(),
     );
@@ -562,11 +585,12 @@ mod tests {
     #[test]
     fn compute_hud_state_nominal() {
         let physics = ShipPhysics::default();
-        let state = compute_hud_state(false, &physics, 100.0, 100.0, &GamePhase::InProgress, None);
+        let state = compute_hud_state(false, &physics, 100.0, 100.0, 0.0, &GamePhase::InProgress, None);
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
         assert_eq!(state.condition, "NOMINAL");
         assert!(!state.red_alert);
+        assert_eq!(state.engine_thrust, 0.0);
         assert!(state.game_over_message.is_none());
     }
 
@@ -576,11 +600,19 @@ mod tests {
             yaw: std::f32::consts::FRAC_PI_2,
             ..Default::default()
         };
-        let state = compute_hud_state(true, &physics, 50.0, 100.0, &GamePhase::InProgress, None);
+        let state = compute_hud_state(true, &physics, 50.0, 100.0, 0.75, &GamePhase::InProgress, None);
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
         assert_eq!(state.condition, "ALERT");
         assert!(state.red_alert);
+        assert!((state.engine_thrust - 0.75).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn compute_hud_state_engine_thrust_propagated() {
+        let physics = ShipPhysics::default();
+        let state = compute_hud_state(false, &physics, 100.0, 100.0, 0.5, &GamePhase::InProgress, None);
+        assert_eq!(state.engine_thrust, 0.5);
     }
 
     #[test]
@@ -593,6 +625,7 @@ mod tests {
             &physics,
             0.0,
             100.0,
+            0.0,
             &GamePhase::GameOver,
             Some(&reason),
         );
@@ -609,6 +642,7 @@ mod tests {
             &physics,
             50.0,
             100.0,
+            0.0,
             &GamePhase::GameOver,
             Some(&reason),
         );

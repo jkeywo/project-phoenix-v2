@@ -893,6 +893,7 @@
     }
   };
 
+  let _hudPrevRedAlert = false;
   window.__updateHud = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
@@ -913,6 +914,16 @@
       condition.textContent = s.condition;
     }
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
+    // ── Red-alert siren on transition ───────────────────────────────────────
+    if (s.red_alert && !_hudPrevRedAlert) {
+      document.getElementById('red-alert-siren').play().catch(() => {});
+    }
+    _hudPrevRedAlert = !!s.red_alert;
+    // ── Engine hum volume from thrust ───────────────────────────────────────
+    if (typeof s.engine_thrust === 'number') {
+      const engine = document.getElementById('ship-engine');
+      if (engine) engine.volume = s.engine_thrust * 0.15;
+    }
     // ── 4-slot viewscreen status strip ──────────────────────────────────────
     const vNav = document.getElementById('v-nav');
     const vTac = document.getElementById('v-tac');
@@ -954,9 +965,33 @@
   // set_lobby_state_callback. We parse it and render the station grid,
   // crew counter, ready badge, and spectator list.
 
+  let _lobbyPrevPhase = '';
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+
+    // ── Loading overlay ────────────────────────────────────────────────
+    if (s.phase === 'Loading') {
+      const al = document.getElementById('asset-loading');
+      if (al) al.style.display = 'flex';
+      if (typeof s.loading_progress === 'number') {
+        const pct = Math.round(s.loading_progress * 100) + '%';
+        const el1 = document.getElementById('asset-loading-pct');
+        const el2 = document.getElementById('loading-progress-pct');
+        if (el1) el1.textContent = pct;
+        if (el2) el2.textContent = pct;
+      }
+    }
+
+    // ── Game-start cue (Loading → InProgress transition) ───────────────
+    if (s.phase === 'InProgress' && _lobbyPrevPhase === 'Loading') {
+      const al = document.getElementById('asset-loading');
+      if (al) al.style.display = 'none';
+      const qrOverlay = document.getElementById('overlay');
+      if (qrOverlay) qrOverlay.style.display = 'none';
+      startGameAudio();
+    }
+    _lobbyPrevPhase = s.phase;
 
     // ── Show/hide panel + canvas based on phase ───────────────────────
     const isLobby = s.phase === 'Lobby';
@@ -1435,7 +1470,6 @@
     // ── Outbound routing ───────────────────────────────────────────────────
 
     // ── JS audio state ─────────────────────────────────────────────────────
-    let prevRedAlert = false;
     let gameAudioStarted = false;
 
     function startGameAudio() {
@@ -1450,39 +1484,6 @@
     }
 
     function routeOutbound(target, payload) {
-      try {
-        const parsed = JSON.parse(payload);
-        if (parsed.type === 'GameStarted') {
-          qrVisible = false;
-          document.getElementById('overlay').style.display = 'none';
-          const al = document.getElementById('asset-loading');
-          if (al) al.style.display = 'none';
-          startGameAudio();
-        }
-        if (parsed.type === 'LoadingProgress') {
-          const frac = parsed.data?.fraction ?? 0;
-          const pct = Math.round(frac * 100);
-          const el = document.getElementById('loading-progress-text');
-          const pctEl = document.getElementById('loading-progress-pct');
-          if (el) el.style.display = '';
-          if (pctEl) pctEl.textContent = String(pct);
-          const al = document.getElementById('asset-loading');
-          const alPct = document.getElementById('asset-loading-pct');
-          if (al) al.style.display = 'flex';
-          if (alPct) alPct.textContent = String(pct);
-        }
-        if (parsed.type === 'SimState') {
-          const snapshot = parsed.data?.snapshot;
-          const redAlert = snapshot?.red_alert;
-          if (redAlert && !prevRedAlert) {
-            document.getElementById('red-alert-siren').play().catch(() => {});
-          }
-          prevRedAlert = redAlert;
-          const engine = document.getElementById('ship-engine');
-          engine.volume = (snapshot?.engine_thrust ?? 0) * 0.15;
-        }
-      } catch (_) {}
-
       if (target === 'all') {
         for (const conn of tokenConns.values()) { if (conn.open) conn.send(payload); }
       } else if (target.startsWith('token:')) {

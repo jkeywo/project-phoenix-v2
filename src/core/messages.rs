@@ -1240,6 +1240,10 @@ pub struct ViewscreenHudState {
     pub condition: String,
     /// Whether the ship is at red alert (drives the CSS vignette).
     pub red_alert: bool,
+    /// Current engine thrust fraction (0.0 = idle, 1.0 = full).
+    /// Drives the engine hum volume on the host page.
+    #[serde(default)]
+    pub engine_thrust: f32,
     /// Set when the game has ended. "Ship Destroyed" for hull death; the
     /// scenario `game_over` message otherwise. `None` while in progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2393,6 +2397,8 @@ pub struct LobbyStatePayload {
     pub all_ready: bool,
     pub stations: Vec<StationPayload>,
     pub spectators: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loading_progress: Option<f32>,
 }
 
 /// One station slot in the lobby grid payload.

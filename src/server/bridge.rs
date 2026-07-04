@@ -1,7 +1,15 @@
 // WASM/JS bridge — all public functions are #[wasm_bindgen] exports.
 //
-// On native targets this module is empty; the WASM-specific code is
-// gated behind #[cfg(target_arch = "wasm32")].
+// On native targets this module is empty except for the debug-toggle
+// pending-set (`DebugToggleKind` + `apply_pending_toggles`), which is kept
+// free of `target_arch = "wasm32"` and Bevy types specifically so it can be
+// unit-tested natively (see the `tests` module at the bottom of this file).
+// The WASM-specific glue (thread-locals, wasm_bindgen exports, the Bevy
+// drain system) is gated behind #[cfg(target_arch = "wasm32")].
+
+// Used by the debug-toggle pending-set below, which is compiled on every
+// target (see comment on `DebugToggleKind`), so this import is not gated.
+use std::collections::HashSet;
 
 #[cfg(target_arch = "wasm32")]
 use {
@@ -28,6 +36,73 @@ use {
     std::cell::RefCell,
     wasm_bindgen::prelude::*,
 };
+
+// ── Debug toggle pending-set ────────────────────────────────────────────────
+//
+// One enum-keyed pending set replaces what used to be six near-identical
+// `RefCell<bool>` thread-locals (one per debug overlay) plus six matching
+// blocks in the drain system (issue #609). Adding a new debug overlay now
+// means: add a variant here, add its resource field to `apply_pending_toggles`,
+// and add one `wasm_bindgen` export that inserts the variant — no new
+// thread-local, no new drain block.
+//
+// Deliberately kept free of `target_arch = "wasm32"` and Bevy types so it can
+// be unit-tested on native (`cargo test`) without a running Bevy App.
+
+/// Identifies which debug overlay/toggle a pending request is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DebugToggleKind {
+    /// F4 — region wireframes (`DebugRegionsEnabled`).
+    Regions,
+    /// F3 — modifier debug overlay (`DebugOverlayEnabled`).
+    Overlay,
+    /// F9 — simulation pause (`DebugPaused`); also (un)pauses `Time<Virtual>`.
+    Pause,
+    /// F8 — damage debug log (`DebugDamageEnabled`).
+    Damage,
+    /// F7 — entity behavior overlay (`DebugEntitiesEnabled`).
+    Entities,
+    /// F2 — entity inspector overlay (`DebugEntityInspectorEnabled`).
+    EntityInspector,
+}
+
+/// Applies a batch of pending debug-toggle requests to plain `bool` flags.
+///
+/// Pure function, no Bevy/wasm dependency, so it can be exercised directly by
+/// unit tests. Each distinct `DebugToggleKind` present in `pending` flips its
+/// corresponding flag exactly once, regardless of how many times that variant
+/// appears in the iterator (the pending set only ever holds each kind once,
+/// but the function doesn't rely on that to stay correct).
+///
+/// Returns `true` if `*paused` was flipped, so the caller (the Bevy drain
+/// system) knows to (un)pause `Time<Virtual>` as a side effect.
+pub fn apply_pending_toggles(
+    pending: impl IntoIterator<Item = DebugToggleKind>,
+    regions: &mut bool,
+    overlay: &mut bool,
+    paused: &mut bool,
+    damage: &mut bool,
+    entities: &mut bool,
+    entity_inspector: &mut bool,
+) -> bool {
+    let mut pause_changed = false;
+    // Dedupe in case the same kind was queued multiple times between drains.
+    let unique: HashSet<DebugToggleKind> = pending.into_iter().collect();
+    for kind in unique {
+        match kind {
+            DebugToggleKind::Regions => *regions = !*regions,
+            DebugToggleKind::Overlay => *overlay = !*overlay,
+            DebugToggleKind::Pause => {
+                *paused = !*paused;
+                pause_changed = true;
+            }
+            DebugToggleKind::Damage => *damage = !*damage,
+            DebugToggleKind::Entities => *entities = !*entities,
+            DebugToggleKind::EntityInspector => *entity_inspector = !*entity_inspector,
+        }
+    }
+    pause_changed
+}
 
 // ── Thread-local state ─────────────────────────────────────────────────────
 //
@@ -59,21 +134,11 @@ thread_local! {
     /// `wasm_set_debug_regions()` before `wasm_init()`.
     static DEBUG_REGIONS_ENABLED: RefCell<bool> = const { RefCell::new(false) };
 
-    /// Pending toggle request from `wasm_toggle_debug_regions()`. Drained by
-    /// `drain_debug_toggles` each `PreUpdate` frame.
-    static PENDING_DEBUG_TOGGLE: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Pending toggle request from `wasm_toggle_debug_overlay()`. Drained by
-    /// `drain_debug_toggles` each `PreUpdate` frame.
-    static PENDING_TOGGLE_OVERLAY: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Pending toggle request from `wasm_toggle_debug_pause()`. Drained by
-    /// `drain_debug_toggles` each `PreUpdate` frame.
-    static PENDING_PAUSE_TOGGLE: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Pending toggle request from `wasm_toggle_debug_damage()`. Drained by
-    /// `drain_debug_toggles` each `PreUpdate` frame.
-    static PENDING_TOGGLE_DAMAGE: RefCell<bool> = const { RefCell::new(false) };
+    /// Pending debug-toggle requests queued by the six `wasm_toggle_*`
+    /// exports. Drained by `drain_debug_toggles` each `PreUpdate` frame via
+    /// `apply_pending_toggles`. Consolidated from six separate
+    /// `RefCell<bool>` thread-locals into one enum-keyed set (issue #609).
+    static PENDING_TOGGLES: RefCell<HashSet<DebugToggleKind>> = RefCell::new(HashSet::new());
 
     /// Pre-formatted modifier debug text written by `write_debug_state` each
     /// `PostUpdate` frame when the overlay is enabled. Read by
@@ -85,18 +150,10 @@ thread_local! {
     /// `wasm_get_damage_log()` from JS.
     static DAMAGE_LOG_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
-    /// Pending toggle request from `wasm_toggle_debug_entities()`. Drained by
-    /// `drain_debug_toggles` each `PreUpdate` frame.
-    static PENDING_TOGGLE_ENTITIES: RefCell<bool> = const { RefCell::new(false) };
-
     /// Pre-formatted entity behavior text written by `write_entity_debug_state`
     /// each `PostUpdate` frame when the overlay is enabled. Read by
     /// `wasm_get_entity_debug_state()` from JS.
     static ENTITY_DEBUG_STRING: RefCell<String> = const { RefCell::new(String::new()) };
-
-    /// Pending toggle request from `wasm_toggle_entity_inspector()`. Drained by
-    /// `drain_debug_toggles` each `PreUpdate` frame.
-    static PENDING_TOGGLE_ENTITY_INSPECTOR: RefCell<bool> = const { RefCell::new(false) };
 
     /// Pre-formatted entity inspector text written by `update_entity_inspector`
     /// each `PostUpdate` frame when the overlay is enabled. Read by
@@ -454,7 +511,9 @@ pub fn wasm_is_debug_regions_enabled() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_debug_regions() {
-    PENDING_DEBUG_TOGGLE.with(|v| *v.borrow_mut() = true);
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::Regions);
+    });
 }
 
 /// Called by JS (e.g. F3 keydown) to toggle the modifier debug overlay at runtime.
@@ -464,7 +523,9 @@ pub fn wasm_toggle_debug_regions() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_debug_overlay() {
-    PENDING_TOGGLE_OVERLAY.with(|v| *v.borrow_mut() = true);
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::Overlay);
+    });
 }
 
 /// Called by JS (e.g. F9 keydown) to toggle the debug simulation pause at runtime.
@@ -474,7 +535,9 @@ pub fn wasm_toggle_debug_overlay() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_debug_pause() {
-    PENDING_PAUSE_TOGGLE.with(|v| *v.borrow_mut() = true);
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::Pause);
+    });
 }
 
 /// Called by JS (e.g. F8 keydown) to toggle the damage debug overlay at runtime.
@@ -484,7 +547,9 @@ pub fn wasm_toggle_debug_pause() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_debug_damage() {
-    PENDING_TOGGLE_DAMAGE.with(|v| *v.borrow_mut() = true);
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::Damage);
+    });
 }
 
 /// Called by JS each animation frame to read the latest formatted modifier
@@ -524,7 +589,9 @@ pub fn set_damage_log_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_debug_entities() {
-    PENDING_TOGGLE_ENTITIES.with(|v| *v.borrow_mut() = true);
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::Entities);
+    });
 }
 
 /// Called by JS each animation frame to read the latest entity behavior debug
@@ -549,7 +616,9 @@ pub fn set_entity_debug_string(text: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_entity_inspector() {
-    PENDING_TOGGLE_ENTITY_INSPECTOR.with(|v| *v.borrow_mut() = true);
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::EntityInspector);
+    });
 }
 
 /// Called by JS each animation frame to read the latest entity inspector text
@@ -668,9 +737,16 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
     }
 }
 
-/// Drains the pending debug-toggle flags each frame and updates the corresponding
-/// Bevy resources: `DebugRegionsEnabled` (F4), `DebugOverlayEnabled` (F3), and
-/// `DebugPaused` (F9).
+/// Drains the pending debug-toggle set each frame and updates the
+/// corresponding Bevy resources: `DebugRegionsEnabled` (F4),
+/// `DebugOverlayEnabled` (F3), `DebugPaused` (F9), `DebugDamageEnabled` (F8),
+/// `DebugEntitiesEnabled` (F7), and `DebugEntityInspectorEnabled` (F2).
+///
+/// The actual flag-flipping logic lives in [`apply_pending_toggles`], a pure
+/// function with no Bevy/wasm dependency so it's unit-testable on native.
+/// This system just drains the thread-local set, calls that function against
+/// the live resources, and handles the one Bevy-specific side effect
+/// (pausing/unpausing `Time<Virtual>`) based on the returned flag.
 #[cfg(target_arch = "wasm32")]
 fn drain_debug_toggles(
     mut regions_enabled: ResMut<crate::debug_overlay::DebugRegionsEnabled>,
@@ -681,71 +757,32 @@ fn drain_debug_toggles(
     mut entity_inspector_enabled: ResMut<crate::debug_overlay::DebugEntityInspectorEnabled>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
-    // ── Region wireframes toggle (F4) ──────────────────────────────────────
-    let pending_regions = PENDING_DEBUG_TOGGLE.with(|v| {
-        let was = *v.borrow();
-        *v.borrow_mut() = false;
-        was
-    });
-    if pending_regions {
-        let new_val = !regions_enabled.0;
-        regions_enabled.0 = new_val;
-        DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = new_val);
+    let pending: Vec<DebugToggleKind> =
+        PENDING_TOGGLES.with(|set| set.borrow_mut().drain().collect());
+    if pending.is_empty() {
+        return;
     }
 
-    // ── Modifier overlay toggle (F3) ───────────────────────────────────────
-    let pending_overlay = PENDING_TOGGLE_OVERLAY.with(|v| {
-        let was = *v.borrow();
-        *v.borrow_mut() = false;
-        was
-    });
-    if pending_overlay {
-        overlay_enabled.0 = !overlay_enabled.0;
-    }
+    let pause_changed = apply_pending_toggles(
+        pending,
+        &mut regions_enabled.0,
+        &mut overlay_enabled.0,
+        &mut paused.0,
+        &mut damage_enabled.0,
+        &mut entities_enabled.0,
+        &mut entity_inspector_enabled.0,
+    );
 
-    // ── Simulation pause toggle (F9) ───────────────────────────────────────
-    let pending_pause = PENDING_PAUSE_TOGGLE.with(|v| {
-        let was = *v.borrow();
-        *v.borrow_mut() = false;
-        was
-    });
-    if pending_pause {
-        paused.0 = !paused.0;
+    // Region-wireframe state also lives in a thread-local (read back by
+    // `wasm_is_debug_regions_enabled()`), so mirror the resource into it.
+    DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = regions_enabled.0);
+
+    if pause_changed {
         if paused.0 {
             virtual_time.pause();
         } else {
             virtual_time.unpause();
         }
-    }
-
-    // ── Damage overlay toggle (F8) ─────────────────────────────────────────
-    let pending_damage = PENDING_TOGGLE_DAMAGE.with(|v| {
-        let was = *v.borrow();
-        *v.borrow_mut() = false;
-        was
-    });
-    if pending_damage {
-        damage_enabled.0 = !damage_enabled.0;
-    }
-
-    // ── Entity behavior overlay toggle (F5) ────────────────────────────────
-    let pending_entities = PENDING_TOGGLE_ENTITIES.with(|v| {
-        let was = *v.borrow();
-        *v.borrow_mut() = false;
-        was
-    });
-    if pending_entities {
-        entities_enabled.0 = !entities_enabled.0;
-    }
-
-    // ── Entity inspector overlay toggle (F6) ───────────────────────────────
-    let pending_inspector = PENDING_TOGGLE_ENTITY_INSPECTOR.with(|v| {
-        let was = *v.borrow();
-        *v.borrow_mut() = false;
-        was
-    });
-    if pending_inspector {
-        entity_inspector_enabled.0 = !entity_inspector_enabled.0;
     }
 }
 
@@ -927,4 +964,132 @@ fn flush_shake_state() {
             );
         }
     });
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+//
+// `apply_pending_toggles` and `DebugToggleKind` are defined outside the
+// `target_arch = "wasm32"` gate specifically so this module runs under plain
+// `cargo test` on native, with no Bevy App and no wasm_bindgen involved.
+#[cfg(test)]
+mod tests {
+    use super::{apply_pending_toggles, DebugToggleKind};
+
+    /// Queuing a single toggle flips exactly the corresponding flag, exactly
+    /// once, and leaves every other flag untouched.
+    #[test]
+    fn queueing_regions_toggle_flips_only_regions_once() {
+        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
+            (false, false, false, false, false, false);
+
+        let pause_changed = apply_pending_toggles(
+            [DebugToggleKind::Regions],
+            &mut regions,
+            &mut overlay,
+            &mut paused,
+            &mut damage,
+            &mut entities,
+            &mut inspector,
+        );
+
+        assert!(regions, "Regions flag should have flipped to true");
+        assert!(!overlay);
+        assert!(!paused);
+        assert!(!damage);
+        assert!(!entities);
+        assert!(!inspector);
+        assert!(!pause_changed, "pause was not in this batch");
+    }
+
+    /// Draining an empty pending set (e.g. the following frame, after the
+    /// queue was already drained) must not flip anything again.
+    #[test]
+    fn draining_empty_set_does_not_flip_again() {
+        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
+            (true, false, false, false, false, false);
+
+        let pause_changed = apply_pending_toggles(
+            std::iter::empty(),
+            &mut regions,
+            &mut overlay,
+            &mut paused,
+            &mut damage,
+            &mut entities,
+            &mut inspector,
+        );
+
+        assert!(regions, "previous state must be preserved, not re-toggled");
+        assert!(!pause_changed);
+    }
+
+    /// The pause toggle both flips the flag and reports that it changed, so
+    /// the caller knows to (un)pause `Time<Virtual>`.
+    #[test]
+    fn queueing_pause_toggle_flips_paused_and_reports_change() {
+        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
+            (false, false, false, false, false, false);
+
+        let pause_changed = apply_pending_toggles(
+            [DebugToggleKind::Pause],
+            &mut regions,
+            &mut overlay,
+            &mut paused,
+            &mut damage,
+            &mut entities,
+            &mut inspector,
+        );
+
+        assert!(paused);
+        assert!(pause_changed);
+    }
+
+    /// Multiple distinct toggles queued in the same batch each flip their own
+    /// flag independently.
+    #[test]
+    fn queueing_multiple_distinct_toggles_flips_each_independently() {
+        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
+            (false, false, false, false, false, false);
+
+        apply_pending_toggles(
+            [
+                DebugToggleKind::Overlay,
+                DebugToggleKind::Damage,
+                DebugToggleKind::EntityInspector,
+            ],
+            &mut regions,
+            &mut overlay,
+            &mut paused,
+            &mut damage,
+            &mut entities,
+            &mut inspector,
+        );
+
+        assert!(!regions);
+        assert!(overlay);
+        assert!(!paused);
+        assert!(damage);
+        assert!(!entities);
+        assert!(inspector);
+    }
+
+    /// A duplicate variant appearing twice in the same batch (e.g. queued
+    /// from a `HashSet` that happened to be built with a duplicate insert)
+    /// still only flips the flag once — the function itself dedupes.
+    #[test]
+    fn duplicate_variant_in_same_batch_flips_only_once() {
+        let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
+            (false, false, false, false, false, false);
+
+        apply_pending_toggles(
+            [DebugToggleKind::Entities, DebugToggleKind::Entities],
+            &mut regions,
+            &mut overlay,
+            &mut paused,
+            &mut damage,
+            &mut entities,
+            &mut inspector,
+        );
+
+        assert!(entities, "should have flipped once (false -> true)");
+    }
 }

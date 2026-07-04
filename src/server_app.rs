@@ -161,36 +161,19 @@ pub struct CollisionCooldown {
 #[derive(Resource, Default)]
 pub struct SimOutbox(pub Vec<(Target, ServerMessage)>);
 
-/// Last-broadcast positions for non-asteroid entities (NPCs, stations).
-/// Keyed by UUID string; value is (translation, yaw). Used by the
-/// sim_state_broadcaster to skip sending position/yaw when unchanged.
-#[derive(Resource, Default)]
-pub struct LastBroadcastEntityPositions(
-    pub std::collections::HashMap<String, (bevy::math::Vec3, f32)>,
-);
-
-/// Last-broadcast health (hull_fraction, shield_fraction) for all entities.
-/// Keyed by UUID string. Used by the sim_state_broadcaster to skip sending
-/// health fields when they haven't changed since the last broadcast, reducing
-/// wire payload for stationary / undamaged NPCs.
-#[derive(Resource, Default)]
-pub struct LastBroadcastEntityHealth(
-    pub std::collections::HashMap<String, (Option<f32>, Option<f32>)>,
-);
-
-/// Last-broadcast per-system hull state. When the hull changes, a
-/// `SystemHullUpdate` event message is emitted and this cache is updated.
-///
-/// SystemId-keyed successor of the retired console-keyed cache; the wire
-/// message flipped from `ConsoleHullUpdate` to `SystemHullUpdate` in #618
-/// and the legacy variant was removed entirely in #619.
-#[derive(Resource, Default)]
-pub struct LastBroadcastHull(pub Vec<crate::messages::SystemHullStatus>);
-
-/// Last-broadcast shield facings. Used to suppress the per-tick `ShieldStatus`
-/// broadcast to all players when nothing has changed.
-#[derive(Resource, Default)]
-pub struct LastBroadcastShields(pub Vec<crate::messages::ShieldFacingStatus>);
+/// Broadcast delta caches — [`LastBroadcastEntityPositions`],
+/// [`LastBroadcastEntityHealth`], [`LastBroadcastHull`], [`LastBroadcastShields`],
+/// [`LastBroadcastBlackboards`] — now live in
+/// [`crate::core::broadcast::cache_registry`] (issue #613), which is the
+/// single module that knows about all six delta caches (the sixth,
+/// `LastWeaponsUpdate`, stays in `console::weapons::server`) and owns
+/// `reset_all` / `resync_for_token` / `prune`. Re-exported here so existing
+/// `crate::server_app::LastBroadcastX` / `crate::simulation::LastBroadcastX`
+/// references are unaffected by the move.
+pub use crate::core::broadcast::cache_registry::{
+    LastBroadcastBlackboards, LastBroadcastEntityHealth, LastBroadcastEntityPositions,
+    LastBroadcastHull, LastBroadcastShields,
+};
 
 /// Tracks non-asteroid entities that have been reported to clients via
 /// `EntitySpawned` / `EntityDespawned`.  Seeded from `WorldResource` on
@@ -213,14 +196,6 @@ pub struct TrackedEntities {
 /// `LocalShip` entity. The broadcast pipeline reads from this component.
 #[derive(Component, Default, Clone)]
 pub struct ShipSystemBlackboards(
-    pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
-);
-
-/// Last-broadcast blackboard state per system. The `broadcast_blackboard_updates`
-/// system compares `ShipSystemBlackboards` against this and only emits a
-/// `BlackboardUpdate` for systems whose blackboard has changed.
-#[derive(Resource, Default)]
-pub struct LastBroadcastBlackboards(
     pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
 );
 
@@ -1121,6 +1096,9 @@ fn on_game_over_enter(mut game_over_reason: ResMut<GameOverReason>, mut outbox: 
 /// broadcast tick always sends a full state to all players. Also covers the
 /// multi-game restart case where stale cache from a previous game would
 /// otherwise suppress initial updates.
+///
+/// Delegates to [`crate::core::broadcast::cache_registry::reset_all`] (issue
+/// #613), the single place that knows about all six broadcast delta caches.
 fn reset_broadcast_caches_on_start(
     mut hull: ResMut<LastBroadcastHull>,
     mut shields: ResMut<LastBroadcastShields>,
@@ -1129,12 +1107,14 @@ fn reset_broadcast_caches_on_start(
     mut weapons: ResMut<LastWeaponsUpdate>,
     mut last_bb: ResMut<LastBroadcastBlackboards>,
 ) {
-    *hull = LastBroadcastHull::default();
-    *shields = LastBroadcastShields::default();
-    *positions = LastBroadcastEntityPositions::default();
-    *health = LastBroadcastEntityHealth::default();
-    *weapons = LastWeaponsUpdate::default();
-    *last_bb = LastBroadcastBlackboards::default();
+    crate::core::broadcast::cache_registry::reset_all(
+        &mut hull,
+        &mut shields,
+        &mut positions,
+        &mut health,
+        &mut weapons,
+        &mut last_bb,
+    );
 }
 
 /// Emit `BlackboardUpdate` for any system whose blackboard has changed since
@@ -1350,33 +1330,34 @@ fn is_command_authorized(
 }
 
 /// When a player reconnects mid-game (Identify during InProgress), `process_lobby`
-/// queues a Welcome into LobbyOutbox. Detect this and clear all broadcast delta
-/// caches so the next 10 Hz tick sends a full state update to all players
-/// (including the reconnecting player).
-fn refresh_caches_on_midgame_reconnect(
-    lobby_outbox: Res<LobbyOutbox>,
-    state: Res<State<GamePhase>>,
-    mut hull: ResMut<LastBroadcastHull>,
-    mut shields: ResMut<LastBroadcastShields>,
-    mut weapons: ResMut<LastWeaponsUpdate>,
-    mut positions: ResMut<LastBroadcastEntityPositions>,
-    mut health: ResMut<LastBroadcastEntityHealth>,
-    mut last_bb: ResMut<LastBroadcastBlackboards>,
-) {
+/// queues a `Welcome { .. }` into `LobbyOutbox` targeted at that player's
+/// token. Detect this and push a full-state resync to *just that token* via
+/// [`crate::core::broadcast::cache_registry::resync_for_token`] (issue #613).
+///
+/// This replaces the #599 quick fix, which reset all six shared broadcast
+/// delta caches — correct for the reconnecting player, but it also forced
+/// the *next* 10 Hz tick to broadcast full state to *every other* connected
+/// client, since those caches are shared across all `Audience::All`
+/// producers. The targeted resync leaves the shared caches untouched, so
+/// every other client's next tick remains a normal delta.
+fn refresh_caches_on_midgame_reconnect(world: &mut World) {
+    let state = world.resource::<State<GamePhase>>();
     if *state.get() != GamePhase::InProgress {
         return;
     }
-    let has_welcome = lobby_outbox
-        .0
-        .iter()
-        .any(|(_, msg)| matches!(msg, ServerMessage::Welcome { .. }));
-    if has_welcome {
-        *hull = LastBroadcastHull::default();
-        *shields = LastBroadcastShields::default();
-        *weapons = LastWeaponsUpdate::default();
-        *positions = LastBroadcastEntityPositions::default();
-        *health = LastBroadcastEntityHealth::default();
-        *last_bb = LastBroadcastBlackboards::default();
+    let reconnecting_tokens: Vec<String> = {
+        let lobby_outbox = world.resource::<LobbyOutbox>();
+        lobby_outbox
+            .0
+            .iter()
+            .filter_map(|(target, msg)| match (target, msg) {
+                (Target::Token(token), ServerMessage::Welcome { .. }) => Some(token.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    for token in reconnecting_tokens {
+        crate::core::broadcast::cache_registry::resync_for_token(world, &token);
     }
 }
 
@@ -1499,6 +1480,8 @@ fn reconcile_runtime_entities(
     >,
     mut outbox: ResMut<SimOutbox>,
     objectives: Option<Res<ObjectiveManagerRes>>,
+    mut positions_cache: ResMut<LastBroadcastEntityPositions>,
+    mut health_cache: ResMut<LastBroadcastEntityHealth>,
 ) {
     // Build set of entity names referenced by active mission objectives.
     let active_objective_names: std::collections::HashSet<String> = objectives
@@ -1757,6 +1740,14 @@ fn reconcile_runtime_entities(
         if !current.contains_key(uuid) {
             registry.reported.remove(uuid);
             world.0.entities.retain(|e| e.uuid != *uuid);
+            // Prune the despawned UUID from the delta caches (issue #613) —
+            // runtime-spawned entities (e.g. scenario-triggered NPCs) can
+            // despawn and respawn with fresh UUIDs just like asteroids.
+            crate::core::broadcast::cache_registry::prune(
+                &mut positions_cache,
+                &mut health_cache,
+                std::slice::from_ref(uuid),
+            );
             outbox.0.push((
                 Target::All,
                 ServerMessage::EntityDespawned { uuid: uuid.clone() },

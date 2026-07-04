@@ -6,6 +6,40 @@ pub enum RegisterError {
     DuplicateToken,
 }
 
+/// Server-side record of every connected or recently-disconnected player.
+/// Keyed by session token (a UUIDv4 persisted client-side), not peer ID —
+/// see `CONTEXT.md`'s "Session" / "Session Token" glossary entries.
+///
+/// ## Why disconnected records are never pruned (issue #613, PRD story 9)
+///
+/// `disconnect()` only flips `connected = false` and clears `ready`; it
+/// never removes the `Player` entry. This is intentional, not an oversight:
+///
+/// - Reconnection is matched purely by token lookup (`reconnect()` calls
+///   `idx(token)`, which scans `players` for a matching `token` string). If a
+///   disconnected player's entry were pruned, a later `Identify` with the
+///   same token would miss `idx()` and fall through to `register()` as a
+///   brand-new player — losing `last_rating` and, for a player who still
+///   holds a station, breaking the reconnect-yield seat/rating restore in
+///   `process_disconnect_with_stations` / `process_message`'s `Identify`
+///   handler (`src/lobby/handler.rs`).
+/// - Even a station-less disconnected player is not safe to prune purely on
+///   "disconnected + no station": nothing in `SessionManager` distinguishes
+///   "never held a station this game" from "held one and had it stolen by a
+///   Backfill/other-claim path" — either way the record is the only memory
+///   of that token's `name` / prior identity, and re-registering fabricates
+///   a second, disconnected phantom entry for the same human the next time
+///   they reconnect (since `register()` only rejects *duplicate* tokens, a
+///   stale-but-pruned token would silently accept a fresh entry instead of
+///   restoring the old one).
+/// - Growth is bounded in practice: a ship's `players` list is bounded by
+///   the fixed station roster (a handful of seats) plus whatever spectators
+///   have ever connected during that single running game process — this is
+///   not a public server accumulating unbounded distinct sessions over
+///   months of uptime, it resets to empty on process restart.
+///
+/// Net: correctness of reconnect semantics outweighs the bookkeeping win of
+/// pruning, so this module deliberately does not prune session records.
 pub struct SessionManager {
     players: Vec<Player>,
 }

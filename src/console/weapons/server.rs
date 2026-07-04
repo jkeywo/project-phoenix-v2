@@ -32,7 +32,7 @@ pub const PHASER_BATTERY_DRAIN_PER_SEC: f32 = 5.0;
 
 /// Cache of the last `WeaponsUpdate` sent to the Tactical holder.
 /// The broadcaster compares against this to skip identical ticks.
-#[derive(Resource, Default, Clone, PartialEq)]
+#[derive(Resource, Default, Clone, PartialEq, Debug)]
 pub struct LastWeaponsUpdate {
     pub target_uuid: Option<String>,
     pub target_name: Option<String>,
@@ -2507,208 +2507,241 @@ fn resolve_objective_target_uuid(
 
 // ── Broadcaster ───────────────────────────────────────────────────────────
 
+/// Compute the current Tactical weapons state for the `LocalShip` from live
+/// ECS/resource state — target lock, phaser bank readiness, torpedo tubes,
+/// torpedo count, and phaser mode.
+///
+/// This is the same computation `weapons_update_broadcaster` runs every tick
+/// to decide whether to send a fresh `WeaponsUpdate`; it's factored out here
+/// so [`crate::core::broadcast::cache_registry::resync_for_token`] can reuse
+/// it to build a reconnect resync without duplicating the target/range/arc
+/// logic. Callers that need the diff-and-broadcast behaviour (comparing
+/// against [`LastWeaponsUpdate`] and updating it) must do that themselves —
+/// this function only computes the current snapshot and never reads or
+/// writes the cache resources.
+pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
+    // Extract all resource values as owned copies/clones so we can
+    // release the immutable borrows before calling world.query_filtered.
+    let (ship_x, ship_z, ship_yaw) = {
+        let mut q = world.query_filtered::<&ShipPhysics, With<crate::server_app::LocalShip>>();
+        q.single(world)
+            .ok()
+            .copied()
+            .map(|p| (p.x, p.z, p.yaw))
+            .unwrap_or((0.0, 0.0, 0.0))
+    };
+    let target_uuid: Option<String> = {
+        let mut q = world.query_filtered::<&WeaponsTarget, With<crate::server_app::LocalShip>>();
+        q.single(world).ok().and_then(|wt| wt.0.clone())
+    };
+    let (beam_active, active_beam_bank) = {
+        let mut q = world.query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
+        q.single(world)
+            .ok()
+            .map(|b| (b.target_uuid.is_some(), b.bank.clone()))
+            .unwrap_or((false, None))
+    };
+    let bank_cooldowns: std::collections::HashMap<String, f32> = {
+        let mut q = world.query_filtered::<&PhaserCooldown, With<crate::server_app::LocalShip>>();
+        q.single(world)
+            .ok()
+            .map(|cd| cd.per_bank.clone())
+            .unwrap_or_default()
+    };
+    let tubes: Vec<TorpedoTubeState> = {
+        // Prefer per-entity component on LocalShip; fall back to global resource.
+        let raw_tubes: Vec<crate::torpedo::TorpedoTube> = {
+            let mut q = world
+                .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+            q.single(world)
+                .ok()
+                .map(|ts| ts.0.tubes.clone())
+                .unwrap_or_else(|| world.resource::<TorpedoSystemResource>().0.tubes.clone())
+        };
+        raw_tubes
+            .iter()
+            .map(|t| {
+                let remaining = match &t.load_state {
+                    crate::torpedo::TubeLoadState::Loading { remaining, .. }
+                    | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                    _ => 0.0,
+                };
+                TorpedoTubeState {
+                    id: t.id.clone(),
+                    loaded: t.is_loaded(),
+                    reload_secs: remaining,
+                    state: t.load_state.label().to_string(),
+                    progress: t.load_state.progress(),
+                    load_time: t.load_time,
+                }
+            })
+            .collect()
+    };
+    let torpedo_count = {
+        let mut q =
+            world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+        q.single(world)
+            .ok()
+            .map(|ts| ts.0.torpedoes_remaining)
+            .unwrap_or_else(|| {
+                world
+                    .resource::<TorpedoSystemResource>()
+                    .0
+                    .torpedoes_remaining
+            })
+    };
+    let radar_range_mult = {
+        let mut q = world
+            .query_filtered::<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>(
+            );
+        q.single(world)
+            .ok()
+            .map(|m| m.get(&ModifierSlot::RadarRange))
+            .unwrap_or(1.0)
+    };
+    let phaser_mode = world.resource::<CurrentPhaserMode>().0;
+    let banks_config = {
+        // Prefer per-entity component on LocalShip; fall back to global resource.
+        let mut q = world
+            .query_filtered::<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
+        q.single(world)
+            .ok()
+            .map(|cc| cc.0.banks.clone())
+            .unwrap_or_else(|| {
+                world
+                    .resource::<PhaserCombatConfigResource>()
+                    .0
+                    .banks
+                    .clone()
+            })
+    };
+
+    // Query live ECS Transform for the target — WorldResource is a
+    // stale spawn-time snapshot and doesn't contain NPC ships that
+    // spawn after the scene loads.
+    let target_live_pos: Option<(f32, f32)> = match &target_uuid {
+        None => None,
+        Some(uuid) => {
+            let uuid = uuid.clone();
+            let mut pos = None;
+            let mut entity_qs = world.query_filtered::<
+                        (&crate::entity_spawner::EntityUuid, &Transform),
+                        Without<AsteroidUuid>,
+                    >();
+            for (u, t) in entity_qs.iter(world) {
+                if u.0 == uuid {
+                    pos = Some((t.translation.x, t.translation.z));
+                    break;
+                }
+            }
+            if pos.is_none() {
+                let mut asteroid_qs = world.query_filtered::<
+                            (&AsteroidUuid, &Transform),
+                            Without<crate::entity_spawner::EntityUuid>,
+                        >();
+                for (u, t) in asteroid_qs.iter(world) {
+                    if u.0 == uuid {
+                        pos = Some((t.translation.x, t.translation.z));
+                        break;
+                    }
+                }
+            }
+            pos
+        }
+    };
+
+    // Look up the display name for the locked target.
+    let target_name: Option<String> = match &target_uuid {
+        None => None,
+        Some(uuid) => {
+            let uuid = uuid.clone();
+            let mut name = None;
+            let mut name_qs = world.query::<(
+                &crate::entity_spawner::EntityUuid,
+                &crate::entities::spawner::EntityName,
+            )>();
+            for (u, n) in name_qs.iter(world) {
+                if u.0 == uuid {
+                    name = Some(n.0.clone());
+                    break;
+                }
+            }
+            name
+        }
+    };
+
+    let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
+        let effective_phaser_range =
+            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
+        let fire_ready = match target_live_pos {
+            None => false,
+            Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
+                tx,
+                tz,
+                ship_x,
+                ship_z,
+                ship_yaw,
+                effective_phaser_range,
+            ),
+        };
+        let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
+        vec![PhaserBankState {
+            id: String::new(),
+            fire_ready,
+            on_cooldown: beam_active || cd > 0.0,
+            cooldown_remaining: cd,
+        }]
+    } else {
+        banks_config
+            .iter()
+            .map(|b| {
+                let bank_ready = match target_live_pos {
+                    None => false,
+                    Some((tx, tz)) => {
+                        let bank_base_range = if b.beam_range > 0.0 {
+                            b.beam_range
+                        } else {
+                            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                        };
+                        let effective_bank_range = bank_base_range * radar_range_mult;
+                        let (rx, ry) =
+                            crate::weapons::phaser::ship_local(tx, tz, ship_x, ship_z, ship_yaw);
+                        let range_ok = (tx - ship_x).powi(2) + (tz - ship_z).powi(2)
+                            <= effective_bank_range * effective_bank_range;
+                        range_ok
+                            && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
+                    }
+                };
+                let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
+                let beam_on_this_bank =
+                    beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
+                PhaserBankState {
+                    id: b.id.clone(),
+                    fire_ready: bank_ready,
+                    on_cooldown: beam_on_this_bank || cd > 0.0,
+                    cooldown_remaining: cd,
+                }
+            })
+            .collect()
+    };
+
+    LastWeaponsUpdate {
+        target_uuid,
+        target_name,
+        banks,
+        tubes,
+        torpedo_count,
+        phaser_mode,
+    }
+}
+
 pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
     crate::core::broadcast::SimBroadcaster::new().register(
         crate::core::broadcast::Audience::Holding(StationId("tactical".into())),
         crate::core::broadcast::Cadence::Hz(10.0),
         |world: &mut World| {
-            // Extract all resource values as owned copies/clones so we can
-            // release the immutable borrows before calling world.query_filtered.
-            let (ship_x, ship_z, ship_yaw) = {
-                let mut q = world.query_filtered::<&ShipPhysics, With<crate::server_app::LocalShip>>();
-                q.single(world)
-                    .ok()
-                    .copied()
-                    .map(|p| (p.x, p.z, p.yaw))
-                    .unwrap_or((0.0, 0.0, 0.0))
-            };
-            let target_uuid: Option<String> = {
-                let mut q = world.query_filtered::<&WeaponsTarget, With<crate::server_app::LocalShip>>();
-                q.single(world).ok().and_then(|wt| wt.0.clone())
-            };
-            let (beam_active, active_beam_bank) = {
-                let mut q = world.query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
-                q.single(world)
-                    .ok()
-                    .map(|b| (b.target_uuid.is_some(), b.bank.clone()))
-                    .unwrap_or((false, None))
-            };
-            let bank_cooldowns: std::collections::HashMap<String, f32> = {
-                let mut q = world.query_filtered::<&PhaserCooldown, With<crate::server_app::LocalShip>>();
-                q.single(world)
-                    .ok()
-                    .map(|cd| cd.per_bank.clone())
-                    .unwrap_or_default()
-            };
-            let tubes: Vec<TorpedoTubeState> = {
-                // Prefer per-entity component on LocalShip; fall back to global resource.
-                let raw_tubes: Vec<crate::torpedo::TorpedoTube> = {
-                    let mut q = world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
-                    q.single(world).ok().map(|ts| ts.0.tubes.clone())
-                        .unwrap_or_else(|| world.resource::<TorpedoSystemResource>().0.tubes.clone())
-                };
-                raw_tubes
-                    .iter()
-                    .map(|t| {
-                        let remaining = match &t.load_state {
-                            crate::torpedo::TubeLoadState::Loading { remaining, .. }
-                            | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => {
-                                *remaining
-                            }
-                            _ => 0.0,
-                        };
-                        TorpedoTubeState {
-                            id: t.id.clone(),
-                            loaded: t.is_loaded(),
-                            reload_secs: remaining,
-                            state: t.load_state.label().to_string(),
-                            progress: t.load_state.progress(),
-                            load_time: t.load_time,
-                        }
-                    })
-                    .collect()
-            };
-            let torpedo_count = {
-                let mut q = world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
-                q.single(world).ok().map(|ts| ts.0.torpedoes_remaining)
-                    .unwrap_or_else(|| world.resource::<TorpedoSystemResource>().0.torpedoes_remaining)
-            };
-            let radar_range_mult = {
-                let mut q = world.query_filtered::<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>();
-                q.single(world).ok().map(|m| m.get(&ModifierSlot::RadarRange)).unwrap_or(1.0)
-            };
-            let phaser_mode = world.resource::<CurrentPhaserMode>().0;
-            let banks_config = {
-                // Prefer per-entity component on LocalShip; fall back to global resource.
-                let mut q = world.query_filtered::<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
-                q.single(world).ok().map(|cc| cc.0.banks.clone())
-                    .unwrap_or_else(|| world.resource::<PhaserCombatConfigResource>().0.banks.clone())
-            };
+            let current = compute_current_weapons_update(world);
 
-            // Query live ECS Transform for the target — WorldResource is a
-            // stale spawn-time snapshot and doesn't contain NPC ships that
-            // spawn after the scene loads.
-            let target_live_pos: Option<(f32, f32)> = match &target_uuid {
-                None => None,
-                Some(uuid) => {
-                    let uuid = uuid.clone();
-                    let mut pos = None;
-                    let mut entity_qs = world.query_filtered::<
-                        (&crate::entity_spawner::EntityUuid, &Transform),
-                        Without<AsteroidUuid>,
-                    >();
-                    for (u, t) in entity_qs.iter(world) {
-                        if u.0 == uuid {
-                            pos = Some((t.translation.x, t.translation.z));
-                            break;
-                        }
-                    }
-                    if pos.is_none() {
-                        let mut asteroid_qs = world.query_filtered::<
-                            (&AsteroidUuid, &Transform),
-                            Without<crate::entity_spawner::EntityUuid>,
-                        >();
-                        for (u, t) in asteroid_qs.iter(world) {
-                            if u.0 == uuid {
-                                pos = Some((t.translation.x, t.translation.z));
-                                break;
-                            }
-                        }
-                    }
-                    pos
-                }
-            };
-
-            // Look up the display name for the locked target.
-            let target_name: Option<String> = match &target_uuid {
-                None => None,
-                Some(uuid) => {
-                    let uuid = uuid.clone();
-                    let mut name = None;
-                    let mut name_qs = world.query::<(
-                        &crate::entity_spawner::EntityUuid,
-                        &crate::entities::spawner::EntityName,
-                    )>();
-                    for (u, n) in name_qs.iter(world) {
-                        if u.0 == uuid {
-                            name = Some(n.0.clone());
-                            break;
-                        }
-                    }
-                    name
-                }
-            };
-
-            let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
-                let effective_phaser_range =
-                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                        * radar_range_mult;
-                let fire_ready = match target_live_pos {
-                    None => false,
-                    Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
-                        tx,
-                        tz,
-                        ship_x,
-                        ship_z,
-                        ship_yaw,
-                        effective_phaser_range,
-                    ),
-                };
-                let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
-                vec![PhaserBankState {
-                    id: String::new(),
-                    fire_ready,
-                    on_cooldown: beam_active || cd > 0.0,
-                    cooldown_remaining: cd,
-                }]
-            } else {
-                banks_config
-                    .iter()
-                    .map(|b| {
-                        let bank_ready = match target_live_pos {
-                            None => false,
-                            Some((tx, tz)) => {
-                                let bank_base_range = if b.beam_range > 0.0 {
-                                    b.beam_range
-                                } else {
-                                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                                };
-                                let effective_bank_range = bank_base_range * radar_range_mult;
-                                let (rx, ry) = crate::weapons::phaser::ship_local(
-                                    tx, tz, ship_x, ship_z, ship_yaw,
-                                );
-                                let range_ok = (tx - ship_x).powi(2) + (tz - ship_z).powi(2)
-                                    <= effective_bank_range * effective_bank_range;
-                                range_ok
-                                    && crate::weapons::phaser::in_arc(
-                                        rx,
-                                        ry,
-                                        b.facing_deg,
-                                        b.fire_arc_deg,
-                                    )
-                            }
-                        };
-                        let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
-                        let beam_on_this_bank =
-                            beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
-                        PhaserBankState {
-                            id: b.id.clone(),
-                            fire_ready: bank_ready,
-                            on_cooldown: beam_on_this_bank || cd > 0.0,
-                            cooldown_remaining: cd,
-                        }
-                    })
-                    .collect()
-            };
-
-            let current = LastWeaponsUpdate {
-                target_uuid: target_uuid.clone(),
-                target_name: target_name.clone(),
-                banks: banks.clone(),
-                tubes: tubes.clone(),
-                torpedo_count,
-                phaser_mode,
-            };
             let is_first_tick = world.resource::<WeaponsUpdateFirstTick>().0;
             if !is_first_tick {
                 let last = world.resource::<LastWeaponsUpdate>();
@@ -2719,6 +2752,14 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             if is_first_tick {
                 *world.resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick(false);
             }
+            let LastWeaponsUpdate {
+                target_uuid,
+                target_name,
+                banks,
+                tubes,
+                torpedo_count,
+                phaser_mode,
+            } = current.clone();
             *world.resource_mut::<LastWeaponsUpdate>() = current;
 
             vec![ServerMessage::WeaponsUpdate {

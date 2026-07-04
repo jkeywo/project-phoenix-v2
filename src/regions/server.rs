@@ -342,7 +342,6 @@ fn handle_blocks_impulse_region_enter(
 pub(crate) fn handle_slow_zone_speed_clamp(
     trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
-    modifiers_res: Option<Res<ShipModifiers>>,
     modifiers_q: Query<&ShipModifiers>,
     mut ship_query: Query<&mut ShipPhysics>,
 ) {
@@ -358,20 +357,13 @@ pub(crate) fn handle_slow_zone_speed_clamp(
         return;
     }
     let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
-    // Per-entity component on the subject takes priority; fall back to the
-    // legacy global Resource, and finally to a fresh default cache (1.0 mult).
-    // After PR 9 (PRD #597), NPCs also enter region membership, so an NPC's
-    // own ShipModifiers component drives the effective max here.
     let default_modifiers;
     let modifiers: &ShipModifiers = match modifiers_q.get(ev.subject) {
         Ok(m) => m,
-        Err(_) => match modifiers_res.as_deref() {
-            Some(m) => m,
-            None => {
-                default_modifiers = ShipModifiers::new();
-                &default_modifiers
-            }
-        },
+        Err(_) => {
+            default_modifiers = ShipModifiers::new();
+            &default_modifiers
+        }
     };
     let effective_max = base_max * modifiers.get(&ModifierSlot::MaxSpeed);
     // Apply to the specific entity that entered the region, not all ships.
@@ -388,7 +380,7 @@ mod tests {
     use crate::damage::SystemHull;
     use crate::entity_config::EntityConfig;
     use crate::entity_spawner::spawn_entity;
-    use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_CHARGE_DURATION};
+    use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::messages::ModifierSlot;
     use crate::modifiers::ShipModifiers;
     use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
@@ -400,14 +392,14 @@ mod tests {
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
-            .add_plugins(RegionPlugin)
-            .insert_resource(ShipModifiers::new());
-        // Spawn the ship entity with ShipPhysics so region systems can query it.
+            .add_plugins(RegionPlugin);
+        // Spawn the ship entity with ShipPhysics and ShipModifiers so region systems can query it.
         app.world_mut().spawn((
             LocalShip,
             crate::simulation::Ship,
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
+            ShipModifiers::new(),
         ));
         app
     }
@@ -646,7 +638,6 @@ mod tests {
             (crate::messages::SystemId("power".into()), 25.0),
             (crate::messages::SystemId("shields".into()), 25.0),
         ];
-        app.insert_resource(ShipModifiers::new());
         app.world_mut().spawn((
             LocalShip,
             crate::simulation::Ship,
@@ -654,6 +645,7 @@ mod tests {
             crate::ship_state::ShipPhysics::default(),
             crate::simulation::ShipShields(ShieldSystem::new(&ShieldConfig::default())),
             crate::entity_spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
+            ShipModifiers::new(),
         ));
         app
     }
@@ -662,14 +654,13 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(RegionPlugin);
         app.insert_resource(Time::<()>::default());
-        app.insert_resource(ShipImpulse(ImpulseState::new()));
-        app.insert_resource(ShipModifiers::new());
         app.world_mut().spawn((
             LocalShip,
             crate::simulation::Ship,
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
             ShipImpulse::default(),
+            ShipModifiers::new(),
         ));
         app
     }
@@ -1007,15 +998,10 @@ mod tests {
     // Ã¢â€â‚¬Ã¢â€â‚¬ BlocksImpulse tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     fn set_impulse_charging(app: &mut App) {
-        // Read/mutate the per-entity ShipImpulse on the LocalShip (component
-        // post ship-parity audit). Fallback to the Resource for legacy
-        // fixtures that only insert the Resource.
         let mut q = app
             .world_mut()
             .query_filtered::<&mut ShipImpulse, With<LocalShip>>();
         if let Ok(mut imp) = q.single_mut(app.world_mut()) {
-            imp.0.start_charge();
-        } else if let Some(mut imp) = app.world_mut().get_resource_mut::<ShipImpulse>() {
             imp.0.start_charge();
         }
     }
@@ -1025,9 +1011,6 @@ mod tests {
             .world_mut()
             .query_filtered::<&mut ShipImpulse, With<LocalShip>>();
         if let Ok(mut imp) = q.single_mut(app.world_mut()) {
-            imp.0.start_charge();
-            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
-        } else if let Some(mut imp) = app.world_mut().get_resource_mut::<ShipImpulse>() {
             imp.0.start_charge();
             imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
         }
@@ -1041,8 +1024,7 @@ mod tests {
             q.single(app.world())
                 .map(|i| i.0.phase)
                 .ok()
-                .or_else(|| app.world().get_resource::<ShipImpulse>().map(|r| r.0.phase))
-                .expect("ShipImpulse must exist as Component or Resource")
+                .expect("LocalShip must have ShipImpulse component")
         };
         assert_eq!(
             phase, expected,
@@ -1143,8 +1125,14 @@ mod tests {
             crate::simulation::Ship,
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
+            ShipModifiers::new(),
         ));
         app
+    }
+
+    fn get_ship_modifiers(app: &mut App) -> ShipModifiers {
+        let mut q = app.world_mut().query_filtered::<&ShipModifiers, With<LocalShip>>();
+        q.single(app.world()).unwrap().clone()
     }
 
     fn spawn_radar_dampening_region(
@@ -1201,7 +1189,7 @@ mod tests {
         set_ship_pos(&mut app, 0.0, 0.0); // inside region at origin
         tick_with_dt(&mut app, 0.016);
 
-        let modifiers = app.world().resource::<ShipModifiers>();
+        let modifiers = get_ship_modifiers(&mut app);
         let expected = 1.0 / (1.0 + 0.3); // PRD #117 negative-bonus formula
         assert!(
             (modifiers.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
@@ -1219,7 +1207,7 @@ mod tests {
         tick_with_dt(&mut app, 0.016);
 
         // Verify modifier is present
-        let modifiers_before = app.world().resource::<ShipModifiers>();
+        let modifiers_before = get_ship_modifiers(&mut app);
         assert!(
             (modifiers_before.get(&ModifierSlot::RadarRange) - 1.0 / 1.3).abs() < 1e-6,
             "modifier should be present while inside region"
@@ -1229,7 +1217,7 @@ mod tests {
         set_ship_pos(&mut app, 200.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        let modifiers_after = app.world().resource::<ShipModifiers>();
+        let modifiers_after = get_ship_modifiers(&mut app);
         assert!(
             (modifiers_after.get(&ModifierSlot::RadarRange) - 1.0).abs() < 1e-6,
             "modifier should be removed after exiting region, got {}",
@@ -1248,8 +1236,8 @@ mod tests {
         set_ship_pos(&mut app, 0.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        // Both bonuses sum to -0.8 Ã¢â€ â€™ 1/(1+0.8) = 0.5556
-        let modifiers = app.world().resource::<ShipModifiers>();
+        // Both bonuses sum to -0.8 → 1/(1+0.8) = 0.5556
+        let modifiers = get_ship_modifiers(&mut app);
         let expected_both = 1.0 / (1.0 + 0.3 + 0.5);
         assert!(
             (modifiers.get(&ModifierSlot::RadarRange) - expected_both).abs() < 1e-6,
@@ -1263,7 +1251,7 @@ mod tests {
         set_ship_pos(&mut app, -40.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        let modifiers = app.world().resource::<ShipModifiers>();
+        let modifiers = get_ship_modifiers(&mut app);
         let expected_a = 1.0 / (1.0 + 0.3);
         assert!(
             (modifiers.get(&ModifierSlot::RadarRange) - expected_a).abs() < 1e-6,
@@ -1285,6 +1273,7 @@ mod tests {
             crate::simulation::Ship,
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
+            ShipModifiers::new(),
         ));
         app
     }
@@ -1339,8 +1328,8 @@ mod tests {
         spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
     }
 
-    fn check_modifier(app: &App, slot: ModifierSlot, expected: f32) {
-        let modifiers = app.world().resource::<ShipModifiers>();
+    fn check_modifier(app: &mut App, slot: ModifierSlot, expected: f32) {
+        let modifiers = get_ship_modifiers(app);
         assert!(
             (modifiers.get(&slot) - expected).abs() < 1e-6,
             "expected modifier multiplier {} for {:?}, got {}",
@@ -1359,7 +1348,7 @@ mod tests {
         tick_with_dt(&mut app, 0.016);
 
         // -0.5 bonus Ã¢â€ â€™ 1/(1+0.5) = 0.6667
-        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
+        check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
     }
 
     /// RED 2: entering slow zone with yaw_rate_modifier registers MaxYawRate modifier
@@ -1371,7 +1360,7 @@ mod tests {
         tick_with_dt(&mut app, 0.016);
 
         // -0.3 bonus Ã¢â€ â€™ 1/(1+0.3) = 0.7692
-        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0 / 1.3);
+        check_modifier(&mut app, ModifierSlot::MaxYawRate, 1.0 / 1.3);
     }
 
     /// RED 3: entering slow zone with both fields registers both slots
@@ -1382,8 +1371,8 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
 
-        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
-        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0 / 1.3);
+        check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
+        check_modifier(&mut app, ModifierSlot::MaxYawRate, 1.0 / 1.3);
     }
 
     /// RED 4: entering slow zone with both fields omitted registers nothing
@@ -1394,8 +1383,8 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
 
-        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0);
-        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0);
+        check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0);
+        check_modifier(&mut app, ModifierSlot::MaxYawRate, 1.0);
     }
 
     fn get_ship_physics(app: &mut App) -> crate::ship_state::ShipPhysics {
@@ -1471,14 +1460,14 @@ mod tests {
         let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), Some(-0.3));
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
-        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
+        check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
 
         // Exit the region
         set_ship_pos(&mut app, 200.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0);
-        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0);
+        check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0);
+        check_modifier(&mut app, ModifierSlot::MaxYawRate, 1.0);
     }
 
     /// RED 8: exit does NOT restore previously-clamped velocity
@@ -1635,6 +1624,7 @@ mod tests {
             crate::simulation::Ship,
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
+            ShipModifiers::new(),
         ));
         app
     }
@@ -1719,8 +1709,8 @@ mod tests {
         spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
     }
 
-    fn assert_flag(app: &App, flag: FlagKind, expected: bool) {
-        let modifiers = app.world().resource::<ShipModifiers>();
+    fn assert_flag(app: &mut App, flag: FlagKind, expected: bool) {
+        let modifiers = get_ship_modifiers(app);
         assert_eq!(
             modifiers.has_flag(&flag),
             expected,
@@ -1738,7 +1728,7 @@ mod tests {
         spawn_comms_jam_region(&mut app, 0.0, 0.0, 50.0);
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
-        assert_flag(&app, FlagKind::CommsJammed, true);
+        assert_flag(&mut app, FlagKind::CommsJammed, true);
     }
 
     /// RED 2: entering a sensor_blind region sets the SensorBlind flag
@@ -1748,7 +1738,7 @@ mod tests {
         spawn_sensor_blind_region(&mut app, 0.0, 0.0, 50.0);
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
-        assert_flag(&app, FlagKind::SensorBlind, true);
+        assert_flag(&mut app, FlagKind::SensorBlind, true);
     }
 
     /// RED 3: exiting a comms_jam region clears the flag
@@ -1758,13 +1748,13 @@ mod tests {
         let _region = spawn_comms_jam_region(&mut app, 0.0, 0.0, 50.0);
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
-        assert_flag(&app, FlagKind::CommsJammed, true);
+        assert_flag(&mut app, FlagKind::CommsJammed, true);
 
         // Exit the region
         set_ship_pos(&mut app, 200.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        assert_flag(&app, FlagKind::CommsJammed, false);
+        assert_flag(&mut app, FlagKind::CommsJammed, false);
     }
 
     /// RED 4: two overlapping comms_jam regions OR-aggregate; flag clears only
@@ -1780,19 +1770,19 @@ mod tests {
         set_ship_pos(&mut app, 0.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        assert_flag(&app, FlagKind::CommsJammed, true);
+        assert_flag(&mut app, FlagKind::CommsJammed, true);
 
         // Exit B: move to (-40,0) Ã¢â‚¬â€ still inside A (dist 40 < 80), outside B (dist 100 > 80)
         set_ship_pos(&mut app, -40.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        assert_flag(&app, FlagKind::CommsJammed, true);
+        assert_flag(&mut app, FlagKind::CommsJammed, true);
 
         // Exit A: move far away Ã¢â‚¬â€ outside both
         set_ship_pos(&mut app, -200.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        assert_flag(&app, FlagKind::CommsJammed, false);
+        assert_flag(&mut app, FlagKind::CommsJammed, false);
     }
 
     /// RED 5: region despawn while inside clears the flag
@@ -1802,13 +1792,13 @@ mod tests {
         let region = spawn_comms_jam_region(&mut app, 0.0, 0.0, 50.0);
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
-        assert_flag(&app, FlagKind::CommsJammed, true);
+        assert_flag(&mut app, FlagKind::CommsJammed, true);
 
         // Despawn the region entity
         app.world_mut().despawn(region);
         tick_with_dt(&mut app, 0.016);
 
-        assert_flag(&app, FlagKind::CommsJammed, false);
+        assert_flag(&mut app, FlagKind::CommsJammed, false);
     }
 
     /// RED 9: region despawn while inside removes modifiers
@@ -1818,13 +1808,13 @@ mod tests {
         let region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), Some(-0.3));
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
-        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
+        check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
 
         // Despawn the region (implicit exit)
         app.world_mut().despawn(region);
         tick_with_dt(&mut app, 0.016);
 
-        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0);
-        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0);
+        check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0);
+        check_modifier(&mut app, ModifierSlot::MaxYawRate, 1.0);
     }
 }

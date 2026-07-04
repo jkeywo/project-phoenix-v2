@@ -228,7 +228,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
             .init_resource::<crate::lobby::server::ShipClientConfigResource>()
@@ -247,6 +246,7 @@ mod tests {
             // PR 7 (issue #597) — WeaponsTarget is now per-entity Component.
             crate::simulation::WeaponsTarget::default(),
             SensorsFrequencyState::default(),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
         ));
         app
     }

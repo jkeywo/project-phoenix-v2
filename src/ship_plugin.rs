@@ -116,9 +116,9 @@ pub struct ShipPhysicsConfigResource(pub crate::ship_physics::ShipPhysicsConfig)
 
 /// Runtime impulse drive config, loaded from `[helm_console]` in the entity TOML.
 /// Charge duration and speed multiplier can be overridden per ship.
-/// Dual-derives `Resource` (for tests + global fallback) and `Component`
-/// (per-entity component on each ship — PR 4 migration, see PRD #597).
-#[derive(Resource, Component, Clone)]
+/// Per-entity `Component` on each ship (issue #606: component is the sole
+/// source of truth; no Resource fallback).
+#[derive(Component, Clone)]
 pub struct ImpulseConfigResource {
     pub charge_duration: f32,
     pub speed_multiplier: f32,
@@ -138,9 +138,9 @@ impl Default for ImpulseConfigResource {
 /// Runtime boost drive config, loaded from `[helm_console.boost]` in the entity
 /// TOML. `enabled` is false (the default) when the TOML omits the table, which
 /// disables the feature entirely.
-/// Dual-derives `Resource` (for tests + global fallback) and `Component`
-/// (per-entity component on each ship — PR 4 migration, see PRD #597).
-#[derive(Resource, Component, Clone)]
+/// Per-entity `Component` on each ship (issue #606: component is the sole
+/// source of truth; no Resource fallback).
+#[derive(Component, Clone)]
 pub struct BoostConfigResource {
     pub enabled: bool,
     pub multiplier: f32,
@@ -191,7 +191,8 @@ pub struct ShipPlugin;
 /// under Bevy's 16-parameter system-function limit.
 ///
 /// PR 4 (PRD #597): configs are now per-entity Components on each ship entity.
-/// The Resource variants are kept as fallbacks for test environments that still
+/// Impulse and boost configs are component-only (issue #606); physics and
+/// bank configs still keep a Resource fallback for test environments that
 /// use `insert_resource` without inserting a LocalShip entity with components.
 #[derive(SystemParam)]
 struct HelmDriveParams<'w, 's> {
@@ -208,38 +209,32 @@ struct HelmDriveParams<'w, 's> {
         With<LocalShip>,
     >,
     /// Resource fallbacks (legacy path; used by tests that insert_resource
-    /// without spawning a ship entity with the component).
+    /// without spawning a ship entity with the component). Only physics and
+    /// bank still support this path — impulse and boost are component-only.
     physics_cfg_res: Option<Res<'w, ShipPhysicsConfigResource>>,
-    impulse_cfg_res: Option<Res<'w, ImpulseConfigResource>>,
-    boost_cfg_res: Option<Res<'w, BoostConfigResource>>,
     bank_cfg_res: Option<Res<'w, BankConfigResource>>,
     /// Per-entity impulse state on the LocalShip (Component, not Resource).
     impulse_q: Query<'w, 's, &'static ShipImpulse, With<LocalShip>>,
-    boost: Res<'w, ShipBoost>,
+    /// Per-entity boost state on the LocalShip (Component, not Resource).
+    boost_q: Query<'w, 's, &'static ShipBoost, With<LocalShip>>,
 }
 
 impl HelmDriveParams<'_, '_> {
-    /// Effective impulse config: per-entity component takes priority over Resource.
+    /// Effective impulse config: per-entity component only.
     fn impulse_cfg(&self) -> ImpulseConfigResource {
-        let entity = self
-            .config_q
+        self.config_q
             .single()
             .ok()
-            .and_then(|(_, ic, _, _)| ic.cloned());
-        entity
-            .or_else(|| self.impulse_cfg_res.as_deref().cloned())
+            .and_then(|(_, ic, _, _)| ic.cloned())
             .unwrap_or_default()
     }
 
-    /// Effective boost config: per-entity component takes priority over Resource.
+    /// Effective boost config: per-entity component only.
     fn boost_cfg(&self) -> BoostConfigResource {
-        let entity = self
-            .config_q
+        self.config_q
             .single()
             .ok()
-            .and_then(|(_, _, bc, _)| bc.cloned());
-        entity
-            .or_else(|| self.boost_cfg_res.as_deref().cloned())
+            .and_then(|(_, _, bc, _)| bc.cloned())
             .unwrap_or_default()
     }
 
@@ -272,9 +267,6 @@ impl Plugin for ShipPlugin {
             1.0 / 30.0,
             TimerMode::Repeating,
         )))
-        .init_resource::<ImpulseConfigResource>()
-        .init_resource::<BoostConfigResource>()
-        .init_resource::<ShipBoost>()
         .init_resource::<BankConfigResource>()
         .add_message::<CoordinationEnqueue>()
         .add_systems(
@@ -321,22 +313,16 @@ fn process_helm_inputs(
     mut physics_query: Query<&mut ShipPhysics, With<LocalShip>>,
     mut last_input_q: Query<&mut LastHelmInput, With<LocalShip>>,
     modifiers_q: Query<&ShipModifiers, With<LocalShip>>,
-    modifiers_res: Option<Res<ShipModifiers>>,
     drive: HelmDriveParams,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
-    // Prefer per-entity ShipModifiers component on LocalShip; fall back to
-    // the global Resource for tests that only insert the Resource form.
     let default_modifiers;
     let modifiers: &ShipModifiers = match modifiers_q.single() {
         Ok(m) => m,
-        Err(_) => match modifiers_res.as_deref() {
-            Some(m) => m,
-            None => {
-                default_modifiers = ShipModifiers::new();
-                &default_modifiers
-            }
-        },
+        Err(_) => {
+            default_modifiers = ShipModifiers::new();
+            &default_modifiers
+        }
     };
     let Some(mut last_input) = last_input_q.iter_mut().next() else {
         return;
@@ -466,7 +452,7 @@ fn process_helm_inputs(
     }
     // Boost drive: while engaged, multiply max speed and acceleration. Only
     // applies when the ship's TOML enabled the feature.
-    if boost_cfg.enabled && drive.boost.0.is_active() {
+    if boost_cfg.enabled && drive.boost_q.iter().next().map(|b| b.0.is_active()).unwrap_or(false) {
         config.max_speed *= boost_cfg.multiplier;
         config.max_reverse_speed *= boost_cfg.multiplier;
         config.acceleration *= boost_cfg.multiplier;
@@ -910,17 +896,13 @@ pub fn handle_impulse_messages(
 fn tick_impulse(
     time: Res<Time>,
     mut ships_q: Query<(&mut ShipImpulse, Option<&ImpulseConfigResource>), With<Ship>>,
-    config_res: Option<Res<ImpulseConfigResource>>,
 ) {
     let dt = time.delta_secs();
-    let fallback_duration = config_res
-        .as_deref()
-        .map(|c| c.charge_duration)
-        .unwrap_or(crate::impulse::IMPULSE_CHARGE_DURATION);
     for (mut impulse, entity_cfg) in ships_q.iter_mut() {
         let charge_duration = entity_cfg
-            .map(|c| c.charge_duration)
-            .unwrap_or(fallback_duration);
+            .cloned()
+            .unwrap_or_default()
+            .charge_duration;
         impulse.0.tick(dt, charge_duration);
     }
 }
@@ -932,59 +914,28 @@ pub fn handle_boost_messages(
         (
             &AdmittedCommands,
             Option<&BoostConfigResource>,
-            Option<&mut ShipBoost>,
+            &mut ShipBoost,
         ),
         With<LocalShip>,
     >,
-    mut boost_res: ResMut<ShipBoost>,
-    config_res: Option<Res<BoostConfigResource>>,
 ) {
-    let Some((admitted, entity_cfg, entity_boost)) = ship_query.iter_mut().next() else {
+    let Some((admitted, entity_cfg, mut entity_boost)) = ship_query.iter_mut().next() else {
         return;
     };
-    // Per-entity component takes priority over the Resource fallback.
-    let enabled = entity_cfg
-        .map(|c| c.enabled)
-        .or_else(|| config_res.as_deref().map(|c| c.enabled))
-        .unwrap_or(false);
+    let enabled = entity_cfg.map(|c| c.enabled).unwrap_or(false);
     if !enabled {
         return;
     }
-    // Determine which boost state to mutate: entity component when present
-    // (production path), resource as fallback (legacy test path).
-    let has_entity_boost = entity_boost.is_some();
-    let mut entity_boost = entity_boost;
     for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
         match &cmd.payload {
             SystemControlPayload::ToggleBoost => {
-                if let Some(ref mut b) = entity_boost {
-                    b.0.toggle();
-                }
-                if !has_entity_boost {
-                    boost_res.0.toggle();
-                } else {
-                    // Keep resource in sync so process_helm_inputs (Res<ShipBoost>) sees it.
-                    if let Some(ref b) = entity_boost {
-                        boost_res.0 = b.0.clone();
-                    }
-                }
+                entity_boost.0.toggle();
             }
             SystemControlPayload::SetBoost { active } => {
-                if let Some(ref mut b) = entity_boost {
-                    if *active {
-                        b.0.activate();
-                    } else {
-                        b.0.deactivate();
-                    }
-                }
-                if !has_entity_boost {
-                    if *active {
-                        boost_res.0.activate();
-                    } else {
-                        boost_res.0.deactivate();
-                    }
-                } else if let Some(ref b) = entity_boost {
-                    boost_res.0 = b.0.clone();
+                if *active {
+                    entity_boost.0.activate();
+                } else {
+                    entity_boost.0.deactivate();
                 }
             }
             _ => {}
@@ -998,13 +949,10 @@ fn normalized_boost_drain_factor(thrust: f32, steering: f32) -> f32 {
 
 fn tick_boost(
     time: Res<Time>,
-    mut boost_res: ResMut<ShipBoost>,
-    // Per-entity component takes priority; Resource is the fallback.
     mut boost_entity_q: Query<
-        (Option<&BoostConfigResource>, Option<&mut ShipBoost>),
+        (Option<&BoostConfigResource>, &mut ShipBoost),
         With<LocalShip>,
     >,
-    boost_cfg_res: Option<Res<BoostConfigResource>>,
     last_input_q: Query<&LastHelmInput, With<LocalShip>>,
     sessions: Res<Sessions>,
     impulse_q: Query<&ShipImpulse, With<LocalShip>>,
@@ -1013,14 +961,10 @@ fn tick_boost(
     let Some((_ship_config, control_sources)) = ship_components.iter().next() else {
         return;
     };
-    // Per-entity component takes priority over the Resource fallback.
-    let Some((entity_cfg_opt, entity_boost_opt)) = boost_entity_q.iter_mut().next() else {
+    let Some((entity_cfg, mut entity_boost)) = boost_entity_q.iter_mut().next() else {
         return;
     };
-    let entity_cfg = entity_cfg_opt.cloned();
-    let config = entity_cfg
-        .or_else(|| boost_cfg_res.as_deref().cloned())
-        .unwrap_or_default();
+    let config = entity_cfg.cloned().unwrap_or_default();
     if !config.enabled {
         return;
     }
@@ -1043,25 +987,12 @@ fn tick_boost(
     } else {
         normalized_boost_drain_factor(last_input.thrust, last_input.steering)
     };
-    if let Some(mut entity_boost) = entity_boost_opt {
-        // Production path: entity component takes priority.
-        entity_boost.0.tick_with_drain_factor(
-            time.delta_secs(),
-            config.active_duration,
-            config.recharge_duration,
-            drain_factor,
-        );
-        // Keep resource in sync so process_helm_inputs (Res<ShipBoost>) sees it.
-        boost_res.0 = entity_boost.0.clone();
-    } else {
-        // Fallback: legacy test path with no entity component.
-        boost_res.0.tick_with_drain_factor(
-            time.delta_secs(),
-            config.active_duration,
-            config.recharge_duration,
-            drain_factor,
-        );
-    }
+    entity_boost.0.tick_with_drain_factor(
+        time.delta_secs(),
+        config.active_duration,
+        config.recharge_duration,
+        drain_factor,
+    );
 }
 
 fn is_inside_blocks_impulse(
@@ -1380,10 +1311,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            // TODO: remove, ShipImpulse is a Component (not a Resource) since #b4b0605;
-            // kept here only to avoid breaking any remaining Resource-based readers in tests.
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
         let hull_config = &[
             (crate::messages::SystemId("helm".into()), 25.0_f32),
@@ -1391,7 +1318,7 @@ mod tests {
             (crate::messages::SystemId("power".into()), 25.0),
             (crate::messages::SystemId("shields".into()), 25.0),
         ];
-        app.world_mut().spawn((
+        let ship = app.world_mut().spawn((
             Ship,
             LocalShip,
             Transform::default(),
@@ -1409,6 +1336,10 @@ mod tests {
             LastHelmInput::default(),
             crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
             ShipImpulse(crate::impulse::ImpulseState::new()),
+        )).id();
+        app.world_mut().entity_mut(ship).insert((
+            ShipModifiers::new(),
+            ShipBoost::default(),
         ));
         app
     }
@@ -1443,6 +1374,41 @@ mod tests {
             .single(app.world())
             .unwrap();
         app.world_mut().entity_mut(ship).insert(val);
+    }
+
+    fn find_ship_entity(app: &mut App) -> Entity {
+        app.world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .expect("LocalShip entity must exist")
+    }
+
+    fn toggle_boost(app: &mut App) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<ShipBoost>()
+            .unwrap()
+            .0
+            .toggle();
+    }
+
+    fn boost_is_active(app: &mut App) -> bool {
+        let ship = find_ship_entity(app);
+        app.world()
+            .entity(ship)
+            .get::<ShipBoost>()
+            .map(|b| b.0.is_active())
+            .unwrap_or(false)
+    }
+
+    fn boost_battery(app: &mut App) -> f32 {
+        let ship = find_ship_entity(app);
+        app.world()
+            .entity(ship)
+            .get::<ShipBoost>()
+            .map(|b| b.0.battery)
+            .unwrap_or(0.0)
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
@@ -1951,7 +1917,8 @@ mod tests {
         // 5x boost: base accel = 25/3 ≈ 8.33; boosted = ~41.67 per second.
         // Timer fires at 30 Hz (dt ≈ 1/30 s), so the first tick gives
         // forward_speed ≈ 41.67/30 ≈ 1.39.
-        app.insert_resource(ImpulseConfigResource {
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert(ImpulseConfigResource {
             charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
             speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
             acceleration_multiplier: 5.0,
@@ -2003,7 +1970,8 @@ mod tests {
     #[test]
     fn idle_impulse_does_not_boost_acceleration() {
         let mut app = test_app();
-        app.insert_resource(ImpulseConfigResource {
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert(ImpulseConfigResource {
             charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
             speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
             acceleration_multiplier: 5.0,
@@ -2042,7 +2010,8 @@ mod tests {
     #[test]
     fn zero_acceleration_multiplier_falls_back_to_const() {
         let mut app = test_app();
-        app.insert_resource(ImpulseConfigResource {
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert(ImpulseConfigResource {
             charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
             speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
             acceleration_multiplier: 0.0,
@@ -2086,9 +2055,12 @@ mod tests {
     #[test]
     fn active_boost_triples_acceleration() {
         let mut app = test_app();
-        app.insert_resource(enabled_boost_config());
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(enabled_boost_config());
         start_game_with_helm_and_science(&mut app);
-        app.world_mut().resource_mut::<ShipBoost>().0.toggle(); // engage
+        toggle_boost(&mut app); // engage
         push(
             &mut app,
             "helm",
@@ -2132,9 +2104,12 @@ mod tests {
     #[test]
     fn active_boost_multiplies_steering_rate() {
         let mut app = test_app();
-        app.insert_resource(enabled_boost_config());
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(enabled_boost_config());
         start_game_with_helm_and_science(&mut app);
-        app.world_mut().resource_mut::<ShipBoost>().0.toggle();
+        toggle_boost(&mut app);
         push(
             &mut app,
             "helm",
@@ -2178,13 +2153,13 @@ mod tests {
     #[test]
     fn active_boost_battery_drain_scales_with_helm_demand() {
         let mut app = test_app();
-        app.insert_resource(enabled_boost_config());
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(enabled_boost_config());
         start_game_with_helm_and_science(&mut app);
 
-        {
-            let mut boost = app.world_mut().resource_mut::<ShipBoost>();
-            boost.0.toggle();
-        }
+        toggle_boost(&mut app);
         {
             set_last_helm_input(
                 &mut app,
@@ -2197,7 +2172,7 @@ mod tests {
 
         tick(&mut app);
 
-        let battery = app.world().resource::<ShipBoost>().0.battery;
+        let battery = boost_battery(&mut app);
         assert!(
             (battery - 0.9).abs() < 0.001,
             "full thrust + full steering should drain twice the base rate; got {battery}"
@@ -2207,17 +2182,17 @@ mod tests {
     #[test]
     fn active_boost_battery_does_not_drain_with_idle_helm() {
         let mut app = test_app();
-        app.insert_resource(enabled_boost_config());
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(enabled_boost_config());
         start_game_with_helm_and_science(&mut app);
 
-        {
-            let mut boost = app.world_mut().resource_mut::<ShipBoost>();
-            boost.0.toggle();
-        }
+        toggle_boost(&mut app);
 
         tick(&mut app);
 
-        let battery = app.world().resource::<ShipBoost>().0.battery;
+        let battery = boost_battery(&mut app);
         assert!(
             (battery - 1.0).abs() < f32::EPSILON,
             "idle helm should not spend boost battery; got {battery}"
@@ -2229,7 +2204,10 @@ mod tests {
     #[test]
     fn toggle_boost_engages_when_enabled() {
         let mut app = test_app();
-        app.insert_resource(enabled_boost_config());
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(enabled_boost_config());
         start_game_with_helm_and_science(&mut app);
 
         push(
@@ -2241,7 +2219,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<ShipBoost>().0.is_active());
+        assert!(boost_is_active(&mut app));
 
         push(
             &mut app,
@@ -2252,13 +2230,16 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(!app.world().resource::<ShipBoost>().0.is_active());
+        assert!(!boost_is_active(&mut app));
     }
 
     #[test]
     fn control_system_toggle_boost_engages_when_enabled() {
         let mut app = test_app();
-        app.insert_resource(enabled_boost_config());
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(enabled_boost_config());
         start_game_with_helm_and_science(&mut app);
 
         push(
@@ -2270,13 +2251,16 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<ShipBoost>().0.is_active());
+        assert!(boost_is_active(&mut app));
     }
 
     #[test]
     fn control_system_set_boost_sets_active_state() {
         let mut app = test_app();
-        app.insert_resource(enabled_boost_config());
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(enabled_boost_config());
         start_game_with_helm_and_science(&mut app);
 
         push(
@@ -2288,7 +2272,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(app.world().resource::<ShipBoost>().0.is_active());
+        assert!(boost_is_active(&mut app));
 
         push(
             &mut app,
@@ -2299,7 +2283,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert!(!app.world().resource::<ShipBoost>().0.is_active());
+        assert!(!boost_is_active(&mut app));
     }
 
     /// When boost is disabled (no TOML), `ToggleBoost` is ignored and the
@@ -2319,7 +2303,7 @@ mod tests {
         );
         tick(&mut app);
         assert!(
-            !app.world().resource::<ShipBoost>().0.is_active(),
+            !boost_is_active(&mut app),
             "ToggleBoost must be a no-op when boost is disabled"
         );
     }
@@ -3341,8 +3325,6 @@ station = "helm"
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
         let hull_config = &[
             (crate::messages::SystemId("helm".into()), 25.0_f32),
@@ -3352,7 +3334,7 @@ station = "helm"
             (crate::messages::SystemId("helm-engine-port".into()), 15.0),
             (crate::messages::SystemId("helm-engine-starboard".into()), 15.0),
         ];
-        app.world_mut().spawn((
+        let ship = app.world_mut().spawn((
             Ship,
             LocalShip,
             Transform::default(),
@@ -3370,6 +3352,10 @@ station = "helm"
             LastHelmInput::default(),
             crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
             ShipImpulse(crate::impulse::ImpulseState::new()),
+        )).id();
+        app.world_mut().entity_mut(ship).insert((
+            ShipModifiers::new(),
+            ShipBoost::default(),
         ));
         app
     }
@@ -3620,8 +3606,6 @@ station = "helm"
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
         let hull_config = &[
             (crate::messages::SystemId("helm".into()), 25.0_f32),
@@ -3630,7 +3614,7 @@ station = "helm"
             (crate::messages::SystemId("power-battery".into()), 10.0),
             (crate::messages::SystemId("shields".into()), 25.0),
         ];
-        app.world_mut().spawn((
+        let ship = app.world_mut().spawn((
             Ship,
             LocalShip,
             Transform::default(),
@@ -3648,6 +3632,10 @@ station = "helm"
             LastHelmInput::default(),
             crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
             ShipImpulse(crate::impulse::ImpulseState::new()),
+        )).id();
+        app.world_mut().entity_mut(ship).insert((
+            ShipModifiers::new(),
+            ShipBoost::default(),
         ));
         app
     }
@@ -3710,8 +3698,6 @@ station = "helm"
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
 
         let tc = crate::damage::ConsoleTierConfig::default();
@@ -3734,26 +3720,28 @@ station = "helm"
             ),
         ]);
         let hull_config = &[(crate::messages::SystemId("helm".into()), 25.0_f32)];
-        app.world_mut().spawn((
-            (
-                Ship,
-                LocalShip,
-                Transform::default(),
-                ShipPhysics::default(),
-                ShipConfigComponent::default(),
-                ShipSystemControlSources::default(),
-                ActiveStationRatings::default(),
-                CoordinationQueue::default(),
-                crate::messages::AdmittedCommands::default(),
-                crate::server_app::ShipSystemBlackboards::default(),
-                crate::ai_plugin::ShipAiMemory::default(),
-                crate::entity_spawner::EntitySystemHull(
-                    crate::damage::SystemHull::from_config(hull_config),
-                ),
-                crate::entity_spawner::EntityShipArcHull(arc_hull),
-                LastHelmInput::default(),
-                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+        let ship = app.world_mut().spawn((
+            Ship,
+            LocalShip,
+            Transform::default(),
+            ShipPhysics::default(),
+            ShipConfigComponent::default(),
+            ShipSystemControlSources::default(),
+            ActiveStationRatings::default(),
+            CoordinationQueue::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::ai_plugin::ShipAiMemory::default(),
+            crate::entity_spawner::EntitySystemHull(
+                crate::damage::SystemHull::from_config(hull_config),
             ),
+            crate::entity_spawner::EntityShipArcHull(arc_hull),
+            LastHelmInput::default(),
+            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+        )).id();
+        app.world_mut().entity_mut(ship).insert((
+            ShipModifiers::new(),
+            ShipBoost::default(),
             ShipImpulse(crate::impulse::ImpulseState::new()),
         ));
         app

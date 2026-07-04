@@ -346,7 +346,6 @@ fn handle_set_target(
     >,
     mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
     modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
-    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     mut outbox: ResMut<SimOutbox>,
     ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
@@ -366,17 +365,13 @@ fn handle_set_target(
     if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
         return;
     }
-    // Per-entity modifiers component takes priority; fall back to Resource.
     let default_modifiers;
     let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
         Ok(m) => m,
-        Err(_) => match modifiers_res.as_deref() {
-            Some(m) => m,
-            None => {
-                default_modifiers = crate::modifiers::ShipModifiers::new();
-                &default_modifiers
-            }
-        },
+        Err(_) => {
+            default_modifiers = crate::modifiers::ShipModifiers::new();
+            &default_modifiers
+        }
     };
     for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
         let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
@@ -598,7 +593,6 @@ fn handle_fire_phaser(
         ),
         With<crate::server_app::Ship>,
     >,
-    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
@@ -696,20 +690,14 @@ fn handle_fire_phaser(
         };
 
         // Per-entity component path (preferred). Fallback: default combat
-        // config. Modifiers fall back to the global Resource for legacy
-        // test paths that don't insert the per-entity component.
+        // config.
         let combat_config_default = PhaserCombatConfigResource::default();
         let combat_config: &PhaserCombatConfigResource =
             combat_config_opt.unwrap_or(&combat_config_default);
 
         let modifiers_default = crate::modifiers::ShipModifiers::new();
-        let modifiers: &crate::modifiers::ShipModifiers = match modifiers_opt {
-            Some(m) => m,
-            None => match modifiers_res.as_deref() {
-                Some(m) => m,
-                None => &modifiers_default,
-            },
-        };
+        let modifiers: &crate::modifiers::ShipModifiers =
+            modifiers_opt.unwrap_or(&modifiers_default);
 
         let bank_cfg = combat_config.0.bank_by_id(bank);
         let bank_in_arc = if combat_config.0.banks.is_empty() {
@@ -833,7 +821,6 @@ fn tick_phaser_auto_fire(
         ),
         With<crate::server_app::Ship>,
     >,
-    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
@@ -901,13 +888,8 @@ fn tick_phaser_auto_fire(
         let combat_config: &PhaserCombatConfigResource =
             combat_config_opt.unwrap_or(&combat_config_default);
         let modifiers_default = crate::modifiers::ShipModifiers::new();
-        let modifiers: &crate::modifiers::ShipModifiers = match modifiers_opt {
-            Some(m) => m,
-            None => match modifiers_res.as_deref() {
-                Some(m) => m,
-                None => &modifiers_default,
-            },
-        };
+        let modifiers: &crate::modifiers::ShipModifiers =
+            modifiers_opt.unwrap_or(&modifiers_default);
 
         // Find the first bank that is off-cooldown and has the target in its auto arc.
         // Per-bank policy gate (issue #512): skip banks whose fine system is
@@ -1055,9 +1037,6 @@ fn tick_beams(
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
         Option<&mut crate::entity_spawner::EntityShipArcHull>,
     )>,
-    // ShipModifiers Resource fallback used only by legacy test paths that
-    // set the resource but don't insert the component on the ship entity.
-    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     mut world: ResMut<WorldResource>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
@@ -1123,13 +1102,8 @@ fn tick_beams(
             combat_config_opt.unwrap_or(&combat_default);
 
         let modifiers_default = crate::modifiers::ShipModifiers::new();
-        let modifiers: &crate::modifiers::ShipModifiers = match modifiers_opt {
-            Some(m) => m,
-            None => match modifiers_res.as_deref() {
-                Some(m) => m,
-                None => &modifiers_default,
-            },
-        };
+        let modifiers: &crate::modifiers::ShipModifiers =
+            modifiers_opt.unwrap_or(&modifiers_default);
 
         let active_bank_cfg = combat_config.0.bank_by_id(&active_bank);
         let cooldown_secs = active_bank_cfg
@@ -2609,9 +2583,10 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 q.single(world).ok().map(|ts| ts.0.torpedoes_remaining)
                     .unwrap_or_else(|| world.resource::<TorpedoSystemResource>().0.torpedoes_remaining)
             };
-            let radar_range_mult = world
-                .resource::<crate::modifiers::ShipModifiers>()
-                .get(&ModifierSlot::RadarRange);
+            let radar_range_mult = {
+                let mut q = world.query_filtered::<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>();
+                q.single(world).ok().map(|m| m.get(&ModifierSlot::RadarRange)).unwrap_or(1.0)
+            };
             let phaser_mode = world.resource::<CurrentPhaserMode>().0;
             let banks_config = {
                 // Prefer per-entity component on LocalShip; fall back to global resource.
@@ -2783,7 +2758,6 @@ fn publish_weapons_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
-    modifiers_res: Option<Res<crate::modifiers::ShipModifiers>>,
     world_res: Res<WorldResource>,
     entity_name_q: Query<(
         &crate::entity_spawner::EntityUuid,
@@ -2825,17 +2799,13 @@ fn publish_weapons_blackboard(
             &combat_config_default
         }
     };
-    // Per-entity ShipModifiers component takes priority; fall back to Resource.
     let default_modifiers;
     let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
         Ok(m) => m,
-        Err(_) => match modifiers_res.as_deref() {
-            Some(m) => m,
-            None => {
-                default_modifiers = crate::modifiers::ShipModifiers::new();
-                &default_modifiers
-            }
-        },
+        Err(_) => {
+            default_modifiers = crate::modifiers::ShipModifiers::new();
+            &default_modifiers
+        }
     };
     let torpedo_sys_default;
     let torpedo_sys: &TorpedoSystemResource = match torpedo_sys_q.single() {
@@ -3360,12 +3330,10 @@ station = "tactical"
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-        .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
         .init_resource::<WorldResource>()
         .add_message::<AsteroidDestroyedVfx>()
         .add_message::<crate::ai_plugin::AiEntityDestroyed>()
         .init_resource::<CurrentPhaserMode>()
-        .insert_resource(ShipModifiers::new())
         .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
             TorpedoConfig::default(),
         )))
@@ -3499,6 +3467,8 @@ station = "tactical"
             crate::server_app::ShipAttackedThisTick::default(),
             LastShipAttacker::default(),
             crate::ship::combat_activity::RecentCombatActivity::default(),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
+            ShipModifiers::new(),
         ));
         app
     }
@@ -4840,15 +4810,16 @@ station = "tactical"
 
         let mut app_fast = test_app();
         setup_weapons_world_with_entity(&mut app_fast, 0.0, -20.0);
+        start_game_with_weapons(&mut app_fast);
         {
-            let mut mods = app_fast.world_mut().resource_mut::<ShipModifiers>();
+            let mut q = app_fast.world_mut().query_filtered::<&mut ShipModifiers, With<crate::simulation::LocalShip>>();
+            let mut mods = q.single_mut(app_fast.world_mut()).unwrap();
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::PhaserDamage,
                 bonus: 1.0,
             });
         }
-        start_game_with_weapons(&mut app_fast);
         push(
             &mut app_fast,
             "weapons",

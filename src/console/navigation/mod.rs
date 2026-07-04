@@ -259,8 +259,6 @@ mod tests {
                     .in_set(crate::sim_sets::SimSet::PublishAggregate),
             )
             .init_resource::<Outbox>()
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .insert_resource(crate::modifiers::ShipModifiers::new())
             .init_resource::<LastBroadcastEntityPositions>()
             .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
@@ -278,6 +276,8 @@ mod tests {
             crate::ship_plugin::CoordinationQueue::default(),
             // PR 7 (issue #597) — NavigationWaypoint is now a per-entity Component.
             NavigationWaypoint::default(),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
+            crate::modifiers::ShipModifiers::new(),
         ));
         app
     }

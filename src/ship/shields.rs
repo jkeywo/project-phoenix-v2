@@ -543,6 +543,7 @@ mod tests {
                 crate::messages::AdmittedCommands::default(),
                 crate::ship_state::ShipRedAlert::default(),
                 ShieldsCoordinationState::default(),
+                ShipImpulse(crate::impulse::ImpulseState::new()),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -551,7 +552,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
@@ -687,6 +687,7 @@ mod tests {
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
+                ShipImpulse(crate::impulse::ImpulseState::new()),
             ))
             .id();
         app.add_plugins(LobbyPlugin)
@@ -694,7 +695,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
@@ -796,6 +796,7 @@ mod tests {
                 crate::messages::AdmittedCommands::default(),
                 crate::ship_state::ShipRedAlert::default(),
                 ShieldsCoordinationState::default(),
+                ShipImpulse(crate::impulse::ImpulseState::new()),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -804,7 +805,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()

@@ -85,11 +85,9 @@ struct SimBroadcastTimer(Timer);
 /// AI, but the state lives on the entity so future NPC helm behaviour can
 /// route through the same per-ship pathway.
 ///
-/// Dual `Resource + Component` during the migration window: production
-/// readers query the per-ship Component on the LocalShip; the Resource
-/// form is kept only for legacy test scaffolds that call `insert_resource`.
-/// The Resource derive is scheduled for removal in a follow-up cleanup.
-#[derive(Resource, Component, Default)]
+/// Per-entity `Component` on each ship (issue #606: component is the sole
+/// source of truth; no Resource fallback).
+#[derive(Component, Default)]
 pub struct ShipImpulse(pub ImpulseState);
 
 // ShipShields has moved to `crate::ship::shields` as a Component.
@@ -98,11 +96,10 @@ pub use crate::ship::shields::ShipShields;
 /// The ship's boost drive battery state. Toggle/partial-drain model; only
 /// active when the ship's TOML enables it (see `BoostConfigResource`).
 ///
-/// Dual `Resource + Component` during the ship-parity migration window:
-/// production readers query the per-ship Component on the LocalShip; the
-/// Resource form is kept for legacy test scaffolds. Both spawn paths
-/// insert a `ShipBoost::default()` Component on every ship.
-#[derive(Resource, Component, Default)]
+/// Per-entity `Component` on each ship (issue #606: component is the sole
+/// source of truth; no Resource fallback). Both spawn paths insert a
+/// `ShipBoost::default()` Component on every ship.
+#[derive(Component, Default)]
 pub struct ShipBoost(pub crate::boost::BoostState);
 
 /// Per-ship marker set to `true` by phaser/torpedo fire systems when that
@@ -270,7 +267,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_plugins(crate::entity_star::StarRenderPlugin)
     .add_message::<AsteroidDestroyedVfx>()
-    .insert_resource(ShipBoost(crate::boost::BoostState::new()))
     .init_resource::<CaptainPriorityBoost>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
         crate::config_cache::get_faction_registry(),
@@ -632,17 +628,11 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 pub fn modifier_events_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(Audience::All, Cadence::OnEvent, |world: &mut World| {
         use crate::modifiers::ModifierEvent;
-        // Prefer draining from the per-entity component on LocalShip; fall
-        // back to the global Resource when the entity is absent.
         let events: Vec<ModifierEvent> = {
             let mut q =
                 world.query_filtered::<&mut crate::modifiers::ShipModifiers, With<LocalShip>>();
             if let Some(mut mods_comp) = q.iter_mut(world).next() {
                 std::mem::take(&mut mods_comp.pending_events)
-            } else if let Some(mut mods_res) =
-                world.get_resource_mut::<crate::modifiers::ShipModifiers>()
-            {
-                std::mem::take(&mut mods_res.pending_events)
             } else {
                 Vec::new()
             }
@@ -829,7 +819,6 @@ fn handle_collisions(
         With<Ship>,
     >,
     body_query: Query<(&Transform, Option<&ColliderSection>)>,
-    modifiers_res: Option<Res<ShipModifiers>>,
     mut outbox: ResMut<SimOutbox>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut game_over_reason: ResMut<GameOverReason>,
@@ -861,18 +850,13 @@ fn handle_collisions(
     {
         cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
 
-        // Per-entity ShipModifiers component takes priority; fall back to
-        // the global Resource for tests that only insert the Resource form.
         let default_modifiers;
         let modifiers: &ShipModifiers = match modifiers_comp {
             Some(m) => m,
-            None => match modifiers_res.as_deref() {
-                Some(m) => m,
-                None => {
-                    default_modifiers = ShipModifiers::new();
-                    &default_modifiers
-                }
-            },
+            None => {
+                default_modifiers = ShipModifiers::new();
+                &default_modifiers
+            }
         };
 
         let contact = ctx.contact_pairs_with(ship_entity).next().and_then(|pair| {
@@ -2000,9 +1984,9 @@ fn spawn_game_start_entities(
                 // Per-entity CollisionCooldown so player and NPC ships each
                 // have their own cooldown timer (PRD #597 PR-8).
                 .insert(CollisionCooldown::default())
-                // ShipModifiers as per-entity component (PR 6 — PRD #597). The
-                // legacy Resource form is still initialised by ModifierCoordinationPlugin
-                // and dual-written to by observers/translators until PR 7 completes.
+                // ShipModifiers as per-entity component (PR 6 — PRD #597; the
+                // legacy Resource fallback was removed in issue #606). Every
+                // ship — player and NPC — carries its own instance.
                 .insert(crate::modifiers::ShipModifiers::new())
                 // Combat activity state per-ship (PR 10 — PRD #597). Every
                 // ship (player + NPC) tracks its own recent combat activity
@@ -2297,11 +2281,10 @@ fn spawn_game_start_entities(
                     acceleration_multiplier: hc.impulse_acceleration_multiplier,
                 })
                 .unwrap_or_default();
-            commands.insert_resource(impulse_cfg.clone());
             commands.entity(spawned).insert(impulse_cfg);
 
             // Boost config from [helm_console.boost] TOML. Absent table ⇒
-            // feature disabled (default resource has `enabled: false`).
+            // feature disabled (default component has `enabled: false`).
             let boost_cfg = config
                 .helm_console
                 .as_ref()
@@ -2314,7 +2297,6 @@ fn spawn_game_start_entities(
                     recharge_duration: b.recharge_duration,
                 })
                 .unwrap_or_default();
-            commands.insert_resource(boost_cfg.clone());
             commands.entity(spawned).insert(boost_cfg);
 
             // Bank config from [helm_console] TOML, or default
@@ -2834,9 +2816,7 @@ mod tests {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-        .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<WorldResource>()
-        .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<TrackedEntities>()
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1),
@@ -2932,13 +2912,11 @@ mod tests {
                 )),
             ))
             .id();
-        // Insert per-entity weapon configs as a separate insert (Bundle limit).
-        // Note: no ShipPowerSystem/PowerConfig* per-entity components are
-        // attached here — this test uses the Resource forms (installed by
-        // ShipPowerPlugin) so `resource_mut::<ShipPowerSystem>` mutations in
-        // tests are observed by the systems (which fall back to Resource when
-        // the Component is absent — PR 6, PRD #597).
+        // Insert per-entity components (Bundle limit).
         app.world_mut().entity_mut(ship).insert((
+            ShipImpulse::default(),
+            ShipBoost::default(),
+            crate::modifiers::ShipModifiers::new(),
             crate::weapons_plugin::TorpedoSystemResource(crate::torpedo::TorpedoSystem::new(
                 crate::torpedo::TorpedoConfig::default(),
             )),
@@ -3039,6 +3017,24 @@ mod tests {
             .unwrap()
             .0
             .apply_damage(amount, &mut rng);
+    }
+
+    fn get_ship_modifiers(app: &mut App) -> crate::modifiers::ShipModifiers {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>();
+        q.single(app.world()).unwrap().clone()
+    }
+
+    fn modify_ship_modifiers<F>(app: &mut App, f: F)
+    where
+        F: FnOnce(&mut crate::modifiers::ShipModifiers),
+    {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>();
+        let mut mods = q.single_mut(app.world_mut()).unwrap();
+        f(&mut mods);
     }
 
     fn get_phaser_frequency(app: &mut App) -> f32 {
@@ -5052,21 +5048,20 @@ mod tests {
     #[test]
     fn phaser_damage_modifier_doubles_kill_rate() {
         use crate::messages::{ModifierSlot, ModifierSource};
-        use crate::modifiers::{Modifier, ShipModifiers};
+        use crate::modifiers::Modifier;
 
         // --- App with 2Ã— PhaserDamage modifier ---
         let mut app_fast = test_app();
         setup_weapons_world_with_entity(&mut app_fast, 0.0, -20.0);
-        // Apply 2Ã— phaser damage modifier before game starts.
-        {
-            let mut mods = app_fast.world_mut().resource_mut::<ShipModifiers>();
+        start_game_with_weapons(&mut app_fast);
+        // Apply 2Ã— phaser damage modifier after ship is spawned.
+        modify_ship_modifiers(&mut app_fast, |mods| {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::PhaserDamage,
                 bonus: 1.0, // â†' multiplier 2.0
             });
-        }
-        start_game_with_weapons(&mut app_fast);
+        });
         push(
             &mut app_fast,
             "weapons",
@@ -5147,21 +5142,20 @@ mod tests {
     #[test]
     fn add_modifier_broadcasts_modifier_added_message() {
         use crate::messages::{ModifierSlot, ModifierSource};
-        use crate::modifiers::{Modifier, ShipModifiers};
+        use crate::modifiers::Modifier;
 
         let mut app = test_app();
         start_game(&mut app);
         tick(&mut app); // consume startup messages
 
-        // Register a modifier on the live resource.
-        {
-            let mut mods = app.world_mut().resource_mut::<ShipModifiers>();
+        // Register a modifier on the ship entity.
+        modify_ship_modifiers(&mut app, |mods| {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::MaxSpeed,
                 bonus: 0.5,
             });
-        }
+        });
         let out = tick(&mut app);
 
         let found = out.iter().any(|m| {
@@ -5179,26 +5173,24 @@ mod tests {
     #[test]
     fn remove_modifier_broadcasts_modifier_removed_message() {
         use crate::messages::{ModifierSlot, ModifierSource};
-        use crate::modifiers::{Modifier, ShipModifiers};
+        use crate::modifiers::Modifier;
 
         let mut app = test_app();
         start_game(&mut app);
         // Add first so there's something to remove.
-        {
-            let mut mods = app.world_mut().resource_mut::<ShipModifiers>();
+        modify_ship_modifiers(&mut app, |mods| {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::MaxSpeed,
                 bonus: 0.5,
             });
-        }
+        });
         tick(&mut app);
 
         // Now remove it.
-        {
-            let mut mods = app.world_mut().resource_mut::<ShipModifiers>();
+        modify_ship_modifiers(&mut app, |mods| {
             mods.remove(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed);
-        }
+        });
         let out = tick(&mut app);
 
         let found = out.iter().any(|m| {
@@ -5311,19 +5303,18 @@ mod tests {
     #[test]
     fn hull_damage_modifier_halves_collision_damage() {
         use crate::messages::{ModifierSlot, ModifierSource};
-        use crate::modifiers::{Modifier, ShipModifiers};
+        use crate::modifiers::Modifier;
 
         // Hull damage halved via modifier.
         let mut app = test_app();
         start_game(&mut app);
-        {
-            let mut mods = app.world_mut().resource_mut::<ShipModifiers>();
+        modify_ship_modifiers(&mut app, |mods| {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::HullDamageTaken,
                 bonus: -1.0, // â†' multiplier 0.5
             });
-        }
+        });
 
         // Apply collision damage directly through the formula used in handle_collisions.
         // At 200 u/s: collision_damage(200) = round(200 * 0.5) = 100.
@@ -5331,7 +5322,7 @@ mod tests {
         fn near(a: f32, b: f32) -> bool {
             (a - b).abs() < 1e-6
         }
-        let mods = app.world().resource::<ShipModifiers>().clone();
+        let mods = get_ship_modifiers(&mut app);
         let base_damage = collision_damage(200.0) as f32; // 100
         let scaled_damage = (base_damage * mods.get(&ModifierSlot::HullDamageTaken)).round();
         assert!(
@@ -5392,7 +5383,6 @@ mod tests {
             .init_resource::<SimOutbox>()
             .init_resource::<WorldResource>()
             .insert_resource(GameOverReason(None))
-            .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<DamageLog>()
             .add_message::<crate::ai_plugin::AiEntityDestroyed>()
             .add_systems(Update, handle_collisions);
@@ -5434,6 +5424,7 @@ mod tests {
                     npc_hull_max,
                 )])),
                 ShipModifiers::new(),
+                ShipImpulse::default(),
                 ColliderSection(ColliderConfig {
                     shape: ColliderShape::Ball,
                     radius: 5.0,
@@ -5798,10 +5789,7 @@ mod tests {
         let _ = tick(&mut app);
 
         // Level 3 ? index 2 ? bonus 1.0 ? MaxSpeed multiplier = 2.0
-        let mult = app
-            .world()
-            .resource::<ShipModifiers>()
-            .get(&ModifierSlot::MaxSpeed);
+        let mult = get_ship_modifiers(&mut app).get(&ModifierSlot::MaxSpeed);
         assert!(
             (mult - 2.0).abs() < 1e-6,
             "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}"
@@ -5835,10 +5823,7 @@ mod tests {
 
         // Level 1 ? index 0 ? bonus -0.5 (negative) ? 1.0 / (1.0 + 0.5) = 0.666...
         let expected = 1.0 / 1.5;
-        let mult = app
-            .world()
-            .resource::<ShipModifiers>()
-            .get(&ModifierSlot::PhaserDamage);
+        let mult = get_ship_modifiers(&mut app).get(&ModifierSlot::PhaserDamage);
         assert!(
             (mult - expected).abs() < 1e-6,
             "Weapons power 1 should give PhaserDamage multiplier {expected}, got {mult}"
@@ -5882,7 +5867,7 @@ mod tests {
 
         // All three forced to 1 ? bonus -0.5 (negative) ? multiplier = 1.0 / (1.0 + 0.5) ˜ 0.666...
         let expected = 1.0 / 1.5;
-        let mods = app.world().resource::<ShipModifiers>();
+        let mods = get_ship_modifiers(&mut app);
 
         assert!(
             (mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,

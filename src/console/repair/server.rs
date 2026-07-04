@@ -168,73 +168,30 @@ pub fn handle_dispatch_repair_team(
 
 /// Tick repair teams each frame: advance timers and apply HP restoration.
 ///
-/// After PRD #597 gap-5 closure: iterates every ship (`With<Ship>`) — player
-/// and NPC — so ships with a per-entity `ShipRepairTeams` component (spawned
-/// when their TOML declares a `[repair]` block) tick their own teams against
-/// their own `EntitySystemHull`. Each ship applies its own
-/// `ShipModifiers.RepairRate` multiplier. The global `ShipRepairTeams`
-/// resource is dual-written from the LocalShip so legacy Resource-based
-/// readers (broadcasters, tests) stay in sync.
+/// Iterates every ship (`With<Ship>`) — player and NPC — so ships with a
+/// per-entity `ShipRepairTeams` component (spawned when their TOML declares
+/// a `[repair]` block) tick their own teams against their own
+/// `EntitySystemHull`. Each ship applies its own `ShipModifiers.RepairRate`
+/// multiplier.
 pub fn tick_repair_teams(
     time: Res<Time>,
-    mut teams_res: Option<ResMut<ShipRepairTeams>>,
-    modifiers_res: Option<Res<ShipModifiers>>,
     mut ship_q: Query<
         (
             Option<&mut ShipRepairTeams>,
-            Option<&ShipModifiers>,
+            &ShipModifiers,
             &mut crate::entity_spawner::EntitySystemHull,
-            bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
     let dt = time.delta_secs();
-    let default_modifiers = ShipModifiers::new();
-    let mut local_teams_snapshot: Option<crate::repair_teams::RepairTeams> = None;
 
-    for (teams_comp, modifiers_comp, mut hull, is_local) in ship_q.iter_mut() {
-        // Only tick ships that carry per-entity repair teams. NPCs get the
-        // component only when their TOML declares `[repair]`. Ships without
-        // it silently skip — matching the historical "no teams == no tick"
-        // behaviour.
+    for (teams_comp, modifiers, mut hull) in ship_q.iter_mut() {
         let Some(mut teams) = teams_comp else {
             continue;
         };
-        let modifiers: &ShipModifiers = match modifiers_comp {
-            Some(m) => m,
-            None => match modifiers_res.as_deref() {
-                Some(m) => m,
-                None => &default_modifiers,
-            },
-        };
         let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
         teams.0.tick(dt * repair_mult, &mut hull.0);
-        if is_local {
-            local_teams_snapshot = Some(teams.0.clone());
-        }
-    }
-
-    // Dual-write: mirror the LocalShip's teams into the global Resource so
-    // legacy Resource-based readers stay in sync.
-    if let (Some(local_teams), Some(r)) = (local_teams_snapshot, teams_res.as_deref_mut()) {
-        r.0 = local_teams;
-        return;
-    }
-
-    // Resource-only fallback for tests that don't spawn a Ship entity with
-    // the per-entity `ShipRepairTeams` component. Ticks the global Resource
-    // against the LocalShip's hull only.
-    let mut hull_only_q = ship_q.iter_mut();
-    if let Some((_, _, mut hull, _)) = hull_only_q.find(|(_, _, _, is_local)| *is_local) {
-        if let Some(r) = teams_res.as_deref_mut() {
-            let modifiers = modifiers_res
-                .as_deref()
-                .cloned()
-                .unwrap_or_else(ShipModifiers::new);
-            let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
-            r.0.tick(dt * repair_mult, &mut hull.0);
-        }
     }
 }
 
@@ -424,8 +381,6 @@ mod tests {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
-        .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-        .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<crate::lobby::WorldResource>()
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
@@ -451,6 +406,8 @@ mod tests {
             crate::entity_spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
             crate::server_app::ShipSystemBlackboards::default(),
             ShipShields(ShieldSystem::default()),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
+            crate::modifiers::ShipModifiers::new(),
         ));
         app
     }
@@ -987,6 +944,7 @@ mod tests {
                 ShipSystemControlSources(ai_resolver),
                 ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
                 crate::entity_spawner::EntitySystemHull(hull),
+                crate::modifiers::ShipModifiers::new(),
             ))
             .id();
 

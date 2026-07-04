@@ -1454,10 +1454,6 @@ position = [0.5, -0.1, 0.25]
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(34),
         ))
-        .insert_resource(crate::simulation::ShipImpulse(
-            crate::impulse::ImpulseState::new(),
-        ))
-        .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<crate::messages::InterSystemQueue>()
         .insert_resource(PhaserRenderConfig {
             beam_range: 1000.0,

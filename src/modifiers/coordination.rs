@@ -19,18 +19,17 @@ use crate::simulation::ShipImpulse;
 
 /// Single owner of `ShipModifiers` lifecycle.
 ///
-/// Registers `ShipModifiers` as the sole `init_resource` call site, replacing
-/// the duplicate registrations that existed in `SimulationPlugin` and
-/// `RegionPlugin`. All other plugins read `Res<ShipModifiers>` or write
-/// `ResMut<ShipModifiers>` after this plugin has initialised the resource.
+/// `ShipModifiers` is a per-entity `Component` inserted on each ship at spawn
+/// time (see `entity_spawner`). All other plugins read/write `&ShipModifiers`
+/// or `&mut ShipModifiers` via queries on the ship entity — there is no
+/// global `Resource` fallback.
 ///
 /// Also owns the power → modifiers translator system.
 pub struct ModifierCoordinationPlugin;
 
 impl Plugin for ModifierCoordinationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ShipModifiers>()
-            .add_observer(on_region_entered)
+        app.add_observer(on_region_entered)
             .add_observer(on_region_exited);
     }
 }
@@ -46,44 +45,23 @@ impl Plugin for ModifierCoordinationPlugin {
 /// The system is registered by `SimulationPlugin` (not by
 /// `ModifierCoordinationPlugin`) so it can be chained after the power‑handling
 /// systems with explicit `.after()` ordering.
-///
-/// After PRD #597 gap-4 closure: iterates all ships (player + NPC), using each
-/// ship's per-entity `ShipPowerSystem`, `PowerMultiplierResource`, and
-/// `ShipModifiers` components. NPCs are equipped with these components at
-/// spawn (see `src/entities/spawner.rs`), so their power settings translate
-/// into MaxSpeed / PhaserDamage / RadarRange modifiers via the same code
-/// path as the player ship. When the LocalShip carries its own components,
-/// the global `ShipModifiers` resource is dual-written so legacy
-/// Resource-based readers stay in sync.
-///
-/// Legacy Resource fallback: test fixtures that spawn a `LocalShip` without
-/// per-entity power/modifier components still work — the fallback path reads
-/// the global `ShipPowerSystem` + `PowerMultiplierResource` resources and
-/// writes to the global `ShipModifiers` resource.
 pub fn translate_power_modifiers(
     power_res: Option<Res<ShipPowerSystem>>,
     mult_res: Option<Res<PowerMultiplierResource>>,
-    modifiers_res: Option<ResMut<ShipModifiers>>,
     mut ships_q: Query<
         (
             Option<&ShipPowerSystem>,
             Option<&PowerMultiplierResource>,
-            Option<&mut ShipModifiers>,
+            &mut ShipModifiers,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    let mut modifiers_res = modifiers_res;
     let mut any_ship_had_component = false;
-    let mut local_mods_snapshot: Option<ShipModifiers> = None;
 
-    for (power_comp, mult_comp, mods_comp, is_local) in ships_q.iter_mut() {
+    for (power_comp, mult_comp, mut mods, _is_local) in ships_q.iter_mut() {
         // Only translate for ships that carry the per-entity power state.
-        // NPCs get ShipPowerSystem via the spawner unconditionally; the
-        // LocalShip has it via server_app spawn. Ships without it are
-        // legacy test fixtures — the Resource-fallback branch below handles
-        // those (only for LocalShip semantics).
         let Some(power) = power_comp else {
             continue;
         };
@@ -102,26 +80,13 @@ pub fn translate_power_modifiers(
             },
         };
 
-        if let Some(mut mods) = mods_comp {
-            apply_power_modifiers_from_read_state(&mut mods, &read_state, &mult.multipliers);
-            if is_local {
-                local_mods_snapshot = Some(mods.clone());
-            }
-        }
-    }
-
-    // Dual-write: mirror the LocalShip's per-entity ShipModifiers into the
-    // global Resource so legacy Resource-based readers stay in sync.
-    if let (Some(local_mods), Some(mods_res)) = (local_mods_snapshot, modifiers_res.as_deref_mut())
-    {
-        *mods_res = local_mods;
-        return;
+        apply_power_modifiers_from_read_state(&mut mods, &read_state, &mult.multipliers);
     }
 
     // Resource-only fallback for tests that don't spawn any ship entity
     // with a per-entity `ShipPowerSystem` component. Reads the global
     // `ShipPowerSystem` + `PowerMultiplierResource` resources and writes
-    // the global `ShipModifiers` resource.
+    // the per-entity `ShipModifiers` on the LocalShip.
     if any_ship_had_component {
         return;
     }
@@ -137,8 +102,13 @@ pub fn translate_power_modifiers(
             &mult_default
         }
     };
-    if let Some(mut mods_res) = modifiers_res {
-        apply_power_modifiers_from_read_state(&mut mods_res, &read_state, &mult.multipliers);
+    if let Some(mut mods) = ships_q
+        .iter_mut()
+        .filter(|(_, _, _, is_local)| *is_local)
+        .next()
+        .map(|(_, _, mods, _)| mods)
+    {
+        apply_power_modifiers_from_read_state(&mut mods, &read_state, &mult.multipliers);
     }
 }
 
@@ -286,27 +256,13 @@ pub fn apply_impulse_to(
 /// to the modifier table on transitions, avoiding redundant events.
 ///
 /// This is the single routing point for impulse-side modifier writes.
-///
-/// After PR 6 (PRD #597): prefers the per-entity `ShipModifiers` component on
-/// the LocalShip entity, dual-writing to the global Resource when both exist.
 pub fn translate_impulse_modifiers(
     impulse_q: Query<&ShipImpulse, With<crate::server_app::LocalShip>>,
-    impulse_res: Option<Res<ShipImpulse>>,
-    modifiers_res: Option<ResMut<ShipModifiers>>,
-    // Per-entity component takes priority over the Resource fallback (PR 4).
     impulse_cfg_q: Query<&ImpulseConfigResource, With<crate::server_app::LocalShip>>,
-    impulse_config: Option<Res<ImpulseConfigResource>>,
     mut modifiers_q: Query<&mut ShipModifiers, With<crate::server_app::LocalShip>>,
     mut prev_phase: Local<Option<ImpulsePhase>>,
 ) {
-    // Prefer per-entity Component on LocalShip; fall back to Resource for
-    // legacy test paths that still insert a global ShipImpulse.
-    let impulse_state = impulse_q
-        .single()
-        .ok()
-        .map(|i| i.0.clone())
-        .or_else(|| impulse_res.as_deref().map(|r| r.0.clone()));
-    let Some(impulse_state) = impulse_state else {
+    let Some(impulse_state) = impulse_q.single().ok().map(|i| i.0.clone()) else {
         return;
     };
     let current = impulse_state.phase;
@@ -314,40 +270,19 @@ pub fn translate_impulse_modifiers(
         *prev_phase = Some(current);
         let speed_multiplier = impulse_cfg_q
             .single()
+            .ok()
             .map(|c| c.speed_multiplier)
-            .or_else(|_| {
-                impulse_config
-                    .as_deref()
-                    .map(|c| c.speed_multiplier)
-                    .ok_or(())
-            })
             .unwrap_or(IMPULSE_SPEED_MULTIPLIER);
-        let mut modifiers_res = modifiers_res;
-        match modifiers_q.iter_mut().next() {
-            Some(mut mods_comp) => {
-                apply_impulse_to(&mut mods_comp, &impulse_state, speed_multiplier);
-                if let Some(mods_res) = modifiers_res.as_deref_mut() {
-                    *mods_res = mods_comp.clone();
-                }
-            }
-            None => {
-                if let Some(mut mods_res) = modifiers_res {
-                    apply_impulse_to(&mut mods_res, &impulse_state, speed_multiplier);
-                }
-            }
+        if let Some(mut mods_comp) = modifiers_q.iter_mut().next() {
+            apply_impulse_to(&mut mods_comp, &impulse_state, speed_multiplier);
         }
     }
 }
 
 /// Observer: applies region effects to `ShipModifiers` when the ship enters a region.
-///
-/// After PR 6 (PRD #597): applies to the subject entity's per-entity
-/// `ShipModifiers` component when present; falls back to the global Resource
-/// (dual-writing when both exist).
 fn on_region_entered(
     trigger: On<RegionEntered>,
     region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
-    modifiers_res: Option<ResMut<ShipModifiers>>,
     mut modifiers_q: Query<&mut ShipModifiers>,
 ) {
     let ev = trigger.event();
@@ -358,31 +293,15 @@ fn on_region_entered(
         Ok(u) => u,
         Err(_) => return,
     };
-    let mut modifiers_res = modifiers_res;
-    match modifiers_q.get_mut(ev.subject) {
-        Ok(mut mods_comp) => {
-            apply_region_effects(&mut mods_comp, uuid, &effects.0);
-            if let Some(mods_res) = modifiers_res.as_deref_mut() {
-                *mods_res = mods_comp.clone();
-            }
-        }
-        Err(_) => {
-            if let Some(mut mods_res) = modifiers_res {
-                apply_region_effects(&mut mods_res, uuid, &effects.0);
-            }
-        }
+    if let Ok(mut mods_comp) = modifiers_q.get_mut(ev.subject) {
+        apply_region_effects(&mut mods_comp, uuid, &effects.0);
     }
 }
 
 /// Observer: clears region effects from `ShipModifiers` when the ship exits a region.
-///
-/// After PR 6 (PRD #597): clears from the subject entity's per-entity
-/// `ShipModifiers` component when present; falls back to the global Resource
-/// (dual-writing when both exist).
 fn on_region_exited(
     trigger: On<RegionExited>,
     membership: Res<RegionMembership>,
-    modifiers_res: Option<ResMut<ShipModifiers>>,
     mut modifiers_q: Query<&mut ShipModifiers>,
 ) {
     let ev = trigger.event();
@@ -395,19 +314,8 @@ fn on_region_exited(
         Err(_) => return,
     };
     let source = ModifierSource::RegionEffect { uuid };
-    let mut modifiers_res = modifiers_res;
-    match modifiers_q.get_mut(ev.subject) {
-        Ok(mut mods_comp) => {
-            mods_comp.clear_source(&source);
-            if let Some(mods_res) = modifiers_res.as_deref_mut() {
-                *mods_res = mods_comp.clone();
-            }
-        }
-        Err(_) => {
-            if let Some(mut mods_res) = modifiers_res {
-                mods_res.clear_source(&source);
-            }
-        }
+    if let Ok(mut mods_comp) = modifiers_q.get_mut(ev.subject) {
+        mods_comp.clear_source(&source);
     }
 }
 
@@ -725,7 +633,6 @@ mod tests {
         use crate::simulation::ShipImpulse;
 
         let mut app = App::new();
-        app.init_resource::<ShipModifiers>();
 
         // Activate the impulse drive directly.
         let mut impulse = ImpulseState::new();
@@ -735,19 +642,20 @@ mod tests {
             impulse.is_active(),
             "test fixture: impulse should be active"
         );
-        // Spawn a LocalShip carrying the impulse Component so
-        // `translate_impulse_modifiers` (which prefers the per-entity
-        // Component post ship-parity audit) can read it.
-        app.world_mut().spawn((
-            crate::simulation::LocalShip,
-            crate::simulation::Ship,
-            ShipImpulse(impulse),
-            ShipModifiers::new(),
-        ));
+        // Spawn a LocalShip carrying the per-entity components.
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::simulation::LocalShip,
+                crate::simulation::Ship,
+                ShipImpulse(impulse),
+                ShipModifiers::new(),
+            ))
+            .id();
         // Configure a non-default speed multiplier (3.0 instead of 10.0).
-        // The MaxSpeed modifier must reflect this — proving the system
-        // reads the resource rather than the const fallback.
-        app.insert_resource(ImpulseConfigResource {
+        // The MaxSpeed modifier must reflect this - proving the system
+        // reads the per-entity component rather than the const fallback.
+        app.world_mut().entity_mut(ship).insert(ImpulseConfigResource {
             charge_duration: IMPULSE_CHARGE_DURATION,
             speed_multiplier: 3.0,
             acceleration_multiplier: 1.0,
@@ -756,7 +664,7 @@ mod tests {
         app.add_systems(Update, translate_impulse_modifiers);
         app.update();
 
-        let mods = app.world().resource::<ShipModifiers>();
+        let mods = app.world().get::<ShipModifiers>(ship).expect("ShipModifiers component");
         let max_speed = mods.get(&ModifierSlot::MaxSpeed);
         assert!(
             (max_speed - 3.0).abs() < 1e-6,
@@ -783,7 +691,6 @@ mod tests {
         use crate::server_app::Ship;
 
         let mut app = App::new();
-        app.init_resource::<ShipModifiers>();
 
         // Spawn an NPC ship (Ship marker, no LocalShip). Give it helm=3 and
         // an explicit multipliers table so we can predict the bonus.

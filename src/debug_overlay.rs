@@ -157,19 +157,23 @@ fn should_install_region_wireframes() -> bool {
     !is_playwright_automation()
 }
 
-/// Reads `ShipModifiers` (as a Bevy resource) and writes the formatted debug
-/// text to the WASM thread-local `DEBUG_STATE_STRING`.
+/// Reads `ShipModifiers` from the LocalShip entity and writes the formatted
+/// debug text to the WASM thread-local `DEBUG_STATE_STRING`.
 ///
 /// Only runs when `DebugOverlayEnabled` is true.
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
-fn write_debug_state(modifiers: Res<ShipModifiers>) {
-    let text = modifiers.format_debug();
-    crate::bridge::set_debug_state_string(text);
+fn write_debug_state(
+    modifiers_q: Query<&ShipModifiers, With<crate::server_app::LocalShip>>,
+) {
+    if let Some(modifiers) = modifiers_q.iter().next() {
+        let text = modifiers.format_debug();
+        crate::bridge::set_debug_state_string(text);
+    }
 }
 
 /// Native / test stub — does nothing (no thread-locals available outside WASM).
 #[cfg(not(all(target_arch = "wasm32", feature = "server")))]
-fn write_debug_state(_modifiers: Res<ShipModifiers>) {}
+fn write_debug_state(_modifiers_q: Query<&ShipModifiers, With<crate::server_app::LocalShip>>) {}
 
 /// Reads the `DamageLog` resource and writes the formatted text to the WASM
 /// thread-local `DAMAGE_LOG_STRING` for the F8 overlay.

@@ -7844,7 +7844,6 @@ condition = "on_world_loaded"
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(RegionPlugin)
-            .insert_resource(crate::modifiers::ShipModifiers::new())
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
@@ -7864,6 +7863,7 @@ condition = "on_world_loaded"
             crate::ship_state::ShipPhysics::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
+            crate::modifiers::ShipModifiers::new(),
         ));
         app
     }

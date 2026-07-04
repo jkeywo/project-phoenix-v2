@@ -35,10 +35,7 @@ fn publish_helm_blackboard(
         With<crate::simulation::LocalShip>,
     >,
     impulse_q: Query<&ShipImpulse, With<crate::simulation::LocalShip>>,
-    impulse_res: Option<Res<ShipImpulse>>,
     boost_q: Query<&ShipBoost, With<crate::simulation::LocalShip>>,
-    boost_res: Option<Res<ShipBoost>>,
-    boost_config_res: Option<Res<BoostConfigResource>>,
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
     queue: Res<InterSystemQueue>,
@@ -52,23 +49,14 @@ fn publish_helm_blackboard(
         .ok()
         .map(|(p, c)| (*p, c.cloned()))
         .unwrap_or_default();
-    // Prefer per-entity Component on LocalShip; fall back to Resource for
-    // legacy test paths that still insert a global ShipImpulse.
+    let boost_config = entity_boost_cfg;
+    let boost_enabled = boost_config.as_ref().map(|c| c.enabled).unwrap_or(false);
     let impulse_charge = impulse_q
         .single()
         .ok()
         .map(|i| i.0.charge_progress)
-        .or_else(|| impulse_res.as_deref().map(|r| r.0.charge_progress))
         .unwrap_or(0.0);
-    // Per-entity component takes priority over the Resource fallback.
-    let boost_config = entity_boost_cfg.or_else(|| boost_config_res.as_deref().cloned());
-    let boost_enabled = boost_config.as_ref().map(|c| c.enabled).unwrap_or(false);
-    // Prefer per-entity ShipBoost on LocalShip; fall back to Resource.
-    let boost_state = boost_q
-        .single()
-        .ok()
-        .map(|b| b.0.clone())
-        .or_else(|| boost_res.as_deref().map(|r| r.0.clone()));
+    let boost_state = boost_q.single().ok().map(|b| b.0.clone());
     let boost_battery = boost_state.as_ref().map(|b| b.battery).unwrap_or(0.0);
     let boost_active = boost_state.as_ref().map(|b| b.is_active()).unwrap_or(false);
     // view_mode is not raw sim truth; helm blackboard omits it
@@ -159,12 +147,14 @@ mod tests {
         app.add_systems(Update, publish_helm_blackboard);
         // Initialise InterSystemQueue so the system parameter is satisfied.
         app.init_resource::<InterSystemQueue>();
-        // Spawn a LocalShip entity with ShipPhysics and ShipSystemBlackboards so the system can query it.
+        // Spawn a LocalShip entity with components so the system can query it.
         app.world_mut().spawn((
             crate::simulation::LocalShip,
             ShipPhysics::default(),
             ShipSystemBlackboards::default(),
             ShipImpulse::default(),
+            ShipBoost::default(),
+            crate::modifiers::ShipModifiers::new(),
             crate::ship_plugin::LastHelmInput::default(),
         ));
         app
@@ -249,17 +239,26 @@ mod tests {
     #[test]
     fn publish_reflects_boost_state() {
         let mut app = base_app();
-        app.insert_resource(BoostConfigResource {
-            enabled: true,
-            multiplier: 3.0,
-            steering_multiplier: 2.0,
-            active_duration: 4.0,
-            recharge_duration: 20.0,
-        });
-        app.insert_resource(ShipBoost(BoostState {
-            active: true,
-            battery: 0.75,
-        }));
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
+            let ship = q.single_mut(app.world_mut()).unwrap();
+            app.world_mut().entity_mut(ship).insert(BoostConfigResource {
+                enabled: true,
+                multiplier: 3.0,
+                steering_multiplier: 2.0,
+                active_duration: 4.0,
+                recharge_duration: 20.0,
+            });
+        }
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipBoost, With<crate::simulation::LocalShip>>();
+            let mut boost = q.single_mut(app.world_mut()).expect("LocalShip must have ShipBoost");
+            boost.0 = BoostState { active: true, battery: 0.75 };
+        }
         app.update();
 
         let bb = get_helm_blackboard(&mut app);

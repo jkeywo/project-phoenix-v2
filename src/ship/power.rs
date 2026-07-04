@@ -745,8 +745,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .insert_resource(ShipModifiers::new())
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
@@ -762,9 +760,6 @@ mod tests {
             .add_plugins(crate::simulation::sim_state_broadcaster())
             .add_systems(PostUpdate, collect);
         // Spawn the player ship entity so handle_power_messages can query it.
-        // Note: no ShipPowerSystem/PowerConfig* components are attached — the
-        // tests mutate the Resource forms and expect those to be observed by
-        // the systems (which fall back to Resource when the Component is absent).
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,
@@ -775,6 +770,8 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             ShipShields(ShieldSystem::default()),
+            ShipModifiers::new(),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
         ));
         app
     }
@@ -952,10 +949,10 @@ mod tests {
         let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
         let _ = tick(&mut app);
 
-        let mult = app
-            .world()
-            .resource::<ShipModifiers>()
-            .get(&ModifierSlot::MaxSpeed);
+        let mult = {
+            let mut q = app.world_mut().query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+            q.single(app.world()).unwrap().get(&ModifierSlot::MaxSpeed)
+        };
         assert!(
             (mult - 2.0).abs() < 1e-6,
             "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}"
@@ -977,10 +974,10 @@ mod tests {
         let _ = tick(&mut app);
 
         let expected = 1.0 / 1.5;
-        let mult = app
-            .world()
-            .resource::<ShipModifiers>()
-            .get(&ModifierSlot::PhaserDamage);
+        let mult = {
+            let mut q = app.world_mut().query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+            q.single(app.world()).unwrap().get(&ModifierSlot::PhaserDamage)
+        };
         assert!(
             (mult - expected).abs() < 1e-6,
             "Weapons power 1 should give PhaserDamage multiplier {expected}, got {mult}"
@@ -1018,7 +1015,10 @@ mod tests {
         tick(&mut app);
 
         let expected = 1.0 / 1.5;
-        let mods = app.world().resource::<ShipModifiers>();
+        let mods = {
+            let mut q = app.world_mut().query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+            q.single(app.world()).unwrap().clone()
+        };
 
         assert!(
             (mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,
@@ -1438,8 +1438,6 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .insert_resource(ShipModifiers::new())
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
@@ -1460,6 +1458,8 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
+            ShipModifiers::new(),
         ));
         start_game_with_power(&mut app);
         // Baseline: reactor online — allocation should update.

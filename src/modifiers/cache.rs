@@ -1,6 +1,6 @@
 use crate::flag_kind::FlagKind;
 pub use crate::messages::{ModifierSlot, ModifierSource};
-use bevy::prelude::{Component, Resource};
+use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -108,10 +108,10 @@ pub enum ModifierEvent {
 ///
 /// Cache formula per int slot: straight sum of all active bonuses.
 ///
-/// Dual-derives `Resource` (legacy global fallback used by some tests and by
-/// the coordinator until PR 7 completes) and `Component` (per-entity storage
-/// on each ship — PR 6 migration, see PRD #597).
-#[derive(Resource, Component, Clone, Debug)]
+/// Per-entity `Component` storage on each ship (PR 6 migration, PRD #597;
+/// the legacy `Resource` fallback was removed in issue #606). Every ship —
+/// player and NPC — carries its own instance.
+#[derive(Component, Clone, Debug)]
 pub struct ShipModifiers {
     /// Sparse table: `(source, slot) → bonus`.
     table: HashMap<(ModifierSource, ModifierSlot), f32>,

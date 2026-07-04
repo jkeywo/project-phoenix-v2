@@ -885,7 +885,12 @@ pub enum SystemControlPayload {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+/// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
+/// fieldless companion enum that automatically stays in sync with the
+/// variant list below — used by the codec's table-driven round-trip harness
+/// (issue #610) to enforce that every variant has a sample row.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, strum::EnumDiscriminants)]
+#[strum_discriminants(name(ClientMessageDiscriminants), derive(Hash, strum::EnumIter))]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
     Identify {
@@ -971,7 +976,12 @@ pub enum CoordinationPayload {
     ShieldFacingRestored { label: String },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+/// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
+/// fieldless companion enum that automatically stays in sync with the
+/// variant list below — used by the codec's table-driven round-trip harness
+/// (issue #610) to enforce that every variant has a sample row.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, strum::EnumDiscriminants)]
+#[strum_discriminants(name(ServerMessageDiscriminants), derive(Hash, strum::EnumIter))]
 #[serde(tag = "type", content = "data")]
 #[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {

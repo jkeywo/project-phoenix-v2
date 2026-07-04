@@ -31,6 +31,7 @@ wasm-bindgen = "0.2.120"
 rand = "0.9"
 noise = "0.9"
 toml = "1.0"
+strum = { version = "0.28.0", features = ["derive"] }
 
 # Native: parallel physics enabled
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

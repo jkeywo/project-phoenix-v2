@@ -159,10 +159,6 @@ pub fn process_message(
                 // Existing players keep their stations when new players join.
                 // The new joiner selects a station manually via SelectStation.
 
-                // Spectator queue: if station config is loaded, check if stations are full.
-                // If the joining player has no station (they haven't selected one,
-                // or reconnect didn't restore one), and max_players slots are all taken,
-                // push them to the spectator queue.
                 if !ship_stations.stations.is_empty() {
                     let connected_with_stations = sessions
                         .players()
@@ -175,12 +171,10 @@ pub fn process_message(
                         .find(|p| p.token == *id_token)
                         .map(|p| p.station.is_some())
                         .unwrap_or(false);
-                    let is_already_spectator = sessions.spectator_queue().contains(&id_token);
-                    if !player_has_station && !is_already_spectator {
+                    if !player_has_station {
                         let capacity = ship_stations.stations.len() as u32;
                         let at_capacity = connected_with_stations >= capacity;
                         if at_capacity {
-                            sessions.push_spectator(id_token.clone());
                             outbound.push((
                                 Target::Token(id_token.clone()),
                                 ServerMessage::StationAssigned {
@@ -300,9 +294,6 @@ pub fn process_message(
             let released_station = sessions.station_for_token(token).cloned();
             sessions.set_station(token, None);
             sessions.set_ready(token, false);
-            if !ship_stations.stations.is_empty() {
-                sessions.push_spectator(token.to_string());
-            }
             outbound.push((
                 Target::All,
                 ServerMessage::StationAssigned {
@@ -411,7 +402,6 @@ pub fn process_disconnect_with_stations(
     }
 
     sessions.disconnect(token);
-    sessions.remove_spectator(token);
 
     // Re-evaluate auto-start: if the last not-ready player disconnected,
     // all remaining connected players may be ready.
@@ -1450,106 +1440,16 @@ max_level = 4
         assert!(result.new_phase.is_none());
     }
 
-    // ── Spectator queue: push on join when max_players reached ───────────
-
-    fn sessions_at_max(stations: &ShipStations) -> SessionManager {
-        // Fill every station slot (9 stations after B3).
-        let mut sessions = SessionManager::new();
-        for (tok, name) in [
-            ("t1", "Alice"),
-            ("t2", "Bob"),
-            ("t3", "Carol"),
-            ("t4", "Dave"),
-            ("t5", "Eve"),
-            ("t6", "Frank"),
-            ("t7", "Grace"),
-            ("t8", "Heidi"),
-            ("t9", "Ivan"),
-        ] {
-            sessions.register(tok.into(), name.into()).unwrap();
-        }
-        for (tok, station_name) in [
-            ("t1", "Captain"),
-            ("t2", "Helm"),
-            ("t3", "Tactical"),
-            ("t4", "Repair"),
-            ("t5", "Sensors"),
-            ("t6", "Shields"),
-            ("t7", "Navigation"),
-            ("t8", "Power"),
-            ("t9", "Comms"),
-        ] {
-            let station_def = get_station(stations, station_name).unwrap();
-            sessions.set_station(tok, Some(station_def.id.clone()));
-        }
-        sessions
-    }
-
-    #[test]
-    fn joining_when_max_players_filled_goes_to_spectator_queue() {
-        let stations = ship_stations();
-        let mut sessions = sessions_at_max(&stations);
-        // 10th player identifies — all 9 stations already have holders
-        let msg = ClientMessage::Identify {
-            token: "t10".into(),
-            name: "Judy".into(),
-        };
-        let result = process_message(
-            "t10",
-            &msg,
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-            &stations,
-            &default_ship_config(),
-            true,
-            &HashMap::new(),
-        );
-        assert!(
-            sessions.spectator_queue().contains(&"t10".to_string()),
-            "t10 should be in the spectator queue"
-        );
-        // Should receive StationAssigned with station=None
-        let got_spectator_assigned = result.outbound.iter().any(|(target, m)| {
-            matches!(target, Target::Token(t) if t == "t10")
-                && matches!(m, ServerMessage::StationAssigned { token, station: None, .. } if token == "t10")
-        });
-        assert!(
-            got_spectator_assigned,
-            "spectator should receive StationAssigned {{ station: None }}"
-        );
-    }
-
-    #[test]
-    fn release_station_pushes_token_to_spectator_queue() {
-        let stations = ship_stations();
-        let mut sessions = sessions_at_max(&stations);
-        process_message(
-            "t1",
-            &ClientMessage::ReleaseStation,
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-            &stations,
-            &default_ship_config(),
-            true,
-            &HashMap::new(),
-        );
-        assert!(
-            sessions.spectator_queue().contains(&"t1".to_string()),
-            "releaser should be pushed to spectator queue"
-        );
-    }
-
     #[test]
     fn reconnect_restores_station_when_unclaimed() {
         let stations = ship_stations();
         let config = backfill_ship_config();
-        let mut sessions = sessions_at_max(&stations);
-        // t1 held the Captain station. They disconnect — station stays on Player
-        // record so reconnect can restore it.
-        let mut resolver = ControlSourceResolver::new();
+        let mut sessions = SessionManager::new();
+        sessions.register("t1".into(), "Alice".into()).unwrap();
+        let captain_def = get_station(&stations, "Captain").unwrap();
+        sessions.set_station("t1", Some(captain_def.id.clone()));
         let captain_id = sessions.station_for_token("t1").cloned();
+        let mut resolver = ControlSourceResolver::new();
         let _ = process_disconnect_with_stations(
             "t1",
             &mut sessions,
@@ -1575,7 +1475,6 @@ max_level = 4
             true,
             &HashMap::new(),
         );
-        // Station was kept on disconnect, so reconnect restores it.
         let restored = sessions.station_for_token("t1");
         assert_eq!(
             restored,
@@ -1585,91 +1484,17 @@ max_level = 4
     }
 
     #[test]
-    fn disconnect_with_spectator_in_queue_cascade_fills_all_slots_spectator_stays() {
-        // All 9 stations filled, t10 is spectator. t1 disconnects.
-        // Fixed roster per #495: no cascade on disconnect. t1's station becomes
-        // free. t10 stays queued (must manually claim via SelectStation).
+    fn mid_game_disconnect_emits_player_left_and_no_station_cascade() {
         let stations = ship_stations();
-        let mut sessions = sessions_at_max(&stations);
-        sessions.register("t10".into(), "Judy".into()).unwrap();
-        sessions.push_spectator("t10".into());
-        let _result = pd_stations("t1", &mut sessions, &stations);
-        // t10 stays in spectator queue (fixed roster: no auto-promotion)
-        assert!(
-            sessions.spectator_queue().contains(&"t10".to_string()),
-            "t10 should remain in queue (fixed roster)"
-        );
-    }
-
-    #[test]
-    fn disconnect_with_spectator_promotes_when_cascade_leaves_empty_slot() {
-        // Fixed roster per #495: spectators are NOT auto-promoted on disconnect.
-        // The spectator queue is preserved. This test verifies the queue is
-        // correctly threaded through process_disconnect_with_stations — no
-        // spectator promotion occurs, and the queue remains intact.
-        let stations = ship_stations();
-        let mut sessions = sessions_at_max(&stations);
-        sessions.register("t10".into(), "Judy".into()).unwrap();
-        sessions.push_spectator("t10".into());
-        sessions.push_spectator("nonexistent-extra".into()); // second spectator
-        let _result = pd_stations("t1", &mut sessions, &stations);
-        // Spectator queue is preserved (both spectators still queued)
-        assert!(sessions.spectator_queue().contains(&"t10".to_string()));
-    }
-
-    #[test]
-    fn spectator_can_claim_station_vacated_by_disconnect_at_max_players() {
-        // All 9 stations filled, t10 joins as spectator, one station-holder
-        // disconnects, then the spectator selects the vacated station.
-        let stations = ship_stations();
-        let mut sessions = sessions_at_max(&stations);
-        // Add t10 as spectator
-        sessions.register("t10".into(), "Judy".into()).unwrap();
-        sessions.push_spectator("t10".into());
-
-        // t6 (Shields) disconnects
-        let _ = pd_stations("t6", &mut sessions, &stations);
-
-        // t10 selects "Shields"
-        let result = pm_stations(
-            "t10",
-            &ClientMessage::SelectStation {
-                station: "Shields".into(),
-            },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        // t10 must receive a StationAssigned with station = Some("Shields")
-        let assigned = result.outbound.iter().find_map(|(_, m)| match m {
-            ServerMessage::StationAssigned {
-                token,
-                station: Some(name),
-                ..
-            } if token == "t10" => Some(name.clone()),
-            _ => None,
-        });
-        assert!(
-            assigned.is_some(),
-            "t10 should receive StationAssigned with station=Some(Shields); got outbound: {:?}",
-            result.outbound
-        );
-        let name = assigned.unwrap();
-        assert_eq!(name, "Shields");
-    }
-
-    #[test]
-    fn mid_game_disconnect_emits_player_left_and_station_assigned_changes() {
-        let stations = ship_stations();
-        let mut sessions = sessions_at_max(&stations);
-        // t1 disconnects mid-game
+        let mut sessions = SessionManager::new();
+        sessions.register("t1".into(), "Alice".into()).unwrap();
+        let captain_def = get_station(&stations, "Captain").unwrap();
+        sessions.set_station("t1", Some(captain_def.id.clone()));
         let result = pd_stations("t1", &mut sessions, &stations);
-        // PlayerLeft must be in output
         assert!(result
             .outbound
             .iter()
             .any(|(_, m)| { matches!(m, ServerMessage::PlayerLeft { token } if token == "t1") }));
-        // Fixed roster: no StationAssigned cascade on disconnect.
         let any_station_assigned = result
             .outbound
             .iter()
@@ -1680,44 +1505,11 @@ max_level = 4
         );
     }
 
-    #[test]
-    fn spectator_queue_persists_across_lobby_to_in_progress_phase_transition() {
-        // The spectator queue on SessionManager is phase-agnostic.
-        // Phase transition does not clear the queue — spectators remain spectators mid-game.
-        let stations = ship_stations();
-        let mut sessions = sessions_at_max(&stations);
-        sessions.register("t10".into(), "Judy".into()).unwrap();
-        sessions.push_spectator("t10".into());
-        assert_eq!(
-            sessions.spectator_queue().len(),
-            1,
-            "queue must have one spectator before transition"
-        );
-        // Simulate a phase transition via SetReady (which only changes new_phase).
-        // The sessions object is unaffected — queue should still be there.
-        let result = pm_stations(
-            "t1",
-            &ClientMessage::SetReady { ready: true },
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        // t1 is the only connected player, so SetReady triggers auto-start.
-        // Regardless of whether the phase changes, the spectator queue must survive.
-        let _ = result;
-        assert_eq!(
-            sessions.spectator_queue().len(),
-            1,
-            "spectator queue must persist regardless of phase change"
-        );
-    }
-
     // ── Lobby join/leave station rules ────────────────────────────────────
 
     #[test]
     fn joining_player_is_never_auto_assigned_a_station_in_lobby() {
         let stations = ship_stations();
-        // t1 identifies fresh (no prior players).
         let mut sessions = SessionManager::new();
         let msg = ClientMessage::Identify {
             token: "t1".into(),
@@ -1734,13 +1526,11 @@ max_level = 4
             true,
             &HashMap::new(),
         );
-        // t1 must have no station — no auto-assignment.
         let station = sessions.station_for_token("t1");
         assert!(
             station.is_none(),
             "new joiner should not be auto-assigned a station"
         );
-        // No StationAssigned broadcast targeted at t1 with a real station.
         let auto_assigned = result.outbound.iter().any(|(_, m)| {
             matches!(m,
                 ServerMessage::StationAssigned { token, station: Some(_), .. } if token == "t1"
@@ -1755,13 +1545,11 @@ max_level = 4
     #[test]
     fn existing_assigned_player_follows_next_when_second_player_joins() {
         let stations = ship_stations();
-        // t1 is already in the lobby and has selected Captain.
         let mut sessions = SessionManager::new();
         sessions.register("t1".into(), "Alice".into()).unwrap();
         let captain_def = get_station(&stations, "Captain").unwrap();
         sessions.set_station("t1", Some(captain_def.id.clone()));
 
-        // t2 joins.
         let msg = ClientMessage::Identify {
             token: "t2".into(),
             name: "Bob".into(),
@@ -1778,7 +1566,6 @@ max_level = 4
             &HashMap::new(),
         );
 
-        // Fixed roster per #495: t1 keeps their station when a new player joins.
         let t1_station = sessions.station_for_token("t1");
         assert_eq!(
             t1_station,
@@ -1786,7 +1573,6 @@ max_level = 4
             "t1 should keep their Captain station (fixed roster)"
         );
 
-        // No StationAssigned should be emitted for t1 (they kept their station).
         let t1_station_assigned = result.outbound.iter().any(|(_, m)| {
             matches!(m,
                 ServerMessage::StationAssigned { token, .. } if token == "t1"
@@ -1797,35 +1583,10 @@ max_level = 4
             "t1 should not receive StationAssigned (no station change)"
         );
 
-        // t2 must NOT be auto-assigned.
         let t2_station = sessions.station_for_token("t2");
         assert!(
             t2_station.is_none(),
             "t2 should not be auto-assigned a station on join"
-        );
-    }
-
-    #[test]
-    fn disconnect_does_not_promote_spectator_in_lobby() {
-        // All 9 stations filled, t10 is spectator. t1 disconnects.
-        // In lobby, spectators should NOT be auto-promoted.
-        let stations = ship_stations();
-        let mut sessions = sessions_at_max(&stations);
-        sessions.register("t10".into(), "Judy".into()).unwrap();
-        sessions.push_spectator("t10".into());
-
-        let _result = pd_stations("t1", &mut sessions, &stations);
-
-        // t10 must still be in the spectator queue (not promoted).
-        assert!(
-            sessions.spectator_queue().contains(&"t10".to_string()),
-            "spectator must NOT be auto-promoted on disconnect in lobby"
-        );
-        // t10 must still have no station.
-        let t10_station = sessions.station_for_token("t10");
-        assert!(
-            t10_station.is_none(),
-            "spectator t10 must not receive a station automatically"
         );
     }
 

@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use crate::messages::{Player, StationId};
 use crate::ship::config::ShipConfig;
 
@@ -10,8 +8,6 @@ pub enum RegisterError {
 
 pub struct SessionManager {
     players: Vec<Player>,
-    /// FIFO queue of spectator tokens — players waiting for a station slot.
-    spectator_queue: VecDeque<String>,
 }
 
 impl Default for SessionManager {
@@ -24,7 +20,6 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             players: Vec::new(),
-            spectator_queue: VecDeque::new(),
         }
     }
 
@@ -123,33 +118,6 @@ impl SessionManager {
             .iter()
             .find(|p| p.connected && p.station.as_ref() == Some(station_id))
             .map(|p| p.token.as_str())
-    }
-
-    /// Append a token to the back of the spectator queue (if not already queued).
-    pub fn push_spectator(&mut self, token: String) {
-        if !self.spectator_queue.contains(&token) {
-            self.spectator_queue.push_back(token);
-        }
-    }
-
-    /// Remove and return the front of the spectator queue.
-    pub fn pop_spectator(&mut self) -> Option<String> {
-        self.spectator_queue.pop_front()
-    }
-
-    /// Read-only view of the spectator queue.
-    pub fn spectator_queue(&self) -> &VecDeque<String> {
-        &self.spectator_queue
-    }
-
-    /// Mutable access to the spectator queue (for applying cascade results).
-    pub fn spectator_queue_mut(&mut self) -> &mut VecDeque<String> {
-        &mut self.spectator_queue
-    }
-
-    /// Remove a token from the spectator queue (e.g. when they are promoted to a station).
-    pub fn remove_spectator(&mut self, token: &str) {
-        self.spectator_queue.retain(|t| t != token);
     }
 
     /// Set the ready flag for a player. No-op if token not found.
@@ -490,59 +458,6 @@ mod tests {
         assert_eq!(sm.players()[0].last_rating.as_deref(), Some("Assisted"));
         sm.set_last_rating("t1", None);
         assert!(sm.players()[0].last_rating.is_none());
-    }
-
-    // ── Spectator queue ───────────────────────────────────────────────────
-
-    #[test]
-    fn push_spectator_appends_token() {
-        let mut sm = SessionManager::new();
-        sm.push_spectator("t1".into());
-        assert_eq!(sm.spectator_queue().len(), 1);
-        assert_eq!(sm.spectator_queue().front().map(|s| s.as_str()), Some("t1"));
-    }
-
-    #[test]
-    fn push_spectator_does_not_add_duplicate() {
-        let mut sm = SessionManager::new();
-        sm.push_spectator("t1".into());
-        sm.push_spectator("t1".into());
-        assert_eq!(sm.spectator_queue().len(), 1);
-    }
-
-    #[test]
-    fn push_spectator_maintains_fifo_order() {
-        let mut sm = SessionManager::new();
-        sm.push_spectator("t1".into());
-        sm.push_spectator("t2".into());
-        sm.push_spectator("t3".into());
-        let queue: Vec<_> = sm.spectator_queue().iter().cloned().collect();
-        assert_eq!(queue, vec!["t1", "t2", "t3"]);
-    }
-
-    #[test]
-    fn pop_spectator_returns_front() {
-        let mut sm = SessionManager::new();
-        sm.push_spectator("t1".into());
-        sm.push_spectator("t2".into());
-        assert_eq!(sm.pop_spectator(), Some("t1".into()));
-        assert_eq!(sm.spectator_queue().len(), 1);
-    }
-
-    #[test]
-    fn pop_spectator_returns_none_when_empty() {
-        let mut sm = SessionManager::new();
-        assert_eq!(sm.pop_spectator(), None);
-    }
-
-    #[test]
-    fn remove_spectator_removes_token_from_queue() {
-        let mut sm = SessionManager::new();
-        sm.push_spectator("t1".into());
-        sm.push_spectator("t2".into());
-        sm.remove_spectator("t1");
-        assert_eq!(sm.spectator_queue().len(), 1);
-        assert_eq!(sm.spectator_queue().front().map(|s| s.as_str()), Some("t2"));
     }
 
     // ── Ready state ──────────────────────────────────────────────────

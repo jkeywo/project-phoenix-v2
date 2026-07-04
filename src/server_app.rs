@@ -4,8 +4,8 @@ use bevy_rapier3d::prelude::*;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::lobby::{InboundMessage, LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    ClientMessage, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
-    StationId, SystemControlPayload,
+    ClientMessage, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, StationId,
+    SystemControlPayload,
 };
 use crate::shield::ShieldSystem;
 use rand::SeedableRng as _;
@@ -781,9 +781,7 @@ fn handle_set_sensors_target(
         }
 
         // Only broadcast if there is a Tactical console player to receive it.
-        let Some(tactical_token) = sessions
-            .0
-            .holder_for_station(&StationId("tactical".into()))
+        let Some(tactical_token) = sessions.0.holder_for_station(&StationId("tactical".into()))
         else {
             continue;
         };
@@ -1286,7 +1284,10 @@ fn admit_system_commands(
 ///      deprecated coarse systems like `"tactical"`, `"power"` whose
 ///      `[[system]]` entry was removed during fine-grained refactoring).
 ///   4. `None` — truly unknown system id, caller will deny.
-fn station_for_system(config: &crate::ship::config::ShipConfig, target: &crate::messages::SystemId) -> Option<StationId> {
+fn station_for_system(
+    config: &crate::ship::config::ShipConfig,
+    target: &crate::messages::SystemId,
+) -> Option<StationId> {
     // Step 1: shield-arc prefix (arcs are not in `config.systems`).
     if target.0.starts_with("shield-arc-") {
         return Some(StationId("shields".into()));
@@ -2004,9 +2005,9 @@ fn spawn_game_start_entities(
             // Ship-specific resource setup
             if let Some(hc) = &config.hull {
                 let _hc = hc; // hull is set up via EntitySystemHull in the spawner
-                // [repair] block — overrides default RepairTimings if present.
-                // Absent block keeps the same defaults the hardcoded constants
-                // used to provide (5.0s travel, 0.5 HP/s repair rate).
+                              // [repair] block — overrides default RepairTimings if present.
+                              // Absent block keeps the same defaults the hardcoded constants
+                              // used to provide (5.0s travel, 0.5 HP/s repair rate).
                 let repair = config.repair.as_ref();
                 let team_count = repair
                     .map(|rc| rc.repair_team_count as usize)
@@ -2196,30 +2197,22 @@ fn spawn_game_start_entities(
                 [f32; 4],
             > = std::collections::HashMap::from([
                 (
-                    crate::messages::PowerGroupId(
-                        crate::power_system::HELM_POWER_GROUP.into(),
-                    ),
+                    crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
                     defaults,
                 ),
                 (
-                    crate::messages::PowerGroupId(
-                        crate::power_system::WEAPONS_POWER_GROUP.into(),
-                    ),
+                    crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
                     defaults,
                 ),
                 (
-                    crate::messages::PowerGroupId(
-                        crate::power_system::SENSORS_POWER_GROUP.into(),
-                    ),
+                    crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
                     defaults,
                 ),
             ]);
             if let Some(hc) = &config.helm_console {
                 if let Some(pm) = hc.power_multipliers {
                     multipliers.insert(
-                        crate::messages::PowerGroupId(
-                            crate::power_system::HELM_POWER_GROUP.into(),
-                        ),
+                        crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
                         pm,
                     );
                 }
@@ -2874,10 +2867,13 @@ mod tests {
             crate::modifier_coordination::translate_impulse_modifiers
                 .after(handle_impulse_messages),
         )
-        .add_systems(Update, (
-            sim_processing_anchor,
-            broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),
-        ))
+        .add_systems(
+            Update,
+            (
+                sim_processing_anchor,
+                broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),
+            ),
+        )
         .add_plugins(weapons_update_broadcaster())
         .add_plugins(sim_state_broadcaster())
         .add_plugins(modifier_events_broadcaster())
@@ -2902,14 +2898,12 @@ mod tests {
                 crate::ship_state::ShipViewMode::default(),
                 crate::ship_state::ShipPhaserFrequency::default(),
                 bevy::prelude::Transform::default(),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                    &[
-                        (SystemId("helm".into()), 25.0),
-                        (SystemId("tactical".into()), 25.0),
-                        (SystemId("power".into()), 25.0),
-                        (SystemId("shields".into()), 25.0),
-                    ],
-                )),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
+                    (SystemId("helm".into()), 25.0),
+                    (SystemId("tactical".into()), 25.0),
+                    (SystemId("power".into()), 25.0),
+                    (SystemId("shields".into()), 25.0),
+                ])),
             ))
             .id();
         // Insert per-entity components (Bundle limit).
@@ -3022,7 +3016,8 @@ mod tests {
     fn get_ship_modifiers(app: &mut App) -> crate::modifiers::ShipModifiers {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>(
+            );
         q.single(app.world()).unwrap().clone()
     }
 
@@ -3055,6 +3050,9 @@ mod tests {
             ))
     }
 
+    // Test helper for directly setting view mode without round-tripping a
+    // client message; retained for tests that may need to seed view state.
+    #[allow(dead_code)]
     fn set_ship_view_mode(app: &mut App, mode: crate::messages::ViewMode) {
         let mut q = app
             .world_mut()
@@ -3829,9 +3827,9 @@ mod tests {
             .spawn((
                 Asteroid,
                 AsteroidUuid("target-uuid".into()),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                    &[(crate::messages::SystemId("captain".into()), 30.0)],
-                )),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
+                    (crate::messages::SystemId("captain".into()), 30.0),
+                ])),
                 Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
             ))
             .id()
@@ -5215,7 +5213,8 @@ mod tests {
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
-        let mut hull = crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
+        let mut hull =
+            crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         let damage: f32 = 10.0;
         let (pierced, absorbed) = split_damage_for_pierce(damage, 0.0);
@@ -5247,7 +5246,8 @@ mod tests {
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
-        let mut hull = crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
+        let mut hull =
+            crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         let damage: f32 = 10.0;
         let (pierced, absorbed) = split_damage_for_pierce(damage, 1.0);
@@ -5279,7 +5279,8 @@ mod tests {
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
-        let mut hull = crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
+        let mut hull =
+            crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         // pierce = 0.3 on 10 damage → 3 to hull, 7 to fore shield.
         let damage: f32 = 10.0;
@@ -5575,7 +5576,14 @@ mod tests {
         start_game_with_power(&mut app);
 
         // Reset power to known state.
-        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), 1);
+        let _ = app
+            .world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .set_group_allocation(
+                &crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                1,
+            );
 
         // Captain (not Power holder) tries to set Helm to 2.
         push(
@@ -5584,7 +5592,9 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(
+                        crate::power_system::HELM_POWER_GROUP.into(),
+                    ),
                     level: 2,
                 },
             },
@@ -5592,7 +5602,12 @@ mod tests {
         let _ = tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.level_for(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into())),
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&crate::messages::PowerGroupId(
+                    crate::power_system::HELM_POWER_GROUP.into()
+                )),
             1,
             "non-Power sender should not be able to increase power"
         );
@@ -5610,7 +5625,9 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(
+                        crate::power_system::SENSORS_POWER_GROUP.into(),
+                    ),
                     level: 1,
                 },
             },
@@ -5618,7 +5635,12 @@ mod tests {
         let _ = tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.level_for(&crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into())),
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&crate::messages::PowerGroupId(
+                    crate::power_system::SENSORS_POWER_GROUP.into()
+                )),
             2,
             "non-Power sender should not be able to decrease power"
         );
@@ -5636,7 +5658,9 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(
+                        crate::power_system::HELM_POWER_GROUP.into(),
+                    ),
                     level: 3,
                 },
             },
@@ -5669,7 +5693,9 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(
+                        crate::power_system::WEAPONS_POWER_GROUP.into(),
+                    ),
                     level: 1,
                 },
             },
@@ -5732,7 +5758,14 @@ mod tests {
         start_game_with_power(&mut app);
 
         // Manually set Helm to 4 (max).
-        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), 4);
+        let _ = app
+            .world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .set_group_allocation(
+                &crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                4,
+            );
 
         push(
             &mut app,
@@ -5740,7 +5773,9 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(
+                        crate::power_system::HELM_POWER_GROUP.into(),
+                    ),
                     level: 4,
                 },
             },
@@ -5772,7 +5807,10 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), [-0.5, 0.0, 1.0, 2.0]);
+            .insert(
+                crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                [-0.5, 0.0, 1.0, 2.0],
+            );
 
         // Set Helm to 3.
         push(
@@ -5781,7 +5819,9 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(
+                        crate::power_system::HELM_POWER_GROUP.into(),
+                    ),
                     level: 3,
                 },
             },
@@ -5805,7 +5845,10 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()), [-0.5, 0.0, 0.25, 0.5]);
+            .insert(
+                crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                [-0.5, 0.0, 0.25, 0.5],
+            );
 
         // Set Weapons to 1.
         push(
@@ -5814,7 +5857,9 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(
+                        crate::power_system::WEAPONS_POWER_GROUP.into(),
+                    ),
                     level: 1,
                 },
             },
@@ -5840,24 +5885,42 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), defaults);
+            .insert(
+                crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                defaults,
+            );
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()), defaults);
+            .insert(
+                crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                defaults,
+            );
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()), defaults);
+            .insert(
+                crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
+                defaults,
+            );
 
         // Set state that will trigger exhaustion on the next tick:
         // total=8 (negative rate), battery already at 0 ? tick keeps it at 0
         // and forces all consoles to 1 + lock.
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), 4);
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()), 2);
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()), 2);
+            let _ = ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                4,
+            );
+            let _ = ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                2,
+            );
+            let _ = ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
+                2,
+            );
             ps.0.battery_charge = 0.0;
             ps.0.locked = false;
         }
@@ -5892,7 +5955,14 @@ mod tests {
         start_game_with_power(&mut app);
 
         // Set total to 8: helm=4, weapons=2, sensors=2.
-        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()), 4);
+        let _ = app
+            .world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .set_group_allocation(
+                &crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                4,
+            );
 
         // Try to set sensors to 3 — total would be 9 (over cap), should be blocked at 2.
         push(
@@ -5901,7 +5971,9 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::power_reactor_system_id(),
                 payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(crate::power_system::SENSORS_POWER_GROUP.into()),
+                    group: crate::messages::PowerGroupId(
+                        crate::power_system::SENSORS_POWER_GROUP.into(),
+                    ),
                     level: 3,
                 },
             },
@@ -6105,8 +6177,7 @@ mod tests {
         // Tick: broadcast_blackboard_updates caches the blackboard and emits it.
         let out1 = tick(&mut app);
         assert!(
-            out1
-                .iter()
+            out1.iter()
                 .any(|m| matches!(&m.msg, ServerMessage::BlackboardUpdate { .. })),
             "first tick after seeding must emit BlackboardUpdate"
         );

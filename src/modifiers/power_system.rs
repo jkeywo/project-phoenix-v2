@@ -43,11 +43,8 @@ impl<'a> Channel1Read<'a> {
 /// The stable canonical order of the built-in power groups. The publisher
 /// walks this order to build wire snapshots. Extending the list requires
 /// touching the wire format and every filter path, so keep it minimal.
-pub const POWER_GROUP_ORDER: &[&str] = &[
-    HELM_POWER_GROUP,
-    WEAPONS_POWER_GROUP,
-    SENSORS_POWER_GROUP,
-];
+pub const POWER_GROUP_ORDER: &[&str] =
+    &[HELM_POWER_GROUP, WEAPONS_POWER_GROUP, SENSORS_POWER_GROUP];
 
 /// Pure `PowerSystem` state — keyed by [`PowerGroupId`] after issue #617.
 ///

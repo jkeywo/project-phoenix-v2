@@ -803,7 +803,7 @@ mod tests {
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
-            .single(&app.world())
+            .single(app.world())
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
@@ -838,7 +838,7 @@ mod tests {
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
-            .single(&app.world())
+            .single(app.world())
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
@@ -877,7 +877,7 @@ mod tests {
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
-            .single(&app.world())
+            .single(app.world())
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
@@ -1023,7 +1023,6 @@ mod tests {
                 .query_filtered::<&ShipImpulse, With<LocalShip>>();
             q.single(app.world())
                 .map(|i| i.0.phase)
-                .ok()
                 .expect("LocalShip must have ShipImpulse component")
         };
         assert_eq!(
@@ -1131,7 +1130,9 @@ mod tests {
     }
 
     fn get_ship_modifiers(app: &mut App) -> ShipModifiers {
-        let mut q = app.world_mut().query_filtered::<&ShipModifiers, With<LocalShip>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipModifiers, With<LocalShip>>();
         q.single(app.world()).unwrap().clone()
     }
 
@@ -1391,9 +1392,8 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&crate::ship_state::ShipPhysics, With<LocalShip>>();
-        q.single(app.world())
+        *q.single(app.world())
             .expect("expected LocalShip with ShipPhysics")
-            .clone()
     }
 
     fn set_physics(app: &mut App, f: impl FnOnce(&mut crate::ship_state::ShipPhysics)) {

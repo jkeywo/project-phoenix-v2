@@ -352,10 +352,7 @@ mod tests {
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.register("t2".into(), "Bob".into()).unwrap();
         sm.set_station("t2", Some(StationId("helm".into())));
-        assert_eq!(
-            sm.holder_for_station(&StationId("helm".into())),
-            Some("t2")
-        );
+        assert_eq!(sm.holder_for_station(&StationId("helm".into())), Some("t2"));
     }
 
     #[test]

@@ -903,7 +903,7 @@ impl ShieldArcConfig {
 /// as a Bevy resource by `WeaponsPlugin` and overridden in
 /// `spawn_game_start_entities` from the player ship's `[weapons_console]`
 /// block.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PhaserCombatConfig {
     /// Per-bank facing/arc/range/damage/duration/cooldown/colour list,
     /// parsed from `[[weapons_console.phaser_banks]]` in TOML order. Empty
@@ -920,12 +920,6 @@ impl PhaserCombatConfig {
     pub const DEFAULT_BEAM_DURATION_SECS: f32 = 6.0;
     pub const DEFAULT_BEAM_COOLDOWN_SECS: f32 = 6.0;
     pub const DEFAULT_BEAM_DAMAGE_PER_SEC: f32 = 5.0;
-}
-
-impl Default for PhaserCombatConfig {
-    fn default() -> Self {
-        Self { banks: Vec::new() }
-    }
 }
 
 impl PhaserCombatConfig {
@@ -2290,7 +2284,10 @@ debuff_magnitude = 0.25
         let hull = config.hull.as_ref().expect("hull must parse");
         assert_eq!(hull.system_hull.len(), 1);
         let entry = &hull.system_hull[0];
-        assert_eq!(entry.system_id, crate::messages::SystemId("phaser-fore".into()));
+        assert_eq!(
+            entry.system_id,
+            crate::messages::SystemId("phaser-fore".into())
+        );
         assert_eq!(entry.display_name.as_deref(), Some("Phaser Bank (Fore)"));
         assert!((entry.max_hp - 25.0).abs() < 1e-6);
         assert!((entry.damaged_threshold_pct - 0.6).abs() < 1e-6);

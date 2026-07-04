@@ -5,9 +5,9 @@ pub use crate::lobby_handler::Target;
 use crate::messages::{
     ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
+use crate::server::asset_preload::AssetPreloadResource;
 use crate::session::SessionManager;
 use crate::ship::rating;
-use crate::server::asset_preload::AssetPreloadResource;
 use crate::ship_plugin::{ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources};
 use crate::stations_config::{stations_from_ship_config, ShipStations};
 
@@ -368,7 +368,7 @@ pub fn process_lobby(
                 &mut next_state,
                 Some(ship_config),
                 Some(&mut control_sources),
-                &mut *active_ratings,
+                &mut active_ratings,
             );
         } else {
             let empty_ratings = std::collections::HashMap::new();
@@ -766,7 +766,7 @@ mod tests {
         assert!(
             out.iter().any(|m| {
                 matches!(&m.msg, ServerMessage::StationAssigned { token, station, .. }
-                    if token == "t1" && station == &None)
+                    if token == "t1" && station.is_none())
             }),
             "ReleaseStation should work during InProgress phase"
         );

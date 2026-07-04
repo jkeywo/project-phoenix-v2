@@ -420,10 +420,7 @@ fn tactical_authorized(
     _ship_config: &crate::ship_plugin::ShipConfigComponent,
     token: &str,
 ) -> bool {
-    sessions
-        .0
-        .holder_for_station(&StationId("tactical".into()))
-        == Some(token)
+    sessions.0.holder_for_station(&StationId("tactical".into())) == Some(token)
         || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
 }
 
@@ -601,7 +598,7 @@ fn handle_fire_phaser(
     // Snapshot LocalShip identity for human-token routing. `None` when the
     // test/plugin harness has no player ship spawned.
     let local_ship: Option<(Entity, &crate::ship_plugin::ShipConfigComponent)> =
-        localship_q.single().ok().map(|(e, cfg)| (e, cfg));
+        localship_q.single().ok();
 
     for ev in reader.read() {
         let ClientMessage::FirePhaser { bank } = &ev.msg else {
@@ -1539,11 +1536,7 @@ fn handle_set_phaser_frequency(
         if !allowed {
             continue;
         }
-        if sessions
-            .0
-            .holder_for_station(&StationId("tactical".into()))
-            != Some(ev.token.as_str())
-        {
+        if sessions.0.holder_for_station(&StationId("tactical".into())) != Some(ev.token.as_str()) {
             continue;
         }
         if let Some(mut freq) = freq_q.iter_mut().next() {
@@ -1702,7 +1695,7 @@ fn handle_fire_torpedo(
     // Snapshot LocalShip identity for human-token routing. `None` when the
     // test/plugin harness has no player ship spawned.
     let local_ship: Option<(Entity, &crate::ship_plugin::ShipConfigComponent)> =
-        localship_q.single().ok().map(|(e, cfg)| (e, cfg));
+        localship_q.single().ok();
 
     for ev in reader.read() {
         let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else {
@@ -2339,7 +2332,7 @@ fn operate_tactical_ai(
         // objective is available (or its target entity can't be resolved),
         // fall back to the last attacker.
         let objective_target = match top_destroy_objective_target(Some(blackboards)) {
-            Some(target_name) if target_name.is_empty() => None,
+            Some("") => None,
             Some(target_name) => {
                 resolve_objective_target_uuid(target_name, runtime.as_deref(), &other_ships_q)
             }
@@ -2353,10 +2346,7 @@ fn operate_tactical_ai(
         //
         // When the station is claimed, gate on whether the active rating's
         // ai_tuning has the torpedo_auto_fire rule. Unclaimed → unconditional.
-        let auto_fire_enabled = match sessions
-            .0
-            .holder_for_station(&StationId("tactical".into()))
-        {
+        let auto_fire_enabled = match sessions.0.holder_for_station(&StationId("tactical".into())) {
             Some(_) => active_ratings.0.get(&tactical_station).is_some_and(|r| {
                 ship_config.0.has_ai_rule(
                     &tactical_station,
@@ -4812,7 +4802,9 @@ station = "tactical"
         setup_weapons_world_with_entity(&mut app_fast, 0.0, -20.0);
         start_game_with_weapons(&mut app_fast);
         {
-            let mut q = app_fast.world_mut().query_filtered::<&mut ShipModifiers, With<crate::simulation::LocalShip>>();
+            let mut q = app_fast
+                .world_mut()
+                .query_filtered::<&mut ShipModifiers, With<crate::simulation::LocalShip>>();
             let mut mods = q.single_mut(app_fast.world_mut()).unwrap();
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
@@ -6202,7 +6194,10 @@ station = "tactical"
                     }],
                     radar: None,
                 }),
-                EntitySystemHull(SystemHull::from_config(&[(SystemId("captain".into()), 100.0)])),
+                EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    100.0,
+                )])),
                 Transform::from_xyz(0.0, 0.0, 0.0),
             ))
             .id();
@@ -6212,7 +6207,10 @@ station = "tactical"
             .world_mut()
             .spawn((
                 EntityUuid(target_uuid_str.to_string()),
-                EntitySystemHull(SystemHull::from_config(&[(SystemId("captain".into()), 200.0)])),
+                EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    200.0,
+                )])),
                 Transform::from_xyz(0.0, 0.0, -10.0),
             ))
             .id();
@@ -6639,28 +6637,30 @@ station = "tactical"
         };
         use crate::server_app::ShipSystemBlackboards;
 
-        let mut viewscreen = ViewscreenBlackboard::default();
-        viewscreen.scored_objectives = vec![ScoredObjective {
-            id: format!("obj-destroy-{target}"),
-            score,
-            directive: AiDirective::Destroy {
-                target: target.into(),
-            },
-            source: ObjectiveSource::Mission,
-            relevance: vec![
-                SystemAffinity::Helm,
-                SystemAffinity::Weapons,
-                SystemAffinity::Captain,
-            ],
-            snapshot: ObjectiveSnapshot {
+        let viewscreen = ViewscreenBlackboard {
+            scored_objectives: vec![ScoredObjective {
                 id: format!("obj-destroy-{target}"),
-                text: format!("Destroy {target}"),
-                mandatory: true,
-                status: ObjectiveStatus::Active,
-                targets: vec![target.into()],
+                score,
+                directive: AiDirective::Destroy {
+                    target: target.into(),
+                },
                 source: ObjectiveSource::Mission,
-            },
-        }];
+                relevance: vec![
+                    SystemAffinity::Helm,
+                    SystemAffinity::Weapons,
+                    SystemAffinity::Captain,
+                ],
+                snapshot: ObjectiveSnapshot {
+                    id: format!("obj-destroy-{target}"),
+                    text: format!("Destroy {target}"),
+                    mandatory: true,
+                    status: ObjectiveStatus::Active,
+                    targets: vec![target.into()],
+                    source: ObjectiveSource::Mission,
+                },
+            }],
+            ..Default::default()
+        };
         let mut q = app
             .world_mut()
             .query_filtered::<&mut ShipSystemBlackboards, With<crate::server_app::LocalShip>>();

@@ -7938,5 +7938,4 @@ size_max = 2.0
             "AI-operated comms must auto-pick response index 0"
         );
     }
-
 }

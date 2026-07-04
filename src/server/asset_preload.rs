@@ -800,26 +800,28 @@ mod tests {
 
     #[test]
     fn discover_entity_config_with_model_and_icon() {
-        let mut config = EntityConfig::default();
-        config.mesh = Some(MeshConfig {
-            model: Some("assets/models/test_ship.glb".into()),
-            variant: None,
-            shape: MeshShape::Sphere,
-            colour: vec![1.0, 0.0, 0.0],
-            radius: 1.0,
-            size: None,
-            minor_radius: 0.0,
-            emissive: None,
-            scale: 1.0,
-            rotation: [0.0, 0.0, 0.0],
-            no_render: false,
-        });
-        config.radar_appearance = Some(RadarAppearanceConfig {
-            icon: Some("testShip".into()),
-            colour: Some(vec![1.0, 0.0, 0.0]),
-            size: None,
-            region_colour: None,
-        });
+        let config = EntityConfig {
+            mesh: Some(MeshConfig {
+                model: Some("assets/models/test_ship.glb".into()),
+                variant: None,
+                shape: MeshShape::Sphere,
+                colour: vec![1.0, 0.0, 0.0],
+                radius: 1.0,
+                size: None,
+                minor_radius: 0.0,
+                emissive: None,
+                scale: 1.0,
+                rotation: [0.0, 0.0, 0.0],
+                no_render: false,
+            }),
+            radar_appearance: Some(RadarAppearanceConfig {
+                icon: Some("testShip".into()),
+                colour: Some(vec![1.0, 0.0, 0.0]),
+                size: None,
+                region_colour: None,
+            }),
+            ..Default::default()
+        };
 
         let mut manifest = AssetManifest::default();
         discover_entity_config_assets(&config, &mut manifest);
@@ -834,20 +836,22 @@ mod tests {
 
     #[test]
     fn discover_entity_config_no_render_skips_glb_keeps_sidecar() {
-        let mut config = EntityConfig::default();
-        config.mesh = Some(MeshConfig {
-            model: Some("assets/models/alliance_cruiser.glb".into()),
-            variant: None,
-            shape: MeshShape::Sphere,
-            colour: vec![],
-            radius: 1.0,
-            size: None,
-            minor_radius: 0.0,
-            emissive: None,
-            scale: 1.0,
-            rotation: [0.0, 0.0, 0.0],
-            no_render: true,
-        });
+        let config = EntityConfig {
+            mesh: Some(MeshConfig {
+                model: Some("assets/models/alliance_cruiser.glb".into()),
+                variant: None,
+                shape: MeshShape::Sphere,
+                colour: vec![],
+                radius: 1.0,
+                size: None,
+                minor_radius: 0.0,
+                emissive: None,
+                scale: 1.0,
+                rotation: [0.0, 0.0, 0.0],
+                no_render: true,
+            }),
+            ..Default::default()
+        };
         let mut manifest = AssetManifest::default();
         discover_entity_config_assets(&config, &mut manifest);
         // GLB must NOT be added when no_render = true (saves blocking preload on 7.8 MB file).

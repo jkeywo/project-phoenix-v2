@@ -511,7 +511,7 @@ fn spawn_engine_trails(
         .keys()
         .filter(|key| {
             // Strip the trailing ":<emitter_idx>" suffix to recover the key_base.
-            let base = key.rsplitn(2, ':').nth(1).unwrap_or(key.as_str());
+            let base = key.rsplit_once(':').map(|x| x.0).unwrap_or(key.as_str());
             !live_key_bases.contains(base)
         })
         .cloned()
@@ -1471,7 +1471,9 @@ position = [0.5, -0.1, 0.25]
     }
 
     fn beam_body_translation(app: &mut App) -> Vec3 {
-        let mut q = app.world_mut().query_filtered::<&Transform, With<BeamBody>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&Transform, With<BeamBody>>();
         q.single(app.world())
             .expect("BeamBody entity must exist")
             .translation

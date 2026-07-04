@@ -104,8 +104,7 @@ pub fn translate_power_modifiers(
     };
     if let Some(mut mods) = ships_q
         .iter_mut()
-        .filter(|(_, _, _, is_local)| *is_local)
-        .next()
+        .find(|(_, _, _, is_local)| *is_local)
         .map(|(_, _, mods, _)| mods)
     {
         apply_power_modifiers_from_read_state(&mut mods, &read_state, &mult.multipliers);
@@ -262,7 +261,7 @@ pub fn translate_impulse_modifiers(
     mut modifiers_q: Query<&mut ShipModifiers, With<crate::server_app::LocalShip>>,
     mut prev_phase: Local<Option<ImpulsePhase>>,
 ) {
-    let Some(impulse_state) = impulse_q.single().ok().map(|i| i.0.clone()) else {
+    let Some(impulse_state) = impulse_q.single().ok().map(|i| i.0) else {
         return;
     };
     let current = impulse_state.phase;
@@ -655,16 +654,21 @@ mod tests {
         // Configure a non-default speed multiplier (3.0 instead of 10.0).
         // The MaxSpeed modifier must reflect this - proving the system
         // reads the per-entity component rather than the const fallback.
-        app.world_mut().entity_mut(ship).insert(ImpulseConfigResource {
-            charge_duration: IMPULSE_CHARGE_DURATION,
-            speed_multiplier: 3.0,
-            acceleration_multiplier: 1.0,
-        });
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ImpulseConfigResource {
+                charge_duration: IMPULSE_CHARGE_DURATION,
+                speed_multiplier: 3.0,
+                acceleration_multiplier: 1.0,
+            });
 
         app.add_systems(Update, translate_impulse_modifiers);
         app.update();
 
-        let mods = app.world().get::<ShipModifiers>(ship).expect("ShipModifiers component");
+        let mods = app
+            .world()
+            .get::<ShipModifiers>(ship)
+            .expect("ShipModifiers component");
         let max_speed = mods.get(&ModifierSlot::MaxSpeed);
         assert!(
             (max_speed - 3.0).abs() < 1e-6,
@@ -697,8 +701,7 @@ mod tests {
         let mut power = PowerSystem::default();
         power.set_group_allocation(&helm(), 3).unwrap();
         let mut mult = PowerMultiplierResource::default();
-        mult.multipliers
-            .insert(helm(), [-0.5, 0.0, 1.0, 2.0]);
+        mult.multipliers.insert(helm(), [-0.5, 0.0, 1.0, 2.0]);
 
         let npc = app
             .world_mut()

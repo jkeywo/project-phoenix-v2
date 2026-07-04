@@ -19,17 +19,9 @@ pub struct StationDef {
 
 /// Fixed-roster station configuration. Populated from `ShipConfigResource`
 /// at startup; per-player-count cascade machinery removed in B3 (issue #533).
-#[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct ShipStations {
     pub stations: Vec<StationDef>,
-}
-
-impl Default for ShipStations {
-    fn default() -> Self {
-        Self {
-            stations: Vec::new(),
-        }
-    }
 }
 
 /// Build a `ShipStations` from the new `ShipConfig` station list.

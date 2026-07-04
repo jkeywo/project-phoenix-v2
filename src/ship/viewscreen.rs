@@ -67,7 +67,7 @@ impl ViewscreenArbiter {
                 if should_clear {
                     self.active = None;
                 } else {
-                    let should_replace = self.active.as_ref().map_or(true, |active| {
+                    let should_replace = self.active.as_ref().is_none_or(|active| {
                         let active_priority = view_priority(&active.requester, &active.mode);
                         request_priority > active_priority
                             || (request_priority == active_priority

@@ -2,9 +2,8 @@ use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard,
-    PowerGroupEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage, StationId,
-    SystemBlackboard, SystemId,
+    InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard, PowerGroupEntry,
+    PowerGroupId, PowerReactorBlackboard, ServerMessage, StationId, SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
     power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
@@ -203,10 +202,8 @@ pub fn handle_power_messages(
     for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
         let mut pending: Vec<(crate::messages::PowerGroupId, u8)> = Vec::new();
         for cmd in admitted.for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID) {
-            if let crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                group,
-                level,
-            } = &cmd.payload
+            if let crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } =
+                &cmd.payload
             {
                 pending.push((group.clone(), *level));
             }
@@ -557,8 +554,12 @@ pub fn operate_power_ai(
         let weapons_level = power_comp.0.level_for(&weapons_id).clamp(1, 4);
         let sensors_level = power_comp.0.level_for(&sensors_id).clamp(1, 4);
         let _ = power_comp.0.set_group_allocation(&helm_id, helm_level);
-        let _ = power_comp.0.set_group_allocation(&weapons_id, weapons_level);
-        let _ = power_comp.0.set_group_allocation(&sensors_id, sensors_level);
+        let _ = power_comp
+            .0
+            .set_group_allocation(&weapons_id, weapons_level);
+        let _ = power_comp
+            .0
+            .set_group_allocation(&sensors_id, sensors_level);
 
         if is_local {
             player_power = Some(power_comp.0.clone());
@@ -897,11 +898,18 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 4);
+        let _ = app
+            .world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 4);
         // Directly set via resource (the human message path lives in ship_plugin.rs).
         // Verify the field clamps at 4 on the PowerSystem itself.
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
             4,
             "helm should remain at 4"
         );
@@ -915,16 +923,27 @@ mod tests {
         // Force total to 8 and check PowerSystem::increase is a no-op.
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 4);
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()), 2);
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()), 2);
+            let _ = ps
+                .0
+                .set_group_allocation(&crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 4);
+            let _ = ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
+                2,
+            );
+            let _ = ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
+                2,
+            );
         }
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
             ps.0.increase(&PowerGroupId(SENSORS_POWER_GROUP.into()));
         }
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
             2,
             "sensors should stay at 2 when total is already at the cap of 8"
         );
@@ -946,11 +965,17 @@ mod tests {
             .insert(PowerGroupId(HELM_POWER_GROUP.into()), [-0.5, 0.0, 1.0, 2.0]);
 
         // Directly set helm=3 and tick to let translate_power_modifiers run.
-        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
+        let _ = app
+            .world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
         let _ = tick(&mut app);
 
         let mult = {
-            let mut q = app.world_mut().query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
             q.single(app.world()).unwrap().get(&ModifierSlot::MaxSpeed)
         };
         assert!(
@@ -967,16 +992,27 @@ mod tests {
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
-            .insert(PowerGroupId(WEAPONS_POWER_GROUP.into()), [-0.5, 0.0, 0.25, 0.5]);
+            .insert(
+                PowerGroupId(WEAPONS_POWER_GROUP.into()),
+                [-0.5, 0.0, 0.25, 0.5],
+            );
 
         // Set weapons=1 directly and tick.
-        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(WEAPONS_POWER_GROUP.into()), 1);
+        let _ = app
+            .world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .set_group_allocation(&PowerGroupId(WEAPONS_POWER_GROUP.into()), 1);
         let _ = tick(&mut app);
 
         let expected = 1.0 / 1.5;
         let mult = {
-            let mut q = app.world_mut().query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
-            q.single(app.world()).unwrap().get(&ModifierSlot::PhaserDamage)
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+            q.single(app.world())
+                .unwrap()
+                .get(&ModifierSlot::PhaserDamage)
         };
         assert!(
             (mult - expected).abs() < 1e-6,
@@ -1005,9 +1041,17 @@ mod tests {
 
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 4);
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()), 2);
-            let _ = ps.0.set_group_allocation(&crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()), 2);
+            let _ = ps
+                .0
+                .set_group_allocation(&crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 4);
+            let _ = ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
+                2,
+            );
+            let _ = ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(SENSORS_POWER_GROUP.into()),
+                2,
+            );
             ps.0.battery_charge = 0.0;
             ps.0.locked = false;
         }
@@ -1016,7 +1060,9 @@ mod tests {
 
         let expected = 1.0 / 1.5;
         let mods = {
-            let mut q = app.world_mut().query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
             q.single(app.world()).unwrap().clone()
         };
 
@@ -1087,7 +1133,11 @@ mod tests {
         start_game_with_power(&mut app);
         tick(&mut app);
 
-        let _ = app.world_mut().resource_mut::<ShipPowerSystem>().0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
+        let _ = app
+            .world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
         tick(&mut app);
 
         let bb = power_blackboard(&mut app);
@@ -1116,7 +1166,13 @@ mod tests {
         );
         tick(&mut app);
 
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())), 4);
+        assert_eq!(
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+            4
+        );
     }
 
     /// Wire-string regression: JS clients send `target: 'power-reactor'`
@@ -1144,7 +1200,10 @@ mod tests {
         tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
             4,
             "raw wire string \"power-reactor\" must reach handle_power_messages \
              — if this fails, either the handler's for_target() argument or the \
@@ -1195,7 +1254,13 @@ mod tests {
         });
         // battery_pct = 100/100 = 1.0 >= 0.75 floor
         app.update();
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())), 3);
+        assert_eq!(
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
+            3
+        );
     }
 
     #[test]
@@ -1203,7 +1268,13 @@ mod tests {
         let mut app = ai_test_app();
         // Default LastHelmInput has thrust=0.0
         app.update();
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())), 1);
+        assert_eq!(
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
+            1
+        );
     }
 
     #[test]
@@ -1216,7 +1287,13 @@ mod tests {
             }
         }
         app.update();
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())), 3);
+        assert_eq!(
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
+            3
+        );
     }
 
     #[test]
@@ -1243,7 +1320,10 @@ mod tests {
         app.update();
         // weapons should not be 3 — battery below floor
         assert_ne!(
-            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
             3,
             "weapons should not be boosted when battery is below floor"
         );
@@ -1476,7 +1556,10 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
             4,
             "baseline sanity: online reactor should accept allocation input"
         );
@@ -1496,7 +1579,10 @@ mod tests {
         );
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
+            app.world()
+                .resource::<ShipPowerSystem>()
+                .0
+                .level_for(&PowerGroupId(SENSORS_POWER_GROUP.into())),
             4,
             "reactor offline must refuse allocation input (sensors should stay at 4)"
         );

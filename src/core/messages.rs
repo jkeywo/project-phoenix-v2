@@ -2333,10 +2333,11 @@ pub struct ObjectiveSnapshot {
 
 /// Mission-altitude directive attached to an objective. Drives per-system AI
 /// operate logic to select which directive to act on (issue #571).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 #[serde(tag = "kind")]
 pub enum AiDirective {
     /// No AI directive — objective is human-facing only.
+    #[default]
     None,
     /// Destroy the named target entity.
     Destroy { target: String },
@@ -2349,12 +2350,6 @@ pub enum AiDirective {
     Reach { anchor: String },
     /// Hail the named target entity.
     Hail { target: String },
-}
-
-impl Default for AiDirective {
-    fn default() -> Self {
-        AiDirective::None
-    }
 }
 
 /// Whether an objective originates from the active mission or from standing doctrine.

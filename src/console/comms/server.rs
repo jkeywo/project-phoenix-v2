@@ -1043,6 +1043,25 @@ pub(crate) fn handle_comms_channel2(
     }
 }
 
+// ── AI controller stub ─────────────────────────────────────────────────────────
+
+/// Per-entity AI loop for comms. Loops over ALL ship entities (player and NPC)
+/// where the Comms system is `ControlSource::Ai`.
+///
+/// Currently a compile-verified stub — Comms AI auto-responds to hails
+/// and processes inbox messages (deferred to later fine-grained decomposition).
+pub fn operate_comms_ai(ships: Query<&ShipSystemControlSources>) {
+    for sources in &ships {
+        let policy = sources
+            .0
+            .policy_for(&crate::system_registry::comms_system_id());
+        if !policy.operate_ai {
+            continue;
+        }
+        // TODO: implement comms AI logic (auto-response, inbox processing)
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1147,9 +1166,13 @@ mod tests {
     // suite, so that harness stays in `world::server::tests` (now
     // `pub(crate)`) and is imported here rather than duplicated.
     use crate::messages::{ClientMessage, CommsContact, ServerMessage};
-    use crate::world::content::{CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition};
+    use crate::world::content::{
+        CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition,
+    };
     use crate::world::server::{
-        tests::{comms_test_app, push_msg, setup_game_with_comms, tick, write_spawn_template_fixture},
+        tests::{
+            comms_test_app, push_msg, setup_game_with_comms, tick, write_spawn_template_fixture,
+        },
         tick_pending_follow_ups, PendingWorldLayerChanges, WorldLayerChange, WorldLayerMap,
     };
 
@@ -2824,24 +2847,5 @@ mod tests {
             "ControlSystem::Hail must deliver one message"
         );
         assert_eq!(messages[0].body, "USS Phoenix, please identify yourself.");
-    }
-}
-
-// ── AI controller stub ─────────────────────────────────────────────────────────
-
-/// Per-entity AI loop for comms. Loops over ALL ship entities (player and NPC)
-/// where the Comms system is `ControlSource::Ai`.
-///
-/// Currently a compile-verified stub — Comms AI auto-responds to hails
-/// and processes inbox messages (deferred to later fine-grained decomposition).
-pub fn operate_comms_ai(ships: Query<&ShipSystemControlSources>) {
-    for sources in &ships {
-        let policy = sources
-            .0
-            .policy_for(&crate::system_registry::comms_system_id());
-        if !policy.operate_ai {
-            continue;
-        }
-        // TODO: implement comms AI logic (auto-response, inbox processing)
     }
 }

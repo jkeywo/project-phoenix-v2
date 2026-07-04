@@ -374,7 +374,6 @@ fn toggle_cameras(
     // render during InProgress without an explicit UiTargetCamera.
     if let Ok(mut cam) = game.single_mut() {
         cam.is_active = game_active;
-    } else {
     }
 }
 

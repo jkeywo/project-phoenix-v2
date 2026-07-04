@@ -30,11 +30,18 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
 
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
       - name: Run unit tests (server)
         run: cargo test
 
   # ── WASM build ────────────────────────────────────────────────────────────────
   build:
+    needs: test
     runs-on: ubuntu-latest
 
     steps:

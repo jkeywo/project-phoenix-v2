@@ -163,8 +163,7 @@ pub fn handle_shields_messages(
             .0
             .facings
             .iter()
-            .enumerate()
-            .filter_map(|(_, f)| {
+            .filter_map(|f| {
                 if f.id.is_empty() {
                     None
                 } else {
@@ -592,6 +591,10 @@ mod tests {
         msgs
     }
 
+    // Superseded by `start_game_with_shields_and_helm` below for tests that
+    // also need a Helm session; retained as a documented no-op since no test
+    // in this module currently calls the captain-only variant directly.
+    #[allow(dead_code)]
     fn start_game_with_shields(app: &mut App) {
         push_msg(
             app,
@@ -728,12 +731,12 @@ mod tests {
     fn publish_shields_blackboard_clears_focused_facing() {
         let mut app = test_app();
         let se = ship_e(&mut app);
-        let mut e = app.world_mut().entity_mut(se);
-        let mut shields = e.get_mut::<ShipShields>().unwrap();
-        shields.0.set_focused_facing(Some(0));
-        shields.0.set_focused_facing(None);
-        drop(shields);
-        drop(e);
+        {
+            let mut e = app.world_mut().entity_mut(se);
+            let mut shields = e.get_mut::<ShipShields>().unwrap();
+            shields.0.set_focused_facing(Some(0));
+            shields.0.set_focused_facing(None);
+        }
         app.update();
         assert_eq!(shields_bb(&mut app).focused_facing, None);
     }
@@ -1007,17 +1010,18 @@ mod tests {
             facing.hp = 60;
         }
 
-        app.world_mut()
+        if let Some(mut coord) = app
+            .world_mut()
             .entity_mut(se)
             .get_mut::<ShieldsCoordinationState>()
-            .map(|mut coord| {
-                if coord.down_notified.is_empty() {
-                    coord.down_notified.push(true);
-                    coord.restore_notified.push(false);
-                } else {
-                    coord.down_notified[0] = true;
-                }
-            });
+        {
+            if coord.down_notified.is_empty() {
+                coord.down_notified.push(true);
+                coord.restore_notified.push(false);
+            } else {
+                coord.down_notified[0] = true;
+            }
+        }
 
         // No red alert active.
         tick(&mut app);

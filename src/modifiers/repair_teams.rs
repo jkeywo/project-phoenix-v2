@@ -205,9 +205,7 @@ impl RepairTeams {
                         // back to the raw SystemId only if the slot never
                         // had a label (e.g. legacy on-wire messages without
                         // the new field).
-                        let label = display_name
-                            .clone()
-                            .or_else(|| Some(sid.0.clone()));
+                        let label = display_name.clone().or_else(|| Some(sid.0.clone()));
                         if is_full || is_destroyed {
                             *slot = TeamSlot::Returning {
                                 remaining: 0.0,
@@ -242,9 +240,7 @@ impl RepairTeams {
                     // Carry the display name forward from `Repairing`
                     // through the Returning transition for the same reason
                     // as the Travelling arm above.
-                    let carried_label = display_name
-                        .clone()
-                        .or_else(|| Some(sid.0.clone()));
+                    let carried_label = display_name.clone().or_else(|| Some(sid.0.clone()));
                     // Do not repair a Destroyed system — the latch is
                     // unrepairable by a repair team alone.
                     if hull.tier_for(&sid) == crate::damage::DamageTier::Destroyed {
@@ -390,7 +386,10 @@ mod tests {
         teams.dispatch(0, sid("helm"), "Helm".to_string());
         assert!(matches!(
             &teams.slots()[0],
-            TeamSlot::Returning { queued_system_id: None, .. }
+            TeamSlot::Returning {
+                queued_system_id: None,
+                ..
+            }
         ));
     }
 
@@ -602,7 +601,10 @@ mod tests {
         teams.dispatch(0, sid("helm"), "Helm".to_string()); // same system = recall
         assert!(matches!(
             &teams.slots()[0],
-            TeamSlot::Returning { queued_system_id: None, .. }
+            TeamSlot::Returning {
+                queued_system_id: None,
+                ..
+            }
         ));
     }
 
@@ -634,7 +636,10 @@ mod tests {
         teams.dispatch(0, sid("helm"), "Helm".to_string()); // recall
         assert!(matches!(
             &teams.slots()[0],
-            TeamSlot::Returning { queued_system_id: None, .. }
+            TeamSlot::Returning {
+                queued_system_id: None,
+                ..
+            }
         ));
     }
 
@@ -651,7 +656,7 @@ mod tests {
             "expected 2 HP before recall, got {hp_before_recall}"
         );
         teams.dispatch(0, sid("helm"), "Helm".to_string()); // recall
-                                        // HP should not have changed
+                                                            // HP should not have changed
         let hp_after_recall = hull.current_for(&sid("helm")).unwrap();
         assert!((hp_after_recall - hp_before_recall).abs() < 1e-4);
     }

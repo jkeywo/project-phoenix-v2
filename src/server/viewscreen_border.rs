@@ -229,10 +229,7 @@ pub(crate) fn push_lobby_state(
     let all_ready = sessions.0.all_ready();
 
     let loading_progress = if *phase.get() == GamePhase::Loading {
-        preload
-            .as_ref()
-            .filter(|p| p.started)
-            .map(|p| p.fraction())
+        preload.as_ref().filter(|p| p.started).map(|p| p.fraction())
     } else {
         None
     };
@@ -585,7 +582,15 @@ mod tests {
     #[test]
     fn compute_hud_state_nominal() {
         let physics = ShipPhysics::default();
-        let state = compute_hud_state(false, &physics, 100.0, 100.0, 0.0, &GamePhase::InProgress, None);
+        let state = compute_hud_state(
+            false,
+            &physics,
+            100.0,
+            100.0,
+            0.0,
+            &GamePhase::InProgress,
+            None,
+        );
         assert_eq!(state.heading, 0);
         assert_eq!(state.hull_pct, 100);
         assert_eq!(state.condition, "NOMINAL");
@@ -600,7 +605,15 @@ mod tests {
             yaw: std::f32::consts::FRAC_PI_2,
             ..Default::default()
         };
-        let state = compute_hud_state(true, &physics, 50.0, 100.0, 0.75, &GamePhase::InProgress, None);
+        let state = compute_hud_state(
+            true,
+            &physics,
+            50.0,
+            100.0,
+            0.75,
+            &GamePhase::InProgress,
+            None,
+        );
         assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
         assert_eq!(state.condition, "ALERT");
@@ -611,7 +624,15 @@ mod tests {
     #[test]
     fn compute_hud_state_engine_thrust_propagated() {
         let physics = ShipPhysics::default();
-        let state = compute_hud_state(false, &physics, 100.0, 100.0, 0.5, &GamePhase::InProgress, None);
+        let state = compute_hud_state(
+            false,
+            &physics,
+            100.0,
+            100.0,
+            0.5,
+            &GamePhase::InProgress,
+            None,
+        );
         assert_eq!(state.engine_thrust, 0.5);
     }
 

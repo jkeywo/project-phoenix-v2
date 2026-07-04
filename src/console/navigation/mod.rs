@@ -346,6 +346,9 @@ mod tests {
         tick(app);
     }
 
+    // Test helper mirroring `latest_navigation_blackboard` below; no test in
+    // this module currently asserts on raw SimSnapshot, retained for parity.
+    #[allow(dead_code)]
     fn latest_sim_snapshot(out: &[OutboundMessage]) -> Option<crate::messages::SimSnapshot> {
         out.iter().rev().find_map(|m| match &m.msg {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),

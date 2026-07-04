@@ -300,11 +300,7 @@ impl SystemHull {
                 self.order
                     .iter()
                     .rev()
-                    .find(|id| {
-                        self.entries
-                            .get(*id)
-                            .is_some_and(|e| e.current > 0.0)
-                    })
+                    .find(|id| self.entries.get(*id).is_some_and(|e| e.current > 0.0))
                     .cloned()
                     .expect("total > 0.0 implies at least one live entry")
             });
@@ -882,8 +878,7 @@ mod tests {
     fn apply_damage_skips_depleted_consoles() {
         // Build hull with one console at very low HP so it depletes first.
         // Use a seeded RNG to control which console is chosen.
-        let mut hull =
-            SystemHull::from_config(&[(sid("helm"), 5.0), (sid("tactical"), 100.0)]);
+        let mut hull = SystemHull::from_config(&[(sid("helm"), 5.0), (sid("tactical"), 100.0)]);
         let mut rng = rand::rng();
         // Apply 110 damage — should wipe both consoles (5 + 105 spill to Tactical)
         hull.apply_damage(110.0, &mut rng);

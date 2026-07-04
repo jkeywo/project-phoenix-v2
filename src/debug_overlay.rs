@@ -162,9 +162,7 @@ fn should_install_region_wireframes() -> bool {
 ///
 /// Only runs when `DebugOverlayEnabled` is true.
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
-fn write_debug_state(
-    modifiers_q: Query<&ShipModifiers, With<crate::server_app::LocalShip>>,
-) {
+fn write_debug_state(modifiers_q: Query<&ShipModifiers, With<crate::server_app::LocalShip>>) {
     if let Some(modifiers) = modifiers_q.iter().next() {
         let text = modifiers.format_debug();
         crate::bridge::set_debug_state_string(text);

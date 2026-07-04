@@ -610,7 +610,10 @@ pub fn spawn_entity(
                 .system_hull
                 .iter()
                 .map(|e| {
-                    let display = e.display_name.clone().unwrap_or_else(|| e.system_id.0.clone());
+                    let display = e
+                        .display_name
+                        .clone()
+                        .unwrap_or_else(|| e.system_id.0.clone());
                     (
                         e.system_id.clone(),
                         display,
@@ -1422,7 +1425,10 @@ hull_integrity = 60.0
             .expect("entity with hull_integrity should still get EntitySystemHull");
         assert!((hull_comp.0.total_max() - 200.0).abs() < 1e-6);
         let entries: Vec<_> = hull_comp.0.entries().collect();
-        assert_eq!(entries[0].0, &crate::messages::SystemId("captain".to_string()));
+        assert_eq!(
+            entries[0].0,
+            &crate::messages::SystemId("captain".to_string())
+        );
     }
 
     // -- Channel-3 NPC routing smoke test (#552) --------------------------------

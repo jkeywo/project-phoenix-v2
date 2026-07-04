@@ -88,7 +88,7 @@ pub(crate) fn load_ship_config_from_disk() -> ShipConfigComponent {
     let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
         .expect("core system registry must be valid");
     let kinds: Vec<&str> = registry.kinds().collect();
-    match crate::ship::config::parse_and_validate(&toml_str, &kinds) {
+    match crate::ship::config::parse_and_validate(toml_str, &kinds) {
         Ok(config) => {
             bevy::log::info!(
                 "ship_config: loaded {} stations, {} systems",
@@ -452,7 +452,14 @@ fn process_helm_inputs(
     }
     // Boost drive: while engaged, multiply max speed and acceleration. Only
     // applies when the ship's TOML enabled the feature.
-    if boost_cfg.enabled && drive.boost_q.iter().next().map(|b| b.0.is_active()).unwrap_or(false) {
+    if boost_cfg.enabled
+        && drive
+            .boost_q
+            .iter()
+            .next()
+            .map(|b| b.0.is_active())
+            .unwrap_or(false)
+    {
         config.max_speed *= boost_cfg.multiplier;
         config.max_reverse_speed *= boost_cfg.multiplier;
         config.acceleration *= boost_cfg.multiplier;
@@ -899,10 +906,7 @@ fn tick_impulse(
 ) {
     let dt = time.delta_secs();
     for (mut impulse, entity_cfg) in ships_q.iter_mut() {
-        let charge_duration = entity_cfg
-            .cloned()
-            .unwrap_or_default()
-            .charge_duration;
+        let charge_duration = entity_cfg.cloned().unwrap_or_default().charge_duration;
         impulse.0.tick(dt, charge_duration);
     }
 }
@@ -949,10 +953,7 @@ fn normalized_boost_drain_factor(thrust: f32, steering: f32) -> f32 {
 
 fn tick_boost(
     time: Res<Time>,
-    mut boost_entity_q: Query<
-        (Option<&BoostConfigResource>, &mut ShipBoost),
-        With<LocalShip>,
-    >,
+    mut boost_entity_q: Query<(Option<&BoostConfigResource>, &mut ShipBoost), With<LocalShip>>,
     last_input_q: Query<&LastHelmInput, With<LocalShip>>,
     sessions: Res<Sessions>,
     impulse_q: Query<&ShipImpulse, With<LocalShip>>,
@@ -969,7 +970,7 @@ fn tick_boost(
         return;
     }
     let last_input = last_input_q.single().copied().unwrap_or_default();
-    let policy = helm_control_policy(&control_sources);
+    let policy = helm_control_policy(control_sources);
     let has_helm = sessions
         .0
         .holder_for_station(&crate::messages::StationId("helm".into()))
@@ -1318,29 +1319,31 @@ mod tests {
             (crate::messages::SystemId("power".into()), 25.0),
             (crate::messages::SystemId("shields".into()), 25.0),
         ];
-        let ship = app.world_mut().spawn((
-            Ship,
-            LocalShip,
-            Transform::default(),
-            ShipPhysics::default(),
-            ShipConfigComponent::default(),
-            ShipSystemControlSources::default(),
-            ActiveStationRatings::default(),
-            CoordinationQueue::default(),
-            crate::messages::AdmittedCommands::default(),
-            crate::server_app::ShipSystemBlackboards::default(),
-            crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                hull_config,
-            )),
-            LastHelmInput::default(),
-            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
-        )).id();
-        app.world_mut().entity_mut(ship).insert((
-            ShipModifiers::new(),
-            ShipBoost::default(),
-        ));
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                LocalShip,
+                Transform::default(),
+                ShipPhysics::default(),
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                ActiveStationRatings::default(),
+                CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                crate::ai_plugin::ShipAiMemory::default(),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    hull_config,
+                )),
+                LastHelmInput::default(),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+                ShipImpulse(crate::impulse::ImpulseState::new()),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert((ShipModifiers::new(), ShipBoost::default()));
         app
     }
 
@@ -1480,11 +1483,13 @@ mod tests {
 
     fn get_ship_physics(app: &mut App) -> ShipPhysics {
         let mut q = app.world_mut().query_filtered::<&ShipPhysics, With<Ship>>();
-        q.single(app.world())
+        *q.single(app.world())
             .expect("expected Ship entity with ShipPhysics")
-            .clone()
     }
 
+    // Test helper for directly seeding ship physics state; no current test
+    // calls it, retained for symmetry with `get_ship_physics` above.
+    #[allow(dead_code)]
     fn set_ship_physics(app: &mut App, physics: ShipPhysics) {
         let mut q = app
             .world_mut()
@@ -1522,7 +1527,6 @@ mod tests {
         q.single(app.world())
             .expect("expected LocalShip entity with ShipImpulse")
             .0
-            .clone()
     }
 
     fn set_ship_impulse(app: &mut App, state: crate::impulse::ImpulseState) {
@@ -1918,11 +1922,13 @@ mod tests {
         // Timer fires at 30 Hz (dt ≈ 1/30 s), so the first tick gives
         // forward_speed ≈ 41.67/30 ≈ 1.39.
         let ship = find_ship_entity(&mut app);
-        app.world_mut().entity_mut(ship).insert(ImpulseConfigResource {
-            charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
-            speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
-            acceleration_multiplier: 5.0,
-        });
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ImpulseConfigResource {
+                charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
+                speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+                acceleration_multiplier: 5.0,
+            });
         start_game_with_helm_and_science(&mut app);
 
         // Activate impulse directly (bypass charge).
@@ -1971,11 +1977,13 @@ mod tests {
     fn idle_impulse_does_not_boost_acceleration() {
         let mut app = test_app();
         let ship = find_ship_entity(&mut app);
-        app.world_mut().entity_mut(ship).insert(ImpulseConfigResource {
-            charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
-            speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
-            acceleration_multiplier: 5.0,
-        });
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ImpulseConfigResource {
+                charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
+                speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+                acceleration_multiplier: 5.0,
+            });
         start_game_with_helm_and_science(&mut app);
 
         // Impulse stays Idle; helm asks for full thrust.
@@ -2011,11 +2019,13 @@ mod tests {
     fn zero_acceleration_multiplier_falls_back_to_const() {
         let mut app = test_app();
         let ship = find_ship_entity(&mut app);
-        app.world_mut().entity_mut(ship).insert(ImpulseConfigResource {
-            charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
-            speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
-            acceleration_multiplier: 0.0,
-        });
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ImpulseConfigResource {
+                charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
+                speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+                acceleration_multiplier: 0.0,
+            });
         start_game_with_helm_and_science(&mut app);
 
         // Activate impulse directly (bypass charge).
@@ -2680,8 +2690,10 @@ station = "helm"
         objectives: Vec<crate::messages::ScoredObjective>,
     ) {
         use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
-        let mut vb = ViewscreenBlackboard::default();
-        vb.scored_objectives = objectives;
+        let vb = ViewscreenBlackboard {
+            scored_objectives: objectives,
+            ..Default::default()
+        };
         let entry = (
             crate::system_registry::viewscreen_system_id(),
             SystemBlackboard::Viewscreen(vb),
@@ -3332,31 +3344,36 @@ station = "helm"
             (crate::messages::SystemId("power".into()), 25.0),
             (crate::messages::SystemId("shields".into()), 25.0),
             (crate::messages::SystemId("helm-engine-port".into()), 15.0),
-            (crate::messages::SystemId("helm-engine-starboard".into()), 15.0),
+            (
+                crate::messages::SystemId("helm-engine-starboard".into()),
+                15.0,
+            ),
         ];
-        let ship = app.world_mut().spawn((
-            Ship,
-            LocalShip,
-            Transform::default(),
-            ShipPhysics::default(),
-            ShipConfigComponent::default(),
-            ShipSystemControlSources::default(),
-            ActiveStationRatings::default(),
-            CoordinationQueue::default(),
-            crate::messages::AdmittedCommands::default(),
-            crate::server_app::ShipSystemBlackboards::default(),
-            crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                hull_config,
-            )),
-            LastHelmInput::default(),
-            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
-        )).id();
-        app.world_mut().entity_mut(ship).insert((
-            ShipModifiers::new(),
-            ShipBoost::default(),
-        ));
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                LocalShip,
+                Transform::default(),
+                ShipPhysics::default(),
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                ActiveStationRatings::default(),
+                CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                crate::ai_plugin::ShipAiMemory::default(),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    hull_config,
+                )),
+                LastHelmInput::default(),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+                ShipImpulse(crate::impulse::ImpulseState::new()),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert((ShipModifiers::new(), ShipBoost::default()));
         app
     }
 
@@ -3429,7 +3446,11 @@ station = "helm"
         let mut app = test_app_with_engine_hull();
 
         // Zero out the port engine HP (destroyed tier).
-        set_console_hp_direct(&mut app, crate::messages::SystemId("helm-engine-port".into()), 0.0);
+        set_console_hp_direct(
+            &mut app,
+            crate::messages::SystemId("helm-engine-port".into()),
+            0.0,
+        );
         tick(&mut app);
 
         // After sync_console_damage_tiers, offline_systems should contain helm-engine-port.
@@ -3566,7 +3587,11 @@ station = "helm"
         // Zero the port engine HP, tick once so sync_console_damage_tiers runs
         // (populating offline_systems), then drive at full thrust for TICKS more.
         let mut app_one = make_app();
-        set_console_hp_direct(&mut app_one, crate::messages::SystemId("helm-engine-port".into()), 0.0);
+        set_console_hp_direct(
+            &mut app_one,
+            crate::messages::SystemId("helm-engine-port".into()),
+            0.0,
+        );
         tick(&mut app_one); // let Damage tier propagate
         set_last_helm_input(
             &mut app_one,
@@ -3614,36 +3639,42 @@ station = "helm"
             (crate::messages::SystemId("power-battery".into()), 10.0),
             (crate::messages::SystemId("shields".into()), 25.0),
         ];
-        let ship = app.world_mut().spawn((
-            Ship,
-            LocalShip,
-            Transform::default(),
-            ShipPhysics::default(),
-            ShipConfigComponent::default(),
-            ShipSystemControlSources::default(),
-            ActiveStationRatings::default(),
-            CoordinationQueue::default(),
-            crate::messages::AdmittedCommands::default(),
-            crate::server_app::ShipSystemBlackboards::default(),
-            crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                hull_config,
-            )),
-            LastHelmInput::default(),
-            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
-        )).id();
-        app.world_mut().entity_mut(ship).insert((
-            ShipModifiers::new(),
-            ShipBoost::default(),
-        ));
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                LocalShip,
+                Transform::default(),
+                ShipPhysics::default(),
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                ActiveStationRatings::default(),
+                CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                crate::ai_plugin::ShipAiMemory::default(),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    hull_config,
+                )),
+                LastHelmInput::default(),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+                ShipImpulse(crate::impulse::ImpulseState::new()),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert((ShipModifiers::new(), ShipBoost::default()));
         app
     }
 
     #[test]
     fn damaging_power_reactor_hull_to_disabled_puts_power_reactor_in_offline_systems() {
         let mut app = test_app_with_power_hull();
-        set_console_hp_direct(&mut app, crate::messages::SystemId("power-reactor".into()), 0.0);
+        set_console_hp_direct(
+            &mut app,
+            crate::messages::SystemId("power-reactor".into()),
+            0.0,
+        );
         tick(&mut app);
 
         let ship = app
@@ -3666,7 +3697,11 @@ station = "helm"
     #[test]
     fn damaging_power_battery_hull_to_disabled_puts_power_battery_in_offline_systems() {
         let mut app = test_app_with_power_hull();
-        set_console_hp_direct(&mut app, crate::messages::SystemId("power-battery".into()), 0.0);
+        set_console_hp_direct(
+            &mut app,
+            crate::messages::SystemId("power-battery".into()),
+            0.0,
+        );
         tick(&mut app);
 
         let ship = app
@@ -3720,25 +3755,28 @@ station = "helm"
             ),
         ]);
         let hull_config = &[(crate::messages::SystemId("helm".into()), 25.0_f32)];
-        let ship = app.world_mut().spawn((
-            Ship,
-            LocalShip,
-            Transform::default(),
-            ShipPhysics::default(),
-            ShipConfigComponent::default(),
-            ShipSystemControlSources::default(),
-            ActiveStationRatings::default(),
-            CoordinationQueue::default(),
-            crate::messages::AdmittedCommands::default(),
-            crate::server_app::ShipSystemBlackboards::default(),
-            crate::ai_plugin::ShipAiMemory::default(),
-            crate::entity_spawner::EntitySystemHull(
-                crate::damage::SystemHull::from_config(hull_config),
-            ),
-            crate::entity_spawner::EntityShipArcHull(arc_hull),
-            LastHelmInput::default(),
-            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
-        )).id();
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                LocalShip,
+                Transform::default(),
+                ShipPhysics::default(),
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                ActiveStationRatings::default(),
+                CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                crate::ai_plugin::ShipAiMemory::default(),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    hull_config,
+                )),
+                crate::entity_spawner::EntityShipArcHull(arc_hull),
+                LastHelmInput::default(),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+            ))
+            .id();
         app.world_mut().entity_mut(ship).insert((
             ShipModifiers::new(),
             ShipBoost::default(),

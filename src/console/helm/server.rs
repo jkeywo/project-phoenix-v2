@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::damage::DamageTier;
 use crate::messages::{
-    HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue,
-    SystemBlackboard, SystemId,
+    HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue, SystemBlackboard,
+    SystemId,
 };
 use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship_plugin::BoostConfigResource;
@@ -56,7 +56,7 @@ fn publish_helm_blackboard(
         .ok()
         .map(|i| i.0.charge_progress)
         .unwrap_or(0.0);
-    let boost_state = boost_q.single().ok().map(|b| b.0.clone());
+    let boost_state = boost_q.single().ok().map(|b| b.0);
     let boost_battery = boost_state.as_ref().map(|b| b.battery).unwrap_or(0.0);
     let boost_active = boost_state.as_ref().map(|b| b.is_active()).unwrap_or(false);
     // view_mode is not raw sim truth; helm blackboard omits it
@@ -117,7 +117,7 @@ fn publish_helm_blackboard(
                         None
                     }
                 })
-                .last()
+                .next_back()
                 .unwrap_or(last_input_thrust);
             let thrust_fraction = if is_online {
                 joystick_thrust.abs()
@@ -244,20 +244,27 @@ mod tests {
                 .world_mut()
                 .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
             let ship = q.single_mut(app.world_mut()).unwrap();
-            app.world_mut().entity_mut(ship).insert(BoostConfigResource {
-                enabled: true,
-                multiplier: 3.0,
-                steering_multiplier: 2.0,
-                active_duration: 4.0,
-                recharge_duration: 20.0,
-            });
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(BoostConfigResource {
+                    enabled: true,
+                    multiplier: 3.0,
+                    steering_multiplier: 2.0,
+                    active_duration: 4.0,
+                    recharge_duration: 20.0,
+                });
         }
         {
             let mut q = app
                 .world_mut()
                 .query_filtered::<&mut ShipBoost, With<crate::simulation::LocalShip>>();
-            let mut boost = q.single_mut(app.world_mut()).expect("LocalShip must have ShipBoost");
-            boost.0 = BoostState { active: true, battery: 0.75 };
+            let mut boost = q
+                .single_mut(app.world_mut())
+                .expect("LocalShip must have ShipBoost");
+            boost.0 = BoostState {
+                active: true,
+                battery: 0.75,
+            };
         }
         app.update();
 

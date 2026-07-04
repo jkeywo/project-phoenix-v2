@@ -934,7 +934,10 @@ max_level = 4
         });
         let (station_name, station_id) = assigned.expect("StationAssigned not found");
         assert_eq!(station_name, Some("Captain".to_string()));
-        assert_eq!(station_id, Some(crate::messages::StationId("captain".into())));
+        assert_eq!(
+            station_id,
+            Some(crate::messages::StationId("captain".into()))
+        );
     }
 
     #[test]
@@ -1145,11 +1148,9 @@ max_level = 4
             .outbound
             .iter()
             .filter_map(|(_, m)| match m {
-                ServerMessage::StationAssigned {
-                    token,
-                    station,
-                    ..
-                } if token == "t1" => Some(station.clone()),
+                ServerMessage::StationAssigned { token, station, .. } if token == "t1" => {
+                    Some(station.clone())
+                }
                 _ => None,
             })
             .collect();
@@ -1160,9 +1161,7 @@ max_level = 4
         );
         // One release (station=None) and one claim
         let has_release = assigned.iter().any(|s| s.is_none());
-        let has_claim = assigned
-            .iter()
-            .any(|s| s.as_deref() == Some("Tactical"));
+        let has_claim = assigned.iter().any(|s| s.as_deref() == Some("Tactical"));
         assert!(has_release, "swap must include a release StationAssigned");
         assert!(has_claim, "swap must include a claim StationAssigned");
     }
@@ -1360,9 +1359,11 @@ max_level = 4
             GamePhase::Lobby,
             None,
         );
-        let found = result.outbound.iter().any(|(_, m)| matches!(m,
-            ServerMessage::StationAssigned { token, station: None, .. } if token == "t1"
-        ));
+        let found = result.outbound.iter().any(|(_, m)| {
+            matches!(m,
+                ServerMessage::StationAssigned { token, station: None, .. } if token == "t1"
+            )
+        });
         assert!(
             found,
             "ReleaseStation must broadcast StationAssigned with station=None"
@@ -1935,7 +1936,9 @@ max_level = 4
         let clamped_token = "a".repeat(64);
         let long_token = "a".repeat(100);
         let mut sessions = SessionManager::new();
-        sessions.register(clamped_token.clone(), "Alice".into()).unwrap();
+        sessions
+            .register(clamped_token.clone(), "Alice".into())
+            .unwrap();
         sessions.set_ready(&clamped_token, true);
         sessions.disconnect(&clamped_token);
         // Reconnect with the long token → clamped to 64 chars → matches stored session.
@@ -1944,6 +1947,9 @@ max_level = 4
             name: "Alice".into(),
         };
         let _result = pm("peer", &msg, &mut sessions, GamePhase::Lobby, None);
-        assert!(sessions.players().iter().any(|p| p.token == clamped_token && p.connected));
+        assert!(sessions
+            .players()
+            .iter()
+            .any(|p| p.token == clamped_token && p.connected));
     }
 }

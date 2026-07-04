@@ -1536,9 +1536,9 @@ mod tests {
                 },
                 crate::server_app::WeaponFiredThisTick::default(),
                 crate::server_app::ShipAttackedThisTick::default(),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                    &[(crate::messages::SystemId("captain".into()), 100.0)],
-                )),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
+                    (crate::messages::SystemId("captain".into()), 100.0),
+                ])),
             ))
             .id();
 
@@ -1589,9 +1589,9 @@ mod tests {
                 RecentCombatActivity::default(),
                 crate::server_app::WeaponFiredThisTick::default(),
                 crate::server_app::ShipAttackedThisTick::default(),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                    &[(crate::messages::SystemId("captain".into()), 100.0)],
-                )),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
+                    (crate::messages::SystemId("captain".into()), 100.0),
+                ])),
             ))
             .id();
 

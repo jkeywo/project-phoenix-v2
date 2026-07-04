@@ -388,10 +388,7 @@ fn helm_destroy(
 ) -> Option<(f32, f32)> {
     // Validate / refresh target.
     let target_uuid =
-        resolve_destroy_target(memory, world_view, faction_registry, directive_target);
-    let Some(target_uuid) = target_uuid else {
-        return None;
-    };
+        resolve_destroy_target(memory, world_view, faction_registry, directive_target)?;
     memory.target = Some(target_uuid);
 
     let Some(target_entity) = world_view.entities.iter().find(|e| e.uuid == target_uuid) else {
@@ -564,9 +561,7 @@ fn helm_patrol(
     }
 
     let waypoint_name = &waypoints[memory.waypoint_index];
-    let Some(&wp_pos) = anchors.get(waypoint_name.as_str()) else {
-        return None;
-    };
+    let &wp_pos = anchors.get(waypoint_name.as_str())?;
 
     let pos = world_view.entity_pos;
     let dx = wp_pos[0] - pos[0];

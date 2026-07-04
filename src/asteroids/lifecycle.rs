@@ -169,8 +169,7 @@ pub fn attach_field_components(
         .collect();
     indexed.sort_by_key(|(e, _, _)| *e);
 
-    let mut next_idx: usize = 0;
-    for (entity, has_window, has_index) in indexed {
+    for (next_idx, (entity, has_window, has_index)) in indexed.into_iter().enumerate() {
         if !has_window {
             commands
                 .entity(entity)
@@ -180,7 +179,6 @@ pub fn attach_field_components(
         if !has_index {
             commands.entity(entity).insert(FieldIndex(next_idx));
         }
-        next_idx += 1;
     }
 }
 

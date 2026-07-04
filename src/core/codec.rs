@@ -122,9 +122,7 @@ fn system_target_for_payload_type(type_name: &str) -> Option<&'static str> {
         // `SetShieldArcFocus` (issue #514) intentionally omitted — arcs are
         // variable and there is no single fallback target. The JS layer
         // must always include an explicit `shield-arc-<id>` target.
-        "SetPowerGroupAllocation" => {
-            Some(crate::system_registry::POWER_REACTOR_SYSTEM_ID)
-        }
+        "SetPowerGroupAllocation" => Some(crate::system_registry::POWER_REACTOR_SYSTEM_ID),
         _ => None,
     }
 }
@@ -372,7 +370,9 @@ mod tests {
             ),
             (
                 ServerMessageDiscriminants::PlayerLeft,
-                ServerMessage::PlayerLeft { token: "tok".into() },
+                ServerMessage::PlayerLeft {
+                    token: "tok".into(),
+                },
             ),
             (
                 ServerMessageDiscriminants::StationAssigned,
@@ -933,7 +933,8 @@ mod tests {
     /// this comment.
     #[test]
     fn server_decode_unknown_field_in_known_variant_is_ignored() {
-        let json = r#"{"type":"LoadingProgress","data":{"fraction":0.5,"totally_unknown_field":"x"}}"#;
+        let json =
+            r#"{"type":"LoadingProgress","data":{"fraction":0.5,"totally_unknown_field":"x"}}"#;
         let decoded = JsonCodec.decode_server(json);
         assert_eq!(
             decoded.expect("unknown field must not fail decode"),
@@ -1662,7 +1663,10 @@ mod tests {
         let json = serde_json::to_string(&status).unwrap();
         let decoded: SystemHullStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(status, decoded);
-        assert!(json.contains("\"system_id\":\"phaser-fore\""), "got: {json}");
+        assert!(
+            json.contains("\"system_id\":\"phaser-fore\""),
+            "got: {json}"
+        );
         assert!(
             json.contains("\"display_name\":\"Phaser Bank (Fore)\""),
             "got: {json}"
@@ -1814,7 +1818,10 @@ mod tests {
     #[test]
     fn decode_bridge_client_messages_mixed_valid_and_invalid() {
         let entries = vec![
-            ("t1".into(), r#"{"type":"SetReady","data":{"ready":true}}"#.into()),
+            (
+                "t1".into(),
+                r#"{"type":"SetReady","data":{"ready":true}}"#.into(),
+            ),
             ("t2".into(), "{{{garbage}}}".into()),
         ];
         let (successes, failures) = decode_bridge_client_messages(entries);

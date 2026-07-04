@@ -51,11 +51,7 @@ fn tick_ai_snapshot_timer(
     mut timer: ResMut<AiSnapshotTimer>,
     mut ready: ResMut<AiSnapshotReady>,
 ) {
-    if timer.0.tick(time.delta()).just_finished() {
-        ready.0 = true;
-    } else {
-        ready.0 = false;
-    }
+    ready.0 = timer.0.tick(time.delta()).just_finished();
 }
 
 /// Read-only run condition: fires only when `AiSnapshotReady` is true.
@@ -958,7 +954,10 @@ mod tests {
             ..Default::default()
         };
 
-        let hull = EntitySystemHull(SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]));
+        let hull = EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            100.0,
+        )]));
 
         app.world_mut().spawn((
             BehaviourSection(behaviour),

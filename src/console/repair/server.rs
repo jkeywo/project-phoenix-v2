@@ -3,8 +3,8 @@ use bevy::prelude::*;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::ModifierSlot;
 use crate::messages::{
-    AdmittedCommands, RepairBlackboard, RepairTarget, ServerMessage,
-    StationId, SystemBlackboard, SystemControlPayload, SystemHullStatus, SystemId, TeamSlot,
+    AdmittedCommands, RepairBlackboard, RepairTarget, ServerMessage, StationId, SystemBlackboard,
+    SystemControlPayload, SystemHullStatus, SystemId, TeamSlot,
 };
 use crate::modifiers::ShipModifiers;
 use crate::repair_teams::RepairTeams;
@@ -105,8 +105,7 @@ pub fn handle_dispatch_repair_team(
     >,
     teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Some((admitted, _ship_config, mut teams_comp, hull_opt)) =
-        ship_query.iter_mut().next()
+    let Some((admitted, _ship_config, mut teams_comp, hull_opt)) = ship_query.iter_mut().next()
     else {
         return;
     };
@@ -244,10 +243,8 @@ fn publish_repair_blackboard(
         })
         .unwrap_or_default();
 
-    let damageable_systems: Vec<SystemId> = system_hull
-        .iter()
-        .map(|s| s.system_id.clone())
-        .collect();
+    let damageable_systems: Vec<SystemId> =
+        system_hull.iter().map(|s| s.system_id.clone()).collect();
 
     // Emit the new SystemId-keyed hull + damageable list only (legacy
     // `console_hull` / `damageable_consoles` wire fields were dropped in #619).
@@ -309,8 +306,7 @@ pub fn operate_repair_ai(
             .0
             .entries()
             .filter(|(sid, cur, max)| {
-                max - cur > 0.0
-                    && hull.0.tier_for(sid) != crate::damage::DamageTier::Destroyed
+                max - cur > 0.0 && hull.0.tier_for(sid) != crate::damage::DamageTier::Destroyed
             })
             .max_by(|(_, a_cur, a_max), (_, b_cur, b_max)| {
                 let a_deficit = a_max - a_cur;
@@ -335,7 +331,9 @@ pub fn operate_repair_ai(
         // Dispatch every idle team to the target. Reuses the same
         // `RepairTeams::dispatch` entry point that the human console uses.
         while let Some(idx) = teams.0.lowest_free_team() {
-            teams.0.dispatch(idx, target.clone(), target_display.clone());
+            teams
+                .0
+                .dispatch(idx, target.clone(), target_display.clone());
         }
     }
 }
@@ -928,7 +926,8 @@ mod tests {
         // Damage the hull by 40 HP so total_current == 60 (max = 100).
         let mut ai_resolver = ControlSourceResolver::new();
         ai_resolver.set(repair_system_id(), ControlSource::Ai);
-        let mut hull = crate::damage::SystemHull::from_config(&[(SystemId("helm".into()), 100.0_f32)]);
+        let mut hull =
+            crate::damage::SystemHull::from_config(&[(SystemId("helm".into()), 100.0_f32)]);
         let mut rng = rand::rng();
         hull.apply_damage(40.0, &mut rng);
         let hp_before = hull.total_current();

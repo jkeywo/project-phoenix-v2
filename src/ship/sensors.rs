@@ -86,9 +86,7 @@ pub fn handle_sensors_messages(
             if !is_local {
                 continue;
             }
-            let Some(tactical_token) = sessions
-                .0
-                .holder_for_station(&StationId("tactical".into()))
+            let Some(tactical_token) = sessions.0.holder_for_station(&StationId("tactical".into()))
             else {
                 continue;
             };

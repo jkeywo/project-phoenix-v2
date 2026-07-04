@@ -17,7 +17,11 @@ pub enum SimSet {
     Broadcast,
 }
 
-/// Ordering label within `SimSet::Physics`: ensure player ship position
-/// is synced to Transform before the AI tick reads it.
+/// Ordering label within `SimSet::Physics` marking the AI decision phase:
+/// `build_world_snapshot` runs just before it, `operate_helm_ai` /
+/// `process_attacker_this_tick` run in/after it. `sync_ship_position` is
+/// ordered `.after(process_helm_inputs)`/`.after(operate_helm_ai)` (not
+/// relative to this label) so `Transform` reflects this tick's freshly
+/// computed `ShipPhysics` rather than a stale pre-movement value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub struct AiTickLabel;

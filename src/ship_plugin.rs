@@ -297,7 +297,8 @@ impl Plugin for ShipPlugin {
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
                 sync_ship_position
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .before(crate::sim_sets::AiTickLabel),
+                    .after(process_helm_inputs)
+                    .after(operate_helm_ai),
                 handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
                 handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
                 handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),

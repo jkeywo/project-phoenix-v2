@@ -925,12 +925,21 @@ fn target_position(
 ) -> Option<Vec3> {
     if local_ship_uuid == Some(uuid) {
         if let Some((transform, markers, _)) = local_ship_q.iter().next() {
-            if let Some(point) = target_point_position(transform, markers, target_point_index) {
-                return Some(point);
-            }
+            // Prefer a configured target point, but fall back to the
+            // LocalShip's own translation (not the shooter's) when it has
+            // none — matches the entity_q branch below. Previously this
+            // fell through to `shooter_transform.translation` whenever
+            // `target_point_position` returned `None`, which is the common
+            // case (no `ModelMarkers` configured), making the beam's
+            // endpoint lock onto the shooter instead of tracking the
+            // LocalShip as it moved.
+            return Some(
+                target_point_position(transform, markers, target_point_index)
+                    .unwrap_or(transform.translation),
+            );
         }
-        // Degenerate: local_ship_q had no match but shooter is the player
-        // itself — return the shooter's transform position as a best-effort.
+        // Degenerate: no LocalShip entity exists in the world at all —
+        // fall back to the shooter's own position as a last resort.
         return Some(shooter_transform.translation);
     }
     asteroid_q
@@ -1390,5 +1399,192 @@ position = [0.5, -0.1, 0.25]
         assert_eq!(emitters.len(), 1);
         assert_eq!(emitters[0].0, Vec3::new(1.0, 0.0, 5.0));
         assert_eq!(emitters[0].1, Vec3::Z);
+    }
+
+    // ── Integration: does the beam PFX actually track ship movement? ──────
+    //
+    // The pure-function tests above all pass in isolation, but the reported
+    // bug ("beam frozen when attacker/target move") is a whole-schedule
+    // ordering hazard: `sync_phaser_beams` reads ship `Transform`, which is
+    // written by `sync_ship_position` (in `ShipPlugin`), which in turn must
+    // run *after* whatever system computes this tick's `ShipPhysics`.
+    //
+    // These tests drive movement through the REAL production pipeline
+    // (`process_helm_inputs`, via a constant `HelmInput` admitted command on
+    // a `LocalShip`) rather than a synthetic mover system. A synthetic mover
+    // can only be pinned to a shared *label* (e.g. `AiTickLabel`) from
+    // outside `ship_plugin.rs`, since the real writer/reader systems are
+    // private to that module — and two systems that both merely reference
+    // the same label, without an edge *between* them, have no defined
+    // relative order (this was tried and silently passed for the wrong
+    // reason). Driving `process_helm_inputs` for real gets the exact,
+    // explicit `.after(process_helm_inputs)` edge on `sync_ship_position`
+    // for free, with no privacy workarounds needed.
+    fn thrust_command() -> crate::messages::AdmittedCommands {
+        crate::messages::AdmittedCommands(vec![crate::messages::AdmittedCommand {
+            target: crate::system_registry::helm_system_id(),
+            payload: crate::messages::SystemControlPayload::HelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+            },
+            response_token: None,
+        }])
+    }
+
+    fn beam_test_app() -> App {
+        let mut app = App::new();
+        app.configure_sets(
+            Update,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
+                crate::sim_sets::SimSet::PublishAggregate,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
+        .add_plugins(crate::lobby::LobbyPlugin)
+        .add_plugins(bevy::time::TimePlugin)
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(34),
+        ))
+        .insert_resource(crate::simulation::ShipImpulse(
+            crate::impulse::ImpulseState::new(),
+        ))
+        .insert_resource(crate::modifiers::ShipModifiers::new())
+        .init_resource::<crate::messages::InterSystemQueue>()
+        .insert_resource(PhaserRenderConfig {
+            beam_range: 1000.0,
+            ..Default::default()
+        })
+        .insert_resource(crate::weapons_plugin::PhaserCombatConfigResource(
+            crate::entity_config::PhaserCombatConfig { banks: vec![] },
+        ))
+        .add_plugins(crate::ship_plugin::ShipPlugin)
+        .add_plugins(super::PfxPlugin);
+
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app
+    }
+
+    fn beam_body_translation(app: &mut App) -> Vec3 {
+        let mut q = app.world_mut().query_filtered::<&Transform, With<BeamBody>>();
+        q.single(app.world())
+            .expect("BeamBody entity must exist")
+            .translation
+    }
+
+    #[test]
+    fn beam_transform_tracks_target_ship_physics_movement_across_ticks() {
+        let mut app = beam_test_app();
+
+        let target_uuid = "target-uuid-1".to_string();
+
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            EntityUuid("shooter-uuid-1".to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            ShipPhysics::default(),
+            ActiveBeam {
+                target_uuid: Some(target_uuid.clone()),
+                remaining_secs: 10.0,
+                damage_accumulator: 0.0,
+                bank: None,
+            },
+        ));
+
+        let target = app
+            .world_mut()
+            .spawn((
+                LocalShip,
+                EntityUuid(target_uuid),
+                Transform::from_xyz(0.0, 0.0, -10.0),
+                ShipPhysics {
+                    z: -10.0,
+                    ..Default::default()
+                },
+                thrust_command(),
+                crate::ship_plugin::ShipSystemControlSources::default(),
+                crate::ship_plugin::LastHelmInput::default(),
+            ))
+            .id();
+
+        // Precise check (catches a same-tick-stale ordering bug, not just a
+        // hard freeze): after every tick, the beam midpoint must reflect
+        // THIS tick's `ShipPhysics.z` (ground truth, read directly), not the
+        // previous tick's. A `sync_ship_position` ordered before the system
+        // that writes `ShipPhysics` this tick would make the beam trail by
+        // exactly one tick's movement -- a loose "did it move at all?" check
+        // would not catch that, since a laggy beam still moves every tick.
+        for _ in 0..5 {
+            app.update();
+            let ground_truth_z = app.world().get::<ShipPhysics>(target).unwrap().z;
+            let expected_mid_z = ground_truth_z / 2.0; // shooter stays at z=0
+            let actual_mid_z = beam_body_translation(&mut app).z;
+            assert!(
+                (actual_mid_z - expected_mid_z).abs() < 0.01,
+                "beam midpoint.z={actual_mid_z} should match this tick's target \
+                 position (expected {expected_mid_z}, ground-truth target.z={ground_truth_z}) \
+                 -- beam is reading a stale (last-tick) Transform"
+            );
+        }
+    }
+
+    #[test]
+    fn beam_transform_tracks_shooter_ship_physics_movement_across_ticks() {
+        let mut app = beam_test_app();
+
+        let target_uuid = "target-uuid-2".to_string();
+
+        let shooter = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                LocalShip,
+                EntityUuid("shooter-uuid-2".to_string()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                ShipPhysics::default(),
+                ActiveBeam {
+                    target_uuid: Some(target_uuid.clone()),
+                    remaining_secs: 10.0,
+                    damage_accumulator: 0.0,
+                    bank: None,
+                },
+                thrust_command(),
+                crate::ship_plugin::ShipSystemControlSources::default(),
+                crate::ship_plugin::LastHelmInput::default(),
+            ))
+            .id();
+
+        app.world_mut().spawn((
+            EntityUuid(target_uuid),
+            Transform::from_xyz(0.0, 0.0, -10.0),
+            ShipPhysics {
+                z: -10.0,
+                ..Default::default()
+            },
+        ));
+
+        // Same precise per-tick check as the target-movement test above, but
+        // with the roles reversed: the shooter is the one being moved.
+        for _ in 0..5 {
+            app.update();
+            let ground_truth_z = app.world().get::<ShipPhysics>(shooter).unwrap().z;
+            let expected_mid_z = (ground_truth_z + (-10.0)) / 2.0; // target stays at z=-10
+            let actual_mid_z = beam_body_translation(&mut app).z;
+            assert!(
+                (actual_mid_z - expected_mid_z).abs() < 0.01,
+                "beam midpoint.z={actual_mid_z} should match this tick's shooter \
+                 position (expected {expected_mid_z}, ground-truth shooter.z={ground_truth_z}) \
+                 -- beam is reading a stale (last-tick) Transform"
+            );
+        }
     }
 }

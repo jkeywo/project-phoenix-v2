@@ -2578,6 +2578,7 @@ mod tests {
             hull_pct: 75,
             condition: "ALERT".into(),
             red_alert: true,
+            engine_thrust: 0.0,
             game_over_message: None,
         };
         let json = encode_hud_state(&state).expect("encode hud");
@@ -2592,6 +2593,7 @@ mod tests {
             hull_pct: 100,
             condition: "NOMINAL".into(),
             red_alert: false,
+            engine_thrust: 0.0,
             game_over_message: None,
         };
         let json = encode_hud_state(&state).expect("encode hud");

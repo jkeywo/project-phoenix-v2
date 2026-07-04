@@ -64,7 +64,7 @@ Region effects (damage zones, slow zones, blocks-impulse, comms-jam, sensor-blin
 - Modifier-side effects (`RadarDampening`, `SlowZone`, `CommsJam`, `SensorBlind`) go through the `on_region_entered` / `on_region_exited` observers in `src/modifiers/coordination.rs`, which already use `trigger.subject` and write to the subject entity's `ShipModifiers` component.
 - `handle_region_entered_event` / `handle_region_exited_event` (`src/world/server.rs:280`, `:310`) filter on `LocalShip` so world-scenario triggers remain player-driven (NPC crossings do not fire `OnEnteredRegion` triggers).
 - `nebula_fog_system` (`src/server/renderer.rs:697`) filter switched from `With<Ship>` to `With<LocalShip>` — nebula fog is a rendering effect on the viewscreen camera.
-- **Legitimately player-only**: `handle_blocks_impulse_region_enter` writes to `ShipImpulse` (still a global player-only Resource until NPC impulse is wired). Sensor-blind / comms-jam UI effects consumed by player-only Comms / Sensors panels — but the underlying `FlagKind` is set per-entity so NPC AI could opt in later.
+- **Legitimately player-only**: `handle_blocks_impulse_region_enter` writes to `ShipImpulse` (player-only until NPC impulse is wired; at the time of PR 9 this was a global Resource, and since issue #606 it is a per-entity Component on the player ship only). Sensor-blind / comms-jam UI effects consumed by player-only Comms / Sensors panels — but the underlying `FlagKind` is set per-entity so NPC AI could opt in later.
 - New tests: `npc_ship_in_damage_zone_takes_hull_damage` and `slow_zone_slows_npc_ship` in `src/regions/server.rs` prove NPC ships take damage and get speed-clamped while the player is unaffected in a different location.
 - Test count: 1826 → 1828.
 
@@ -127,7 +127,8 @@ Design highlights:
   to end beams (either due to target destruction or time expiry) and clear
   `WeaponsTarget` on the LocalShip.
 - Every shooter reads its own `PhaserCombatConfigResource` component and its
-  own `ShipModifiers` (with global-Resource fallback for legacy test paths).
+  own `ShipModifiers` component (the global-Resource fallback for legacy test
+  paths was removed by issue #606 — `ShipModifiers` is Component-only now).
 - LocalShip target damage emits `DamageTaken` / `ShipDestroyed` / `GameOver`;
   non-LocalShip target damage despawns the target and emits `EntityDespawned`
   + `AiEntityDestroyed` (or `AsteroidDestroyed` + VFX for asteroids).
@@ -160,10 +161,12 @@ Verification:
 ## Key Decisions
 
 - Per-entity Components are the source of truth for ship state; production readers query the LocalShip entity's Component (with Resource fallback used only for legacy test paths). Where a type is a pure per-entity Component with no Resource: `WeaponsTarget`, `ActiveBeam`, `PhaserCooldown`, `LastShipAttacker`, `SensorsTarget`, `NavigationWaypoint`, `RecentCombatActivity`, `WeaponFiredThisTick`, `ShipAttackedThisTick`, `CollisionCooldown`. Types still carrying `#[derive(Resource, Component)]` for backward compatibility with test scaffolding: `ShipModifiers`, `ShipRepairTeams`, `ShipPowerSystem`, `PowerConfigResource`, `PowerAiConfigResource`, `PowerMultiplierResource`, `PhaserCombatConfigResource`, `PhaserRenderConfig`, `TorpedoSystemResource`, `ShipPhysicsConfigResource`, `ImpulseConfigResource`, `BoostConfigResource`, `BankConfigResource`. Collapsing these to pure Component is a future cleanup.
+
+  **Update (issue #606, 2026-07-04):** that future cleanup landed — partially. `ShipModifiers`, `ImpulseConfigResource`, and `BoostConfigResource` dropped the `Resource` derive and are now `Component`-only; every production fallback branch that read them as `Res`/`ResMut` was deleted, and tests that used to `insert_resource` them now spawn/insert the component on the ship entity instead. `ShipImpulse` and `ShipBoost` (the state types, as opposed to their `*ConfigResource` config counterparts) were also cut over to `Component`-only in the same commit. `ShipRepairTeams`, `ShipPowerSystem`, `PowerConfigResource`, `PowerAiConfigResource`, `PowerMultiplierResource`, `PhaserCombatConfigResource`, `PhaserRenderConfig`, `TorpedoSystemResource`, `ShipPhysicsConfigResource`, and `BankConfigResource` were explicitly left untouched (still dual-derive `Resource, Component`) — out of scope for #606.
 - Each ship reads its own config from its TOML — including `[[station]]` and `[[system]]` blocks. No NPC-specific config helpers.
 - `ShipShields` wraps the existing `ShieldSystem` (already supports configurable `num_facings`). `EntityShield` deleted in PR 2.
 - Fog-of-war (NPC AI sensor range filtering) is out of scope for this PRD.
-- `ShipImpulse` remains a player-only global Resource; NPCs do not have an impulse drive mechanic today.
+- `ShipImpulse` remains a player-only mechanic; NPCs do not have an impulse drive mechanic today. (It was a global Resource at the time this PRD shipped; issue #606 later made it a per-entity `Component` only, seeded on the player ship at spawn — still not present on NPC ships.)
 - Beam-tick unification (`tick_active_beam` + `tick_npc_beams` → single `tick_beams`) completed 2026-07-02 as a follow-up to PR 10; the two former systems are deleted and every ship shares `tick_beams` in `SimSet::Damage`.
 
 ## Cross-references

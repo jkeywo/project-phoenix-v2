@@ -40,12 +40,18 @@ Resources that do not belong to any single plugin live in `server_app.rs`:
 | Resource | Type | Purpose |
 |---|---|---|
 | `ShipState` | `Resource` | Ship position, yaw, red-alert, view-mode |
-| `ShipHullIntegrity` | `Resource` | `f32` hull HP wrapper |
 | `ShipShields` | `Resource` | Four-quadrant shield model |
-| `ShipImpulse` | `Resource` | Impulse-drive charge state |
 | `WorldResource` | `Resource` | `WorldData` snapshot for reconnect Welcome |
 | `SimOutbox` | `Resource` | Per-frame outbound message buffer (drained by `sim_outbox_broadcaster`) |
 | `TrackedEntities` | `Resource` | Entity reconciliation registry (EntitySpawned / EntityDespawned) |
+
+`ShipHullIntegrity` was previously listed here as a `Resource`; it was deleted
+in PRD #597 PR 10 (`EntitySystemHull` is the sole hull store — see
+[PRD #597](../sources/prd-597-ship-parity.md)). `ShipImpulse` was previously
+listed here as a `Resource` too; issue #606 removed its `Resource` derive, so
+it is now a per-entity `Component` only, populated on the ship entity at spawn
+(`spawn_game_start_entities` for the player ship) rather than initialised as a
+shared resource in this file.
 
 ## Systems in server_app.rs
 

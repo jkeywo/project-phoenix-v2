@@ -71,7 +71,9 @@ debuff_magnitude = 0.10
 
 ## Per-entity migration (PRD #597 PR 6)
 
-`ShipRepairTeams` derives both `Resource` and `Component`. The player ship carries a per-entity `ShipRepairTeams` component seeded from its TOML `[repair]` block. NPC ships also get a `ShipRepairTeams` component when their entity TOML declares a `[repair]` block (skipped otherwise). `tick_repair_teams`, `handle_dispatch_repair_team`, `publish_repair_blackboard`, and `repair_state_broadcaster` stay LocalShip-scoped (repair is a player mechanic today), preferring the per-entity component on LocalShip with a Resource fallback for tests. Both the Component and the Resource are dual-written to keep legacy Resource-based readers in sync.
+`ShipRepairTeams` derives both `Resource` and `Component` (unlike `ShipImpulse`/`ShipBoost`/`ShipModifiers`, which lost their `Resource` derive in issue #606 — `ShipRepairTeams` was left untouched by that issue and still dual-derives). The player ship carries a per-entity `ShipRepairTeams` component seeded from its TOML `[repair]` block. NPC ships also get a `ShipRepairTeams` component when their entity TOML declares a `[repair]` block (skipped otherwise).
+
+`tick_repair_teams` (`src/console/repair/server.rs:176`) iterates every ship (`With<Ship>`), reading each ship's own `ShipModifiers` component directly (`&ShipModifiers`, not `Option<&ShipModifiers>` — the #606 cleanup removed the `Option`/Resource-fallback branch here too) to scale `RepairRate`. `handle_dispatch_repair_team`, `publish_repair_blackboard`, and `repair_state_broadcaster` stay LocalShip-scoped (repair is a player mechanic today).
 
 ## Dispatch path
 

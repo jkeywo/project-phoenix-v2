@@ -3,52 +3,53 @@
 Single owner of the `ShipModifiers` lifecycle and a translator system for each
 modifier source. All writes to `ShipModifiers` flow through this module.
 
-## Per-entity migration (PRD #597 PR 6)
+## Per-entity migration (PRD #597 PR 6; Resource fallback deleted in #606)
 
-After PR 6 of PRD #597 (2026-07-02), `ShipModifiers` also derives `Component`
+After PR 6 of PRD #597 (2026-07-02), `ShipModifiers` also derived `Component`
 alongside `Resource`. Every ship entity (player and NPC alike) carries a
-per-entity `ShipModifiers` component; the global Resource is kept as a
-backward-compat fallback and is dual-written by the translators/observers when
-both the Component and the Resource are present.
+per-entity `ShipModifiers` component. Issue #606 (2026-07-04) removed the
+`Resource` derive entirely — `ShipModifiers` is now `Component`-only, and every
+production fallback branch that read it as `Res<ShipModifiers>` /
+`ResMut<ShipModifiers>` has been deleted. Tests that used to
+`app.insert_resource(ShipModifiers::new())` now spawn/insert the component
+directly on the ship entity instead.
 
 Read patterns:
 
-- Systems scoped to `With<LocalShip>` prefer the per-entity component on the
-  LocalShip entity and fall back to `Res<ShipModifiers>`.
+- Systems scoped to `With<LocalShip>` query the per-entity component on the
+  LocalShip entity directly; there is no Resource fallback.
 - `handle_slow_zone_speed_clamp` reads the SUBJECT entity's `ShipModifiers`
-  component (so NPCs entering slow zones will be affected by their own
-  modifier cache once region membership tracks NPCs in PR 9).
+  component (so NPCs entering slow zones are affected by their own
+  modifier cache — region membership tracks NPCs since PR 9).
 - `modifier_events_broadcaster` drains `pending_events` from the LocalShip
-  component with a Resource fallback.
+  component only.
 
 Write patterns (translators):
 
-- `translate_power_modifiers` reads per-entity power/multipliers on LocalShip
-  first, writes to LocalShip's `ShipModifiers` component, then dual-writes the
-  Resource.
+- `translate_power_modifiers` iterates every ship (`With<Ship>`) and writes
+  directly to each ship's own `ShipModifiers` component — no dual-write.
 - `translate_impulse_modifiers` writes to LocalShip's `ShipModifiers`
-  component, dual-writes the Resource.
+  component only.
 - `on_region_entered` / `on_region_exited` observers write to the subject
-  entity's `ShipModifiers` component; when the subject is LocalShip they also
-  dual-write the global Resource.
+  entity's `ShipModifiers` component only.
 
 ## Coordinator's role
 
-`ModifierCoordinationPlugin` (`src/modifiers/coordination.rs:24`) is the sole
-call site for `init_resource::<ShipModifiers>()` (`src/modifiers/coordination.rs:28`).
-Before this seam, three different plugins (`SimulationPlugin`, `RegionPlugin`,
-and the old `modifiers.rs`) each called `init_resource`, creating a soft
-contract violation: if any two ran in the wrong order the second call would
-silently reset the resource, losing all modifier state.
+`ModifierCoordinationPlugin` (`src/modifiers/coordination.rs:28`) no longer
+calls `init_resource::<ShipModifiers>()` — that call site was deleted in #606
+along with the `Resource` derive. `ShipModifiers` is inserted as a `Component`
+on each ship entity at spawn time (see `entities/spawner.rs` for NPCs, the
+player-ship spawn path in `server_app.rs` for the player) instead of being
+initialised as a global resource.
 
-Every other plugin reads `ShipModifiers` through `Res<ShipModifiers>` or writes
-through `ResMut<ShipModifiers>` after this plugin has initialised it. The
-`init_resource` call happens in `ModifierCoordinationPlugin::build()`, which is
-registered in both `src/bridge.rs:12` and `src/server/bridge.rs:12` (server
-build) and in `src/regions/server.rs:725` / `:852` / `:1062` (test app builders).
+Historically (pre-#606), three different plugins (`SimulationPlugin`,
+`RegionPlugin`, and the old `modifiers.rs`) each called `init_resource`,
+creating a soft contract violation: if any two ran in the wrong order the
+second call would silently reset the resource, losing all modifier state. That
+whole class of bug is now moot since there is no shared resource to race on.
 
-A grep for `init_resource.*ShipModifiers` confirms exactly one call site remains
-in the entire codebase.
+Every other plugin reads `ShipModifiers` through `&ShipModifiers` query items
+or writes through `&mut ShipModifiers` query items, scoped per-ship.
 
 ## Translator pattern
 
@@ -57,26 +58,33 @@ resource and calls a pure helper to update `ShipModifiers`. Translators are
 registered in `Update` after the source's own systems, ensuring inputs have
 settled before modifiers are recomputed.
 
-All three translators are registered in `SimulationPlugin` at
-`src/simulation.rs:370-379`:
+> **Correction (2026-07-04 lint pass):** the registration snippet below was
+> written against the pre-simulation-split `SimulationPlugin`/`simulation.rs`,
+> which no longer exist (`server_app.rs` is the composition root now — see
+> [Server App Composition](./server-app.md)). This is unrelated to issue #606;
+> flagged here because the lint pass touched this page anyway.
+
+The power and impulse translators are registered in `add_simulation_plugins`
+at `src/server_app.rs:341-348`, both in `SimSet::Modifiers`:
 
 ```rust
 .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
-    .after(handle_power_messages).after(tick_power_system))
+    .in_set(crate::sim_sets::SimSet::Modifiers))
 .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers
-    .after(handle_impulse_messages))
-.add_systems(Update, (
-    crate::modifier_coordination::translate_region_modifiers,
-    crate::region_plugin::handle_slow_zone_speed_clamp,
-).chain().after(crate::region_plugin::update_region_membership))
+    .in_set(crate::sim_sets::SimSet::Modifiers))
 ```
+
+There is no `translate_region_modifiers` system — region effects are applied
+via the `on_region_entered` / `on_region_exited` observers instead (see below).
+`handle_slow_zone_speed_clamp` lives in `src/regions/server.rs`, not a
+`region_plugin` module.
 
 ### Power translator (`translate_power_modifiers`)
 
 | Aspect | Reference |
 |---|---|
-| System | `src/modifiers/coordination.rs:43` |
-| Pure helper | `apply_power_modifiers` at `src/modifiers/coordination.rs:62` |
+| System | `src/modifiers/coordination.rs:48` |
+| Pure helper | `apply_power_modifiers` at `src/modifiers/coordination.rs:122` |
 | Reads | `ShipPowerSystem` (the `PowerSystem` struct) + `PowerMultiplierResource` |
 | Writes | `ModifierSource::PowerGroup(PowerGroupId::helm())` → `MaxSpeed`, `MaxYawRate` |
 |   | `ModifierSource::PowerGroup(PowerGroupId::weapons())` → `PhaserDamage` |
@@ -90,15 +98,21 @@ to #617/#619 this source variant was `ModifierSource::Console(Console::*)`
 keyed on the Console enum; the enum is deleted, `PowerGroupId` is the
 survivor.
 
-### Region translator (`translate_region_modifiers`)
+### Region translator (`on_region_entered` / `on_region_exited` observers)
+
+> **Correction (2026-07-04 lint pass):** this section previously described a
+> `translate_region_modifiers` polling system. That system no longer exists in
+> the codebase — region effects are applied via Bevy observers instead. This
+> drift predates and is unrelated to issue #606; flagged here because the lint
+> pass touched this page anyway. See `Open questions` below.
 
 | Aspect | Reference |
 |---|---|
-| System | `src/modifiers/coordination.rs:194` |
-| Pure helper | `apply_region_effects` at `src/modifiers/coordination.rs:104` |
-| Reads | `RegionEntered` / `RegionExited` events, `RegionMembership` resource |
-| Writes | Per `RegionEffectKind` variant (see below) |
-| Ordering | `.chain().after(update_region_membership)` |
+| System | `on_region_entered` at `src/modifiers/coordination.rs:283`, `on_region_exited` at `src/modifiers/coordination.rs:302` (registered as observers in `ModifierCoordinationPlugin::build`, not `Update`-scheduled systems) |
+| Pure helper | `apply_region_effects` at `src/modifiers/coordination.rs:180` |
+| Reads | `RegionEntered` / `RegionExited` trigger payloads |
+| Writes | Per `RegionEffectKind` variant (see below), on the trigger's subject entity |
+| Ordering | N/A — observers fire synchronously when the event is triggered, not via `Update` ordering |
 
 Effect-to-modifier mapping:
 
@@ -111,21 +125,22 @@ Effect-to-modifier mapping:
 | `DamageZone { .. }` | **Not a modifier** — handled directly by regions plugin | N/A |
 | `BlocksImpulse` | **Not a modifier** — handled directly by regions plugin | N/A |
 
-On region exit, `translate_region_modifiers` calls `modifiers.clear_source()`
+On region exit, `on_region_exited` calls `modifiers.clear_source()`
 with the leaving region's `ModifierSource::RegionEffect { uuid }`, removing all
 modifiers and flags that originated from that region. This is how stale modifier
 accumulation is prevented.
 
-A companion system `handle_slow_zone_speed_clamp` at `src/regions/server.rs:191`
-reads the updated `Res<ShipModifiers>` and clamps the ship's forward speed so
-the effective max reflects the slow-zone modifier.
+A companion system `handle_slow_zone_speed_clamp` at `src/regions/server.rs:342`
+reads the SUBJECT ship's `ShipModifiers` component (query, not `Res`) and
+clamps that ship's forward speed so the effective max reflects the slow-zone
+modifier.
 
 ### Impulse translator (`translate_impulse_modifiers`)
 
 | Aspect | Reference |
 |---|---|
-| System | `src/modifiers/coordination.rs:174` |
-| Pure helper | `apply_impulse_to` at `src/modifiers/coordination.rs:155` |
+| System | `src/modifiers/coordination.rs:259` |
+| Pure helper | `apply_impulse_to` at `src/modifiers/coordination.rs:236` |
 | Reads | `ShipImpulse` (the `ImpulseState` struct) |
 | Writes | `ModifierSource::ImpulseDrive` → `MaxSpeed` (active only) |
 | Ordering | `.after(handle_impulse_messages)` |
@@ -150,35 +165,40 @@ cache. Not yet implemented.
 
 ### `apply_power_modifiers(modifiers, power, multipliers)`
 
-`src/modifiers/coordination.rs:62`. Non-Bevy, fully unit-tested. Computes the
+`src/modifiers/coordination.rs:122`. Non-Bevy, fully unit-tested. Computes the
 per-console bonus from the current power level and writes `Modifier` entries
 using `ModifierSource::Console(console)`. Re-calling with the same input is
 idempotent — `add_or_update` replaces the previous entry rather than stacking.
 
 ### `apply_region_effects(modifiers, region_uuid, effects)`
 
-`src/modifiers/coordination.rs:104`. Non-Bevy, fully unit-tested. Iterates a
+`src/modifiers/coordination.rs:180`. Non-Bevy, fully unit-tested. Iterates a
 slice of `RegionEffectKind` and registers the corresponding modifiers and flags
 under `ModifierSource::RegionEffect { uuid: region_uuid }`.
 
 ### `apply_impulse_to(modifiers, impulse, speed_multiplier)`
 
-`src/modifiers/coordination.rs:155`. Non-Bevy, fully unit-tested. When the
+`src/modifiers/coordination.rs:236`. Non-Bevy, fully unit-tested. When the
 impulse drive is active (`is_active()`), writes a `MaxSpeed` modifier with
 bonus `speed_multiplier - 1.0` under `ModifierSource::ImpulseDrive`. When
 idle or charging, removes that modifier so the cache returns to the
 identity multiplier. Note: the per-tick **acceleration** boost is applied
-separately inside `process_helm_inputs` (`src/ship_plugin.rs`) by multiplying
+separately inside `process_helm_inputs` (`src/ship_plugin.rs:309`) by multiplying
 `ShipPhysicsConfig.acceleration` by `ImpulseConfigResource.acceleration_multiplier`;
-it does not flow through `ShipModifiers`.
+it does not flow through `ShipModifiers`. `ImpulseConfigResource` is a
+`Component` only (its `Resource` derive was removed in issue #606, same as
+`ShipModifiers`).
 
 ## Read interface for consumers
 
-Consumers never hold `ResMut<ShipModifiers>` — they are read-only. The
-canonical way to read modifier state:
+`ShipModifiers` is a per-entity `Component` (as of issue #606, no `Resource`
+form exists at all). Consumers never hold a mutable reference outside the
+translators/observers above — they query read-only. The canonical way to read
+modifier state:
 
 ```rust
-fn my_system(modifiers: Res<ShipModifiers>) {
+fn my_system(modifiers_q: Query<&ShipModifiers, With<LocalShip>>) {
+    let Ok(modifiers) = modifiers_q.single() else { return };
     let speed_mult = modifiers.get(&ModifierSlot::MaxSpeed);
     let is_jammed = modifiers.has_flag(&FlagKind::CommsJammed);
     let all_flags = modifiers.flags();
@@ -193,17 +213,19 @@ Key `ShipModifiers` methods (defined in `src/modifiers/cache.rs`):
 | `has_flag(&FlagKind) -> bool` | `true` if any source has set the flag | OR-aggregated across all sources |
 | `flags() -> Vec<FlagKind>` | All currently set flags | Snapshot for broadcast |
 
-Current consumers of `Res<ShipModifiers>`:
+Current consumers of the per-entity `ShipModifiers` component (all query
+`&ShipModifiers`, none hold `Res<ShipModifiers>` — that type does not exist
+post-#606):
 
 | Location | What it reads |
 |---|---|
-| `src/simulation.rs:654` — `handle_set_target` | `ModifierSlot::RadarRange` for target-lock range gate |
-| `src/simulation.rs:752` — `handle_helm_input` | `ModifierSlot::MaxSpeed` and `ModifierSlot::MaxYawRate` for acceleration/steering caps |
-| `src/simulation.rs:825` — `tick_collisions` | `ModifierSlot::HullDamageTaken` to scale collision damage |
-| `src/simulation.rs:936` — `handle_fire_phaser` | `ModifierSlot::RadarRange` to scale effective phaser range |
-| `src/simulation.rs:1298` — `tick_repair` | `ModifierSlot::RepairRate` to scale repair speed |
-| `src/console/weapons/server.rs` — `tick_beams` | `ModifierSlot::PhaserDamage` to scale beam DPS (per shooter) |
-| `src/regions/server.rs:194` — `handle_slow_zone_speed_clamp` | `ModifierSlot::MaxSpeed` to clamp ship speed on slow-zone entry |
+| `src/console/weapons/server.rs:337` — `handle_set_target` | `ModifierSlot::RadarRange` for target-lock range gate |
+| `src/ship_plugin.rs:309` — `process_helm_inputs` | `ModifierSlot::MaxSpeed` for acceleration/reverse-speed caps |
+| `src/server_app.rs:798` — `handle_collisions` | `ModifierSlot::HullDamageTaken` to scale collision damage |
+| `src/console/weapons/server.rs:570` — `handle_fire_phaser` | `ModifierSlot::RadarRange` to scale effective phaser range |
+| `src/console/repair/server.rs:176` — `tick_repair_teams` | `ModifierSlot::RepairRate` to scale repair speed |
+| `src/console/weapons/server.rs:992` — `tick_beams` | `ModifierSlot::PhaserDamage` to scale beam DPS (per shooter) |
+| `src/regions/server.rs:342` — `handle_slow_zone_speed_clamp` | `ModifierSlot::MaxSpeed` to clamp ship speed on slow-zone entry |
 
 ## How `RegionEffect { uuid }` source identity prevents stale accumulation
 
@@ -240,21 +262,25 @@ until the last jammer region is left.
    }
    ```
 
-3. **Write a translator system** in the same file:
+3. **Write a translator system** in the same file. `ShipModifiers` is
+   `Component`-only since issue #606 — query it per-ship, never `Res`/`ResMut`:
    ```rust
    pub fn translate_<source>_modifiers(
        source_state: Res<SourceResource>,
-       mut modifiers: ResMut<ShipModifiers>,
+       mut ships_q: Query<&mut ShipModifiers, With<LocalShip>>,
    ) {
        // gate on GamePhase::InProgress if needed
+       let Ok(mut modifiers) = ships_q.single_mut() else { return };
        apply_<source>_to(&mut modifiers, &source_state.0);
    }
    ```
 
-4. **Register the system** in `SimulationPlugin` at `src/simulation.rs:370`:
+4. **Register the system** in `add_simulation_plugins` at
+   `src/server_app.rs` (see the power/impulse translator registrations above
+   for the current pattern):
    ```rust
    .add_systems(Update, crate::modifier_coordination::translate_<source>_modifiers
-       .after(<source's mutating systems>))
+       .in_set(crate::sim_sets::SimSet::Modifiers))
    ```
 
 5. **Unit-test the pure helper** in the `#[cfg(test)]` block of
@@ -296,16 +322,28 @@ modifiers.
 
 | File | Role |
 |---|---|
-| `src/modifiers/coordination.rs` | Plugin + pure helpers + translator systems (power + region + impulse) |
-| `src/modifiers/cache.rs` | `ShipModifiers` resource + `Modifier` type + `ModifierEvent` enum |
+| `src/modifiers/coordination.rs` | Plugin + pure helpers + translator systems (power + impulse) + region observers |
+| `src/modifiers/cache.rs` | `ShipModifiers` — per-entity `Component` (no `Resource` since #606) + `Modifier` type + `ModifierEvent` enum |
 | `src/modifiers/mod.rs` | Module re-exports (`pub use cache::...`) |
 | `src/core/messages.rs` | `ModifierSlot`, `ModifierSource` enum definitions |
 | `src/regions/server.rs` | Region membership detection + `handle_slow_zone_speed_clamp` (read-only consumer) |
 
+## Open questions
+
+- The "region translator" was described here as a polling system
+  (`translate_region_modifiers`) registered after `update_region_membership`.
+  That system does not exist in the current codebase — region effects are
+  applied via `on_region_entered`/`on_region_exited` observers instead (fixed
+  in this lint pass). This drift predates issue #606 and its origin (which PR
+  converted the region translator to observers) is not otherwise documented in
+  the wiki; worth tracking down if a future source ingest touches regions.
+
 ## Related
 
 - [Architecture](./architecture.md) — Where the coordinator fits in the plugin map.
+- [Server App Composition](./server-app.md) — Composition root that registers the translators.
 - [PRD #117](https://github.com/jkeywo/project-phoenix-v2/issues/117) — Modifier system (`modifiers.rs` cache + wire).
 - [PRD #118](https://github.com/jkeywo/project-phoenix-v2/issues/118) — Power console (6+2 power allocation driving `ModifierSource::Console`).
 - [PRD #153](https://github.com/jkeywo/project-phoenix-v2/issues/153) — Region entities (`RegionEffectKind`, `EntityUuid` driving `ModifierSource::RegionEffect`).
+- [PRD #597 — Ship Parity](../sources/prd-597-ship-parity.md) — Introduced the per-entity `ShipModifiers` Component (PR 6); issue #606 later deleted the `Resource` half.
 - [Broadcaster Seam](./broadcaster-seam.md) — How modifier events (`ModifierAdded`/`ModifierRemoved`) are broadcast to clients.

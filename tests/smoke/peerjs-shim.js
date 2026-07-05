@@ -93,6 +93,37 @@
     (this._h[ev] || []).forEach(function (fn) { fn.apply(null, args); });
   };
 
+  function makePeerConnection(localId, remoteId) {
+    var listeners = {};
+    return {
+      iceConnectionState: 'connected',
+      iceGatheringState: 'complete',
+      createDataChannel: function (label, opts) {
+        var dc = new DataChannel(localId, remoteId, label, opts);
+        return dc;
+      },
+      getStats: function () {
+        return Promise.resolve(new Map());
+      },
+      addEventListener: function (type, fn) {
+        if (typeof fn !== 'function') return;
+        if (!listeners[type]) listeners[type] = [];
+        listeners[type].push(fn);
+      },
+      removeEventListener: function (type, fn) {
+        if (!listeners[type]) return;
+        listeners[type] = listeners[type].filter(function (listener) { return listener !== fn; });
+      },
+      dispatchEvent: function (event) {
+        var type = typeof event === 'string' ? event : event && event.type;
+        if (!type) return true;
+        (listeners[type] || []).forEach(function (fn) { fn.call(null, event); });
+        return true;
+      },
+      ondatachannel: null,
+    };
+  }
+
   // ── DataChannel shim ───────────────────────────────────────────────────────
   // Represents a sub-channel on the same RTCPeerConnection (snapshot channel).
 
@@ -150,13 +181,7 @@
     this.open = false;
     // DataChannel sub-channels keyed by label (e.g. 'snapshot')
     this._dataChannels = new Map();
-    this.peerConnection = {
-      createDataChannel: function (label, opts) {
-        var dc = new DataChannel(localId, remoteId, label, opts);
-        return dc;
-      },
-      ondatachannel: null,
-    };
+    this.peerConnection = makePeerConnection(localId, remoteId);
   }
   Connection.prototype = Object.create(Emitter.prototype);
   Connection.prototype.constructor = Connection;

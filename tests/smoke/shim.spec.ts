@@ -91,6 +91,48 @@ test.describe('peerjs-shim', () => {
     await ctx.close();
   });
 
+  test('connection exposes WebRTC inspection hooks used by the client', async ({ browser }) => {
+    const { ctx, a: hostPage, b: clientPage } = await twoPages(
+      browser, 'shim-pc-host', 'shim-pc-client',
+    );
+
+    await hostPage.evaluate(() => {
+      const host = new (window as any).Peer('pc-host-1');
+      host.on('connection', () => {});
+    });
+    await hostPage.waitForTimeout(100);
+
+    const result = await clientPage.evaluate(() =>
+      new Promise<any>((resolve) => {
+        const client = new (window as any).Peer();
+        client.on('open', () => {
+          const conn = client.connect('pc-host-1');
+          const pc = conn.peerConnection;
+          const events: string[] = [];
+          pc.addEventListener('iceconnectionstatechange', () => events.push(pc.iceConnectionState));
+          pc.dispatchEvent({ type: 'iceconnectionstatechange' });
+          pc.getStats().then((stats: Map<string, unknown>) => {
+            resolve({
+              hasCreateDataChannel: typeof pc.createDataChannel === 'function',
+              hasRemoveEventListener: typeof pc.removeEventListener === 'function',
+              statsIsMap: stats instanceof Map,
+              events,
+            });
+          });
+        });
+        setTimeout(() => resolve({ timeout: true }), 5_000);
+      }),
+    );
+
+    expect(result).toEqual({
+      hasCreateDataChannel: true,
+      hasRemoveEventListener: true,
+      statsIsMap: true,
+      events: ['connected'],
+    });
+    await ctx.close();
+  });
+
   test('host sends data to client', async ({ browser }) => {
     const { ctx, a: hostPage, b: clientPage } = await twoPages(
       browser, 'shim-data-host', 'shim-data-client',

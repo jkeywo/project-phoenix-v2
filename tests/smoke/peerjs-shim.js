@@ -11,12 +11,18 @@
 
   const CHANNEL = 'peerjs-shim';
   const registry = new Map(); // peerId -> Peer instance
+  const offlinePairs = new Set();
+  const offlineEndpoints = new Set();
   let bc = null;
 
   function getChannel() {
     if (!bc) {
       bc = new BroadcastChannel(CHANNEL);
       bc.onmessage = function (ev) {
+        if (ev.data && ev.data.t === 'control') {
+          handleControl(ev.data);
+          return;
+        }
         var peer = registry.get(ev.data.to);
         if (peer) peer._recv(ev.data);
       };
@@ -28,6 +34,50 @@
     return Array.from(crypto.getRandomValues(new Uint8Array(8)))
       .map(function (b) { return b.toString(16).padStart(2, '0'); })
       .join('');
+  }
+
+  function pairKey(peerIdA, peerIdB) {
+    return [peerIdA, peerIdB].sort().join('\0');
+  }
+
+  function isOffline(localId, remoteId) {
+    return offlinePairs.has(pairKey(localId, remoteId)) ||
+      offlineEndpoints.has(localId) ||
+      offlineEndpoints.has(remoteId);
+  }
+
+  function closeLocalSide(localId, remoteId) {
+    var peer = registry.get(localId);
+    if (!peer) return;
+    peer._sever(remoteId);
+  }
+
+  function applySever(peerIdA, peerIdB) {
+    offlinePairs.add(pairKey(peerIdA, peerIdB));
+    // Reconnect creates a fresh client peer id; holding the stable endpoint
+    // offline keeps retries blocked until the test explicitly revives it.
+    offlineEndpoints.add(peerIdA);
+    offlineEndpoints.add(peerIdB);
+    closeLocalSide(peerIdA, peerIdB);
+    closeLocalSide(peerIdB, peerIdA);
+  }
+
+  function applyRevive(peerIdA, peerIdB) {
+    offlinePairs.delete(pairKey(peerIdA, peerIdB));
+    offlineEndpoints.delete(peerIdA);
+    offlineEndpoints.delete(peerIdB);
+  }
+
+  function broadcastControl(action, peerIdA, peerIdB) {
+    getChannel().postMessage({ t: 'control', action: action, peerIdA: peerIdA, peerIdB: peerIdB });
+  }
+
+  function handleControl(msg) {
+    if (msg.action === 'sever') {
+      applySever(msg.peerIdA, msg.peerIdB);
+    } else if (msg.action === 'revive') {
+      applyRevive(msg.peerIdA, msg.peerIdB);
+    }
   }
 
   // ── Minimal event emitter ──────────────────────────────────────────────────
@@ -56,6 +106,7 @@
   Connection.prototype.constructor = Connection;
 
   Connection.prototype.send = function (data) {
+    if (isOffline(this._lid, this._rid)) return;
     getChannel().postMessage({ t: 'data', from: this._lid, to: this._rid, data: data });
   };
 
@@ -135,6 +186,7 @@
   Peer.prototype.connect = function (remoteId) {
     var conn = new Connection(this.id, remoteId);
     this._conns.set(remoteId, conn);
+    if (isOffline(this.id, remoteId)) return conn;
     getChannel().postMessage({ t: 'connect', from: this.id, to: remoteId });
     return conn;
   };
@@ -147,6 +199,53 @@
   Peer.prototype.destroy = function () {
     registry.delete(this.id);
     if (bc) { bc.close(); bc = null; }
+  };
+
+  // ── Test-only kill/revive support (issue #614) ─────────────────────────────
+  //
+  // Simulates a silently-dropped DataChannel — e.g. a phone's radio sleeping
+  // mid-game — without destroying the underlying Peer (signaling channel) on
+  // either side. Real WebRTC failure modes like this fire the DataChannel's
+  // 'close'/'error' event on BOTH ends without either side having called
+  // conn.close() itself, which is exactly what connection-manager.js's
+  // reconnect-with-backoff logic needs to observe to kick in.
+  //
+  // `_sever(remoteId)` fires `_close()` locally on this Peer object's
+  // Connection to `remoteId` (if any) WITHOUT posting a 'close' broadcast
+  // message. A BroadcastChannel control message asks every browser context to
+  // apply the same local close, so both sides observe the DataChannel close.
+  Peer.prototype._sever = function (remoteId) {
+    var conn = this._conns.get(remoteId);
+    if (conn) {
+      conn._close();
+      this._conns.delete(remoteId);
+    }
+  };
+
+  // Exposed as a small test-only global API rather than bloating the public
+  // Peer/Connection surface real PeerJS exposes. Tests reach in via
+  // `window.__peerjsShim.severConnection(peerIdA, peerIdB)`.
+  window.__peerjsShim = {
+    /**
+     * Sever the DataChannel between two peer IDs on both ends, simulating a
+     * dropped connection that neither side initiated. The pair stays offline
+     * until reviveConnection() so the client's backoff retry cannot race ahead
+     * before the test observes and clicks the retry control.
+     */
+    severConnection: function (peerIdA, peerIdB) {
+      applySever(peerIdA, peerIdB);
+      broadcastControl('sever', peerIdA, peerIdB);
+    },
+
+    /**
+     * Re-enable the previously severed link. Existing blocked Connection
+     * objects stay closed/half-open; the client must retry to create a fresh
+     * DataChannel, matching the real user-visible "retry now" path.
+     */
+    reviveConnection: function (peerIdA, peerIdB) {
+      applyRevive(peerIdA, peerIdB);
+      broadcastControl('revive', peerIdA, peerIdB);
+    },
   };
 
   // Close all open connections cleanly when the page is being torn down so
@@ -170,6 +269,7 @@
     var self = this;
     switch (msg.t) {
       case 'connect': {
+        if (isOffline(this.id, msg.from)) break;
         var inConn = new Connection(this.id, msg.from);
         this._conns.set(msg.from, inConn);
         // Send accept first, then surface to caller so they can register handlers
@@ -182,11 +282,13 @@
         break;
       }
       case 'accept': {
+        if (isOffline(this.id, msg.from)) break;
         var outConn = this._conns.get(msg.from);
         if (outConn) Promise.resolve().then(function () { outConn._open(); });
         break;
       }
       case 'data': {
+        if (isOffline(this.id, msg.from)) break;
         var dataConn = this._conns.get(msg.from);
         if (dataConn) dataConn._data(msg.data);
         break;

@@ -77,6 +77,13 @@
     }
     #conn-label { font-size: 0.75rem; color: #f44; }
     #conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #4c4; flex-shrink: 0; }
+    #retry-now-btn {
+      display: none; width: auto; background: #422; color: #fbb;
+      border: 1px solid #a55; padding: 0.2rem 0.5rem; margin: 0;
+      font-size: 0.7rem; cursor: pointer;
+    }
+    #retry-now-btn.visible { display: inline-block; }
+    #retry-now-btn:active { background: #633; }
     #fullscreen-btn {
       display: inline; width: auto; background: none; border: none; color: #cce;
       font-size: 1.1rem; cursor: pointer; padding: 0; margin: 0; line-height: 1;
@@ -735,6 +742,7 @@
   <div id="top-bar">
     <span id="conn-label"></span>
     <span id="conn-dot"></span>
+    <button id="retry-now-btn" title="Retry connection now">Retry now</button>
     <button id="fullscreen-btn" title="Toggle fullscreen">?</button>
   </div>
 
@@ -814,15 +822,23 @@
     function setConnectionStatus(state) {
       const dot = document.getElementById('conn-dot');
       const label = document.getElementById('conn-label');
+      const retryBtn = document.getElementById('retry-now-btn');
       if (state === 'disconnected') {
         dot.style.background = '#f44';
         label.textContent = 'Disconnected � reconnecting�';
+        if (retryBtn) retryBtn.classList.add('visible');
       } else if (state === 'error') {
+        // No permanent give-up state anymore — connection-manager keeps
+        // retrying with backoff even after an 'error' signal, so this still
+        // shows the retry-now affordance rather than telling the user to
+        // refresh the page.
         dot.style.background = '#f44';
-        label.textContent = 'Error � refresh to retry';
+        label.textContent = 'Connection error � reconnecting�';
+        if (retryBtn) retryBtn.classList.add('visible');
       } else {
         dot.style.background = '#4c4';
         label.textContent = '';
+        if (retryBtn) retryBtn.classList.remove('visible');
       }
     }
 
@@ -860,6 +876,20 @@
     })();
 
     setConnectionStatus('connecting');
+
+    // -- Retry-now control (issue #614) --------------------------------------
+    // Visible only while disconnected/retrying (see setConnectionStatus).
+    // Bypasses the connection manager's current backoff wait and attempts a
+    // reconnect immediately.
+    (function initRetryNow() {
+      const btn = document.getElementById('retry-now-btn');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        if (window.connectionManager && typeof window.connectionManager.retryNow === 'function') {
+          window.connectionManager.retryNow();
+        }
+      });
+    })();
 
     // -- Persistence ---------------------------------------------
 

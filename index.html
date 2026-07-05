@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-8d7a1d17f1a844dd.js" crossorigin="anonymous" integrity="sha384-kUACGuKgKbDc8kCuCervpRd8qQQappAPlxj99oj2Z5cJ5XJk4bHHjJ4CglN4oDvE"><link rel="preload" href="./project-phoenix-8d7a1d17f1a844dd_bg.wasm" crossorigin="anonymous" integrity="sha384-cl4QZAWa7/AzTv/ToFpZKkMrjY1ecbfIZzH4aGcju89N26kwv6pTBG8BsiJLiAML" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-8c2d6319a5a9429e.js" crossorigin="anonymous" integrity="sha384-KVvVNd6OUDfSSI5HDByPj08WDeNnLSCmV0vBALzK26TpgboZWnFgHXBtX2YQhzdB"><link rel="preload" href="./project-phoenix-8c2d6319a5a9429e_bg.wasm" crossorigin="anonymous" integrity="sha384-+bD+Eye6ZvbnWaf6M9PHjdioXvfchDB75ClCD1a+J3xODwolLk5dszdPHrIeXtwE" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -862,8 +862,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-8d7a1d17f1a844dd.js';
-const wasm = await init({ module_or_path: './project-phoenix-8d7a1d17f1a844dd_bg.wasm' });
+import init, * as bindings from './project-phoenix-8c2d6319a5a9429e.js';
+const wasm = await init({ module_or_path: './project-phoenix-8c2d6319a5a9429e_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1279,6 +1279,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     const peerTokens = new Map();
     // session token → DataConnection (for routing server→client messages)
     const tokenConns = new Map();
+    // session token → snapshot DataChannel (unordered, no retransmit)
+    const tokenSnapshotConns = new Map();
     // messages queued before WASM is ready
     const msgQueue = [];
 
@@ -1347,9 +1349,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
         conn.on('open', () => {
           console.log(`[PeerJS] DataChannel open — ${shortId}…`);
-          // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
           const pc = conn.peerConnection;
           if (pc) {
+            // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
             pc.addEventListener('iceconnectionstatechange', () =>
               console.log(`[ICE] ${shortId}… → ${pc.iceConnectionState}`));
             setTimeout(() => {
@@ -1363,6 +1365,26 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
                 }
               }).catch(() => {});
             }, 1500);
+
+            // Listen for snapshot sub-channels created by the client on this PC
+            pc.ondatachannel = (event) => {
+              const chan = event.channel;
+              if (chan.label === 'snapshot') {
+                chan.onopen = () => {
+                  console.log(`[PeerJS] snapshot channel open — ${shortId}…`);
+                  const token = peerTokens.get(conn.peer);
+                  if (token) tokenSnapshotConns.set(token, chan);
+                };
+                chan.onclose = () => {
+                  const token = peerTokens.get(conn.peer);
+                  if (token) tokenSnapshotConns.delete(token);
+                };
+                chan.onerror = () => {
+                  const token = peerTokens.get(conn.peer);
+                  if (token) tokenSnapshotConns.delete(token);
+                };
+              }
+            };
           }
         });
 
@@ -1405,6 +1427,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         conn.on('close', () => {
           const token = peerTokens.get(conn.peer);
           console.log(`[PeerJS] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
+          // Clean up snapshot channel
+          tokenSnapshotConns.delete(token);
           peerTokens.delete(conn.peer);
           if (!token) return;
           // On a browser refresh the new page may have already reconnected
@@ -1494,16 +1518,40 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       engine.play().catch(() => {});
     }
 
-    function routeOutbound(target, payload) {
+    function routeOutbound(target, payload, deliveryClass) {
+      const useSnapshot = deliveryClass === 'snapshot';
+      const primary = useSnapshot ? tokenSnapshotConns : tokenConns;
+      const fallback = useSnapshot ? tokenConns : null;
       if (target === 'all') {
-        for (const conn of tokenConns.values()) { if (conn.open) conn.send(payload); }
+        const sent = new Set();
+        for (const [t, c] of primary) {
+          if (c.open || c.readyState === 'open') { c.send(payload); sent.add(t); }
+        }
+        // Fallback: send via reliable for tokens missing a snapshot channel
+        if (useSnapshot && fallback) {
+          for (const [t, c] of fallback) {
+            if (!sent.has(t) && (c.open || c.readyState === 'open')) c.send(payload);
+          }
+        }
       } else if (target.startsWith('token:')) {
-        const conn = tokenConns.get(target.slice(6));
-        if (conn?.open) conn.send(payload);
+        const t = target.slice(6);
+        const c = primary.get(t);
+        if (c && (c.open || c.readyState === 'open')) { c.send(payload); return; }
+        // Fallback to reliable
+        if (useSnapshot && fallback) {
+          const fc = fallback.get(t);
+          if (fc && (fc.open || fc.readyState === 'open')) fc.send(payload);
+        }
       } else if (target.startsWith('except:')) {
         const exc = target.slice(7);
-        for (const [t, conn] of tokenConns.entries()) {
-          if (t !== exc && conn.open) conn.send(payload);
+        const sent = new Set();
+        for (const [t, c] of primary) {
+          if (t !== exc && (c.open || c.readyState === 'open')) { c.send(payload); sent.add(t); }
+        }
+        if (useSnapshot && fallback) {
+          for (const [t, c] of fallback) {
+            if (!sent.has(t) && t !== exc && (c.open || c.readyState === 'open')) c.send(payload);
+          }
         }
       }
     }

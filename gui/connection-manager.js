@@ -42,6 +42,8 @@ export function nextBackoffDelay(attempt, initialMs = 100, maxMs = 30_000) {
 export class ConnectionManager {
   constructor() {
     this.conn = null;
+    this._snapshotConn = null;
+    this._snapshotAvailable = false;
     this.peer = null;
     this._identSent = false;
     this._retryTimer = null;
@@ -129,6 +131,38 @@ export class ConnectionManager {
                 }
               }).catch(() => {});
             }, 1500);
+
+            // Create snapshot sub-channel (unordered, no retransmit)
+            try {
+              const snapChan = pc.createDataChannel('snapshot', { ordered: false, maxRetransmits: 0 });
+              this._snapshotConn = snapChan;
+              snapChan.onopen = () => {
+                this._snapshotAvailable = true;
+                if (onLog) onLog('[PeerJS] snapshot DataChannel open');
+              };
+              snapChan.onclose = () => {
+                this._snapshotAvailable = false;
+                if (onLog) onLog('[PeerJS] snapshot DataChannel closed');
+              };
+              snapChan.onerror = () => {
+                this._snapshotAvailable = false;
+              };
+              // Inbound data on snapshot channel
+              snapChan.onmessage = (event) => {
+                if (!this._isCurrentConn(conn, clientPeer, generation)) return;
+                if (typeof onData !== 'function') return;
+                try {
+                  const str = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
+                  onData(JSON.parse(str));
+                } catch (e) {
+                  if (onLog) onLog('[snapshot] bad message ' + e);
+                }
+              };
+              if (onLog) onLog('[PeerJS] snapshot DataChannel created');
+            } catch (e) {
+              if (onLog) onLog('[PeerJS] failed to create snapshot channel:', e.message);
+              this._snapshotAvailable = false;
+            }
           }
           if (onStatus) onStatus('ready');
           if (typeof getIdent === 'function') {
@@ -155,6 +189,12 @@ export class ConnectionManager {
           if (!this._isCurrentConn(conn, clientPeer, generation)) return;
           clearTimeout(connectTimeout);
           if (onLog) onLog('[PeerJS] DataChannel closed');
+          // Clean up snapshot channel
+          this._snapshotAvailable = false;
+          if (this._snapshotConn) {
+            try { this._snapshotConn.close(); } catch (_) { /* already dead */ }
+            this._snapshotConn = null;
+          }
           // Reset so the next reopen re-sends Identify — the server restores
           // seat/rating from the token on every Identify, so this is what
           // makes reconnect actually resume the same seat.
@@ -251,8 +291,18 @@ export class ConnectionManager {
     this._reconnect();
   }
 
-  send(type, data) {
+  send(type, data, deliveryClass) {
     if (!this.connected) return;
+    // Snapshot-class messages ride the unordered channel when available
+    if (deliveryClass === 'snapshot' && this._snapshotAvailable && this._snapshotConn) {
+      const msg = data !== undefined ? { type, data } : { type };
+      try {
+        this._snapshotConn.send(JSON.stringify(msg));
+        return;
+      } catch (_) {
+        // Fallback to reliable channel
+      }
+    }
     const msg = data !== undefined ? { type, data } : { type };
     this.conn.send(JSON.stringify(msg));
   }
@@ -261,6 +311,11 @@ export class ConnectionManager {
     this._clearRetryTimer();
     this._hostPeerId = null;
     this._opts = null;
+    this._snapshotAvailable = false;
+    if (this._snapshotConn) {
+      try { this._snapshotConn.close(); } catch (_) { /* already dead */ }
+      this._snapshotConn = null;
+    }
     if (this.conn) {
       this.conn.close();
       this.conn = null;

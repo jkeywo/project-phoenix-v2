@@ -175,6 +175,40 @@ function makeFakeConn() {
   conn.open = false;
   conn.send = vi.fn();
   conn.close = vi.fn(() => { conn.open = false; });
+  // Mock peerConnection for snapshot DataChannel creation + ICE logging
+  const dataChannels = [];
+  conn.peerConnection = {
+    iceConnectionState: 'connected',
+    iceGatheringState: 'complete',
+    addEventListener: vi.fn(),
+    getStats: vi.fn().mockResolvedValue(new Map()),
+    createDataChannel: vi.fn((label, opts) => {
+      const snap = makeEmitter();
+      snap.label = label;
+      snap.readyState = 'connecting';
+      snap.send = vi.fn();
+      snap.close = vi.fn();
+      snap._simulateOpen = () => {
+        snap.readyState = 'open';
+        snap._emit('open');
+        if (typeof snap.onopen === 'function') snap.onopen();
+      };
+      snap._simulateClose = () => {
+        snap.readyState = 'closed';
+        snap._emit('close');
+        if (typeof snap.onclose === 'function') snap.onclose();
+      };
+      snap._simulateError = () => {
+        snap._emit('error', new Error('dc error'));
+        if (typeof snap.onerror === 'function') snap.onerror(new Error('dc error'));
+      };
+      dataChannels.push(snap);
+      // Fire open on next microtask like the real shim
+      queueMicrotask(() => snap._simulateOpen());
+      return snap;
+    }),
+  };
+  conn._dataChannels = dataChannels;
   // Mirrors the real shim's Connection.prototype._open: flips `.open` to
   // true (which ConnectionManager's `connected` getter reads) before firing
   // the 'open' event, matching real PeerJS DataConnection semantics.
@@ -405,6 +439,86 @@ describe('ConnectionManager lifecycle (identify re-send + reconnect)', () => {
     cm.peer = peer;
     cm.retryNow();
     expect(peer.destroy).not.toHaveBeenCalled();
+  });
+
+  describe('snapshot channel', () => {
+    it('creates a snapshot DataChannel when DataChannel opens', async () => {
+      const conn1 = makeFakeConn();
+      globalThis.window = { Peer: makeFakePeerCtor([conn1]) };
+      const cm = new ConnectionManager();
+      cm.connect('host-id', {});
+      await Promise.resolve();
+      await Promise.resolve();
+      conn1._simulateOpen();
+      await Promise.resolve(); // flush createDataChannel microtask
+      // Verify createDataChannel was called with 'snapshot'
+      expect(conn1.peerConnection.createDataChannel).toHaveBeenCalledWith(
+        'snapshot',
+        { ordered: false, maxRetransmits: 0 },
+      );
+      // Verify the snapshot channel is tracked
+      expect(cm._snapshotConn).not.toBeNull();
+    });
+
+    it('send with snapshot class routes to snapshot channel when available', async () => {
+      const conn1 = makeFakeConn();
+      globalThis.window = { Peer: makeFakePeerCtor([conn1]) };
+      const cm = new ConnectionManager();
+      cm.connect('host-id', {});
+      await Promise.resolve();
+      await Promise.resolve();
+      conn1._simulateOpen();
+      await Promise.resolve(); // flush snapshot channel open microtask
+      // Snapshot channel should be available now
+      expect(cm._snapshotAvailable).toBe(true);
+      const snapSendSpy = cm._snapshotConn.send;
+      cm.send('SimState', { data: 1 }, 'snapshot');
+      expect(snapSendSpy).toHaveBeenCalledWith(JSON.stringify({ type: 'SimState', data: { data: 1 } }));
+    });
+
+    it('send with snapshot class falls back to reliable when snapshot unavailable', async () => {
+      const conn1 = makeFakeConn();
+      globalThis.window = { Peer: makeFakePeerCtor([conn1]) };
+      const cm = new ConnectionManager();
+      cm.connect('host-id', {});
+      await Promise.resolve();
+      await Promise.resolve();
+      conn1._simulateOpen();
+      // Don't flush snapshot channel microtask — snapshot not yet available
+      cm._snapshotAvailable = false;
+      cm.send('SimState', { foo: 1 }, 'snapshot');
+      expect(conn1.send).toHaveBeenCalledWith(JSON.stringify({ type: 'SimState', data: { foo: 1 } }));
+    });
+
+    it('cleans up snapshot channel on close', async () => {
+      const conn1 = makeFakeConn();
+      globalThis.window = { Peer: makeFakePeerCtor([conn1]) };
+      vi.useFakeTimers();
+      const cm = new ConnectionManager();
+      cm.connect('host-id', {});
+      await vi.advanceTimersByTimeAsync(0);
+      conn1._simulateOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cm._snapshotConn).not.toBeNull();
+      conn1._simulateClose();
+      expect(cm._snapshotConn).toBeNull();
+      expect(cm._snapshotAvailable).toBe(false);
+    });
+
+    it('cleans up snapshot channel on disconnect', async () => {
+      const conn1 = makeFakeConn();
+      globalThis.window = { Peer: makeFakePeerCtor([conn1]) };
+      vi.useFakeTimers();
+      const cm = new ConnectionManager();
+      cm.connect('host-id', {});
+      await vi.advanceTimersByTimeAsync(0);
+      conn1._simulateOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cm._snapshotConn).not.toBeNull();
+      cm.disconnect();
+      expect(cm._snapshotConn).toBeNull();
+      expect(cm._snapshotAvailable).toBe(false);
+    });
   });
 
   it('disconnect() clears any pending retry timer', async () => {

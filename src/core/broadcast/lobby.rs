@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::core::broadcast::audience::Audience;
 use crate::core::broadcast::cadence::Cadence;
 use crate::lobby::{OutboundMessage, Sessions};
-use crate::messages::{GamePhase, ServerMessage};
+use crate::messages::{DeliveryClass, GamePhase, ServerMessage};
 
 // ── Registration types ─────────────────────────────────────────────────────
 
@@ -188,6 +188,7 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
             world.write_message(OutboundMessage {
                 target: target.clone(),
                 msg,
+                delivery: DeliveryClass::Reliable,
             });
         }
     }

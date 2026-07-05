@@ -1003,7 +1003,8 @@
       if (!window.connectionManager || !window.connectionManager.connected) return;
       const clickType = (type === 'ControlSystem' && data && data.payload) ? data.payload.type : type;
       if (!NO_CLICK.has(clickType)) playClick();
-      window.connectionManager.send(type, data);
+      // Client messages (commands, lobby actions) are always reliable
+      window.connectionManager.send(type, data, 'reliable');
     }
 
     function setStatus(text) { $('status').textContent = text; }

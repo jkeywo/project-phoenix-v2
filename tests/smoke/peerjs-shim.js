@@ -93,6 +93,53 @@
     (this._h[ev] || []).forEach(function (fn) { fn.apply(null, args); });
   };
 
+  // ── DataChannel shim ───────────────────────────────────────────────────────
+  // Represents a sub-channel on the same RTCPeerConnection (snapshot channel).
+
+  function DataChannel(localId, remoteId, label, opts) {
+    Emitter.call(this);
+    this.label = label;
+    this._lid = localId;
+    this._rid = remoteId;
+    this.readyState = 'connecting';
+    this.ordered = opts ? opts.ordered !== false : true;
+    this.maxRetransmits = opts ? opts.maxRetransmits : null;
+    this._dropRate = 0;
+    this.onopen = null;
+    this.onclose = null;
+    this.onerror = null;
+    this.onmessage = null;
+
+    var self = this;
+    Promise.resolve().then(function () {
+      self.readyState = 'open';
+      self._emit('open');
+      if (typeof self.onopen === 'function') self.onopen();
+      // Notify remote side about this DataChannel
+      getChannel().postMessage({
+        t: 'datachannel', from: localId, to: remoteId,
+        label: label, ordered: self.ordered, maxRetransmits: self.maxRetransmits,
+      });
+    });
+  }
+  DataChannel.prototype = Object.create(Emitter.prototype);
+  DataChannel.prototype.constructor = DataChannel;
+
+  DataChannel.prototype.send = function (data) {
+    if (this.readyState !== 'open') return;
+    if (this._dropRate > 0 && Math.random() < this._dropRate) return;
+    getChannel().postMessage({
+      t: 'data', from: this._lid, to: this._rid,
+      data: data, channel: this.label,
+    });
+  };
+
+  DataChannel.prototype.close = function () {
+    this.readyState = 'closed';
+    this._emit('close');
+    if (typeof this.onclose === 'function') this.onclose();
+  };
+
   // ── Connection shim ────────────────────────────────────────────────────────
 
   function Connection(localId, remoteId) {
@@ -101,6 +148,15 @@
     this._lid = localId;
     this._rid = remoteId;
     this.open = false;
+    // DataChannel sub-channels keyed by label (e.g. 'snapshot')
+    this._dataChannels = new Map();
+    this.peerConnection = {
+      createDataChannel: function (label, opts) {
+        var dc = new DataChannel(localId, remoteId, label, opts);
+        return dc;
+      },
+      ondatachannel: null,
+    };
   }
   Connection.prototype = Object.create(Emitter.prototype);
   Connection.prototype.constructor = Connection;
@@ -112,6 +168,9 @@
 
   Connection.prototype.close = function () {
     this.open = false;
+    // Close all sub-channels
+    this._dataChannels.forEach(function (dc) { dc.close(); });
+    this._dataChannels.clear();
     getChannel().postMessage({ t: 'close', from: this._lid, to: this._rid });
     this._emit('close');
   };
@@ -127,7 +186,27 @@
 
   Connection.prototype._close = function () {
     this.open = false;
+    this._dataChannels.forEach(function (dc) { dc.close(); });
+    this._dataChannels.clear();
     this._emit('close');
+  };
+
+  /**
+   * Register a DataChannel on this Connection and fire ondatachannel.
+   * Called by the remote side when a 'datachannel' control message arrives.
+   */
+  Connection.prototype._addDataChannel = function (label, opts) {
+    var dc = new DataChannel(this._lid, this._rid, label, opts);
+    this._dataChannels.set(label, dc);
+    var self = this;
+    Promise.resolve().then(function () {
+      dc.readyState = 'open';
+      dc._emit('open');
+      if (typeof self.peerConnection.ondatachannel === 'function') {
+        self.peerConnection.ondatachannel({ channel: dc });
+      }
+    });
+    return dc;
   };
 
   // ── wasm-ready signalling ─────────────────────────────────────────────────
@@ -246,6 +325,26 @@
       applyRevive(peerIdA, peerIdB);
       broadcastControl('revive', peerIdA, peerIdB);
     },
+
+    /**
+     * Get all registered DataChannels for debugging/inspection.
+     */
+    _dataChannels: function () {
+      var result = {};
+      registry.forEach(function (peer, peerId) {
+        peer._conns.forEach(function (conn, remoteId) {
+          conn._dataChannels.forEach(function (dc, label) {
+            result[peerId + '->' + remoteId + ':' + label] = {
+              readyState: dc.readyState,
+              ordered: dc.ordered,
+              maxRetransmits: dc.maxRetransmits,
+              dropRate: dc._dropRate,
+            };
+          });
+        });
+      });
+      return result;
+    },
   };
 
   // Close all open connections cleanly when the page is being torn down so
@@ -287,10 +386,32 @@
         if (outConn) Promise.resolve().then(function () { outConn._open(); });
         break;
       }
+      case 'datachannel': {
+        if (isOffline(this.id, msg.from)) break;
+        var conn = this._conns.get(msg.from);
+        if (conn) {
+          conn._addDataChannel(msg.label, {
+            ordered: msg.ordered,
+            maxRetransmits: msg.maxRetransmits,
+          });
+        }
+        break;
+      }
       case 'data': {
         if (isOffline(this.id, msg.from)) break;
-        var dataConn = this._conns.get(msg.from);
-        if (dataConn) dataConn._data(msg.data);
+        if (msg.channel && msg.channel !== 'reliable') {
+          // Route to specific DataChannel
+          var dcConn = this._conns.get(msg.from);
+          if (dcConn) {
+            var dc = dcConn._dataChannels.get(msg.channel);
+            if (dc && typeof dc.onmessage === 'function') {
+              dc.onmessage({ data: msg.data });
+            }
+          }
+        } else {
+          var dataConn = this._conns.get(msg.from);
+          if (dataConn) dataConn._data(msg.data);
+        }
         break;
       }
       case 'close': {

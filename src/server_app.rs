@@ -4,8 +4,8 @@ use bevy_rapier3d::prelude::*;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::lobby::{InboundMessage, LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    ClientMessage, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, StationId,
-    SystemControlPayload,
+    ClientMessage, DeliveryClass, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
+    StationId, SystemControlPayload,
 };
 use crate::shield::ShieldSystem;
 use rand::SeedableRng as _;
@@ -644,10 +644,34 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
         let mut outbox = world.resource_mut::<SimOutbox>();
         let entries = std::mem::take(&mut outbox.0);
         for (target, msg) in entries {
-            world.write_message(OutboundMessage { target, msg });
+            world.write_message(OutboundMessage {
+                target,
+                msg: msg.clone(),
+                delivery: delivery_class_for_msg(&msg),
+            });
         }
         vec![]
     })
+}
+
+/// Derive the delivery class for a `ServerMessage`.
+///
+/// Snapshot-class messages ride the unordered/no-retransmit DataChannel;
+/// everything else (commands, lobby messages, Welcome, etc.) is reliable.
+/// This is the single place where delivery class is decided server-side
+/// (AC 1). The function is not exported — everything routes through
+/// `sim_outbox_broadcaster` or `dispatch_sim_broadcasts`.
+fn delivery_class_for_msg(msg: &ServerMessage) -> DeliveryClass {
+    match msg {
+        ServerMessage::SimState { .. }
+        | ServerMessage::BlackboardUpdate { .. }
+        | ServerMessage::ShieldStatus { .. }
+        | ServerMessage::RepairState { .. }
+        | ServerMessage::PowerState { .. }
+        | ServerMessage::WeaponsUpdate { .. }
+        | ServerMessage::SystemHullUpdate { .. } => DeliveryClass::Snapshot,
+        _ => DeliveryClass::Reliable,
+    }
 }
 
 // -- Systems -------------------------------------------------------------------
@@ -3070,7 +3094,11 @@ mod tests {
         let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
         let mut out = app.world().resource::<Outbox>().0.clone();
         for (target, msg) in sim_entries {
-            out.push(OutboundMessage { target, msg });
+            out.push(OutboundMessage {
+                target,
+                msg,
+                delivery: DeliveryClass::Reliable,
+            });
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
         out

@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::lobby_handler;
 pub use crate::lobby_handler::Target;
 use crate::messages::{
-    ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
+    ClientMessage, DeliveryClass, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
 use crate::server::asset_preload::AssetPreloadResource;
 use crate::session::SessionManager;
@@ -66,6 +66,7 @@ pub struct PlayerDisconnected {
 pub struct OutboundMessage {
     pub target: Target,
     pub msg: ServerMessage,
+    pub delivery: DeliveryClass,
 }
 
 // ── Plugin ─────────────────────────────────────────────────────────────────
@@ -510,7 +511,11 @@ impl Plugin for LobbyOutboxPlugin {
 pub(crate) fn drain_lobby_outbox(world: &mut World) {
     let entries = std::mem::take(&mut world.resource_mut::<LobbyOutbox>().0);
     for (target, msg) in entries {
-        world.write_message(OutboundMessage { target, msg });
+        world.write_message(OutboundMessage {
+            target,
+            msg,
+            delivery: DeliveryClass::Reliable,
+        });
     }
 }
 

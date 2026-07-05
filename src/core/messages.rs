@@ -126,6 +126,20 @@ pub type PhaserBank = String;
 /// and `TorpedoTubeClientConfig`.
 pub type TorpedoTube = String;
 
+/// How an outbound `ServerMessage` should be delivered over the wire.
+///
+/// `Reliable` rides the ordered/retransmit DataChannel (PeerJS default).
+/// `Snapshot` rides the unordered/no-retransmit DataChannel when available,
+/// falling back to the reliable channel when the snapshot channel has not
+/// opened yet or has failed. The server decides the delivery class; clients
+/// just obey — this value is a routing hint passed through the JS bridge,
+/// not serialised as part of the wire format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeliveryClass {
+    Reliable,
+    Snapshot,
+}
+
 /// Stable, designer-authored identifier for a claimable ship station.
 ///
 /// Station ids are ship-local authoring keys, not player tokens and not world

@@ -791,7 +791,11 @@ mod tests {
         let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
         let mut out = app.world().resource::<Outbox>().0.clone();
         for (target, msg) in sim_entries {
-            out.push(OutboundMessage { target, msg });
+            out.push(OutboundMessage {
+                target,
+                msg,
+                delivery: crate::messages::DeliveryClass::Reliable,
+            });
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
         out

@@ -1268,6 +1268,8 @@
     const peerTokens = new Map();
     // session token → DataConnection (for routing server→client messages)
     const tokenConns = new Map();
+    // session token → snapshot DataChannel (unordered, no retransmit)
+    const tokenSnapshotConns = new Map();
     // messages queued before WASM is ready
     const msgQueue = [];
 
@@ -1336,9 +1338,9 @@
 
         conn.on('open', () => {
           console.log(`[PeerJS] DataChannel open — ${shortId}…`);
-          // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
           const pc = conn.peerConnection;
           if (pc) {
+            // Log the winning ICE candidate type (host = direct, srflx = STUN, relay = TURN)
             pc.addEventListener('iceconnectionstatechange', () =>
               console.log(`[ICE] ${shortId}… → ${pc.iceConnectionState}`));
             setTimeout(() => {
@@ -1352,6 +1354,26 @@
                 }
               }).catch(() => {});
             }, 1500);
+
+            // Listen for snapshot sub-channels created by the client on this PC
+            pc.ondatachannel = (event) => {
+              const chan = event.channel;
+              if (chan.label === 'snapshot') {
+                chan.onopen = () => {
+                  console.log(`[PeerJS] snapshot channel open — ${shortId}…`);
+                  const token = peerTokens.get(conn.peer);
+                  if (token) tokenSnapshotConns.set(token, chan);
+                };
+                chan.onclose = () => {
+                  const token = peerTokens.get(conn.peer);
+                  if (token) tokenSnapshotConns.delete(token);
+                };
+                chan.onerror = () => {
+                  const token = peerTokens.get(conn.peer);
+                  if (token) tokenSnapshotConns.delete(token);
+                };
+              }
+            };
           }
         });
 
@@ -1394,6 +1416,8 @@
         conn.on('close', () => {
           const token = peerTokens.get(conn.peer);
           console.log(`[PeerJS] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
+          // Clean up snapshot channel
+          tokenSnapshotConns.delete(token);
           peerTokens.delete(conn.peer);
           if (!token) return;
           // On a browser refresh the new page may have already reconnected
@@ -1483,16 +1507,40 @@
       engine.play().catch(() => {});
     }
 
-    function routeOutbound(target, payload) {
+    function routeOutbound(target, payload, deliveryClass) {
+      const useSnapshot = deliveryClass === 'snapshot';
+      const primary = useSnapshot ? tokenSnapshotConns : tokenConns;
+      const fallback = useSnapshot ? tokenConns : null;
       if (target === 'all') {
-        for (const conn of tokenConns.values()) { if (conn.open) conn.send(payload); }
+        const sent = new Set();
+        for (const [t, c] of primary) {
+          if (c.open || c.readyState === 'open') { c.send(payload); sent.add(t); }
+        }
+        // Fallback: send via reliable for tokens missing a snapshot channel
+        if (useSnapshot && fallback) {
+          for (const [t, c] of fallback) {
+            if (!sent.has(t) && (c.open || c.readyState === 'open')) c.send(payload);
+          }
+        }
       } else if (target.startsWith('token:')) {
-        const conn = tokenConns.get(target.slice(6));
-        if (conn?.open) conn.send(payload);
+        const t = target.slice(6);
+        const c = primary.get(t);
+        if (c && (c.open || c.readyState === 'open')) { c.send(payload); return; }
+        // Fallback to reliable
+        if (useSnapshot && fallback) {
+          const fc = fallback.get(t);
+          if (fc && (fc.open || fc.readyState === 'open')) fc.send(payload);
+        }
       } else if (target.startsWith('except:')) {
         const exc = target.slice(7);
-        for (const [t, conn] of tokenConns.entries()) {
-          if (t !== exc && conn.open) conn.send(payload);
+        const sent = new Set();
+        for (const [t, c] of primary) {
+          if (t !== exc && (c.open || c.readyState === 'open')) { c.send(payload); sent.add(t); }
+        }
+        if (useSnapshot && fallback) {
+          for (const [t, c] of fallback) {
+            if (!sent.has(t) && t !== exc && (c.open || c.readyState === 'open')) c.send(payload);
+          }
         }
       }
     }

@@ -22,7 +22,7 @@ use {
     crate::lobby::{
         InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target,
     },
-    crate::messages,
+    crate::messages::{self, DeliveryClass},
     crate::modifier_coordination::ModifierCoordinationPlugin,
     crate::renderer::RendererPlugin,
     crate::server_app::add_simulation_plugins,
@@ -834,7 +834,7 @@ fn drain_force_start(
 /// Reads outbound messages each frame and forwards them to the JS callback.
 #[cfg(target_arch = "wasm32")]
 fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
-    let dispatches: Vec<(String, String)> = reader
+    let dispatches: Vec<(String, String, String)> = reader
         .read()
         .filter_map(|out| {
             let payload = JsonCodec.encode_server(&out.msg).ok()?;
@@ -843,7 +843,11 @@ fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
                 Target::Token(t) => format!("token:{t}"),
                 Target::AllExcept(t) => format!("except:{t}"),
             };
-            Some((target, payload))
+            let class_str = match out.delivery {
+                DeliveryClass::Reliable => "reliable",
+                DeliveryClass::Snapshot => "snapshot",
+            };
+            Some((target, payload, class_str.to_string()))
         })
         .collect();
 
@@ -853,11 +857,12 @@ fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
 
     OUTBOUND_CB.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
-            for (target, payload) in &dispatches {
-                let _ = cb.call2(
+            for (target, payload, class_str) in &dispatches {
+                let _ = cb.call3(
                     &JsValue::NULL,
                     &JsValue::from_str(target),
                     &JsValue::from_str(payload),
+                    &JsValue::from_str(class_str),
                 );
             }
         }

@@ -58,6 +58,20 @@ Every client maintains two parallel DataChannels on the same `RTCPeerConnection`
 
 The server classifies each `ServerMessage` via `delivery_class_for_msg()` (`src/server_app.rs:664`). `flush_outbound` (`src/server/bridge.rs:836`) passes the delivery class as a third string argument to the JS callback. `routeOutbound` (`server.html:1510`) dispatches to the appropriate channel map, falling back to the reliable channel for any token without a snapshot channel.
 
+## Client connection lifecycle (`gui/connection-manager.js`, #603 / #614)
+
+PeerJS peer creation, connect/retry/timeout, DataConnection handlers, and `Identify`-on-open were extracted from `client.html` inline script into `gui/connection-manager.js` (issue #603). The module exposes a `ConnectionManager` class with a small callback-based interface that `client.html` wires up: `onData`, `onStatus`, `onLog`, `onError`, and a `getIdent` callback for the session token. Vitest suite (`tests/client/connection-manager.test.js`) covers the pure module logic.
+
+**Auto-reconnect with backoff (#614):** The old hard 3-attempt ICE give-up was replaced with exponential backoff starting at 100ms, capped at 30s, with persistent retry. `_identSent` is reset on DataChannel close/error so `Identify` is re-sent on every reopen, restoring seat + rating through the existing server-side reconnect flow. `client.html` shows a "Retry now" affordance button. A generation guard ignores stale connection callbacks after a retry cycles the generation counter. A Playwright smoke test (`reconnect-midgame-sever.spec.ts`) exercises sever + revive mid-game and verifies the seat is restored and console reflects current system state within one broadcast tick.
+
+## Host page cues via HUD/lobby push (#604)
+
+`server.html`'s `routeOutbound` previously sniffed JSON payloads to drive the loading overlay, red-alert siren, and engine hum volume from wire content. With #604, these cues are now driven by dedicated push callbacks:
+- `__updateHud` — carries `ViewscreenHudState` with `engine_thrust` (engine hum volume), `red_alert` (siren), etc.
+- `__updateLobby` — carries `LobbyStatePayload` with `phase` (loading overlay visibility) and `loading_progress` (progress bar value).
+
+`routeOutbound` is now a pure forwarder — it inspects no JSON payloads, only dispatches by `Target` + `DeliveryClass`.
+
 ## Connection state machine (PRD #17)
 
 Both pages show a coloured dot in the top-right:

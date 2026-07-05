@@ -37,6 +37,10 @@ The old `src/stations.rs` shim has been deleted (issue #242). All call sites now
 - `get_station(stations, player_count, name) -> Option<&StationDef>` — lookup by count and name.
 - `all_stations_filled(stations, player_count, current: &[Console]) -> bool` — true when every station at `player_count` has at least one console represented in `current`.
 
+### Spectator queue removed (#605)
+
+`SessionManager`'s write-only spectator queue was deleted — the FIFO that used to back empty-station assignment when all slots were taken no longer exists. At-capacity join behaviour is unchanged: players still receive `StationAssigned { station: None }`, but there is no backing queue to promote on departure.
+
 ### TOML schema
 
 ```toml
@@ -61,6 +65,10 @@ Pure functions with no Bevy dependencies, imported via `crate::stations_policy::
 - `advance_on_join(stations: &ShipStations, current: &StationAssignments) -> StationAssignments` — lobby-safe variant: advances existing assigned players to the N+1 layout without assigning the new joiner (they must select a station explicitly).
 
 Call sites import directly from `crate::stations_policy` rather than via the legacy `crate::stations` shim.
+
+## Config-derived admission gate (#601)
+
+The `station_for_system()` lookup (`src/server_app.rs`) was replaced from a hardcoded system-id match to a `ShipConfig`-derived lookup via `config.system() -> station`. Unknown system IDs are now denied with a `warn!` log (previously conservative allow). Shield-arc prefix routing is preserved as a necessary exception (arc IDs derive from the variable-count shield-arc config, not from `ShipConfig.stations`). Admission-gate tests cover: config-defined system controllable only by its owning station's holder; unknown system ID is denied.
 
 ## Complexity presets
 

@@ -170,6 +170,27 @@ The following Bevy systems still write to `SimOutbox` (not `OutboundMessage` dir
 
 Each could be replaced by a `SimBroadcaster` registration that produces the same `ServerMessage` at the right cadence, eliminating the hand-written gating and timer.
 
+## Broadcast delta-cache registry (`cache_registry.rs`, issue #613)
+
+Six broadcast producers avoid redundant sends by diffing each tick's computed value against a "last broadcast" cache (`Resource`). Before issue #613, each cache was reset ad-hoc from two call sites, and nothing ever pruned per-UUID entries for despawned entities.
+
+The registry at `src/core/broadcast/cache_registry.rs` is the single place that knows about all six caches and exposes three operations:
+
+| Operation | Effect | Used by |
+|---|---|---|
+| `reset_all` | Zero every cache | `OnEnter(GamePhase::InProgress)` — multi-game restart safety |
+| `resync_for_token` | Push full-state snapshot to one session token without touching shared caches (so no other client gets force-resent full state) | Mid-game `Welcome` (reconnect), replacing the #599 quick-fix `refresh_caches_on_midgame_reconnect` that reset *every* cache globally |
+| `prune` | Remove despawned entity UUIDs from the two UUID-keyed caches (`LastBroadcastEntityPositions`, `LastBroadcastEntityHealth`) | Asteroid destruction, asteroid window-eviction, runtime-entity reconciliation |
+
+The five cache resources are defined in `cache_registry.rs` and re-exported from `server_app.rs`:
+- `LastBroadcastEntityPositions` — per-UUID `(Vec3, f32)` for NPCs/stations
+- `LastBroadcastEntityHealth` — per-UUID `(hull_fraction, shield_fraction)`
+- `LastBroadcastHull` — per-system `SystemHullStatus` Vec
+- `LastBroadcastShields` — per-facing `ShieldFacingStatus` Vec
+- `LastBroadcastBlackboards` — per-system `SystemBlackboard`
+
+A sixth cache, `LastWeaponsUpdate` (`src/console/weapons/server.rs`), stays defined in its natural home but is also covered by `reset_all` — so the registry's interface covers all six even though one struct lives elsewhere.
+
 ## Cross-links to relevant PRDs
 
 - **PRD #117** — Modifier System: `ModifierAdded` / `ModifierRemoved` messages broadcast via `OnEvent` producer.

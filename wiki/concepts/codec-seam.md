@@ -29,6 +29,16 @@ The project may need a binary wire format later (MessagePack via `rmp-serde` is 
 
 That's it. Every other module trades in typed Rust values.
 
+## Decode resilience (#602)
+
+`decode_bridge_client_messages` (added in `codec.rs`) partitions a batch of decode results into successes and `DecodeError` entries instead of failing the whole batch on one bad message. Each failure is logged at `warn!` with the raw JSON snippet. `drain_inbound` in `src/server/bridge.rs` calls this helper rather than decoding individually.
+
+## Table-driven round-trip harness (#610)
+
+The former ~164 hand-written per-variant serde round-trip tests were replaced with a table-driven harness using `strum::EnumDiscriminants + EnumIter`. A test iterates every discriminant of `ClientMessage` and `ServerMessage`, finds its sample data row in a table, and runs the encode-decode-assert cycle. Exhaustiveness is enforced: a new variant without a table entry fails the test run, naming the specific missing variant. Wire-format string pins (exact JSON assertions) are preserved as standalone tests. The change reduced `codec.rs` from 3289 to 1826 lines.
+
+Four version-skew tests pin current decode behaviour: unknown field on a known variant (silently ignored) and unknown type tag (decode error) — all with doc comments documenting the pinned behaviour.
+
 ## Round-trip test pattern
 
 Every variant gets a test like:

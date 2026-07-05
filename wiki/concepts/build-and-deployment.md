@@ -35,7 +35,9 @@ Outputs land in `dist/` with the client at `dist/client/`. The QR code on the vi
 
 ## CI workflows
 
-- **`.github/workflows/ci.yml`** — on push and pull_request: native unit tests, WASM server build, pure JS client copy, editor Vitest suite, Playwright smoke suite; on push to `main`: also deploy to `gh-pages`.
+- **`.github/workflows/ci.yml`** — on push and pull_request: `cargo fmt --check`, `clippy -D warnings`, native `cargo test`, WASM server build, pure JS client copy, editor Vitest suite, Playwright smoke suite; on push to `main`: also deploy to `gh-pages`.
+
+Formatting and lint gates run before `cargo test` to fail fast and cheaply. The build job depends on test (`needs: test`), so a fmt or clippy failure blocks the expensive WASM/trunk build, which transitively blocks smoke and deploy. (#612)
 
 The smoke suite runs the host page in headless Chromium with render-heavy plugins skipped. The host stays on continuous Bevy updates even when unfocused so backgrounded server pages still drain `wasm_receive_message` and send `Welcome` to test clients.
 
@@ -54,6 +56,10 @@ bevy_rapier3d = { version = "0.33", features = ["parallel"] }
 ```
 
 `parallel` is fine on native (where `cargo test` runs); WASM has no threads.
+
+### Bevy debug feature (#598)
+
+The bevy `debug` feature (enabling Bevy debug internals like system-name recording and visual debug overlays) was removed from default dependencies and is now a **conditional Cargo feature** (`debug`), opt-in via `--features debug`. Release builds exclude it entirely. Overlays that depend on it (entity inspector, behaviour overlay, region wireframes, modifier overlay, damage log) are functional only when the feature is active — the `wasm_bindgen` exports that gate them compile on all targets, but their Bevy-internal backing resources are no-ops without `debug`.
 
 ## Related
 

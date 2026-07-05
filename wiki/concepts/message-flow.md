@@ -113,6 +113,14 @@ See [Game Loop](./game-loop.md).
 
 See [Networking](./networking.md) for the DataChannel creation details.
 
+## Inbound decode resilience (#602)
+
+`drain_inbound` (`src/server/bridge.rs`) now calls `decode_bridge_client_messages` (`src/core/codec.rs`) which partitions decode results into successes and `DecodeError` entries instead of failing the whole batch on one bad message. Each decode failure is logged at `warn!` level with the raw JSON snippet. `Identify` token is clamped to 64 chars and name to 32 chars at the lobby handler boundary using Unicode-safe char truncation — caught by the aforementioned clamping before they reach session bookkeeping.
+
+## Bridge debug-toggles (#609)
+
+Six near-identical `RefCell<bool>` thread-locals (one per debug overlay) were replaced by one `DebugToggleKind` enum-keyed pending set plus `apply_pending_toggles` — a pure function (no Bevy/wasm dependency, unit-testable natively) that flips the corresponding `bool` flag for each variant present in the set. Adding a new debug overlay means: add a variant to `DebugToggleKind`, add its resource field to `apply_pending_toggles`, and add one `wasm_bindgen` export — no new thread-local, no new drain block. The six `wasm_bindgen` export names/signatures are unchanged so `server.html`'s hotkey wiring needed no changes.
+
 ## Diagnosing WASM panics
 
 `wasm_init` calls `console_error_panic_hook::set_once()` before `App::new()`. Without this, any Rust panic anywhere in the Bevy app traps the wasm instance and every *subsequent* JS→WASM call surfaces as `RuntimeError: memory access out of bounds`, almost always pointing at `wasm_receive_message` (the next entry point fired by PeerJS). The hook routes the real panic message + Rust source location to `console.error` so the actual fault is visible.

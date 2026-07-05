@@ -285,13 +285,18 @@ Pure unit tests in `src/client_comms.rs` and `src/console/comms/client.rs`. Run 
 cargo test comms
 ```
 
+## Server-side handlers (#608)
+
+Comms conversation handlers were relocated from `src/world/server.rs` into `src/console/comms/server.rs` (issue #608): `handle_hail`, `handle_respond_to_message`, `handle_clear_comms`, `handle_show_on_screen`, `handle_comms_channel2`, and `current_sender_in_range`, along with their 32 unit tests. Behaviour-preserving — only cross-module visibility (`pub(crate)`) was widened where the relocated handlers now call world-module helpers. The source page reference below is now the primary location.
+
 ## Sources
 
 - `src/console/comms/client.rs`
+- `src/console/comms/server.rs` (handle_hail, handle_respond_to_message, handle_clear_comms, handle_show_on_screen, handle_comms_channel2, current_sender_in_range — migrated from `src/world/server.rs` in #608)
 - `src/client_comms.rs`
 - `src/console/comms/inbox.rs`
 - `src/core/messages.rs`
 - `src/world/config.rs` (`speaker` parsing, legacy follow-up `from` alias, root-level `[comms.follow_up]` parsing + mutual-exclusion validation)
-- `src/world/server.rs` (thread_id generation in handle_hail, handle_respond_to_message, auto-triggered comms; root_follow_up scheduling at inject time)
+- `src/world/server.rs` (world-module helpers called by relocated handlers)
 - `src/world/content.rs` (ActiveDialogue.thread_id; `FiredCommsTemplate.root_follow_up`)
 - `assets/worlds/before_the_fire.toml` (Research Outpost handoff → Dr. Myst chain via `[comms.follow_up]`)

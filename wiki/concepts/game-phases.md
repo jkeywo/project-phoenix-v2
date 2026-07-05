@@ -31,6 +31,7 @@ pub enum GamePhase {
 - Station ownership is stored as `Player.station: Option<StationId>`.
 - Players send `SetReady { ready }`; the legacy captain-only start command is gone.
 - When every connected player is ready, the lobby handler moves to `Loading` if assets still need preloading, or directly to `InProgress` if preload is complete.
+- When a player **disconnects**, auto-start is re-evaluated: the disconnecting player's ready flag is cleared, then `all_ready()` is checked again. If the remaining players are all ready, the same phase-transition + `GameStarted` broadcast fires (including the `Loading` gate when preload is incomplete). A returning player must re-confirm readiness. (#600)
 - The server derives available consoles from unclaimed stations in the loaded `ShipConfig`.
 
 ## Loading
@@ -48,14 +49,17 @@ Reconnect is still accepted during `Loading`; a refreshing player receives `Welc
 
 ## Disconnect And Reconnect
 
-Disconnect no longer vacates a per-player console vector because players do not own one. Instead:
+Disconnect no longer vacates a per-player player console vector because players do not own one. Instead:
 
 1. `process_disconnect_with_stations` resolves the player's `StationId`.
 2. It records the station's current rating in `Player.last_rating`.
 3. It applies the station's `Backfill` rating through `rating::apply_rating`, switching station-owned systems to AI control.
 4. It broadcasts `PlayerLeft` and `RatingChanged { rating_name: "Backfill" }`.
+5. Auto-start is re-evaluated (see Lobby above).
 
-On reconnect, `Identify` restores the previous station only if no other connected player has claimed it. If restore succeeds, the server broadcasts `StationAssigned` and `RatingChanged` with the saved `last_rating` (or the fallback used by the handler). If the station was claimed, the reconnecting player remains without a station and can select another available one or wait as a spectator.
+On reconnect, `Identify` restores the previous station only if no other connected player has claimed it. If restore succeeds, the server broadcasts `StationAssigned` and `RatingChanged` with the saved `last_rating` (or the fallback used by the handler). If the station was claimed, the reconnecting player remains without a station and can select another available one.
+
+**Spectator queue removed (#605):** The write-only `spectator_queue` field on `SessionManager` was deleted (all 5 API methods, push/remove call sites, and 6 unit tests). At-capacity join behaviour is unchanged — players still receive `StationAssigned { station: None }` when all slots are taken, but there is no FIFO queue backing the empty-station assignment: a cap-reached player simply has no station and must wait for a slot to open via another player's departure.
 
 ## GameOver
 

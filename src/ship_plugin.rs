@@ -277,7 +277,8 @@ impl Plugin for ShipPlugin {
                     .after(crate::sim_sets::AiTickLabel),
                 process_helm_inputs
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(operate_helm_ai),
+                    .after(operate_helm_ai)
+                    .after(tick_impulse),
                 publish_joystick_to_engines
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(process_helm_inputs),

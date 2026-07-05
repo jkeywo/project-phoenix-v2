@@ -416,6 +416,19 @@ Ship sidecars currently carry three provisional points:
 `[0.5, -0.1, 0]`, `[-0.25, -0.1, 0.25]`, and
 `[-0.25, -0.1, -0.25]` in Bevy's Y-up model-rig space.
 
+Marker and target-point positions are stored in post-base-rig space: the
+sidecar `[base]` transform is applied to the rendered GLB child, while
+`ModelMarkers` keeps authored points that should already match that corrected
+space. Runtime PFX resolves those points with
+`Transform::transform_point`, so the entity transform's current translation,
+rotation, and scale are applied. This includes `[mesh].scale` /
+`[mesh].rotation` because the renderer writes those onto the parent entity
+transform, and it includes game yaw/roll updates from ship physics. It does
+not separately apply the sidecar `[base]` transform during lookup; raw GLB-local
+marker coordinates would be wrong unless converted into post-base-rig space
+first. World-level `[[entity]].transform.rotation` / `scale` currently parse
+but are not applied by the immediate entity spawning path.
+
 ### Drift guards and tests
 
 - `validate_phaser_banks` / `validate_torpedo_tubes` reject empty lists,

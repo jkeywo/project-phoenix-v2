@@ -27,7 +27,7 @@ First extracted console plugin in the simulation-split series ([#227](https://gi
 
 ## Registration
 
-`CaptainPlugin` is registered as a sub-plugin of `SimulationPlugin` in `src/simulation.rs:307` and directly in the simulation `test_app` at `src/simulation.rs:1923`. The module is declared in `src/lib.rs:5`.
+`CaptainPlugin` was extracted from the former `src/simulation.rs` and is now registered by `add_simulation_plugins()` in `src/server_app.rs` and the test `test_app` in `src/server_app.rs::tests`. The module is declared in `src/lib.rs`.
 
 ## Related
 

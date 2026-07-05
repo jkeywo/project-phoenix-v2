@@ -54,9 +54,9 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 .add_plugins(crate::weapons_plugin::WeaponsPlugin)
 ```
 
-Registered as a sub-plugin of `SimulationPlugin` in `src/simulation.rs`. The module is declared in `src/lib.rs`.
+Registered by `add_simulation_plugins()` in `src/server_app.rs`. The module is declared in `src/lib.rs`.
 
-The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `WeaponsUpdate` at 10 Hz to the Tactical holder) is also defined in `weapons_plugin.rs` and registered by `SimulationPlugin`.
+The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `WeaponsUpdate` at 10 Hz to the Tactical holder) is defined in `src/console/weapons/server.rs:2738` and registered by `add_simulation_plugins()` in `src/server_app.rs:329`.
 
 ## Broadcaster
 
@@ -106,7 +106,7 @@ Tests live in `src/weapons_plugin.rs` under `#[cfg(test)] mod tests`.
 | `weapons_update_fire_ready_false_when_target_out_of_phaser_range` | `WeaponsUpdate.fire_ready` false for out-of-range target |
 | `phaser_damage_modifier_doubles_kill_rate` | `PhaserDamage` modifier at +1 doubles effective DPS |
 
-Integration tests (test-app exercises `WeaponsPlugin` as a complete plugin) are in `src/simulation.rs::tests`.
+Integration tests (test-app exercises `WeaponsPlugin` as a complete plugin) are in `src/server_app.rs::tests`.
 
 ## Torpedo configuration (TOML-driven)
 
@@ -263,7 +263,7 @@ Regression test:
 ## Sources
 
 - `src/weapons_plugin.rs`
-- `src/simulation.rs` (pub use re-exports and integration tests)
+- `src/server_app.rs` (integration tests)
 - Issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)
 - [Console Plugin Pattern](./console-plugin-pattern.md)
 - [Broadcaster Seam](./broadcaster-seam.md)

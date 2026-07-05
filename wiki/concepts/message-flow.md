@@ -1,9 +1,9 @@
 ---
 title: Message Flow
 type: concept
-tags: [messages, bridge, wasm, bevy, events, routing]
-sources: [src/server/bridge.rs, src/server/lobby.rs, src/server/simulation.rs, AGENTS.md]
-updated: 2026-06-18
+tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot]
+sources: [src/server/bridge.rs, src/lobby/server.rs, src/server_app.rs, AGENTS.md]
+updated: 2026-07-05
 ---
 
 # Message Flow
@@ -11,7 +11,7 @@ updated: 2026-06-18
 The single most important diagram in the project.
 
 ```
-Phone (client.html — Bevy/WASM)
+Phone (client.html — pure HTML/JS)
    │  builds ClientMessage, encodes to JSON, sends over PeerJS
    ▼
 server.html JS
@@ -21,17 +21,18 @@ server.html JS
 src/server/bridge.rs :: drain_inbound()
    │  decodes via JsonCodec, queues InboundMessage
    ▼
-Bevy systems in lobby.rs / simulation.rs
+Bevy systems in server_app.rs / console plugins
    │  read InboundMessage events (pull-based)
-   │  mutate SessionManager / ShipState
-   │  write OutboundMessage events with routing target
+   │  mutate session / ship state
+   │  write OutboundMessage events with routing target + delivery class
    ▼
 src/server/bridge.rs :: flush_outbound()
    │  encodes ServerMessage → JSON
-   │  invokes the JS callback registered with set_message_callback
+   │  invokes JS callback(target, payload, deliveryClass)
    ▼
-server.html JS :: routeOutbound()
-   │  fans out: All / Token(t) / AllExcept(t)
+server.html JS :: routeOutbound(target, payload, deliveryClass)
+   │  dispatch to snapshot DataChannel (unordered) or reliable DataChannel
+   │  fallback: snapshot-unavailable tokens → reliable channel
    ▼
 client.html (one or more phones)
    │  decode → update local view-model → render
@@ -47,13 +48,35 @@ This project uses Bevy's **pull-based** message system (not legacy events):
 
 ## Routing targets
 
-`OutboundMessage` carries a routing target enum:
+`OutboundMessage` carries a routing target enum and a delivery class:
 
-- `All` — broadcast to every connected client.
-- `Token(SessionToken)` — direct to one player (used for `Welcome`, future per-console payloads).
-- `AllExcept(SessionToken)` — broadcast minus one (e.g. `PlayerJoined` to everyone but the joiner).
+| Field | Type | Description |
+|---|---|---|
+| `target` | `Target` | Who receives the message |
+| `msg` | `ServerMessage` | The payload |
+| `delivery` | `DeliveryClass` | How to send: `Reliable` or `Snapshot` |
 
-PRD #66 adds `Target::One(token)` per-console payloads at 10 Hz so Weapons/Engineering only get the messages they need.
+Target variants:
+
+- `Target::All` — broadcast to every connected client.
+- `Target::Token(SessionToken)` — direct to one player (used for `Welcome`, per-station payloads).
+- `Target::AllExcept(SessionToken)` — broadcast minus one (e.g. `PlayerJoined` to everyone but the joiner).
+
+## Delivery classes
+
+Defined in `src/core/messages.rs:138`:
+
+```rust
+pub enum DeliveryClass {
+    Reliable,  // ordered, retransmit — PeerJS default DataChannel
+    Snapshot,  // unordered, no retransmit — second DataChannel
+}
+```
+
+- **`Reliable`** — guarantee delivery in order. Used for commands (`FirePhaser`, `SelectStation`, `SetReady`), lobby messages (`Welcome`, `PlayerJoined`), and anything where dropping a message would cause visible state corruption.
+- **`Snapshot`** — best-effort, unordered, never retransmitted. Used for periodic state broadcasts (`SimState`, `BlackboardUpdate`, `ShieldStatus`, `RepairState`, `PowerState`, `WeaponsUpdate`, `SystemHullUpdate`) where a stale snapshot is worse than a dropped one. The server classifies each message variant via `delivery_class_for_msg()` in `src/server_app.rs:664`.
+
+On the wire `routeOutbound` (server.html:1510) dispatches snapshot-class messages to the client's `tokenSnapshotConns` (unordered DataChannel with `maxRetransmits: 0`) when available, falling back to the reliable channel. The reliable channel is always the final fallback — no snapshot-class message is ever dropped due to an absent snapshot channel.
 
 ## Disconnect lifecycle
 
@@ -64,18 +87,31 @@ JS detects a peer drop and calls `wasm_player_disconnected(token)`. The bridge f
 
 ## Tick rates
 
-| Channel | Rate |
-|---|---|
-| Discrete events (`PlayerJoined`, `ConsoleSelected`, `GameStarted`, …) | Immediate (per inbound message) |
-| `HelmInput` from clients | 10 Hz while controls are active |
-| `SimState` broadcast | 10 Hz |
-| Bevy frame loop | `requestAnimationFrame` (browser tab) |
+| Channel | Rate | Delivery |
+|---|---|---|
+| Discrete events (`PlayerJoined`, `StationAssigned`, `GameStarted`, …) | Immediate (per inbound message) | Reliable |
+| `HelmInput` / commands from clients | 10 Hz while controls are active | Reliable |
+| `SimState` broadcast | 10 Hz | Snapshot |
+| Per-console state (`PowerState`, `WeaponsUpdate`, `RepairState`, `ShieldStatus`) | 10 Hz | Snapshot |
+| `BlackboardUpdate` / `SystemHullUpdate` | 10 Hz | Snapshot |
+| Bevy frame loop | `requestAnimationFrame` (browser tab) | — |
 
 See [Game Loop](./game-loop.md).
 
 ## Why the codec seam matters here
 
-`bridge.rs` is the *only* call site of `JsonCodec::decode` / `encode` outside tests. This means the wire format is one module change away from being binary. See [Codec Seam](./codec-seam.md).
+`src/server/bridge.rs:836` (`flush_outbound`) is the *only* production call site of `JsonCodec::encode_server` / `decode` outside tests. This means the wire format is one module change away from being binary. See [Codec Seam](./codec-seam.md).
+
+## Snapshot channel lifecycle
+
+1. When a client connects, `connection-manager.js` creates an ordered DataChannel (PeerJS `DataConnection` with `{ reliable: true }`).
+2. Once the reliable channel opens, `connection-manager.js` creates a second unordered DataChannel on the same `RTCPeerConnection` via `pc.createDataChannel('snapshot', { ordered: false, maxRetransmits: 0 })`.
+3. The server's `server.html` listens for `pc.ondatachannel` with `label === 'snapshot'` and registers the channel in `tokenSnapshotConns` keyed by session token.
+4. `flush_outbound` (bridge.rs:836) passes each `OutboundMessage`'s delivery class as a third `"reliable"` / `"snapshot"` string argument to the JS callback.
+5. `routeOutbound` (server.html:1510) dispatches to `tokenSnapshotConns` for snapshot-class messages or `tokenConns` for reliable ones. When a token has no snapshot channel, it falls back to the reliable channel.
+6. On disconnect, both maps are cleaned up. On reconnect, a new snapshot channel is created alongside the new reliable connection.
+
+See [Networking](./networking.md) for the DataChannel creation details.
 
 ## Diagnosing WASM panics
 

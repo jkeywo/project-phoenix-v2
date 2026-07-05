@@ -2,8 +2,8 @@
 title: Game Loop
 type: concept
 tags: [loop, ticks, simulation, rates]
-sources: [src/server/simulation.rs, src/server/ship_physics.rs, AGENTS.md]
-updated: 2026-05-08
+sources: [src/server_app.rs, src/ship/physics.rs, AGENTS.md]
+updated: 2026-07-05
 ---
 
 # Game Loop

@@ -32,7 +32,7 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 .add_plugins(crate::science_plugin::SciencePlugin)
 ```
 
-Registered as a sub-plugin of `SimulationPlugin` in `src/simulation.rs`. The module is declared in `src/lib.rs`.
+Registered by `add_simulation_plugins()` in `src/server_app.rs`. The module is declared in `src/lib.rs`.
 
 ## Message Flow
 
@@ -60,7 +60,7 @@ Tests live in `src/science_plugin.rs` under `#[cfg(test)] mod tests`.
 ## Sources
 
 - `src/science_plugin.rs`
-- `src/simulation.rs` (aggregator registration)
+- `src/server_app.rs` (aggregator registration via `add_simulation_plugins`)
 - Issue [#258](https://github.com/jkeywo/project-phoenix-v2/issues/258)
 - [Console Plugin Pattern](./console-plugin-pattern.md)
 - [Broadcaster Seam](./broadcaster-seam.md)

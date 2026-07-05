@@ -37,7 +37,7 @@ After PR 6 of PRD #597 (2026-07-02), `ShipPowerSystem`, `PowerConfigResource`, `
 .add_plugins(crate::power_plugin::PowerPlugin)
 ```
 
-Registered as a sub-plugin of `SimulationPlugin` in `src/simulation.rs`. The module is declared in `src/lib.rs`.
+Registered by `add_simulation_plugins()` in `src/server_app.rs`. The module is declared in `src/lib.rs`.
 
 ## Broadcaster
 
@@ -72,7 +72,7 @@ Tests live in `src/power_plugin.rs` under `#[cfg(test)] mod tests`.
 ## Sources
 
 - `src/power_plugin.rs`
-- `src/simulation.rs` (pub use re-exports + ordering constraints)
+- `src/server_app.rs` (ordering constraints within `add_simulation_plugins`)
 - `src/modifiers/coordination.rs` (`translate_power_modifiers`)
 - Issue [#254](https://github.com/jkeywo/project-phoenix-v2/issues/254)
 - [Console Plugin Pattern](./console-plugin-pattern.md)

@@ -47,5 +47,5 @@ Final home will be `src/ship/server.rs` once Deepening A ([#223](https://github.
 ## Sources
 
 - `src/ship_plugin.rs`
-- `src/simulation.rs:handle_collisions`
+- `src/server_app.rs:handle_collisions`
 - Issue [#239](https://github.com/jkeywo/project-phoenix-v2/issues/239)

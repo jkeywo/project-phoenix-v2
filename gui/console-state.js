@@ -65,6 +65,27 @@ function ownHull(stationId, state) {
   return (state.consoleHull || []).find(h => h.system_id === stationId) || null;
 }
 
+/**
+ * Aggregate hull health across all systems that belong to a station.
+ *
+ * Destroyed or offline systems remain in the denominator (their `max_hp` still
+ * counts; their `current` is 0) so that station damage can only increase as
+ * systems are destroyed.
+ *
+ * @param {string}   stationId      - lowercase station id (e.g. 'helm')
+ * @param {Array}    consoleHull    - full ship hull array from state.consoleHull
+ * @param {object}   stationSystems - map of stationId → [systemId, ...] from state.stationSystems
+ * @returns {{ entries: Array, totalCurrent: number, totalMax: number, pct: number, damagePct: number }}
+ */
+export function aggregateStationHull(stationId, consoleHull, stationSystems) {
+  const systemIds = (stationSystems || {})[stationId] || [];
+  const entries = (consoleHull || []).filter(h => systemIds.includes(h.system_id));
+  const totalCurrent = entries.reduce((s, h) => s + h.current, 0);
+  const totalMax = entries.reduce((s, h) => s + h.max_hp, 0);
+  const pct = totalMax > 0 ? totalCurrent / totalMax : 1;
+  return { entries, totalCurrent, totalMax, pct, damagePct: 1 - pct };
+}
+
 function withObjectiveTargets(entities, objectives) {
   const targets = activeObjectiveTargetNames(objectives);
   if (targets.size === 0) return entities || [];
@@ -412,7 +433,7 @@ export function buildWeaponsConsoleState(state) {
     regions,
     phaser_arcs:   mappedPhaserArcs,
     torpedo_arcs:  torpedoArcs,
-    own_hull:      ownHull('tactical', state),
+    own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
     tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
   });
 }
@@ -436,7 +457,7 @@ export function buildCaptainConsoleState(state) {
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
-      own_hull:              ownHull('captain', state),
+      own_hull:              aggregateStationHull('captain', state.consoleHull, state.stationSystems),
     });
   }
   // Legacy fallback.
@@ -458,7 +479,7 @@ export function buildCaptainConsoleState(state) {
                              ? 'RED ALERT — All hands to battlestations.'
                              : 'Standing by. All systems nominal.',
     blips:                 state.blips       || [],
-    own_hull:              ownHull('captain', state),
+    own_hull:              aggregateStationHull('captain', state.consoleHull, state.stationSystems),
   });
 }
 
@@ -522,7 +543,7 @@ export function buildHelmConsoleState(state) {
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
-    own_hull:                ownHull('helm', state),
+    own_hull:                aggregateStationHull('helm', state.consoleHull, state.stationSystems),
     boost_enabled:           !!boostEnabled,
     boost_battery:           boostBattery,
     boost_active:            !!boostActive,
@@ -594,7 +615,7 @@ export function buildPowerConsoleState(state) {
       locked:         bb.locked         || false,
       reactor_online: reactorOnline,
       battery_online: batteryOnline,
-      own_hull:       ownHull('power', state),
+      own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
       power_auto:     state.stationRatings?.['power'] === 'Backfill',
     });
   }
@@ -607,7 +628,7 @@ export function buildPowerConsoleState(state) {
     locked:         state.powerLocked  || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
-    own_hull:       ownHull('power', state),
+    own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
     power_auto:     state.stationRatings?.['power'] === 'Backfill',
   });
 }
@@ -625,7 +646,7 @@ export function buildShieldsConsoleState(state) {
       focused_facing:     bb.focused_facing     ?? null,
       target_bearing:     bb.target_bearing     ?? null,
       grid_status:        bb.grid_status        ?? 'GRID NOMINAL',
-      own_hull: ownHull('shields', state),
+      own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
       shields_auto: state.stationRatings?.['shields'] === 'Backfill',
     });
   }
@@ -646,7 +667,7 @@ export function buildShieldsConsoleState(state) {
     target_bearing:     targetBearing,
     grid_status:        (state.shieldFacings && state.shieldFacings.length > 0)
                           ? 'GRID NOMINAL' : 'GRID OFFLINE',
-    own_hull: ownHull('shields', state),
+    own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
     shields_auto: state.stationRatings?.['shields'] === 'Backfill',
   });
 }
@@ -761,7 +782,7 @@ export function buildSensorsConsoleState(state) {
     target_shield_freq: targetShieldFreq,
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
-    own_hull: ownHull('sensors', state),
+    own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
     sensors_auto: state.stationRatings?.['sensors'] === 'Backfill',
   });
 }
@@ -778,7 +799,7 @@ export function buildCommsConsoleState(state) {
       objectives: bb.objectives ?? [],
       contacts:   bb.contacts   ?? [],
       on_screen:  state.currentView === 'Comms',
-      own_hull:   ownHull('comms', state),
+      own_hull:   aggregateStationHull('comms', state.consoleHull, state.stationSystems),
       comms_auto: state.stationRatings?.['comms'] === 'Backfill',
     });
   }
@@ -787,7 +808,7 @@ export function buildCommsConsoleState(state) {
     messages:  state.commsMessages || [],
     contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
-    own_hull:  ownHull('comms', state),
+    own_hull:  aggregateStationHull('comms', state.consoleHull, state.stationSystems),
     comms_auto: state.stationRatings?.['comms'] === 'Backfill',
   });
 }
@@ -865,7 +886,7 @@ export function buildNavigationConsoleState(state) {
     ship_x:                  state.shipX || 0,
     ship_z:                  state.shipZ || 0,
     ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
-    own_hull: ownHull('navigation', state),
+    own_hull: aggregateStationHull('navigation', state.consoleHull, state.stationSystems),
     ship_speed:              state.forwardSpeed || 0,
     impulse_charge_progress: charge,
     cancel_visible:          charge > 0,

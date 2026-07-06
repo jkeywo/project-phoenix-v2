@@ -1830,4 +1830,56 @@ mod tests {
         assert_eq!(successes[0].0, "t1");
         assert_eq!(failures[0].token, "t2");
     }
+
+    // ── station_systems round-trip (issue #625) ───────────────────────────
+
+    #[test]
+    fn ship_client_config_station_systems_round_trips() {
+        // Build a config that carries a station→system map.
+        let mut station_systems = HashMap::new();
+        station_systems.insert("helm".to_string(), vec!["helm".to_string(), "helm-engine-port".to_string()]);
+        station_systems.insert("tactical".to_string(), vec!["tactical".to_string()]);
+        let config = ShipClientConfig {
+            station_systems,
+            ..ShipClientConfig::default()
+        };
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config: config.clone(),
+            station_ratings: HashMap::new(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+        // Verify the station_systems field survives the round-trip.
+        let json = JsonCodec.encode_server(&msg).unwrap();
+        let decoded = JsonCodec.decode_server(&json).unwrap();
+        if let ServerMessage::Welcome { ship_config, .. } = decoded {
+            assert_eq!(ship_config.station_systems, config.station_systems);
+        } else {
+            panic!("expected Welcome");
+        }
+    }
+
+    #[test]
+    fn ship_client_config_station_systems_defaults_empty_when_missing() {
+        // Old server payloads without station_systems should decode cleanly.
+        // Build a minimal Welcome message, encode it, strip the station_systems
+        // key, then re-decode — the #[serde(default)] must fill in an empty map.
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config: ShipClientConfig::default(),
+            station_ratings: HashMap::new(),
+        };
+        let full_json = JsonCodec.encode_server(&msg).unwrap();
+        // Remove the station_systems entry to simulate an old server payload.
+        let stripped = full_json.replace(",\"station_systems\":{}", "");
+        let decoded = JsonCodec.decode_server(&stripped).unwrap();
+        if let ServerMessage::Welcome { ship_config, .. } = decoded {
+            assert!(ship_config.station_systems.is_empty(), "station_systems defaults to empty map");
+        } else {
+            panic!("expected Welcome");
+        }
+    }
 }

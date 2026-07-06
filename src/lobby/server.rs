@@ -275,6 +275,22 @@ fn update_session_with_config(
         next.hull_id = ship_config.hull_id.clone();
         next.power_rating = ship_config.power_rating;
         next.ship_css = ship_config.css.clone();
+        // Station→system membership map: lets the client aggregate per-station
+        // hull without knowing the ship layout. Iterate the stations block of
+        // the TOML and collect system ids per station.
+        if let Some(sc) = ship_config.ship_config.as_ref() {
+            next.station_systems = sc
+                .stations
+                .iter()
+                .map(|station| {
+                    let system_ids = sc
+                        .systems_for_station(&station.id)
+                        .map(|sys| sys.id.0.clone())
+                        .collect();
+                    (station.id.0.clone(), system_ids)
+                })
+                .collect();
+        }
         ship_client_config.0 = next;
     }
 }

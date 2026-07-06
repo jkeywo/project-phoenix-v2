@@ -532,6 +532,13 @@ pub struct ShipClientConfig {
     /// ship TOML.
     #[serde(default)]
     pub ship_css: Option<String>,
+    /// Map from station id string to the list of system id strings that
+    /// belong to that station. Populated from `ShipConfig::systems_for_station`
+    /// and sent on `Welcome` so the client can aggregate per-station hull
+    /// without knowing the ship layout. Uses `#[serde(default)]` for backward
+    /// compatibility with older server builds that don't send this field.
+    #[serde(default)]
+    pub station_systems: HashMap<String, Vec<String>>,
 }
 
 fn default_tactical_radar_range() -> f32 {
@@ -600,6 +607,7 @@ impl Default for ShipClientConfig {
             hull_id: None,
             power_rating: None,
             ship_css: None,
+            station_systems: HashMap::new(),
         }
     }
 }

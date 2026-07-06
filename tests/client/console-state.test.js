@@ -7,6 +7,7 @@ import {
   buildTargetBlip,
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
   NAVIGATION_RADAR_RANGE,
+  aggregateStationHull,
   buildWeaponsConsoleState,
   buildCaptainConsoleState,
   buildHelmConsoleState,
@@ -1370,5 +1371,82 @@ describe('auto fields', () => {
 
   it('comms_auto is false when stationRatings is absent', () => {
     expect(parse(buildCommsConsoleState(EMPTY)).comms_auto).toBe(false);
+  });
+});
+
+// ── aggregateStationHull (issue #625) ────────────────────────────────────────
+
+describe('aggregateStationHull', () => {
+  const hull = [
+    { system_id: 'helm', display_name: 'Helm', current: 20, max_hp: 25, tier: 'Operational' },
+    { system_id: 'helm-engine-port', display_name: 'Port Engine', current: 15, max_hp: 25, tier: 'Damaged' },
+  ];
+  const stationSystems = { helm: ['helm', 'helm-engine-port'], tactical: ['tactical'] };
+
+  it('returns entries for the given station', () => {
+    const agg = aggregateStationHull('helm', hull, stationSystems);
+    expect(agg.entries).toHaveLength(2);
+    expect(agg.entries.map(e => e.system_id)).toContain('helm');
+    expect(agg.entries.map(e => e.system_id)).toContain('helm-engine-port');
+  });
+
+  it('computes totalCurrent and totalMax correctly', () => {
+    const agg = aggregateStationHull('helm', hull, stationSystems);
+    expect(agg.totalCurrent).toBe(35);
+    expect(agg.totalMax).toBe(50);
+  });
+
+  it('computes pct as current/max', () => {
+    const agg = aggregateStationHull('helm', hull, stationSystems);
+    expect(agg.pct).toBeCloseTo(0.7);
+  });
+
+  it('computes damagePct as 1 - pct', () => {
+    const agg = aggregateStationHull('helm', hull, stationSystems);
+    expect(agg.damagePct).toBeCloseTo(0.3);
+  });
+
+  it('damaged system reduces pct but remains in denominator', () => {
+    const hullWithDamaged = [
+      { system_id: 'helm', display_name: 'Helm', current: 25, max_hp: 25, tier: 'Operational' },
+      { system_id: 'helm-engine-port', display_name: 'Port Engine', current: 5, max_hp: 25, tier: 'Damaged' },
+    ];
+    const agg = aggregateStationHull('helm', hullWithDamaged, stationSystems);
+    // max_hp: 50 (both systems still in denominator)
+    expect(agg.totalMax).toBe(50);
+    expect(agg.totalCurrent).toBe(30);
+    expect(agg.pct).toBeCloseTo(0.6);
+  });
+
+  it('destroyed system current=0 but max_hp still in denominator', () => {
+    const hullWithDestroyed = [
+      { system_id: 'helm', display_name: 'Helm', current: 25, max_hp: 25, tier: 'Operational' },
+      { system_id: 'helm-engine-port', display_name: 'Port Engine', current: 0, max_hp: 25, tier: 'Destroyed' },
+    ];
+    const agg = aggregateStationHull('helm', hullWithDestroyed, stationSystems);
+    expect(agg.totalMax).toBe(50);
+    expect(agg.totalCurrent).toBe(25);
+    expect(agg.pct).toBeCloseTo(0.5);
+  });
+
+  it('returns pct=1 when stationSystems is empty for that station', () => {
+    const agg = aggregateStationHull('comms', hull, stationSystems);
+    expect(agg.entries).toHaveLength(0);
+    expect(agg.totalMax).toBe(0);
+    expect(agg.pct).toBe(1);
+    expect(agg.damagePct).toBe(0);
+  });
+
+  it('falls back gracefully when stationSystems is null/undefined', () => {
+    const agg = aggregateStationHull('helm', hull, null);
+    expect(agg.entries).toHaveLength(0);
+    expect(agg.pct).toBe(1);
+  });
+
+  it('falls back gracefully when consoleHull is null/undefined', () => {
+    const agg = aggregateStationHull('helm', null, stationSystems);
+    expect(agg.entries).toHaveLength(0);
+    expect(agg.totalMax).toBe(0);
+    expect(agg.pct).toBe(1);
   });
 });

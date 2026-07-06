@@ -601,6 +601,11 @@ pub struct BlasterBankConfig {
     /// Optional rig-marker name linking this bank to a mount point.
     #[serde(default)]
     pub marker: Option<String>,
+    /// Maximum range in world units. Projectile lifespan is computed per-bank
+    /// as `range / projectile_speed`. Use `default_blaster_range` (35.0) when
+    /// absent from TOML.
+    #[serde(default = "default_blaster_range")]
+    pub range: f32,
 }
 
 fn default_blaster_fire_arc_deg() -> f32 {
@@ -626,6 +631,33 @@ fn default_blaster_visual_scale() -> f32 {
 }
 fn default_blaster_damage() -> i32 {
     20
+}
+fn default_blaster_range() -> f32 {
+    35.0
+}
+
+impl BlasterBankConfig {
+    /// Convert this TOML config into a runtime `crate::blaster::BlasterBankConfig`.
+    pub fn to_runtime(&self) -> crate::blaster::BlasterBankConfig {
+        crate::blaster::BlasterBankConfig {
+            id: self.id.clone(),
+            facing_deg: self.facing_deg,
+            fire_arc_deg: self.fire_arc_deg,
+            volley_count: self.volley_count,
+            volley_interval_secs: self.volley_interval_secs,
+            cooldown_secs: self.cooldown_secs,
+            charge_time_secs: self.charge_time_secs,
+            projectile_speed: self.projectile_speed,
+            collision_radius: self.collision_radius,
+            visual_scale: self.visual_scale,
+            damage: self.damage,
+            shield_pierce: self.shield_pierce,
+            recoil_impulse: self.recoil_impulse,
+            screenshake_magnitude: self.screenshake_magnitude,
+            marker: self.marker.clone(),
+            range: self.range,
+        }
+    }
 }
 
 /// Stable identifier for a torpedo tube, parsed verbatim from the TOML

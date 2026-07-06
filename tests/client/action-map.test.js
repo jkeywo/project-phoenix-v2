@@ -65,7 +65,7 @@ describe('fire_blaster', () => {
     const send = mkSend();
     ACTION_MAP.fire_blaster({ action: 'fire_blaster', bank: 'fore' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'blaster-bank-fore',
+      target: 'blaster-fore',
       payload: { type: 'FireBlaster' },
     });
   });

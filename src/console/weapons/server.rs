@@ -1844,7 +1844,7 @@ fn handle_fire_torpedo(
 
 // ── Blaster systems (issue #631) ─────────────────────────────────────────────
 
-/// Handle `ControlSystem { target: "blaster-bank-<id>", payload: FireBlaster }`.
+/// Handle `ControlSystem { target: "blaster-<id>", payload: FireBlaster }`.
 ///
 /// Resolves the bank id from the target SystemId, gates on the bank's
 /// fine-system policy, then calls `BlasterSystem::request_fire`.
@@ -1874,8 +1874,8 @@ fn handle_fire_blaster(
             continue;
         };
 
-        // Target must look like "blaster-bank-<bank_id>" (from JS action-map).
-        let bank_id = match target.0.strip_prefix("blaster-bank-") {
+        // Target must look like "blaster-<bank_id>" — matches `blaster_bank_system_id`.
+        let bank_id = match target.0.strip_prefix("blaster-") {
             Some(id) if !id.is_empty() => id.to_string(),
             _ => continue,
         };
@@ -1894,8 +1894,7 @@ fn handle_fire_blaster(
             continue;
         };
 
-        // Gate on the bank's fine-system policy. The system ID uses the
-        // `blaster-<bank_id>` convention (not `blaster-bank-<bank_id>`).
+        // Gate on the bank's fine-system policy.
         let bank_system_id = crate::system_registry::blaster_bank_system_id(&bank_id)
             .filter(|id| system_is_registered(control_sources, id));
         let policy = match &bank_system_id {

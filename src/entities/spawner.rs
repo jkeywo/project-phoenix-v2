@@ -480,6 +480,23 @@ pub fn spawn_entity(
         entity_commands.insert(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
     }
 
+    // Blasters — attach a `BlasterSystemResource` component when the entity
+    // TOML has a non-empty `[[weapons_console.blaster_banks]]` list. Mirrors
+    // the torpedo insertion above so NPCs and the player ship both participate
+    // in the per-entity component model (issue #631 Finding 1).
+    if let Some(wc) = &config.weapons_console {
+        if !wc.blaster_banks.is_empty() {
+            let blaster_systems: Vec<crate::blaster::BlasterSystem> = wc
+                .blaster_banks
+                .iter()
+                .map(|bc| crate::blaster::BlasterSystem::new(bc.to_runtime()))
+                .collect();
+            entity_commands.insert(crate::weapons_plugin::BlasterSystemResource(
+                blaster_systems,
+            ));
+        }
+    }
+
     // HelmConsole - attach a HelmConsoleSection so the AI tick can read movement params.
     // Also insert the four drive-config Components (PR 4 — PRD #597) so NPC ships
     // participate in the per-entity config model alongside the player ship.

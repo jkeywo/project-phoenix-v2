@@ -22,9 +22,6 @@
 
 use std::f32::consts::PI;
 
-/// Default maximum range in world units. Projectile lifespan = range / speed.
-pub const DEFAULT_PROJECTILE_RANGE: f32 = 35.0;
-
 // ── Configuration ──────────────────────────────────────────────────────────
 
 /// TOML-loaded configuration for one blaster bank instance.
@@ -64,6 +61,9 @@ pub struct BlasterBankConfig {
     pub screenshake_magnitude: f32,
     /// Optional rig-marker name for mount point resolution.
     pub marker: Option<String>,
+    /// Maximum range in world units. Projectile lifespan is computed as
+    /// `range / projectile_speed` at fire time.
+    pub range: f32,
 }
 
 impl Default for BlasterBankConfig {
@@ -84,6 +84,7 @@ impl Default for BlasterBankConfig {
             recoil_impulse: 0.0,
             screenshake_magnitude: 0.0,
             marker: None,
+            range: 35.0,
         }
     }
 }
@@ -179,7 +180,14 @@ impl BlasterSystem {
     ///
     /// Does nothing if the bank is already on cooldown or has a volley
     /// in progress.
+    ///
+    /// Note: `fire_arc_deg` is stored in `config` but is NOT enforced during
+    /// launch — arc enforcement is deferred to a future issue. All projectiles
+    /// are aimed at the predicted intercept regardless of the arc boundary.
     pub fn request_fire(&mut self) -> bool {
+        if self.config.volley_count == 0 {
+            return false;
+        }
         if !self.is_fire_ready() {
             return false;
         }
@@ -252,7 +260,7 @@ impl BlasterSystem {
             shooter_yaw,
             self.config.facing_deg,
         );
-        let lifespan = DEFAULT_PROJECTILE_RANGE / self.config.projectile_speed;
+        let lifespan = self.config.range / self.config.projectile_speed;
         let projectile = BlasterProjectile {
             id: uuid.clone(),
             x: shooter_x,
@@ -329,8 +337,8 @@ impl BlasterSystem {
     }
 
     /// Snapshot state for the `WeaponsUpdate` broadcast.
-    pub fn bank_state(&self) -> BlasterBankState {
-        BlasterBankState {
+    pub fn bank_state(&self) -> crate::core::messages::BlasterBankState {
+        crate::core::messages::BlasterBankState {
             id: self.config.id.clone(),
             fire_ready: self.is_fire_ready(),
             on_cooldown: self.volley.on_cooldown,
@@ -356,16 +364,6 @@ pub struct LaunchEvent {
 pub struct HitData {
     pub damage: i32,
     pub shield_pierce: f32,
-}
-
-/// Per-bank state snapshot included in `WeaponsUpdate`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct BlasterBankState {
-    pub id: String,
-    pub fire_ready: bool,
-    pub on_cooldown: bool,
-    pub cooldown_remaining: f32,
-    pub pending_volley: u32,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -447,6 +445,7 @@ mod tests {
             recoil_impulse: 0.0,
             screenshake_magnitude: 0.0,
             marker: None,
+            range: 35.0,
         })
     }
 
@@ -644,5 +643,18 @@ mod tests {
         assert!(state.fire_ready);
         assert!(!state.on_cooldown);
         assert_eq!(state.pending_volley, 0);
+    }
+
+    #[test]
+    fn request_fire_zero_volley_count_returns_false() {
+        let mut sys = BlasterSystem::new(BlasterBankConfig {
+            volley_count: 0,
+            ..BlasterBankConfig::default()
+        });
+        assert!(
+            !sys.request_fire(),
+            "request_fire must return false when volley_count == 0"
+        );
+        assert_eq!(sys.volley.pending_volley, 0, "pending_volley must remain 0");
     }
 }

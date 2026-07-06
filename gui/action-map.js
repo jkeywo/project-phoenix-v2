@@ -26,7 +26,7 @@ export const ACTION_MAP = Object.freeze({
   fire_blaster: (a, send) => {
     if (!a.bank) return;
     send('ControlSystem', {
-      target: `blaster-bank-${a.bank}`,
+      target: `blaster-${a.bank}`,
       payload: { type: 'FireBlaster' },
     });
   },

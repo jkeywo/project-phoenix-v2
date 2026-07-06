@@ -1,0 +1,434 @@
+name = "Alliance Destroyer"
+class = "destroyer"
+hull_id = "NCC-0741"
+power_rating = 70
+css = "gui/themes/cruiser.css"
+tags = [ "player", "ship" ]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+
+[mesh]
+model = "assets/models/alliance_cruiser.glb"
+shape = "sphere"
+colour = []
+no_render = true
+
+[collider]
+shape = "Capsule"
+radius = 1.2
+length = 3
+
+[[hull.system_hull]]
+system_id = "helm"
+display_name = "Helm"
+max_hp = 25
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "tactical"
+display_name = "Tactical"
+max_hp = 25
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "power-reactor"
+display_name = "Power Reactor"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "power-battery"
+display_name = "Power Battery"
+max_hp = 10
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "core"
+display_name = "Core"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.10
+
+[[hull.system_hull]]
+system_id = "helm-engine-port"
+display_name = "Engine (Port)"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-engine-starboard"
+display_name = "Engine (Starboard)"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "phaser-fore"
+display_name = "Phaser Bank (Fore)"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-fore"
+display_name = "Torpedo Tube (Fore)"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-magazine"
+display_name = "Torpedo Magazine"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[repair]
+repair_team_count = 2
+travel_duration_secs = 5
+repair_rate_hp_per_sec = 0.5
+
+[weapons_console]
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
+torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
+
+[weapons_console.radar]
+range = 75
+shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
+selects = [ "ship", "station", "asteroid" ]
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0
+fire_arc_deg = 270
+auto_arc_deg = 180
+beam_range = 35
+beam_damage_per_sec = 5
+beam_duration_secs = 5
+cooldown_secs = 5
+beam_color = [ 1, 0.4, 0.1, 1 ]
+marker = "phasers_fore"
+
+[torpedoes]
+count = 4
+damage_hull = 45
+damage_shields = 5
+speed = 18
+turn_rate_deg_per_sec = 60
+lifespan = 18
+load_time = 8
+detonation_radius = 5
+
+[[torpedoes.tubes]]
+id = "fore"
+facing_deg = 0
+fire_arc_deg = 120
+load_time = 4
+marker = "torpedo_fore"
+
+[sensors_console]
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
+
+[sensors_console.long_range_radar]
+range = 250
+shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
+selects = [ "ship", "station", "planet" ]
+
+[helm_console]
+max_speed = 12
+max_reverse_speed = 5
+acceleration = 5
+deceleration = 12
+max_yaw_rate = 0.55
+max_bank_deg = 10
+impulse_charge_duration = 2.5
+impulse_speed_multiplier = 10
+impulse_acceleration_multiplier = 5
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
+
+[helm_console.engine_pfx]
+color = [ 0.25, 0.75, 1, 0.72 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.45
+trail_spawn_interval_secs = 0.05
+
+[helm_console.boost]
+multiplier = 3.0
+steering_multiplier = 2.0
+active_duration = 3.0
+recharge_duration = 18.0
+
+[helm_console.radar]
+range = 187.5
+shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
+
+[navigation_console]
+
+[navigation_console.system_chart]
+range = 800
+shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker" ]
+selects = [ "station", "planet", "star", "region" ]
+
+[comms]
+range = 1000
+
+[shields_console]
+focus_bonus_max_hp = 40
+focus_bonus_regen = 4
+focus_penalty_max_hp = 20
+focus_penalty_regen = 1.0
+focus_decay_rate = 10
+
+[shields_console.base]
+max_hp = 80
+regen_per_sec = 2.5
+offline_duration = 8
+
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 90
+hull_max_hp = 6
+
+[[shield_arc]]
+id = "port"
+label = "Port"
+center_deg = 270
+width_deg = 90
+hull_max_hp = 5
+
+[[shield_arc]]
+id = "aft"
+label = "Aft"
+center_deg = 180
+width_deg = 90
+hull_max_hp = 5
+
+[[shield_arc]]
+id = "starboard"
+label = "Starboard"
+center_deg = 90
+width_deg = 90
+hull_max_hp = 5
+
+[power]
+capacity = 70
+rates = [ 5, 4, 3, 2, -2, -5 ]
+emergency_threshold = 20
+
+[power.ai]
+weapons_battery_floor = 0.5
+shields_battery_floor = 0.25
+helm_battery_floor = 0.75
+helm_throttle_threshold = 0.5
+
+[captain_console]
+
+[engineering_console]
+
+[radar_appearance]
+colour = [ 0, 1, 0.2 ]
+size = 5
+icon = "playerShip"
+
+[power_groups.ops]
+label = "Operations"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.helm]
+label = "Propulsion"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.weapons]
+label = "Weapons"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.sensors]
+label = "Sensors"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command the bridge and monitor sensors."
+rank = "Cpt."
+short_code = "CPT"
+console = "gui/destroyer-captain-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Pilot the ship."
+rank = "Ltn."
+short_code = "HLM"
+console = "gui/helm-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Manage weapons, navigation and comms."
+rank = "Lt. Cmdr."
+short_code = "TAC"
+console = "gui/destroyer-tactical-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "Manage shields, power and repairs."
+rank = "Ltn."
+short_code = "ENG"
+console = "gui/destroyer-engineering-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "captain"
+kind = "captain"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "viewscreen"
+kind = "viewscreen"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "sensors"
+kind = "sensors"
+station = "captain"
+power_group = "sensors"
+
+[[system]]
+id = "helm"
+kind = "helm"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-joystick"
+kind = "helm_joystick"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-engine-port"
+kind = "helm_engine"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-engine-starboard"
+kind = "helm_engine"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-radar"
+kind = "helm_radar"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-fore"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "tactical"
+power_group = "ops"
+
+[[system]]
+id = "comms"
+kind = "comms"
+station = "tactical"
+power_group = "ops"
+
+[[system]]
+id = "shields-system"
+kind = "shields"
+station = "engineering"
+marker = "ship"
+power_group = "ops"
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+station = "engineering"
+power_group = "ops"
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+station = "engineering"
+power_group = "ops"
+
+[[system]]
+id = "repair"
+kind = "repair"
+station = "engineering"
+power_group = "ops"

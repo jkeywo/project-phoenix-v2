@@ -103,6 +103,10 @@ entity    = "raider_alpha"
 template_path = "assets/entities/alliance_cruiser.toml"
 label = "Alliance Cruiser"
 
+[[available_ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+label = "Alliance Destroyer"
+
 # ── Comms templates ──────────────────────────────────────────────────────────
 
 # Automatic distress call broadcast when the raider is first attacked.

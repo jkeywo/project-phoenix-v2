@@ -81,10 +81,122 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
+[[hull.system_hull]]
+system_id = "phaser-fore"
+display_name = "Phaser Bank (Fore)"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "phaser-aft"
+display_name = "Phaser Bank (Aft)"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-fore-port"
+display_name = "Torpedo Tube (Fore Port)"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-fore-starboard"
+display_name = "Torpedo Tube (Fore Starboard)"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-aft"
+display_name = "Torpedo Tube (Aft)"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-magazine"
+display_name = "Torpedo Magazine"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
 repair_rate_hp_per_sec = 0.5
+
+[weapons_console]
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
+torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
+
+[weapons_console.radar]
+range = 75
+shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
+selects = [ "ship", "station", "asteroid" ]
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0
+fire_arc_deg = 270
+auto_arc_deg = 180
+beam_range = 40
+beam_damage_per_sec = 4
+beam_duration_secs = 6
+cooldown_secs = 6
+beam_color = [ 1, 0.4, 0.1, 1 ]
+marker = "phasers_fore"
+
+[[weapons_console.phaser_banks]]
+id = "aft"
+facing_deg = 180
+fire_arc_deg = 270
+auto_arc_deg = 180
+beam_range = 40
+beam_damage_per_sec = 4
+beam_duration_secs = 6
+cooldown_secs = 6
+beam_color = [ 1, 0.4, 0.1, 1 ]
+marker = "phasers_aft"
+
+[torpedoes]
+count = 6
+damage_hull = 40
+damage_shields = 4
+speed = 15
+turn_rate_deg_per_sec = 45
+lifespan = 20
+load_time = 10
+detonation_radius = 5
+
+[[torpedoes.tubes]]
+id = "fore_port"
+facing_deg = 0
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_port"
+
+[[torpedoes.tubes]]
+id = "fore_starboard"
+facing_deg = 0
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_starboard"
+
+[[torpedoes.tubes]]
+id = "aft"
+facing_deg = 180
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_aft"
 
 [sensors_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
@@ -277,36 +389,12 @@ name = "Std"
 automated_systems = []
 
 [[station]]
-id = "navigation"
-name = "Navigation"
-description = "Plot course and navigate."
-rank = "Ens."
-short_code = "NAV"
-console = "gui/navigation-console.html"
-
-[[station.rating]]
-name = "Std"
-automated_systems = []
-
-[[station]]
-id = "power"
-name = "Power"
-description = "Manage ship power systems."
-rank = "Ltn."
-short_code = "PWR"
-console = "gui/power-console.html"
-
-[[station.rating]]
-name = "Std"
-automated_systems = []
-
-[[station]]
 id = "comms"
 name = "Comms"
-description = "Hail stations and relay intelligence."
+description = "Hail stations, plot course and navigate."
 rank = "Ens."
 short_code = "COM"
-console = "gui/comms-console.html"
+console = "gui/cruiser-comms-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -361,6 +449,42 @@ station = "helm"
 power_group = "helm"
 
 [[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "phaser-aft"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-fore-port"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-fore-starboard"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-aft"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
 id = "sensors"
 kind = "sensors"
 station = "science"
@@ -376,19 +500,25 @@ power_group = "ops"
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "navigation"
+station = "comms"
 power_group = "ops"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-station = "power"
+station = "engineering"
 power_group = "ops"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-station = "power"
+station = "engineering"
+power_group = "ops"
+
+[[system]]
+id = "repair"
+kind = "repair"
+station = "engineering"
 power_group = "ops"
 
 [[system]]

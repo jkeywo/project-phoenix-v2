@@ -569,6 +569,13 @@
 
         </div>
 
+        <div class="hull" id="hull-display" style="display:none; padding: 4px 16px;">
+          <span>HULL</span>
+          <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+          <span class="val" id="hull-val">—</span>
+          <div id="hull-sys-popup" class="hull-sys-popup" style="display:none;"></div>
+        </div>
+
         <footer class="console-footer footer-bar">
           <span class="dot"></span>
           <span id="footer-status">HELM ONLINE</span>
@@ -585,7 +592,7 @@
   <script src="radar-widget.js"></script>
 
   <script type="module">
-    import { initConsole, renderDamageBar } from './console-core.js';
+    import { initConsole, renderStationDamageBar } from './console-core.js';
     import { setBar, setAutoState } from './console-ui.js';
 
     var _state         = null;
@@ -697,7 +704,7 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
         }
       }
 
-      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+      renderStationDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val', 'hull-sys-popup');
 
       // AUTO badge: show when helm station is AI-controlled (Backfill rating).
       // The joystick is not a <button> so we only manage the badge + impulse btn.

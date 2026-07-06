@@ -671,6 +671,7 @@ html, body {
   font-size: 0.875rem;
   color: var(--ink-faint);
   letter-spacing: 0.22em;
+  position: relative;
 }
 .hull .bar {
   width: 8.75rem; height: 0.5rem;
@@ -688,6 +689,30 @@ html, body {
 .hull .val { color: var(--ink); }
 .hull .val.warn { color: var(--reloading); }
 .hull .val.crit { color: var(--fire-bright); }
+
+/* ── Station damage popup (per-system tier list, issue #625) ─── */
+.hull-sys-popup {
+  position: absolute;
+  top: calc(100% + 4px); left: 0;
+  min-width: 11rem;
+  background: rgba(5, 8, 24, 0.94);
+  border: 1px solid var(--line-soft);
+  padding: 5px 8px;
+  z-index: 50;
+  pointer-events: none;
+}
+.hull-sys-row {
+  display: flex; justify-content: space-between; gap: 0.5rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  color: var(--ink-faint);
+  line-height: 1.6;
+}
+.hull-sys-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hull-sys-tier { flex-shrink: 0; color: var(--loaded); }
+.hull-sys-tier.warn { color: var(--reloading); }
+.hull-sys-tier.crit { color: var(--fire-bright); }
 
 /* Legacy hidden utility; station ratings replaced complexity-preset hiding. */
 .cpx-hidden { display: none !important; }

@@ -86,9 +86,9 @@ export function tabBarLayout(consoles, active, orientation, inGame, consoleHull,
   const list = Array.isArray(consoles) ? consoles : [];
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   const initials = useInitials(list, orient);
-  // Hide when not in-game or when there are no consoles.
-  // Single-console players still see the bar (for the title label).
-  const hidden = !inGame || list.length === 0;
+  // Hide when not in-game or when the player owns <= 1 console (single-station
+  // mode — full screen for the console, no tab bar needed).
+  const hidden = !inGame || list.length <= 1;
   // Build a lookup from station id (lowercase) → hull pct for damageable
   // systems. Both the `consoles` list and the `system_id` on each hull
   // entry are lowercase station ids.

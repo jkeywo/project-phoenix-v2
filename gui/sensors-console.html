@@ -378,6 +378,13 @@
         </section>
       </div>
 
+      <div class="hull" id="hull-display" style="display:none; padding: 4px 16px;">
+        <span>HULL</span>
+        <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+        <span class="val" id="hull-val">—</span>
+        <div id="hull-sys-popup" class="hull-sys-popup" style="display:none;"></div>
+      </div>
+
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
         <span id="footer-status">SENSORS ONLINE</span>
@@ -835,11 +842,11 @@
     }, 900);
   </script>
   <script type="module">
-    import { initConsole, renderDamageBar } from './console-core.js';
+    import { initConsole, renderStationDamageBar } from './console-core.js';
     import { setAutoState } from './console-ui.js';
     var _c = initConsole({ name: 'sensors', render: function(s) {
       _apply(s);
-      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+      renderStationDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val', 'hull-sys-popup');
       // AUTO badge: show when sensors station is AI-controlled (Backfill rating).
       setAutoState(document.getElementById('btn-on-screen'), document.getElementById('sensors-auto-badge'), !!s.sensors_auto);
     } });

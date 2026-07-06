@@ -327,6 +327,13 @@
         </div>
         <!-- /panel-mid -->
 
+        <div class="hull" id="hull-display" style="display:none; padding: 4px 16px;">
+          <span>HULL</span>
+          <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+          <span class="val" id="hull-val">—</span>
+          <div id="hull-sys-popup" class="hull-sys-popup" style="display:none;"></div>
+        </div>
+
         <footer class="console-footer footer-bar">
           <span class="dot"></span>
           <span id="footer-status">COMMS ONLINE</span>
@@ -905,12 +912,12 @@
     window.__updateConsole('comms', JSON.stringify(_DEMO));
   </script>
   <script type="module">
-    import { initConsole, renderDamageBar } from './console-core.js';
+    import { initConsole, renderStationDamageBar } from './console-core.js';
     import { setAutoState } from './console-ui.js';
     var _c = initConsole({ name: 'comms', render: function(s) {
       _state = s;
       _render(s);
-      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+      renderStationDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val', 'hull-sys-popup');
       // AUTO badge: show when comms station is AI-controlled (Backfill rating).
       // Also disable any currently-visible response buttons.
       var isAuto = !!s.comms_auto;

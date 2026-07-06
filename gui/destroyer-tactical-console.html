@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Destroyer Tactical Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner {
+      padding: 22px 52px 20px;
+      display: flex; flex-direction: column; gap: 12px;
+      height: 100%;
+    }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body {
+      flex: 1; min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+    }
+    .console-body .col {
+      display: flex; flex-direction: column;
+      background: rgba(14,17,23,0.6);
+      border: 1px solid var(--edge);
+      padding: 12px;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .console-body .col h2 {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.3em;
+      color: var(--ink-dim); text-transform: uppercase;
+      margin: 0 0 8px; padding: 0; flex-shrink: 0;
+      border-bottom: 1px solid var(--edge);
+      padding-bottom: 6px;
+    }
+    .col-content {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .console-footer {
+      display: flex; align-items: center; gap: 14px;
+      font-family: "JetBrains Mono", monospace; font-size: 11px;
+      color: var(--ink-faint); flex-shrink: 0; padding: 6px 0;
+    }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .hero h1 { font-size: 20px; }
+      .hero h1 .sub { font-size: 10px; }
+      .console-body {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .console-body .col { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Destroyer Tactical Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>TACTICAL<span class="sub">WEAPONS &middot; NAV &middot; COMMS</span></h1>
+        <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
+      </div>
+
+      <div class="console-body">
+        <div class="col" id="weapons-col">
+          <h2>Weapons</h2>
+          <div class="col-content" id="weapons-content">
+            <!-- Weapons state rendered here -->
+          </div>
+        </div>
+        <div class="col" id="navigation-col">
+          <h2>Navigation</h2>
+          <div class="col-content" id="navigation-content">
+            <!-- Navigation state rendered here -->
+          </div>
+        </div>
+        <div class="col" id="comms-col">
+          <h2>Comms</h2>
+          <div class="col-content" id="comms-content">
+            <!-- Comms state rendered here -->
+          </div>
+        </div>
+      </div>
+
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">TACTICAL STATION</span>
+        <span class="sep">·</span>
+        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span class="spacer"></span>
+        <span id="footer-waypoint" style="color:var(--ink-faint)">NO WAYPOINT</span>
+      </footer>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initConsole } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
+
+    function renderWeapons(weaponsState, container) {
+      if (!weaponsState || !container) return;
+
+      var s = weaponsState;
+      var banks = s.banks || [];
+      var tubes = s.tubes || [];
+      var torpedoCount = s.torpedo_count || 0;
+      var phaserMode = s.phaser_mode || 'Auto';
+      var target = s.target_name || s.target_uuid || null;
+
+      var html = '';
+
+      // Target
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">TARGET</div>';
+      if (target) {
+        html += '<div style="font-family:\'Chakra Petch\',sans-serif;font-size:13px;font-weight:600;color:var(--fire-bright);">' + target.toUpperCase() + '</div>';
+      } else {
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);">NO TARGET</div>';
+      }
+      html += '</div>';
+
+      // Phaser banks
+      if (banks.length > 0) {
+        html += '<div style="margin-bottom:8px;">';
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">PHASERS · ' + phaserMode.toUpperCase() + '</div>';
+        banks.forEach(function(b) {
+          var readyCls = b.ready ? 'var(--loaded)' : 'var(--reloading)';
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">';
+          html += '<span style="width:7px;height:7px;border-radius:50%;background:' + readyCls + ';flex-shrink:0;display:inline-block;"></span>';
+          html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);letter-spacing:0.15em;">' + (b.id || '').toUpperCase() + '</span>';
+          if (!b.ready) {
+            html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--reloading);margin-left:auto;">RELOADING</span>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      // Torpedo status
+      html += '<div>';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">TORPEDOES</div>';
+      html += '<div style="font-family:\'Chakra Petch\',sans-serif;font-size:18px;font-weight:600;color:var(--cyan);">' + torpedoCount + ' <span style="font-size:10px;color:var(--ink-faint);">READY</span></div>';
+      if (tubes.length > 0) {
+        tubes.forEach(function(t) {
+          var tubeCls = t.loaded ? 'var(--loaded)' : 'var(--reloading)';
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">';
+          html += '<span style="width:7px;height:7px;border-radius:50%;background:' + tubeCls + ';flex-shrink:0;display:inline-block;"></span>';
+          html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);letter-spacing:0.15em;">' + (t.id || '').toUpperCase() + '</span>';
+          html += '</div>';
+        });
+      }
+      html += '</div>';
+
+      container.innerHTML = html;
+    }
+
+    function renderNavigation(navState, container) {
+      if (!navState || !container) return;
+
+      var s = navState;
+      var shipX = s.ship_x || 0;
+      var shipZ = s.ship_z || 0;
+      var shipHdg = s.ship_heading || 0;
+      var shipSpd = s.ship_speed || 0;
+      var waypoint = s.waypoint || null;
+      var impulseCharge = s.impulse_charge_progress || 0;
+
+      var html = '';
+
+      // Position / heading / speed
+      html += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">';
+      html += '<div style="display:flex;align-items:baseline;gap:6px;">';
+      html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);letter-spacing:0.2em;width:32px;">POS</span>';
+      html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:14px;font-weight:600;color:var(--ink);">' + Math.round(shipX) + ' / ' + Math.round(shipZ) + '</span>';
+      html += '</div>';
+      html += '<div style="display:flex;align-items:baseline;gap:6px;">';
+      html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);letter-spacing:0.2em;width:32px;">HDG</span>';
+      html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:14px;font-weight:600;color:var(--ink);">' + shipHdg.toFixed(1) + '°</span>';
+      html += '</div>';
+      html += '<div style="display:flex;align-items:baseline;gap:6px;">';
+      html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);letter-spacing:0.2em;width:32px;">SPD</span>';
+      html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:14px;font-weight:600;color:var(--loaded);">' + shipSpd.toFixed(1) + ' kn</span>';
+      html += '</div>';
+      html += '</div>';
+
+      // Waypoint
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">WAYPOINT</div>';
+      if (waypoint && waypoint.x !== undefined) {
+        var dx = waypoint.x - shipX, dz = (waypoint.z || 0) - shipZ;
+        var dist = Math.round(Math.sqrt(dx * dx + dz * dz));
+        var brg = (((Math.atan2(dx, -dz) * 180 / Math.PI) + 360) % 360).toFixed(1);
+        html += '<div style="font-family:\'Chakra Petch\',sans-serif;font-size:13px;color:var(--tactical);">BRG ' + brg + '° · ' + dist + ' AU</div>';
+      } else {
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);">NOT SET</div>';
+      }
+      html += '</div>';
+
+      // Impulse charge
+      if (impulseCharge > 0) {
+        html += '<div style="margin-bottom:8px;">';
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">IMPULSE CHARGE</div>';
+        html += '<div style="display:flex;align-items:center;gap:8px;">';
+        html += '<div style="flex:1;height:8px;background:var(--bg-deep);border:1px solid var(--line-faint);position:relative;overflow:hidden;">';
+        html += '<div style="position:absolute;top:0;left:0;bottom:0;width:' + (impulseCharge * 100).toFixed(1) + '%;background:linear-gradient(90deg,var(--cyan-dim),var(--cyan));"></div>';
+        html += '</div>';
+        html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:12px;color:var(--cyan);min-width:36px;text-align:right;">' + Math.round(impulseCharge * 100) + '%</span>';
+        html += '</div>';
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    function renderComms(commsState, container) {
+      if (!commsState || !container) return;
+
+      var s = commsState;
+      var messages = s.messages || [];
+      var contacts = s.contacts || [];
+
+      var html = '';
+
+      // Contacts
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:6px;">CONTACTS (' + contacts.length + ')</div>';
+      if (contacts.length > 0) {
+        contacts.slice(0, 4).forEach(function(c) {
+          var inRange = c.in_range !== false;
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">';
+          html += '<span style="width:7px;height:7px;border-radius:50%;background:' + (c.is_urgent ? 'var(--reloading)' : inRange ? 'var(--loaded)' : 'var(--ink-faint)') + ';flex-shrink:0;display:inline-block;"></span>';
+          html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:11px;letter-spacing:0.12em;color:' + (c.is_urgent ? 'var(--reloading)' : inRange ? 'var(--ink)' : 'var(--ink-faint)') + ';">' + (c.name || '').toUpperCase() + '</span>';
+          if (!inRange) html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);margin-left:auto;">OUT</span>';
+          html += '</div>';
+        });
+        if (contacts.length > 4) {
+          html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);padding-top:3px;">+' + (contacts.length - 4) + ' MORE</div>';
+        }
+      } else {
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);">NO CONTACTS</div>';
+      }
+      html += '</div>';
+
+      // Messages
+      html += '<div>';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:6px;">INBOX (' + messages.length + ')</div>';
+      if (messages.length > 0) {
+        messages.slice(0, 3).forEach(function(m) {
+          var isUnread = !m.is_read;
+          var isUrgent = m.is_urgent;
+          html += '<div style="padding:4px 6px;margin-bottom:4px;border:1px solid ' + (isUrgent ? 'var(--reloading)' : isUnread ? 'var(--line)' : 'var(--line-faint)') + ';">';
+          html += '<div style="font-family:\'Chakra Petch\',sans-serif;font-size:11px;letter-spacing:0.1em;color:' + (isUrgent ? 'var(--reloading)' : isUnread ? 'var(--ink)' : 'var(--ink-dim)') + ';">' + (m.sender_name || '').toUpperCase() + '</div>';
+          html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (m.subject || '') + '</div>';
+          html += '</div>';
+        });
+        if (messages.length > 3) {
+          html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);">+' + (messages.length - 3) + ' MORE MESSAGES</div>';
+        }
+      } else {
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);">— NO MESSAGES —</div>';
+      }
+      html += '</div>';
+
+      container.innerHTML = html;
+    }
+
+    initConsole({
+      name: 'tactical',
+      render: function(s) {
+        var weaponsContent = document.getElementById('weapons-content');
+        var navContent = document.getElementById('navigation-content');
+        var commsContent = document.getElementById('comms-content');
+
+        if (s.weapons) {
+          renderWeapons(s.weapons, weaponsContent);
+
+          var footerTarget = document.getElementById('footer-target');
+          if (footerTarget) {
+            var tgt = s.weapons.target_name || s.weapons.target_uuid || null;
+            footerTarget.textContent = tgt ? '\u25C9 ' + tgt : 'NO TARGET';
+            footerTarget.style.color = tgt ? 'var(--fire-bright)' : 'var(--ink-faint)';
+          }
+        }
+
+        if (s.navigation) {
+          renderNavigation(s.navigation, navContent);
+
+          var footerWaypoint = document.getElementById('footer-waypoint');
+          if (footerWaypoint) {
+            var wp = s.navigation.waypoint;
+            if (wp && wp.x !== undefined) {
+              footerWaypoint.textContent = 'WP SET';
+              footerWaypoint.style.color = 'var(--tactical)';
+            } else {
+              footerWaypoint.textContent = 'NO WAYPOINT';
+              footerWaypoint.style.color = 'var(--ink-faint)';
+            }
+          }
+        }
+
+        if (s.comms) {
+          renderComms(s.comms, commsContent);
+        }
+
+        var isAuto = !!(s.tactical_auto || (s.weapons && s.weapons.tactical_auto));
+        setAutoState(null, document.getElementById('tactical-auto-badge'), isAuto);
+      }
+    });
+  </script>
+</body>
+</html>

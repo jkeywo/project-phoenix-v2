@@ -101,6 +101,9 @@ export class ClientSimState {
     this.currentTargetUuid = null;
     /** Per-station active ratings, populated from Welcome / RatingChanged. */
     this.stationRatings = {};
+    /** Station → system id list, populated from Welcome ship_config.station_systems.
+     *  Used by aggregateStationHull to compute per-station damage from consoleHull. */
+    this.stationSystems = {};
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = {};
     /** Per-system blackboard mirror, keyed by SystemId string.
@@ -183,6 +186,7 @@ export class ClientSimState {
         this.phaserArcConfigs  = sc.phaser_banks        ?? [];
         this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
         this.stationRatings = d.station_ratings || {};
+        this.stationSystems = sc.station_systems || {};
         if (world) {
           // Reset to defaults but preserve the world snapshot from Welcome.
           this.world = world;

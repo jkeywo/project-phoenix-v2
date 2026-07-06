@@ -325,6 +325,13 @@
         </div>
         <!-- /panel-mid -->
 
+        <div class="hull" id="hull-display" style="display:none; padding: 4px 16px;">
+          <span>HULL</span>
+          <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+          <span class="val" id="hull-val">—</span>
+          <div id="hull-sys-popup" class="hull-sys-popup" style="display:none;"></div>
+        </div>
+
         <footer class="console-footer footer-bar">
           <span class="dot"></span>
         </footer>
@@ -334,7 +341,7 @@
   </div>
 
   <script type="module">
-    import { initConsole, renderDamageBar } from './console-core.js';
+    import { initConsole, renderStationDamageBar } from './console-core.js';
     import { setAutoState } from './console-ui.js';
     /* ── Constants ─────────────────────────────────────────────── */
     var MIN_LEVEL  = 1;
@@ -479,7 +486,7 @@
       var ft = document.getElementById('footer-ticker');
       if (ft) ft.textContent = 'POWER · ' + total + '/' + totalMax + ' POOL · BAT ' + Math.round(batPct * 100) + '%' + (locked ? ' · LOCKED' : '');
 
-      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+      renderStationDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val', 'hull-sys-popup');
 
       // AUTO badge: show when power station is AI-controlled (Backfill rating).
       setAutoState(null, document.getElementById('power-auto-badge'), !!s.power_auto);

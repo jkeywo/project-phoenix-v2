@@ -65,6 +65,27 @@ function ownHull(stationId, state) {
   return (state.consoleHull || []).find(h => h.system_id === stationId) || null;
 }
 
+/**
+ * Aggregate hull health across all systems that belong to a station.
+ *
+ * Destroyed or offline systems remain in the denominator (their `max_hp` still
+ * counts; their `current` is 0) so that station damage can only increase as
+ * systems are destroyed.
+ *
+ * @param {string}   stationId      - lowercase station id (e.g. 'helm')
+ * @param {Array}    consoleHull    - full ship hull array from state.consoleHull
+ * @param {object}   stationSystems - map of stationId → [systemId, ...] from state.stationSystems
+ * @returns {{ entries: Array, totalCurrent: number, totalMax: number, pct: number, damagePct: number }}
+ */
+export function aggregateStationHull(stationId, consoleHull, stationSystems) {
+  const systemIds = (stationSystems || {})[stationId] || [];
+  const entries = (consoleHull || []).filter(h => systemIds.includes(h.system_id));
+  const totalCurrent = entries.reduce((s, h) => s + h.current, 0);
+  const totalMax = entries.reduce((s, h) => s + h.max_hp, 0);
+  const pct = totalMax > 0 ? totalCurrent / totalMax : 1;
+  return { entries, totalCurrent, totalMax, pct, damagePct: 1 - pct };
+}
+
 function withObjectiveTargets(entities, objectives) {
   const targets = activeObjectiveTargetNames(objectives);
   if (targets.size === 0) return entities || [];
@@ -412,7 +433,7 @@ export function buildWeaponsConsoleState(state) {
     regions,
     phaser_arcs:   mappedPhaserArcs,
     torpedo_arcs:  torpedoArcs,
-    own_hull:      ownHull('tactical', state),
+    own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
     tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
   });
 }
@@ -436,7 +457,7 @@ export function buildCaptainConsoleState(state) {
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
-      own_hull:              ownHull('captain', state),
+      own_hull:              aggregateStationHull('captain', state.consoleHull, state.stationSystems),
     });
   }
   // Legacy fallback.
@@ -458,7 +479,7 @@ export function buildCaptainConsoleState(state) {
                              ? 'RED ALERT — All hands to battlestations.'
                              : 'Standing by. All systems nominal.',
     blips:                 state.blips       || [],
-    own_hull:              ownHull('captain', state),
+    own_hull:              aggregateStationHull('captain', state.consoleHull, state.stationSystems),
   });
 }
 
@@ -522,7 +543,7 @@ export function buildHelmConsoleState(state) {
     on_screen:               state.currentView === 'Radar',
     blips,
     waypoint:                state.navigationWaypoint || null,
-    own_hull:                ownHull('helm', state),
+    own_hull:                aggregateStationHull('helm', state.consoleHull, state.stationSystems),
     boost_enabled:           !!boostEnabled,
     boost_battery:           boostBattery,
     boost_active:            !!boostActive,
@@ -594,7 +615,7 @@ export function buildPowerConsoleState(state) {
       locked:         bb.locked         || false,
       reactor_online: reactorOnline,
       battery_online: batteryOnline,
-      own_hull:       ownHull('power', state),
+      own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
       power_auto:     state.stationRatings?.['power'] === 'Backfill',
     });
   }
@@ -607,7 +628,7 @@ export function buildPowerConsoleState(state) {
     locked:         state.powerLocked  || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
-    own_hull:       ownHull('power', state),
+    own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
     power_auto:     state.stationRatings?.['power'] === 'Backfill',
   });
 }
@@ -625,7 +646,7 @@ export function buildShieldsConsoleState(state) {
       focused_facing:     bb.focused_facing     ?? null,
       target_bearing:     bb.target_bearing     ?? null,
       grid_status:        bb.grid_status        ?? 'GRID NOMINAL',
-      own_hull: ownHull('shields', state),
+      own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
       shields_auto: state.stationRatings?.['shields'] === 'Backfill',
     });
   }
@@ -646,7 +667,7 @@ export function buildShieldsConsoleState(state) {
     target_bearing:     targetBearing,
     grid_status:        (state.shieldFacings && state.shieldFacings.length > 0)
                           ? 'GRID NOMINAL' : 'GRID OFFLINE',
-    own_hull: ownHull('shields', state),
+    own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
     shields_auto: state.stationRatings?.['shields'] === 'Backfill',
   });
 }
@@ -761,7 +782,7 @@ export function buildSensorsConsoleState(state) {
     target_shield_freq: targetShieldFreq,
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
-    own_hull: ownHull('sensors', state),
+    own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
     sensors_auto: state.stationRatings?.['sensors'] === 'Backfill',
   });
 }
@@ -778,7 +799,7 @@ export function buildCommsConsoleState(state) {
       objectives: bb.objectives ?? [],
       contacts:   bb.contacts   ?? [],
       on_screen:  state.currentView === 'Comms',
-      own_hull:   ownHull('comms', state),
+      own_hull:   aggregateStationHull('comms', state.consoleHull, state.stationSystems),
       comms_auto: state.stationRatings?.['comms'] === 'Backfill',
     });
   }
@@ -787,7 +808,7 @@ export function buildCommsConsoleState(state) {
     messages:  state.commsMessages || [],
     contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
-    own_hull:  ownHull('comms', state),
+    own_hull:  aggregateStationHull('comms', state.consoleHull, state.stationSystems),
     comms_auto: state.stationRatings?.['comms'] === 'Backfill',
   });
 }
@@ -865,7 +886,7 @@ export function buildNavigationConsoleState(state) {
     ship_x:                  state.shipX || 0,
     ship_z:                  state.shipZ || 0,
     ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
-    own_hull: ownHull('navigation', state),
+    own_hull: aggregateStationHull('navigation', state.consoleHull, state.stationSystems),
     ship_speed:              state.forwardSpeed || 0,
     impulse_charge_progress: charge,
     cancel_visible:          charge > 0,
@@ -897,6 +918,121 @@ export function buildScienceConsoleState(state) {
   });
 }
 
+/**
+ * Engineering console — combined Power + Repair view (Cruiser).
+ *
+ * Delegates to buildPowerConsoleState and buildRepairConsoleState,
+ * nesting payloads under `power` and `repair` keys so the per-console
+ * iframe receives both panels' data without key collision.
+ *
+ * @param {object} state
+ */
+export function buildEngineeringConsoleState(state) {
+  const power = JSON.parse(buildPowerConsoleState(state));
+  const repair = JSON.parse(buildRepairConsoleState(state));
+  return JSON.stringify({
+    power,
+    repair,
+    engineering_auto: state.stationRatings?.['engineering'] === 'Backfill',
+  });
+}
+
+/**
+ * Cruiser Comms console — combined Navigation + Comms view (Cruiser).
+ *
+ * Delegates to buildNavigationConsoleState and buildCommsConsoleState,
+ * nesting payloads under `navigation` and `comms` keys so the per-console
+ * iframe receives both panels' data without key collision.
+ *
+ * Used when the state has a navigation blackboard present (cruiser comms
+ * station merges navigation + comms). The `comms_auto` field reflects
+ * the comms station rating, consistent with the existing comms dispatch.
+ *
+ * @param {object} state
+ */
+export function buildCruiserCommsConsoleState(state) {
+  const navigation = JSON.parse(buildNavigationConsoleState(state));
+  const comms = JSON.parse(buildCommsConsoleState(state));
+  return JSON.stringify({
+    navigation,
+    comms,
+    comms_auto: state.stationRatings?.['comms'] === 'Backfill',
+  });
+}
+
+/**
+ * Destroyer Captain console — combined CaptainChair + Sensors view.
+ *
+ * Delegates to buildCaptainConsoleState and buildSensorsConsoleState,
+ * nesting payloads under `captain` and `sensors` keys.
+ *
+ * Used when the state has a sensors blackboard present and the station is
+ * captain — indicating a Destroyer captain who also owns the sensors system.
+ *
+ * @param {object} state
+ */
+export function buildDestroyerCaptainConsoleState(state) {
+  const captain = JSON.parse(buildCaptainConsoleState(state));
+  const sensors = JSON.parse(buildSensorsConsoleState(state));
+  return JSON.stringify({
+    captain,
+    sensors,
+    captain_auto: state.stationRatings?.['captain'] === 'Backfill',
+  });
+}
+
+/**
+ * Destroyer Tactical console — combined Weapons + Navigation + Comms view.
+ *
+ * Delegates to buildWeaponsConsoleState, buildNavigationConsoleState, and
+ * buildCommsConsoleState, nesting payloads under `weapons`, `navigation`,
+ * and `comms` keys so the per-console iframe receives all three panels'
+ * data without key collision.
+ *
+ * Used when the state has both a navigation blackboard and a comms
+ * blackboard present on the tactical station — indicating a Destroyer
+ * tactical officer who also owns navigation and comms.
+ *
+ * @param {object} state
+ */
+export function buildDestroyerTacticalConsoleState(state) {
+  const weapons = JSON.parse(buildWeaponsConsoleState(state));
+  const navigation = JSON.parse(buildNavigationConsoleState(state));
+  const comms = JSON.parse(buildCommsConsoleState(state));
+  return JSON.stringify({
+    weapons,
+    navigation,
+    comms,
+    tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
+  });
+}
+
+/**
+ * Destroyer Engineering console — combined Shields + Power + Repair view.
+ *
+ * Delegates to buildShieldsConsoleState, buildPowerConsoleState, and
+ * buildRepairConsoleState, nesting payloads under `shields`, `power`, and
+ * `repair` keys so the per-console iframe receives all three panels' data
+ * without key collision.
+ *
+ * Used when the state has a shields blackboard present on the engineering
+ * station — indicating a Destroyer engineer who owns shields, power, and
+ * repair (unlike the Cruiser engineer who owns only power and repair).
+ *
+ * @param {object} state
+ */
+export function buildDestroyerEngineeringConsoleState(state) {
+  const shields = JSON.parse(buildShieldsConsoleState(state));
+  const power = JSON.parse(buildPowerConsoleState(state));
+  const repair = JSON.parse(buildRepairConsoleState(state));
+  return JSON.stringify({
+    shields,
+    power,
+    repair,
+    engineering_auto: state.stationRatings?.['engineering'] === 'Backfill',
+  });
+}
+
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
 if (typeof window !== 'undefined') {
@@ -906,17 +1042,44 @@ if (typeof window !== 'undefined') {
     // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase
     // Console enum names.
     switch (consoleName) {
-      case 'tactical':   return buildWeaponsConsoleState(state);
-      case 'captain':    return buildCaptainConsoleState(state);
-      case 'helm':       return buildHelmConsoleState(state);
-      case 'repair':     return buildRepairConsoleState(state);
-      case 'power':      return buildPowerConsoleState(state);
-      case 'shields':    return buildShieldsConsoleState(state);
-      case 'sensors':    return buildSensorsConsoleState(state);
-      case 'comms':      return buildCommsConsoleState(state);
-      case 'navigation': return buildNavigationConsoleState(state);
-      case 'science':    return buildScienceConsoleState(state);
-      default:           return '{}';
+      case 'tactical':
+        // Destroyer merged console: if navigation and comms blackboards are
+        // present on the tactical station, return the 3-system merged payload.
+        if (state.blackboards && state.blackboards['navigation'] && state.blackboards['comms']) {
+          return buildDestroyerTacticalConsoleState(state);
+        }
+        return buildWeaponsConsoleState(state);
+      case 'captain':
+        // Destroyer merged console: if a sensors blackboard is present on
+        // the captain station, return the captain + sensors merged payload.
+        if (state.blackboards && state.blackboards['sensors']) {
+          return buildDestroyerCaptainConsoleState(state);
+        }
+        return buildCaptainConsoleState(state);
+      case 'helm':        return buildHelmConsoleState(state);
+      case 'repair':      return buildRepairConsoleState(state);
+      case 'power':       return buildPowerConsoleState(state);
+      case 'shields':     return buildShieldsConsoleState(state);
+      case 'sensors':     return buildSensorsConsoleState(state);
+      case 'comms':
+        // Cruiser merged console: if a navigation blackboard is present,
+        // the comms station holds both navigation and comms systems —
+        // return the merged payload. Battleship pure comms falls through
+        // to buildCommsConsoleState (no navigation blackboard).
+        if (state.blackboards && state.blackboards['navigation']) {
+          return buildCruiserCommsConsoleState(state);
+        }
+        return buildCommsConsoleState(state);
+      case 'navigation':  return buildNavigationConsoleState(state);
+      case 'science':     return buildScienceConsoleState(state);
+      case 'engineering':
+        // Destroyer merged console: if a shields blackboard is present on
+        // the engineering station, return the 3-system merged payload.
+        if (state.blackboards && state.blackboards['shields']) {
+          return buildDestroyerEngineeringConsoleState(state);
+        }
+        return buildEngineeringConsoleState(state);
+      default:            return '{}';
     }
   };
 }

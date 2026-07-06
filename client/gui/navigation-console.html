@@ -236,6 +236,7 @@
       <span>HULL</span>
       <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
       <span class="val" id="hull-val">—</span>
+      <div id="hull-sys-popup" class="hull-sys-popup" style="display:none;"></div>
     </div>
   </div>
 
@@ -300,7 +301,7 @@
   </div>
 
   <script type="module">
-    import { initConsole, renderDamageBar } from './console-core.js';
+    import { initConsole, renderStationDamageBar } from './console-core.js';
     import { setAutoState } from './console-ui.js';
 
     const canvas = document.getElementById('map-canvas');
@@ -960,7 +961,7 @@
         if (label) label.textContent = _onScreen ? 'CLEAR SCREEN' : 'ON SCREEN';
       }
       updateHiddenData(s);
-      renderDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val');
+      renderStationDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val', 'hull-sys-popup');
       draw();
     }
 

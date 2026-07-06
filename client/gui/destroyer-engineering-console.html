@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Destroyer Engineering Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner {
+      padding: 22px 52px 20px;
+      display: flex; flex-direction: column; gap: 12px;
+      height: 100%;
+    }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body {
+      flex: 1; min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+    }
+    .console-body .col {
+      display: flex; flex-direction: column;
+      background: rgba(14,17,23,0.6);
+      border: 1px solid var(--edge);
+      padding: 12px;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .console-body .col h2 {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.3em;
+      color: var(--ink-dim); text-transform: uppercase;
+      margin: 0 0 8px; padding: 0; flex-shrink: 0;
+      border-bottom: 1px solid var(--edge);
+      padding-bottom: 6px;
+    }
+    .col-content {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .console-footer {
+      display: flex; align-items: center; gap: 14px;
+      font-family: "JetBrains Mono", monospace; font-size: 11px;
+      color: var(--ink-faint); flex-shrink: 0; padding: 6px 0;
+    }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .hero h1 { font-size: 20px; }
+      .hero h1 .sub { font-size: 10px; }
+      .console-body {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .console-body .col { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Destroyer Engineering Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>ENGINEERING<span class="sub">SHIELDS &middot; POWER &middot; REPAIR</span></h1>
+        <span class="auto-badge" id="engineering-auto-badge" hidden>AUTO</span>
+      </div>
+
+      <div class="console-body">
+        <div class="col" id="shields-col">
+          <h2>Shields</h2>
+          <div class="col-content" id="shields-content">
+            <!-- Shields state rendered here -->
+          </div>
+        </div>
+        <div class="col" id="power-col">
+          <h2>Power</h2>
+          <div class="col-content" id="power-content">
+            <!-- Power state rendered here -->
+          </div>
+        </div>
+        <div class="col" id="repair-col">
+          <h2>Repair</h2>
+          <div class="col-content" id="repair-content">
+            <!-- Repair state rendered here -->
+          </div>
+        </div>
+      </div>
+
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">ENGINEERING STATION</span>
+        <span class="spacer"></span>
+        <span id="footer-right" style="color:var(--ink-faint)">—</span>
+      </footer>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initConsole } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
+
+    function renderShields(shieldsState, container) {
+      if (!shieldsState || !container) return;
+
+      var s = shieldsState;
+      var facings = s.facings || [];
+      var gridStatus = s.grid_status || 'GRID OFFLINE';
+      var focused = s.focused_facing || null;
+      var hullPct = s.hull_integrity_pct !== undefined ? s.hull_integrity_pct : 100;
+
+      var html = '';
+
+      // Grid status
+      var statusColor = gridStatus.indexOf('NOMINAL') >= 0 ? 'var(--loaded)' : 'var(--fire-bright)';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:' + statusColor + ';letter-spacing:0.2em;margin-bottom:8px;">' + gridStatus + '</div>';
+
+      // Hull integrity
+      var hullCls = hullPct <= 30 ? 'var(--fire-bright)' : hullPct <= 60 ? 'var(--reloading)' : 'var(--loaded)';
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">HULL</div>';
+      html += '<div style="display:flex;align-items:center;gap:6px;">';
+      html += '<div style="flex:1;height:8px;background:var(--bg-deep);border:1px solid var(--line-faint);position:relative;overflow:hidden;">';
+      html += '<div style="position:absolute;top:0;left:0;bottom:0;width:' + hullPct.toFixed(1) + '%;background:linear-gradient(90deg,var(--loaded-dim),var(--loaded));"></div>';
+      html += '</div>';
+      html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:12px;font-weight:600;color:' + hullCls + ';min-width:32px;text-align:right;">' + Math.round(hullPct) + '%</span>';
+      html += '</div>';
+      html += '</div>';
+
+      // Shield facings
+      if (facings.length > 0) {
+        html += '<div style="display:flex;flex-direction:column;gap:4px;">';
+        facings.forEach(function(f) {
+          var pct = f.max_hp > 0 ? Math.round(f.hp / f.max_hp * 100) : 0;
+          var barCls = f.online === false ? 'var(--line-soft)' : pct > 60 ? 'var(--loaded)' : pct > 25 ? 'var(--reloading)' : 'var(--fire-bright)';
+          var pctStr = f.online === false ? 'OFF' : pct + '%';
+          var isFocused = focused === f.label;
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;' + (isFocused ? 'border-left:2px solid var(--tactical);padding-left:4px;' : '') + '">';
+          html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);letter-spacing:0.18em;width:28px;flex-shrink:0;">' + (f.label || '').substring(0, 4).toUpperCase() + '</span>';
+          html += '<div style="flex:1;height:7px;background:var(--bg-deep);border:1px solid var(--line-faint);position:relative;overflow:hidden;">';
+          html += '<div style="position:absolute;top:0;left:0;bottom:0;width:' + pct + '%;background:' + barCls + ';"></div>';
+          html += '</div>';
+          html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-dim);min-width:28px;text-align:right;">' + pctStr + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);">NO SHIELD DATA</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    function renderPower(powerState, container) {
+      if (!powerState || !container) return;
+
+      var s = powerState;
+      var consoles = s.consoles || [];
+      var total = s.total !== undefined ? s.total : consoles.reduce(function(a, c) { return a + c.level; }, 0);
+      var totalMax = s.total_max !== undefined ? s.total_max : 8;
+      var locked = !!s.locked;
+      var batCharge = s.battery_charge || 0;
+      var batMax = s.battery_max || 100;
+      var batPct = batMax > 0 ? batCharge / batMax : 0;
+      var reactorOnline = s.reactor_online !== undefined ? !!s.reactor_online : true;
+      var batteryOnline = s.battery_online !== undefined ? !!s.battery_online : true;
+
+      var batCls = batPct <= 0.20 ? 'crit' : batPct <= 0.40 ? 'warn' : '';
+      var batColour = batCls === 'crit' ? 'var(--fire-bright)' : batCls === 'warn' ? 'var(--reloading)' : 'var(--cyan)';
+
+      var html = '';
+
+      // Status badges
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.2em;">';
+      html += '<span style="color:' + (reactorOnline ? 'var(--loaded)' : 'var(--fire-bright)') + '">' + (reactorOnline ? 'REACTOR OK' : 'REACTOR OFFLINE') + '</span>';
+      html += '<span style="color:var(--line-soft)">·</span>';
+      html += '<span style="color:' + (batteryOnline ? 'var(--loaded)' : 'var(--fire-bright)') + '">' + (batteryOnline ? 'BATTERY OK' : 'BATTERY OFFLINE') + '</span>';
+      html += '</div>';
+
+      // Power allocation rows
+      if (consoles.length > 0) {
+        html += '<div style="margin-bottom:10px;">';
+        consoles.forEach(function(con) {
+          var pct = con.max_level > 0 ? con.level / con.max_level : 0;
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line-faint);">';
+          html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;width:64px;flex-shrink:0;">' + (con.label || con.id || '').toUpperCase() + '</span>';
+          html += '<div style="flex:1;height:8px;background:var(--bg-deep);border:1px solid var(--line-faint);position:relative;overflow:hidden;">';
+          html += '<div style="position:absolute;top:0;left:0;bottom:0;width:' + (pct * 100).toFixed(1) + '%;background:linear-gradient(90deg,var(--cyan-dim),var(--cyan));"></div>';
+          html += '</div>';
+          html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:13px;font-weight:600;color:var(--cyan);min-width:28px;text-align:right;">' + con.level + '/' + con.max_level + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);letter-spacing:0.2em;margin-bottom:10px;">POOL ' + total + '/' + totalMax + (locked ? ' · LOCKED' : '') + '</div>';
+      }
+
+      // Battery bar
+      html += '<div style="margin-top:4px;">';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">BATTERY</div>';
+      html += '<div style="display:flex;align-items:center;gap:8px;">';
+      html += '<div style="flex:1;height:14px;background:var(--bg-deep);border:1px solid var(--line-faint);position:relative;overflow:hidden;">';
+      html += '<div style="position:absolute;top:0;left:0;bottom:0;width:' + (batPct * 100).toFixed(1) + '%;background:linear-gradient(90deg,var(--cyan-dim),var(--cyan));"></div>';
+      html += '</div>';
+      html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:15px;font-weight:600;color:' + batColour + ';min-width:42px;text-align:right;">' + Math.round(batPct * 100) + '%</span>';
+      html += '</div>';
+      html += '</div>';
+
+      container.innerHTML = html;
+    }
+
+    function renderRepair(repairState, container) {
+      if (!repairState || !container) return;
+
+      var s = repairState;
+      var hull = s.system_hull || [];
+      var teams = s.teams || [];
+      var totC = hull.reduce(function(a, h) { return a + h.current; }, 0);
+      var totM = hull.reduce(function(a, h) { return a + h.max_hp; }, 0);
+      var hullPct = totM > 0 ? totC / totM : 1;
+      var hullCls = hullPct <= 0.33 ? 'var(--fire-bright)' : hullPct <= 0.60 ? 'var(--reloading)' : 'var(--loaded)';
+
+      var html = '';
+
+      // Hull integrity bar
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">HULL INTEGRITY</div>';
+      html += '<div style="display:flex;align-items:center;gap:8px;">';
+      html += '<div style="flex:1;height:10px;background:var(--bg-deep);border:1px solid var(--line-faint);position:relative;overflow:hidden;">';
+      html += '<div style="position:absolute;top:0;left:0;bottom:0;width:' + (hullPct * 100).toFixed(1) + '%;background:linear-gradient(90deg,var(--loaded-dim),var(--loaded));"></div>';
+      html += '</div>';
+      html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:13px;font-weight:600;color:' + hullCls + ';min-width:36px;text-align:right;">' + Math.round(hullPct * 100) + '%</span>';
+      html += '</div>';
+      html += '</div>';
+
+      // Teams summary
+      if (teams.length > 0) {
+        var NAMES = ['ALPHA', 'BETA', 'GAMMA', 'DELTA'];
+        html += '<div style="display:flex;flex-direction:column;gap:4px;">';
+        teams.forEach(function(slot, i) {
+          var name = i < NAMES.length ? NAMES[i] : ('TEAM ' + (i + 1));
+          var statusText, statusColour;
+          if (slot === 'Idle') {
+            statusText = 'IDLE'; statusColour = 'var(--ink-faint)';
+          } else if (slot.Travelling) {
+            statusText = '→ ' + (slot.Travelling.display_name || slot.Travelling.system_id || '').toUpperCase();
+            statusColour = 'var(--reloading)';
+          } else if (slot.Repairing) {
+            statusText = 'REPAIRING ' + (slot.Repairing.display_name || slot.Repairing.system_id || '').toUpperCase();
+            statusColour = 'var(--loaded)';
+          } else if (slot.Returning) {
+            statusText = 'RETURNING'; statusColour = 'var(--cyan)';
+          } else {
+            statusText = '—'; statusColour = 'var(--ink-faint)';
+          }
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">';
+          html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);letter-spacing:0.2em;width:44px;flex-shrink:0;">' + name + '</span>';
+          html += '<span style="font-family:\'Chakra Petch\',sans-serif;font-size:11px;letter-spacing:0.15em;color:' + statusColour + ';">' + statusText + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);letter-spacing:0.2em;">NO TEAMS</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    initConsole({
+      name: 'engineering',
+      render: function(s) {
+        var shieldsContent = document.getElementById('shields-content');
+        var powerContent = document.getElementById('power-content');
+        var repairContent = document.getElementById('repair-content');
+
+        if (s.shields) {
+          renderShields(s.shields, shieldsContent);
+        }
+        if (s.power) {
+          renderPower(s.power, powerContent);
+        }
+        if (s.repair) {
+          renderRepair(s.repair, repairContent);
+        }
+
+        var isAuto = !!s.engineering_auto;
+        setAutoState(null, document.getElementById('engineering-auto-badge'), isAuto);
+
+        var footerRight = document.getElementById('footer-right');
+        if (footerRight) {
+          var shieldsAuto = s.shields && s.shields.shields_auto;
+          var powerAuto = s.power && s.power.power_auto;
+          var repairAuto = s.repair && s.repair.repair_auto;
+          footerRight.textContent = (shieldsAuto || powerAuto || repairAuto) ? 'AUTO' : '—';
+        }
+      }
+    });
+  </script>
+</body>
+</html>

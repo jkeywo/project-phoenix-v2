@@ -84,6 +84,14 @@ disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
+system_id = "blaster-heavy-fore"
+display_name = "Heavy Blaster Bank (Fore)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
 system_id = "phaser-aft"
 display_name = "Phaser Bank (Aft)"
 max_hp = 21
@@ -94,7 +102,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-port"
 display_name = "Torpedo Tube (Fore Port)"
-max_hp = 17
+max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -102,15 +110,31 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-starboard"
 display_name = "Torpedo Tube (Fore Starboard)"
-max_hp = 17
+max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
-system_id = "torpedo-tube-aft"
-display_name = "Torpedo Tube (Aft)"
-max_hp = 17
+system_id = "torpedo-tube-fore-centre"
+display_name = "Torpedo Tube (Fore Centre)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-aft-port"
+display_name = "Torpedo Tube (Aft Port)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-aft-starboard"
+display_name = "Torpedo Tube (Aft Starboard)"
+max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -137,14 +161,14 @@ range = 75
 shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
 selects = [ "ship", "station", "asteroid" ]
 
-# Standard fore + aft phaser banks — Cruiser stats (4.0 dps, range 40, duration 6, cooldown 6)
+# Standard fore + aft phaser banks — fore bank deals double-damage (8.0 dps = 2× Cruiser's 4.0)
 [[weapons_console.phaser_banks]]
 id = "fore"
 facing_deg = 0
 fire_arc_deg = 270
 auto_arc_deg = 180
 beam_range = 40
-beam_damage_per_sec = 4
+beam_damage_per_sec = 8.0
 beam_duration_secs = 6
 cooldown_secs = 6
 beam_color = [ 1, 0.4, 0.1, 1 ]
@@ -162,28 +186,27 @@ cooldown_secs = 6
 beam_color = [ 1, 0.4, 0.1, 1 ]
 marker = "phasers_aft"
 
-# Heavy blaster bank (issue #638): charge-to-fire, sphere visual, meaningful recoil + screenshake.
-# charge_time_secs requires issue #636; the bank works as instant-fire until that ships.
+# Heavy blaster bank: hold-to-fire, 2-shot volley, heavy sphere projectile, recoil + screenshake.
 [[weapons_console.blaster_banks]]
-id = "heavy_fore"
+id = "heavy-fore"
 facing_deg = 0
 fire_arc_deg = 90
-volley_count = 1
-volley_interval_secs = 0.0
-cooldown_secs = 5.0
 charge_time_secs = 3.0
-projectile_speed = 55.0
-collision_radius = 2.5
+volley_count = 2
+volley_interval_secs = 1.5
+cooldown_secs = 12.0
+projectile_speed = 35.0
+collision_radius = 3.0
 visual_scale = 3.0
-damage = 60
-shield_pierce = 0.1
-recoil_impulse = 4.0
-screenshake_magnitude = 0.6
+damage = 80
+shield_pierce = 0.15
+recoil_impulse = 6.0
+screenshake_magnitude = 1.0
 range = 50.0
 
-# Standard 3-tube torpedo layout — Cruiser stats
+# 5-tube torpedo layout: 3 fore + 2 aft, volley_max=3, 30-round magazine, burst_interval=0.5s
 [torpedoes]
-count = 6
+count = 30
 damage_hull = 40
 damage_shields = 4
 speed = 15
@@ -191,27 +214,44 @@ turn_rate_deg_per_sec = 45
 lifespan = 20
 load_time = 10
 detonation_radius = 5
+burst_interval_secs = 0.5
 
 [[torpedoes.tubes]]
-id = "fore_port"
+id = "fore-port"
 facing_deg = 0
 fire_arc_deg = 90
 load_time = 3
+volley_max = 3
 marker = "torpedo_port"
 
 [[torpedoes.tubes]]
-id = "fore_starboard"
+id = "fore-starboard"
 facing_deg = 0
 fire_arc_deg = 90
 load_time = 3
+volley_max = 3
 marker = "torpedo_starboard"
 
 [[torpedoes.tubes]]
-id = "aft"
-facing_deg = 180
+id = "fore-centre"
+facing_deg = 0
 fire_arc_deg = 90
 load_time = 3
-marker = "torpedo_aft"
+volley_max = 3
+
+[[torpedoes.tubes]]
+id = "aft-port"
+facing_deg = 180
+fire_arc_deg = 90
+load_time = 4
+volley_max = 3
+
+[[torpedoes.tubes]]
+id = "aft-starboard"
+facing_deg = 180
+fire_arc_deg = 90
+load_time = 4
+volley_max = 3
 
 [sensors_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
@@ -274,7 +314,8 @@ max_hp = 140
 regen_per_sec = 3.5
 offline_duration = 10
 
-# Standard 4-arc shields (Fore/Starboard/Aft/Port, each 90°)
+# 5-arc shields: priority-1 directional arcs absorb first; priority-2 omni absorbs when
+# the relevant directional arc is offline.
 [[shield_arc]]
 id = "fore"
 label = "Fore"
@@ -302,6 +343,14 @@ label = "Port"
 center_deg = 270
 width_deg = 90
 hull_max_hp = 9
+
+[[shield_arc]]
+id = "omni"
+label = "Omni"
+center_deg = 0
+width_deg = 360
+priority = 2
+hull_max_hp = 8
 
 [power]
 capacity = 90
@@ -544,7 +593,19 @@ station = "tactical"
 power_group = "weapons"
 
 [[system]]
-id = "torpedo-tube-aft"
+id = "torpedo-tube-fore-centre"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-aft-port"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-aft-starboard"
 kind = "torpedo_tube"
 station = "tactical"
 power_group = "weapons"

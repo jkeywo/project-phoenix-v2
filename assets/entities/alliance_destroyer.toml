@@ -20,7 +20,7 @@ length = 3
 [[hull.system_hull]]
 system_id = "helm"
 display_name = "Helm"
-max_hp = 25
+max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
@@ -28,7 +28,7 @@ debuff_magnitude = 0.15
 [[hull.system_hull]]
 system_id = "tactical"
 display_name = "Tactical"
-max_hp = 25
+max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
@@ -44,7 +44,7 @@ debuff_magnitude = 0.15
 [[hull.system_hull]]
 system_id = "power-battery"
 display_name = "Power Battery"
-max_hp = 10
+max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.15
@@ -52,7 +52,7 @@ debuff_magnitude = 0.15
 [[hull.system_hull]]
 system_id = "core"
 display_name = "Core"
-max_hp = 20
+max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.10
@@ -74,8 +74,24 @@ disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
-system_id = "phaser-fore"
-display_name = "Phaser Bank (Fore)"
+system_id = "phaser-omni"
+display_name = "Phaser Bank (Omni)"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "blaster-port"
+display_name = "Blaster Bank (Port)"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "blaster-starboard"
+display_name = "Blaster Bank (Starboard)"
 max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -84,7 +100,15 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore"
 display_name = "Torpedo Tube (Fore)"
-max_hp = 12
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-aft"
+display_name = "Torpedo Tube (Aft)"
+max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -92,7 +116,7 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-magazine"
 display_name = "Torpedo Magazine"
-max_hp = 20
+max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -111,20 +135,49 @@ range = 75
 shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
 selects = [ "ship", "station", "asteroid" ]
 
+# 360° suppression phaser (issue #639): omni-directional suppression beam.
 [[weapons_console.phaser_banks]]
-id = "fore"
+id = "omni"
 facing_deg = 0
-fire_arc_deg = 270
-auto_arc_deg = 180
-beam_range = 35
-beam_damage_per_sec = 5
-beam_duration_secs = 5
+fire_arc_deg = 360
+auto_arc_deg = 360
+beam_range = 30
+beam_damage_per_sec = 3
+beam_duration_secs = 4
+cooldown_secs = 4
+
+# Forward blaster banks (issue #639): 45° forward blasters, port and starboard.
+[[weapons_console.blaster_banks]]
+id = "port"
+facing_deg = 0
+fire_arc_deg = 45
+volley_count = 3
+volley_interval_secs = 0.5
 cooldown_secs = 5
-beam_color = [ 1, 0.4, 0.1, 1 ]
-marker = "phasers_fore"
+projectile_speed = 50
+collision_radius = 0.8
+visual_scale = 0.5
+damage = 20
+shield_pierce = 0.1
+range = 35
+
+[[weapons_console.blaster_banks]]
+id = "starboard"
+facing_deg = 0
+fire_arc_deg = 45
+volley_count = 3
+volley_interval_secs = 0.5
+cooldown_secs = 5
+projectile_speed = 50
+collision_radius = 0.8
+visual_scale = 0.5
+damage = 20
+shield_pierce = 0.1
+range = 35
 
 [torpedoes]
-count = 4
+count = 12
+burst_interval_secs = 0.4
 damage_hull = 45
 damage_shields = 5
 speed = 18
@@ -138,7 +191,15 @@ id = "fore"
 facing_deg = 0
 fire_arc_deg = 120
 load_time = 4
+volley_max = 4
 marker = "torpedo_fore"
+
+[[torpedoes.tubes]]
+id = "aft"
+facing_deg = 180
+fire_arc_deg = 90
+load_time = 4
+volley_max = 2
 
 [sensors_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
@@ -149,15 +210,15 @@ shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
 [helm_console]
-max_speed = 12
-max_reverse_speed = 5
-acceleration = 5
-deceleration = 12
-max_yaw_rate = 0.55
+max_speed = 15
+max_reverse_speed = 6
+acceleration = 6
+deceleration = 15
+max_yaw_rate = 0.6
 max_bank_deg = 10
 impulse_charge_duration = 2.5
-impulse_speed_multiplier = 10
-impulse_acceleration_multiplier = 5
+impulse_speed_multiplier = 12
+impulse_acceleration_multiplier = 7.5
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 
 [helm_console.engine_pfx]
@@ -169,7 +230,7 @@ trail_spawn_interval_secs = 0.05
 [helm_console.boost]
 multiplier = 3.0
 steering_multiplier = 2.0
-active_duration = 3.0
+active_duration = 6.0
 recharge_duration = 18.0
 
 [helm_console.radar]
@@ -202,28 +263,14 @@ offline_duration = 8
 id = "fore"
 label = "Fore"
 center_deg = 0
-width_deg = 90
+width_deg = 180
 hull_max_hp = 6
-
-[[shield_arc]]
-id = "port"
-label = "Port"
-center_deg = 270
-width_deg = 90
-hull_max_hp = 5
 
 [[shield_arc]]
 id = "aft"
 label = "Aft"
 center_deg = 180
-width_deg = 90
-hull_max_hp = 5
-
-[[shield_arc]]
-id = "starboard"
-label = "Starboard"
-center_deg = 90
-width_deg = 90
+width_deg = 180
 hull_max_hp = 5
 
 [power]
@@ -379,7 +426,7 @@ station = "helm"
 power_group = "helm"
 
 [[system]]
-id = "phaser-fore"
+id = "phaser-omni"
 kind = "phaser_bank"
 station = "tactical"
 power_group = "weapons"
@@ -393,6 +440,24 @@ power_group = "weapons"
 [[system]]
 id = "torpedo-tube-fore"
 kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-aft"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "blaster-port"
+kind = "blaster_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "blaster-starboard"
+kind = "blaster_bank"
 station = "tactical"
 power_group = "weapons"
 

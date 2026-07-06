@@ -26,8 +26,38 @@ export const ACTION_MAP = Object.freeze({
   fire_blaster: (a, send) => {
     if (!a.bank) return;
     send('ControlSystem', {
-      target: `blaster-bank-${a.bank}`,
+      target: `blaster-${a.bank}`,
       payload: { type: 'FireBlaster' },
+    });
+  },
+
+  /**
+   * Begin the charge phase for a hold-to-fire blaster bank (issue #636).
+   *
+   * When `charge_time_secs == 0` (instant-fire banks) this behaves identically
+   * to `fire_blaster`. When `charge_time_secs > 0` the bank enters a charge
+   * phase and fires automatically when the charge completes.
+   */
+  charge_blaster_start: (a, send) => {
+    if (!a.bank) return;
+    send('ControlSystem', {
+      target: `blaster-${a.bank}`,
+      payload: { type: 'ChargeBlasterStart' },
+    });
+  },
+
+  /**
+   * Cancel an in-progress charge phase (issue #636).
+   *
+   * Resets charge progress to 0 with no cooldown and no ammo consumed.
+   * Safe to send even when the bank is not currently charging (no-op on the
+   * server).
+   */
+  charge_blaster_cancel: (a, send) => {
+    if (!a.bank) return;
+    send('ControlSystem', {
+      target: `blaster-${a.bank}`,
+      payload: { type: 'ChargeBlasterCancel' },
     });
   },
 
@@ -44,6 +74,18 @@ export const ACTION_MAP = Object.freeze({
   /** Unload (or cancel loading of) a torpedo tube. */
   unload_tube: (a, send) => {
     if (a.tube) send('UnloadTube', { tube: a.tube });
+  },
+
+  /** Set the volley target count for a torpedo tube (issue #632).
+   *  Sends a ControlSystem message to the tube's fine SystemId with
+   *  payload type SetTorpedoVolleyTarget. */
+  set_torpedo_volley_target: (a, send) => {
+    if (a.tube == null || a.count == null) return;
+    const sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');
+    send('ControlSystem', {
+      target: sysId,
+      payload: { type: 'SetTorpedoVolleyTarget', data: { count: a.count } },
+    });
   },
 
   /** Lock the weapon / sensor target to a specific entity UUID. */

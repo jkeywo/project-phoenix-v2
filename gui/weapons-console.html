@@ -599,12 +599,92 @@
                 gap: 8px;
                 flex-shrink: 0;
               }
-              .tube-row .load-btn,
+              /* ── Per-slot torpedo icons ─────────────────────────────────────── */
+              .torp-slots {
+                display: flex;
+                gap: 5px;
+                align-items: center;
+                flex-wrap: wrap;
+              }
+              .torp-slot {
+                position: relative;
+                width: 22px;
+                height: 36px;
+                border-radius: 3px;
+                overflow: hidden;
+                flex-shrink: 0;
+                /* Torpedo silhouette: tapered top via clip-path */
+                clip-path: polygon(30% 0, 70% 0, 100% 12%, 100% 100%, 0 100%, 0 12%);
+              }
+              /* State backgrounds */
+              .torp-slot[data-state="empty"] {
+                background: rgba(255, 255, 255, 0.12);
+                border: 1px solid rgba(255,255,255,0.18);
+              }
+              .torp-slot[data-state="queued-to-fill"] {
+                background: rgba(0, 229, 255, 0.10);
+                border: 1px solid rgba(0, 229, 255, 0.40);
+              }
+              .torp-slot[data-state="filled"] {
+                background: rgba(0, 229, 255, 0.45);
+                border: 1px solid #00e5ff;
+                box-shadow: 0 0 6px rgba(0,229,255,0.4);
+              }
+              .torp-slot[data-state="queued-to-empty"] {
+                background: rgba(255, 120, 0, 0.30);
+                border: 1px solid rgba(255, 120, 0, 0.70);
+              }
+              /* Progress bar — fills from the bottom up */
+              .torp-progress {
+                position: absolute;
+                bottom: 0; left: 0; right: 0;
+                height: 0%;
+                transition: height 0.15s linear;
+                pointer-events: none;
+              }
+              .torp-slot[data-state="queued-to-fill"] .torp-progress {
+                background: linear-gradient(0deg, #00e5ff 0%, rgba(0,229,255,0.5) 100%);
+              }
+              .torp-slot[data-state="queued-to-empty"] .torp-progress {
+                background: linear-gradient(0deg, rgba(255,120,0,0.2) 0%, rgba(255,120,0,0.6) 100%);
+              }
+              /* Volley target +/- controls */
+              .volley-ctrl {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                flex-shrink: 0;
+              }
+              .volley-btn {
+                --cham: 4px;
+                width: 28px;
+                height: 28px;
+                flex-shrink: 0;
+                border: none;
+                background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
+                clip-path: polygon(
+                  var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+                  100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+                  var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+                );
+                color: var(--ink-dim);
+                font-family: "Chakra Petch", sans-serif;
+                font-weight: 700;
+                font-size: 16px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                user-select: none;
+                padding: 0;
+              }
+              .volley-btn:disabled { opacity: 0.35; cursor: default; }
+
               .tube-row .fire-btn {
                 --cham: 6px;
                 position: relative;
                 height: 36px;
-                width: 100px;
+                width: 80px;
                 flex-shrink: 0;
                 border: none;
                 background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
@@ -625,7 +705,6 @@
                 justify-content: center;
                 user-select: none;
               }
-              .tube-row .load-btn::before,
               .tube-row .fire-btn::before {
                 content: "";
                 position: absolute;
@@ -638,32 +717,14 @@
                   var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
                 );
               }
-              .tube-row .load-btn span,
               .tube-row .fire-btn span {
                 position: relative;
                 z-index: 1;
               }
-              .tube-row .load-btn:disabled,
               .tube-row .fire-btn:disabled {
                 cursor: default;
                 opacity: 0.45;
               }
-              .tube-row .load-btn .load-fill {
-                position: absolute;
-                inset: 0;
-                width: 0%;
-                background: rgba(0,200,120,0.14);
-                transition: width 0.15s linear;
-                pointer-events: none;
-                z-index: 0;
-              }
-              .tube-row .load-btn.btn-unload .load-fill {
-                background: rgba(255,120,60,0.14);
-              }
-              .tube-row .load-btn.btn-load { color: var(--loaded); }
-              .tube-row .load-btn.btn-unload { color: var(--reloading); }
-              .tube-row .load-btn.btn-loading,
-              .tube-row .load-btn.btn-unloading { color: var(--ink-faint); }
               .tube-row .fire-btn.armed {
                 background: linear-gradient(180deg, #8c4818 0%, #5a2c10 50%, #2a1008 100%);
                 color: var(--tactical);
@@ -687,12 +748,20 @@
                 .tube-buttons {
                   gap: 4px;
                 }
-                .tube-row .load-btn,
+                .torp-slot {
+                  width: clamp(14px, 4.5vw, 18px);
+                  height: clamp(23px, 7dvh, 28px);
+                }
                 .tube-row .fire-btn {
                   height: clamp(23px, 7dvh, 28px);
-                  width: clamp(56px, 18vw, 68px);
+                  width: clamp(50px, 15vw, 60px);
                   font-size: clamp(8px, 2.4vh, 9px);
                   letter-spacing: 0.1em;
+                }
+                .volley-btn {
+                  width: clamp(20px, 6vw, 24px);
+                  height: clamp(20px, 6vw, 24px);
+                  font-size: 13px;
                 }
               }
 
@@ -701,8 +770,7 @@
                 .tube-row:first-child { margin-top: 10px; }
                 .tube-row .tube-name { min-width: unset; font-size: 10px; }
                 .tube-buttons { margin-left: 0; }
-                .tube-row .load-btn,
-                .tube-row .fire-btn { height: 30px; font-size: 10px; flex: 1; }
+                .tube-row .fire-btn { height: 30px; font-size: 10px; }
               }
             </style>
 
@@ -735,14 +803,14 @@
                   </div>
                 </div>
 
-                <!-- Fire blasters button (issue #631). Shown only when the
-                     ship config declares at least one blaster bank. -->
+                <!-- Fire blasters section (issue #631 / #636).
+                     Shown only when the ship config declares at least one
+                     blaster bank. Per-bank rows are built dynamically in
+                     _renderConsole: instant-fire banks use click→fire_blaster;
+                     charge banks use pointerdown→charge_blaster_start and
+                     pointerup/pointerleave→charge_blaster_cancel. -->
                 <div id="fire-blasters-row" style="padding-top:8px; display:none;">
-                  <button id="fire-blaster" class="btn danger" style="width:100%;" type="button">
-                    <span class="btn-bg"></span>
-                    <span class="led fire"></span>
-                    <span class="label">FIRE BLASTERS</span>
-                  </button>
+                  <div id="blaster-bank-rows"></div>
                 </div>
               </div>
             </div>
@@ -777,6 +845,7 @@
   <script type="module">
     import { initConsole, renderStationDamageBar } from './console-core.js';
     import { setAutoState } from './console-ui.js';
+    import { torpSlotStates } from './console-state.js';
 
     // ── State ────────────────────────────────────────────────────────────
     var _selectedBank  = 'fore';
@@ -795,43 +864,132 @@
     // 10Hz so the bar can animate smoothly without DOM churn.
     var _cooldownRowEls = {};
 
+    // Stable per-blaster-bank DOM refs (issue #636), keyed by bank id.
+    // Built once; updated in _renderConsole to reflect charge_progress and
+    // fire_ready state without DOM churn.
+    var _blasterBankEls = {};
+
     // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
     // Handled by initConsole({ render }) — see bottom of script.
 
-    // Build the (stable) DOM nodes for one torpedo tube row. Click handlers
-    // look up the tube's current state from `_state` at click time rather
-    // than capturing it, since these nodes now persist across many renders.
+    /**
+     * Build (and cache) stable DOM nodes for one blaster bank row.
+     *
+     * For instant-fire banks (has_charge == false) the button fires on click.
+     * For charge banks (has_charge == true) the button fires on pointerdown
+     * and cancels on pointerup/pointerleave (hold-to-fire).
+     *
+     * The DOM is created once; subsequent renders call _updateBlasterBank to
+     * mutate the existing nodes.
+     *
+     * @param {string} bankId
+     * @param {boolean} hasCharge
+     * @returns {{ container: HTMLElement, btn: HTMLElement, progressBar: HTMLElement, progressFill: HTMLElement }}
+     */
+    function _buildBlasterBankRow(bankId, hasCharge) {
+      var container = document.createElement('div');
+      container.style.cssText = 'padding-bottom:6px;';
+
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn danger';
+      btn.style.width = '100%';
+      var btnBg = document.createElement('span'); btnBg.className = 'btn-bg';
+      var led = document.createElement('span'); led.className = 'led fire';
+      var lbl = document.createElement('span'); lbl.className = 'label';
+      lbl.textContent = hasCharge ? ('HOLD TO FIRE [' + bankId.toUpperCase() + ']') : ('FIRE BLASTERS [' + bankId.toUpperCase() + ']');
+      btn.appendChild(btnBg);
+      btn.appendChild(led);
+      btn.appendChild(lbl);
+
+      // Charge progress bar (hidden for instant-fire banks).
+      var progressBar = document.createElement('div');
+      progressBar.style.cssText = 'height:6px; background:var(--bg-deep); border:1px solid var(--line-faint); overflow:hidden; margin-top:3px; display:' + (hasCharge ? '' : 'none') + ';';
+      var progressFill = document.createElement('div');
+      progressFill.style.cssText = 'height:100%; width:0%; background:var(--col-danger); transition:width 0.1s linear;';
+      progressBar.appendChild(progressFill);
+
+      container.appendChild(btn);
+      container.appendChild(progressBar);
+
+      if (hasCharge) {
+        // Hold-to-fire: pointerdown starts charge, pointerup/leave cancels.
+        btn.addEventListener('pointerdown', function(e) {
+          e.preventDefault();
+          sendAction('charge_blaster_start', { bank: bankId });
+        });
+        btn.addEventListener('pointerup', function() {
+          sendAction('charge_blaster_cancel', { bank: bankId });
+        });
+        btn.addEventListener('pointerleave', function() {
+          sendAction('charge_blaster_cancel', { bank: bankId });
+        });
+      } else {
+        // Instant-fire: single click.
+        btn.addEventListener('click', function() {
+          sendAction('fire_blaster', { bank: bankId });
+        });
+      }
+
+      return { container: container, btn: btn, progressBar: progressBar, progressFill: progressFill };
+    }
+
+    /**
+     * Update the in-place blaster bank nodes for the given state snapshot.
+     *
+     * @param {{ id: string, fire_ready: boolean, charge_progress: number, has_charge: boolean }} bankState
+     */
+    function _updateBlasterBank(bankState) {
+      var els = _blasterBankEls[bankState.id];
+      if (!els) return;
+      els.btn.disabled = !bankState.fire_ready && !bankState.charging;
+      var pct = Math.round((bankState.charge_progress || 0) * 100);
+      els.progressFill.style.width = pct + '%';
+    }
+
+    // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
+    // Handled by initConsole({ render }) — see bottom of script.
+
+    // Build the (stable) DOM nodes for one torpedo tube row.
+    //
+    // The old single LOAD/UNLOAD button has been replaced with a row of per-slot
+    // torpedo icons (issue #637). The +/- buttons (added in #632) adjust the volley
+    // target and thus implicitly queue loading/unloading. The FIRE button fires all
+    // loaded torpedoes (partial load allowed).
+    //
+    // Click handlers look up the tube's current state from `_state` at click time
+    // rather than capturing it, since these nodes persist across many renders.
     function _buildTubeRow(id) {
-      var loadBtn = document.createElement('button');
-      loadBtn.type = 'button';
+      var row = document.createElement('div');
+      row.className = 'tube-row';
 
-      var fill = document.createElement('span');
-      fill.className = 'load-fill';
+      var nameEl = document.createElement('span');
+      nameEl.className = 'tube-name';
 
-      var lbl = document.createElement('span');
-      loadBtn.appendChild(fill);
-      loadBtn.appendChild(lbl);
+      // Torpedo slot icons — rebuilt in _renderTubeIcons when volley_max changes.
+      var slotsEl = document.createElement('div');
+      slotsEl.className = 'torp-slots';
 
-      loadBtn.addEventListener('click', function() {
+      // Volley target controls: - [slots] +   FIRE
+      var minusBtn = document.createElement('button');
+      minusBtn.type = 'button';
+      minusBtn.className = 'volley-btn volley-minus';
+      minusBtn.textContent = '-';
+      minusBtn.addEventListener('click', function() {
         var t = (_state && _state.tubes || []).find(function(x) { return x.id === id; });
-        var st = t ? (t.state || (t.loaded ? 'loaded' : 'unloaded')) : 'unloaded';
-        loadBtn.disabled = true;
-        if (st === 'loaded') {
-          loadBtn.className = 'load-btn btn-unloading';
-          fill.style.width = '0%';
-          lbl.textContent = 'UNLOADING ' + (t && typeof t.load_time === 'number' ? t.load_time.toFixed(1) : '…') + 's';
-          sendAction('unload_tube', { tube: id });
-        } else if (st === 'loading') {
-          loadBtn.className = 'load-btn btn-unloading';
-          fill.style.width = '0%';
-          lbl.textContent = 'CANCEL…';
-          sendAction('unload_tube', { tube: id });
-        } else {
-          loadBtn.className = 'load-btn btn-loading';
-          fill.style.width = '0%';
-          lbl.textContent = 'LOADING 0%';
-          sendAction('load_tube', { tube: id });
-        }
+        var cur = t ? (typeof t.target_count === 'number' ? t.target_count : 0) : 0;
+        if (cur > 0) sendAction('set_torpedo_volley_target', { tube: id, count: cur - 1 });
+      });
+
+      var plusBtn = document.createElement('button');
+      plusBtn.type = 'button';
+      plusBtn.className = 'volley-btn volley-plus';
+      plusBtn.textContent = '+';
+      plusBtn.addEventListener('click', function() {
+        var t = (_state && _state.tubes || []).find(function(x) { return x.id === id; });
+        var cur = t ? (typeof t.target_count === 'number' ? t.target_count : 0) : 0;
+        var max = t ? (typeof t.volley_max === 'number' ? t.volley_max : 1) : 1;
+        if (cur < max) sendAction('set_torpedo_volley_target', { tube: id, count: cur + 1 });
       });
 
       var fireBtn = document.createElement('button');
@@ -844,21 +1002,65 @@
         sendAction('fire_torpedo', { tube: id, target_uuid: targetUuid });
       });
 
-      var row = document.createElement('div');
-      row.className = 'tube-row';
-
-      var nameEl = document.createElement('span');
-      nameEl.className = 'tube-name';
-
       var btns = document.createElement('div');
       btns.className = 'tube-buttons';
-      btns.appendChild(loadBtn);
+
+      var volleyCtrl = document.createElement('div');
+      volleyCtrl.className = 'volley-ctrl';
+      volleyCtrl.appendChild(minusBtn);
+      volleyCtrl.appendChild(slotsEl);
+      volleyCtrl.appendChild(plusBtn);
+
+      btns.appendChild(volleyCtrl);
       btns.appendChild(fireBtn);
 
       row.appendChild(nameEl);
       row.appendChild(btns);
 
-      return { row: row, nameEl: nameEl, loadBtn: loadBtn, fill: fill, lbl: lbl, fireBtn: fireBtn };
+      return { row: row, nameEl: nameEl, slotsEl: slotsEl, fireBtn: fireBtn,
+               minusBtn: minusBtn, plusBtn: plusBtn };
+    }
+
+    // Rebuild (or reuse) the per-slot torpedo icon <div> elements inside slotsEl
+    // when the tube's volley_max changes. Returns the array of slot elements.
+    function _ensureSlotIcons(slotsEl, vollMax) {
+      var existing = slotsEl.children.length;
+      if (existing === vollMax) return Array.from(slotsEl.children);
+
+      // Clear and rebuild — this is only triggered when the ship config changes,
+      // not on every 10 Hz tick.
+      while (slotsEl.firstChild) slotsEl.removeChild(slotsEl.firstChild);
+      var slots = [];
+      for (var i = 0; i < vollMax; i++) {
+        var slotEl = document.createElement('div');
+        slotEl.className = 'torp-slot';
+        slotEl.dataset.state = 'empty';
+        var progressEl = document.createElement('div');
+        progressEl.className = 'torp-progress';
+        slotEl.appendChild(progressEl);
+        slotsEl.appendChild(slotEl);
+        slots.push(slotEl);
+      }
+      return slots;
+    }
+
+    // Update per-slot icon states from the current tube struct.
+    // Called every render tick for each tube.
+    function _renderTubeIcons(els, t) {
+      var vollMax  = typeof t.volley_max === 'number' ? t.volley_max : 1;
+      var slotEls  = _ensureSlotIcons(els.slotsEl, vollMax);
+      var slots    = torpSlotStates(t);
+
+      for (var i = 0; i < vollMax; i++) {
+        var slotEl = slotEls[i];
+        var slot   = slots[i] || { state: 'empty', progress: 0 };
+        slotEl.dataset.state = slot.state;
+
+        var progressEl = slotEl.firstChild;
+        if (progressEl) {
+          progressEl.style.height = Math.round(slot.progress * 100) + '%';
+        }
+      }
     }
 
     // Build the (stable) DOM nodes for one per-bank cooldown row.
@@ -1028,8 +1230,6 @@
       });
 
       tubes.forEach(function(t) {
-        var state    = t.state || (t.loaded ? 'loaded' : 'unloaded');
-        var progress = typeof t.progress === 'number' ? t.progress : (t.loaded ? 1 : 0);
         var name     = t.id.replace(/_/g, ' ').toUpperCase();
 
         var els = _tubeRowEls[t.id];
@@ -1040,26 +1240,22 @@
         }
 
         els.nameEl.textContent = name;
-        els.fill.style.width = (progress * 100).toFixed(1) + '%';
-        els.loadBtn.disabled = state === 'unloading';
 
-        if (state === 'loaded') {
-          els.loadBtn.className = 'load-btn btn-unload';
-          els.lbl.textContent = 'UNLOAD';
-        } else if (state === 'unloaded') {
-          els.loadBtn.className = 'load-btn btn-load';
-          els.lbl.textContent = 'LOAD';
-        } else if (state === 'loading') {
-          els.loadBtn.className = 'load-btn btn-loading';
-          els.lbl.textContent = 'LOADING ' + Math.round(progress * 100) + '%';
-        } else {
-          els.loadBtn.className = 'load-btn btn-unloading';
-          var secsLeft = typeof t.reload_secs === 'number' ? t.reload_secs : 0;
-          els.lbl.textContent = 'UNLOADING ' + secsLeft.toFixed(1) + 's';
-        }
+        // Render per-slot icons (fills, queued states, progress bar).
+        _renderTubeIcons(els, t);
 
-        els.fireBtn.disabled = state !== 'loaded';
-        els.fireBtn.className = state === 'loaded' ? 'fire-btn armed' : 'fire-btn';
+        var loadedCount  = typeof t.loaded_count  === 'number' ? t.loaded_count  : (t.loaded ? 1 : 0);
+        var targetCount  = typeof t.target_count  === 'number' ? t.target_count  : 0;
+        var vollMax      = typeof t.volley_max     === 'number' ? t.volley_max    : 1;
+        var canFire      = loadedCount > 0;
+
+        // FIRE button: enabled whenever at least one torpedo is loaded.
+        els.fireBtn.disabled = !canFire;
+        els.fireBtn.className = canFire ? 'fire-btn armed' : 'fire-btn';
+
+        // +/- buttons: disable at limits.
+        if (els.minusBtn) els.minusBtn.disabled = targetCount <= 0;
+        if (els.plusBtn)  els.plusBtn.disabled  = targetCount >= vollMax;
       });
 
       // ── Phaser state ─────────────────────────────────────────────────────
@@ -1169,6 +1365,21 @@
       if (blastersRow) {
         var hasBlasters = Array.isArray(s.blasters) && s.blasters.length > 0;
         blastersRow.style.display = hasBlasters ? '' : 'none';
+
+        if (hasBlasters) {
+          var bankRowsContainer = document.getElementById('blaster-bank-rows');
+          if (bankRowsContainer) {
+            // Build any new bank rows (first render or ship config change).
+            s.blasters.forEach(function(bank) {
+              if (!_blasterBankEls[bank.id]) {
+                var els = _buildBlasterBankRow(bank.id, !!bank.has_charge);
+                _blasterBankEls[bank.id] = els;
+                bankRowsContainer.appendChild(els.container);
+              }
+              _updateBlasterBank(bank);
+            });
+          }
+        }
       }
     }
 
@@ -1182,20 +1393,6 @@
       }
       sendAction('fire_phaser', { bank: bank });
     });
-
-    // Fire blasters button — fires the first fire-ready blaster bank.
-    var fireBlasterEl = document.getElementById('fire-blaster');
-    if (fireBlasterEl) {
-      fireBlasterEl.addEventListener('click', function() {
-        var bank = 'fore';
-        if (_state && Array.isArray(_state.blasters)) {
-          var ready = _state.blasters.filter(function(b) { return b.fire_ready; });
-          if (ready.length > 0) bank = ready[0].id;
-          else if (_state.blasters.length > 0) bank = _state.blasters[0].id;
-        }
-        sendAction('fire_blaster', { bank: bank });
-      });
-    }
 
     // MAN/AUTO toggle beside the fire button — each option sets its mode.
     var _modeManEl = document.getElementById('mode-man');

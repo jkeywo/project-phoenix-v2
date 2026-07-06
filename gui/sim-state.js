@@ -94,6 +94,8 @@ export class ClientSimState {
     this.frequencyHint = null;
     /** Per-console hull integrity from the latest SimState. */
     this.consoleHull = [];
+    /** Per-bank blaster state from the latest WeaponsUpdate or blackboard. */
+    this.blasterBanks = [];
     /** Per-bank phaser state from the latest WeaponsUpdate. */
     this.bankStates = [];
     /** Per-tube torpedo state from the latest WeaponsUpdate. */
@@ -214,6 +216,7 @@ export class ClientSimState {
         this.tubeStates = d.tubes || [];
         this.torpedoCount = typeof d.torpedo_count === 'number' ? d.torpedo_count : 0;
         this.phaserMode = d.phaser_mode || 'Auto';
+        if (d.blasters != null) this.blasterBanks = d.blasters;
         break;
       case 'SensorsTargetSuggestion':
         this.sensorsTargetSuggestion = d.uuid;

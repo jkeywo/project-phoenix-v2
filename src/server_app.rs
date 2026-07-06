@@ -268,6 +268,7 @@ pub fn add_simulation_plugins(app: &mut App) {
         OnEnter(GamePhase::InProgress),
         (
             reset_broadcast_caches_on_start,
+            crate::world::server::seed_ship_power_counter,
             spawn_game_start_entities,
             dump_tracked_entities,
         )
@@ -1874,6 +1875,7 @@ fn spawn_game_start_entities(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut pending_ship_config: Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
     sessions: Option<Res<crate::lobby::Sessions>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
 ) {
     if *has_spawned {
@@ -1892,6 +1894,14 @@ fn spawn_game_start_entities(
     for entity_inst in &mc.entities {
         if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
             continue;
+        }
+        // Evaluate optional spawn predicate against the world flag store.
+        if let Some(pred) = &entity_inst.when_predicate {
+            let empty = crate::world::flags::FlagStore::new();
+            let flags_ref = runtime.as_ref().map(|r| &r.flags).unwrap_or(&empty);
+            if !pred.evaluate(&[flags_ref]) {
+                continue;
+            }
         }
         let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {
             Ok(c) => c,

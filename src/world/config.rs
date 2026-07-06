@@ -144,6 +144,18 @@ pub struct WorldEntity {
     /// Optional inline TOML overrides merged on top of the template.
     #[serde(default)]
     pub overrides: Option<toml::Value>,
+    /// Optional raw predicate string parsed at world-load time into `when_predicate`.
+    /// When `Some`, the entity is only spawned if the predicate evaluates to
+    /// `true` against the world flag/counter store at spawn time.
+    ///
+    /// Supports the same predicate grammar as trigger `when =` fields:
+    /// `flag(name)`, `counter(name) >= N`, `not(...)`, `and(a, b)`, `or(a, b)`.
+    #[serde(default)]
+    pub when: Option<String>,
+    /// Parsed form of `when`. Populated by `parse_world`; `None` when `when`
+    /// is absent or the struct was constructed directly (e.g. in tests).
+    #[serde(skip)]
+    pub when_predicate: Option<crate::world::flags::Predicate>,
 }
 
 // -- TOML-facing raw types --------------------------------------------------
@@ -1273,10 +1285,21 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         raw.available_ships
     };
 
+    // Parse `when` predicates on entity entries.
+    let mut entities = raw.entities;
+    for entity in &mut entities {
+        if let Some(ref src) = entity.when.clone() {
+            entity.when_predicate = Some(
+                crate::world::flags::parse_predicate(src)
+                    .map_err(|e| format!("Entity '{}' when predicate parse error: {e}", entity.template_path))?,
+            );
+        }
+    }
+
     Ok(WorldConfig {
         global: raw.global,
         anchors,
-        entities: raw.entities,
+        entities,
         triggers,
         comms,
         name_to_uuid: HashMap::new(),

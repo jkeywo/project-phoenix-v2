@@ -1,4 +1,4 @@
-﻿use bevy::prelude::*;
+use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::comms_inbox::CommsInbox;
@@ -399,7 +399,8 @@ fn spawn_world_entities(
     // Startup. Pass the runtime flags so any Immediate-path predicates that
     // don't depend on ship_power still evaluate correctly.
     let flags = runtime.as_ref().map(|r| &r.flags);
-    let _spawned = spawn_immediate_entities_internal(&mut commands, &world_snapshot, &config_cache, flags);
+    let _spawned =
+        spawn_immediate_entities_internal(&mut commands, &world_snapshot, &config_cache, flags);
 }
 
 /// Spawn the unified-pipeline-owned immediate `[[entity]]` instances.
@@ -7837,7 +7838,10 @@ size_max = 2.0
             1,
             "placeholder must be replaced by the real message"
         );
-        assert_eq!(messages[0].body, "Aphelion armed Ã¢â‚¬â€ we're committed now.");
+        assert_eq!(
+            messages[0].body,
+            "Aphelion armed Ã¢â‚¬â€ we're committed now."
+        );
         assert_eq!(messages[0].thread_id, "thread-aphelion");
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(runtime.pending_follow_ups.is_empty());
@@ -8016,7 +8020,11 @@ size_max = 2.0
         let rating: i32 = 300;
         flags.set_flag_value("ship_power", rating as i64);
 
-        assert_eq!(flags.counter("ship_power"), 300, "ship_power counter must equal power_rating");
+        assert_eq!(
+            flags.counter("ship_power"),
+            300,
+            "ship_power counter must equal power_rating"
+        );
     }
 
     /// When `power_rating` is `None` the seeding system writes nothing, so
@@ -8028,7 +8036,11 @@ size_max = 2.0
         let flags = FlagStore::new();
         // Simulate seed_ship_power_counter with power_rating = None — nothing written.
 
-        assert_eq!(flags.counter("ship_power"), 0, "ship_power must remain 0 when power_rating is None");
+        assert_eq!(
+            flags.counter("ship_power"),
+            0,
+            "ship_power must remain 0 when power_rating is None"
+        );
     }
 
     // Helper: build a minimal ConfigCache with a single blank template at `path`.
@@ -8065,8 +8077,8 @@ size_max = 2.0
     /// flag store has `ship_power = 200`.
     #[test]
     fn spawn_game_start_entity_gated_on_ship_power_spawns_when_met() {
-        use crate::world::flags::{CmpOp, FlagStore, Predicate};
         use crate::entity_spawner::EntityUuid;
+        use crate::world::flags::{CmpOp, FlagStore, Predicate};
 
         let pred = Predicate::Counter {
             name: "ship_power".into(),
@@ -8088,7 +8100,11 @@ size_max = 2.0
         };
         app.update();
 
-        assert_eq!(spawned.len(), 1, "entity must spawn when predicate is satisfied");
+        assert_eq!(
+            spawned.len(),
+            1,
+            "entity must spawn when predicate is satisfied"
+        );
         let uuid = app.world().get::<EntityUuid>(spawned[0]).unwrap();
         assert_eq!(uuid.0, "gated-ship-uuid");
     }
@@ -8119,15 +8135,19 @@ size_max = 2.0
         };
         app.update();
 
-        assert_eq!(spawned.len(), 0, "entity must be skipped when predicate is not met");
+        assert_eq!(
+            spawned.len(),
+            0,
+            "entity must be skipped when predicate is not met"
+        );
     }
 
     /// Complementary pair: exactly one of two mutually-exclusive entities
     /// spawns depending on `ship_power`.
     #[test]
     fn spawn_game_start_entity_complementary_pair() {
-        use crate::world::flags::{CmpOp, FlagStore, Predicate};
         use crate::world::config::{WorldConfig, WorldEntity, WorldEntitySpawnOn};
+        use crate::world::flags::{CmpOp, FlagStore, Predicate};
 
         let mut cfg = WorldConfig::default();
         // Heavy variant: ship_power >= 200
@@ -8160,8 +8180,14 @@ size_max = 2.0
         use crate::entity_config::EntityConfig;
         use std::collections::HashMap;
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
-        m.insert("fixture/heavy.toml".into(), EntityConfig::from_toml("").unwrap());
-        m.insert("fixture/scout.toml".into(), EntityConfig::from_toml("").unwrap());
+        m.insert(
+            "fixture/heavy.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+        m.insert(
+            "fixture/scout.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
         let cache = crate::config_cache::ConfigCache::from(m);
 
         // Low power: only scout spawns.
@@ -8176,7 +8202,10 @@ size_max = 2.0
         };
         app_low.update();
         assert_eq!(spawned_low.len(), 1, "only scout should spawn at low power");
-        let uuid_low = app_low.world().get::<crate::entity_spawner::EntityUuid>(spawned_low[0]).unwrap();
+        let uuid_low = app_low
+            .world()
+            .get::<crate::entity_spawner::EntityUuid>(spawned_low[0])
+            .unwrap();
         assert_eq!(uuid_low.0, "scout-uuid");
 
         // High power: only heavy spawns.
@@ -8190,8 +8219,15 @@ size_max = 2.0
             spawn_immediate_entities_internal(&mut commands, &cfg, &cache, Some(&flags_high))
         };
         app_high.update();
-        assert_eq!(spawned_high.len(), 1, "only heavy should spawn at high power");
-        let uuid_high = app_high.world().get::<crate::entity_spawner::EntityUuid>(spawned_high[0]).unwrap();
+        assert_eq!(
+            spawned_high.len(),
+            1,
+            "only heavy should spawn at high power"
+        );
+        let uuid_high = app_high
+            .world()
+            .get::<crate::entity_spawner::EntityUuid>(spawned_high[0])
+            .unwrap();
         assert_eq!(uuid_high.0, "heavy-uuid");
     }
 
@@ -8199,8 +8235,8 @@ size_max = 2.0
     /// — entity spawns when either condition is true.
     #[test]
     fn spawn_game_start_entity_composed_predicate() {
-        use crate::world::flags::{CmpOp, FlagStore, Predicate};
         use crate::entity_spawner::EntityUuid;
+        use crate::world::flags::{CmpOp, FlagStore, Predicate};
 
         let pred = Predicate::Or(
             Box::new(Predicate::Counter {
@@ -8221,7 +8257,12 @@ size_max = 2.0
         app_a.add_plugins(bevy::time::TimePlugin);
         let spawned_a: Vec<Entity> = {
             let mut commands = app_a.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, Some(&flags_neither))
+            spawn_immediate_entities_internal(
+                &mut commands,
+                &world_cfg,
+                &cache,
+                Some(&flags_neither),
+            )
         };
         app_a.update();
         assert_eq!(spawned_a.len(), 0, "neither condition met → skip");
@@ -8253,4 +8294,3 @@ size_max = 2.0
         assert_eq!(spawned_c.len(), 1, "high power → spawn even without flag");
     }
 }
-

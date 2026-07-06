@@ -1289,10 +1289,13 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     let mut entities = raw.entities;
     for entity in &mut entities {
         if let Some(ref src) = entity.when.clone() {
-            entity.when_predicate = Some(
-                crate::world::flags::parse_predicate(src)
-                    .map_err(|e| format!("Entity '{}' when predicate parse error: {e}", entity.template_path))?,
-            );
+            entity.when_predicate =
+                Some(crate::world::flags::parse_predicate(src).map_err(|e| {
+                    format!(
+                        "Entity '{}' when predicate parse error: {e}",
+                        entity.template_path
+                    )
+                })?);
         }
     }
 

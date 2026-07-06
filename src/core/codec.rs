@@ -1837,7 +1837,10 @@ mod tests {
     fn ship_client_config_station_systems_round_trips() {
         // Build a config that carries a station→system map.
         let mut station_systems = HashMap::new();
-        station_systems.insert("helm".to_string(), vec!["helm".to_string(), "helm-engine-port".to_string()]);
+        station_systems.insert(
+            "helm".to_string(),
+            vec!["helm".to_string(), "helm-engine-port".to_string()],
+        );
         station_systems.insert("tactical".to_string(), vec!["tactical".to_string()]);
         let config = ShipClientConfig {
             station_systems,
@@ -1877,7 +1880,10 @@ mod tests {
         let stripped = full_json.replace(",\"station_systems\":{}", "");
         let decoded = JsonCodec.decode_server(&stripped).unwrap();
         if let ServerMessage::Welcome { ship_config, .. } = decoded {
-            assert!(ship_config.station_systems.is_empty(), "station_systems defaults to empty map");
+            assert!(
+                ship_config.station_systems.is_empty(),
+                "station_systems defaults to empty map"
+            );
         } else {
             panic!("expected Welcome");
         }

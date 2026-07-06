@@ -3124,7 +3124,7 @@ entity    = "raider"
     #[test]
     fn parse_world_combat_test_toml_parses_and_carries_8_waves() {
         // (#475) The combat-test scenario must parse and contain:
-        //   - 8 on_timer wave-spawn triggers
+        //   - 16 on_timer wave-spawn triggers (8 base + 8 conditional ship_power extras)
         //   - 1 on_all_destroyed victory trigger
         //   - 1 on_destroyed starbase defeat trigger
         //   - 8 on_destroyed wave objective-completion triggers
@@ -3133,13 +3133,16 @@ entity    = "raider"
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
 
-        // Count timer triggers (waves).
+        // Count timer triggers (waves): 8 base + 8 conditional ship_power extras.
         let timer_count = cfg
             .triggers
             .iter()
             .filter(|t| matches!(t.condition, TriggerCondition::OnTimer { .. }))
             .count();
-        assert_eq!(timer_count, 8, "combat_test must have 8 wave-spawn timers");
+        assert_eq!(
+            timer_count, 16,
+            "combat_test must have 16 wave-spawn timers (8 base + 8 conditional)"
+        );
 
         // OnAllDestroyed victory trigger present with all 8 wave names.
         let victory = cfg

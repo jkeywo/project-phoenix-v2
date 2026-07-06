@@ -6,5 +6,6 @@ pub mod stations_policy;
 
 pub use server::{
     lobby_outbox_broadcaster, process_lobby, GameStateCache, InboundMessage, LobbyOutbox,
-    LobbyPlugin, OutboundMessage, PlayerDisconnected, Sessions, Target, WorldResource,
+    LobbyPlugin, OutboundMessage, PlayerDisconnected, SelectedShipResource, Sessions, Target,
+    WorldResource,
 };

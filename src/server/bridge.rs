@@ -343,7 +343,7 @@ pub fn wasm_init() {
         let ship_path = SELECTED_SHIP_TEMPLATE_PATH
             .with(|slot| slot.borrow().clone())
             .unwrap_or_else(|| "assets/entities/player_ship.toml".to_string());
-        app.insert_resource(crate::lobby::SelectedShipResource(ship_path));
+        app.insert_resource(SelectedShipResource(ship_path));
     }
     if is_automation {
         // push_lobby_state is normally registered by ViewscreenBorderPlugin,

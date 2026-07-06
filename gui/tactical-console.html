@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Tactical Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner {
+      padding: 22px 52px 20px;
+      display: flex; flex-direction: column; gap: 12px;
+      height: 100%;
+    }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body {
+      flex: 1; min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .console-body .col {
+      display: flex; flex-direction: column;
+      background: rgba(14,17,23,0.6);
+      border: 1px solid var(--edge);
+      padding: 12px;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .console-body .col h2 {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.3em;
+      color: var(--ink-dim); text-transform: uppercase;
+      margin: 0 0 8px; padding: 0; flex-shrink: 0;
+      border-bottom: 1px solid var(--edge);
+      padding-bottom: 6px;
+    }
+    .col-content {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .console-footer {
+      display: flex; align-items: center; gap: 14px;
+      font-family: "JetBrains Mono", monospace; font-size: 11px;
+      color: var(--ink-faint); flex-shrink: 0; padding: 6px 0;
+    }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 8px; }
+      .hero h1 { font-size: 20px; }
+      .hero h1 .sub { font-size: 10px; }
+      .console-body {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .console-body .col { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Tactical Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>TACTICAL<span class="sub">WEAPONS &middot; TORPEDOES</span></h1>
+        <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
+      </div>
+
+      <div class="console-body">
+        <div class="col" id="phasers-col">
+          <h2>Phasers</h2>
+          <div class="col-content" id="phasers-content">
+            <!-- Phaser banks rendered here -->
+          </div>
+        </div>
+        <div class="col" id="torpedoes-col">
+          <h2>Torpedoes</h2>
+          <div class="col-content" id="torpedoes-content">
+            <!-- Torpedo state rendered here -->
+          </div>
+        </div>
+      </div>
+
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">TACTICAL STATION</span>
+        <span class="sep">·</span>
+        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span class="spacer"></span>
+        <span id="footer-torps" style="color:var(--ink-faint)">TORPEDOES: --</span>
+      </footer>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initConsole } from './console-core.js';
+    import { setAutoState } from './console-ui.js';
+
+    function renderPhasers(weaponsState, container) {
+      if (!weaponsState || !container) return;
+
+      var s = weaponsState;
+      var banks = s.banks || [];
+      var phaserMode = s.phaser_mode || 'Auto';
+      var target = s.target_name || s.target_uuid || null;
+
+      var html = '';
+
+      // Target
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">TARGET</div>';
+      if (target) {
+        html += '<div style="font-family:\'Chakra Petch\',sans-serif;font-size:13px;font-weight:600;color:var(--fire-bright);">' + target.toUpperCase() + '</div>';
+      } else {
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-faint);">NO TARGET</div>';
+      }
+      html += '</div>';
+
+      // Phaser banks
+      if (banks.length > 0) {
+        html += '<div>';
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">BANKS · ' + phaserMode.toUpperCase() + '</div>';
+        banks.forEach(function(b) {
+          var readyCls = b.ready ? 'var(--loaded)' : 'var(--reloading)';
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">';
+          html += '<span style="width:7px;height:7px;border-radius:50%;background:' + readyCls + ';flex-shrink:0;display:inline-block;"></span>';
+          html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);letter-spacing:0.15em;">' + (b.id || '').toUpperCase() + '</span>';
+          if (!b.ready) {
+            html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--reloading);margin-left:auto;">RELOADING</span>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    function renderTorpedoes(weaponsState, container) {
+      if (!weaponsState || !container) return;
+
+      var s = weaponsState;
+      var tubes = s.tubes || [];
+      var torpedoCount = s.torpedo_count || 0;
+
+      var html = '';
+
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">MAGAZINE</div>';
+      html += '<div style="font-family:\'Chakra Petch\',sans-serif;font-size:18px;font-weight:600;color:var(--cyan);">' + torpedoCount + ' <span style="font-size:10px;color:var(--ink-faint);">READY</span></div>';
+      html += '</div>';
+
+      if (tubes.length > 0) {
+        html += '<div>';
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--ink-dim);letter-spacing:0.2em;margin-bottom:4px;">TUBES</div>';
+        tubes.forEach(function(t) {
+          var tubeCls = t.loaded ? 'var(--loaded)' : 'var(--reloading)';
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">';
+          html += '<span style="width:7px;height:7px;border-radius:50%;background:' + tubeCls + ';flex-shrink:0;display:inline-block;"></span>';
+          html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--ink-faint);letter-spacing:0.15em;">' + (t.id || '').toUpperCase() + '</span>';
+          if (!t.loaded) {
+            html += '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--reloading);margin-left:auto;">LOADING</span>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    initConsole({
+      name: 'tactical',
+      render: function(s) {
+        var phasersContent = document.getElementById('phasers-content');
+        var torpedoesContent = document.getElementById('torpedoes-content');
+
+        if (s.weapons) {
+          renderPhasers(s.weapons, phasersContent);
+          renderTorpedoes(s.weapons, torpedoesContent);
+
+          var footerTarget = document.getElementById('footer-target');
+          if (footerTarget) {
+            var tgt = s.weapons.target_name || s.weapons.target_uuid || null;
+            footerTarget.textContent = tgt ? '\u25C9 ' + tgt : 'NO TARGET';
+            footerTarget.style.color = tgt ? 'var(--fire-bright)' : 'var(--ink-faint)';
+          }
+
+          var footerTorps = document.getElementById('footer-torps');
+          if (footerTorps) {
+            footerTorps.textContent = 'TORPEDOES: ' + (s.weapons.torpedo_count || 0);
+            footerTorps.style.color = (s.weapons.torpedo_count || 0) > 0 ? 'var(--cyan)' : 'var(--ink-faint)';
+          }
+        }
+
+        var isAuto = !!(s.tactical_auto || (s.weapons && s.weapons.tactical_auto));
+        setAutoState(null, document.getElementById('tactical-auto-badge'), isAuto);
+      }
+    });
+  </script>
+</body>
+</html>

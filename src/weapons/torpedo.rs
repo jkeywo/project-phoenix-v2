@@ -630,9 +630,7 @@ impl TorpedoSystem {
         // Ã¢â€â‚¬Ã¢â€â‚¬ Auto-unload toward target_count Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         for i in 0..n_tubes {
             let tube = &self.tubes[i];
-            if tube.load_state == TubeLoadState::Unloaded
-                && tube.loaded_count > tube.target_count
-            {
+            if tube.load_state == TubeLoadState::Unloaded && tube.loaded_count > tube.target_count {
                 let lt = tube.load_time;
                 self.tubes[i].load_state = TubeLoadState::Unloading {
                     remaining: lt,
@@ -1022,9 +1020,9 @@ mod tests {
         assert_eq!(sys.torpedoes_remaining, 9);
         assert!(sys.start_unload("fore_port"));
         assert_eq!(sys.torpedoes_remaining, 9); // not returned yet
-        // Disable auto-management so the manual-unload test is isolated: after
-        // the timer fires we expect exactly one torpedo to return to the pool
-        // and no auto-reload to start.
+                                                // Disable auto-management so the manual-unload test is isolated: after
+                                                // the timer fires we expect exactly one torpedo to return to the pool
+                                                // and no auto-reload to start.
         sys.tube_mut("fore_port").unwrap().target_count = 0;
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(

@@ -1,0 +1,575 @@
+name = "Alliance Battleship"
+class = "battleship"
+hull_id = "NCC-2001"
+power_rating = 120
+css = "gui/themes/battleship.css"
+tags = [ "player", "ship" ]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+
+[mesh]
+model = "assets/models/alliance_cruiser.glb"
+shape = "sphere"
+colour = []
+no_render = true
+
+[collider]
+shape = "Capsule"
+radius = 1.5
+length = 4
+
+# ── System hull HP — Cruiser baseline × 1.4 (rounded) ───────────────────────
+
+[[hull.system_hull]]
+system_id = "helm"
+display_name = "Helm"
+max_hp = 35
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "tactical"
+display_name = "Tactical"
+max_hp = 35
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "power-reactor"
+display_name = "Power Reactor"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "power-battery"
+display_name = "Power Battery"
+max_hp = 14
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "core"
+display_name = "Core"
+max_hp = 28
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.10
+
+[[hull.system_hull]]
+system_id = "helm-engine-port"
+display_name = "Engine (Port)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-engine-starboard"
+display_name = "Engine (Starboard)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "phaser-fore"
+display_name = "Phaser Bank (Fore)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "phaser-aft"
+display_name = "Phaser Bank (Aft)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-fore-port"
+display_name = "Torpedo Tube (Fore Port)"
+max_hp = 17
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-fore-starboard"
+display_name = "Torpedo Tube (Fore Starboard)"
+max_hp = 17
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-tube-aft"
+display_name = "Torpedo Tube (Aft)"
+max_hp = 17
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "torpedo-magazine"
+display_name = "Torpedo Magazine"
+max_hp = 28
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[repair]
+repair_team_count = 2
+travel_duration_secs = 5
+repair_rate_hp_per_sec = 0.5
+
+[weapons_console]
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
+torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
+
+[weapons_console.radar]
+range = 75
+shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
+selects = [ "ship", "station", "asteroid" ]
+
+# Standard fore + aft phaser banks — Cruiser stats (4.0 dps, range 40, duration 6, cooldown 6)
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0
+fire_arc_deg = 270
+auto_arc_deg = 180
+beam_range = 40
+beam_damage_per_sec = 4
+beam_duration_secs = 6
+cooldown_secs = 6
+beam_color = [ 1, 0.4, 0.1, 1 ]
+marker = "phasers_fore"
+
+[[weapons_console.phaser_banks]]
+id = "aft"
+facing_deg = 180
+fire_arc_deg = 270
+auto_arc_deg = 180
+beam_range = 40
+beam_damage_per_sec = 4
+beam_duration_secs = 6
+cooldown_secs = 6
+beam_color = [ 1, 0.4, 0.1, 1 ]
+marker = "phasers_aft"
+
+# Standard 3-tube torpedo layout — Cruiser stats
+[torpedoes]
+count = 6
+damage_hull = 40
+damage_shields = 4
+speed = 15
+turn_rate_deg_per_sec = 45
+lifespan = 20
+load_time = 10
+detonation_radius = 5
+
+[[torpedoes.tubes]]
+id = "fore_port"
+facing_deg = 0
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_port"
+
+[[torpedoes.tubes]]
+id = "fore_starboard"
+facing_deg = 0
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_starboard"
+
+[[torpedoes.tubes]]
+id = "aft"
+facing_deg = 180
+fire_arc_deg = 90
+load_time = 3
+marker = "torpedo_aft"
+
+[sensors_console]
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
+
+[sensors_console.long_range_radar]
+range = 300
+shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
+selects = [ "ship", "station", "planet" ]
+
+# Helm stats — Cruiser baseline × 2/3 (battleship is slower/less agile)
+[helm_console]
+max_speed = 6.7
+max_reverse_speed = 2.7
+acceleration = 2.7
+deceleration = 6.7
+max_yaw_rate = 0.27
+max_bank_deg = 8
+impulse_charge_duration = 3
+impulse_speed_multiplier = 8
+impulse_acceleration_multiplier = 4
+power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
+
+[helm_console.engine_pfx]
+color = [ 0.25, 0.75, 1, 0.72 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.55
+trail_spawn_interval_secs = 0.06
+
+[helm_console.boost]
+multiplier = 2.5
+steering_multiplier = 1.8
+active_duration = 3.0
+recharge_duration = 20.0
+
+[helm_console.radar]
+range = 187.5
+shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "star" ]
+
+[navigation_console]
+
+[navigation_console.system_chart]
+range = 800
+shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker" ]
+selects = [ "station", "planet", "star", "region" ]
+
+[comms]
+range = 1000
+
+# Shields — Cruiser baseline × 1.4
+# max_hp: 100 × 1.4 = 140; regen_per_sec: 2.5 × 1.4 = 3.5
+[shields_console]
+focus_bonus_max_hp = 70
+focus_bonus_regen = 5
+focus_penalty_max_hp = 35
+focus_penalty_regen = 1.0
+focus_decay_rate = 10
+
+[shields_console.base]
+max_hp = 140
+regen_per_sec = 3.5
+offline_duration = 10
+
+# Standard 4-arc shields (Fore/Starboard/Aft/Port, each 90°)
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 90
+hull_max_hp = 10
+
+[[shield_arc]]
+id = "starboard"
+label = "Starboard"
+center_deg = 90
+width_deg = 90
+hull_max_hp = 9
+
+[[shield_arc]]
+id = "aft"
+label = "Aft"
+center_deg = 180
+width_deg = 90
+hull_max_hp = 9
+
+[[shield_arc]]
+id = "port"
+label = "Port"
+center_deg = 270
+width_deg = 90
+hull_max_hp = 9
+
+[power]
+capacity = 90
+rates = [ 5, 4, 3, 2, -2, -5 ]
+emergency_threshold = 22
+
+[power.ai]
+weapons_battery_floor = 0.5
+shields_battery_floor = 0.25
+helm_battery_floor = 0.75
+helm_throttle_threshold = 0.5
+
+[captain_console]
+
+[engineering_console]
+
+[radar_appearance]
+colour = [ 0, 1, 0.2 ]
+size = 5
+icon = "playerShip"
+
+[power_groups.ops]
+label = "Operations"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.helm]
+label = "Propulsion"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.weapons]
+label = "Weapons"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.sensors]
+label = "Sensors"
+default_level = 2
+min_level = 1
+max_level = 4
+
+# ── 9-Station crew layout ────────────────────────────────────────────────────
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command the bridge."
+rank = "Cpt."
+short_code = "CPT"
+console = "gui/captain-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Pilot the ship."
+rank = "Ltn."
+short_code = "HLM"
+console = "gui/helm-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Manage weapons systems."
+rank = "Ltn."
+short_code = "TAC"
+console = "gui/tactical-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "repair"
+name = "Repair"
+description = "Maintain and repair ship systems."
+rank = "Ltn."
+short_code = "ENG"
+console = "gui/repair-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "sensors"
+name = "Sensors"
+description = "Monitor long-range sensors."
+rank = "Ens."
+short_code = "SCI"
+console = "gui/sensors-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "shields"
+name = "Shields"
+description = "Manage shield systems."
+rank = "Ens."
+short_code = "SHD"
+console = "gui/shields-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = "Plot course and navigate."
+rank = "Ens."
+short_code = "NAV"
+console = "gui/navigation-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "power"
+name = "Power"
+description = "Manage ship power systems."
+rank = "Ltn."
+short_code = "PWR"
+console = "gui/power-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "comms"
+name = "Comms"
+description = "Hail stations and relay intelligence."
+rank = "Ens."
+short_code = "COM"
+console = "gui/comms-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── Systems ──────────────────────────────────────────────────────────────────
+
+[[system]]
+id = "captain"
+kind = "captain"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "viewscreen"
+kind = "viewscreen"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "helm"
+kind = "helm"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-joystick"
+kind = "helm_joystick"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-engine-port"
+kind = "helm_engine"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-engine-starboard"
+kind = "helm_engine"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-radar"
+kind = "helm_radar"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "phaser-aft"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-fore-port"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-fore-starboard"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "torpedo-tube-aft"
+kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "repair"
+kind = "repair"
+station = "repair"
+power_group = "ops"
+
+[[system]]
+id = "sensors"
+kind = "sensors"
+station = "sensors"
+power_group = "sensors"
+
+# shields-system auto-generates shield-arc-* systems from [[shield_arc]] blocks above
+[[system]]
+id = "shields-system"
+kind = "shields"
+station = "shields"
+marker = "ship"
+power_group = "ops"
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "navigation"
+power_group = "ops"
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+station = "power"
+power_group = "ops"
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+station = "power"
+power_group = "ops"
+
+[[system]]
+id = "comms"
+kind = "comms"
+station = "comms"
+power_group = "ops"

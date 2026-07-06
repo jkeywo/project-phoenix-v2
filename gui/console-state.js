@@ -918,6 +918,48 @@ export function buildScienceConsoleState(state) {
   });
 }
 
+/**
+ * Engineering console — combined Power + Repair view (Cruiser).
+ *
+ * Delegates to buildPowerConsoleState and buildRepairConsoleState,
+ * nesting payloads under `power` and `repair` keys so the per-console
+ * iframe receives both panels' data without key collision.
+ *
+ * @param {object} state
+ */
+export function buildEngineeringConsoleState(state) {
+  const power = JSON.parse(buildPowerConsoleState(state));
+  const repair = JSON.parse(buildRepairConsoleState(state));
+  return JSON.stringify({
+    power,
+    repair,
+    engineering_auto: state.stationRatings?.['engineering'] === 'Backfill',
+  });
+}
+
+/**
+ * Cruiser Comms console — combined Navigation + Comms view (Cruiser).
+ *
+ * Delegates to buildNavigationConsoleState and buildCommsConsoleState,
+ * nesting payloads under `navigation` and `comms` keys so the per-console
+ * iframe receives both panels' data without key collision.
+ *
+ * Used when the state has a navigation blackboard present (cruiser comms
+ * station merges navigation + comms). The `comms_auto` field reflects
+ * the comms station rating, consistent with the existing comms dispatch.
+ *
+ * @param {object} state
+ */
+export function buildCruiserCommsConsoleState(state) {
+  const navigation = JSON.parse(buildNavigationConsoleState(state));
+  const comms = JSON.parse(buildCommsConsoleState(state));
+  return JSON.stringify({
+    navigation,
+    comms,
+    comms_auto: state.stationRatings?.['comms'] === 'Backfill',
+  });
+}
+
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
 if (typeof window !== 'undefined') {
@@ -927,17 +969,26 @@ if (typeof window !== 'undefined') {
     // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase
     // Console enum names.
     switch (consoleName) {
-      case 'tactical':   return buildWeaponsConsoleState(state);
-      case 'captain':    return buildCaptainConsoleState(state);
-      case 'helm':       return buildHelmConsoleState(state);
-      case 'repair':     return buildRepairConsoleState(state);
-      case 'power':      return buildPowerConsoleState(state);
-      case 'shields':    return buildShieldsConsoleState(state);
-      case 'sensors':    return buildSensorsConsoleState(state);
-      case 'comms':      return buildCommsConsoleState(state);
-      case 'navigation': return buildNavigationConsoleState(state);
-      case 'science':    return buildScienceConsoleState(state);
-      default:           return '{}';
+      case 'tactical':    return buildWeaponsConsoleState(state);
+      case 'captain':     return buildCaptainConsoleState(state);
+      case 'helm':        return buildHelmConsoleState(state);
+      case 'repair':      return buildRepairConsoleState(state);
+      case 'power':       return buildPowerConsoleState(state);
+      case 'shields':     return buildShieldsConsoleState(state);
+      case 'sensors':     return buildSensorsConsoleState(state);
+      case 'comms':
+        // Cruiser merged console: if a navigation blackboard is present,
+        // the comms station holds both navigation and comms systems —
+        // return the merged payload. Battleship pure comms falls through
+        // to buildCommsConsoleState (no navigation blackboard).
+        if (state.blackboards && state.blackboards['navigation']) {
+          return buildCruiserCommsConsoleState(state);
+        }
+        return buildCommsConsoleState(state);
+      case 'navigation':  return buildNavigationConsoleState(state);
+      case 'science':     return buildScienceConsoleState(state);
+      case 'engineering': return buildEngineeringConsoleState(state);
+      default:            return '{}';
     }
   };
 }

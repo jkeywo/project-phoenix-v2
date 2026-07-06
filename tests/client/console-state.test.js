@@ -18,6 +18,8 @@ import {
   buildCommsConsoleState,
   buildNavigationConsoleState,
   buildScienceConsoleState,
+  buildEngineeringConsoleState,
+  buildCruiserCommsConsoleState,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 
@@ -1371,6 +1373,151 @@ describe('auto fields', () => {
 
   it('comms_auto is false when stationRatings is absent', () => {
     expect(parse(buildCommsConsoleState(EMPTY)).comms_auto).toBe(false);
+  });
+});
+
+// ── buildEngineeringConsoleState (issue #627) ─────────────────────────────────
+
+describe('buildEngineeringConsoleState', () => {
+  it('returns valid JSON', () => {
+    expect(() => parse(buildEngineeringConsoleState(EMPTY))).not.toThrow();
+  });
+
+  it('contains power and repair sub-objects', () => {
+    const s = parse(buildEngineeringConsoleState(EMPTY));
+    expect(s).toHaveProperty('power');
+    expect(s).toHaveProperty('repair');
+  });
+
+  it('power sub-object has expected fields', () => {
+    const s = parse(buildEngineeringConsoleState(EMPTY));
+    // buildPowerConsoleState returns either consoles+total or helm+weapons+sensors depending on state
+    expect(s.power).toBeDefined();
+  });
+
+  it('repair sub-object has teams field', () => {
+    const s = parse(buildEngineeringConsoleState(EMPTY));
+    expect(s.repair).toHaveProperty('teams');
+    expect(Array.isArray(s.repair.teams)).toBe(true);
+  });
+
+  it('engineering_auto is true when stationRatings.engineering === Backfill', () => {
+    const s = parse(buildEngineeringConsoleState({ stationRatings: { engineering: 'Backfill' } }));
+    expect(s.engineering_auto).toBe(true);
+  });
+
+  it('engineering_auto is false when stationRatings.engineering is a different rating', () => {
+    const s = parse(buildEngineeringConsoleState({ stationRatings: { engineering: 'Full' } }));
+    expect(s.engineering_auto).toBe(false);
+  });
+
+  it('engineering_auto is false when stationRatings is absent', () => {
+    expect(parse(buildEngineeringConsoleState(EMPTY)).engineering_auto).toBe(false);
+  });
+
+  it('passes power blackboard state through the nested power sub-object', () => {
+    const state = {
+      blackboards: {
+        power: {
+          groups: [{ id: 'helm', label: 'HELM', level: 3, max_level: 4 }],
+          total: 3,
+          total_max: 8,
+          battery_charge: 75,
+          battery_max: 100,
+          locked: false,
+        },
+      },
+    };
+    const s = parse(buildEngineeringConsoleState(state));
+    expect(s.power.consoles).toHaveLength(1);
+    expect(s.power.consoles[0].id).toBe('helm');
+    expect(s.power.battery_charge).toBe(75);
+  });
+
+  it('passes repair blackboard state through the nested repair sub-object', () => {
+    const state = {
+      blackboards: {
+        repair: {
+          teams: ['Idle', 'Idle'],
+          system_hull: [{ system_id: 'helm', current: 20, max_hp: 25 }],
+          damageable_systems: ['helm'],
+          travel_duration_secs: 5.0,
+        },
+      },
+    };
+    const s = parse(buildEngineeringConsoleState(state));
+    expect(s.repair.teams).toHaveLength(2);
+    expect(s.repair.system_hull[0].system_id).toBe('helm');
+  });
+});
+
+// ── buildCruiserCommsConsoleState (issue #627) ────────────────────────────────
+
+describe('buildCruiserCommsConsoleState', () => {
+  it('returns valid JSON', () => {
+    expect(() => parse(buildCruiserCommsConsoleState(EMPTY))).not.toThrow();
+  });
+
+  it('contains navigation and comms sub-objects', () => {
+    const s = parse(buildCruiserCommsConsoleState(EMPTY));
+    expect(s).toHaveProperty('navigation');
+    expect(s).toHaveProperty('comms');
+  });
+
+  it('navigation sub-object has blips and waypoint fields', () => {
+    const s = parse(buildCruiserCommsConsoleState(EMPTY));
+    expect(s.navigation).toHaveProperty('blips');
+    expect(s.navigation).toHaveProperty('waypoint');
+  });
+
+  it('comms sub-object has messages and contacts fields', () => {
+    const s = parse(buildCruiserCommsConsoleState(EMPTY));
+    expect(s.comms).toHaveProperty('messages');
+    expect(s.comms).toHaveProperty('contacts');
+    expect(Array.isArray(s.comms.messages)).toBe(true);
+    expect(Array.isArray(s.comms.contacts)).toBe(true);
+  });
+
+  it('comms_auto is true when stationRatings.comms === Backfill', () => {
+    expect(parse(buildCruiserCommsConsoleState({ stationRatings: { comms: 'Backfill' } })).comms_auto).toBe(true);
+  });
+
+  it('comms_auto is false when stationRatings.comms is a different rating', () => {
+    expect(parse(buildCruiserCommsConsoleState({ stationRatings: { comms: 'Full' } })).comms_auto).toBe(false);
+  });
+
+  it('comms_auto is false when stationRatings is absent', () => {
+    expect(parse(buildCruiserCommsConsoleState(EMPTY)).comms_auto).toBe(false);
+  });
+
+  it('passes navigation blackboard through the nested navigation sub-object', () => {
+    const state = {
+      blackboards: {
+        navigation: {
+          nav_chart_range: 1000,
+          nav_chart_shows: ['ship', 'station'],
+          nav_chart_selects: ['station'],
+        },
+      },
+      shipX: 10,
+      shipZ: 20,
+    };
+    const s = parse(buildCruiserCommsConsoleState(state));
+    expect(s.navigation.ship_x).toBe(10);
+    expect(s.navigation.ship_z).toBe(20);
+    expect(s.navigation.radar_range).toBe(1000);
+  });
+
+  it('passes comms blackboard messages through the nested comms sub-object', () => {
+    const msgs = [{ id: 'msg-1', sender_name: 'Starbase', subject: 'Hello', body: 'Hi' }];
+    const state = {
+      blackboards: {
+        comms: { messages: msgs, contacts: [], objectives: [] },
+      },
+    };
+    const s = parse(buildCruiserCommsConsoleState(state));
+    expect(s.comms.messages).toHaveLength(1);
+    expect(s.comms.messages[0].id).toBe('msg-1');
   });
 });
 

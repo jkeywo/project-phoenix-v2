@@ -363,6 +363,59 @@ export function buildTargetBlip(targetUuid, entities, shipX, shipZ, shipYaw, ran
 // ── Console state builders ──────────────────────────────────────────────────
 
 /**
+ * Compute per-slot torpedo icon states for a single tube (issue #637).
+ *
+ * Returns an array of `vollMax` slot descriptors, each with:
+ *   - `state`: 'filled' | 'queued-to-fill' | 'queued-to-empty' | 'empty'
+ *   - `progress`: 0..1 fill fraction for the progress bar (non-zero only on the
+ *                 "active" slot — the one currently being loaded or unloaded)
+ *
+ * Rules:
+ *   slot i < loadedCount                       → filled (unless also i >= targetCount → queued-to-empty)
+ *   slot i >= loadedCount && i < targetCount   → queued-to-fill
+ *   slot i >= targetCount && i < loadedCount   → queued-to-empty
+ *   otherwise                                  → empty
+ *
+ * Active slot (shows load_progress bar):
+ *   loading   → slot index == loadedCount       (the slot being filled)
+ *   unloading → slot index == loadedCount - 1   (the top-most loaded slot being drained)
+ *
+ * @param {{ state?: string, loaded?: boolean, loaded_count?: number,
+ *            target_count?: number, volley_max?: number, load_progress?: number }} tube
+ * @returns {{ state: string, progress: number }[]}
+ */
+export function torpSlotStates(tube) {
+  const loadedCount = typeof tube.loaded_count  === 'number' ? tube.loaded_count  : (tube.loaded ? 1 : 0);
+  const targetCount = typeof tube.target_count  === 'number' ? tube.target_count  : 0;
+  const vollMax     = typeof tube.volley_max    === 'number' ? tube.volley_max    : 1;
+  const loadProg    = typeof tube.load_progress === 'number' ? tube.load_progress : 0;
+  const tubeState   = tube.state || (tube.loaded ? 'loaded' : 'unloaded');
+
+  // Index of the slot currently transitioning (−1 = none).
+  let activeIdx = -1;
+  if (tubeState === 'loading')   activeIdx = loadedCount;
+  if (tubeState === 'unloading') activeIdx = loadedCount - 1;
+
+  const slots = [];
+  for (let i = 0; i < vollMax; i++) {
+    let slotState;
+    if (i < loadedCount) {
+      slotState = i >= targetCount ? 'queued-to-empty' : 'filled';
+    } else {
+      slotState = i < targetCount ? 'queued-to-fill' : 'empty';
+    }
+
+    let progress = 0;
+    if (i === activeIdx && activeIdx >= 0) {
+      progress = tubeState === 'loading' ? loadProg : (1 - loadProg);
+    }
+
+    slots.push({ state: slotState, progress });
+  }
+  return slots;
+}
+
+/**
  * Tactical / Weapons console.
  * Reads raw sim truth from `state.blackboards['tactical']` (WeaponsBlackboard),
  * falling back to legacy camelCase properties for compatibility.

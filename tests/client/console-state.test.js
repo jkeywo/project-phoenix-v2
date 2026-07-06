@@ -8,6 +8,7 @@ import {
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
   NAVIGATION_RADAR_RANGE,
   aggregateStationHull,
+  torpSlotStates,
   buildWeaponsConsoleState,
   buildCaptainConsoleState,
   buildHelmConsoleState,
@@ -2008,5 +2009,98 @@ describe('buildDestroyerEngineeringConsoleState', () => {
   it('shields sub-object has GRID NOMINAL when facings present', () => {
     const s = parse(buildDestroyerEngineeringConsoleState({ shieldFacings: ['fore', 'aft'] }));
     expect(s.shields.grid_status).toBe('GRID NOMINAL');
+  });
+});
+
+// ── torpSlotStates (issue #637) ───────────────────────────────────────────────
+
+describe('torpSlotStates', () => {
+  it('returns vollMax slots', () => {
+    const slots = torpSlotStates({ volley_max: 4, loaded_count: 0, target_count: 0, load_progress: 0 });
+    expect(slots).toHaveLength(4);
+  });
+
+  it('defaults to 1 slot when volley_max absent', () => {
+    const slots = torpSlotStates({ loaded: false });
+    expect(slots).toHaveLength(1);
+    expect(slots[0].state).toBe('empty');
+  });
+
+  it('marks slots below loaded_count as filled', () => {
+    const slots = torpSlotStates({ volley_max: 4, loaded_count: 3, target_count: 3, load_progress: 0 });
+    expect(slots[0].state).toBe('filled');
+    expect(slots[1].state).toBe('filled');
+    expect(slots[2].state).toBe('filled');
+    expect(slots[3].state).toBe('empty');
+  });
+
+  it('marks slots queued-to-fill (loaded < i < target_count)', () => {
+    const slots = torpSlotStates({ volley_max: 4, loaded_count: 1, target_count: 3, load_progress: 0 });
+    expect(slots[0].state).toBe('filled');
+    expect(slots[1].state).toBe('queued-to-fill');
+    expect(slots[2].state).toBe('queued-to-fill');
+    expect(slots[3].state).toBe('empty');
+  });
+
+  it('marks slots queued-to-empty (target_count <= i < loaded_count)', () => {
+    const slots = torpSlotStates({ volley_max: 4, loaded_count: 3, target_count: 1, load_progress: 0 });
+    expect(slots[0].state).toBe('filled');
+    expect(slots[1].state).toBe('queued-to-empty');
+    expect(slots[2].state).toBe('queued-to-empty');
+    expect(slots[3].state).toBe('empty');
+  });
+
+  it('loading state: active slot is loaded_count index, progress bar filled to load_progress', () => {
+    // loading: loaded_count=1, next slot (index 1) is being filled; load_progress=0.6
+    const slots = torpSlotStates({ volley_max: 4, loaded_count: 1, target_count: 3,
+                                   state: 'loading', load_progress: 0.6 });
+    expect(slots[1].progress).toBeCloseTo(0.6);
+    // Other slots have no progress
+    expect(slots[0].progress).toBe(0);
+    expect(slots[2].progress).toBe(0);
+    expect(slots[3].progress).toBe(0);
+  });
+
+  it('unloading state: active slot is loaded_count-1, progress bar = 1 - load_progress', () => {
+    // unloading: loaded_count=3, top slot (index 2) is being drained; load_progress=0.7
+    const slots = torpSlotStates({ volley_max: 4, loaded_count: 3, target_count: 1,
+                                   state: 'unloading', load_progress: 0.7 });
+    expect(slots[2].progress).toBeCloseTo(0.3);
+    expect(slots[0].progress).toBe(0);
+    expect(slots[1].progress).toBe(0);
+    expect(slots[3].progress).toBe(0);
+  });
+
+  it('no active slot when state is loaded (all loaded, no transition)', () => {
+    const slots = torpSlotStates({ volley_max: 2, loaded_count: 2, target_count: 2,
+                                   state: 'loaded', load_progress: 0 });
+    expect(slots.every(s => s.progress === 0)).toBe(true);
+  });
+
+  it('Cruiser-style single slot: fully loaded', () => {
+    const slots = torpSlotStates({ volley_max: 1, loaded_count: 1, target_count: 1,
+                                   state: 'loaded', load_progress: 0 });
+    expect(slots).toHaveLength(1);
+    expect(slots[0].state).toBe('filled');
+    expect(slots[0].progress).toBe(0);
+  });
+
+  it('Destroyer fore tube: volley_max=4, partially filled, partially queued', () => {
+    // 2 loaded, targeting 4 (all will fill), none queued-to-empty
+    const slots = torpSlotStates({ volley_max: 4, loaded_count: 2, target_count: 4, load_progress: 0 });
+    expect(slots[0].state).toBe('filled');
+    expect(slots[1].state).toBe('filled');
+    expect(slots[2].state).toBe('queued-to-fill');
+    expect(slots[3].state).toBe('queued-to-fill');
+  });
+
+  it('Battleship tube: volley_max=3, all queued-to-empty when target_count=0', () => {
+    const slots = torpSlotStates({ volley_max: 3, loaded_count: 3, target_count: 0, load_progress: 0 });
+    expect(slots.every(s => s.state === 'queued-to-empty')).toBe(true);
+  });
+
+  it('uses loaded boolean as fallback for loaded_count when field absent', () => {
+    const slots = torpSlotStates({ volley_max: 1, loaded: true, target_count: 1 });
+    expect(slots[0].state).toBe('filled');
   });
 });

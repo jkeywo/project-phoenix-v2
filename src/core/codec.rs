@@ -468,6 +468,8 @@ mod tests {
                         on_cooldown: false,
                         cooldown_remaining: 0.0,
                         pending_volley: 0,
+                        charge_progress: 0.0,
+                        has_charge: false,
                     }],
                 },
             ),
@@ -857,6 +859,41 @@ mod tests {
             encoded,
             r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"FireBlaster"}}}"#,
             "FireBlaster wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// ChargeBlasterStart / ChargeBlasterCancel codec round-trips (issue #636).
+    #[test]
+    fn charge_blaster_start_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("blaster-fore".into()),
+            payload: SystemControlPayload::ChargeBlasterStart,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"ChargeBlasterStart"}}}"#,
+            "ChargeBlasterStart wire shape must match what action-map.js sends"
+        );
+    }
+
+    #[test]
+    fn charge_blaster_cancel_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("blaster-fore".into()),
+            payload: SystemControlPayload::ChargeBlasterCancel,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"ChargeBlasterCancel"}}}"#,
+            "ChargeBlasterCancel wire shape must match what action-map.js sends"
         );
     }
 

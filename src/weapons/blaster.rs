@@ -144,6 +144,11 @@ pub struct BlasterVolleyState {
     pub on_cooldown: bool,
     /// Seconds remaining on the cooldown timer (0 when ready).
     pub cooldown_remaining: f32,
+    /// True while the bank is in the charge phase (hold-to-fire, issue #636).
+    /// Only used when `BlasterBankConfig::charge_time_secs > 0`.
+    pub charging: bool,
+    /// Seconds elapsed in the current charge phase.
+    pub charge_elapsed: f32,
 }
 
 // ── Blaster system ─────────────────────────────────────────────────────────
@@ -169,10 +174,10 @@ impl BlasterSystem {
         }
     }
 
-    /// True when the bank can accept a new `FireBlaster` command (not on
-    /// cooldown and not mid-volley).
+    /// True when the bank can accept a new fire/charge command (not on
+    /// cooldown, not mid-volley, and not already charging).
     pub fn is_fire_ready(&self) -> bool {
-        !self.volley.on_cooldown && self.volley.pending_volley == 0
+        !self.volley.on_cooldown && self.volley.pending_volley == 0 && !self.volley.charging
     }
 
     /// Start a new volley. Resets the volley timer so the first projectile
@@ -194,6 +199,47 @@ impl BlasterSystem {
         self.volley.pending_volley = self.config.volley_count;
         self.volley.volley_timer = 0.0; // fire immediately on first tick
         true
+    }
+
+    /// Begin the charge phase for a hold-to-fire bank (issue #636).
+    ///
+    /// When `charge_time_secs == 0` this delegates directly to `request_fire`
+    /// (instant-fire path — unchanged behaviour for Destroyer blasters).
+    ///
+    /// When `charge_time_secs > 0` this sets `charging = true` and resets
+    /// `charge_elapsed` to 0 if the bank is currently `is_fire_ready()`.
+    ///
+    /// Returns `true` when the bank accepted the command.
+    pub fn request_charge_start(&mut self) -> bool {
+        if self.config.charge_time_secs <= 0.0 {
+            return self.request_fire();
+        }
+        if !self.is_fire_ready() {
+            return false;
+        }
+        self.volley.charging = true;
+        self.volley.charge_elapsed = 0.0;
+        true
+    }
+
+    /// Cancel an in-progress charge phase (issue #636).
+    ///
+    /// Resets `charging` and `charge_elapsed` to zero with no cooldown and
+    /// no ammo consumed. Safe to call even when not charging (no-op).
+    pub fn request_charge_cancel(&mut self) {
+        self.volley.charging = false;
+        self.volley.charge_elapsed = 0.0;
+    }
+
+    /// Charge phase completion fraction in `[0.0, 1.0]` (issue #636).
+    ///
+    /// Returns `0.0` when `charge_time_secs == 0` (instant-fire banks never
+    /// show a charge bar).
+    pub fn charge_progress(&self) -> f32 {
+        if self.config.charge_time_secs <= 0.0 {
+            return 0.0;
+        }
+        (self.volley.charge_elapsed / self.config.charge_time_secs).clamp(0.0, 1.0)
     }
 
     /// Advance the volley timer by `dt` seconds.
@@ -225,6 +271,23 @@ impl BlasterSystem {
         // Tick all live projectiles.
         for p in self.in_flight.iter_mut() {
             p.tick(dt);
+        }
+
+        // ── Charge phase (issue #636) ────────────────────────────────────
+        if self.volley.charging {
+            self.volley.charge_elapsed += dt;
+            if self.volley.charge_elapsed >= self.config.charge_time_secs {
+                // Charge complete — transition to volley start.
+                self.volley.charging = false;
+                self.volley.charge_elapsed = 0.0;
+                if self.config.volley_count > 0 {
+                    self.volley.pending_volley = self.config.volley_count;
+                    self.volley.volley_timer = 0.0;
+                }
+            } else {
+                // Still charging — no projectile launch yet.
+                return Vec::new();
+            }
         }
 
         // Tick cooldown.
@@ -344,6 +407,8 @@ impl BlasterSystem {
             on_cooldown: self.volley.on_cooldown,
             cooldown_remaining: self.volley.cooldown_remaining,
             pending_volley: self.volley.pending_volley,
+            charge_progress: self.charge_progress(),
+            has_charge: self.config.charge_time_secs > 0.0,
         }
     }
 }
@@ -656,5 +721,184 @@ mod tests {
             "request_fire must return false when volley_count == 0"
         );
         assert_eq!(sys.volley.pending_volley, 0, "pending_volley must remain 0");
+    }
+
+    // ── Charge mechanic tests (issue #636) ───────────────────────────────────
+
+    fn make_charging_system() -> BlasterSystem {
+        BlasterSystem::new(BlasterBankConfig {
+            id: "heavy".to_string(),
+            charge_time_secs: 2.0,
+            volley_count: 2,
+            volley_interval_secs: 0.1,
+            cooldown_secs: 3.0,
+            ..BlasterBankConfig::default()
+        })
+    }
+
+    #[test]
+    fn charge_start_on_instant_fire_bank_delegates_to_request_fire() {
+        // charge_time_secs == 0 → request_charge_start behaves as request_fire.
+        let mut sys = make_system();
+        assert!(sys.request_charge_start());
+        // Volley should be armed immediately, no charging state.
+        assert!(
+            !sys.volley.charging,
+            "instant-fire bank must not set charging"
+        );
+        assert_eq!(
+            sys.volley.pending_volley, 3,
+            "instant-fire bank must arm volley immediately"
+        );
+    }
+
+    #[test]
+    fn charge_start_sets_charging_flag_for_charge_bank() {
+        let mut sys = make_charging_system();
+        assert!(sys.request_charge_start());
+        assert!(sys.volley.charging);
+        assert_eq!(sys.volley.charge_elapsed, 0.0);
+        assert_eq!(
+            sys.volley.pending_volley, 0,
+            "volley must not be armed until charge completes"
+        );
+    }
+
+    #[test]
+    fn is_fire_ready_false_while_charging() {
+        let mut sys = make_charging_system();
+        sys.request_charge_start();
+        assert!(
+            !sys.is_fire_ready(),
+            "is_fire_ready must be false while charging"
+        );
+    }
+
+    #[test]
+    fn charge_start_rejected_when_already_charging() {
+        let mut sys = make_charging_system();
+        assert!(sys.request_charge_start());
+        assert!(
+            !sys.request_charge_start(),
+            "second charge_start while charging must be rejected"
+        );
+    }
+
+    #[test]
+    fn charge_cancel_resets_state_with_no_cooldown() {
+        let mut sys = make_charging_system();
+        sys.request_charge_start();
+        // Tick a bit so elapsed advances.
+        let mut uuids = Vec::new();
+        tick_system(&mut sys, 0.5, &mut uuids);
+        assert!(sys.volley.charging);
+
+        sys.request_charge_cancel();
+        assert!(!sys.volley.charging);
+        assert_eq!(sys.volley.charge_elapsed, 0.0);
+        assert!(!sys.volley.on_cooldown, "cancel must not start cooldown");
+        assert_eq!(sys.volley.pending_volley, 0, "cancel must not arm a volley");
+        assert!(sys.is_fire_ready(), "bank must be ready again after cancel");
+    }
+
+    #[test]
+    fn charge_cancel_is_noop_when_not_charging() {
+        let mut sys = make_charging_system();
+        // Calling cancel when idle must not corrupt state.
+        sys.request_charge_cancel();
+        assert!(!sys.volley.charging);
+        assert!(sys.is_fire_ready());
+    }
+
+    #[test]
+    fn charge_progress_zero_for_instant_fire_bank() {
+        let sys = make_system(); // charge_time_secs == 0
+        assert_eq!(
+            sys.charge_progress(),
+            0.0,
+            "instant-fire banks must always report 0 charge_progress"
+        );
+    }
+
+    #[test]
+    fn charge_progress_increases_while_charging() {
+        let mut sys = make_charging_system();
+        sys.request_charge_start();
+        let mut uuids = Vec::new();
+        tick_system(&mut sys, 1.0, &mut uuids); // halfway through 2-second charge
+        let progress = sys.charge_progress();
+        assert!(
+            (progress - 0.5).abs() < 0.01,
+            "charge_progress must be ~0.5 after 1s of 2s charge, got {progress}"
+        );
+    }
+
+    #[test]
+    fn charge_progress_clamped_at_one() {
+        let mut sys = make_charging_system();
+        // Manually push elapsed past charge_time_secs.
+        sys.volley.charging = true;
+        sys.volley.charge_elapsed = 10.0;
+        assert_eq!(
+            sys.charge_progress(),
+            1.0,
+            "charge_progress must be clamped to 1.0"
+        );
+    }
+
+    #[test]
+    fn charge_completes_and_fires_volley() {
+        let mut sys = make_charging_system();
+        sys.request_charge_start();
+
+        let mut uuids = Vec::new();
+        // Tick just under charge time — still charging, no projectile.
+        let early = tick_system(&mut sys, 1.9, &mut uuids);
+        assert_eq!(early.len(), 0, "no projectile before charge completes");
+        assert!(sys.volley.charging);
+
+        // Tick past the charge threshold — charge completes, volley begins.
+        let completed = tick_system(&mut sys, 0.2, &mut uuids);
+        assert_eq!(
+            completed.len(),
+            1,
+            "one projectile on the tick charge completes"
+        );
+        assert!(
+            !sys.volley.charging,
+            "charging must be cleared after completion"
+        );
+    }
+
+    #[test]
+    fn no_projectile_while_charging() {
+        let mut sys = make_charging_system();
+        sys.request_charge_start();
+
+        let mut uuids = Vec::new();
+        // Multiple ticks, all within charge window.
+        for _ in 0..5 {
+            let events = tick_system(&mut sys, 0.3, &mut uuids);
+            assert_eq!(events.len(), 0, "must not fire during charge phase");
+        }
+    }
+
+    #[test]
+    fn bank_state_includes_charge_progress_and_has_charge() {
+        let sys = make_charging_system();
+        let state = sys.bank_state();
+        assert_eq!(state.charge_progress, 0.0);
+        assert!(
+            state.has_charge,
+            "has_charge must be true when charge_time_secs > 0"
+        );
+
+        let instant = make_system();
+        let istate = instant.bank_state();
+        assert_eq!(istate.charge_progress, 0.0);
+        assert!(
+            !istate.has_charge,
+            "has_charge must be false for instant-fire bank"
+        );
     }
 }

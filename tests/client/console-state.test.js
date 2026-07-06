@@ -463,6 +463,37 @@ describe('buildWeaponsConsoleState', () => {
     expect(s.blasters).toHaveLength(1);
     expect(s.blasters[0].id).toBe('bb-bank');
   });
+
+  it('passes charge_progress through from blackboard (issue #636)', () => {
+    const bank = { id: 'heavy', fire_ready: false, on_cooldown: false, charge_progress: 0.75, has_charge: true };
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: { tactical: { blasters: [bank] } },
+    }));
+    expect(s.blasters[0].charge_progress).toBeCloseTo(0.75, 3);
+  });
+
+  it('has_charge true surfaces in blaster bank state (issue #636)', () => {
+    const bank = { id: 'heavy', fire_ready: true, on_cooldown: false, charge_progress: 0.0, has_charge: true };
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: { tactical: { blasters: [bank] } },
+    }));
+    expect(s.blasters[0].has_charge).toBe(true);
+  });
+
+  it('has_charge false for instant-fire bank (issue #636)', () => {
+    const bank = { id: 'fore', fire_ready: true, on_cooldown: false, charge_progress: 0.0, has_charge: false };
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: { tactical: { blasters: [bank] } },
+    }));
+    expect(s.blasters[0].has_charge).toBe(false);
+  });
+
+  it('charge_progress defaults to 0 when absent (issue #636)', () => {
+    const bank = { id: 'fore', fire_ready: true, on_cooldown: false };
+    const s = parse(buildWeaponsConsoleState({ blasterBanks: [bank] }));
+    // charge_progress not present → passes through as undefined; treat as falsy
+    expect(s.blasters[0].charge_progress == null || s.blasters[0].charge_progress === 0).toBe(true);
+  });
 });
 
 describe('buildCaptainConsoleState', () => {

@@ -8,9 +8,11 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 28 expected action keys', () => {
+  it('contains exactly the 30 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
+      'charge_blaster_cancel',
+      'charge_blaster_start',
       'clear_comms',
       'clear_navigation_waypoint',
       'dispatch_repair_team',
@@ -74,6 +76,40 @@ describe('fire_blaster', () => {
   it('does nothing when bank is absent', () => {
     const send = mkSend();
     ACTION_MAP.fire_blaster({ action: 'fire_blaster' }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('charge_blaster_start', () => {
+  it('sends ControlSystem ChargeBlasterStart with blaster-bank target when bank provided', () => {
+    const send = mkSend();
+    ACTION_MAP.charge_blaster_start({ action: 'charge_blaster_start', bank: 'heavy' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'blaster-heavy',
+      payload: { type: 'ChargeBlasterStart' },
+    });
+  });
+
+  it('does nothing when bank is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.charge_blaster_start({ action: 'charge_blaster_start' }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('charge_blaster_cancel', () => {
+  it('sends ControlSystem ChargeBlasterCancel with blaster-bank target when bank provided', () => {
+    const send = mkSend();
+    ACTION_MAP.charge_blaster_cancel({ action: 'charge_blaster_cancel', bank: 'heavy' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'blaster-heavy',
+      payload: { type: 'ChargeBlasterCancel' },
+    });
+  });
+
+  it('does nothing when bank is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.charge_blaster_cancel({ action: 'charge_blaster_cancel' }, send);
     expect(send).not.toHaveBeenCalled();
   });
 });

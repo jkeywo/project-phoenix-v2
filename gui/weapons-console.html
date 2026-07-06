@@ -735,14 +735,14 @@
                   </div>
                 </div>
 
-                <!-- Fire blasters button (issue #631). Shown only when the
-                     ship config declares at least one blaster bank. -->
+                <!-- Fire blasters section (issue #631 / #636).
+                     Shown only when the ship config declares at least one
+                     blaster bank. Per-bank rows are built dynamically in
+                     _renderConsole: instant-fire banks use click→fire_blaster;
+                     charge banks use pointerdown→charge_blaster_start and
+                     pointerup/pointerleave→charge_blaster_cancel. -->
                 <div id="fire-blasters-row" style="padding-top:8px; display:none;">
-                  <button id="fire-blaster" class="btn danger" style="width:100%;" type="button">
-                    <span class="btn-bg"></span>
-                    <span class="led fire"></span>
-                    <span class="label">FIRE BLASTERS</span>
-                  </button>
+                  <div id="blaster-bank-rows"></div>
                 </div>
               </div>
             </div>
@@ -794,6 +794,89 @@
     // first render (or when the ship config changes); updated in place at
     // 10Hz so the bar can animate smoothly without DOM churn.
     var _cooldownRowEls = {};
+
+    // Stable per-blaster-bank DOM refs (issue #636), keyed by bank id.
+    // Built once; updated in _renderConsole to reflect charge_progress and
+    // fire_ready state without DOM churn.
+    var _blasterBankEls = {};
+
+    // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
+    // Handled by initConsole({ render }) — see bottom of script.
+
+    /**
+     * Build (and cache) stable DOM nodes for one blaster bank row.
+     *
+     * For instant-fire banks (has_charge == false) the button fires on click.
+     * For charge banks (has_charge == true) the button fires on pointerdown
+     * and cancels on pointerup/pointerleave (hold-to-fire).
+     *
+     * The DOM is created once; subsequent renders call _updateBlasterBank to
+     * mutate the existing nodes.
+     *
+     * @param {string} bankId
+     * @param {boolean} hasCharge
+     * @returns {{ container: HTMLElement, btn: HTMLElement, progressBar: HTMLElement, progressFill: HTMLElement }}
+     */
+    function _buildBlasterBankRow(bankId, hasCharge) {
+      var container = document.createElement('div');
+      container.style.cssText = 'padding-bottom:6px;';
+
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn danger';
+      btn.style.width = '100%';
+      var btnBg = document.createElement('span'); btnBg.className = 'btn-bg';
+      var led = document.createElement('span'); led.className = 'led fire';
+      var lbl = document.createElement('span'); lbl.className = 'label';
+      lbl.textContent = hasCharge ? ('HOLD TO FIRE [' + bankId.toUpperCase() + ']') : ('FIRE BLASTERS [' + bankId.toUpperCase() + ']');
+      btn.appendChild(btnBg);
+      btn.appendChild(led);
+      btn.appendChild(lbl);
+
+      // Charge progress bar (hidden for instant-fire banks).
+      var progressBar = document.createElement('div');
+      progressBar.style.cssText = 'height:6px; background:var(--bg-deep); border:1px solid var(--line-faint); overflow:hidden; margin-top:3px; display:' + (hasCharge ? '' : 'none') + ';';
+      var progressFill = document.createElement('div');
+      progressFill.style.cssText = 'height:100%; width:0%; background:var(--col-danger); transition:width 0.1s linear;';
+      progressBar.appendChild(progressFill);
+
+      container.appendChild(btn);
+      container.appendChild(progressBar);
+
+      if (hasCharge) {
+        // Hold-to-fire: pointerdown starts charge, pointerup/leave cancels.
+        btn.addEventListener('pointerdown', function(e) {
+          e.preventDefault();
+          sendAction('charge_blaster_start', { bank: bankId });
+        });
+        btn.addEventListener('pointerup', function() {
+          sendAction('charge_blaster_cancel', { bank: bankId });
+        });
+        btn.addEventListener('pointerleave', function() {
+          sendAction('charge_blaster_cancel', { bank: bankId });
+        });
+      } else {
+        // Instant-fire: single click.
+        btn.addEventListener('click', function() {
+          sendAction('fire_blaster', { bank: bankId });
+        });
+      }
+
+      return { container: container, btn: btn, progressBar: progressBar, progressFill: progressFill };
+    }
+
+    /**
+     * Update the in-place blaster bank nodes for the given state snapshot.
+     *
+     * @param {{ id: string, fire_ready: boolean, charge_progress: number, has_charge: boolean }} bankState
+     */
+    function _updateBlasterBank(bankState) {
+      var els = _blasterBankEls[bankState.id];
+      if (!els) return;
+      els.btn.disabled = !bankState.fire_ready && !bankState.charging;
+      var pct = Math.round((bankState.charge_progress || 0) * 100);
+      els.progressFill.style.width = pct + '%';
+    }
 
     // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
     // Handled by initConsole({ render }) — see bottom of script.
@@ -1213,6 +1296,21 @@
       if (blastersRow) {
         var hasBlasters = Array.isArray(s.blasters) && s.blasters.length > 0;
         blastersRow.style.display = hasBlasters ? '' : 'none';
+
+        if (hasBlasters) {
+          var bankRowsContainer = document.getElementById('blaster-bank-rows');
+          if (bankRowsContainer) {
+            // Build any new bank rows (first render or ship config change).
+            s.blasters.forEach(function(bank) {
+              if (!_blasterBankEls[bank.id]) {
+                var els = _buildBlasterBankRow(bank.id, !!bank.has_charge);
+                _blasterBankEls[bank.id] = els;
+                bankRowsContainer.appendChild(els.container);
+              }
+              _updateBlasterBank(bank);
+            });
+          }
+        }
       }
     }
 
@@ -1226,20 +1324,6 @@
       }
       sendAction('fire_phaser', { bank: bank });
     });
-
-    // Fire blasters button — fires the first fire-ready blaster bank.
-    var fireBlasterEl = document.getElementById('fire-blaster');
-    if (fireBlasterEl) {
-      fireBlasterEl.addEventListener('click', function() {
-        var bank = 'fore';
-        if (_state && Array.isArray(_state.blasters)) {
-          var ready = _state.blasters.filter(function(b) { return b.fire_ready; });
-          if (ready.length > 0) bank = ready[0].id;
-          else if (_state.blasters.length > 0) bank = _state.blasters[0].id;
-        }
-        sendAction('fire_blaster', { bank: bank });
-      });
-    }
 
     // MAN/AUTO toggle beside the fire button — each option sets its mode.
     var _modeManEl = document.getElementById('mode-man');

@@ -31,6 +31,36 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /**
+   * Begin the charge phase for a hold-to-fire blaster bank (issue #636).
+   *
+   * When `charge_time_secs == 0` (instant-fire banks) this behaves identically
+   * to `fire_blaster`. When `charge_time_secs > 0` the bank enters a charge
+   * phase and fires automatically when the charge completes.
+   */
+  charge_blaster_start: (a, send) => {
+    if (!a.bank) return;
+    send('ControlSystem', {
+      target: `blaster-${a.bank}`,
+      payload: { type: 'ChargeBlasterStart' },
+    });
+  },
+
+  /**
+   * Cancel an in-progress charge phase (issue #636).
+   *
+   * Resets charge progress to 0 with no cooldown and no ammo consumed.
+   * Safe to send even when the bank is not currently charging (no-op on the
+   * server).
+   */
+  charge_blaster_cancel: (a, send) => {
+    if (!a.bank) return;
+    send('ControlSystem', {
+      target: `blaster-${a.bank}`,
+      payload: { type: 'ChargeBlasterCancel' },
+    });
+  },
+
   /** Fire a torpedo from a tube, optionally targeting a UUID. */
   fire_torpedo: (a, send) => {
     send('FireTorpedo', { tube: a.tube || 'fore', target_uuid: a.target_uuid || null });

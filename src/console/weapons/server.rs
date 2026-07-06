@@ -2029,10 +2029,17 @@ fn handle_fire_torpedo(
 
 // ── Blaster systems (issue #631) ─────────────────────────────────────────────
 
-/// Handle `ControlSystem { target: "blaster-<id>", payload: FireBlaster }`.
+/// Handle blaster fire/charge control messages:
+///
+/// - `ControlSystem { target: "blaster-<id>", payload: FireBlaster }` — legacy
+///   alias, behaves as `ChargeBlasterStart` (instant-fire when `charge_time_secs == 0`).
+/// - `ControlSystem { target: "blaster-<id>", payload: ChargeBlasterStart }` — begins
+///   charge (or instant-fires when `charge_time_secs == 0`, issue #636).
+/// - `ControlSystem { target: "blaster-<id>", payload: ChargeBlasterCancel }` — cancels
+///   an in-progress charge with no penalty (issue #636).
 ///
 /// Resolves the bank id from the target SystemId, gates on the bank's
-/// fine-system policy, then calls `BlasterSystem::request_fire`.
+/// fine-system policy, then dispatches to the appropriate `BlasterSystem` method.
 ///
 /// Runs in `SimSet::Input`.
 fn handle_fire_blaster(
@@ -2051,13 +2058,19 @@ fn handle_fire_blaster(
         localship_q.single().ok();
 
     for ev in reader.read() {
-        let ClientMessage::ControlSystem {
-            target,
-            payload: SystemControlPayload::FireBlaster,
-        } = &ev.msg
-        else {
+        let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
             continue;
         };
+
+        // Accept FireBlaster (legacy), ChargeBlasterStart, and ChargeBlasterCancel.
+        let is_charge_start = matches!(
+            payload,
+            SystemControlPayload::FireBlaster | SystemControlPayload::ChargeBlasterStart
+        );
+        let is_charge_cancel = matches!(payload, SystemControlPayload::ChargeBlasterCancel);
+        if !is_charge_start && !is_charge_cancel {
+            continue;
+        }
 
         // Target must look like "blaster-<bank_id>" — matches `blaster_bank_system_id`.
         let bank_id = match target.0.strip_prefix("blaster-") {
@@ -2093,9 +2106,13 @@ fn handle_fire_blaster(
             continue;
         }
 
-        // Find the matching bank and start a volley.
+        // Dispatch to the matching bank.
         if let Some(bank) = blaster_res.0.iter_mut().find(|b| b.config.id == bank_id) {
-            bank.request_fire();
+            if is_charge_start {
+                bank.request_charge_start();
+            } else {
+                bank.request_charge_cancel();
+            }
         }
     }
 }
@@ -3276,20 +3293,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 let mut q = world
                     .query_filtered::<&BlasterSystemResource, With<crate::server_app::LocalShip>>();
                 if let Ok(blaster_res) = q.single(world) {
-                    current.blasters = blaster_res
-                        .0
-                        .iter()
-                        .map(|b| {
-                            let state = b.bank_state();
-                            BlasterBankState {
-                                id: state.id,
-                                fire_ready: state.fire_ready,
-                                on_cooldown: state.on_cooldown,
-                                cooldown_remaining: state.cooldown_remaining,
-                                pending_volley: state.pending_volley,
-                            }
-                        })
-                        .collect();
+                    current.blasters = blaster_res.0.iter().map(|b| b.bank_state()).collect();
                 }
             }
 
@@ -3592,20 +3596,7 @@ fn publish_weapons_blackboard(
 
     // Collect blaster bank states from the LocalShip's BlasterSystemResource.
     let blasters: Vec<BlasterBankState> = match blaster_res_q.single() {
-        Ok(blaster_res) => blaster_res
-            .0
-            .iter()
-            .map(|b| {
-                let state = b.bank_state();
-                BlasterBankState {
-                    id: state.id,
-                    fire_ready: state.fire_ready,
-                    on_cooldown: state.on_cooldown,
-                    cooldown_remaining: state.cooldown_remaining,
-                    pending_volley: state.pending_volley,
-                }
-            })
-            .collect(),
+        Ok(blaster_res) => blaster_res.0.iter().map(|b| b.bank_state()).collect(),
         Err(_) => Vec::new(),
     };
 

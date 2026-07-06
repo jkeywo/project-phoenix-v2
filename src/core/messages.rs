@@ -221,7 +221,7 @@ fn default_tube_volley_max_wire() -> u32 {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct BlasterBankState {
     pub id: String,
-    /// True when the bank is ready to accept a new `FireBlaster` command.
+    /// True when the bank is ready to accept a new fire/charge command.
     pub fire_ready: bool,
     /// True while the bank is in its post-volley cooldown.
     pub on_cooldown: bool,
@@ -229,6 +229,15 @@ pub struct BlasterBankState {
     pub cooldown_remaining: f32,
     /// Projectiles remaining in the current volley (0 when idle).
     pub pending_volley: u32,
+    /// Charge phase completion fraction `[0.0, 1.0]` (issue #636).
+    /// Always `0.0` for instant-fire banks (`charge_time_secs == 0`).
+    #[serde(default)]
+    pub charge_progress: f32,
+    /// True when this bank requires a charge phase before firing
+    /// (`charge_time_secs > 0` in TOML). The client uses this to switch
+    /// the fire button to hold-to-fire mode.
+    #[serde(default)]
+    pub has_charge: bool,
 }
 
 /// Static, per-bank configuration sent to clients in `Welcome` so the
@@ -913,6 +922,18 @@ pub enum SystemControlPayload {
     /// Fire the blaster bank addressed by the `ControlSystem` target SystemId
     /// (issue #631). No fields — the target encodes the bank identity.
     FireBlaster,
+    /// Begin the charge phase for a hold-to-fire blaster bank (issue #636).
+    ///
+    /// When `charge_time_secs == 0` on the target bank this behaves
+    /// identically to `FireBlaster` (instant-fire — no delay). When
+    /// `charge_time_secs > 0` the bank enters a charge phase and the volley
+    /// fires automatically when the charge completes.
+    ChargeBlasterStart,
+    /// Cancel an in-progress charge phase (issue #636).
+    ///
+    /// Resets charge progress to 0 with no cooldown and no ammo consumed.
+    /// Safe to send even when the bank is not currently charging (no-op).
+    ChargeBlasterCancel,
     SetPhaserMode {
         mode: PhaserMode,
     },

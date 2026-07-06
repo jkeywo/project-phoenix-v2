@@ -21,6 +21,7 @@
   <script type="module" src="gui/phone-bezel.js"></script>
   <script type="module" src="gui/phase-toggle.js"></script>
   <script type="module" src="gui/tab-bar.js"></script>
+  <script type="module" src="gui/single-station.js"></script>
   <script type="module" src="gui/help-panel.js"></script>
   <script type="module" src="gui/console-registry.js"></script>
   <script type="module" src="gui/console-resolver.js"></script>
@@ -1118,19 +1119,27 @@
       const container = $('console-container');
       if (container) container.dataset.orientation = orientation;
 
-      // Console tab bar (issue #441): render into #console-tab-bar via
-      // gui/tab-bar.js. Hidden in lobby; shows title for 1-console players,
+      // Console tab bar (issue #441, #626): render into #console-tab-bar via
+      // gui/tab-bar.js. Hidden in lobby and for single-station in-game players;
       // shows tab buttons + title for multi-console players.
       // When a console is selected, compact mode hides non-selected tabs and
       // the freed space shows help text for all owned consoles (issue #462).
       const tabRoot = $('console-tab-bar');
+      // Single-station in-game: hide the tab bar entirely so the console
+      // fills the full screen. Use shouldHideTabBar when available (loaded
+      // from gui/single-station.js); fall back to an inline check.
+      const hideTabBar = (typeof window.shouldHideTabBar === 'function')
+        ? window.shouldHideTabBar(mine, inGame)
+        : (inGame && mine.length <= 1);
       if (tabRoot && typeof window.tabBarLayout === 'function'
           && typeof window.renderTabBar === 'function') {
         const compactActive = inGame && activeConsole !== null;
         const layout = window.tabBarLayout(mine, activeConsole, orientation, inGame, state.consoleHull, compactActive);
         // Capture title ref before renderTabBar clears the bar's children.
         const titleEl = _consoleTitleEl;
-        if (inGame) {
+        // Only show title in the tab bar when the bar itself is visible
+        // (multi-station in-game). In single-station mode the bar is hidden.
+        if (inGame && !hideTabBar) {
           titleEl.textContent = activeConsole ? consoleLabel(activeConsole) : 'Bridge';
         }
         window.renderTabBar(tabRoot, layout, { onPress: (name) => {
@@ -1138,8 +1147,8 @@
           scheduleRender();
         }});
         // Append title into the bar so it sits inline (landscape) or wraps
-        // below the buttons (portrait) � CSS handles the two layouts.
-        if (inGame) tabRoot.appendChild(titleEl);
+        // below the buttons (portrait). Only when multi-station (bar is visible).
+        if (inGame && !hideTabBar) tabRoot.appendChild(titleEl);
       }
 
       // Inline help area: shown in lobby when the player has a station
@@ -1827,10 +1836,17 @@
             state.shipStations = msg.data.ship_stations || { stations: [] };
             state.players = msg.data.state.players.map(p => ({ ...p }));
           }
-          // Dynamically set iframe src from station console paths
+          // Dynamically set iframe src from station console paths.
+          // In InProgress, only mount the player's own assigned station iframe
+          // (AC#1 of issue #626). In Lobby all iframes are eagerly loaded so
+          // the player can pick any station without a loading delay.
           if (typeof window.resolveConsoleUrl === 'function') {
             const stations = (state.shipStations && state.shipStations.stations) || [];
+            const myStationId = playerStation(state);
+            const inProgress = state.phase === 'InProgress';
             for (const st of stations) {
+              // In-progress: skip stations the local player does not own.
+              if (inProgress && st.id !== myStationId) continue;
               const entry = window.CONSOLE_REGISTRY && window.CONSOLE_REGISTRY[st.id];
               if (!entry) continue;
               const iframe = document.getElementById(entry.iframeId);

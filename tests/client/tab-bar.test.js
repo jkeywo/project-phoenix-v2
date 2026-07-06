@@ -152,9 +152,9 @@ describe('tabBarLayout — hidden conditions', () => {
     expect(out.hidden).toBe(true);
   });
 
-  it('shows when in-game with exactly 1 console (bar visible for title, no tab buttons)', () => {
+  it('hides when in-game with exactly 1 console (single-station mode — full screen)', () => {
     const out = tabBarLayout(['captain'], 'captain', 'portrait', true);
-    expect(out.hidden).toBe(false);
+    expect(out.hidden).toBe(true);
     expect(out.buttons).toHaveLength(0);
   });
 
@@ -299,11 +299,11 @@ describe('renderTabBar — DOM mutations', () => {
     expect(root.children.length).toBe(0);
   });
 
-  it('sets aria-hidden=false with no buttons for single-console player (bar visible for title)', () => {
+  it('sets aria-hidden=true for single-console player in-game (single-station mode)', () => {
     const root = fakeRoot();
     const layout = tabBarLayout(['captain'], 'captain', 'portrait', true);
     renderTabBar(root, layout);
-    expect(root.getAttribute('aria-hidden')).toBe('false');
+    expect(root.getAttribute('aria-hidden')).toBe('true');
     expect(root.children.length).toBe(0);
   });
 
@@ -371,14 +371,14 @@ describe('renderTabBar — DOM mutations', () => {
     expect(root.children.map((c) => c.dataset.console)).toEqual(['captain', 'helm']);
   });
 
-  it('reducing to 1 console clears buttons but keeps bar visible (for title)', () => {
+  it('reducing to 1 console hides the bar (single-station mode)', () => {
     const root = fakeRoot();
     renderTabBar(root, tabBarLayout(['captain', 'tactical'], 'captain', 'portrait', true));
     expect(root.children.length).toBe(2);
     expect(root.getAttribute('aria-hidden')).toBe('false');
     renderTabBar(root, tabBarLayout(['captain'], 'captain', 'portrait', true));
     expect(root.children.length).toBe(0);
-    expect(root.getAttribute('aria-hidden')).toBe('false');
+    expect(root.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('going out of game hides the bar', () => {

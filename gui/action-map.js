@@ -22,6 +22,15 @@ export const ACTION_MAP = Object.freeze({
     if (a.bank) send('FirePhaser', { bank: a.bank });
   },
 
+  /** Fire a specific blaster bank (issue #631). */
+  fire_blaster: (a, send) => {
+    if (!a.bank) return;
+    send('ControlSystem', {
+      target: `blaster-bank-${a.bank}`,
+      payload: { type: 'FireBlaster' },
+    });
+  },
+
   /** Fire a torpedo from a tube, optionally targeting a UUID. */
   fire_torpedo: (a, send) => {
     send('FireTorpedo', { tube: a.tube || 'fore', target_uuid: a.target_uuid || null });

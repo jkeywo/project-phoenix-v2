@@ -458,6 +458,13 @@ mod tests {
                     }],
                     torpedo_count: 10,
                     phaser_mode: PhaserMode::Auto,
+                    blasters: vec![BlasterBankState {
+                        id: "fore".to_string(),
+                        fire_ready: true,
+                        on_cooldown: false,
+                        cooldown_remaining: 0.0,
+                        pending_volley: 0,
+                    }],
                 },
             ),
             (
@@ -550,6 +557,25 @@ mod tests {
                 ServerMessageDiscriminants::TorpedoDestroyed,
                 ServerMessage::TorpedoDestroyed {
                     uuid: "torpedo-uuid-1".into(),
+                },
+            ),
+            (
+                ServerMessageDiscriminants::BlasterFired,
+                ServerMessage::BlasterFired {
+                    bank: "fore".to_string(),
+                    source_uuid: "11111111-1111-1111-1111-111111111111".into(),
+                    projectile_id: "proj-uuid-1".into(),
+                    x: 5.0,
+                    z: -10.0,
+                    heading: 0.0,
+                },
+            ),
+            (
+                ServerMessageDiscriminants::BlasterHit,
+                ServerMessage::BlasterHit {
+                    bank: "fore".to_string(),
+                    projectile_id: "proj-uuid-1".into(),
+                    target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
                 },
             ),
             (
@@ -805,6 +831,56 @@ mod tests {
             encoded,
             r#"{"type":"ControlSystem","data":{"target":"power-reactor","payload":{"type":"SetPowerGroupAllocation","data":{"group":"weapons","level":3}}}}"#
         );
+    }
+
+    /// Blaster fire command codec round-trip (issue #631).
+    ///
+    /// `FireBlaster` is a `SystemControlPayload` variant carried by
+    /// `ClientMessage::ControlSystem`. This test verifies the JSON shape and
+    /// round-trip fidelity for the fire action.
+    #[test]
+    fn fire_blaster_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("blaster-fore".into()),
+            payload: SystemControlPayload::FireBlaster,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        // Pin the on-the-wire JSON shape — JS action-map.js depends on this.
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"FireBlaster"}}}"#,
+            "FireBlaster wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// BlasterFired server message round-trip (issue #631).
+    #[test]
+    fn blaster_fired_server_message_round_trips() {
+        let msg = ServerMessage::BlasterFired {
+            bank: "fore".to_string(),
+            source_uuid: "11111111-1111-1111-1111-111111111111".into(),
+            projectile_id: "proj-uuid-abc".into(),
+            x: 5.0,
+            z: -10.0,
+            heading: 1.57,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    /// BlasterHit server message round-trip (issue #631).
+    #[test]
+    fn blaster_hit_server_message_round_trips() {
+        let msg = ServerMessage::BlasterHit {
+            bank: "fore".to_string(),
+            projectile_id: "proj-uuid-abc".into(),
+            target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     /// Regression: the on-the-wire JSON for `LoadingProgress` must place

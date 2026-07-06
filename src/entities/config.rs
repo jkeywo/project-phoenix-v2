@@ -549,6 +549,85 @@ pub struct PhaserBankConfig {
     pub marker: Option<String>,
 }
 
+/// Stable identifier for a blaster bank, parsed verbatim from the TOML
+/// `id` field on `[[weapons_console.blaster_banks]]` (issue #631).
+pub type BlasterBankId = String;
+
+/// One `[[weapons_console.blaster_banks]]` entry (issue #631).
+///
+/// A blaster bank fires straight-flying projectiles in data-driven volleys
+/// with linear motion prediction at fire time — no homing, no mid-flight
+/// correction.
+///
+/// `facing_deg` and `fire_arc_deg` use the same convention as
+/// [`PhaserBankConfig`] (ship-local degrees, 0 = forward). Note: do NOT
+/// add `serde(deny_unknown_fields)` here — future issues will add more
+/// fields (recoil, screenshake, visual variants).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct BlasterBankConfig {
+    pub id: BlasterBankId,
+    #[serde(default)]
+    pub facing_deg: f32,
+    #[serde(default = "default_blaster_fire_arc_deg")]
+    pub fire_arc_deg: f32,
+    #[serde(default = "default_blaster_volley_count")]
+    pub volley_count: u32,
+    #[serde(default = "default_blaster_volley_interval_secs")]
+    pub volley_interval_secs: f32,
+    /// Post-volley cooldown in seconds.
+    #[serde(default = "default_blaster_cooldown_secs")]
+    pub cooldown_secs: f32,
+    /// Charge time before firing begins. `0` = instant (click-to-fire);
+    /// `>0` = hold-to-fire (reserved for a later issue).
+    #[serde(default)]
+    pub charge_time_secs: f32,
+    #[serde(default = "default_blaster_projectile_speed")]
+    pub projectile_speed: f32,
+    #[serde(default = "default_blaster_collision_radius")]
+    pub collision_radius: f32,
+    #[serde(default = "default_blaster_visual_scale")]
+    pub visual_scale: f32,
+    #[serde(default = "default_blaster_damage")]
+    pub damage: i32,
+    /// Fraction `[0.0, 1.0]` of damage that bypasses shields entirely.
+    #[serde(default)]
+    pub shield_pierce: f32,
+    /// Recoil impulse magnitude (reserved for a later issue).
+    #[serde(default)]
+    pub recoil_impulse: f32,
+    /// Screenshake magnitude (reserved for a later issue).
+    #[serde(default)]
+    pub screenshake_magnitude: f32,
+    /// Optional rig-marker name linking this bank to a mount point.
+    #[serde(default)]
+    pub marker: Option<String>,
+}
+
+fn default_blaster_fire_arc_deg() -> f32 {
+    90.0
+}
+fn default_blaster_volley_count() -> u32 {
+    3
+}
+fn default_blaster_volley_interval_secs() -> f32 {
+    0.15
+}
+fn default_blaster_cooldown_secs() -> f32 {
+    3.0
+}
+fn default_blaster_projectile_speed() -> f32 {
+    40.0
+}
+fn default_blaster_collision_radius() -> f32 {
+    1.5
+}
+fn default_blaster_visual_scale() -> f32 {
+    1.0
+}
+fn default_blaster_damage() -> i32 {
+    20
+}
+
 /// Stable identifier for a torpedo tube, parsed verbatim from the TOML
 /// `id` field on `[[torpedoes.tubes]]`. Used on the wire to address a
 /// specific tube (e.g. `FireTorpedo { tube: "fore_port" }`).
@@ -646,6 +725,11 @@ pub struct WeaponsConsoleConfig {
     /// fire arc, auto-fire arc, range, damage, duration, cooldown, and colour.
     #[serde(default)]
     pub phaser_banks: Vec<PhaserBankConfig>,
+    /// Per-bank blaster definitions parsed from
+    /// `[[weapons_console.blaster_banks]]` (issue #631). Each bank has its own
+    /// facing, fire arc, volley count, damage, shield pierce, and cooldown.
+    #[serde(default)]
+    pub blaster_banks: Vec<BlasterBankConfig>,
     /// Radar configuration for the Tactical console radar widget, from
     /// `[weapons_console.radar]`.
     #[serde(default)]

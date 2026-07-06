@@ -1,0 +1,648 @@
+//! Pure-Rust blaster projectile mechanics.
+//!
+//! This module is platform-agnostic and Bevy-free. Each blaster bank has a
+//! `BlasterBankConfig` (loaded from TOML) and a `BlasterSystem` runtime that
+//! tracks in-flight projectiles and volley state.
+//!
+//! Coordinate system: same as `ship_physics` / `torpedo` — XZ plane, Y-up.
+//! Ship forward is −Z when yaw = 0. Heading convention: atan2(dx, -dz).
+//!
+//! ## Linear motion prediction
+//!
+//! At fire time the bank computes where a target *will be* when the projectile
+//! arrives (assuming constant velocity). Given:
+//!
+//!   - target current position: (tx, tz)
+//!   - target velocity: (tvx, tvz)
+//!   - projectile speed: `speed`
+//!
+//! The estimated intercept time is `distance / speed`; predicted position is
+//! `(tx + tvx * t, tz + tvz * t)`. The projectile is oriented toward this
+//! predicted position and flies straight — no mid-flight correction.
+
+use std::f32::consts::PI;
+
+/// Default maximum range in world units. Projectile lifespan = range / speed.
+pub const DEFAULT_PROJECTILE_RANGE: f32 = 35.0;
+
+// ── Configuration ──────────────────────────────────────────────────────────
+
+/// TOML-loaded configuration for one blaster bank instance.
+///
+/// `serde(default)` on optional-feel fields so the struct can grow with
+/// future TOML fields without a `deny_unknown_fields` compile error.
+#[derive(Clone, Debug)]
+pub struct BlasterBankConfig {
+    /// Bank identifier (matches the TOML `id` field, e.g. `"fore"`, `"aft"`).
+    pub id: String,
+    /// Centre of the fire arc in degrees clockwise from ship-forward (0 = fore).
+    pub facing_deg: f32,
+    /// Total fire arc width in degrees.
+    pub fire_arc_deg: f32,
+    /// Number of projectiles in one volley.
+    pub volley_count: u32,
+    /// Delay between successive projectile launches within a volley (seconds).
+    pub volley_interval_secs: f32,
+    /// Cooldown applied after a full volley completes (seconds).
+    pub cooldown_secs: f32,
+    /// Charge time before firing begins (0 = instant; >0 reserved for a later
+    /// issue — hold-to-fire behaviour).
+    pub charge_time_secs: f32,
+    /// Projectile travel speed in world units per second.
+    pub projectile_speed: f32,
+    /// Proximity hit radius for each projectile (world units).
+    pub collision_radius: f32,
+    /// Visual scale hint for the client renderer (reserved for a later issue).
+    pub visual_scale: f32,
+    /// Hull + shield damage applied on hit.
+    pub damage: i32,
+    /// Fraction `[0.0, 1.0]` of damage that bypasses shields entirely.
+    pub shield_pierce: f32,
+    /// Recoil impulse magnitude (reserved for a later issue, default 0).
+    pub recoil_impulse: f32,
+    /// Screenshake magnitude (reserved for a later issue, default 0).
+    pub screenshake_magnitude: f32,
+    /// Optional rig-marker name for mount point resolution.
+    pub marker: Option<String>,
+}
+
+impl Default for BlasterBankConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            facing_deg: 0.0,
+            fire_arc_deg: 90.0,
+            volley_count: 3,
+            volley_interval_secs: 0.15,
+            cooldown_secs: 3.0,
+            charge_time_secs: 0.0,
+            projectile_speed: 40.0,
+            collision_radius: 1.5,
+            visual_scale: 1.0,
+            damage: 20,
+            shield_pierce: 0.0,
+            recoil_impulse: 0.0,
+            screenshake_magnitude: 0.0,
+            marker: None,
+        }
+    }
+}
+
+// ── In-flight projectile ───────────────────────────────────────────────────
+
+/// A single blaster bolt in flight.
+#[derive(Clone, Debug)]
+pub struct BlasterProjectile {
+    /// Unique identifier for this projectile (UUID string).
+    pub id: String,
+    /// World X position.
+    pub x: f32,
+    /// World Z position.
+    pub z: f32,
+    /// Heading in radians. Convention: atan2(dx, -dz) — ship forward is -Z.
+    pub heading: f32,
+    /// Travel speed (world units / second).
+    pub speed: f32,
+    /// Seconds remaining before this projectile expires.
+    pub lifespan_remaining: f32,
+    /// Proximity hit radius (world units).
+    pub collision_radius: f32,
+    /// Damage applied on hit.
+    pub damage: i32,
+    /// Shield-pierce fraction `[0.0, 1.0]`.
+    pub shield_pierce: f32,
+    /// UUID of the entity that fired this projectile (excluded from hit
+    /// detection so a blaster can't self-hit).
+    pub source_uuid: String,
+}
+
+impl BlasterProjectile {
+    /// Advance position by `dt` seconds and decrement lifespan.
+    pub fn tick(&mut self, dt: f32) {
+        self.x += self.heading.sin() * self.speed * dt;
+        self.z -= self.heading.cos() * self.speed * dt;
+        self.lifespan_remaining = (self.lifespan_remaining - dt).max(0.0);
+    }
+
+    /// True when this projectile has expired (lifespan exhausted).
+    pub fn is_expired(&self) -> bool {
+        self.lifespan_remaining <= 0.0
+    }
+}
+
+// ── Volley runtime state ───────────────────────────────────────────────────
+
+/// Runtime state for the volley + cooldown cycle of one blaster bank.
+#[derive(Clone, Debug, Default)]
+pub struct BlasterVolleyState {
+    /// How many more projectiles remain to be launched in the current volley.
+    pub pending_volley: u32,
+    /// Countdown timer (seconds) before the next projectile in the volley fires.
+    pub volley_timer: f32,
+    /// True while the bank is waiting for the post-volley cooldown to expire.
+    pub on_cooldown: bool,
+    /// Seconds remaining on the cooldown timer (0 when ready).
+    pub cooldown_remaining: f32,
+}
+
+// ── Blaster system ─────────────────────────────────────────────────────────
+
+/// Runtime state for one blaster bank.
+#[derive(Clone, Debug)]
+pub struct BlasterSystem {
+    /// TOML-derived config for this bank.
+    pub config: BlasterBankConfig,
+    /// In-flight projectiles fired from this bank.
+    pub in_flight: Vec<BlasterProjectile>,
+    /// Volley + cooldown cycle state.
+    pub volley: BlasterVolleyState,
+}
+
+impl BlasterSystem {
+    /// Create a new `BlasterSystem` with the given config.
+    pub fn new(config: BlasterBankConfig) -> Self {
+        Self {
+            config,
+            in_flight: Vec::new(),
+            volley: BlasterVolleyState::default(),
+        }
+    }
+
+    /// True when the bank can accept a new `FireBlaster` command (not on
+    /// cooldown and not mid-volley).
+    pub fn is_fire_ready(&self) -> bool {
+        !self.volley.on_cooldown && self.volley.pending_volley == 0
+    }
+
+    /// Start a new volley. Resets the volley timer so the first projectile
+    /// fires on the next `tick` call (or immediately via the caller).
+    ///
+    /// Does nothing if the bank is already on cooldown or has a volley
+    /// in progress.
+    pub fn request_fire(&mut self) -> bool {
+        if !self.is_fire_ready() {
+            return false;
+        }
+        self.volley.pending_volley = self.config.volley_count;
+        self.volley.volley_timer = 0.0; // fire immediately on first tick
+        true
+    }
+
+    /// Advance the volley timer by `dt` seconds.
+    ///
+    /// When `volley_timer` reaches 0 and `pending_volley > 0`, one projectile
+    /// is launched and returned (for the caller to broadcast). When the volley
+    /// completes (`pending_volley == 0`), the cooldown starts. Expired
+    /// projectiles are also pruned here.
+    ///
+    /// Returns a list of `LaunchEvent`s — one per projectile launched this
+    /// tick. The caller is responsible for obtaining the fire position and
+    /// emitting server messages.
+    pub fn tick(
+        &mut self,
+        dt: f32,
+        shooter_x: f32,
+        shooter_z: f32,
+        shooter_yaw: f32,
+        target_x: f32,
+        target_z: f32,
+        target_vx: f32,
+        target_vz: f32,
+        source_uuid: &str,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> Vec<LaunchEvent> {
+        // Prune expired projectiles.
+        self.in_flight.retain(|p| !p.is_expired());
+
+        // Tick all live projectiles.
+        for p in self.in_flight.iter_mut() {
+            p.tick(dt);
+        }
+
+        // Tick cooldown.
+        if self.volley.on_cooldown {
+            self.volley.cooldown_remaining = (self.volley.cooldown_remaining - dt).max(0.0);
+            if self.volley.cooldown_remaining <= 0.0 {
+                self.volley.on_cooldown = false;
+            }
+            return Vec::new();
+        }
+
+        // No volley pending.
+        if self.volley.pending_volley == 0 {
+            return Vec::new();
+        }
+
+        // Count down the inter-shot timer.
+        self.volley.volley_timer -= dt;
+        if self.volley.volley_timer > 0.0 {
+            return Vec::new();
+        }
+
+        // Fire one projectile.
+        let uuid = next_uuid();
+        let heading = predict_intercept_heading(
+            shooter_x,
+            shooter_z,
+            target_x,
+            target_z,
+            target_vx,
+            target_vz,
+            self.config.projectile_speed,
+            shooter_yaw,
+            self.config.facing_deg,
+        );
+        let lifespan = DEFAULT_PROJECTILE_RANGE / self.config.projectile_speed;
+        let projectile = BlasterProjectile {
+            id: uuid.clone(),
+            x: shooter_x,
+            z: shooter_z,
+            heading,
+            speed: self.config.projectile_speed,
+            lifespan_remaining: lifespan,
+            collision_radius: self.config.collision_radius,
+            damage: self.config.damage,
+            shield_pierce: self.config.shield_pierce,
+            source_uuid: source_uuid.to_string(),
+        };
+        let event = LaunchEvent {
+            projectile_id: uuid,
+            x: projectile.x,
+            z: projectile.z,
+            heading: projectile.heading,
+        };
+        self.in_flight.push(projectile);
+
+        self.volley.pending_volley -= 1;
+        // Schedule the next shot.
+        if self.volley.pending_volley > 0 {
+            self.volley.volley_timer = self.config.volley_interval_secs;
+        } else {
+            // Volley complete — start cooldown.
+            self.volley.on_cooldown = true;
+            self.volley.cooldown_remaining = self.config.cooldown_secs;
+            self.volley.volley_timer = 0.0;
+        }
+
+        vec![event]
+    }
+
+    /// Check every live projectile against a list of possible targets.
+    ///
+    /// Returns a vec of `(projectile_id, target_uuid)` for every hit detected.
+    /// The hit projectile is NOT removed here — call `consume_hit` to remove
+    /// it after broadcasting the hit event.
+    ///
+    /// `targets`: `&[(uuid, x, z, radius)]`. The projectile's own
+    /// `source_uuid` is excluded to prevent self-hits.
+    pub fn find_hits(&self, targets: &[(String, f32, f32, f32)]) -> Vec<(String, String)> {
+        let mut hits = Vec::new();
+        for projectile in &self.in_flight {
+            for (uuid, tx, tz, radius) in targets {
+                if uuid == &projectile.source_uuid {
+                    continue;
+                }
+                let dx = tx - projectile.x;
+                let dz = tz - projectile.z;
+                let dist = (dx * dx + dz * dz).sqrt();
+                if dist <= projectile.collision_radius + radius {
+                    hits.push((projectile.id.clone(), uuid.clone()));
+                    break; // one hit per projectile
+                }
+            }
+        }
+        hits
+    }
+
+    /// Remove the projectile with the given id (after a hit). Returns the
+    /// projectile data needed by the damage system.
+    pub fn consume_hit(&mut self, projectile_id: &str) -> Option<HitData> {
+        if let Some(pos) = self.in_flight.iter().position(|p| p.id == projectile_id) {
+            let p = self.in_flight.remove(pos);
+            Some(HitData {
+                damage: p.damage,
+                shield_pierce: p.shield_pierce,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Snapshot state for the `WeaponsUpdate` broadcast.
+    pub fn bank_state(&self) -> BlasterBankState {
+        BlasterBankState {
+            id: self.config.id.clone(),
+            fire_ready: self.is_fire_ready(),
+            on_cooldown: self.volley.on_cooldown,
+            cooldown_remaining: self.volley.cooldown_remaining,
+            pending_volley: self.volley.pending_volley,
+        }
+    }
+}
+
+// ── Output types ────────────────────────────────────────────────────────────
+
+/// Returned by `BlasterSystem::tick` once per projectile launched.
+#[derive(Clone, Debug)]
+pub struct LaunchEvent {
+    pub projectile_id: String,
+    pub x: f32,
+    pub z: f32,
+    pub heading: f32,
+}
+
+/// Projectile stats returned by `consume_hit` for the damage system.
+#[derive(Clone, Debug)]
+pub struct HitData {
+    pub damage: i32,
+    pub shield_pierce: f32,
+}
+
+/// Per-bank state snapshot included in `WeaponsUpdate`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BlasterBankState {
+    pub id: String,
+    pub fire_ready: bool,
+    pub on_cooldown: bool,
+    pub cooldown_remaining: f32,
+    pub pending_volley: u32,
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Convert a `f32` heading in radians to the range `(-PI, PI]`.
+fn normalise_angle(a: f32) -> f32 {
+    let mut r = a;
+    while r > PI {
+        r -= 2.0 * PI;
+    }
+    while r <= -PI {
+        r += 2.0 * PI;
+    }
+    r
+}
+
+/// Compute the launch heading toward the predicted intercept position.
+///
+/// Uses linear motion prediction: `t_est = distance / speed`, then
+/// `predicted = (tx + tvx * t_est, tz + tvz * t_est)`. If `speed` is zero
+/// or the predicted position coincides with the shooter, falls back to the
+/// bank's facing direction relative to `shooter_yaw`.
+///
+/// Returns a heading in radians following the project's convention:
+/// `atan2(dx, -dz)` where `+Z` is backwards.
+pub fn predict_intercept_heading(
+    sx: f32,
+    sz: f32,
+    tx: f32,
+    tz: f32,
+    tvx: f32,
+    tvz: f32,
+    speed: f32,
+    shooter_yaw: f32,
+    facing_deg: f32,
+) -> f32 {
+    let fallback = normalise_angle(shooter_yaw + facing_deg.to_radians());
+
+    if speed <= 0.0 {
+        return fallback;
+    }
+
+    let dx0 = tx - sx;
+    let dz0 = tz - sz;
+    let dist = (dx0 * dx0 + dz0 * dz0).sqrt();
+    let t_est = dist / speed;
+
+    let px = tx + tvx * t_est;
+    let pz = tz + tvz * t_est;
+
+    let dx = px - sx;
+    let dz = pz - sz;
+    if dx * dx + dz * dz < 1e-6 {
+        return fallback;
+    }
+    dx.atan2(-dz)
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_system() -> BlasterSystem {
+        BlasterSystem::new(BlasterBankConfig {
+            id: "fore".to_string(),
+            facing_deg: 0.0,
+            fire_arc_deg: 90.0,
+            volley_count: 3,
+            volley_interval_secs: 0.1,
+            cooldown_secs: 2.0,
+            charge_time_secs: 0.0,
+            projectile_speed: 40.0,
+            collision_radius: 1.5,
+            visual_scale: 1.0,
+            damage: 20,
+            shield_pierce: 0.0,
+            recoil_impulse: 0.0,
+            screenshake_magnitude: 0.0,
+            marker: None,
+        })
+    }
+
+    fn no_target() -> (f32, f32, f32, f32) {
+        (100.0, 0.0, 100.0, 0.0)
+    }
+
+    fn tick_system(sys: &mut BlasterSystem, dt: f32, uuids: &mut Vec<String>) -> Vec<LaunchEvent> {
+        let (tx, tz, tvx, tvz) = no_target();
+        let mut idx = 0usize;
+        let events = sys.tick(
+            dt,
+            0.0,
+            0.0,
+            0.0,
+            tx,
+            tz,
+            tvx,
+            tvz,
+            "shooter-uuid",
+            &mut || {
+                idx += 1;
+                let id = format!("proj-{}", uuids.len() + idx);
+                id
+            },
+        );
+        for e in &events {
+            uuids.push(e.projectile_id.clone());
+        }
+        events
+    }
+
+    #[test]
+    fn fire_ready_initially() {
+        let sys = make_system();
+        assert!(sys.is_fire_ready());
+    }
+
+    #[test]
+    fn request_fire_starts_volley() {
+        let mut sys = make_system();
+        assert!(sys.request_fire());
+        assert_eq!(sys.volley.pending_volley, 3);
+        // Can't fire again while volley pending.
+        assert!(!sys.request_fire());
+    }
+
+    #[test]
+    fn volley_launches_correct_count() {
+        let mut sys = make_system();
+        sys.request_fire();
+
+        let mut uuids = Vec::new();
+        // First shot fires immediately (volley_timer starts at 0).
+        let e1 = tick_system(&mut sys, 0.001, &mut uuids);
+        assert_eq!(e1.len(), 1, "first tick should launch 1 projectile");
+
+        // Before interval expires, no more shots.
+        let e2 = tick_system(&mut sys, 0.05, &mut uuids);
+        assert_eq!(e2.len(), 0);
+
+        // After interval, second shot.
+        let e3 = tick_system(&mut sys, 0.1, &mut uuids);
+        assert_eq!(e3.len(), 1);
+
+        // After interval, third (final) shot.
+        let e4 = tick_system(&mut sys, 0.1, &mut uuids);
+        assert_eq!(e4.len(), 1);
+
+        assert_eq!(
+            uuids.len(),
+            3,
+            "three projectiles should have been launched"
+        );
+        // After volley, enters cooldown.
+        assert!(sys.volley.on_cooldown);
+        assert!(!sys.is_fire_ready());
+    }
+
+    #[test]
+    fn cooldown_expires_and_ready_again() {
+        let mut sys = make_system();
+        sys.request_fire();
+
+        let mut uuids = Vec::new();
+        // Fire all 3 shots (3 ticks of 0.15 each — enough to clear 0.1 interval).
+        for _ in 0..3 {
+            tick_system(&mut sys, 0.15, &mut uuids);
+        }
+        assert!(sys.volley.on_cooldown);
+
+        // Tick through the 2 s cooldown.
+        tick_system(&mut sys, 2.1, &mut uuids);
+        assert!(!sys.volley.on_cooldown);
+        assert!(sys.is_fire_ready());
+    }
+
+    #[test]
+    fn projectile_flies_straight() {
+        let mut sys = make_system();
+        sys.request_fire();
+        let mut uuids = Vec::new();
+        tick_system(&mut sys, 0.001, &mut uuids);
+
+        let proj = &sys.in_flight[0];
+        let heading = proj.heading;
+        let x0 = proj.x;
+        let z0 = proj.z;
+
+        // One second of travel.
+        let dt = 1.0;
+        let expected_x = x0 + heading.sin() * proj.speed * dt;
+        let expected_z = z0 - heading.cos() * proj.speed * dt;
+
+        let mut p = proj.clone();
+        p.tick(dt);
+        assert!((p.x - expected_x).abs() < 1e-4);
+        assert!((p.z - expected_z).abs() < 1e-4);
+    }
+
+    #[test]
+    fn find_hits_returns_matching_target() {
+        let mut sys = make_system();
+        sys.request_fire();
+        let mut uuids = Vec::new();
+        tick_system(&mut sys, 0.001, &mut uuids);
+
+        // Move the projectile directly onto the target.
+        let proj = sys.in_flight.first_mut().unwrap();
+        proj.x = 10.0;
+        proj.z = 5.0;
+
+        let targets = vec![("other-entity".to_string(), 10.0_f32, 5.0_f32, 1.0_f32)];
+        let hits = sys.find_hits(&targets);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].1, "other-entity");
+    }
+
+    #[test]
+    fn find_hits_excludes_source_uuid() {
+        let mut sys = make_system();
+        sys.request_fire();
+        let mut uuids = Vec::new();
+        tick_system(&mut sys, 0.001, &mut uuids);
+
+        // Projectile at origin; source ship is also at origin.
+        let targets = vec![("shooter-uuid".to_string(), 0.0_f32, 0.0_f32, 100.0_f32)];
+        let hits = sys.find_hits(&targets);
+        assert_eq!(hits.len(), 0, "should not self-hit");
+    }
+
+    #[test]
+    fn consume_hit_removes_projectile() {
+        let mut sys = make_system();
+        sys.request_fire();
+        let mut uuids = Vec::new();
+        tick_system(&mut sys, 0.001, &mut uuids);
+
+        let pid = sys.in_flight[0].id.clone();
+        let hit = sys.consume_hit(&pid);
+        assert!(hit.is_some());
+        assert!(sys.in_flight.is_empty());
+    }
+
+    #[test]
+    fn projectile_expires_after_lifespan() {
+        let mut sys = make_system();
+        // speed=40, range=35 → lifespan=0.875 s
+        sys.request_fire();
+        let mut uuids = Vec::new();
+        tick_system(&mut sys, 0.001, &mut uuids);
+
+        let proj = sys.in_flight.first_mut().unwrap();
+        proj.tick(1.0); // well past lifespan
+        assert!(proj.is_expired());
+    }
+
+    #[test]
+    fn predict_intercept_heading_stationary_target() {
+        // Target directly ahead (+Z direction from shooter at origin with yaw=0
+        // means target is at (0, 10) in XZ. Ship forward = -Z so "ahead" in
+        // world space is z < shooter_z, i.e. z = -10).
+        let h = predict_intercept_heading(0.0, 0.0, 0.0, -10.0, 0.0, 0.0, 40.0, 0.0, 0.0);
+        // atan2(0, -(-10)) = atan2(0, 10) = 0 → straight ahead.
+        assert!(
+            (h - 0.0).abs() < 0.01,
+            "heading should be ~0 for target ahead, got {h}"
+        );
+    }
+
+    #[test]
+    fn bank_state_reflects_current_state() {
+        let sys = make_system();
+        let state = sys.bank_state();
+        assert!(state.fire_ready);
+        assert!(!state.on_cooldown);
+        assert_eq!(state.pending_volley, 0);
+    }
+}

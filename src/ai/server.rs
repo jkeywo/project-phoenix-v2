@@ -743,6 +743,7 @@ mod tests {
                 shield_pierce: Some(0.0),
                 marker: None,
             }],
+            blaster_banks: vec![],
             radar: None,
         }
     }

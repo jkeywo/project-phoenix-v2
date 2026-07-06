@@ -199,6 +199,21 @@ pub struct TorpedoTubeState {
     pub load_time: f32,
 }
 
+/// Per-bank blaster state broadcast to the Tactical operator as part of
+/// `WeaponsUpdate` (issue #631).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct BlasterBankState {
+    pub id: String,
+    /// True when the bank is ready to accept a new `FireBlaster` command.
+    pub fire_ready: bool,
+    /// True while the bank is in its post-volley cooldown.
+    pub on_cooldown: bool,
+    /// Seconds remaining on the cooldown timer (0.0 when ready).
+    pub cooldown_remaining: f32,
+    /// Projectiles remaining in the current volley (0 when idle).
+    pub pending_volley: u32,
+}
+
 /// Static, per-bank configuration sent to clients in `Welcome` so the
 /// Tactical UI can render the bank's fire arc on the radar and the
 /// per-bank cooldown bar. Only `fire_arc_deg` is exposed —
@@ -878,6 +893,9 @@ pub enum SystemControlPayload {
         uuid: String,
     },
     FirePhaser,
+    /// Fire the blaster bank addressed by the `ControlSystem` target SystemId
+    /// (issue #631). No fields — the target encodes the bank identity.
+    FireBlaster,
     SetPhaserMode {
         mode: PhaserMode,
     },
@@ -1099,6 +1117,9 @@ pub enum ServerMessage {
         torpedo_count: u32,
         /// Current phaser firing mode (Auto or Manual).
         phaser_mode: PhaserMode,
+        /// Per-bank blaster state (issue #631). Empty when no blaster banks declared.
+        #[serde(default)]
+        blasters: Vec<BlasterBankState>,
     },
     /// Broadcast when a phaser beam starts. Sent to all players so the renderer
     /// can draw the beam on the viewscreen.
@@ -1152,6 +1173,25 @@ pub enum ServerMessage {
     /// Broadcast to all when a torpedo is destroyed (expired or hit something).
     TorpedoDestroyed {
         uuid: String,
+    },
+    /// Broadcast to all when a blaster projectile is launched (issue #631).
+    ///
+    /// `bank` is the TOML bank id (e.g. `"fore"`); `source_uuid` is the firing
+    /// entity's UUID; `x`/`z` is the launch position; `heading` is the initial
+    /// travel direction in radians.
+    BlasterFired {
+        bank: String,
+        source_uuid: String,
+        projectile_id: String,
+        x: f32,
+        z: f32,
+        heading: f32,
+    },
+    /// Broadcast to all when a blaster projectile hits a target (issue #631).
+    BlasterHit {
+        bank: String,
+        projectile_id: String,
+        target_uuid: String,
     },
     /// Broadcast when a modifier is added or updated on the ship.
     ModifierAdded {
@@ -1639,6 +1679,9 @@ pub struct WeaponsBlackboard {
     /// Static torpedo tube arc geometry (from ship config).
     #[serde(default)]
     pub torpedo_arcs: Vec<TorpedoTubeClientConfig>,
+    /// Blaster bank state (issue #631). Empty when the ship has no blaster banks.
+    #[serde(default)]
+    pub blasters: Vec<BlasterBankState>,
     /// Radar blips projected into normalised ship-relative coordinates.
     #[serde(default)]
     pub blips: Vec<RadarBlip>,

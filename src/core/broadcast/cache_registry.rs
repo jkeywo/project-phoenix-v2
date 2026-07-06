@@ -259,6 +259,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
                 tubes: current.tubes,
                 torpedo_count: current.torpedo_count,
                 phaser_mode: current.phaser_mode,
+                blasters: current.blasters,
             });
         }
     }
@@ -691,6 +692,7 @@ mod tests {
             tubes: vec![],
             torpedo_count: 7,
             phaser_mode: crate::messages::PhaserMode::Auto,
+            blasters: vec![],
         };
         *app.world_mut().resource_mut::<LastWeaponsUpdate>() = seeded.clone();
 

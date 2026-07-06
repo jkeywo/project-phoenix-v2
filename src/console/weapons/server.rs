@@ -4,10 +4,11 @@ use crate::ai_plugin::AiTokenRegistry;
 use crate::entity_spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    AdmittedCommands, ClientMessage, GamePhase, InterSystemMsg, InterSystemPayload,
-    InterSystemQueue, ModifierSlot, PhaserBank, PhaserBankClientConfig, PhaserBankState,
-    PhaserMode, RadarBlip, RadarRegion, ServerMessage, StationId, SystemBlackboard,
-    SystemControlPayload, SystemId, TorpedoTubeClientConfig, TorpedoTubeState, WeaponsBlackboard,
+    AdmittedCommands, BlasterBankState, ClientMessage, GamePhase, InterSystemMsg,
+    InterSystemPayload, InterSystemQueue, ModifierSlot, PhaserBank, PhaserBankClientConfig,
+    PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage, StationId,
+    SystemBlackboard, SystemControlPayload, SystemId, TorpedoTubeClientConfig, TorpedoTubeState,
+    WeaponsBlackboard,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
@@ -40,6 +41,8 @@ pub struct LastWeaponsUpdate {
     pub tubes: Vec<TorpedoTubeState>,
     pub torpedo_count: u32,
     pub phaser_mode: PhaserMode,
+    /// Per-bank blaster state (issue #631). Empty when no blaster banks declared.
+    pub blasters: Vec<BlasterBankState>,
 }
 
 /// True on the first tick of the weapons broadcaster, then cleared.
@@ -161,6 +164,14 @@ impl Default for PhaserRenderConfig {
 #[derive(Resource, Component, Clone)]
 pub struct TorpedoSystemResource(pub TorpedoSystem);
 
+/// Wraps the pure-Rust blaster system(s) so they can be used as a Bevy
+/// component on each ship entity (issue #631).
+///
+/// Each element corresponds to one `[[weapons_console.blaster_banks]]` entry.
+/// A ship with no blaster banks will have an empty `Vec`.
+#[derive(Resource, Component, Clone, Default)]
+pub struct BlasterSystemResource(pub Vec<crate::blaster::BlasterSystem>);
+
 /// Bevy resource holding the player-ship phaser combat tuning
 /// (beam duration, beam cooldown, beam damage per second, phaser range).
 ///
@@ -266,6 +277,7 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<PhaserCombatConfigResource>()
             .init_resource::<WeaponsUpdateFirstTick>()
             .init_resource::<TacticalAiController>()
+            .init_resource::<BlasterSystemResource>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
                 TorpedoConfig::default(),
             )))
@@ -284,12 +296,14 @@ impl Plugin for WeaponsPlugin {
                     handle_load_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
                     operate_tactical_ai.in_set(crate::sim_sets::SimSet::Input),
+                    handle_fire_blaster.in_set(crate::sim_sets::SimSet::Input),
                 ),
             )
             .add_systems(
                 Update,
                 (
                     tick_beams.in_set(crate::sim_sets::SimSet::Damage),
+                    handle_blaster_hits.in_set(crate::sim_sets::SimSet::Damage),
                     drain_power_for_active_beam.in_set(crate::sim_sets::SimSet::Physics),
                     tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
                     // Magazine consumer runs in Physics — reads channel-2 claims
@@ -297,6 +311,7 @@ impl Plugin for WeaponsPlugin {
                     // load starts same-tick (issue #512). Ordered after
                     // tick_torpedo_system so its own state mutations are seen.
                     handle_torpedo_magazine_inter_system.in_set(crate::sim_sets::SimSet::Physics),
+                    tick_blaster_system.in_set(crate::sim_sets::SimSet::Physics),
                 ),
             )
             .add_systems(
@@ -1827,6 +1842,304 @@ fn handle_fire_torpedo(
     }
 }
 
+// ── Blaster systems (issue #631) ─────────────────────────────────────────────
+
+/// Handle `ControlSystem { target: "blaster-bank-<id>", payload: FireBlaster }`.
+///
+/// Resolves the bank id from the target SystemId, gates on the bank's
+/// fine-system policy, then calls `BlasterSystem::request_fire`.
+///
+/// Runs in `SimSet::Input`.
+fn handle_fire_blaster(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    localship_q: Query<
+        (Entity, &crate::ship_plugin::ShipConfigComponent),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut ship_q: Query<
+        (&ShipSystemControlSources, &mut BlasterSystemResource),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    let local_ship: Option<(Entity, &crate::ship_plugin::ShipConfigComponent)> =
+        localship_q.single().ok();
+
+    for ev in reader.read() {
+        let ClientMessage::ControlSystem {
+            target,
+            payload: SystemControlPayload::FireBlaster,
+        } = &ev.msg
+        else {
+            continue;
+        };
+
+        // Target must look like "blaster-bank-<bank_id>" (from JS action-map).
+        let bank_id = match target.0.strip_prefix("blaster-bank-") {
+            Some(id) if !id.is_empty() => id.to_string(),
+            _ => continue,
+        };
+
+        // Resolve shooter entity — only the LocalShip for human tokens.
+        let shooter_entity: Entity = if ev.token.starts_with("ai:") {
+            continue; // AI support deferred.
+        } else {
+            match local_ship {
+                Some((e, cfg)) if tactical_authorized(&sessions, cfg, &ev.token) => e,
+                _ => continue,
+            }
+        };
+
+        let Ok((control_sources, mut blaster_res)) = ship_q.get_mut(shooter_entity) else {
+            continue;
+        };
+
+        // Gate on the bank's fine-system policy. The system ID uses the
+        // `blaster-<bank_id>` convention (not `blaster-bank-<bank_id>`).
+        let bank_system_id = crate::system_registry::blaster_bank_system_id(&bank_id)
+            .filter(|id| system_is_registered(control_sources, id));
+        let policy = match &bank_system_id {
+            Some(id) => control_sources.0.policy_for(id),
+            None => control_sources
+                .0
+                .policy_for(&crate::system_registry::tactical_system_id()),
+        };
+        let authorized = policy.accept_human_input;
+        if !authorized {
+            continue;
+        }
+
+        // Find the matching bank and start a volley.
+        if let Some(bank) = blaster_res.0.iter_mut().find(|b| b.config.id == bank_id) {
+            bank.request_fire();
+        }
+    }
+}
+
+/// Tick every ship's `BlasterSystemResource` — advance volley timers and
+/// launch projectiles. Emits `ServerMessage::BlasterFired` for each
+/// projectile launched. Runs in `SimSet::Physics`.
+fn tick_blaster_system(
+    time: Res<Time>,
+    mut ship_q: Query<
+        (
+            Option<&crate::entity_spawner::EntityUuid>,
+            &ShipPhysics,
+            Option<&WeaponsTarget>,
+            &mut BlasterSystemResource,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut outbox: ResMut<SimOutbox>,
+) {
+    let dt = time.delta_secs();
+    for (source_uuid_opt, physics, weapons_target_opt, mut blaster_res) in ship_q.iter_mut() {
+        let source_uuid = source_uuid_opt
+            .map(|u| u.0.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        // Resolve target position (velocity data not yet available — use 0).
+        let target_uuid = weapons_target_opt.and_then(|wt| wt.0.clone());
+        let (target_x, target_z, target_vx, target_vz) = if let Some(ref uuid) = target_uuid {
+            let pos = live_entity_xz(uuid, &asteroid_q, &entity_q);
+            pos.map(|(x, z)| (x, z, 0.0_f32, 0.0_f32)).unwrap_or((
+                physics.x,
+                physics.z - 100.0,
+                0.0,
+                0.0,
+            ))
+        } else {
+            let fwd_x = physics.yaw.sin();
+            let fwd_z = -physics.yaw.cos();
+            (
+                physics.x + fwd_x * 100.0,
+                physics.z + fwd_z * 100.0,
+                0.0,
+                0.0,
+            )
+        };
+
+        for bank in blaster_res.0.iter_mut() {
+            let bank_id = bank.config.id.clone();
+            let events = bank.tick(
+                dt,
+                physics.x,
+                physics.z,
+                physics.yaw,
+                target_x,
+                target_z,
+                target_vx,
+                target_vz,
+                &source_uuid,
+                &mut || uuid::Uuid::new_v4().to_string(),
+            );
+            for ev in events {
+                outbox.0.push((
+                    Target::All,
+                    ServerMessage::BlasterFired {
+                        bank: bank_id.clone(),
+                        source_uuid: source_uuid.clone(),
+                        projectile_id: ev.projectile_id,
+                        x: ev.x,
+                        z: ev.z,
+                        heading: ev.heading,
+                    },
+                ));
+            }
+        }
+    }
+}
+
+/// Check blaster projectile hits against all entities and apply shields-first
+/// damage. Emits `ServerMessage::BlasterHit`. Runs in `SimSet::Damage`.
+///
+/// Hit detection uses live ECS Transform positions — the same approach as
+/// `tick_torpedo_system`.
+#[allow(clippy::too_many_arguments)]
+fn handle_blaster_hits(
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut hit_target_q: Query<
+        (
+            Entity,
+            Option<&AsteroidUuid>,
+            Option<&crate::entity_spawner::EntityUuid>,
+            &mut crate::entity_spawner::EntitySystemHull,
+            Option<&mut crate::ship::shields::ShipShields>,
+            Option<&mut crate::entity_spawner::EntityShipArcHull>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    mut blaster_res_q: Query<&mut BlasterSystemResource, With<crate::server_app::Ship>>,
+    mut outbox: ResMut<SimOutbox>,
+    mut commands: Commands,
+    mut next_state: Option<ResMut<NextState<GamePhase>>>,
+    mut game_over_reason: Option<ResMut<GameOverReason>>,
+) {
+    // Build target list from live ECS transforms.
+    let mut targets: Vec<(String, f32, f32, f32)> = Vec::new();
+    for (ast_uuid, transform) in asteroid_q.iter() {
+        targets.push((
+            ast_uuid.0.clone(),
+            transform.translation.x,
+            transform.translation.z,
+            0.0,
+        ));
+    }
+    for (ent_uuid, transform) in entity_q.iter() {
+        targets.push((
+            ent_uuid.0.clone(),
+            transform.translation.x,
+            transform.translation.z,
+            0.0,
+        ));
+    }
+
+    #[derive(Clone)]
+    struct BlasterDetonation {
+        bank_id: String,
+        projectile_id: String,
+        target_uuid: String,
+        damage: i32,
+        shield_pierce: f32,
+    }
+
+    let mut detonations: Vec<BlasterDetonation> = Vec::new();
+    for mut blaster_res in blaster_res_q.iter_mut() {
+        for bank in blaster_res.0.iter_mut() {
+            let hits = bank.find_hits(&targets);
+            for (proj_id, target_uuid) in hits {
+                if let Some(hit_data) = bank.consume_hit(&proj_id) {
+                    detonations.push(BlasterDetonation {
+                        bank_id: bank.config.id.clone(),
+                        projectile_id: proj_id,
+                        target_uuid,
+                        damage: hit_data.damage,
+                        shield_pierce: hit_data.shield_pierce,
+                    });
+                }
+            }
+        }
+    }
+
+    for det in detonations {
+        outbox.0.push((
+            Target::All,
+            ServerMessage::BlasterHit {
+                bank: det.bank_id,
+                projectile_id: det.projectile_id,
+                target_uuid: det.target_uuid.clone(),
+            },
+        ));
+
+        // Apply shields-first damage to the matching entity.
+        for (entity, _ast_uuid, ent_uuid, mut hull_comp, mut shield_comp, mut arc_hull, is_local) in
+            hit_target_q.iter_mut()
+        {
+            let uuid_matches = ent_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str());
+            if !uuid_matches {
+                continue;
+            }
+
+            let mut hull_damage = det.damage as f32;
+
+            let shield_amount = if let Some(ref mut shields) = shield_comp {
+                let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
+                if !all_offline {
+                    let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
+                        det.damage as f32,
+                        det.shield_pierce,
+                    );
+                    let leak = shields.0.apply_damage(absorbed.round() as i32, 0.0);
+                    let shielded = (absorbed - leak as f32).max(0.0);
+                    hull_damage = pierced + leak as f32;
+                    shielded
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            if hull_damage > 0.0 {
+                let mut rng = rand::rng();
+                let (hull_applied, destroyed) =
+                    crate::damage::apply_hull_damage(&mut hull_comp.0, hull_damage, &mut rng);
+                if let Some(ref mut ah) = arc_hull {
+                    ah.0.apply_damage(hull_applied, &mut rng);
+                }
+                if is_local {
+                    outbox.0.push((
+                        Target::All,
+                        ServerMessage::DamageTaken {
+                            hull: hull_applied,
+                            shield: shield_amount,
+                        },
+                    ));
+                    if destroyed {
+                        outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
+                        if let Some(ref mut ns) = next_state {
+                            ns.set(GamePhase::GameOver);
+                        }
+                        if let Some(ref mut reason) = game_over_reason {
+                            if reason.0.is_none() {
+                                reason.0 = Some("Ship destroyed".into());
+                            }
+                        }
+                    }
+                } else if destroyed {
+                    commands.entity(entity).try_despawn();
+                }
+            }
+            break; // UUID is unique.
+        }
+    }
+}
+
 /// Drains each ship's Power battery via the inter-system command channel
 /// while its own phaser beam is active. Runs in `SimSet::Physics` (one
 /// phase before `tick_beams` in `SimSet::Damage`); the Power system
@@ -2732,6 +3045,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         tubes,
         torpedo_count,
         phaser_mode,
+        blasters: Vec::new(), // Populated by weapons_update_broadcaster from BlasterSystemResource.
     }
 }
 
@@ -2740,7 +3054,29 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
         crate::core::broadcast::Audience::Holding(StationId("tactical".into())),
         crate::core::broadcast::Cadence::Hz(10.0),
         |world: &mut World| {
-            let current = compute_current_weapons_update(world);
+            let mut current = compute_current_weapons_update(world);
+
+            // Collect blaster bank states from the LocalShip's BlasterSystemResource.
+            {
+                let mut q = world
+                    .query_filtered::<&BlasterSystemResource, With<crate::server_app::LocalShip>>();
+                if let Ok(blaster_res) = q.single(world) {
+                    current.blasters = blaster_res
+                        .0
+                        .iter()
+                        .map(|b| {
+                            let state = b.bank_state();
+                            BlasterBankState {
+                                id: state.id,
+                                fire_ready: state.fire_ready,
+                                on_cooldown: state.on_cooldown,
+                                cooldown_remaining: state.cooldown_remaining,
+                                pending_volley: state.pending_volley,
+                            }
+                        })
+                        .collect();
+                }
+            }
 
             let is_first_tick = world.resource::<WeaponsUpdateFirstTick>().0;
             if !is_first_tick {
@@ -2759,6 +3095,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 tubes,
                 torpedo_count,
                 phaser_mode,
+                blasters,
             } = current.clone();
             *world.resource_mut::<LastWeaponsUpdate>() = current;
 
@@ -2769,6 +3106,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 tubes,
                 torpedo_count,
                 phaser_mode,
+                blasters,
             }]
         },
     )
@@ -2786,6 +3124,7 @@ fn publish_weapons_blackboard(
     combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
     phaser_mode: Res<CurrentPhaserMode>,
     torpedo_sys_q: Query<&TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    blaster_res_q: Query<&BlasterSystemResource, With<crate::server_app::LocalShip>>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
@@ -3032,6 +3371,25 @@ fn publish_weapons_blackboard(
     let phaser_arcs: Vec<PhaserBankClientConfig> = ship_config.0.phaser_banks.clone();
     let torpedo_arcs: Vec<TorpedoTubeClientConfig> = ship_config.0.torpedo_tubes.clone();
 
+    // Collect blaster bank states from the LocalShip's BlasterSystemResource.
+    let blasters: Vec<BlasterBankState> = match blaster_res_q.single() {
+        Ok(blaster_res) => blaster_res
+            .0
+            .iter()
+            .map(|b| {
+                let state = b.bank_state();
+                BlasterBankState {
+                    id: state.id,
+                    fire_ready: state.fire_ready,
+                    on_cooldown: state.on_cooldown,
+                    cooldown_remaining: state.cooldown_remaining,
+                    pending_volley: state.pending_volley,
+                }
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
     let bb = WeaponsBlackboard {
         target_uuid,
         target_name,
@@ -3041,6 +3399,7 @@ fn publish_weapons_blackboard(
         phaser_mode: phaser_mode.0,
         phaser_arcs,
         torpedo_arcs,
+        blasters: blasters.clone(),
         blips,
         regions,
     };
@@ -6237,6 +6596,7 @@ station = "tactical"
                         shield_pierce: Some(0.0),
                         marker: None,
                     }],
+                    blaster_banks: vec![],
                     radar: None,
                 }),
                 EntitySystemHull(SystemHull::from_config(&[(

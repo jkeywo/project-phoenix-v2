@@ -8,12 +8,13 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 26 expected action keys', () => {
+  it('contains exactly the 27 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'clear_comms',
       'clear_navigation_waypoint',
       'dispatch_repair_team',
+      'fire_blaster',
       'fire_phaser',
       'fire_torpedo',
       'hail',
@@ -55,6 +56,23 @@ describe('fire_phaser', () => {
   it('does nothing when bank is absent', () => {
     const send = mkSend();
     ACTION_MAP.fire_phaser({ action: 'fire_phaser' }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('fire_blaster', () => {
+  it('sends ControlSystem FireBlaster with blaster-bank target when bank provided', () => {
+    const send = mkSend();
+    ACTION_MAP.fire_blaster({ action: 'fire_blaster', bank: 'fore' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'blaster-bank-fore',
+      payload: { type: 'FireBlaster' },
+    });
+  });
+
+  it('does nothing when bank is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.fire_blaster({ action: 'fire_blaster' }, send);
     expect(send).not.toHaveBeenCalled();
   });
 });

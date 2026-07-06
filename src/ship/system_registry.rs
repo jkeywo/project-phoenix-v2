@@ -138,6 +138,13 @@ pub const TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID: &str = "torpedo-tube-fore-starb
 pub const TORPEDO_TUBE_AFT_SYSTEM_ID: &str = "torpedo-tube-aft";
 pub const TORPEDO_TUBE_AI_CONTROLLER: &str = "torpedo_tube_ai";
 
+/// Wire `SystemId` for the Blaster Bank fine systems (issue #631).
+///
+/// Registered per-instance in TOML (e.g. `"blaster-fore"`, `"blaster-aft"`).
+/// A blaster bank fires straight-flying projectiles in data-driven volleys.
+pub const BLASTER_BANK_KIND: &str = "blaster_bank";
+pub const BLASTER_BANK_AI_CONTROLLER: &str = "blaster_bank_ai";
+
 /// Wire `SystemId` for the Torpedo Magazine fine system (single instance).
 ///
 /// The magazine owns the shared torpedo `count`; tubes claim a round via
@@ -335,6 +342,11 @@ impl SystemKindRegistry {
             TORPEDO_MAGAZINE_KIND,
             AiControllerRegistration::new(TORPEDO_MAGAZINE_AI_CONTROLLER)?,
         )?;
+        // Blaster bank fine system (issue #631)
+        registry.register(
+            BLASTER_BANK_KIND,
+            AiControllerRegistration::new(BLASTER_BANK_AI_CONTROLLER)?,
+        )?;
         // Fine-grained Power systems (issue #513)
         registry.register(
             POWER_REACTOR_KIND,
@@ -514,6 +526,18 @@ pub fn phaser_bank_system_id(bank_id: &str) -> Option<SystemId> {
         return None;
     }
     Some(SystemId(format!("phaser-{bank_id}")))
+}
+
+/// Resolve the `SystemId` for a blaster bank by its TOML `id` (issue #631).
+///
+/// The convention is `"blaster-<bank_id>"`, so `"fore"` → `"blaster-fore"`,
+/// `"aft"` → `"blaster-aft"`, etc. Returns `Some` for every non-empty bank id.
+/// Underscore-to-hyphen conversion follows the project convention.
+pub fn blaster_bank_system_id(bank_id: &str) -> Option<SystemId> {
+    if bank_id.is_empty() {
+        return None;
+    }
+    Some(SystemId(format!("blaster-{}", bank_id.replace('_', "-"))))
 }
 
 /// Resolve the `SystemId` for a torpedo tube by its TOML `id`.
@@ -1071,6 +1095,69 @@ mod tests {
             Some(SystemId("torpedo-tube-dorsal-upper".into()))
         );
         assert_eq!(torpedo_tube_system_id(""), None);
+    }
+
+    // ── Fine Blaster system tests (issue #631) ────────────────────────────────
+
+    #[test]
+    fn blaster_bank_kind_is_registered() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+        assert!(
+            registry.contains(BLASTER_BANK_KIND),
+            "blaster_bank not registered"
+        );
+        assert_eq!(
+            registry
+                .registration(BLASTER_BANK_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            BLASTER_BANK_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn blaster_bank_kind_constant_is_correct() {
+        assert_eq!(BLASTER_BANK_KIND, "blaster_bank");
+        assert_eq!(BLASTER_BANK_AI_CONTROLLER, "blaster_bank_ai");
+    }
+
+    #[test]
+    fn blaster_bank_system_id_resolves_known_ids() {
+        assert_eq!(
+            blaster_bank_system_id("fore"),
+            Some(SystemId("blaster-fore".into()))
+        );
+        assert_eq!(
+            blaster_bank_system_id("aft"),
+            Some(SystemId("blaster-aft".into()))
+        );
+        assert_eq!(
+            blaster_bank_system_id("fore_port"),
+            Some(SystemId("blaster-fore-port".into()))
+        );
+        assert_eq!(blaster_bank_system_id(""), None);
+    }
+
+    #[test]
+    fn blaster_bank_system_ids_are_lowercase_kebab() {
+        for bank_id in &["fore", "aft", "port", "starboard", "fore_port"] {
+            let sid =
+                blaster_bank_system_id(bank_id).expect("non-empty id should produce a SystemId");
+            assert_eq!(
+                sid.0,
+                sid.0.to_lowercase(),
+                "SystemId {sid:?} for blaster bank {bank_id:?} is not lowercase"
+            );
+            assert!(
+                !sid.0.contains('_'),
+                "SystemId {sid:?} for blaster bank {bank_id:?} contains underscore"
+            );
+            assert!(
+                sid.0.starts_with("blaster-"),
+                "SystemId {sid:?} must start with blaster-"
+            );
+        }
     }
 
     // ── Fine Power system tests (issue #513) ──────────────────────────────────

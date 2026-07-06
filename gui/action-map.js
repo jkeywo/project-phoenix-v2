@@ -46,6 +46,18 @@ export const ACTION_MAP = Object.freeze({
     if (a.tube) send('UnloadTube', { tube: a.tube });
   },
 
+  /** Set the volley target count for a torpedo tube (issue #632).
+   *  Sends a ControlSystem message to the tube's fine SystemId with
+   *  payload type SetTorpedoVolleyTarget. */
+  set_torpedo_volley_target: (a, send) => {
+    if (a.tube == null || a.count == null) return;
+    const sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');
+    send('ControlSystem', {
+      target: sysId,
+      payload: { type: 'SetTorpedoVolleyTarget', data: { count: a.count } },
+    });
+  },
+
   /** Lock the weapon / sensor target to a specific entity UUID. */
   set_target: (a, send) => {
     if (a.uuid)

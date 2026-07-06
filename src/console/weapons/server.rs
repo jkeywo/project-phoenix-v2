@@ -295,6 +295,7 @@ impl Plugin for WeaponsPlugin {
                     handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Input),
                     handle_load_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
+                    handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
                     operate_tactical_ai.in_set(crate::sim_sets::SimSet::Input),
                     handle_fire_blaster.in_set(crate::sim_sets::SimSet::Input),
                 ),
@@ -1663,7 +1664,67 @@ fn handle_unload_tube(
     }
 }
 
-/// Unified `FireTorpedo` handler for every ship (player + NPC).
+/// Handle `ControlSystem { target: "torpedo-tube-<id>", payload: SetTorpedoVolleyTarget { count } }`.
+///
+/// Resolves the tube id from the target SystemId, gates on the tube's
+/// fine-system policy, then calls [`TorpedoSystem::set_volley_target`].
+///
+/// Runs in `SimSet::Input`.
+fn handle_set_torpedo_volley_target(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
+) {
+    let Some((ship_config, control_sources)) = ship_query.iter().next() else {
+        return;
+    };
+    for ev in reader.read() {
+        let ClientMessage::ControlSystem {
+            target,
+            payload: SystemControlPayload::SetTorpedoVolleyTarget { count },
+        } = &ev.msg
+        else {
+            continue;
+        };
+        // Target must look like "torpedo-tube-<tube_id_with_hyphens>".
+        let tube_id_hyphens = match target.0.strip_prefix("torpedo-tube-") {
+            Some(id) if !id.is_empty() => id,
+            _ => continue,
+        };
+        // Gate on the tube's own fine-system policy (falls back to tactical).
+        let is_registered = system_is_registered(control_sources, target);
+        let tube_policy = if is_registered {
+            control_sources.0.policy_for(target)
+        } else {
+            control_sources
+                .0
+                .policy_for(&crate::system_registry::tactical_system_id())
+        };
+        if !tube_policy.accept_human_input {
+            continue;
+        }
+        if !tactical_authorized(&sessions, ship_config, &ev.token) {
+            continue;
+        }
+        // Convert hyphens → underscores to get the TOML tube id.
+        let tube_id = tube_id_hyphens.replace('-', "_");
+        // Prefer per-entity component; fall back to global resource.
+        if let Some(mut ts) = torpedo_sys_q.iter_mut().next() {
+            ts.0.set_volley_target(&tube_id, *count);
+        } else {
+            torpedo_sys_res.0.set_volley_target(&tube_id, *count);
+        }
+    }
+}
+
 ///
 /// Iterates `InboundMessage::FireTorpedo` events and resolves each to a
 /// shooter ship entity by token:
@@ -1821,6 +1882,7 @@ fn handle_fire_torpedo(
         match result {
             LaunchResult::Launched {
                 uuid: launched_uuid,
+                ..
             } => {
                 if let Some(mut wf) = weapon_fired_comp {
                     wf.0 = true;
@@ -2399,11 +2461,25 @@ fn tick_torpedo_system(
 
     for mut torpedo_sys in torpedo_sys_q.iter_mut() {
         any_ship_component = true;
-        let result = torpedo_sys.0.tick(dt, &target_positions);
+        let result = torpedo_sys.0.tick(dt, &target_positions, &mut || {
+            uuid::Uuid::new_v4().to_string()
+        });
         for expired_uuid in result.expired {
             outbox.0.push((
                 Target::All,
                 ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
+            ));
+        }
+        for (tube, uuid, x, z, heading) in result.burst_launched {
+            outbox.0.push((
+                Target::All,
+                ServerMessage::TorpedoLaunched {
+                    uuid,
+                    tube,
+                    x,
+                    z,
+                    heading,
+                },
             ));
         }
         let hits = torpedo_sys.0.find_detonation_hits(&targets);
@@ -2427,11 +2503,25 @@ fn tick_torpedo_system(
     // Resource-only fallback: tests that only insert the global
     // `TorpedoSystemResource` (no Ship entity carrying it) still work.
     if !any_ship_component {
-        let result = torpedo_sys_res.0.tick(dt, &target_positions);
+        let result = torpedo_sys_res.0.tick(dt, &target_positions, &mut || {
+            uuid::Uuid::new_v4().to_string()
+        });
         for expired_uuid in result.expired {
             outbox.0.push((
                 Target::All,
                 ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
+            ));
+        }
+        for (tube, uuid, x, z, heading) in result.burst_launched {
+            outbox.0.push((
+                Target::All,
+                ServerMessage::TorpedoLaunched {
+                    uuid,
+                    tube,
+                    x,
+                    z,
+                    heading,
+                },
             ));
         }
         let hits = torpedo_sys_res.0.find_detonation_hits(&targets);
@@ -2738,6 +2828,7 @@ fn operate_tactical_ai(
             match result {
                 LaunchResult::Launched {
                     uuid: launched_uuid,
+                    ..
                 } => {
                     outbox.0.push((
                         Target::All,
@@ -2883,6 +2974,10 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
                     state: t.load_state.label().to_string(),
                     progress: t.load_state.progress(),
                     load_time: t.load_time,
+                    volley_max: t.volley_max,
+                    loaded_count: t.loaded_count,
+                    target_count: t.target_count,
+                    load_progress: t.load_progress(),
                 }
             })
             .collect()
@@ -3278,6 +3373,10 @@ fn publish_weapons_blackboard(
                 state: t.load_state.label().to_string(),
                 progress: t.load_state.progress(),
                 load_time: t.load_time,
+                volley_max: t.volley_max,
+                loaded_count: t.loaded_count,
+                target_count: t.target_count,
+                load_progress: t.load_progress(),
             }
         })
         .collect();
@@ -3458,6 +3557,10 @@ fn publish_weapons_blackboard(
                     state: tube_state.state.clone(),
                     progress: tube_state.progress,
                     load_time: tube_state.load_time,
+                    volley_max: tube_state.volley_max,
+                    loaded_count: tube_state.loaded_count,
+                    target_count: tube_state.target_count,
+                    load_progress: tube_state.load_progress,
                 }),
             );
         }
@@ -3991,14 +4094,14 @@ station = "tactical"
         if let Ok(mut ts) = q.single_mut(app.world_mut()) {
             ts.0.tube_mut(tube)
                 .expect("test tube should exist")
-                .load_state = crate::torpedo::TubeLoadState::Loaded;
+                .loaded_count = 1;
         } else {
-            app.world_mut()
-                .resource_mut::<TorpedoSystemResource>()
-                .0
+            let mut world = app.world_mut();
+            let mut res = world.resource_mut::<TorpedoSystemResource>();
+            res.0
                 .tube_mut(tube)
                 .expect("test tube should exist")
-                .load_state = crate::torpedo::TubeLoadState::Loaded;
+                .loaded_count = 1;
         }
     }
 
@@ -4801,7 +4904,7 @@ station = "tactical"
                 .expect("NPC must have TorpedoSystemResource component");
             ts.0.tube_mut("fore_port")
                 .expect("default TorpedoSystem must expose fore_port tube")
-                .load_state = crate::torpedo::TubeLoadState::Loaded;
+                .loaded_count = 1;
             let result = ts.0.launch(
                 "fore_port",
                 "direct-launch-uuid".to_string(),
@@ -4823,7 +4926,7 @@ station = "tactical"
                 .world_mut()
                 .get_mut::<TorpedoSystemResource>(npc_entity)
                 .unwrap();
-            ts.0.tube_mut("fore_port").unwrap().load_state = crate::torpedo::TubeLoadState::Loaded;
+            ts.0.tube_mut("fore_port").unwrap().loaded_count = 1;
             ts.0.in_flight.clear();
         }
 
@@ -8096,6 +8199,7 @@ ai_only = true
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                volley_max: 1,
             }],
             TorpedoConfig {
                 count: 10,

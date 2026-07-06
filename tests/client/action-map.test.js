@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 27 expected action keys', () => {
+  it('contains exactly the 28 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'clear_comms',
@@ -31,6 +31,7 @@ describe('ACTION_MAP', () => {
       'set_sensors_target',
       'set_shield_focus',
       'set_target',
+      'set_torpedo_volley_target',
       'set_view',
       'show_on_screen',
       'start_impulse_charge',
@@ -560,5 +561,39 @@ describe('dispatchConsoleAction', () => {
       target: 'sensors',
       payload: { type: 'SetScienceTarget', data: { uuid: 'x' } },
     });
+  });
+});
+
+// ── set_torpedo_volley_target (issue #632) ────────────────────────────────────
+
+describe('set_torpedo_volley_target', () => {
+  it('sends ControlSystem SetTorpedoVolleyTarget to torpedo-tube-<id> system', () => {
+    const send = mkSend();
+    ACTION_MAP.set_torpedo_volley_target({ tube: 'fore_port', count: 3 }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'torpedo-tube-fore-port',
+      payload: { type: 'SetTorpedoVolleyTarget', data: { count: 3 } },
+    });
+  });
+
+  it('converts underscores to hyphens in tube id', () => {
+    const send = mkSend();
+    ACTION_MAP.set_torpedo_volley_target({ tube: 'fore_starboard', count: 1 }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'torpedo-tube-fore-starboard',
+      payload: { type: 'SetTorpedoVolleyTarget', data: { count: 1 } },
+    });
+  });
+
+  it('does nothing when tube is null', () => {
+    const send = mkSend();
+    ACTION_MAP.set_torpedo_volley_target({ tube: null, count: 1 }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when count is null', () => {
+    const send = mkSend();
+    ACTION_MAP.set_torpedo_volley_target({ tube: 'fore_port', count: null }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });

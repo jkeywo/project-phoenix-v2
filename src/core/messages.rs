@@ -184,7 +184,7 @@ pub struct PhaserBankState {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TorpedoTubeState {
     pub id: TorpedoTube,
-    /// True when the tube is loaded and ready to fire.
+    /// True when the tube has at least one torpedo loaded and ready to fire.
     pub loaded: bool,
     /// Seconds remaining on the current load/unload timer (0.0 when done).
     pub reload_secs: f32,
@@ -197,6 +197,23 @@ pub struct TorpedoTubeState {
     /// Tube-specific load/unload duration in seconds.
     #[serde(default)]
     pub load_time: f32,
+    /// Maximum number of torpedoes this tube can hold (from TOML `volley_max`).
+    #[serde(default = "default_tube_volley_max_wire")]
+    pub volley_max: u32,
+    /// Number of torpedoes currently loaded and ready to fire.
+    #[serde(default)]
+    pub loaded_count: u32,
+    /// Desired number of loaded torpedoes (0..=volley_max).
+    #[serde(default)]
+    pub target_count: u32,
+    /// Fraction `[0.0, 1.0]` of the in-progress load/unload operation for the
+    /// next torpedo. 0.0 when idle.
+    #[serde(default)]
+    pub load_progress: f32,
+}
+
+fn default_tube_volley_max_wire() -> u32 {
+    1
 }
 
 /// Per-bank blaster state broadcast to the Tactical operator as part of
@@ -951,6 +968,12 @@ pub enum SystemControlPayload {
     SetObjectivePriority {
         id: String,
     },
+    /// Set the volley target count for the torpedo tube addressed by the
+    /// `ControlSystem` target SystemId (issue #632). `count` is clamped to
+    /// `[0, tube.volley_max]` server-side.
+    SetTorpedoVolleyTarget {
+        count: u32,
+    },
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -1559,7 +1582,7 @@ pub struct PhaserBankBlackboard {
 pub struct TorpedoTubeBlackboard {
     /// True when the tube is operational (not disabled or destroyed by hull damage).
     pub is_online: bool,
-    /// True when the tube is loaded and ready to fire.
+    /// True when the tube has at least one torpedo loaded and ready to fire.
     pub loaded: bool,
     /// Load state label: "loaded" | "unloaded" | "loading" | "unloading".
     pub state: String,
@@ -1567,6 +1590,18 @@ pub struct TorpedoTubeBlackboard {
     pub progress: f32,
     /// Tube-specific load/unload duration in seconds.
     pub load_time: f32,
+    /// Maximum number of torpedoes this tube can hold (from TOML `volley_max`).
+    #[serde(default = "default_tube_volley_max_wire")]
+    pub volley_max: u32,
+    /// Number of torpedoes currently loaded and ready to fire.
+    #[serde(default)]
+    pub loaded_count: u32,
+    /// Desired number of loaded torpedoes (0..=volley_max).
+    #[serde(default)]
+    pub target_count: u32,
+    /// Fraction `[0.0, 1.0]` of the in-progress load operation for the next torpedo.
+    #[serde(default)]
+    pub load_progress: f32,
 }
 
 /// Raw sim truth for the shared Torpedo Magazine fine system, published each

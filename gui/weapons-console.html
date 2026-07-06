@@ -844,6 +844,32 @@
         sendAction('fire_torpedo', { tube: id, target_uuid: targetUuid });
       });
 
+      // Volley +/- buttons (issue #632).
+      var minusBtn = document.createElement('button');
+      minusBtn.type = 'button';
+      minusBtn.className = 'volley-btn volley-minus';
+      minusBtn.textContent = '-';
+      minusBtn.addEventListener('click', function() {
+        var t = (_state && _state.tubes || []).find(function(x) { return x.id === id; });
+        var cur = t ? (typeof t.target_count === 'number' ? t.target_count : 0) : 0;
+        if (cur > 0) sendAction('set_torpedo_volley_target', { tube: id, count: cur - 1 });
+      });
+
+      var plusBtn = document.createElement('button');
+      plusBtn.type = 'button';
+      plusBtn.className = 'volley-btn volley-plus';
+      plusBtn.textContent = '+';
+      plusBtn.addEventListener('click', function() {
+        var t = (_state && _state.tubes || []).find(function(x) { return x.id === id; });
+        var cur = t ? (typeof t.target_count === 'number' ? t.target_count : 0) : 0;
+        var max = t ? (typeof t.volley_max === 'number' ? t.volley_max : 1) : 1;
+        if (cur < max) sendAction('set_torpedo_volley_target', { tube: id, count: cur + 1 });
+      });
+
+      var volleyCountEl = document.createElement('span');
+      volleyCountEl.className = 'volley-count';
+      volleyCountEl.title = 'Loaded / Max';
+
       var row = document.createElement('div');
       row.className = 'tube-row';
 
@@ -854,11 +880,15 @@
       btns.className = 'tube-buttons';
       btns.appendChild(loadBtn);
       btns.appendChild(fireBtn);
+      btns.appendChild(minusBtn);
+      btns.appendChild(volleyCountEl);
+      btns.appendChild(plusBtn);
 
       row.appendChild(nameEl);
       row.appendChild(btns);
 
-      return { row: row, nameEl: nameEl, loadBtn: loadBtn, fill: fill, lbl: lbl, fireBtn: fireBtn };
+      return { row: row, nameEl: nameEl, loadBtn: loadBtn, fill: fill, lbl: lbl, fireBtn: fireBtn,
+               minusBtn: minusBtn, plusBtn: plusBtn, volleyCountEl: volleyCountEl };
     }
 
     // Build the (stable) DOM nodes for one per-bank cooldown row.
@@ -1058,8 +1088,22 @@
           els.lbl.textContent = 'UNLOADING ' + secsLeft.toFixed(1) + 's';
         }
 
-        els.fireBtn.disabled = state !== 'loaded';
-        els.fireBtn.className = state === 'loaded' ? 'fire-btn armed' : 'fire-btn';
+        var loadedCount  = typeof t.loaded_count  === 'number' ? t.loaded_count  : (t.loaded ? 1 : 0);
+        var targetCount  = typeof t.target_count  === 'number' ? t.target_count  : 0;
+        var vollMax      = typeof t.volley_max     === 'number' ? t.volley_max    : 1;
+        var canFire      = loadedCount > 0;
+
+        // FIRE button: can fire when at least one torpedo is loaded.
+        els.fireBtn.disabled = !canFire;
+        els.fireBtn.className = canFire ? 'fire-btn armed' : 'fire-btn';
+
+        // Volley count display: "loaded / max".
+        if (els.volleyCountEl) {
+          els.volleyCountEl.textContent = loadedCount + '/' + vollMax;
+        }
+        // +/- buttons: disable at limits.
+        if (els.minusBtn) els.minusBtn.disabled = targetCount <= 0;
+        if (els.plusBtn)  els.plusBtn.disabled  = targetCount >= vollMax;
       });
 
       // ── Phaser state ─────────────────────────────────────────────────────

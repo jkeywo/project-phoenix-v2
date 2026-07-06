@@ -455,6 +455,10 @@ mod tests {
                         state: "loaded".into(),
                         progress: 1.0,
                         load_time: 10.0,
+                        volley_max: 3,
+                        loaded_count: 2,
+                        target_count: 3,
+                        load_progress: 0.5,
                     }],
                     torpedo_count: 10,
                     phaser_mode: PhaserMode::Auto,
@@ -878,6 +882,58 @@ mod tests {
             bank: "fore".to_string(),
             projectile_id: "proj-uuid-abc".into(),
             target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    /// Torpedo volley target command codec round-trip (issue #632).
+    ///
+    /// `SetTorpedoVolleyTarget` is a `SystemControlPayload` variant carried by
+    /// `ClientMessage::ControlSystem`. The target SystemId addresses a specific
+    /// torpedo tube (e.g. `"torpedo-tube-fore-port"`).
+    #[test]
+    fn set_torpedo_volley_target_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::system_registry::torpedo_tube_system_id("fore_port")
+                .expect("fore_port resolves"),
+            payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 3 },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        // Pin the on-the-wire JSON shape — action-map.js depends on this.
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-fore-port","payload":{"type":"SetTorpedoVolleyTarget","data":{"count":3}}}}"#,
+            "SetTorpedoVolleyTarget wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// `TorpedoTubeState` with non-default volley fields round-trips (issue #632).
+    #[test]
+    fn torpedo_tube_state_volley_fields_round_trip() {
+        use crate::messages::{PhaserMode, TorpedoTubeState};
+        let msg = ServerMessage::WeaponsUpdate {
+            target_uuid: None,
+            target_name: None,
+            banks: vec![],
+            tubes: vec![TorpedoTubeState {
+                id: "fore_port".to_string(),
+                loaded: true,
+                reload_secs: 3.5,
+                state: "loading".into(),
+                progress: 0.65,
+                load_time: 10.0,
+                volley_max: 4,
+                loaded_count: 2,
+                target_count: 4,
+                load_progress: 0.65,
+            }],
+            torpedo_count: 8,
+            phaser_mode: PhaserMode::Auto,
+            blasters: vec![],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

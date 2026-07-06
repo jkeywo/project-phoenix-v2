@@ -385,6 +385,49 @@ describe('buildWeaponsConsoleState', () => {
     }));
     expect(s.blips).toEqual(serverBlips);
   });
+
+  it('surfaces volley fields from tubes (issue #632)', () => {
+    const tubeWithVolley = {
+      id: 'fore_port',
+      loaded: true,
+      reload_secs: 0,
+      state: 'loading',
+      progress: 0.5,
+      load_time: 10,
+      volley_max: 4,
+      loaded_count: 2,
+      target_count: 3,
+      load_progress: 0.5,
+    };
+    const s = parse(buildWeaponsConsoleState({ weaponsTubes: [tubeWithVolley] }));
+    expect(s.tubes).toHaveLength(1);
+    const t = s.tubes[0];
+    expect(t.volley_max).toBe(4);
+    expect(t.loaded_count).toBe(2);
+    expect(t.target_count).toBe(3);
+    expect(t.load_progress).toBe(0.5);
+  });
+
+  it('surfaces volley fields from blackboard tubes (issue #632)', () => {
+    const tubeWithVolley = {
+      id: 'aft',
+      loaded: false,
+      reload_secs: 5,
+      state: 'unloaded',
+      progress: 0,
+      load_time: 10,
+      volley_max: 2,
+      loaded_count: 0,
+      target_count: 2,
+      load_progress: 0,
+    };
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: { tactical: { tubes: [tubeWithVolley] } },
+    }));
+    expect(s.tubes).toHaveLength(1);
+    expect(s.tubes[0].volley_max).toBe(2);
+    expect(s.tubes[0].target_count).toBe(2);
+  });
 });
 
 describe('buildCaptainConsoleState', () => {

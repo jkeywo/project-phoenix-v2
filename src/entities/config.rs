@@ -686,6 +686,16 @@ pub struct TorpedoTubeConfig {
     /// callers fall back to the ship-centre launch origin.
     #[serde(default)]
     pub marker: Option<String>,
+    /// Maximum number of torpedoes that can be loaded into this tube at once
+    /// (volley capacity). Default `1` preserves existing single-shot
+    /// behaviour. Values greater than 1 allow the tube to queue multiple
+    /// torpedoes and fire them as a rapid burst.
+    #[serde(default = "default_tube_volley_max")]
+    pub volley_max: u32,
+}
+
+fn default_tube_volley_max() -> u32 {
+    1
 }
 
 /// Validate a `[[weapons_console.phaser_banks]]` list parsed from TOML.
@@ -1173,6 +1183,14 @@ pub struct TorpedoesConfig {
     /// per-tube loadout.
     #[serde(default)]
     pub tubes: Vec<TorpedoTubeConfig>,
+    /// Interval in seconds between successive torpedo launches in a burst
+    /// volley. Applies to all tubes on the ship. Default `0.3s`.
+    #[serde(default = "default_burst_interval_secs")]
+    pub burst_interval_secs: f32,
+}
+
+fn default_burst_interval_secs() -> f32 {
+    0.3
 }
 
 fn default_torpedo_count() -> u32 {
@@ -1213,6 +1231,7 @@ impl Default for TorpedoesConfig {
             detonation_radius: default_torpedo_detonation_radius(),
             shield_pierce: 0.0,
             tubes: Vec::new(),
+            burst_interval_secs: default_burst_interval_secs(),
         }
     }
 }
@@ -1231,6 +1250,7 @@ impl TorpedoesConfig {
             load_time: self.load_time,
             detonation_radius: self.detonation_radius,
             shield_pierce: self.shield_pierce,
+            burst_interval_secs: self.burst_interval_secs,
         }
     }
 }
@@ -3632,11 +3652,12 @@ fire_arc_deg = 90.0
             fire_arc_deg: 90.0,
             load_time: None,
             marker: None,
+            volley_max: 1,
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
         assert!(sys.start_load("fore"));
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        sys.tick(sys.config.load_time, &targets);
+        sys.tick(sys.config.load_time, &targets, &mut || "test".into());
         sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert!((sys.in_flight[0].shield_pierce - 0.75).abs() < 1e-6);
 
@@ -3824,6 +3845,7 @@ count = 10
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                volley_max: 1,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
@@ -3831,6 +3853,7 @@ count = 10
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                volley_max: 1,
             },
         ];
         assert!(validate_torpedo_tubes(&tubes).is_ok());
@@ -3851,6 +3874,7 @@ count = 10
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                volley_max: 1,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
@@ -3858,6 +3882,7 @@ count = 10
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                volley_max: 1,
             },
         ];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
@@ -3873,6 +3898,7 @@ count = 10
             fire_arc_deg: 0.0,
             load_time: None,
             marker: None,
+            volley_max: 1,
         }];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
         assert!(err.contains("fire_arc_deg"));

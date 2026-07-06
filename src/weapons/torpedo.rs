@@ -10,15 +10,15 @@
 //! rate. If the target is gone the torpedo flies straight. Torpedoes expire
 //! after a configurable lifespan.
 //!
-//! Coordinate system: same as `ship_physics` / `radar` — XZ plane, Y-up.
-//! Ship forward is −Z when yaw = 0.
+//! Coordinate system: same as `ship_physics` / `radar` Ã¢â‚¬â€ XZ plane, Y-up.
+//! Ship forward is Ã¢Ë†â€™Z when yaw = 0.
 
 use std::f32::consts::PI;
 
 /// String identifier for a torpedo tube (matches the `id` field in TOML).
 pub type TorpedoTubeId = String;
 
-// ── Configuration ──────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Configuration Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /// Tuning knobs for the torpedo system.
 #[derive(Clone, Debug)]
@@ -39,15 +39,18 @@ pub struct TorpedoConfig {
     pub load_time: f32,
     /// Proximity-detonation radius in world units. A torpedo explodes when
     /// its centre comes within `detonation_radius + target_radius` of any
-    /// entity. Independent of homing — an un-locked torpedo still detonates
+    /// entity. Independent of homing Ã¢â‚¬â€ an un-locked torpedo still detonates
     /// on contact.
     pub detonation_radius: f32,
     /// Fraction of the `damage_shields` payload that bypasses the shield
-    /// system entirely and adds to hull damage. Default `0.0` — all
+    /// system entirely and adds to hull damage. Default `0.0` Ã¢â‚¬â€ all
     /// `damage_shields` is mitigated by the facing shield quadrant.
     /// `damage_hull` is unaffected (it always hits hull by design).
     /// Clamped to `[0.0, 1.0]` at apply time.
     pub shield_pierce: f32,
+    /// Interval in seconds between successive torpedo launches in a burst
+    /// volley (issue #632). Default `0.3`.
+    pub burst_interval_secs: f32,
 }
 
 impl Default for TorpedoConfig {
@@ -62,11 +65,12 @@ impl Default for TorpedoConfig {
             load_time: 10.0,
             detonation_radius: 5.0,
             shield_pierce: 0.0,
+            burst_interval_secs: 0.3,
         }
     }
 }
 
-// ── In-flight torpedo ──────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ In-flight torpedo Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 #[derive(Clone, Debug)]
 pub struct Torpedo {
@@ -112,7 +116,7 @@ impl Torpedo {
     }
 }
 
-// ── Torpedo tube ───────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Torpedo tube Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /// Load state for a single torpedo tube.
 #[derive(Clone, Debug, PartialEq)]
@@ -158,23 +162,43 @@ pub struct TorpedoTube {
     pub facing_deg: f32,
     /// Total fire-arc width in degrees.
     pub fire_arc_deg: f32,
-    /// Current load state (loaded, unloaded, or transitioning).
+    /// Current load state for the in-progress load/unload operation.
+    /// When `loaded_count < volley_max`, this tracks the next torpedo
+    /// being loaded. When `loaded_count > target_count`, it tracks the
+    /// torpedo being unloaded.
     pub load_state: TubeLoadState,
-    /// Seconds to load or unload this tube.
+    /// Seconds to load or unload one torpedo.
     pub load_time: f32,
+    /// Maximum number of torpedoes this tube can hold at once (from TOML).
+    pub volley_max: u32,
+    /// Number of torpedoes currently loaded and ready to fire.
+    pub loaded_count: u32,
+    /// Desired number of loaded torpedoes (0..=volley_max). The tube
+    /// loads/unloads toward this value automatically.
+    pub target_count: u32,
 }
 
 impl TorpedoTube {
+    /// True when at least one torpedo is loaded and ready to fire.
     pub fn is_loaded(&self) -> bool {
-        self.load_state == TubeLoadState::Loaded
+        self.loaded_count > 0
     }
 
-    pub fn tick(&mut self, dt: f32) {
+    /// Fraction of the in-progress load/unload operation, `[0.0, 1.0]`.
+    /// Returns 0.0 when idle (no active operation in progress).
+    pub fn load_progress(&self) -> f32 {
+        self.load_state.progress()
+    }
+
+    /// Advance the in-progress load/unload timer by `dt` seconds.
+    /// Returns `LoadTickOutcome` indicating any state transitions.
+    pub fn tick(&mut self, dt: f32) -> LoadTickOutcome {
+        let prev = self.load_state.clone();
         self.load_state = match self.load_state.clone() {
             TubeLoadState::Loading { remaining, total } => {
                 let r = (remaining - dt).max(0.0);
                 if r <= 0.0 {
-                    TubeLoadState::Loaded
+                    TubeLoadState::Unloaded
                 } else {
                     TubeLoadState::Loading {
                         remaining: r,
@@ -195,6 +219,13 @@ impl TorpedoTube {
             }
             other => other,
         };
+        match (&prev, &self.load_state) {
+            (TubeLoadState::Loading { .. }, TubeLoadState::Unloaded) => LoadTickOutcome::LoadedOne,
+            (TubeLoadState::Unloading { .. }, TubeLoadState::Unloaded) => {
+                LoadTickOutcome::UnloadedOne
+            }
+            _ => LoadTickOutcome::None,
+        }
     }
 
     /// Start loading from the Unloaded state (manual load).
@@ -208,7 +239,7 @@ impl TorpedoTube {
         }
     }
 
-    /// Start unloading: from Loaded → Unloading; cancel an in-progress load → Unloaded.
+    /// Start unloading: from Loaded Ã¢â€ â€™ Unloading; cancel an in-progress load Ã¢â€ â€™ Unloaded.
     pub fn start_unload(&mut self) {
         match &self.load_state {
             TubeLoadState::Loaded => {
@@ -225,8 +256,9 @@ impl TorpedoTube {
         }
     }
 
-    /// Mark this tube empty after firing. Loading is always a manual action.
+    /// Mark this tube empty after firing all loaded torpedoes.
     pub fn mark_fired(&mut self) {
+        self.loaded_count = 0;
         self.load_state = TubeLoadState::Unloaded;
     }
 
@@ -239,7 +271,18 @@ impl TorpedoTube {
     }
 }
 
-// ── Torpedo system ─────────────────────────────────────────────────────────
+/// Outcome of a single `TorpedoTube::tick` call.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LoadTickOutcome {
+    None,
+    /// A loading operation completed; caller should increment `loaded_count`.
+    LoadedOne,
+    /// An unloading operation completed; caller should decrement `loaded_count`
+    /// and return one torpedo to the magazine.
+    UnloadedOne,
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Torpedo system Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 #[derive(Clone, Debug)]
 pub struct TorpedoSystem {
@@ -247,11 +290,19 @@ pub struct TorpedoSystem {
     pub config: TorpedoConfig,
     pub torpedoes_remaining: u32,
     pub in_flight: Vec<Torpedo>,
+    /// Per-tube burst-fire pending state (issue #632). Entries are removed
+    /// when their `pending` count reaches 0.
+    pub burst_states: Vec<TubeBurstState>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum LaunchResult {
-    Launched { uuid: String },
+    /// First torpedo of a burst was launched. `count_remaining` is the number
+    /// of additional torpedoes still to be fired (0 for a single shot).
+    Launched {
+        uuid: String,
+        count_remaining: u32,
+    },
     TubeNotLoaded,
     NoTorpedoes,
     UnknownTube,
@@ -260,6 +311,26 @@ pub enum LaunchResult {
 #[derive(Clone, Debug, Default)]
 pub struct TorpedoTickResult {
     pub expired: Vec<String>,
+    /// Torpedoes launched by burst-fire this tick.
+    /// Each entry is `(tube_id, uuid, x, z, heading)`.
+    pub burst_launched: Vec<(String, String, f32, f32, f32)>,
+}
+
+/// Pending burst-fire state for a single tube. Stored on `TorpedoSystem` so
+/// the pure-module `tick` can drive the burst without Bevy.
+#[derive(Clone, Debug, Default)]
+pub struct TubeBurstState {
+    pub tube_id: String,
+    /// Torpedoes remaining to be fired in the current burst (0 = idle).
+    pub pending: u32,
+    /// Countdown timer before the next burst shot fires.
+    pub timer: f32,
+    /// Parameters captured at fire time for the burst shots.
+    pub launch_x: f32,
+    pub launch_z: f32,
+    pub launch_heading: f32,
+    pub target_uuid: Option<String>,
+    pub source_uuid: Option<String>,
 }
 
 impl TorpedoSystem {
@@ -276,6 +347,9 @@ impl TorpedoSystem {
                 fire_arc_deg: 90.0,
                 load_state: TubeLoadState::Unloaded,
                 load_time,
+                volley_max: 1,
+                loaded_count: 0,
+                target_count: 0,
             },
             TorpedoTube {
                 id: "fore_starboard".to_string(),
@@ -283,6 +357,9 @@ impl TorpedoSystem {
                 fire_arc_deg: 90.0,
                 load_state: TubeLoadState::Unloaded,
                 load_time,
+                volley_max: 1,
+                loaded_count: 0,
+                target_count: 0,
             },
             TorpedoTube {
                 id: "aft".to_string(),
@@ -290,6 +367,9 @@ impl TorpedoSystem {
                 fire_arc_deg: 90.0,
                 load_state: TubeLoadState::Unloaded,
                 load_time,
+                volley_max: 1,
+                loaded_count: 0,
+                target_count: 0,
             },
         ];
         Self {
@@ -297,6 +377,7 @@ impl TorpedoSystem {
             config,
             torpedoes_remaining: count,
             in_flight: Vec::new(),
+            burst_states: Vec::new(),
         }
     }
 
@@ -314,6 +395,9 @@ impl TorpedoSystem {
                 fire_arc_deg: c.fire_arc_deg,
                 load_state: TubeLoadState::Unloaded,
                 load_time: c.load_time.unwrap_or(global_load_time),
+                volley_max: c.volley_max,
+                loaded_count: 0,
+                target_count: 0,
             })
             .collect();
         let count = config.count;
@@ -322,6 +406,7 @@ impl TorpedoSystem {
             config,
             torpedoes_remaining: count,
             in_flight: Vec::new(),
+            burst_states: Vec::new(),
         }
     }
 
@@ -336,8 +421,8 @@ impl TorpedoSystem {
     /// Start loading a torpedo into the given tube.
     ///
     /// Consumes one torpedo from the shared pool. Returns `false` if the pool
-    /// is empty, the tube id is unknown, or the tube is not in the `Unloaded`
-    /// state.
+    /// is empty, the tube id is unknown, the tube is not in the `Unloaded`
+    /// state, or the tube is already at `volley_max` capacity.
     pub fn start_load(&mut self, tube_id: &str) -> bool {
         if self.torpedoes_remaining == 0 {
             return false;
@@ -347,6 +432,9 @@ impl TorpedoSystem {
             return false;
         };
         if self.tubes[idx].load_state != TubeLoadState::Unloaded {
+            return false;
+        }
+        if self.tubes[idx].loaded_count >= self.tubes[idx].volley_max {
             return false;
         }
         self.torpedoes_remaining -= 1;
@@ -362,14 +450,18 @@ impl TorpedoSystem {
     /// [`crate::messages::InterSystemPayload::ClaimTorpedoRound`] transaction.
     /// The caller is responsible for having granted the round.
     ///
-    /// Returns `false` if the tube id is unknown or the tube is not in the
-    /// `Unloaded` state. Does NOT check magazine stock.
+    /// Returns `false` if the tube id is unknown, the tube is not in the
+    /// `Unloaded` state, or the tube is at `volley_max` capacity. Does NOT
+    /// check magazine stock.
     pub fn start_load_reserved(&mut self, tube_id: &str) -> bool {
         let idx = self.tubes.iter().position(|t| t.id == tube_id);
         let Some(idx) = idx else {
             return false;
         };
         if self.tubes[idx].load_state != TubeLoadState::Unloaded {
+            return false;
+        }
+        if self.tubes[idx].loaded_count >= self.tubes[idx].volley_max {
             return false;
         }
         self.tubes[idx].start_load();
@@ -390,34 +482,53 @@ impl TorpedoSystem {
 
     /// Start unloading (or cancel a load in progress).
     ///
-    /// If the tube is `Loaded`, begins the unloading timer — the torpedo is
-    /// returned to the magazine when the timer completes in [`tick`].
-    ///
     /// If the tube is currently `Loading`, cancels immediately and returns the
     /// torpedo to the magazine.
     ///
-    /// Returns `false` if the tube id is unknown or the tube is already
-    /// `Unloaded` / `Unloading`.
+    /// If the tube is `Unloaded` and `loaded_count > 0`, begins the unloading
+    /// timer for one torpedo Ã¢â‚¬â€ the torpedo is returned to the magazine when
+    /// the timer completes in [`Self::tick`].
+    ///
+    /// Returns `false` if the tube id is unknown, or there is nothing to unload
+    /// (idle and `loaded_count == 0`), or a previous unload is already in
+    /// progress.
     pub fn start_unload(&mut self, tube_id: &str) -> bool {
         let idx = self.tubes.iter().position(|t| t.id == tube_id);
         let Some(idx) = idx else {
             return false;
         };
         let tube = &self.tubes[idx];
-        let is_loaded = matches!(tube.load_state, TubeLoadState::Loaded);
         let is_loading = matches!(tube.load_state, TubeLoadState::Loading { .. });
-        if is_loaded {
-            self.tubes[idx].start_unload();
-            true
-        } else if is_loading {
+        let is_unloading = matches!(tube.load_state, TubeLoadState::Unloading { .. });
+        if is_loading {
+            // Cancel in-progress load, return torpedo to pool.
             self.tubes[idx].start_unload();
             self.torpedoes_remaining += 1;
+            true
+        } else if is_unloading {
+            false
+        } else if self.tubes[idx].loaded_count > 0 {
+            // Start unloading one of the ready torpedoes.
+            let t = self.tubes[idx].load_time;
+            self.tubes[idx].load_state = TubeLoadState::Unloading {
+                remaining: t,
+                total: t,
+            };
             true
         } else {
             false
         }
     }
 
+    /// Fire all loaded torpedoes from the specified tube as a burst.
+    ///
+    /// The first torpedo is added to `in_flight` immediately. If `loaded_count
+    /// > 1`, a `TubeBurstState` entry is pushed so subsequent torpedoes fire
+    /// at `burst_interval_secs` cadence during `tick` calls.
+    ///
+    /// Returns `LaunchResult::TubeNotLoaded` when `loaded_count == 0`.
+    /// After a successful launch `loaded_count` is set to 0 and `load_state`
+    /// reset to `Unloaded`.
     pub fn launch(
         &mut self,
         tube_id: &str,
@@ -429,41 +540,154 @@ impl TorpedoSystem {
         source_uuid: Option<String>,
     ) -> LaunchResult {
         let lifespan = self.config.lifespan;
+        let burst_interval = self.config.burst_interval_secs;
         let Some(tube) = self.tube_mut(tube_id) else {
             return LaunchResult::UnknownTube;
         };
-        if !tube.is_loaded() {
+        if tube.loaded_count == 0 {
             return LaunchResult::TubeNotLoaded;
         }
-        tube.mark_fired();
+        let count = tube.loaded_count;
+        tube.mark_fired(); // sets loaded_count = 0, load_state = Unloaded
         let shield_pierce = self.config.shield_pierce;
+        // Fire the first torpedo immediately.
         self.in_flight.push(Torpedo {
             uuid: uuid.clone(),
             x: launch_x,
             z: launch_z,
             heading: launch_heading,
             lifespan_remaining: lifespan,
-            target_uuid,
-            source_uuid,
+            target_uuid: target_uuid.clone(),
+            source_uuid: source_uuid.clone(),
             shield_pierce,
         });
-        LaunchResult::Launched { uuid }
+        let count_remaining = count - 1;
+        // Schedule the remaining burst torpedoes.
+        if count_remaining > 0 {
+            // Remove any existing burst state for this tube.
+            self.burst_states.retain(|b| b.tube_id != tube_id);
+            self.burst_states.push(TubeBurstState {
+                tube_id: tube_id.to_string(),
+                pending: count_remaining,
+                timer: burst_interval,
+                launch_x,
+                launch_z,
+                launch_heading,
+                target_uuid,
+                source_uuid,
+            });
+        }
+        LaunchResult::Launched {
+            uuid,
+            count_remaining,
+        }
     }
 
     pub fn tick(
         &mut self,
         dt: f32,
         target_positions: &std::collections::HashMap<String, (f32, f32)>,
+        next_uuid: &mut impl FnMut() -> String,
     ) -> TorpedoTickResult {
+        let mut result = TorpedoTickResult::default();
+
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Tube load/unload progression Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        let mut unload_completions: u32 = 0;
         for t in &mut self.tubes {
-            let was_unloading = matches!(t.load_state, TubeLoadState::Unloading { .. });
-            t.tick(dt);
-            if was_unloading && t.load_state == TubeLoadState::Unloaded {
-                self.torpedoes_remaining += 1;
+            let outcome = t.tick(dt);
+            match outcome {
+                LoadTickOutcome::LoadedOne => {
+                    t.loaded_count += 1;
+                }
+                LoadTickOutcome::UnloadedOne => {
+                    if t.loaded_count > 0 {
+                        t.loaded_count -= 1;
+                    }
+                    unload_completions += 1;
+                }
+                LoadTickOutcome::None => {}
             }
         }
+        // Return unloaded torpedoes to the magazine.
+        self.torpedoes_remaining += unload_completions;
+
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Auto-load toward target_count Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        let n_tubes = self.tubes.len();
+        for i in 0..n_tubes {
+            let tube = &self.tubes[i];
+            if tube.target_count > 0
+                && tube.load_state == TubeLoadState::Unloaded
+                && tube.loaded_count < tube.target_count
+                && tube.loaded_count < tube.volley_max
+            {
+                if self.torpedoes_remaining > 0 {
+                    self.torpedoes_remaining -= 1;
+                    self.tubes[i].start_load();
+                }
+            }
+        }
+
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Auto-unload toward target_count Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        for i in 0..n_tubes {
+            let tube = &self.tubes[i];
+            if tube.target_count > 0
+                && tube.load_state == TubeLoadState::Unloaded
+                && tube.loaded_count > tube.target_count
+            {
+                let lt = tube.load_time;
+                self.tubes[i].load_state = TubeLoadState::Unloading {
+                    remaining: lt,
+                    total: lt,
+                };
+            }
+        }
+
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Burst-fire timer Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        let lifespan = self.config.lifespan;
+        let shield_pierce = self.config.shield_pierce;
+        let burst_interval = self.config.burst_interval_secs;
+        // Collect burst launches to avoid split borrows.
+        let mut burst_torpedoes: Vec<Torpedo> = Vec::new();
+        let mut burst_events: Vec<(String, String, f32, f32, f32)> = Vec::new();
+        let mut completed_bursts: Vec<usize> = Vec::new();
+        for (i, burst) in self.burst_states.iter_mut().enumerate() {
+            burst.timer -= dt;
+            if burst.timer <= 0.0 && burst.pending > 0 {
+                let uuid = next_uuid();
+                burst_torpedoes.push(Torpedo {
+                    uuid: uuid.clone(),
+                    x: burst.launch_x,
+                    z: burst.launch_z,
+                    heading: burst.launch_heading,
+                    lifespan_remaining: lifespan,
+                    target_uuid: burst.target_uuid.clone(),
+                    source_uuid: burst.source_uuid.clone(),
+                    shield_pierce,
+                });
+                burst_events.push((
+                    burst.tube_id.clone(),
+                    uuid,
+                    burst.launch_x,
+                    burst.launch_z,
+                    burst.launch_heading,
+                ));
+                burst.pending -= 1;
+                if burst.pending > 0 {
+                    burst.timer = burst_interval;
+                } else {
+                    completed_bursts.push(i);
+                }
+            }
+        }
+        self.in_flight.extend(burst_torpedoes);
+        result.burst_launched.extend(burst_events);
+        // Remove completed burst states (in reverse to preserve indices).
+        for &i in completed_bursts.iter().rev() {
+            self.burst_states.remove(i);
+        }
+
+        // Ã¢â€â‚¬Ã¢â€â‚¬ In-flight torpedo movement Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         let config = &self.config;
-        let mut expired = Vec::new();
         for t in &mut self.in_flight {
             let pos = t
                 .target_uuid
@@ -472,11 +696,11 @@ impl TorpedoSystem {
                 .copied();
             t.tick(dt, pos, config);
             if t.is_expired() {
-                expired.push(t.uuid.clone());
+                result.expired.push(t.uuid.clone());
             }
         }
         self.in_flight.retain(|t| !t.is_expired());
-        TorpedoTickResult { expired }
+        result
     }
 
     pub fn handle_collision(&mut self, torpedo_uuid: &str) -> Option<i32> {
@@ -496,6 +720,16 @@ impl TorpedoSystem {
             damage_shields: self.config.damage_shields,
             shield_pierce: removed.shield_pierce,
         })
+    }
+
+    /// Set the volley target count for the given tube, clamped to
+    /// `[0, tube.volley_max]`. Returns `false` if the tube id is unknown.
+    pub fn set_volley_target(&mut self, tube_id: &str, count: u32) -> bool {
+        let Some(tube) = self.tube_mut(tube_id) else {
+            return false;
+        };
+        tube.target_count = count.min(tube.volley_max);
+        true
     }
 }
 
@@ -559,7 +793,7 @@ impl TorpedoSystem {
     }
 }
 
-// ── private math helpers ───────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ private math helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 fn angle_diff(a: f32, b: f32) -> f32 {
     let mut d = a - b;
@@ -572,7 +806,7 @@ fn angle_diff(a: f32, b: f32) -> f32 {
     d
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 #[cfg(test)]
 mod tests {
@@ -589,7 +823,12 @@ mod tests {
             fire_arc_deg,
             load_time: None,
             marker: None,
+            volley_max: 1,
         }
+    }
+
+    fn no_uuid() -> String {
+        "test-uuid".to_string()
     }
 
     fn default_system() -> TorpedoSystem {
@@ -605,7 +844,7 @@ mod tests {
         let load_time = sys.tube(id).unwrap().load_time;
         assert!(sys.start_load(id));
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        sys.tick(load_time, &targets);
+        sys.tick(load_time, &targets, &mut no_uuid);
     }
 
     fn loaded_system() -> TorpedoSystem {
@@ -630,7 +869,13 @@ mod tests {
     fn launch_returns_launched_with_uuid() {
         let mut sys = loaded_system();
         let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        assert_eq!(r, LaunchResult::Launched { uuid: "t1".into() });
+        assert_eq!(
+            r,
+            LaunchResult::Launched {
+                uuid: "t1".into(),
+                count_remaining: 0
+            }
+        );
     }
 
     #[test]
@@ -659,7 +904,7 @@ mod tests {
         assert_eq!(sys.torpedoes_remaining, 0);
     }
 
-    // ── channel-2 magazine claim helpers (issue #512) ─────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ channel-2 magazine claim helpers (issue #512) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn claim_magazine_round_decrements_when_available() {
@@ -733,7 +978,7 @@ mod tests {
             TubeLoadState::Unloaded
         );
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        sys.tick(sys.config.load_time, &targets);
+        sys.tick(sys.config.load_time, &targets, &mut no_uuid);
         assert_eq!(
             sys.tube("fore_port").unwrap().load_state,
             TubeLoadState::Unloaded
@@ -771,7 +1016,11 @@ mod tests {
         assert!(sys.start_unload("fore_port"));
         assert_eq!(sys.torpedoes_remaining, 9); // not returned yet
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        sys.tick(sys.tube("fore_port").unwrap().load_time, &targets);
+        sys.tick(
+            sys.tube("fore_port").unwrap().load_time,
+            &targets,
+            &mut no_uuid,
+        );
         assert_eq!(sys.torpedoes_remaining, 10); // returned after timer
     }
 
@@ -787,7 +1036,7 @@ mod tests {
         let mut sys = default_system();
         load_tube(&mut sys, "fore_port");
         assert!(sys.start_unload("fore_port"));
-        // Already unloading — second call does nothing
+        // Already unloading Ã¢â‚¬â€ second call does nothing
         assert!(!sys.start_unload("fore_port"));
     }
 
@@ -815,7 +1064,7 @@ mod tests {
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let initial = sys.in_flight[0].heading;
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        sys.tick(0.1, &targets);
+        sys.tick(0.1, &targets, &mut no_uuid);
         assert_eq!(sys.in_flight[0].heading, initial);
     }
 
@@ -824,7 +1073,7 @@ mod tests {
         let mut sys = loaded_system();
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        sys.tick(1.0, &targets);
+        sys.tick(1.0, &targets, &mut no_uuid);
         let t = &sys.in_flight[0];
         assert!(t.x.abs() < 0.01);
         assert!(t.z < 0.0);
@@ -845,7 +1094,7 @@ mod tests {
         let mut targets = HashMap::new();
         targets.insert("enemy".into(), (20.0_f32, 0.0_f32));
         let h0 = sys.in_flight[0].heading;
-        sys.tick(0.1, &targets);
+        sys.tick(0.1, &targets, &mut no_uuid);
         assert!(sys.in_flight[0].heading > h0);
     }
 
@@ -867,7 +1116,7 @@ mod tests {
         );
         let mut targets = HashMap::new();
         targets.insert("enemy".into(), (20.0_f32, 0.0_f32));
-        sys.tick(1.0, &targets);
+        sys.tick(1.0, &targets, &mut no_uuid);
         assert!(sys.in_flight[0].heading <= PI / 4.0 + 0.001);
     }
 
@@ -885,7 +1134,7 @@ mod tests {
         );
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         let h0 = sys.in_flight[0].heading;
-        sys.tick(0.5, &targets);
+        sys.tick(0.5, &targets, &mut no_uuid);
         assert_eq!(sys.in_flight[0].heading, h0);
     }
 
@@ -910,7 +1159,7 @@ mod tests {
         targets.insert("target-b".into(), (0.0_f32, -100.0_f32)); // straight ahead
 
         let h0 = sys.in_flight[0].heading;
-        sys.tick(0.1, &targets);
+        sys.tick(0.1, &targets, &mut no_uuid);
 
         // The torpedo must have turned right (toward target-a), not stayed straight.
         assert!(
@@ -934,7 +1183,7 @@ mod tests {
         load_tube(&mut sys, "fore_port");
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        let r = sys.tick(5.1, &targets);
+        let r = sys.tick(5.1, &targets, &mut no_uuid);
         assert!(r.expired.contains(&"t1".to_string()));
         assert_eq!(sys.in_flight.len(), 0);
     }
@@ -948,7 +1197,7 @@ mod tests {
         load_tube(&mut sys, "fore_port");
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        let r = sys.tick(4.9, &targets);
+        let r = sys.tick(4.9, &targets, &mut no_uuid);
         assert!(!r.expired.contains(&"t1".to_string()));
         assert_eq!(sys.in_flight.len(), 1);
     }
@@ -978,7 +1227,7 @@ mod tests {
         assert!(sys.start_load("fore_port"));
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        sys.tick(10.0, &targets);
+        sys.tick(10.0, &targets, &mut no_uuid);
         assert!(sys.tube("fore_port").unwrap().is_loaded());
     }
 
@@ -990,11 +1239,11 @@ mod tests {
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
         assert!(sys.start_load("fore_port"));
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
-        sys.tick(9.9, &targets);
+        sys.tick(9.9, &targets, &mut no_uuid);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
     }
 
-    // ── proximity detonation ──────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ proximity detonation Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     fn detonation_system(detonation_radius: f32) -> TorpedoSystem {
         let mut config = TorpedoConfig::default();
@@ -1027,7 +1276,7 @@ mod tests {
 
     #[test]
     fn find_detonation_hits_includes_target_radius_in_threshold() {
-        // Detonation radius 1, target radius 10, distance 9 → should hit.
+        // Detonation radius 1, target radius 10, distance 9 Ã¢â€ â€™ should hit.
         let mut sys = detonation_system(1.0);
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets = vec![("rock".to_string(), 0.0, -9.0, 10.0)];
@@ -1132,5 +1381,187 @@ mod tests {
         let targets = vec![("player-ship".to_string(), 0.0, 0.0, 5.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert!(hits.is_empty());
+    }
+
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Volley mechanics (issue #632) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+    fn volley_cfg(id: &str, volley_max: u32) -> TorpedoTubeConfig {
+        TorpedoTubeConfig {
+            id: id.into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 180.0,
+            load_time: None,
+            marker: None,
+            volley_max,
+        }
+    }
+
+    #[test]
+    fn volley_max_defaults_to_1_on_standard_tube() {
+        let sys = default_system();
+        assert_eq!(sys.tube("fore_port").unwrap().volley_max, 1);
+    }
+
+    #[test]
+    fn set_volley_target_clamps_to_volley_max() {
+        let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 3)], TorpedoConfig::default());
+        assert!(sys.set_volley_target("t1", 5)); // 5 > 3, should clamp
+        assert_eq!(sys.tube("t1").unwrap().target_count, 3);
+    }
+
+    #[test]
+    fn set_volley_target_returns_false_for_unknown_tube() {
+        let mut sys = default_system();
+        assert!(!sys.set_volley_target("dorsal", 1));
+    }
+
+    #[test]
+    fn auto_load_toward_target_count() {
+        // Set target_count=2, volley_max=2. Tick twice through load_time.
+        // Should end up with loaded_count==2 and torpedoes_remaining decremented by 2.
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.load_time = 5.0;
+        let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 2)], config);
+        sys.set_volley_target("t1", 2);
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        // First tick starts loading torpedo #1.
+        sys.tick(0.0, &targets, &mut no_uuid);
+        assert_eq!(sys.torpedoes_remaining, 9);
+        assert!(matches!(
+            sys.tube("t1").unwrap().load_state,
+            TubeLoadState::Loading { .. }
+        ));
+        // Tick past load_time: torpedo #1 finishes, torpedo #2 starts immediately.
+        sys.tick(5.0, &targets, &mut no_uuid);
+        assert_eq!(sys.tube("t1").unwrap().loaded_count, 1);
+        assert_eq!(sys.torpedoes_remaining, 8); // second load started
+                                                // Tick past load_time again: torpedo #2 finishes.
+        sys.tick(5.0, &targets, &mut no_uuid);
+        assert_eq!(sys.tube("t1").unwrap().loaded_count, 2);
+        // No more auto-loads: loaded_count == target_count.
+        assert_eq!(sys.torpedoes_remaining, 8);
+    }
+
+    #[test]
+    fn fire_volley_fires_first_torpedo_immediately_rest_in_burst() {
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.load_time = 1.0;
+        config.burst_interval_secs = 0.3;
+        let tubes = vec![volley_cfg("t1", 3)];
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        // Load 3 torpedoes manually.
+        sys.torpedoes_remaining -= 3;
+        let tube = sys.tube_mut("t1").unwrap();
+        tube.loaded_count = 3;
+        let result = sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, None, None);
+        assert!(matches!(
+            result,
+            LaunchResult::Launched {
+                count_remaining: 2,
+                ..
+            }
+        ));
+        assert_eq!(sys.in_flight.len(), 1);
+        assert_eq!(sys.burst_states.len(), 1);
+        assert_eq!(sys.burst_states[0].pending, 2);
+    }
+
+    #[test]
+    fn burst_launches_remaining_torpedoes_at_interval() {
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.burst_interval_secs = 0.3;
+        let tubes = vec![volley_cfg("t1", 3)];
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        sys.torpedoes_remaining -= 3;
+        let tube = sys.tube_mut("t1").unwrap();
+        tube.loaded_count = 3;
+        sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, None, None);
+        assert_eq!(sys.in_flight.len(), 1);
+
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let mut uuid_counter = 1u32;
+        let mut next = || {
+            let s = format!("uuid-{uuid_counter}");
+            uuid_counter += 1;
+            s
+        };
+        // Tick past first burst interval: should fire torpedo #2.
+        sys.tick(0.3, &targets, &mut next);
+        assert_eq!(
+            sys.in_flight.len(),
+            2,
+            "torpedo #2 should fire after interval"
+        );
+        // Tick past second interval: torpedo #3.
+        sys.tick(0.3, &targets, &mut next);
+        assert_eq!(
+            sys.in_flight.len(),
+            3,
+            "torpedo #3 should fire after second interval"
+        );
+        assert!(sys.burst_states.is_empty(), "burst state should be cleared");
+    }
+
+    #[test]
+    fn fire_with_partial_load_fires_what_is_loaded() {
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        let tubes = vec![volley_cfg("t1", 4)];
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        // Only 2 of 4 are loaded.
+        sys.torpedoes_remaining -= 2;
+        let tube = sys.tube_mut("t1").unwrap();
+        tube.loaded_count = 2;
+        let result = sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, None, None);
+        assert!(matches!(
+            result,
+            LaunchResult::Launched {
+                count_remaining: 1,
+                ..
+            }
+        ));
+        assert_eq!(sys.tube("t1").unwrap().loaded_count, 0);
+    }
+
+    #[test]
+    fn auto_unload_when_target_count_decremented() {
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.load_time = 1.0;
+        let tubes = vec![volley_cfg("t1", 3)];
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        // Start with 2 loaded, target_count = 2 (auto-managed mode).
+        sys.torpedoes_remaining -= 2;
+        {
+            let tube = sys.tube_mut("t1").unwrap();
+            tube.loaded_count = 2;
+            tube.target_count = 2;
+        }
+        // Drop target to 1 â†’ should auto-unload one torpedo.
+        sys.set_volley_target("t1", 1);
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        // First tick starts unloading one.
+        sys.tick(0.0, &targets, &mut no_uuid);
+        assert!(matches!(
+            sys.tube("t1").unwrap().load_state,
+            TubeLoadState::Unloading { .. }
+        ));
+        // Complete the unload: loaded_count goes from 2 to 1.
+        sys.tick(1.0, &targets, &mut no_uuid);
+        assert_eq!(sys.tube("t1").unwrap().loaded_count, 1);
+        // target_count == loaded_count now â†’ no more auto-unload.
+        sys.tick(0.0, &targets, &mut no_uuid);
+        assert_eq!(
+            sys.tube("t1").unwrap().loaded_count,
+            1,
+            "should stop at target_count=1"
+        );
+        assert_eq!(
+            sys.torpedoes_remaining, 9,
+            "one torpedo returned to magazine"
+        );
     }
 }

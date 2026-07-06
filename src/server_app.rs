@@ -3180,14 +3180,14 @@ mod tests {
         if let Ok(mut ts) = q.single_mut(app.world_mut()) {
             ts.0.tube_mut(tube)
                 .expect("test tube should exist")
-                .load_state = crate::torpedo::TubeLoadState::Loaded;
+                .loaded_count = 1;
         } else {
-            app.world_mut()
-                .resource_mut::<TorpedoSystemResource>()
-                .0
+            let mut world = app.world_mut();
+            let mut res = world.resource_mut::<TorpedoSystemResource>();
+            res.0
                 .tube_mut(tube)
                 .expect("test tube should exist")
-                .load_state = crate::torpedo::TubeLoadState::Loaded;
+                .loaded_count = 1;
         }
     }
 

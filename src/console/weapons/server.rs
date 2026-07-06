@@ -2001,18 +2001,15 @@ fn tick_blaster_system(
 fn handle_blaster_hits(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-    mut hit_target_q: Query<
-        (
-            Entity,
-            Option<&AsteroidUuid>,
-            Option<&crate::entity_spawner::EntityUuid>,
-            &mut crate::entity_spawner::EntitySystemHull,
-            Option<&mut crate::ship::shields::ShipShields>,
-            Option<&mut crate::entity_spawner::EntityShipArcHull>,
-            bevy::ecs::query::Has<crate::server_app::LocalShip>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut hit_target_q: Query<(
+        Entity,
+        Option<&AsteroidUuid>,
+        Option<&crate::entity_spawner::EntityUuid>,
+        &mut crate::entity_spawner::EntitySystemHull,
+        Option<&mut crate::ship::shields::ShipShields>,
+        Option<&mut crate::entity_spawner::EntityShipArcHull>,
+        bevy::ecs::query::Has<crate::server_app::LocalShip>,
+    )>,
     mut blaster_res_q: Query<&mut BlasterSystemResource, With<crate::server_app::Ship>>,
     mut outbox: ResMut<SimOutbox>,
     mut commands: Commands,
@@ -2076,10 +2073,11 @@ fn handle_blaster_hits(
         ));
 
         // Apply shields-first damage to the matching entity.
-        for (entity, _ast_uuid, ent_uuid, mut hull_comp, mut shield_comp, mut arc_hull, is_local) in
+        for (entity, ast_uuid, ent_uuid, mut hull_comp, mut shield_comp, mut arc_hull, is_local) in
             hit_target_q.iter_mut()
         {
-            let uuid_matches = ent_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str());
+            let uuid_matches = ast_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str())
+                || ent_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str());
             if !uuid_matches {
                 continue;
             }

@@ -20,6 +20,9 @@ import {
   buildScienceConsoleState,
   buildEngineeringConsoleState,
   buildCruiserCommsConsoleState,
+  buildDestroyerCaptainConsoleState,
+  buildDestroyerTacticalConsoleState,
+  buildDestroyerEngineeringConsoleState,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 
@@ -1595,5 +1598,276 @@ describe('aggregateStationHull', () => {
     expect(agg.entries).toHaveLength(0);
     expect(agg.totalMax).toBe(0);
     expect(agg.pct).toBe(1);
+  });
+});
+
+// ── buildDestroyerCaptainConsoleState (issue #628) ────────────────────────────
+
+describe('buildDestroyerCaptainConsoleState', () => {
+  it('returns valid JSON', () => {
+    expect(() => parse(buildDestroyerCaptainConsoleState(EMPTY))).not.toThrow();
+  });
+
+  it('contains captain and sensors sub-objects', () => {
+    const s = parse(buildDestroyerCaptainConsoleState(EMPTY));
+    expect(s).toHaveProperty('captain');
+    expect(s).toHaveProperty('sensors');
+  });
+
+  it('captain sub-object has red_alert field', () => {
+    const s = parse(buildDestroyerCaptainConsoleState(EMPTY));
+    expect(s.captain).toHaveProperty('red_alert');
+    expect(s.captain.red_alert).toBe(false);
+  });
+
+  it('sensors sub-object has blips field', () => {
+    const s = parse(buildDestroyerCaptainConsoleState(EMPTY));
+    expect(s.sensors).toHaveProperty('blips');
+    expect(Array.isArray(s.sensors.blips)).toBe(true);
+  });
+
+  it('captain_auto is true when stationRatings.captain === Backfill', () => {
+    const s = parse(buildDestroyerCaptainConsoleState({ stationRatings: { captain: 'Backfill' } }));
+    expect(s.captain_auto).toBe(true);
+  });
+
+  it('captain_auto is false when stationRatings.captain is a different rating', () => {
+    const s = parse(buildDestroyerCaptainConsoleState({ stationRatings: { captain: 'Full' } }));
+    expect(s.captain_auto).toBe(false);
+  });
+
+  it('captain_auto is false when stationRatings is absent', () => {
+    expect(parse(buildDestroyerCaptainConsoleState(EMPTY)).captain_auto).toBe(false);
+  });
+
+  it('passes captain state through the nested captain sub-object', () => {
+    const s = parse(buildDestroyerCaptainConsoleState({ redAlert: true }));
+    expect(s.captain.red_alert).toBe(true);
+    expect(s.captain.game_status).toMatch(/RED ALERT/);
+  });
+
+  it('passes sensors target state through the nested sensors sub-object', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'tgt-1',
+      asteroids: [{ uuid: 'tgt-1', x: 0, z: -100, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate', radar_icon: 'ship' }],
+    };
+    const s = parse(buildDestroyerCaptainConsoleState(state));
+    expect(s.sensors.target_uuid).toBe('tgt-1');
+    expect(s.sensors.target_name).toBe('Raider');
+  });
+});
+
+// ── buildDestroyerTacticalConsoleState (issue #628) ───────────────────────────
+
+describe('buildDestroyerTacticalConsoleState', () => {
+  it('returns valid JSON', () => {
+    expect(() => parse(buildDestroyerTacticalConsoleState(EMPTY))).not.toThrow();
+  });
+
+  it('contains weapons, navigation, and comms sub-objects', () => {
+    const s = parse(buildDestroyerTacticalConsoleState(EMPTY));
+    expect(s).toHaveProperty('weapons');
+    expect(s).toHaveProperty('navigation');
+    expect(s).toHaveProperty('comms');
+  });
+
+  it('weapons sub-object has banks, tubes, and blips fields', () => {
+    const s = parse(buildDestroyerTacticalConsoleState(EMPTY));
+    expect(s.weapons).toHaveProperty('banks');
+    expect(s.weapons).toHaveProperty('tubes');
+    expect(s.weapons).toHaveProperty('blips');
+  });
+
+  it('navigation sub-object has blips and waypoint fields', () => {
+    const s = parse(buildDestroyerTacticalConsoleState(EMPTY));
+    expect(s.navigation).toHaveProperty('blips');
+    expect(s.navigation).toHaveProperty('waypoint');
+  });
+
+  it('comms sub-object has messages and contacts fields', () => {
+    const s = parse(buildDestroyerTacticalConsoleState(EMPTY));
+    expect(s.comms).toHaveProperty('messages');
+    expect(s.comms).toHaveProperty('contacts');
+    expect(Array.isArray(s.comms.messages)).toBe(true);
+    expect(Array.isArray(s.comms.contacts)).toBe(true);
+  });
+
+  it('tactical_auto is true when stationRatings.tactical === Backfill', () => {
+    const s = parse(buildDestroyerTacticalConsoleState({ stationRatings: { tactical: 'Backfill' } }));
+    expect(s.tactical_auto).toBe(true);
+  });
+
+  it('tactical_auto is false when stationRatings.tactical is a different rating', () => {
+    const s = parse(buildDestroyerTacticalConsoleState({ stationRatings: { tactical: 'Full' } }));
+    expect(s.tactical_auto).toBe(false);
+  });
+
+  it('tactical_auto is false when stationRatings is absent', () => {
+    expect(parse(buildDestroyerTacticalConsoleState(EMPTY)).tactical_auto).toBe(false);
+  });
+
+  it('passes weapons blackboard through the nested weapons sub-object', () => {
+    const state = {
+      blackboards: {
+        tactical: {
+          banks: [{ id: 'fore', ready: true }],
+          tubes: [],
+          torpedo_count: 4,
+          phaser_mode: 'Manual',
+          blips: [],
+          regions: [],
+          phaser_arcs: [],
+          torpedo_arcs: [],
+          target_uuid: null,
+          target_name: null,
+        },
+      },
+    };
+    const s = parse(buildDestroyerTacticalConsoleState(state));
+    expect(s.weapons.banks).toHaveLength(1);
+    expect(s.weapons.banks[0].id).toBe('fore');
+    expect(s.weapons.torpedo_count).toBe(4);
+    expect(s.weapons.phaser_mode).toBe('Manual');
+  });
+
+  it('passes comms messages through the nested comms sub-object', () => {
+    const msgs = [{ id: 'msg-1', sender_name: 'Starbase', subject: 'Hello', body: 'Hi' }];
+    const state = {
+      blackboards: {
+        comms: { messages: msgs, contacts: [], objectives: [] },
+      },
+    };
+    const s = parse(buildDestroyerTacticalConsoleState(state));
+    expect(s.comms.messages).toHaveLength(1);
+    expect(s.comms.messages[0].id).toBe('msg-1');
+  });
+
+  it('passes navigation blackboard through the nested navigation sub-object', () => {
+    const state = {
+      blackboards: {
+        navigation: {
+          nav_chart_range: 800,
+          nav_chart_shows: ['station', 'planet'],
+          nav_chart_selects: ['station'],
+        },
+      },
+      shipX: 10,
+      shipZ: 20,
+    };
+    const s = parse(buildDestroyerTacticalConsoleState(state));
+    expect(s.navigation.ship_x).toBe(10);
+    expect(s.navigation.ship_z).toBe(20);
+    expect(s.navigation.radar_range).toBe(800);
+  });
+});
+
+// ── buildDestroyerEngineeringConsoleState (issue #628) ────────────────────────
+
+describe('buildDestroyerEngineeringConsoleState', () => {
+  it('returns valid JSON', () => {
+    expect(() => parse(buildDestroyerEngineeringConsoleState(EMPTY))).not.toThrow();
+  });
+
+  it('contains shields, power, and repair sub-objects', () => {
+    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
+    expect(s).toHaveProperty('shields');
+    expect(s).toHaveProperty('power');
+    expect(s).toHaveProperty('repair');
+  });
+
+  it('shields sub-object has grid_status field', () => {
+    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
+    expect(s.shields).toHaveProperty('grid_status');
+  });
+
+  it('power sub-object is defined', () => {
+    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
+    expect(s.power).toBeDefined();
+  });
+
+  it('repair sub-object has teams field', () => {
+    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
+    expect(s.repair).toHaveProperty('teams');
+    expect(Array.isArray(s.repair.teams)).toBe(true);
+  });
+
+  it('engineering_auto is true when stationRatings.engineering === Backfill', () => {
+    const s = parse(buildDestroyerEngineeringConsoleState({ stationRatings: { engineering: 'Backfill' } }));
+    expect(s.engineering_auto).toBe(true);
+  });
+
+  it('engineering_auto is false when stationRatings.engineering is a different rating', () => {
+    const s = parse(buildDestroyerEngineeringConsoleState({ stationRatings: { engineering: 'Full' } }));
+    expect(s.engineering_auto).toBe(false);
+  });
+
+  it('engineering_auto is false when stationRatings is absent', () => {
+    expect(parse(buildDestroyerEngineeringConsoleState(EMPTY)).engineering_auto).toBe(false);
+  });
+
+  it('passes shields blackboard state through the nested shields sub-object', () => {
+    const state = {
+      blackboards: {
+        shields: {
+          facings: [
+            { arc_id: 'fore', label: 'Fore', hp: 80, max_hp: 80, online: true, center_deg: 0, width_deg: 90 },
+            { arc_id: 'aft', label: 'Aft', hp: 40, max_hp: 80, online: true, center_deg: 180, width_deg: 90 },
+          ],
+          hull_integrity_pct: 75,
+          focused_facing: null,
+          target_bearing: null,
+          grid_status: 'GRID NOMINAL',
+        },
+      },
+    };
+    const s = parse(buildDestroyerEngineeringConsoleState(state));
+    expect(s.shields.grid_status).toBe('GRID NOMINAL');
+    expect(s.shields.facings).toHaveLength(2);
+    expect(s.shields.hull_integrity_pct).toBe(75);
+  });
+
+  it('passes power blackboard state through the nested power sub-object', () => {
+    const state = {
+      blackboards: {
+        power: {
+          groups: [{ id: 'helm', label: 'HELM', level: 3, max_level: 4 }],
+          total: 3,
+          total_max: 8,
+          battery_charge: 75,
+          battery_max: 100,
+          locked: false,
+        },
+      },
+    };
+    const s = parse(buildDestroyerEngineeringConsoleState(state));
+    expect(s.power.consoles).toHaveLength(1);
+    expect(s.power.battery_charge).toBe(75);
+  });
+
+  it('passes repair blackboard state through the nested repair sub-object', () => {
+    const state = {
+      blackboards: {
+        repair: {
+          teams: ['Idle', 'Idle'],
+          system_hull: [{ system_id: 'helm', current: 20, max_hp: 25 }],
+          damageable_systems: ['helm'],
+          travel_duration_secs: 5.0,
+        },
+      },
+    };
+    const s = parse(buildDestroyerEngineeringConsoleState(state));
+    expect(s.repair.teams).toHaveLength(2);
+    expect(s.repair.system_hull[0].system_id).toBe('helm');
+  });
+
+  it('shields sub-object has GRID OFFLINE when no facings', () => {
+    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
+    expect(s.shields.grid_status).toBe('GRID OFFLINE');
+  });
+
+  it('shields sub-object has GRID NOMINAL when facings present', () => {
+    const s = parse(buildDestroyerEngineeringConsoleState({ shieldFacings: ['fore', 'aft'] }));
+    expect(s.shields.grid_status).toBe('GRID NOMINAL');
   });
 });

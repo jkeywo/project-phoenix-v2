@@ -960,6 +960,79 @@ export function buildCruiserCommsConsoleState(state) {
   });
 }
 
+/**
+ * Destroyer Captain console — combined CaptainChair + Sensors view.
+ *
+ * Delegates to buildCaptainConsoleState and buildSensorsConsoleState,
+ * nesting payloads under `captain` and `sensors` keys.
+ *
+ * Used when the state has a sensors blackboard present and the station is
+ * captain — indicating a Destroyer captain who also owns the sensors system.
+ *
+ * @param {object} state
+ */
+export function buildDestroyerCaptainConsoleState(state) {
+  const captain = JSON.parse(buildCaptainConsoleState(state));
+  const sensors = JSON.parse(buildSensorsConsoleState(state));
+  return JSON.stringify({
+    captain,
+    sensors,
+    captain_auto: state.stationRatings?.['captain'] === 'Backfill',
+  });
+}
+
+/**
+ * Destroyer Tactical console — combined Weapons + Navigation + Comms view.
+ *
+ * Delegates to buildWeaponsConsoleState, buildNavigationConsoleState, and
+ * buildCommsConsoleState, nesting payloads under `weapons`, `navigation`,
+ * and `comms` keys so the per-console iframe receives all three panels'
+ * data without key collision.
+ *
+ * Used when the state has both a navigation blackboard and a comms
+ * blackboard present on the tactical station — indicating a Destroyer
+ * tactical officer who also owns navigation and comms.
+ *
+ * @param {object} state
+ */
+export function buildDestroyerTacticalConsoleState(state) {
+  const weapons = JSON.parse(buildWeaponsConsoleState(state));
+  const navigation = JSON.parse(buildNavigationConsoleState(state));
+  const comms = JSON.parse(buildCommsConsoleState(state));
+  return JSON.stringify({
+    weapons,
+    navigation,
+    comms,
+    tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
+  });
+}
+
+/**
+ * Destroyer Engineering console — combined Shields + Power + Repair view.
+ *
+ * Delegates to buildShieldsConsoleState, buildPowerConsoleState, and
+ * buildRepairConsoleState, nesting payloads under `shields`, `power`, and
+ * `repair` keys so the per-console iframe receives all three panels' data
+ * without key collision.
+ *
+ * Used when the state has a shields blackboard present on the engineering
+ * station — indicating a Destroyer engineer who owns shields, power, and
+ * repair (unlike the Cruiser engineer who owns only power and repair).
+ *
+ * @param {object} state
+ */
+export function buildDestroyerEngineeringConsoleState(state) {
+  const shields = JSON.parse(buildShieldsConsoleState(state));
+  const power = JSON.parse(buildPowerConsoleState(state));
+  const repair = JSON.parse(buildRepairConsoleState(state));
+  return JSON.stringify({
+    shields,
+    power,
+    repair,
+    engineering_auto: state.stationRatings?.['engineering'] === 'Backfill',
+  });
+}
+
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
 if (typeof window !== 'undefined') {
@@ -969,8 +1042,20 @@ if (typeof window !== 'undefined') {
     // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase
     // Console enum names.
     switch (consoleName) {
-      case 'tactical':    return buildWeaponsConsoleState(state);
-      case 'captain':     return buildCaptainConsoleState(state);
+      case 'tactical':
+        // Destroyer merged console: if navigation and comms blackboards are
+        // present on the tactical station, return the 3-system merged payload.
+        if (state.blackboards && state.blackboards['navigation'] && state.blackboards['comms']) {
+          return buildDestroyerTacticalConsoleState(state);
+        }
+        return buildWeaponsConsoleState(state);
+      case 'captain':
+        // Destroyer merged console: if a sensors blackboard is present on
+        // the captain station, return the captain + sensors merged payload.
+        if (state.blackboards && state.blackboards['sensors']) {
+          return buildDestroyerCaptainConsoleState(state);
+        }
+        return buildCaptainConsoleState(state);
       case 'helm':        return buildHelmConsoleState(state);
       case 'repair':      return buildRepairConsoleState(state);
       case 'power':       return buildPowerConsoleState(state);
@@ -987,7 +1072,13 @@ if (typeof window !== 'undefined') {
         return buildCommsConsoleState(state);
       case 'navigation':  return buildNavigationConsoleState(state);
       case 'science':     return buildScienceConsoleState(state);
-      case 'engineering': return buildEngineeringConsoleState(state);
+      case 'engineering':
+        // Destroyer merged console: if a shields blackboard is present on
+        // the engineering station, return the 3-system merged payload.
+        if (state.blackboards && state.blackboards['shields']) {
+          return buildDestroyerEngineeringConsoleState(state);
+        }
+        return buildEngineeringConsoleState(state);
       default:            return '{}';
     }
   };

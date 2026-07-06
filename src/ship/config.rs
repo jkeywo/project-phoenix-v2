@@ -30,6 +30,11 @@ pub struct StationConfig {
     pub short_code: String,
     #[serde(default, rename = "rating")]
     pub ratings: Vec<StationRatingConfig>,
+    /// Console root URL for this station (e.g. "gui/captain-console.html").
+    /// When absent, the client falls back to a generic console or the
+    /// station has no dedicated UI.
+    #[serde(default)]
+    pub console: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -376,6 +381,7 @@ name = "Captain"
 description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
+console = "gui/captain-console.html"
 
 [[station.rating]]
 name = "Assisted"
@@ -391,6 +397,7 @@ name = "Tactical"
 description = "Weapons and threat response."
 rank = "Ltn."
 short_code = "TAC"
+console = "gui/tactical-console.html"
 
 [[station.rating]]
 name = "Assisted"
@@ -668,5 +675,163 @@ power_group = "ops"
                 station: StationId("ghost".into())
             })
         );
+    }
+
+    #[test]
+    fn station_config_parses_console_field() {
+        let config = parse_ok(valid_toml());
+
+        let captain = config.station(&StationId("captain".into())).unwrap();
+        assert_eq!(
+            captain.console.as_deref(),
+            Some("gui/captain-console.html")
+        );
+
+        let tactical = config.station(&StationId("tactical".into())).unwrap();
+        assert_eq!(
+            tactical.console.as_deref(),
+            Some("gui/tactical-console.html")
+        );
+    }
+
+    #[test]
+    fn station_config_console_defaults_to_none_when_absent() {
+        let toml = valid_toml().replace("console = \"gui/captain-console.html\"\n", "");
+        let config = parse_ok(&toml);
+
+        let captain = config.station(&StationId("captain".into())).unwrap();
+        assert_eq!(captain.console, None);
+    }
+
+    #[test]
+    fn station_system_and_console_resolution_for_battleship_style_config() {
+        let toml = r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command."
+rank = "Cpt."
+short_code = "CPT"
+console = "gui/captain-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Pilot."
+rank = "Ltn."
+short_code = "HLM"
+console = "gui/helm-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons."
+rank = "Ltn."
+short_code = "TAC"
+console = "gui/tactical-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "repair"
+name = "Repair"
+description = "Repair."
+rank = "Ltn."
+short_code = "ENG"
+console = "gui/repair-console.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[power_groups.ops]
+label = "Operations"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.helm]
+label = "Propulsion"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.weapons]
+label = "Weapons"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "helm"
+kind = "helm"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "tactical"
+kind = "phaser_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "viewscreen"
+kind = "viewscreen"
+station = "captain"
+power_group = "ops"
+"#;
+        let config = parse_ok(toml);
+
+        assert_eq!(config.stations.len(), 4);
+        assert_eq!(config.systems.len(), 4);
+
+        for station in &config.stations {
+            match station.id.0.as_str() {
+                "captain" => {
+                    assert_eq!(station.console.as_deref(), Some("gui/captain-console.html"));
+                    let systems: Vec<_> = config.systems_for_station(&station.id).collect();
+                    assert_eq!(systems.len(), 2);
+                }
+                "helm" => {
+                    assert_eq!(station.console.as_deref(), Some("gui/helm-console.html"));
+                    let systems: Vec<_> = config.systems_for_station(&station.id).collect();
+                    assert_eq!(systems.len(), 1);
+                }
+                "tactical" => {
+                    assert_eq!(station.console.as_deref(), Some("gui/tactical-console.html"));
+                    let systems: Vec<_> = config.systems_for_station(&station.id).collect();
+                    assert_eq!(systems.len(), 1);
+                }
+                "repair" => {
+                    assert_eq!(station.console.as_deref(), Some("gui/repair-console.html"));
+                    let systems: Vec<_> = config.systems_for_station(&station.id).collect();
+                    assert_eq!(systems.len(), 0);
+                }
+                other => panic!("unexpected station id: {other}"),
+            }
+        }
+
+        let captain_station = config.station(&StationId("captain".into())).unwrap();
+        let captain_system_ids: Vec<&str> = config
+            .systems_for_station(&captain_station.id)
+            .map(|s| s.id.0.as_str())
+            .collect();
+        assert_eq!(captain_system_ids, vec!["red-alert", "viewscreen"]);
     }
 }

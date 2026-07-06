@@ -199,6 +199,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("helm".into()),
@@ -206,6 +207,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("tactical".into()),
@@ -213,6 +215,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("repair".into()),
@@ -220,6 +223,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("sensors".into()),
@@ -227,6 +231,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("shields".into()),
@@ -234,6 +239,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("navigation".into()),
@@ -241,6 +247,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("power".into()),
@@ -248,6 +255,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("comms".into()),
@@ -255,6 +263,7 @@ mod tests {
                     description: "".into(),
                     rank: "".into(),
                     short_code: "".into(),
+                    console: None,
                 },
             ],
         }
@@ -272,6 +281,7 @@ mod tests {
                     rank: station.rank,
                     short_code: station.short_code,
                     ratings: vec![],
+                    console: None,
                 })
                 .collect(),
             systems: vec![SystemInstanceConfig {

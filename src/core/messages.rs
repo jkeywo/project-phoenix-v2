@@ -516,6 +516,22 @@ pub struct ShipClientConfig {
     /// TOML.
     #[serde(default = "default_nav_chart_range")]
     pub nav_chart_range: f32,
+    /// Ship class identifier (e.g. "battleship"). Sourced from
+    /// top-level `class` in the ship TOML.
+    #[serde(default)]
+    pub class: Option<String>,
+    /// Unique hull identifier/registry number. Sourced from
+    /// top-level `hull_id` in the ship TOML.
+    #[serde(default)]
+    pub hull_id: Option<String>,
+    /// Authored power rating. Sourced from top-level `power_rating`
+    /// in the ship TOML.
+    #[serde(default)]
+    pub power_rating: Option<i32>,
+    /// Per-ship CSS theme URL. Sourced from top-level `css` in the
+    /// ship TOML.
+    #[serde(default)]
+    pub ship_css: Option<String>,
 }
 
 fn default_tactical_radar_range() -> f32 {
@@ -580,6 +596,10 @@ impl Default for ShipClientConfig {
             tactical_radar_shows: Vec::new(),
             tactical_radar_range: default_tactical_radar_range(),
             tactical_radar_selects: Vec::new(),
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            ship_css: None,
         }
     }
 }

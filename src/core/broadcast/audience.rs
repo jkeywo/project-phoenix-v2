@@ -52,6 +52,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "P".into(),
                     ratings: vec![],
+                    console: None,
                 },
                 StationConfig {
                     id: StationId("helm".into()),
@@ -60,6 +61,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "H".into(),
                     ratings: vec![],
+                    console: None,
                 },
             ],
             systems: vec![SystemInstanceConfig {

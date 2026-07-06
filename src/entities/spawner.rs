@@ -677,6 +677,10 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -719,6 +723,10 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -758,6 +766,10 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: Some("Sun".to_string()),
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -802,6 +814,10 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -844,6 +860,10 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -899,6 +919,10 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: vec![LightConfig {
                 kind: LightKind::Point,
                 colour: [1.0, 0.95, 0.85],
@@ -951,6 +975,10 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -1010,6 +1038,10 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -1094,6 +1126,10 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -1153,6 +1189,10 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -1202,6 +1242,10 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -1275,6 +1319,10 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -1387,6 +1435,10 @@ hull_integrity = 60.0
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),

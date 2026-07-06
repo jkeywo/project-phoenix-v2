@@ -1,4 +1,8 @@
 name = "Player Ship"
+class = "battleship"
+hull_id = "NCC-1701"
+power_rating = 100
+css = "gui/themes/battleship.css"
 tags = [ "player", "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
@@ -340,6 +344,7 @@ name = "Captain"
 description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
+console = "gui/captain-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -351,6 +356,7 @@ name = "Helm"
 description = "Pilot the ship."
 rank = "Ltn."
 short_code = "HLM"
+console = "gui/helm-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -362,6 +368,7 @@ name = "Tactical"
 description = "Manage weapons systems."
 rank = "Ltn."
 short_code = "TAC"
+console = "gui/tactical-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -381,6 +388,7 @@ name = "Repair"
 description = "Maintain and repair ship systems."
 rank = "Ltn."
 short_code = "ENG"
+console = "gui/repair-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -392,6 +400,7 @@ name = "Sensors"
 description = "Monitor long-range sensors."
 rank = "Ens."
 short_code = "SCI"
+console = "gui/sensors-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -410,6 +419,7 @@ name = "Shields"
 description = "Manage shield systems."
 rank = "Ens."
 short_code = "SHD"
+console = "gui/shields-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -421,6 +431,7 @@ name = "Navigation"
 description = "Plot course and navigate."
 rank = "Ens."
 short_code = "NAV"
+console = "gui/navigation-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -432,6 +443,7 @@ name = "Power"
 description = "Manage ship power systems."
 rank = "Ltn."
 short_code = "PWR"
+console = "gui/power-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -451,6 +463,7 @@ name = "Comms"
 description = "Hail stations and relay intelligence."
 rank = "Ens."
 short_code = "COM"
+console = "gui/comms-console.html"
 
 [[station.rating]]
 name = "Std"

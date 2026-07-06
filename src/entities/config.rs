@@ -1187,6 +1187,22 @@ pub struct EntityConfig {
     /// Procedural animated star/sun visual.
     #[serde(default)]
     pub star: Option<StarConfig>,
+    /// Ship class identifier (e.g. "battleship", "cruiser"). Sourced from
+    /// top-level TOML `class` field.
+    #[serde(default)]
+    pub class: Option<String>,
+    /// Unique hull identifier/registry number (e.g. "NCC-1701"). Sourced from
+    /// top-level TOML `hull_id` field.
+    #[serde(default)]
+    pub hull_id: Option<String>,
+    /// Authored power rating for this ship. Sourced from top-level TOML
+    /// `power_rating` field.
+    #[serde(default)]
+    pub power_rating: Option<i32>,
+    /// Per-ship CSS theme URL or inline stylesheet. Sourced from top-level
+    /// TOML `css` field.
+    #[serde(default)]
+    pub css: Option<String>,
     /// Renderer light sources attached to this entity.
     #[serde(default)]
     pub light: Vec<LightConfig>,

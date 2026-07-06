@@ -15,6 +15,11 @@ pub struct StationDef {
     pub rank: String,
     #[serde(default)]
     pub short_code: String,
+    /// Console root URL (e.g. "gui/captain-console.html"). Mirrors
+    /// `StationConfig.console`. When absent, the client launches a
+    /// generic fallback panel.
+    #[serde(default)]
+    pub console: Option<String>,
 }
 
 /// Fixed-roster station configuration. Populated from `ShipConfigResource`
@@ -38,6 +43,7 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
             description: sc.description.clone(),
             rank: sc.rank.clone(),
             short_code: sc.short_code.clone(),
+            console: sc.console.clone(),
         })
         .collect();
     ShipStations { stations }

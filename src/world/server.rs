@@ -6062,6 +6062,10 @@ condition = "on_world_loaded"
         let config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
@@ -6347,6 +6351,10 @@ condition = "on_world_loaded"
         let npc_config = EntityConfig {
             name: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),

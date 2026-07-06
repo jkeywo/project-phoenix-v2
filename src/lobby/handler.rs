@@ -806,6 +806,7 @@ max_level = 4
                     description: "Command the bridge.".into(),
                     rank: "Cpt.".into(),
                     short_code: "CPT".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("helm".into()),
@@ -813,6 +814,7 @@ max_level = 4
                     description: "Pilot the ship.".into(),
                     rank: "Ltn.".into(),
                     short_code: "HLM".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("tactical".into()),
@@ -820,6 +822,7 @@ max_level = 4
                     description: "Manage weapons.".into(),
                     rank: "Ltn.".into(),
                     short_code: "TAC".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("repair".into()),
@@ -827,6 +830,7 @@ max_level = 4
                     description: "Repair systems.".into(),
                     rank: "Ltn.".into(),
                     short_code: "ENG".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("sensors".into()),
@@ -834,6 +838,7 @@ max_level = 4
                     description: "Monitor sensors.".into(),
                     rank: "Ens.".into(),
                     short_code: "SCI".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("shields".into()),
@@ -841,6 +846,7 @@ max_level = 4
                     description: "Manage shields.".into(),
                     rank: "Ens.".into(),
                     short_code: "SHD".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("navigation".into()),
@@ -848,6 +854,7 @@ max_level = 4
                     description: "Plot course.".into(),
                     rank: "Ens.".into(),
                     short_code: "NAV".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("power".into()),
@@ -855,6 +862,7 @@ max_level = 4
                     description: "Manage power.".into(),
                     rank: "Ltn.".into(),
                     short_code: "PWR".into(),
+                    console: None,
                 },
                 StationDef {
                     id: StationId("comms".into()),
@@ -862,6 +870,7 @@ max_level = 4
                     description: "Hail contacts.".into(),
                     rank: "Ens.".into(),
                     short_code: "COM".into(),
+                    console: None,
                 },
             ],
         }

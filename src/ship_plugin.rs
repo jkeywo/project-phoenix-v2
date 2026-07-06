@@ -1847,6 +1847,10 @@ mod tests {
             radar_appearance: None,
             mesh: None,
             star: None,
+            class: None,
+            hull_id: None,
+            power_rating: None,
+            css: None,
             target: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

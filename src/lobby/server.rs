@@ -250,6 +250,11 @@ fn update_session_with_config(
                 next.tactical_radar_range = r.range;
             }
         }
+        // Ship identity metadata — class, hull_id, power_rating, css.
+        next.class = ship_config.class.clone();
+        next.hull_id = ship_config.hull_id.clone();
+        next.power_rating = ship_config.power_rating;
+        next.ship_css = ship_config.css.clone();
         ship_client_config.0 = next;
     }
 }
@@ -611,6 +616,7 @@ mod tests {
                         automated_systems: vec![],
                         ai_tuning: None,
                     }],
+                    console: None,
                 },
                 StationConfig {
                     id: StationId("tactical".into()),
@@ -623,6 +629,7 @@ mod tests {
                         automated_systems: vec![],
                         ai_tuning: None,
                     }],
+                    console: None,
                 },
             ],
             systems: vec![],
@@ -727,6 +734,7 @@ mod tests {
                     automated_systems: vec![],
                     ai_tuning: None,
                 }],
+                console: None,
             }],
             systems: vec![],
             power_groups: HashMap::new(),

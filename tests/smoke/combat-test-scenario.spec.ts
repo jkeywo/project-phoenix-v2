@@ -29,6 +29,17 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
 
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/combat_test.toml');
+
+  // combat_test.toml declares three [[available_ships]] (Destroyer / Cruiser /
+  // Battleship), so finishInit() re-shows the scenario-panel as a ship picker
+  // rather than calling startServer() immediately.  Wait for the first ship
+  // button to appear and click it so wasm_init() runs and __wasmReady can fire.
+  await serverPage.waitForSelector('#scenario-panel button.world-btn', {
+    state: 'visible',
+    timeout: 60_000,
+  });
+  await serverPage.click('#scenario-panel button.world-btn:first-child');
+
   await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);

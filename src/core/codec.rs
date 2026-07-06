@@ -532,6 +532,7 @@ mod tests {
                         center_deg: 0.0,
                         width_deg: 90.0,
                         arc_id: "fore".into(),
+                        priority: 1,
                     }],
                 },
             ),
@@ -1132,6 +1133,7 @@ mod tests {
             center_deg: 0.0,
             width_deg: 90.0,
             arc_id: "fore".into(),
+            priority: 1,
         };
         let encoded = serde_json::to_string(&msg).unwrap();
         let decoded: ShieldFacingStatus = serde_json::from_str(&encoded).unwrap();

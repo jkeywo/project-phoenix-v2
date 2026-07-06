@@ -1106,6 +1106,7 @@ mod tests {
             is_focused: focused,
             center_deg: 0.0,
             width_deg: 90.0,
+            priority: 1,
         }
     }
 

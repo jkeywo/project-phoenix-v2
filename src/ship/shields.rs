@@ -132,6 +132,7 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
                     center_deg: s.center_deg,
                     width_deg: s.width_deg,
                     arc_id: s.id,
+                    priority: s.priority,
                 })
                 .collect();
             vec![crate::messages::ServerMessage::ShieldStatus { facings }]
@@ -355,6 +356,7 @@ fn publish_shields_blackboard(
             center_deg: s.center_deg,
             width_deg: s.width_deg,
             arc_id: s.id.clone(),
+            priority: s.priority,
         })
         .collect();
 

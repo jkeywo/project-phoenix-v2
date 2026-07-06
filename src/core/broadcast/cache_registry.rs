@@ -219,6 +219,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
                     center_deg: s.center_deg,
                     width_deg: s.width_deg,
                     arc_id: s.id,
+                    priority: s.priority,
                 })
                 .collect();
             messages.push(ServerMessage::ShieldStatus { facings });
@@ -296,6 +297,7 @@ mod tests {
             center_deg: 0.0,
             width_deg: 90.0,
             arc_id: "fore".into(),
+            priority: 1,
         }]);
         let mut positions = LastBroadcastEntityPositions::default();
         positions

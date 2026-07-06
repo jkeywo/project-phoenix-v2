@@ -683,6 +683,36 @@ describe('buildShieldsConsoleState', () => {
     }));
     expect(s.target_bearing).toBeCloseTo(90);
   });
+
+  it('passes priority field through from blackboard facings', () => {
+    const state = {
+      blackboards: {
+        shields: {
+          facings: [
+            { label: 'Fore', hp: 100, max_hp: 100, online: true, offline_remaining: 0, arc_id: 'fore', center_deg: 0, width_deg: 90, priority: 3 },
+            { label: 'Aft',  hp: 80,  max_hp: 100, online: true, offline_remaining: 0, arc_id: 'aft',  center_deg: 180, width_deg: 90, priority: 1 },
+          ],
+          hull_integrity_pct: 100,
+          focused_facing: null,
+          target_bearing: null,
+          grid_status: 'GRID NOMINAL',
+        },
+      },
+    };
+    const s = parse(buildShieldsConsoleState(state));
+    expect(s.facings[0].priority).toBe(3);
+    expect(s.facings[1].priority).toBe(1);
+  });
+
+  it('passes priority field through from legacy shieldFacings path', () => {
+    const state = {
+      shieldFacings: [
+        { label: 'Fore', hp: 100, max_hp: 100, online: true, offline_remaining: 0, arc_id: 'fore', center_deg: 0, width_deg: 90, priority: 2 },
+      ],
+    };
+    const s = parse(buildShieldsConsoleState(state));
+    expect(s.facings[0].priority).toBe(2);
+  });
 });
 
 describe('buildSensorsConsoleState', () => {

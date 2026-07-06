@@ -1081,6 +1081,7 @@ fn broadcast_shield_status(
             center_deg: s.center_deg,
             width_deg: s.width_deg,
             arc_id: s.id,
+            priority: s.priority,
         })
         .collect();
 

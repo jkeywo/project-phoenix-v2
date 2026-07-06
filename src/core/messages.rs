@@ -108,6 +108,14 @@ pub struct ShieldFacingStatus {
     /// Defaults to empty for wire compatibility with pre-#514 payloads.
     #[serde(default)]
     pub arc_id: String,
+    /// Hit-routing priority. Higher value wins when multiple arcs cover the same bearing.
+    /// Defaults to 1 for wire compatibility with older payloads.
+    #[serde(default = "default_priority")]
+    pub priority: u32,
+}
+
+fn default_priority() -> u32 {
+    1
 }
 
 fn default_arc_width_deg() -> f32 {

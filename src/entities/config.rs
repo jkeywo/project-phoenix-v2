@@ -865,6 +865,16 @@ pub struct ShieldArcConfig {
     /// Debuff magnitude applied on Damaged/Disabled tier. Default 0.15.
     #[serde(default = "default_arc_hull_debuff_magnitude")]
     pub hull_debuff_magnitude: f32,
+    /// Hit-routing priority. When multiple arcs cover the same bearing, the
+    /// arc with the highest `priority` value absorbs the hit first. Falls
+    /// through to the next tier only when all arcs at the higher priority
+    /// covering that bearing are offline. Default 1.
+    #[serde(default = "default_arc_priority")]
+    pub priority: u32,
+}
+
+fn default_arc_priority() -> u32 {
+    1
 }
 
 fn default_arc_hull_damaged_threshold() -> f32 {
@@ -891,6 +901,7 @@ impl ShieldArcConfig {
             max_hp: self.max_hp,
             regen_per_sec: self.regen_per_sec,
             offline_duration: self.offline_duration,
+            priority: self.priority,
         }
     }
 }

@@ -40,6 +40,8 @@ pub struct ShieldFacingSnapshot {
     pub center_deg: f32,
     /// Arc angular width in degrees.
     pub width_deg: f32,
+    /// Hit-routing priority. Higher value wins when multiple arcs cover the same bearing.
+    pub priority: u32,
 }
 
 /// Configuration for the entire shield system.
@@ -131,6 +133,9 @@ pub struct ShieldFacing {
     pub base_max_hp: i32,
     /// Per-arc baseline regen/sec before focus modifiers. See `base_max_hp`.
     pub base_regen_per_sec: f32,
+    /// Hit-routing priority. Higher value wins when multiple arcs cover the same bearing.
+    /// Set at construction from TOML config and never mutated at runtime.
+    pub priority: u32,
 }
 
 impl ShieldFacing {
@@ -154,6 +159,7 @@ impl ShieldFacing {
             width_deg: 0.0,
             base_max_hp: max_hp,
             base_regen_per_sec: regen_per_sec,
+            priority: 1,
         }
     }
 
@@ -168,6 +174,7 @@ impl ShieldFacing {
         offline_duration: f32,
         center_deg: f32,
         width_deg: f32,
+        priority: u32,
     ) -> Self {
         Self {
             id: id.into(),
@@ -183,6 +190,7 @@ impl ShieldFacing {
             width_deg,
             base_max_hp: max_hp,
             base_regen_per_sec: regen_per_sec,
+            priority,
         }
     }
 
@@ -252,6 +260,7 @@ impl ShieldFacing {
             is_focused: self.is_focused,
             center_deg: self.center_deg,
             width_deg: self.width_deg,
+            priority: self.priority,
         }
     }
 }
@@ -327,6 +336,9 @@ pub struct ArcRuntimeConfig {
     pub regen_per_sec: Option<f32>,
     /// Per-arc override for offline duration.
     pub offline_duration: Option<f32>,
+    /// Hit-routing priority. Higher value wins when multiple arcs cover the same bearing.
+    /// Default 1 (matches `default_arc_priority()` in `entities/config.rs`).
+    pub priority: u32,
 }
 
 /// The complete shield system, owning all facings.
@@ -417,6 +429,7 @@ impl ShieldSystem {
                     a.offline_duration.unwrap_or(ship_wide.offline_duration),
                     a.center_deg,
                     a.width_deg,
+                    a.priority,
                 )
             })
             .collect();
@@ -517,11 +530,12 @@ impl ShieldSystem {
             delta
         };
 
-        // ── Phase 1: in-arc pass — pick first-matching arc.
-        // Declaration order is authoritative when arcs overlap: earlier
-        // `[[shield_arc]]` blocks in the TOML win. Designers can still
-        // author overlap-free arc layouts; overlap is a designer choice
-        // and this rule makes it deterministic.
+        // ── Phase 1: priority-aware in-arc pass.
+        // Find the highest priority value among all arcs that strictly contain
+        // the bearing. Then return the first arc at that priority that is
+        // online. If all arcs at the highest priority tier are offline, fall
+        // through to the next lower priority tier, and so on. Declaration
+        // order is the tie-break within a priority tier.
         //
         // Boundary handling: use strict `<` instead of `<=` so arcs share
         // boundaries cleanly — an arc whose edge exactly touches another
@@ -531,15 +545,59 @@ impl ShieldSystem {
         // and port arcs both have `|delta| = 45` (their shared boundary),
         // so neither matches strictly and the centre-nearest fallback
         // picks port (see phase 2 tie-break).
-        for (i, f) in self.facings.iter().enumerate() {
-            if f.width_deg <= 0.0 {
-                continue;
+
+        // Collect all (index, priority) for arcs that strictly contain the bearing.
+        let in_arc: Vec<(usize, u32)> = self
+            .facings
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| {
+                if f.width_deg <= 0.0 {
+                    return None;
+                }
+                let half = f.width_deg * 0.5;
+                let dist = signed_delta(f.center_deg).abs();
+                if dist < half - 1e-4 {
+                    Some((i, f.priority))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !in_arc.is_empty() {
+            // Walk priority tiers from highest to lowest.
+            let remaining_priorities: Vec<u32> = {
+                let mut ps: Vec<u32> = in_arc.iter().map(|(_, p)| *p).collect();
+                ps.sort_unstable();
+                ps.dedup();
+                ps.reverse(); // highest first
+                ps
+            };
+
+            for tier in &remaining_priorities {
+                // First online arc at this priority tier (declaration order).
+                let candidate = in_arc
+                    .iter()
+                    .filter(|(_, p)| p == tier)
+                    .find(|(i, _)| self.facings[*i].is_online())
+                    .map(|(i, _)| *i);
+                if let Some(idx) = candidate {
+                    return idx;
+                }
+                // All arcs at this tier are offline; try next lower tier.
             }
-            let half = f.width_deg * 0.5;
-            let dist = signed_delta(f.center_deg).abs();
-            if dist < half - 1e-4 {
-                return i;
-            }
+
+            // Every in-arc facing (all tiers) is offline — pick the highest-priority
+            // offline arc (first declaration order) so damage routes to *something*
+            // rather than bypassing to phase 2 / centre-nearest.
+            let top_priority = remaining_priorities[0];
+            return in_arc
+                .iter()
+                .filter(|(_, p)| *p == top_priority)
+                .map(|(i, _)| *i)
+                .next()
+                .unwrap(); // in_arc is non-empty
         }
 
         // ── Phase 2: no in-arc match — pick centre-nearest.
@@ -1140,6 +1198,7 @@ mod tests {
                 max_hp: None,
                 regen_per_sec: None,
                 offline_duration: None,
+                priority: 1,
             },
             ArcRuntimeConfig {
                 id: "port".into(),
@@ -1149,6 +1208,7 @@ mod tests {
                 max_hp: None,
                 regen_per_sec: None,
                 offline_duration: None,
+                priority: 1,
             },
         ];
         let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
@@ -1170,6 +1230,7 @@ mod tests {
             max_hp: Some(50),
             regen_per_sec: Some(0.5),
             offline_duration: Some(3.0),
+            priority: 1,
         }];
         let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
         assert_eq!(s.facings[0].max_hp, 50);
@@ -1198,6 +1259,7 @@ mod tests {
                 max_hp: Some(200),
                 regen_per_sec: Some(4.0),
                 offline_duration: None,
+                priority: 1,
             },
             ArcRuntimeConfig {
                 id: "aft".into(),
@@ -1207,6 +1269,7 @@ mod tests {
                 max_hp: Some(50),
                 regen_per_sec: Some(1.0),
                 offline_duration: None,
+                priority: 1,
             },
         ];
         let mut s = ShieldSystem::from_arcs(&arcs, &ship_wide());
@@ -1277,6 +1340,7 @@ mod tests {
             max_hp: None,
             regen_per_sec: None,
             offline_duration: None,
+            priority: 1,
         }];
         let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
         assert_eq!(s.facings[0].max_hp, 100);
@@ -1300,6 +1364,7 @@ mod tests {
                 max_hp: None,
                 regen_per_sec: None,
                 offline_duration: None,
+                priority: 1,
             },
             // Narrow port + starboard.
             ArcRuntimeConfig {
@@ -1310,6 +1375,7 @@ mod tests {
                 max_hp: None,
                 regen_per_sec: None,
                 offline_duration: None,
+                priority: 1,
             },
             ArcRuntimeConfig {
                 id: "starboard".into(),
@@ -1319,6 +1385,7 @@ mod tests {
                 max_hp: None,
                 regen_per_sec: None,
                 offline_duration: None,
+                priority: 1,
             },
         ];
         let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
@@ -1352,6 +1419,7 @@ mod tests {
             max_hp: None,
             regen_per_sec: None,
             offline_duration: None,
+            priority: 1,
         }];
         let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
         let snap = &s.snapshot()[0];
@@ -1359,5 +1427,99 @@ mod tests {
         assert_eq!(snap.label, "Custom");
         assert!((snap.center_deg - 45.0).abs() < 1e-6);
         assert!((snap.width_deg - 60.0).abs() < 1e-6);
+    }
+
+    // ── Priority routing ─────────────────────────────────────────────────────
+
+    /// Helper: build two overlapping arcs covering the full 360° — a "priority
+    /// shield" (priority 2, centre 0°, width 360°) and a "standard shield"
+    /// (priority 1, same geometry). When the priority shield is online, all
+    /// hits route to it. When it goes offline, hits fall through to the
+    /// lower-priority arc.
+    fn two_priority_arcs(priority_arc_offline: bool) -> ShieldSystem {
+        let wide = ship_wide();
+        let mut s = ShieldSystem::from_arcs(
+            &[
+                ArcRuntimeConfig {
+                    id: "hi".into(),
+                    label: "High".into(),
+                    center_deg: 0.0,
+                    width_deg: 360.0,
+                    max_hp: None,
+                    regen_per_sec: None,
+                    offline_duration: Some(999.0),
+                    priority: 2,
+                },
+                ArcRuntimeConfig {
+                    id: "lo".into(),
+                    label: "Low".into(),
+                    center_deg: 0.0,
+                    width_deg: 360.0,
+                    max_hp: None,
+                    regen_per_sec: None,
+                    offline_duration: Some(999.0),
+                    priority: 1,
+                },
+            ],
+            &wide,
+        );
+        if priority_arc_offline {
+            // Deplete the high-priority arc to put it offline.
+            s.facings[0].apply_damage(9999);
+        }
+        s
+    }
+
+    #[test]
+    fn priority_arc_online_absorbs_hit_first() {
+        let mut s = two_priority_arcs(false);
+        let before_hi = s.facings[0].hp;
+        let before_lo = s.facings[1].hp;
+        s.apply_damage(10, 0.0);
+        assert_eq!(
+            s.facings[0].hp,
+            before_hi - 10,
+            "high-priority arc should absorb"
+        );
+        assert_eq!(
+            s.facings[1].hp, before_lo,
+            "low-priority arc should be untouched"
+        );
+    }
+
+    #[test]
+    fn priority_arc_offline_falls_through_to_lower_priority() {
+        let mut s = two_priority_arcs(true);
+        assert!(
+            !s.facings[0].is_online(),
+            "sanity: high-priority arc is offline"
+        );
+        let before_lo = s.facings[1].hp;
+        s.apply_damage(10, 0.0);
+        assert_eq!(
+            s.facings[1].hp,
+            before_lo - 10,
+            "low-priority arc should absorb when high is offline"
+        );
+    }
+
+    #[test]
+    fn snapshot_carries_priority() {
+        let wide = ship_wide();
+        let s = ShieldSystem::from_arcs(
+            &[ArcRuntimeConfig {
+                id: "fore".into(),
+                label: "Fore".into(),
+                center_deg: 0.0,
+                width_deg: 360.0,
+                max_hp: None,
+                regen_per_sec: None,
+                offline_duration: None,
+                priority: 5,
+            }],
+            &wide,
+        );
+        let snap = &s.snapshot()[0];
+        assert_eq!(snap.priority, 5);
     }
 }

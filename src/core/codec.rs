@@ -1133,7 +1133,7 @@ mod tests {
             center_deg: 0.0,
             width_deg: 90.0,
             arc_id: "fore".into(),
-            priority: 1,
+            priority: 3,
         };
         let encoded = serde_json::to_string(&msg).unwrap();
         let decoded: ShieldFacingStatus = serde_json::from_str(&encoded).unwrap();
@@ -1147,6 +1147,7 @@ mod tests {
         assert_eq!(legacy_decoded.width_deg, 90.0);
         assert_eq!(legacy_decoded.arc_id, "");
         assert!(!legacy_decoded.is_focused);
+        assert_eq!(legacy_decoded.priority, 1);
     }
 
     #[test]

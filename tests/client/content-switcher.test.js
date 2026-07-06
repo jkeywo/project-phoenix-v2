@@ -8,18 +8,18 @@ import {
 } from '../../gui/content-switcher.js';
 
 describe('CONSOLE_SECTION map', () => {
-  it('keys all nine HTML-panel consoles by lowercase station id', () => {
+  it('keys all ten HTML-panel consoles by lowercase station id', () => {
     // Post issues #618/#619 the map is single-keyed on lowercase station ids
     // (matching the Rust `StationId` newtype); the PascalCase Console aliases
     // are gone along with the enum.
-    const lowercase = ['captain', 'comms', 'helm', 'navigation', 'power', 'repair', 'sensors', 'shields', 'tactical'];
+    const lowercase = ['captain', 'comms', 'helm', 'navigation', 'power', 'repair', 'science', 'sensors', 'shields', 'tactical'];
     for (const id of lowercase) {
       expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, id)).toBe(true);
     }
   });
 
   it('does NOT expose PascalCase Console-enum aliases (retired in #619)', () => {
-    const pascal = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power', 'Sensors', 'Shields', 'Comms', 'Navigation'];
+    const pascal = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power', 'Sensors', 'Shields', 'Comms', 'Navigation', 'Science'];
     for (const name of pascal) {
       expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, name)).toBe(false);
     }
@@ -57,10 +57,10 @@ describe('CONSOLE_SECTION map', () => {
     expect(Object.isFrozen(HTML_SECTION_IDS)).toBe(true);
   });
 
-  it('HTML_SECTION_IDS lists all nine section ids', () => {
+  it('HTML_SECTION_IDS lists all ten section ids', () => {
     expect([...HTML_SECTION_IDS].sort()).toEqual([
       'captain-ui', 'comms-ui', 'helm-ui', 'navigation-ui',
-      'power-ui', 'repair-ui', 'sensors-ui', 'shields-ui', 'weapons-ui',
+      'power-ui', 'repair-ui', 'science-ui', 'sensors-ui', 'shields-ui', 'weapons-ui',
     ]);
   });
 });
@@ -74,6 +74,7 @@ describe('sectionForConsole', () => {
     expect(sectionForConsole('power')).toBe('power-ui');
     expect(sectionForConsole('sensors')).toBe('sensors-ui');
     expect(sectionForConsole('shields')).toBe('shields-ui');
+    expect(sectionForConsole('science')).toBe('science-ui');
     expect(sectionForConsole('comms')).toBe('comms-ui');
     expect(sectionForConsole('navigation')).toBe('navigation-ui');
   });
@@ -98,8 +99,9 @@ describe('consoleSections', () => {
   function allFalse() {
     return {
       'captain-ui': false, 'helm-ui': false, 'weapons-ui': false,
-      'repair-ui': false, 'power-ui': false, 'sensors-ui': false,
-      'shields-ui': false, 'comms-ui': false, 'navigation-ui': false,
+      'repair-ui': false, 'power-ui': false, 'science-ui': false,
+      'sensors-ui': false, 'shields-ui': false, 'comms-ui': false,
+      'navigation-ui': false,
     };
   }
 
@@ -169,8 +171,8 @@ describe('consoleSections', () => {
 });
 
 describe('isBevyConsole', () => {
-  it('returns false for all nine HTML-section consoles', () => {
-    for (const c of ['captain', 'helm', 'tactical', 'repair', 'power', 'sensors', 'shields', 'comms', 'navigation']) {
+  it('returns false for all ten HTML-section consoles', () => {
+    for (const c of ['captain', 'helm', 'tactical', 'repair', 'power', 'sensors', 'shields', 'comms', 'navigation', 'science']) {
       expect(isBevyConsole(c)).toBe(false);
     }
   });

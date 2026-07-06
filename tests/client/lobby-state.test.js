@@ -37,7 +37,7 @@ describe('LobbyState defaults', () => {
 
   it('exports a singleton and the canonical station list', () => {
     expect(lobbyState).toBeInstanceOf(LobbyState);
-    expect(ALL_STATIONS).toHaveLength(9);
+    expect(ALL_STATIONS).toHaveLength(10);
     expect(ALL_STATIONS[0]).toBe('captain');
   });
 });

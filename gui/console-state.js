@@ -876,6 +876,27 @@ export function buildNavigationConsoleState(state) {
   });
 }
 
+/**
+ * Science console — combined Sensors + Shields view.
+ *
+ * Delegates to buildSensorsConsoleState and buildShieldsConsoleState,
+ * then nests their payloads under `sensors` and `shields` keys so the
+ * per-console iframe receives both panels' data without key collision.
+ *
+ * @param {{ blackboards?, asteroids?, shipX?, shipZ?, shipYaw?,
+ *           sensorsTarget?, regions?, shieldFacings?, hullIntegrity?,
+ *           shieldFocusedFacing? }} state
+ */
+export function buildScienceConsoleState(state) {
+  const sensors = JSON.parse(buildSensorsConsoleState(state));
+  const shields = JSON.parse(buildShieldsConsoleState(state));
+  return JSON.stringify({
+    sensors,
+    shields,
+    science_auto: state.stationRatings?.['science'] === 'Backfill',
+  });
+}
+
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
 if (typeof window !== 'undefined') {
@@ -894,6 +915,7 @@ if (typeof window !== 'undefined') {
       case 'sensors':    return buildSensorsConsoleState(state);
       case 'comms':      return buildCommsConsoleState(state);
       case 'navigation': return buildNavigationConsoleState(state);
+      case 'science':    return buildScienceConsoleState(state);
       default:           return '{}';
     }
   };

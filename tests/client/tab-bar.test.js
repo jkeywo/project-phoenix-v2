@@ -65,10 +65,10 @@ function fakeRoot() {
 }
 
 describe('CONSOLE_LABEL / CONSOLE_INITIAL', () => {
-  it('keys all nine consoles by lowercase station id', () => {
+  it('keys all ten consoles by lowercase station id', () => {
     const expected = [
       'captain', 'helm', 'tactical', 'repair', 'sensors',
-      'shields', 'navigation', 'power', 'comms',
+      'shields', 'navigation', 'power', 'comms', 'science',
     ];
     expect(Object.keys(CONSOLE_LABEL).sort()).toEqual(expected.slice().sort());
     expect(Object.keys(CONSOLE_INITIAL).sort()).toEqual(expected.slice().sort());

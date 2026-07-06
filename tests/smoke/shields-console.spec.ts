@@ -12,7 +12,7 @@
 
 import { test, expect } from './fixtures';
 
-const CONSOLE_URL = '/gui/shield-console.html';
+const CONSOLE_URL = '/gui/shields-console.html';
 
 const NOMINAL_STATE = {
   facings: [

@@ -23,6 +23,7 @@
   <script type="module" src="gui/tab-bar.js"></script>
   <script type="module" src="gui/help-panel.js"></script>
   <script type="module" src="gui/console-registry.js"></script>
+  <script type="module" src="gui/console-resolver.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
   <script type="module" src="gui/active-console.js"></script>
   <!-- Per-tab session identity (issue: multiple clients on one desktop).
@@ -120,6 +121,7 @@
     #repair-ui.active,
     #shields-ui.active,
     #sensors-ui.active,
+    #science-ui.active,
     #comms-ui.active,
     #navigation-ui.active {
       display: flex;
@@ -136,6 +138,7 @@
     #repair-ui iframe,
     #shields-ui iframe,
     #sensors-ui iframe,
+    #science-ui iframe,
     #comms-ui iframe,
     #navigation-ui iframe {
       flex: 1;
@@ -293,7 +296,8 @@
        fills to the screen edge, letting the radar circle meet the bezel. */
     #helm-ui.active,
     #weapons-ui.active,
-    #sensors-ui.active { padding: 0; }
+    #sensors-ui.active,
+    #science-ui.active { padding: 0; }
     #captain-ui.active,
     #power-ui.active,
     #repair-ui.active,
@@ -690,7 +694,7 @@
          Driven by __updateConsole via postMessage bridge.
          Tap-to-lock, fire phaser, fire torpedo actions forwarded to server via PeerJS. -->
     <section id="weapons-ui">
-      <iframe id="weapons-iframe" src="gui/weapons-console.html"
+      <iframe id="weapons-iframe" src="gui/tactical-console.html"
         title="Tactical Console" allowfullscreen></iframe>
     </section>
 
@@ -713,7 +717,7 @@
     </section>
 
     <section id="shields-ui">
-      <iframe id="shields-iframe" src="gui/shield-console.html"
+      <iframe id="shields-iframe" src="gui/shields-console.html"
         title="Shield Console" allowfullscreen></iframe>
     </section>
 
@@ -722,6 +726,10 @@
         title="Sensors Console" allowfullscreen></iframe>
     </section>
 
+    <section id="science-ui">
+      <iframe id="science-iframe" src="gui/science-console.html"
+        title="Science Console" allowfullscreen></iframe>
+    </section>
 
     <section id="comms-ui">
       <iframe id="comms-iframe" src="gui/comms-console.html"
@@ -1011,7 +1019,7 @@
 
     // -- Rendering -----------------------------------------------
 
-    const CONSOLES = ['captain', 'helm', 'tactical', 'repair', 'sensors', 'shields', 'navigation', 'power', 'comms'];
+    const CONSOLES = ['captain', 'helm', 'tactical', 'repair', 'sensors', 'science', 'shields', 'navigation', 'power', 'comms'];
 
     // Console display name ? human label. Reads the single source from
     // gui/tab-bar.js (window.CONSOLE_LABEL, frozen). Falls back to the
@@ -1085,9 +1093,10 @@
             'weapons-ui': inGame && activeConsole === 'tactical',
             'repair-ui': inGame && activeConsole === 'repair',
             'power-ui':  inGame && activeConsole === 'power',
-            'shields-ui': inGame && activeConsole === 'shields',
-            'sensors-ui': inGame && activeConsole === 'sensors',
-             'comms-ui':  inGame && activeConsole === 'comms',
+             'shields-ui': inGame && activeConsole === 'shields',
+             'sensors-ui': inGame && activeConsole === 'sensors',
+             'science-ui': inGame && activeConsole === 'science',
+              'comms-ui':  inGame && activeConsole === 'comms',
              'navigation-ui': inGame && activeConsole === 'navigation' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
@@ -1096,6 +1105,7 @@
       $('power-ui').className  = sections['power-ui']  ? 'active' : '';
       $('shields-ui').className = sections['shields-ui'] ? 'active' : '';
       $('sensors-ui').className = sections['sensors-ui'] ? 'active' : '';
+      $('science-ui').className = sections['science-ui'] ? 'active' : '';
       $('comms-ui').className  = sections['comms-ui']  ? 'active' : '';
       $('navigation-ui').className = sections['navigation-ui'] ? 'active' : '';
 
@@ -1443,6 +1453,9 @@
       if (activeConsole === 'sensors') {
         pushSensorsConsoleState();
       }
+      if (activeConsole === 'science') {
+        pushScienceConsoleState();
+      }
       if (activeConsole === 'comms') {
         pushCommsConsoleState();
       }
@@ -1537,6 +1550,19 @@
     }
 
     if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); injectSwipeRelay($('sensors-iframe')); });
+
+    // -- Science console iframe bridge --------------------------------------------
+    function buildScienceConsoleState() {
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('science', state);
+      return JSON.stringify({ sensors: { scan_range: 2000, blips: [], target_uuid: null }, shields: { facings: [], hull_integrity_pct: 100, grid_status: 'GRID OFFLINE' }, science_auto: false });
+    }
+
+    function pushScienceConsoleState() {
+      if (activeConsole !== 'science') return;
+      _pushIframe($('science-iframe'), 'science', buildScienceConsoleState());
+    }
+
+    if ($('science-iframe')) $('science-iframe').addEventListener('load', () => { pushScienceConsoleState(); injectSwipeRelay($('science-iframe')); });
 
     // -- Comms console iframe bridge --------------------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1800,6 +1826,20 @@
             state.phase   = msg.data.state.phase;
             state.shipStations = msg.data.ship_stations || { stations: [] };
             state.players = msg.data.state.players.map(p => ({ ...p }));
+          }
+          // Dynamically set iframe src from station console paths
+          if (typeof window.resolveConsoleUrl === 'function') {
+            const stations = (state.shipStations && state.shipStations.stations) || [];
+            for (const st of stations) {
+              const entry = window.CONSOLE_REGISTRY && window.CONSOLE_REGISTRY[st.id];
+              if (!entry) continue;
+              const iframe = document.getElementById(entry.iframeId);
+              if (!iframe) continue;
+              const url = window.resolveConsoleUrl(state.shipStations, st.id);
+              if (iframe.src !== url) {
+                iframe.src = url;
+              }
+            }
           }
           if (window.simState) {
             // Share the module's entity array so in-place SimState position

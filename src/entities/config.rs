@@ -1318,15 +1318,23 @@ impl EntityConfig {
 
             // Synthesise `[[system]]` entries from `[[shield_arc]]` blocks.
             //
-            // For player ships (has a `shields` station in `stations`), each
-            // arc is owned by that station with `ai_only = false`. For NPC
-            // ships (no `shields` station), arcs are ownerless AI-only
+            // For player ships (has a `shields` station or a system with
+            // kind="shields" in `systems`), each arc is owned by that
+            // station with `ai_only = false`. For NPC ships (no shields
+            // station and no shields system), arcs are ownerless AI-only
             // systems, matching how NPC phaser banks / power reactors work.
+            // If a kind="shields" system exists, its station assignment
+            // is used (allowing shields to live on e.g. Science).
             let shields_station_id = crate::messages::StationId("shields".into());
-            let has_shields_station = ship_config
-                .stations
+            let shields_system = ship_config
+                .systems
                 .iter()
-                .any(|s| s.id == shields_station_id);
+                .find(|s| s.kind == crate::system_registry::SHIELDS_KIND);
+            let has_shields_station = shields_system.is_some()
+                || ship_config.stations.iter().any(|s| s.id == shields_station_id);
+            let effective_shields_station = shields_system
+                .and_then(|s| s.station.clone())
+                .unwrap_or(shields_station_id);
             let ops_group = crate::messages::PowerGroupId("ops".into());
             let has_ops_group = ship_config.power_groups.contains_key(&ops_group);
 
@@ -1362,7 +1370,7 @@ impl EntityConfig {
                         id: sid,
                         kind: crate::system_registry::SHIELD_ARC_KIND.into(),
                         station: if has_shields_station {
-                            Some(shields_station_id.clone())
+                            Some(effective_shields_station.clone())
                         } else {
                             None
                         },

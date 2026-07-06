@@ -19,7 +19,7 @@
  * (`Player.station`, `StationAssigned.station_id`) is a lowercase id.
  */
 export const ALL_STATIONS = Object.freeze([
-  'captain', 'helm', 'tactical', 'repair', 'sensors',
+  'captain', 'helm', 'tactical', 'repair', 'sensors', 'science',
   'shields', 'navigation', 'power', 'comms',
 ]);
 

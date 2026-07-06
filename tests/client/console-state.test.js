@@ -16,6 +16,7 @@ import {
   buildSensorsConsoleState,
   buildCommsConsoleState,
   buildNavigationConsoleState,
+  buildScienceConsoleState,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 
@@ -849,6 +850,51 @@ describe('buildSensorsConsoleState', () => {
   it('target_shield_fraction is null when sensorsTarget is unset', () => {
     const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
     expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
+  });
+});
+
+describe('buildScienceConsoleState', () => {
+  it('returns valid JSON', () => {
+    expect(() => parse(buildScienceConsoleState(EMPTY))).not.toThrow();
+  });
+
+  it('contains sensors and shields sub-objects', () => {
+    const s = parse(buildScienceConsoleState(EMPTY));
+    expect(s).toHaveProperty('sensors');
+    expect(s).toHaveProperty('shields');
+    expect(s.sensors).toHaveProperty('blips');
+    expect(s.shields).toHaveProperty('grid_status');
+  });
+
+  it('science_auto is true when stationRatings.science === Backfill', () => {
+    expect(parse(buildScienceConsoleState({ stationRatings: { science: 'Backfill' } })).science_auto).toBe(true);
+  });
+
+  it('science_auto is false when stationRatings.science is a different rating', () => {
+    expect(parse(buildScienceConsoleState({ stationRatings: { science: 'Full' } })).science_auto).toBe(false);
+  });
+
+  it('science_auto is false when stationRatings is absent', () => {
+    expect(parse(buildScienceConsoleState(EMPTY)).science_auto).toBe(false);
+  });
+
+  it('passes sensors target state through the nested sensors sub-object', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'tgt-1',
+      asteroids: [{ uuid: 'tgt-1', x: 0, z: -100, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate' }],
+    };
+    const s = parse(buildScienceConsoleState(state));
+    expect(s.sensors.target_uuid).toBe('tgt-1');
+    expect(s.sensors.target_name).toBe('Raider');
+    expect(s.sensors.target_stance).toBe('hostile');
+    expect(s.sensors.target_faction).toBe('pirate');
+  });
+
+  it('passes shields facings through the nested shields sub-object', () => {
+    const s = parse(buildScienceConsoleState({ shieldFacings: ['fore', 'port', 'aft', 'starboard'] }));
+    expect(s.shields.grid_status).toBe('GRID NOMINAL');
+    expect(s.shields.facings).toEqual(['fore', 'port', 'aft', 'starboard']);
   });
 });
 

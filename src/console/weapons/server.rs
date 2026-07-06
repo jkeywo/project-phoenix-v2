@@ -1,7 +1,8 @@
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::ReadRapierContext;
 
 use crate::ai_plugin::AiTokenRegistry;
-use crate::entity_spawner::EntitySystemHull;
+use crate::entity_spawner::{EntitySystemHull, FactionComponent};
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     AdmittedCommands, BlasterBankState, ClientMessage, GamePhase, InterSystemMsg,
@@ -1026,6 +1027,8 @@ fn tick_beams(
             // WeaponsTarget only on the LocalShip.
             Option<&mut WeaponsTarget>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            // Shooter's faction for LOS friendly-fire check.
+            Option<&FactionComponent>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1058,6 +1061,16 @@ fn tick_beams(
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    // LOS raycast parameters (optional so tests without RapierPhysicsPlugin still pass).
+    rapier_context: Option<ReadRapierContext>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    // Read-only lookup: entity → UUID + faction, used to classify the LOS blocker.
+    blocker_info_q: Query<(
+        Entity,
+        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&AsteroidUuid>,
+        Option<&FactionComponent>,
+    )>,
 ) {
     use crate::entity_config::PhaserCombatConfig;
 
@@ -1076,14 +1089,22 @@ fn tick_beams(
         shooter_x: f32,
         shooter_z: f32,
         target_uuid: String,
-        target_x: f32,
-        target_z: f32,
         active_bank: String,
         cooldown_secs: f32,
         damage_to_apply: i32,
         shield_pierce: f32,
         end_beam_early: bool,
         is_local_shooter: bool,
+        /// UUID of the entity that will actually receive damage this tick.
+        /// Equals `target_uuid` when LOS is clear; set to the blocker's UUID
+        /// when a blocking entity intercepts the beam.
+        effective_target_uuid: String,
+        /// Position of the effective target (for VFX positioning on destruction).
+        effective_target_x: f32,
+        effective_target_z: f32,
+        /// True when a friendly ship is blocking — beam is absorbed with no
+        /// damage applied to anyone this tick.
+        zero_damage: bool,
     }
 
     let mut shooters: Vec<ShooterState> = Vec::new();
@@ -1098,6 +1119,7 @@ fn tick_beams(
         modifiers_opt,
         _weapons_target_opt,
         is_local_shooter,
+        shooter_faction_opt,
     ) in ship_q.iter_mut()
     {
         cooldown.tick(dt);
@@ -1223,20 +1245,111 @@ fn tick_beams(
         // application in phase 2.
         beam.damage_accumulator -= damage_to_apply as f32;
 
+        // ── LOS raycast: check if another entity blocks the beam this tick ──
+        //
+        // When Rapier physics is not loaded (tests without RapierPhysicsPlugin),
+        // `rapier_context` is None — skip LOS and apply damage to the original
+        // target as before.
+        let (effective_target_uuid, effective_target_x, effective_target_z, zero_damage) =
+            if let Some(ref ctx_param) = rapier_context {
+                if let Ok(ctx) = ctx_param.single() {
+                    let ray_origin = Vec3::new(shooter_physics.x, 0.0, shooter_physics.z);
+                    let to_target = Vec3::new(tx - shooter_physics.x, 0.0, tz - shooter_physics.z);
+                    let dist_to_target = to_target.length();
+                    if dist_to_target > f32::EPSILON {
+                        let ray_dir = to_target / dist_to_target;
+                        let filter = bevy_rapier3d::prelude::QueryFilter::new()
+                            .exclude_rigid_body(shooter_entity);
+                        if let Some((hit_entity, toi)) =
+                            ctx.cast_ray(ray_origin, ray_dir, dist_to_target, true, filter)
+                        {
+                            // Classify the blocking entity.
+                            if let Ok((_, blocker_ent_uuid, blocker_ast_uuid, blocker_faction)) =
+                                blocker_info_q.get(hit_entity)
+                            {
+                                let blocker_uuid_str: Option<&str> = blocker_ent_uuid
+                                    .map(|u| u.0.as_str())
+                                    .or_else(|| blocker_ast_uuid.map(|u| u.0.as_str()));
+
+                                // Only reroute when blocker is a *different* entity from
+                                // the original target (the ray hits the target itself at
+                                // toi == dist_to_target).
+                                let blocker_is_target = blocker_uuid_str
+                                    .map(|u| u == target_uuid.as_str())
+                                    .unwrap_or(false);
+
+                                if !blocker_is_target && toi < dist_to_target {
+                                    // Determine friendliness.
+                                    let is_friendly = match (
+                                        shooter_faction_opt.map(|f| f.0),
+                                        blocker_faction.map(|f| f.0),
+                                        &faction_registry,
+                                    ) {
+                                        (Some(sf), Some(bf), Some(reg)) => {
+                                            !crate::faction::is_enemy(Some(sf), Some(bf), reg)
+                                        }
+                                        // No faction data → treat as non-friendly (takes damage).
+                                        _ => false,
+                                    };
+
+                                    if is_friendly {
+                                        // Friendly ship blocks; nobody takes damage this tick.
+                                        (target_uuid.clone(), tx, tz, true)
+                                    } else {
+                                        // Enemy/neutral/asteroid blocks; blocker takes damage.
+                                        let blocker_uuid =
+                                            blocker_uuid_str.unwrap_or("").to_string();
+                                        if blocker_uuid.is_empty() {
+                                            // Blocker has no UUID — fall through to original target.
+                                            (target_uuid.clone(), tx, tz, false)
+                                        } else {
+                                            // Use the ray hit position as the blocker position
+                                            // for VFX (e.g. asteroid destruction effects).
+                                            let hit_pos = ray_origin + ray_dir * toi;
+                                            (blocker_uuid, hit_pos.x, hit_pos.z, false)
+                                        }
+                                    }
+                                } else {
+                                    // Hit was the target itself — no blocker.
+                                    (target_uuid.clone(), tx, tz, false)
+                                }
+                            } else {
+                                // Hit entity not in blocker_info_q — fall through to original target.
+                                (target_uuid.clone(), tx, tz, false)
+                            }
+                        } else {
+                            // No LOS blocker found.
+                            (target_uuid.clone(), tx, tz, false)
+                        }
+                    } else {
+                        // Shooter and target at same position — no LOS check.
+                        (target_uuid.clone(), tx, tz, false)
+                    }
+                } else {
+                    // Rapier context unavailable at this tick.
+                    (target_uuid.clone(), tx, tz, false)
+                }
+            } else {
+                // No Rapier plugin — skip LOS.
+                (target_uuid.clone(), tx, tz, false)
+            };
+
         shooters.push(ShooterState {
             shooter_entity,
             shooter_uuid: shooter_uuid_opt.map(|u| u.0.clone()).unwrap_or_default(),
             shooter_x: shooter_physics.x,
             shooter_z: shooter_physics.z,
             target_uuid,
-            target_x: tx,
-            target_z: tz,
             active_bank,
             cooldown_secs,
             damage_to_apply,
             shield_pierce,
             end_beam_early: false,
             is_local_shooter,
+            effective_target_uuid,
+            effective_target_x,
+            effective_target_z,
+            zero_damage,
         });
     }
 
@@ -1247,19 +1360,25 @@ fn tick_beams(
     // (so we can end the beam and clear WeaponsTarget in phase 3).
 
     for state in shooters.iter_mut() {
-        // Always mark the target ship as attacked, even when damage_to_apply == 0
-        // (mirrors the historical NPC path which tagged the target every tick
-        // the beam was live). Skip for asteroid targets.
+        // When a friendly ship blocks the beam this tick, skip all damage and
+        // attacker tracking — nobody takes damage.
+        if state.zero_damage {
+            continue;
+        }
+
+        // Always mark the effective target ship as attacked, even when
+        // damage_to_apply == 0 (mirrors the historical NPC path which tagged
+        // the target every tick the beam was live). Skip for asteroid targets.
         {
-            // Look up the target and set attacker/attacked components.
+            // Look up the effective target and set attacker/attacked components.
             let target_entity =
                 hull_q
                     .iter()
                     .find_map(|(e, ast_uuid, ent_uuid, _, _, _, _, _, _, _, _)| {
-                        let asteroid_match =
-                            ast_uuid.map(|u| u.0.as_str()) == Some(state.target_uuid.as_str());
-                        let entity_match =
-                            ent_uuid.map(|u| u.0.as_str()) == Some(state.target_uuid.as_str());
+                        let asteroid_match = ast_uuid.map(|u| u.0.as_str())
+                            == Some(state.effective_target_uuid.as_str());
+                        let entity_match = ent_uuid.map(|u| u.0.as_str())
+                            == Some(state.effective_target_uuid.as_str());
                         if asteroid_match || entity_match {
                             Some((e, ast_uuid.is_some()))
                         } else {
@@ -1311,8 +1430,9 @@ fn tick_beams(
             mut target_arc_hull,
         ) in hull_q.iter_mut()
         {
-            let uuid_matches = ast_uuid.map(|u| u.0.as_str()) == Some(state.target_uuid.as_str())
-                || ent_uuid.map(|u| u.0.as_str()) == Some(state.target_uuid.as_str());
+            let uuid_matches = ast_uuid.map(|u| u.0.as_str())
+                == Some(state.effective_target_uuid.as_str())
+                || ent_uuid.map(|u| u.0.as_str()) == Some(state.effective_target_uuid.as_str());
             if !uuid_matches {
                 continue;
             }
@@ -1424,29 +1544,32 @@ fn tick_beams(
             continue;
         }
         if target_asteroid_destroyed || target_ship_destroyed_non_local {
-            world.0.entities.retain(|a| a.uuid != state.target_uuid);
+            world
+                .0
+                .entities
+                .retain(|a| a.uuid != state.effective_target_uuid);
             if target_asteroid_destroyed {
                 vfx_events.write(AsteroidDestroyedVfx {
-                    x: state.target_x,
-                    z: state.target_z,
+                    x: state.effective_target_x,
+                    z: state.effective_target_z,
                 });
                 if let Some(ref mut ob) = outbox {
                     ob.0.push((
                         Target::All,
                         ServerMessage::AsteroidDestroyed {
-                            uuid: state.target_uuid.clone(),
+                            uuid: state.effective_target_uuid.clone(),
                         },
                     ));
                 }
             } else {
                 destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
-                    entity_uuid: state.target_uuid.clone(),
+                    entity_uuid: state.effective_target_uuid.clone(),
                 });
                 if let Some(ref mut ob) = outbox {
                     ob.0.push((
                         Target::All,
                         ServerMessage::EntityDespawned {
-                            uuid: state.target_uuid.clone(),
+                            uuid: state.effective_target_uuid.clone(),
                         },
                     ));
                 }
@@ -1461,7 +1584,7 @@ fn tick_beams(
     // cleared, cooldown started, WeaponsTarget cleared for LocalShip).
 
     for state in shooters {
-        let Ok((_, _, _, mut beam, mut cooldown, _, _, mut weapons_target_opt, _)) =
+        let Ok((_, _, _, mut beam, mut cooldown, _, _, mut weapons_target_opt, _, _)) =
             ship_q.get_mut(state.shooter_entity)
         else {
             continue;
@@ -8283,6 +8406,408 @@ ai_only = true
         assert!(
             npc_tube_loading,
             "NPC's own tube must transition to Loading after its claim is granted"
+        );
+    }
+
+    // ── LOS blocking tests (Rapier) ──────────────────────────────────────────
+    //
+    // These tests spin up a Rapier world (like the collision tests in
+    // server_app.rs) and verify that `tick_beams` routes damage correctly when
+    // a blocking entity is between the shooter and the original target.
+
+    /// Build a minimal app with Rapier physics + WeaponsPlugin so `tick_beams`
+    /// runs the LOS raycast.
+    fn los_test_app() -> App {
+        use bevy_rapier3d::prelude::RapierPhysicsPlugin;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
+            .add_plugins(bevy::transform::TransformPlugin)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<bevy::mesh::Mesh>()
+            .init_resource::<bevy::scene::SceneSpawner>()
+            .add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_plugins(RapierPhysicsPlugin::<()>::default())
+            .configure_sets(
+                Update,
+                (
+                    crate::sim_sets::SimSet::Input,
+                    crate::sim_sets::SimSet::Physics,
+                    crate::sim_sets::SimSet::Damage,
+                    crate::sim_sets::SimSet::Modifiers,
+                    crate::sim_sets::SimSet::Publish,
+                    crate::sim_sets::SimSet::PublishAggregate,
+                    crate::sim_sets::SimSet::Broadcast,
+                )
+                    .chain(),
+            )
+            .add_plugins(LobbyPlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
+            .init_resource::<WorldResource>()
+            .add_message::<AsteroidDestroyedVfx>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .init_resource::<CurrentPhaserMode>()
+            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
+                TorpedoConfig::default(),
+            )))
+            .init_resource::<SimOutbox>()
+            .init_resource::<Outbox>()
+            .init_resource::<crate::world::server::WorldContentRuntime>()
+            .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
+            // FactionRegistryResource for the LOS faction check.
+            .insert_resource(crate::entities::config_cache::FactionRegistryResource(
+                crate::entities::config_cache::get_faction_registry(),
+            ))
+            .add_plugins(WeaponsPlugin)
+            .insert_resource(PhaserCombatConfigResource(
+                crate::entity_config::PhaserCombatConfig {
+                    banks: vec![crate::entity_config::PhaserBankConfig {
+                        id: "port".into(),
+                        facing_deg: -90.0,
+                        fire_arc_deg: 360.0,
+                        auto_arc_deg: 360.0,
+                        beam_range: 0.0,
+                        beam_damage_per_sec: 100.0,
+                        beam_duration_secs: 10.0,
+                        cooldown_secs: 1.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    }],
+                },
+            ))
+            // WeaponsPlugin already registers tick_beams and tick_torpedo_system.
+            // Do NOT register them again here.
+            .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
+            .add_systems(PostUpdate, collect);
+
+        // Advance one tick to let Rapier initialise.
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+        app
+    }
+
+    /// Helper: spawn a ship entity with a ball collider and phaser state.
+    /// Returns the Entity.
+    fn spawn_los_ship(
+        app: &mut App,
+        uuid: &str,
+        x: f32,
+        z: f32,
+        faction: Option<uuid::Uuid>,
+        hull_hp: f32,
+        is_local: bool,
+    ) -> bevy::ecs::entity::Entity {
+        use bevy_rapier3d::prelude::{
+            ActiveCollisionTypes, Collider, ColliderMassProperties, RigidBody,
+        };
+        let mut ecmds = app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::entity_spawner::EntityUuid(uuid.to_string()),
+            ShipPhysics {
+                x,
+                z,
+                yaw: 0.0,
+                forward_speed: 0.0,
+                roll: 0.0,
+            },
+            Transform::from_xyz(x, 0.0, z),
+            GlobalTransform::default(),
+            Visibility::default(),
+            // Ball collider large enough for the raycast to hit.
+            Collider::ball(3.0),
+            RigidBody::Fixed,
+            ColliderMassProperties::Density(1.0),
+            ActiveCollisionTypes::all(),
+            crate::entity_spawner::EntitySystemHull(SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                hull_hp,
+            )])),
+            ActiveBeam::default(),
+            PhaserCooldown::default(),
+            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                banks: vec![crate::entity_config::PhaserBankConfig {
+                    id: "port".into(),
+                    facing_deg: -90.0,
+                    fire_arc_deg: 360.0,
+                    auto_arc_deg: 360.0,
+                    beam_range: 0.0,
+                    beam_damage_per_sec: 100.0,
+                    beam_duration_secs: 10.0,
+                    cooldown_secs: 1.0,
+                    beam_color: vec![],
+                    shield_pierce: None,
+                    marker: None,
+                }],
+            }),
+            crate::ship_plugin::ShipSystemControlSources::default(),
+        ));
+        if is_local {
+            ecmds.insert(crate::server_app::LocalShip);
+        }
+        if let Some(f) = faction {
+            ecmds.insert(FactionComponent(f));
+        }
+        ecmds.id()
+    }
+
+    /// Helper: spawn an asteroid with a ball collider.
+    fn spawn_los_asteroid(
+        app: &mut App,
+        uuid: &str,
+        x: f32,
+        z: f32,
+        hull_hp: f32,
+    ) -> bevy::ecs::entity::Entity {
+        use bevy_rapier3d::prelude::{
+            ActiveCollisionTypes, Collider, ColliderMassProperties, RigidBody,
+        };
+        app.world_mut()
+            .spawn((
+                crate::simulation::Asteroid,
+                AsteroidUuid(uuid.to_string()),
+                Transform::from_xyz(x, 0.0, z),
+                GlobalTransform::default(),
+                Visibility::default(),
+                Collider::ball(3.0),
+                RigidBody::Fixed,
+                ColliderMassProperties::Density(1.0),
+                ActiveCollisionTypes::all(),
+                crate::entity_spawner::EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    hull_hp,
+                )])),
+            ))
+            .id()
+    }
+
+    /// Activate a beam on the given ship entity, targeting `target_uuid`.
+    fn activate_los_beam(app: &mut App, shooter: bevy::ecs::entity::Entity, target_uuid: &str) {
+        let mut beam = app.world_mut().get_mut::<ActiveBeam>(shooter).unwrap();
+        beam.target_uuid = Some(target_uuid.to_string());
+        beam.remaining_secs = 10.0;
+        beam.damage_accumulator = 0.0;
+        beam.bank = Some("port".to_string());
+    }
+
+    /// Read the total current hull HP from a ship/asteroid entity.
+    fn hull_hp(app: &App, entity: bevy::ecs::entity::Entity) -> f32 {
+        app.world()
+            .get::<crate::entity_spawner::EntitySystemHull>(entity)
+            .map(|h| h.0.total_current())
+            .unwrap_or(0.0)
+    }
+
+    #[test]
+    fn los_no_blocker_damages_original_target() {
+        // Shooter at origin, target at (0, 0, -30). No entity in between.
+        // Beam should damage the original target.
+        let mut app = los_test_app();
+        let faction_uuid = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
+
+        let shooter = spawn_los_ship(
+            &mut app,
+            "shooter-uuid",
+            0.0,
+            0.0,
+            Some(faction_uuid),
+            200.0,
+            true,
+        );
+        let target = spawn_los_ship(&mut app, "target-uuid", 0.0, -30.0, None, 200.0, false);
+
+        // Let Rapier settle and colliders register at their correct positions.
+        app.update();
+        app.update();
+
+        activate_los_beam(&mut app, shooter, "target-uuid");
+
+        let before = hull_hp(&app, target);
+        // Run a few ticks to accumulate damage.
+        for _ in 0..5 {
+            app.update();
+        }
+        let after = hull_hp(&app, target);
+        assert!(
+            after < before,
+            "Target should take damage when LOS is clear (before={before}, after={after})"
+        );
+    }
+
+    #[test]
+    fn los_enemy_blocker_redirects_damage_away_from_target() {
+        // Shooter at origin. Enemy blocker at (0,0,-10). Original target at (0,0,-30).
+        // Blocker is in the way → target takes no damage, blocker takes damage.
+        use crate::config_cache::FactionRegistryResource;
+        use crate::faction::FactionRegistry;
+
+        let mut app = los_test_app();
+
+        let shooter_faction =
+            uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
+        let enemy_faction = uuid::Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap();
+
+        // Make shooter hostile to blocker.
+        let mut reg = FactionRegistry::new();
+        reg.insert(crate::faction::FactionConfig {
+            uuid: shooter_faction,
+            name: "Federation".into(),
+            enemies: vec![enemy_faction],
+        });
+        reg.insert(crate::faction::FactionConfig {
+            uuid: enemy_faction,
+            name: "Pirate".into(),
+            enemies: vec![],
+        });
+        app.insert_resource(FactionRegistryResource(reg));
+
+        let shooter = spawn_los_ship(
+            &mut app,
+            "shooter-uuid-2",
+            0.0,
+            0.0,
+            Some(shooter_faction),
+            200.0,
+            true,
+        );
+        let blocker = spawn_los_ship(
+            &mut app,
+            "blocker-uuid-2",
+            0.0,
+            -10.0,
+            Some(enemy_faction),
+            500.0,
+            false,
+        );
+        let target = spawn_los_ship(&mut app, "target-uuid-2", 0.0, -30.0, None, 500.0, false);
+
+        // Let Rapier settle so colliders are at their correct positions.
+        app.update();
+        app.update();
+
+        activate_los_beam(&mut app, shooter, "target-uuid-2");
+
+        let blocker_before = hull_hp(&app, blocker);
+        let target_before = hull_hp(&app, target);
+        // Run several ticks — each tick the ray hits the blocker, rerouting damage.
+        for _ in 0..5 {
+            app.update();
+        }
+        let blocker_after = hull_hp(&app, blocker);
+        let target_after = hull_hp(&app, target);
+
+        assert!(
+            blocker_after < blocker_before,
+            "Enemy blocker between shooter and target must take damage \
+             (before={blocker_before}, after={blocker_after})"
+        );
+        assert_eq!(
+            target_after, target_before,
+            "Original target must NOT take damage when blocked \
+             (before={target_before}, after={target_after})"
+        );
+    }
+
+    #[test]
+    fn los_friendly_blocker_absorbs_beam_with_no_damage() {
+        // Shooter and blocker are same faction. Blocker at (0,0,-10),
+        // target at (0,0,-30). Neither blocker nor target should take damage.
+        use crate::config_cache::FactionRegistryResource;
+        use crate::faction::FactionRegistry;
+
+        let mut app = los_test_app();
+
+        let faction_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000003").unwrap();
+
+        // Empty enemy list → faction is friendly to itself.
+        let mut reg = FactionRegistry::new();
+        reg.insert(crate::faction::FactionConfig {
+            uuid: faction_uuid,
+            name: "Federation".into(),
+            enemies: vec![],
+        });
+        app.insert_resource(FactionRegistryResource(reg));
+
+        let shooter = spawn_los_ship(
+            &mut app,
+            "shooter-uuid-3",
+            0.0,
+            0.0,
+            Some(faction_uuid),
+            200.0,
+            true,
+        );
+        let blocker = spawn_los_ship(
+            &mut app,
+            "blocker-uuid-3",
+            0.0,
+            -10.0,
+            Some(faction_uuid), // same faction → friendly
+            500.0,
+            false,
+        );
+        let target = spawn_los_ship(&mut app, "target-uuid-3", 0.0, -30.0, None, 500.0, false);
+
+        // Let Rapier settle so colliders are at their correct positions.
+        app.update();
+        app.update();
+
+        activate_los_beam(&mut app, shooter, "target-uuid-3");
+
+        let blocker_before = hull_hp(&app, blocker);
+        let target_before = hull_hp(&app, target);
+        for _ in 0..5 {
+            app.update();
+        }
+        let blocker_after = hull_hp(&app, blocker);
+        let target_after = hull_hp(&app, target);
+
+        assert_eq!(
+            blocker_after, blocker_before,
+            "Friendly blocker must NOT take damage (before={blocker_before}, after={blocker_after})"
+        );
+        assert_eq!(
+            target_after, target_before,
+            "Target must NOT take damage when a friendly blocks (before={target_before}, after={target_after})"
+        );
+    }
+
+    #[test]
+    fn los_asteroid_blocker_takes_damage() {
+        // Asteroid at (0,0,-10), target at (0,0,-30).
+        // Beam aimed at target — asteroid intercepts and takes damage.
+        let mut app = los_test_app();
+
+        let shooter = spawn_los_ship(&mut app, "shooter-uuid-4", 0.0, 0.0, None, 200.0, true);
+        let ast = spawn_los_asteroid(&mut app, "ast-uuid-4", 0.0, -10.0, 2000.0);
+        let target = spawn_los_ship(&mut app, "target-uuid-4", 0.0, -30.0, None, 500.0, false);
+
+        // Let Rapier settle so colliders are at their correct positions.
+        app.update();
+        app.update();
+
+        activate_los_beam(&mut app, shooter, "target-uuid-4");
+
+        let ast_before = hull_hp(&app, ast);
+        let target_before = hull_hp(&app, target);
+        for _ in 0..5 {
+            app.update();
+        }
+        let ast_after = hull_hp(&app, ast);
+        let target_after = hull_hp(&app, target);
+
+        assert!(
+            ast_after < ast_before,
+            "Asteroid blocker must take damage (before={ast_before}, after={ast_after})"
+        );
+        assert_eq!(
+            target_after, target_before,
+            "Target behind asteroid must NOT take damage (before={target_before}, after={target_after})"
         );
     }
 }

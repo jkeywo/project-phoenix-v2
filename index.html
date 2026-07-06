@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-8c2d6319a5a9429e.js" crossorigin="anonymous" integrity="sha384-KVvVNd6OUDfSSI5HDByPj08WDeNnLSCmV0vBALzK26TpgboZWnFgHXBtX2YQhzdB"><link rel="preload" href="./project-phoenix-8c2d6319a5a9429e_bg.wasm" crossorigin="anonymous" integrity="sha384-+bD+Eye6ZvbnWaf6M9PHjdioXvfchDB75ClCD1a+J3xODwolLk5dszdPHrIeXtwE" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-c7e40ed254e167a9.js" crossorigin="anonymous" integrity="sha384-ixNCLVRQxV9M2QrBUbNwat4L1CVWag1L4Xlh5371Wz3GBRzr7pY02feS8+YQCAD6"><link rel="preload" href="./project-phoenix-c7e40ed254e167a9_bg.wasm" crossorigin="anonymous" integrity="sha384-fIfXJt6z79T01rjNuxwnQ+0irj0BZoxuvXfLkH4TFkQfvhi7RnPmRyYpe0h/z4O5" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -862,8 +862,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-8c2d6319a5a9429e.js';
-const wasm = await init({ module_or_path: './project-phoenix-8c2d6319a5a9429e_bg.wasm' });
+import init, * as bindings from './project-phoenix-c7e40ed254e167a9.js';
+const wasm = await init({ module_or_path: './project-phoenix-c7e40ed254e167a9_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1719,22 +1719,70 @@ function finishInit() {
     set_console_state_callback(window.__updateConsole);
   }
 
-  // Validate station config before starting PeerJS or the Bevy app.
-  // A malformed [stations] section must refuse to boot.
-  fetch('assets/entities/player_ship.toml')
-    .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
-    .then(toml => {
-      try {
-        wasm_validate_stations(toml);
-      } catch (err) {
-        showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
-        return;
-      }
-      startServer();
-    })
-    .catch(err => {
-      showFatalError('Failed to load player_ship.toml: ' + String(err));
-    });
+  // ── Available ships from world config (issue #623) ──────────────────────
+  window.wasm_get_available_ships = wasmBindings.wasm_get_available_ships;
+  window.wasm_select_ship = wasmBindings.wasm_select_ship;
+
+  const ships = wasm_get_available_ships();
+
+  if (ships.length === 0) {
+    // Legacy world without available_ships: fall back to player_ship.toml.
+    fetch('assets/entities/player_ship.toml')
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(toml => {
+        wasm_select_ship('assets/entities/player_ship.toml');
+        try { wasm_validate_stations(toml); } catch (err) {
+          showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+          return;
+        }
+        startServer();
+      })
+      .catch(err => { showFatalError('Failed to load player_ship.toml: ' + String(err)); });
+  } else if (ships.length === 1) {
+    // Single ship — auto-select and proceed.
+    const ship = ships[0];
+    wasm_select_ship(ship.template_path);
+    fetch(ship.template_path)
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(toml => {
+        try { wasm_validate_stations(toml); } catch (err) {
+          showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+          return;
+        }
+        startServer();
+      })
+      .catch(err => { showFatalError('Failed to load ' + ship.template_path + ': ' + String(err)); });
+  } else {
+    // Multiple ships — show ship picker, defer server start until selection.
+    const panel = document.getElementById('scenario-panel');
+    const worldList = document.getElementById('world-list');
+    // Replace world list label
+    document.getElementById('world-list-label').textContent = 'Select a ship';
+    // Clear existing world buttons
+    worldList.innerHTML = '';
+    for (const ship of ships) {
+      const btn = document.createElement('button');
+      btn.className = 'world-btn';
+      btn.textContent = ship.label || ship.template_path;
+      btn.addEventListener('click', function() {
+        wasm_select_ship(ship.template_path);
+        panel.style.display = 'none';
+        fetch(ship.template_path)
+          .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+          .then(toml => {
+            try { wasm_validate_stations(toml); } catch (err) {
+              showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+              return;
+            }
+            startServer();
+          })
+          .catch(err => { showFatalError('Failed to load ' + ship.template_path + ': ' + String(err)); });
+      });
+      worldList.appendChild(btn);
+    }
+    // Show the panel again (it may have been hidden by world selection)
+    panel.style.display = '';
+  }
 }
 
 function showFatalError(message) {

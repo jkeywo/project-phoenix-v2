@@ -20,6 +20,7 @@ export const REGISTRY = Object.freeze({
   power:      { sectionId: 'power-ui',      iframeId: 'power-iframe'      },
   shields:    { sectionId: 'shields-ui',    iframeId: 'shields-iframe'    },
   sensors:    { sectionId: 'sensors-ui',    iframeId: 'sensors-iframe'    },
+  science:    { sectionId: 'science-ui',    iframeId: 'science-iframe'    },
   navigation: { sectionId: 'navigation-ui', iframeId: 'navigation-iframe' },
   comms:      { sectionId: 'comms-ui',      iframeId: 'comms-iframe'      },
 });

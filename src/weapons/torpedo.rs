@@ -619,11 +619,10 @@ impl TorpedoSystem {
                 && tube.load_state == TubeLoadState::Unloaded
                 && tube.loaded_count < tube.target_count
                 && tube.loaded_count < tube.volley_max
+                && self.torpedoes_remaining > 0
             {
-                if self.torpedoes_remaining > 0 {
-                    self.torpedoes_remaining -= 1;
-                    self.tubes[i].start_load();
-                }
+                self.torpedoes_remaining -= 1;
+                self.tubes[i].start_load();
             }
         }
 

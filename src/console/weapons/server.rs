@@ -4256,7 +4256,7 @@ station = "tactical"
                 .expect("test tube should exist")
                 .loaded_count = 1;
         } else {
-            let mut world = app.world_mut();
+            let world = app.world_mut();
             let mut res = world.resource_mut::<TorpedoSystemResource>();
             res.0
                 .tube_mut(tube)

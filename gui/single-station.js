@@ -18,26 +18,7 @@ export function shouldHideTabBar(myConsoles, inGame) {
   return !myConsoles || myConsoles.length <= 1;
 }
 
-/**
- * Resolves the iframe URL for the player's single assigned station.
- * Looks up `stationId` in `shipStations.stations` and returns its
- * `console` path; falls back to `gui/<stationId>-console.html` when
- * the station has no explicit path. Returns null when stationId is
- * falsy (spectator, no station assigned yet).
- *
- * @param {{ stations: Array<{ id: string, console?: string }> }} shipStations
- * @param {string|null} stationId
- * @returns {string|null}
- */
-export function singleStationIframeUrl(shipStations, stationId) {
-  if (!stationId) return null;
-  const stations = (shipStations && shipStations.stations) || [];
-  const station = stations.find(s => s.id === stationId);
-  return (station && station.console) || `gui/${stationId}-console.html`;
-}
-
 // Expose for non-module scripts in `client.html`.
 if (typeof window !== 'undefined') {
   window.shouldHideTabBar = shouldHideTabBar;
-  window.singleStationIframeUrl = singleStationIframeUrl;
 }

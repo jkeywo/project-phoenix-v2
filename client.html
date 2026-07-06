@@ -1125,12 +1125,6 @@
       // When a console is selected, compact mode hides non-selected tabs and
       // the freed space shows help text for all owned consoles (issue #462).
       const tabRoot = $('console-tab-bar');
-      // Single-station in-game: hide the tab bar entirely so the console
-      // fills the full screen. Use shouldHideTabBar when available (loaded
-      // from gui/single-station.js); fall back to an inline check.
-      const hideTabBar = (typeof window.shouldHideTabBar === 'function')
-        ? window.shouldHideTabBar(mine, inGame)
-        : (inGame && mine.length <= 1);
       if (tabRoot && typeof window.tabBarLayout === 'function'
           && typeof window.renderTabBar === 'function') {
         const compactActive = inGame && activeConsole !== null;
@@ -1139,7 +1133,7 @@
         const titleEl = _consoleTitleEl;
         // Only show title in the tab bar when the bar itself is visible
         // (multi-station in-game). In single-station mode the bar is hidden.
-        if (inGame && !hideTabBar) {
+        if (inGame && !layout.hidden) {
           titleEl.textContent = activeConsole ? consoleLabel(activeConsole) : 'Bridge';
         }
         window.renderTabBar(tabRoot, layout, { onPress: (name) => {
@@ -1148,7 +1142,7 @@
         }});
         // Append title into the bar so it sits inline (landscape) or wraps
         // below the buttons (portrait). Only when multi-station (bar is visible).
-        if (inGame && !hideTabBar) tabRoot.appendChild(titleEl);
+        if (inGame && !layout.hidden) tabRoot.appendChild(titleEl);
       }
 
       // Inline help area: shown in lobby when the player has a station

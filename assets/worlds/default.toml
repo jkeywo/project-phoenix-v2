@@ -21,6 +21,17 @@ description = "Defend the Federation outpost against an incoming raider patrol."
 color      = [0.6, 0.55, 0.5]
 brightness = 300.0
 
+[dust]
+max_motes         = 120
+max_spawn_rate    = 40.0
+spawn_radius      = 60.0
+lifetime_secs     = 3.5
+mote_radius       = 0.08
+color             = [0.9, 0.92, 1.0, 0.6]
+min_opacity       = 0.05
+max_opacity       = 0.6
+emissive_strength = 1.2
+
 [anchors]
 starbase_alpha = [1000.0, 0.0, 0.0]
 patrol_alpha   = [600.0, 0.0, -600.0]

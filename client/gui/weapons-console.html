@@ -734,6 +734,16 @@
                     <div class="opt active" id="mode-auto">AUTO</div>
                   </div>
                 </div>
+
+                <!-- Fire blasters button (issue #631). Shown only when the
+                     ship config declares at least one blaster bank. -->
+                <div id="fire-blasters-row" style="padding-top:8px; display:none;">
+                  <button id="fire-blaster" class="btn danger" style="width:100%;" type="button">
+                    <span class="btn-bg"></span>
+                    <span class="led fire"></span>
+                    <span class="label">FIRE BLASTERS</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1153,6 +1163,13 @@
 
       // AUTO badge: show when tactical station is AI-controlled (Backfill rating).
       setAutoState(document.getElementById('fire-phaser'), document.getElementById('tactical-auto-badge'), !!s.tactical_auto);
+
+      // Fire blasters row: visible only when the ship has blaster banks.
+      var blastersRow = document.getElementById('fire-blasters-row');
+      if (blastersRow) {
+        var hasBlasters = Array.isArray(s.blasters) && s.blasters.length > 0;
+        blastersRow.style.display = hasBlasters ? '' : 'none';
+      }
     }
 
     // ── Outbound actions ──────────────────────────────────────────────────
@@ -1165,6 +1182,20 @@
       }
       sendAction('fire_phaser', { bank: bank });
     });
+
+    // Fire blasters button — fires the first fire-ready blaster bank.
+    var fireBlasterEl = document.getElementById('fire-blaster');
+    if (fireBlasterEl) {
+      fireBlasterEl.addEventListener('click', function() {
+        var bank = 'fore';
+        if (_state && Array.isArray(_state.blasters)) {
+          var ready = _state.blasters.filter(function(b) { return b.fire_ready; });
+          if (ready.length > 0) bank = ready[0].id;
+          else if (_state.blasters.length > 0) bank = _state.blasters[0].id;
+        }
+        sendAction('fire_blaster', { bank: bank });
+      });
+    }
 
     // MAN/AUTO toggle beside the fire button — each option sets its mode.
     var _modeManEl = document.getElementById('mode-man');

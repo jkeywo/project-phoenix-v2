@@ -560,15 +560,45 @@
       // carries its own `center_deg` and `width_deg`; render one <path>
       // per facing dynamically. Fall back to pre-#514 fixed positions
       // when facings don't carry geometry (backwards compat with tests).
-      var INNER_R = 34, MIN_OUTER_R = 46, MAX_OUTER_R = 78;
+      //
+      // Issue #634: concentric donut tiers by priority.
+      // The radial band INNER_R..MAX_OUTER_R is divided equally between the
+      // number of distinct priority tiers present. Priority-1 arcs occupy
+      // the outermost band; priority-2 arcs the next band inward; etc.
+      var INNER_R = 34, MAX_OUTER_R = 78;
       var arcContainer = document.getElementById('shield-arcs');
       if (arcContainer) {
+        // Collect the distinct priority tiers sorted ascending (1 = outermost).
+        var tiers = [];
+        _state.facings.forEach(function(f) {
+          var p = f.priority || 1;
+          if (tiers.indexOf(p) === -1) tiers.push(p);
+        });
+        tiers.sort(function(a, b) { return a - b; });
+        var numTiers = Math.max(tiers.length, 1);
+        var bandWidth = (MAX_OUTER_R - INNER_R) / numTiers;
+
+        // Returns { bandInner, bandOuter } for the radial band allocated to
+        // the given priority value. Priority 1 → outermost band.
+        function tierBand(priority) {
+          var tierIndex = tiers.indexOf(priority);
+          if (tierIndex < 0) tierIndex = 0; // unknown priority falls back to outermost
+          var bandOuter = MAX_OUTER_R - tierIndex * bandWidth;
+          var bandInner = MAX_OUTER_R - (tierIndex + 1) * bandWidth;
+          return { bandInner: bandInner, bandOuter: bandOuter };
+        }
+
         // Remove all existing arcs.
         while (arcContainer.firstChild) arcContainer.removeChild(arcContainer.firstChild);
         _state.facings.forEach(function(facing) {
           var pctFraction = facing.max_hp > 0 ? (facing.hp / facing.max_hp) : 0;
-          var outerR = MIN_OUTER_R + (MAX_OUTER_R - MIN_OUTER_R) * pctFraction;
-          var d = _facingPath(facing.center_deg || 0, facing.width_deg || 90, INNER_R, outerR);
+          // Compute the radial band for this arc's priority tier, then scale
+          // the outer radius within that band by the HP fraction. A ~40% floor
+          // is used so arcs remain visible even at low HP.
+          var band = tierBand(facing.priority || 1);
+          var minOuterR = band.bandInner + (band.bandOuter - band.bandInner) * 0.4;
+          var outerR = minOuterR + (band.bandOuter - minOuterR) * pctFraction;
+          var d = _facingPath(facing.center_deg || 0, facing.width_deg || 90, band.bandInner, outerR);
           if (!d) return;
           var t = tier(facing.online ? Math.round(pctFraction * 100) : 0);
           var isFocused = (s.focused_facing === facing.label);

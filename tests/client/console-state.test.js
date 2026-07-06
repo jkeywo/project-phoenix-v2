@@ -428,6 +428,41 @@ describe('buildWeaponsConsoleState', () => {
     expect(s.tubes[0].volley_max).toBe(2);
     expect(s.tubes[0].target_count).toBe(2);
   });
+
+  it('blasters defaults to empty array when absent', () => {
+    const s = parse(buildWeaponsConsoleState(EMPTY));
+    expect(s.blasters).toEqual([]);
+  });
+
+  it('passes blasters through from state.blasterBanks', () => {
+    const bank = { id: 'fore', fire_ready: true, on_cooldown: false, cooldown_remaining_secs: 0 };
+    const s = parse(buildWeaponsConsoleState({ blasterBanks: [bank] }));
+    expect(s.blasters).toHaveLength(1);
+    expect(s.blasters[0].id).toBe('fore');
+    expect(s.blasters[0].fire_ready).toBe(true);
+  });
+
+  it('passes blasters through from blackboard', () => {
+    const bank = { id: 'aft', fire_ready: false, on_cooldown: true, cooldown_remaining_secs: 1.5 };
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: { tactical: { blasters: [bank] } },
+    }));
+    expect(s.blasters).toHaveLength(1);
+    expect(s.blasters[0].id).toBe('aft');
+    expect(s.blasters[0].on_cooldown).toBe(true);
+    expect(s.blasters[0].cooldown_remaining_secs).toBe(1.5);
+  });
+
+  it('blackboard blasters take priority over state.blasterBanks', () => {
+    const bbBank  = { id: 'bb-bank',  fire_ready: true,  on_cooldown: false, cooldown_remaining_secs: 0 };
+    const stBank  = { id: 'st-bank',  fire_ready: false, on_cooldown: true,  cooldown_remaining_secs: 2 };
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: { tactical: { blasters: [bbBank] } },
+      blasterBanks: [stBank],
+    }));
+    expect(s.blasters).toHaveLength(1);
+    expect(s.blasters[0].id).toBe('bb-bank');
+  });
 });
 
 describe('buildCaptainConsoleState', () => {

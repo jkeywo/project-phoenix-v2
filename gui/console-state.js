@@ -368,7 +368,7 @@ export function buildTargetBlip(targetUuid, entities, shipX, shipZ, shipYaw, ran
  * falling back to legacy camelCase properties for compatibility.
  *
  * @param {{ blackboards?, weaponsTarget?, weaponsBanks?, weaponsTubes?,
- *           weaponsTorpedoCount?, weaponsPhaserMode? }} state
+ *           weaponsTorpedoCount?, weaponsPhaserMode?, blasterBanks? }} state
  */
 export function buildWeaponsConsoleState(state) {
   const bb = (state.blackboards && state.blackboards['tactical']) || {};
@@ -381,6 +381,7 @@ export function buildWeaponsConsoleState(state) {
   const regions      = bb.regions       ?? [];
   const phaserArcs   = bb.phaser_arcs   ?? state.phaserArcConfigs   ?? [];
   const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
+  const blasters     = bb.blasters      ?? state.blasterBanks        ?? [];
 
   const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
   const mappedPhaserArcs = phaserArcs.map(a => ({
@@ -433,6 +434,7 @@ export function buildWeaponsConsoleState(state) {
     regions,
     phaser_arcs:   mappedPhaserArcs,
     torpedo_arcs:  torpedoArcs,
+    blasters,
     own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
     tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
   });

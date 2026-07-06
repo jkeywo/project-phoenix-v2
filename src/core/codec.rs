@@ -574,6 +574,7 @@ mod tests {
                     x: 5.0,
                     z: -10.0,
                     heading: 0.0,
+                    visual_scale: 1.0,
                 },
             ),
             (
@@ -897,7 +898,7 @@ mod tests {
         );
     }
 
-    /// BlasterFired server message round-trip (issue #631).
+    /// BlasterFired server message round-trip (issue #631, extended #638).
     #[test]
     fn blaster_fired_server_message_round_trips() {
         let msg = ServerMessage::BlasterFired {
@@ -907,9 +908,27 @@ mod tests {
             x: 5.0,
             z: -10.0,
             heading: 1.57,
+            visual_scale: 1.5,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    /// BlasterFired defaults visual_scale to 1.0 when absent (wire compat).
+    #[test]
+    fn blaster_fired_defaults_visual_scale_when_absent() {
+        // Simulate an older wire message that has no visual_scale field.
+        let json = r#"{"type":"BlasterFired","data":{"bank":"fore","source_uuid":"11111111-1111-1111-1111-111111111111","projectile_id":"proj-uuid-abc","x":5.0,"z":-10.0,"heading":1.57}}"#;
+        let codec = crate::codec::JsonCodec;
+        let decoded: ServerMessage = codec.decode_server(json).unwrap();
+        if let ServerMessage::BlasterFired { visual_scale, .. } = decoded {
+            assert!(
+                (visual_scale - 1.0).abs() < f32::EPSILON,
+                "visual_scale must default to 1.0 when absent from wire, got {visual_scale}"
+            );
+        } else {
+            panic!("expected BlasterFired");
+        }
     }
 
     /// BlasterHit server message round-trip (issue #631).

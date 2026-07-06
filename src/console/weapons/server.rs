@@ -2125,7 +2125,7 @@ fn tick_blaster_system(
     mut ship_q: Query<
         (
             Option<&crate::entity_spawner::EntityUuid>,
-            &ShipPhysics,
+            &mut ShipPhysics,
             Option<&WeaponsTarget>,
             &mut BlasterSystemResource,
         ),
@@ -2134,9 +2134,13 @@ fn tick_blaster_system(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     mut outbox: ResMut<SimOutbox>,
+    #[cfg(feature = "server")] mut shake_state: Option<
+        ResMut<crate::server::viewscreen_border::ShakeState>,
+    >,
 ) {
     let dt = time.delta_secs();
-    for (source_uuid_opt, physics, weapons_target_opt, mut blaster_res) in ship_q.iter_mut() {
+    let now = time.elapsed_secs();
+    for (source_uuid_opt, mut physics, weapons_target_opt, mut blaster_res) in ship_q.iter_mut() {
         let source_uuid = source_uuid_opt
             .map(|u| u.0.as_str())
             .unwrap_or("")
@@ -2165,6 +2169,9 @@ fn tick_blaster_system(
 
         for bank in blaster_res.0.iter_mut() {
             let bank_id = bank.config.id.clone();
+            let visual_scale = bank.config.visual_scale;
+            let recoil_impulse = bank.config.recoil_impulse;
+            let screenshake_magnitude = bank.config.screenshake_magnitude;
             let events = bank.tick(
                 dt,
                 physics.x,
@@ -2177,16 +2184,55 @@ fn tick_blaster_system(
                 &source_uuid,
                 &mut || uuid::Uuid::new_v4().to_string(),
             );
-            for ev in events {
+            for ev in &events {
+                // ── Recoil impulse (issue #638) ─────────────────────────────
+                // Apply an instantaneous velocity impulse to the firing ship
+                // in the direction opposite to the projectile's heading.
+                // The physics model is 1D (forward_speed along ship axis), so
+                // we project the impulse onto the ship's forward axis and
+                // accumulate it into forward_speed. The opposite-to-fire
+                // convention is: impulse_dir = heading + π.
+                if recoil_impulse > 0.0 {
+                    // Ship forward direction in world space: (sin(yaw), -cos(yaw)).
+                    // Projectile direction: (sin(heading), -cos(heading)).
+                    // Recoil direction = opposite to projectile = -projectile.
+                    // Projection of recoil onto ship forward:
+                    //   dot((−sin(h), cos(h)), (sin(yaw), −cos(yaw)))
+                    //   = −sin(h)·sin(yaw) + cos(h)·(−cos(yaw))
+                    //   = −(sin(h)·sin(yaw) + cos(h)·cos(yaw))
+                    //   = −cos(h − yaw)
+                    let heading = ev.heading;
+                    let yaw = physics.yaw;
+                    let projection = -(heading - yaw).cos();
+                    physics.forward_speed += projection * recoil_impulse;
+                }
+
+                // ── Screenshake (issue #638) ─────────────────────────────────
+                // Push a synthetic entry into the rolling shake window.
+                // The shake system sums hull_damage in the window; we scale
+                // screenshake_magnitude so that 1.0 produces a noticeable
+                // single-shot kick. The formula:
+                //   magnitude = (total_hull / 30.0).min(1.0) * SHAKE_MAX_MAGNITUDE
+                // So pushing hull_damage = screenshake_magnitude * 30.0 maps
+                // 1.0 → full shake, 0.5 → half shake, etc.
+                #[cfg(feature = "server")]
+                if screenshake_magnitude > 0.0 {
+                    if let Some(ref mut shake) = shake_state {
+                        let hull_equiv = screenshake_magnitude * 30.0;
+                        shake.entries.push((now, hull_equiv));
+                    }
+                }
+
                 outbox.0.push((
                     Target::All,
                     ServerMessage::BlasterFired {
                         bank: bank_id.clone(),
                         source_uuid: source_uuid.clone(),
-                        projectile_id: ev.projectile_id,
+                        projectile_id: ev.projectile_id.clone(),
                         x: ev.x,
                         z: ev.z,
                         heading: ev.heading,
+                        visual_scale,
                     },
                 ));
             }

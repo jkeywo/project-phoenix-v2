@@ -123,6 +123,33 @@ cooldown_secs = 5
 beam_color = [ 1, 0.4, 0.1, 1 ]
 marker = "phasers_fore"
 
+# Blaster banks (issue #638): rapid-fire bolts, no recoil or screenshake on Destroyer.
+[[weapons_console.blaster_banks]]
+id = "fore"
+facing_deg = 0
+fire_arc_deg = 120
+volley_count = 3
+volley_interval_secs = 0.12
+cooldown_secs = 2.5
+projectile_speed = 45.0
+collision_radius = 1.0
+visual_scale = 0.6
+damage = 15
+range = 40.0
+
+[[weapons_console.blaster_banks]]
+id = "aft"
+facing_deg = 180
+fire_arc_deg = 120
+volley_count = 3
+volley_interval_secs = 0.12
+cooldown_secs = 2.5
+projectile_speed = 45.0
+collision_radius = 1.0
+visual_scale = 0.6
+damage = 15
+range = 40.0
+
 [torpedoes]
 count = 4
 damage_hull = 45
@@ -393,6 +420,18 @@ power_group = "weapons"
 [[system]]
 id = "torpedo-tube-fore"
 kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "blaster-fore"
+kind = "blaster_bank"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "blaster-aft"
+kind = "blaster_bank"
 station = "tactical"
 power_group = "weapons"
 

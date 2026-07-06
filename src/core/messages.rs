@@ -122,6 +122,10 @@ fn default_arc_width_deg() -> f32 {
     90.0
 }
 
+fn default_visual_scale() -> f32 {
+    1.0
+}
+
 /// String identifier for a phaser bank, matching the `id` field of the
 /// `[[weapons_console.phaser_banks]]` array in `player_ship.toml` (e.g.
 /// `"port"`, `"starboard"`). Used in `FirePhaser`, `PhaserFired`,
@@ -1230,6 +1234,11 @@ pub enum ServerMessage {
         x: f32,
         z: f32,
         heading: f32,
+        /// Visual scale hint for the client renderer (issue #638).
+        /// Small values (≤ 1.0) render a short bolt; large values render a sphere.
+        /// Defaults to 1.0 when absent (old wire format compatibility).
+        #[serde(default = "default_visual_scale")]
+        visual_scale: f32,
     },
     /// Broadcast to all when a blaster projectile hits a target (issue #631).
     BlasterHit {

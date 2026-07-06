@@ -162,6 +162,25 @@ cooldown_secs = 6
 beam_color = [ 1, 0.4, 0.1, 1 ]
 marker = "phasers_aft"
 
+# Heavy blaster bank (issue #638): charge-to-fire, sphere visual, meaningful recoil + screenshake.
+# charge_time_secs requires issue #636; the bank works as instant-fire until that ships.
+[[weapons_console.blaster_banks]]
+id = "heavy_fore"
+facing_deg = 0
+fire_arc_deg = 90
+volley_count = 1
+volley_interval_secs = 0.0
+cooldown_secs = 5.0
+charge_time_secs = 3.0
+projectile_speed = 55.0
+collision_radius = 2.5
+visual_scale = 3.0
+damage = 60
+shield_pierce = 0.1
+recoil_impulse = 4.0
+screenshake_magnitude = 0.6
+range = 50.0
+
 # Standard 3-tube torpedo layout — Cruiser stats
 [torpedoes]
 count = 6
@@ -527,6 +546,12 @@ power_group = "weapons"
 [[system]]
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
+id = "blaster-heavy-fore"
+kind = "blaster_bank"
 station = "tactical"
 power_group = "weapons"
 

@@ -119,6 +119,29 @@ pub struct AmbientLightConfig {
     pub brightness: Option<f32>,
 }
 
+/// Per-world ambient dust particle effect config from `[dust]`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DustPfxConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_motes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_spawn_rate: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_radius: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifetime_secs: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mote_radius: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f32; 4]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_opacity: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_opacity: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emissive_strength: Option<f32>,
+}
+
 /// A concrete entity instance declared in the world TOML — a reference to an
 /// entity template (under `assets/entities/`) plus instance-level metadata
 /// (transform sub-table, spawn timing, optional name for trigger/comms binding,
@@ -413,6 +436,9 @@ pub struct RawWorld {
     /// Optional world-level ambient light override.
     #[serde(default)]
     pub ambient_light: Option<AmbientLightConfig>,
+    /// Optional ambient dust particle effect config.
+    #[serde(default)]
+    pub dust: Option<DustPfxConfig>,
     /// List of selectable player ship options for this world.
     #[serde(default)]
     pub available_ships: Vec<AvailableShipEntry>,
@@ -1129,6 +1155,9 @@ pub struct WorldConfig {
     /// Optional world-level ambient light override; `None` means the
     /// renderer falls back to its built-in constants.
     pub ambient_light: Option<AmbientLightConfig>,
+    /// Optional ambient dust particle effect config; `None` means the
+    /// renderer falls back to built-in dust defaults.
+    pub dust: Option<DustPfxConfig>,
     /// List of selectable player ship options for this world.
     pub available_ships: Vec<AvailableShipEntry>,
     /// Optional spawn point for the player ship.
@@ -1308,6 +1337,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         name_to_uuid: HashMap::new(),
         extra_worlds: raw.extra_worlds,
         ambient_light: raw.ambient_light,
+        dust: raw.dust,
         available_ships,
         player_spawn: raw.player_spawn,
     })

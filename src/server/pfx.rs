@@ -9,6 +9,7 @@ use crate::entity_config::{EnginePfxConfig, PhaserBankConfig};
 use crate::entity_spawner::{EntityUuid, HelmConsoleSection};
 use crate::messages::GamePhase;
 use crate::model_rig::ModelMarkers;
+use crate::server::renderer::GameCamera;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{
     ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, TorpedoSystemResource,
@@ -31,6 +32,20 @@ const ENGINE_TRAIL_CRUMB_LIFETIME_SECS: f32 = 1.5;
 const ENGINE_TRAIL_MAX_CRUMBS: usize = 200;
 const ENGINE_TRAIL_MIN_CRUMB_DIST: f32 = 0.08;
 
+// Dust mote defaults (overridden by [dust] world config block)
+const DUST_MAX_MOTES: u32 = 120;
+const DUST_MAX_SPAWN_RATE: f32 = 40.0;
+const DUST_SPAWN_RADIUS: f32 = 60.0;
+const DUST_LIFETIME_SECS: f32 = 3.5;
+const DUST_MOTE_RADIUS: f32 = 0.08;
+const DUST_COLOR: [f32; 4] = [0.9, 0.92, 1.0, 0.6];
+const DUST_MIN_OPACITY: f32 = 0.05;
+const DUST_MAX_OPACITY: f32 = 0.6;
+const DUST_EMISSIVE_STRENGTH: f32 = 1.2;
+/// Fallback max speed when no `HelmConsoleSection` is present on the local ship.
+/// Matches the typical player ship `max_speed` in TOML; never used in normal play.
+const DUST_FALLBACK_MAX_SPEED: f32 = 12.5;
+
 pub struct PfxPlugin;
 
 impl Plugin for PfxPlugin {
@@ -46,6 +61,8 @@ impl Plugin for PfxPlugin {
                     spawn_engine_trails.run_if(in_state(GamePhase::InProgress)),
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),
                     tick_bursts.run_if(in_state(GamePhase::InProgress)),
+                    spawn_dust_motes.run_if(in_state(GamePhase::InProgress)),
+                    move_dust_motes.run_if(in_state(GamePhase::InProgress)),
                 )
                     // These read ship `Transform`/`ShipPhysics`, which
                     // `sync_ship_position` (SimSet::Physics) writes each tick.
@@ -89,6 +106,10 @@ struct PfxFadingMaterial {
     color: [f32; 4],
     emissive_strength: f32,
 }
+
+/// Marker component distinguishing ambient dust motes from other PFX entities.
+#[derive(Component)]
+struct DustMote;
 
 struct BeamEntities {
     body: Entity,
@@ -1042,6 +1063,162 @@ fn segment_transform(start: Vec3, end: Vec3, radius: f32) -> Transform {
         translation: start + delta * 0.5,
         rotation: Quat::from_rotation_arc(Vec3::Y, dir),
         scale: Vec3::new(radius, length, radius),
+    }
+}
+
+/// Resolved dust config — constants with world-config overrides applied.
+struct DustPfxSettings {
+    max_motes: u32,
+    max_spawn_rate: f32,
+    spawn_radius: f32,
+    lifetime_secs: f32,
+    mote_radius: f32,
+    color: [f32; 4],
+    min_opacity: f32,
+    max_opacity: f32,
+    emissive_strength: f32,
+}
+
+impl DustPfxSettings {
+    fn from_world(world_config: Option<&crate::world::config::WorldConfig>) -> Self {
+        let cfg = world_config.and_then(|wc| wc.dust.as_ref());
+        Self {
+            max_motes: cfg.and_then(|c| c.max_motes).unwrap_or(DUST_MAX_MOTES),
+            max_spawn_rate: cfg
+                .and_then(|c| c.max_spawn_rate)
+                .unwrap_or(DUST_MAX_SPAWN_RATE),
+            spawn_radius: cfg
+                .and_then(|c| c.spawn_radius)
+                .unwrap_or(DUST_SPAWN_RADIUS),
+            lifetime_secs: cfg
+                .and_then(|c| c.lifetime_secs)
+                .unwrap_or(DUST_LIFETIME_SECS),
+            mote_radius: cfg.and_then(|c| c.mote_radius).unwrap_or(DUST_MOTE_RADIUS),
+            color: cfg.and_then(|c| c.color).unwrap_or(DUST_COLOR),
+            min_opacity: cfg.and_then(|c| c.min_opacity).unwrap_or(DUST_MIN_OPACITY),
+            max_opacity: cfg.and_then(|c| c.max_opacity).unwrap_or(DUST_MAX_OPACITY),
+            emissive_strength: cfg
+                .and_then(|c| c.emissive_strength)
+                .unwrap_or(DUST_EMISSIVE_STRENGTH),
+        }
+    }
+}
+
+/// Spawns camera-relative ambient dust motes at a rate proportional to ship speed.
+fn spawn_dust_motes(
+    time: Res<Time>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut spawn_acc: Local<f32>,
+    cam_q: Query<&Transform, With<GameCamera>>,
+    ship_q: Query<(&ShipPhysics, Option<&HelmConsoleSection>), With<LocalShip>>,
+    mote_q: Query<(), With<DustMote>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Ok(cam_transform) = cam_q.single() else {
+        return;
+    };
+    let Ok((physics, helm)) = ship_q.single() else {
+        return;
+    };
+
+    let cfg = DustPfxSettings::from_world(world_config.as_deref());
+
+    let max_speed = helm
+        .map(|h| h.0.max_speed)
+        .unwrap_or(DUST_FALLBACK_MAX_SPEED)
+        .max(0.1);
+    let impulse_mult = helm
+        .map(|h| h.0.impulse_speed_multiplier)
+        .unwrap_or(crate::impulse::IMPULSE_SPEED_MULTIPLIER);
+    let speed_abs = physics.forward_speed.abs();
+    let speed_frac = (speed_abs / max_speed).clamp(0.0, 1.0);
+
+    let dt = time.delta_secs();
+    *spawn_acc += cfg.max_spawn_rate * speed_frac * dt;
+
+    let live_count = mote_q.iter().count() as u32;
+    let budget = cfg.max_motes.saturating_sub(live_count);
+    let to_spawn = (*spawn_acc as u32).min(budget);
+    *spawn_acc -= to_spawn as f32;
+    // Prevent unbounded accumulation when at the mote cap — without this the
+    // accumulator grows while all slots are occupied and triggers a burst
+    // the moment slots open up, defeating the rate-based spawning intent.
+    if budget == 0 {
+        *spawn_acc = spawn_acc.min(cfg.max_spawn_rate * dt);
+    }
+
+    if to_spawn == 0 {
+        return;
+    }
+
+    let opacity_ceil = (max_speed * impulse_mult).max(0.001);
+    let opacity_t = (speed_abs / opacity_ceil).clamp(0.0, 1.0);
+    let opacity = cfg.min_opacity + (cfg.max_opacity - cfg.min_opacity) * opacity_t;
+
+    let color = [cfg.color[0], cfg.color[1], cfg.color[2], opacity];
+    let sphere_mesh = meshes.add(Sphere {
+        radius: cfg.mote_radius,
+    });
+    let cam_pos = cam_transform.translation;
+
+    let mut rng = rand::rng();
+    for _ in 0..to_spawn {
+        let spawn_pos = loop {
+            let v = Vec3::new(
+                rng.random_range(-1.0_f32..1.0),
+                rng.random_range(-1.0_f32..1.0),
+                rng.random_range(-1.0_f32..1.0),
+            );
+            if v.length_squared() <= 1.0 {
+                break cam_pos + v * cfg.spawn_radius;
+            }
+        };
+
+        let mat = glow_material(
+            &mut materials,
+            color,
+            cfg.emissive_strength,
+            AlphaMode::Blend,
+        );
+        commands.spawn((
+            PfxEntity,
+            DustMote,
+            Mesh3d(sphere_mesh.clone()),
+            MeshMaterial3d(mat.clone()),
+            Transform::from_translation(spawn_pos),
+            PfxLifetime {
+                age: 0.0,
+                lifetime: cfg.lifetime_secs,
+            },
+            PfxFadingMaterial {
+                handle: mat,
+                color,
+                emissive_strength: cfg.emissive_strength,
+            },
+        ));
+    }
+}
+
+/// Moves all live dust motes opposite to ship heading at the ship's current forward_speed.
+fn move_dust_motes(
+    time: Res<Time>,
+    ship_q: Query<&ShipPhysics, With<LocalShip>>,
+    mut mote_q: Query<&mut Transform, With<DustMote>>,
+) {
+    let Ok(physics) = ship_q.single() else {
+        return;
+    };
+    let dt = time.delta_secs();
+    // Ship forward = (sin(yaw), 0, -cos(yaw)). Dust drifts opposite: (-sin, 0, +cos).
+    let drift = Vec3::new(
+        -physics.yaw.sin() * physics.forward_speed * dt,
+        0.0,
+        physics.yaw.cos() * physics.forward_speed * dt,
+    );
+    for mut transform in mote_q.iter_mut() {
+        transform.translation += drift;
     }
 }
 

@@ -82,6 +82,17 @@ description = "Eight waves of Harrow attackers. Hold the line."
 color      = [0.6, 0.55, 0.5]
 brightness = 300.0
 
+[dust]
+max_motes         = 120
+max_spawn_rate    = 40.0
+spawn_radius      = 60.0
+lifetime_secs     = 3.5
+mote_radius       = 0.08
+color             = [0.9, 0.92, 1.0, 0.6]
+min_opacity       = 0.05
+max_opacity       = 0.6
+emissive_strength = 1.2
+
 # ── Anchors ───────────────────────────────────────────────────────────────────
 #
 # Starbase at [500, 0, 100]. Spawn anchors are absolute world coords (the

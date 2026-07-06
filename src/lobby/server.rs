@@ -138,8 +138,7 @@ fn update_session_with_config(
         .map(|s| s.0.as_str())
         .unwrap_or("assets/entities/player_ship.toml");
 
-    if let Some(ship_config) = crate::config_cache::get_config_cache().get(config_path)
-    {
+    if let Some(ship_config) = crate::config_cache::get_config_cache().get(config_path) {
         // Build the client-facing ship config from the same source-of-truth.
         // `HelmConsoleConfig::effective_radar_range()` prefers the structured
         // [helm_console.radar] range when present, falling back to the legacy

@@ -1838,9 +1838,15 @@ label = "Cruiser"
 "#;
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.available_ships.len(), 2);
-        assert_eq!(cfg.available_ships[0].template_path, "assets/entities/ship_scout.toml");
+        assert_eq!(
+            cfg.available_ships[0].template_path,
+            "assets/entities/ship_scout.toml"
+        );
         assert_eq!(cfg.available_ships[0].label.as_deref(), Some("Scout"));
-        assert_eq!(cfg.available_ships[1].template_path, "assets/entities/ship_cruiser.toml");
+        assert_eq!(
+            cfg.available_ships[1].template_path,
+            "assets/entities/ship_cruiser.toml"
+        );
         assert_eq!(cfg.available_ships[1].label.as_deref(), Some("Cruiser"));
     }
 
@@ -1995,8 +2001,14 @@ transform = { position = [0.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         let paths = entity_template_paths(&cfg);
-        let count = paths.iter().filter(|p| *p == "assets/entities/player_ship.toml").count();
-        assert_eq!(count, 1, "duplicate ship path must be collapsed to one entry");
+        let count = paths
+            .iter()
+            .filter(|p| *p == "assets/entities/player_ship.toml")
+            .count();
+        assert_eq!(
+            count, 1,
+            "duplicate ship path must be collapsed to one entry"
+        );
     }
 
     // -- resolve_entity_position (PRD #337 slice 3) ------------------------

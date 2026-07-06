@@ -1331,7 +1331,10 @@ impl EntityConfig {
                 .iter()
                 .find(|s| s.kind == crate::system_registry::SHIELDS_KIND);
             let has_shields_station = shields_system.is_some()
-                || ship_config.stations.iter().any(|s| s.id == shields_station_id);
+                || ship_config
+                    .stations
+                    .iter()
+                    .any(|s| s.id == shields_station_id);
             let effective_shields_station = shields_system
                 .and_then(|s| s.station.clone())
                 .unwrap_or(shields_station_id);

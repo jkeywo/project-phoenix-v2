@@ -682,10 +682,7 @@ power_group = "ops"
         let config = parse_ok(valid_toml());
 
         let captain = config.station(&StationId("captain".into())).unwrap();
-        assert_eq!(
-            captain.console.as_deref(),
-            Some("gui/captain-console.html")
-        );
+        assert_eq!(captain.console.as_deref(), Some("gui/captain-console.html"));
 
         let tactical = config.station(&StationId("tactical".into())).unwrap();
         assert_eq!(
@@ -814,7 +811,10 @@ power_group = "ops"
                     assert_eq!(systems.len(), 1);
                 }
                 "tactical" => {
-                    assert_eq!(station.console.as_deref(), Some("gui/tactical-console.html"));
+                    assert_eq!(
+                        station.console.as_deref(),
+                        Some("gui/tactical-console.html")
+                    );
                     let systems: Vec<_> = config.systems_for_station(&station.id).collect();
                     assert_eq!(systems.len(), 1);
                 }

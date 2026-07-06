@@ -752,11 +752,13 @@ pub fn wasm_get_available_ships() -> Array {
     let arr = Array::new();
     for ship in ships {
         let obj = Object::new();
-        let label = ship
-            .label
-            .as_deref()
-            .unwrap_or(&ship.template_path);
-        Reflect::set(&obj, &JsValue::from_str("template_path"), &JsValue::from_str(&ship.template_path)).ok();
+        let label = ship.label.as_deref().unwrap_or(&ship.template_path);
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("template_path"),
+            &JsValue::from_str(&ship.template_path),
+        )
+        .ok();
         Reflect::set(&obj, &JsValue::from_str("label"), &JsValue::from_str(label)).ok();
         arr.push(&obj);
     }

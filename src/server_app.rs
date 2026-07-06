@@ -1930,9 +1930,7 @@ fn spawn_game_start_entities(
                     match mc.anchors.get(anchor_name) {
                         Some(a) => Vec3::new(a[0], a[1], a[2]),
                         None => {
-                            bevy::log::error!(
-                                "player_spawn anchor '{}' not found", anchor_name
-                            );
+                            bevy::log::error!("player_spawn anchor '{}' not found", anchor_name);
                             pos
                         }
                     }
@@ -1949,16 +1947,15 @@ fn spawn_game_start_entities(
         };
 
         // Override with player_spawn rotation when spawning the player ship (issue #623).
-        let player_spawn_rot: Option<bevy::math::Quat> = if !ship_spawned
-            && config.tags.iter().any(|t| t == "ship")
-        {
-            mc.player_spawn.as_ref().and_then(|s| s.rotation).map(|r| {
-                let (q, _) = player_spawn_rotation_yaw(r);
-                q
-            })
-        } else {
-            None
-        };
+        let player_spawn_rot: Option<bevy::math::Quat> =
+            if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
+                mc.player_spawn.as_ref().and_then(|s| s.rotation).map(|r| {
+                    let (q, _) = player_spawn_rotation_yaw(r);
+                    q
+                })
+            } else {
+                None
+            };
 
         let spawned = crate::entity_spawner::spawn_entity(
             &mut commands,
@@ -1970,9 +1967,9 @@ fn spawn_game_start_entities(
 
         // Apply rotation on the spawned entity's Transform
         if let Some(q) = player_spawn_rot {
-            commands.entity(spawned).insert(
-                bevy::prelude::Transform::from_translation(pos).with_rotation(q),
-            );
+            commands
+                .entity(spawned)
+                .insert(bevy::prelude::Transform::from_translation(pos).with_rotation(q));
         }
 
         // Extract yaw for ShipPhysicsComponent
@@ -6646,18 +6643,12 @@ mod tests {
     #[test]
     fn player_spawn_rotation_yaw_pitch_only_gives_zero_yaw() {
         let (_, yaw) = player_spawn_rotation_yaw([std::f32::consts::FRAC_PI_4, 0.0, 0.0]);
-        assert!(
-            yaw.abs() < 1e-6,
-            "pitch-only rotation should give zero yaw"
-        );
+        assert!(yaw.abs() < 1e-6, "pitch-only rotation should give zero yaw");
     }
 
     #[test]
     fn player_spawn_rotation_yaw_roll_only_gives_zero_yaw() {
         let (_, yaw) = player_spawn_rotation_yaw([0.0, 0.0, std::f32::consts::FRAC_PI_3]);
-        assert!(
-            yaw.abs() < 1e-6,
-            "roll-only rotation should give zero yaw"
-        );
+        assert!(yaw.abs() < 1e-6, "roll-only rotation should give zero yaw");
     }
 }

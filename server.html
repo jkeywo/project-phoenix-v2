@@ -867,8 +867,18 @@
   <link data-trunk rel="copy-dir" href="assets/shaders" />
   <!-- HTML console pages (issue #422): copied to dist/gui/ -->
   <link data-trunk rel="copy-dir" href="gui" />
-
   <script>
+  // ── Ship selection logic (issue #623, inlined from gui/ship-picker.js) ──
+  function resolveShipSelection(ships) {
+    if (!ships || ships.length === 0) {
+      return { action: 'legacy-fallback' };
+    }
+    if (ships.length === 1) {
+      return { action: 'auto-select', templatePath: ships[0].template_path };
+    }
+    return { action: 'show-picker', ships };
+  }
+
   // ── QR code toggle state (global, shared across handlers) ─────────────
   let qrVisible = false;
 
@@ -1714,7 +1724,9 @@ function finishInit() {
 
   const ships = wasm_get_available_ships();
 
-  if (ships.length === 0) {
+  const shipResult = resolveShipSelection(ships);
+
+  if (shipResult.action === 'legacy-fallback') {
     // Legacy world without available_ships: fall back to player_ship.toml.
     fetch('assets/entities/player_ship.toml')
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
@@ -1727,11 +1739,11 @@ function finishInit() {
         startServer();
       })
       .catch(err => { showFatalError('Failed to load player_ship.toml: ' + String(err)); });
-  } else if (ships.length === 1) {
+  } else if (shipResult.action === 'auto-select') {
     // Single ship — auto-select and proceed.
-    const ship = ships[0];
-    wasm_select_ship(ship.template_path);
-    fetch(ship.template_path)
+    const templatePath = shipResult.templatePath;
+    wasm_select_ship(templatePath);
+    fetch(templatePath)
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
         try { wasm_validate_stations(toml); } catch (err) {
@@ -1740,7 +1752,7 @@ function finishInit() {
         }
         startServer();
       })
-      .catch(err => { showFatalError('Failed to load ' + ship.template_path + ': ' + String(err)); });
+      .catch(err => { showFatalError('Failed to load ' + templatePath + ': ' + String(err)); });
   } else {
     // Multiple ships — show ship picker, defer server start until selection.
     const panel = document.getElementById('scenario-panel');
@@ -1749,7 +1761,7 @@ function finishInit() {
     document.getElementById('world-list-label').textContent = 'Select a ship';
     // Clear existing world buttons
     worldList.innerHTML = '';
-    for (const ship of ships) {
+    for (const ship of shipResult.ships) {
       const btn = document.createElement('button');
       btn.className = 'world-btn';
       btn.textContent = ship.label || ship.template_path;

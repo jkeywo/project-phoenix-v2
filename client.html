@@ -92,16 +92,13 @@
     }
     /* View selector cross and Red Alert button moved to Bevy WASM (#48). */
     /* Console container: full-screen flex layout host for the tab bar and
-        all console sections. Always column layout � tab bar at top,
+        all console sections. Always column layout — tab bar at top,
         console content below. */
     #console-container {
       position: fixed;
       inset: 0;
       display: flex;
       flex-direction: column;
-      padding-top: var(--bezel-inset);
-      border: 4px solid transparent;
-      transition: border-color 0.15s;
       z-index: 1;
       pointer-events: none;
     }
@@ -115,16 +112,7 @@
        Padding leaves room for the phone bezel (issue #439); see --bezel-inset
        further down. */
     /* Active HTML console sections fill the space below the tab bar. */
-    #weapons-ui.active,
-    #captain-ui.active,
-    #helm-ui.active,
-    #power-ui.active,
-    #repair-ui.active,
-    #shields-ui.active,
-    #sensors-ui.active,
-    #science-ui.active,
-    #comms-ui.active,
-    #navigation-ui.active {
+    .console-section.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -132,16 +120,7 @@
       min-width: 0;
       margin: 0;
     }
-    #weapons-ui iframe,
-    #captain-ui iframe,
-    #helm-ui iframe,
-    #power-ui iframe,
-    #repair-ui iframe,
-    #shields-ui iframe,
-    #sensors-ui iframe,
-    #science-ui iframe,
-    #comms-ui iframe,
-    #navigation-ui iframe {
+    .console-section iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -290,20 +269,7 @@
     #phone-bezel.alert-on .bezel-edge.left   { background-image: url("gui/borders/phone-edge-left-alert.png"); }
     #phone-bezel.alert-on .bezel-edge.right  { background-image: url("gui/borders/phone-edge-right-alert.png"); }
 
-    /* Iframe content sits inside the bezel safe zone.
-       No top padding � the container's padding-top + the tab bar already
-       clear the top bezel edge. Side + bottom still needed for most consoles.
-       Radar consoles (helm/weapons/sensors) get no padding so the iframe
-       fills to the screen edge, letting the radar circle meet the bezel. */
-    #helm-ui.active,
-    #weapons-ui.active,
-    #sensors-ui.active,
-    #science-ui.active { padding: 0; }
-    #captain-ui.active,
-    #power-ui.active,
-    #repair-ui.active,
-    #shields-ui.active,
-    #comms-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
+
 
     /* -- Console tab bar (issue #441) ----------------------------------
        First flex child of #console-container. In-flow so it takes up
@@ -683,64 +649,11 @@
       </div>
     </section>
 
-    <!-- Captain console: full-viewport polished HTML UI (issue #428).
-         Driven by __updateConsole via postMessage bridge.
-         Direction pad and red alert actions forwarded to server via PeerJS. -->
-    <section id="captain-ui">
-      <iframe id="captain-iframe" src="gui/captain-console.html"
-        title="Captain Console" allowfullscreen></iframe>
-    </section>
-
-    <!-- Weapons console: full-viewport polished HTML UI (issue #422).
-         Driven by __updateConsole via postMessage bridge.
-         Tap-to-lock, fire phaser, fire torpedo actions forwarded to server via PeerJS. -->
-    <section id="weapons-ui">
-      <iframe id="weapons-iframe" src="gui/tactical-console.html"
-        title="Tactical Console" allowfullscreen></iframe>
-    </section>
-
-    <!-- Helm console: full-viewport polished HTML UI (issue #423).
-         Driven by __updateConsole via postMessage bridge.
-         Joystick, impulse, and ON SCREEN actions forwarded to server via PeerJS. -->
-    <section id="helm-ui">
-      <iframe id="helm-iframe" src="gui/helm-console.html"
-        title="Helm Console" allowfullscreen></iframe>
-    </section>
-
-    <section id="power-ui">
-      <iframe id="power-iframe" src="gui/power-console.html"
-        title="Power Console" allowfullscreen></iframe>
-    </section>
-
-    <section id="repair-ui">
-      <iframe id="repair-iframe" src="gui/repair-console.html"
-        title="Repair Console" allowfullscreen></iframe>
-    </section>
-
-    <section id="shields-ui">
-      <iframe id="shields-iframe" src="gui/shields-console.html"
-        title="Shield Console" allowfullscreen></iframe>
-    </section>
-
-    <section id="sensors-ui">
-      <iframe id="sensors-iframe" src="gui/sensors-console.html"
-        title="Sensors Console" allowfullscreen></iframe>
-    </section>
-
-    <section id="science-ui">
-      <iframe id="science-iframe" src="gui/science-console.html"
-        title="Science Console" allowfullscreen></iframe>
-    </section>
-
-    <section id="comms-ui">
-      <iframe id="comms-iframe" src="gui/comms-console.html"
-        title="Comms Console" allowfullscreen></iframe>
-    </section>
-
-    <section id="navigation-ui">
-      <iframe id="navigation-iframe" src="gui/navigation-console.html"
-        title="Navigation Console" allowfullscreen></iframe>
-    </section>
+    <!-- Console sections are mounted dynamically by mountConsoles() when a
+         Welcome message arrives with ship_stations. Each section is created
+         with the same id/iframe-id conventions as the static originals
+         (e.g. #captain-ui / #captain-iframe) so all downstream $() references
+         continue to resolve. -->
   </div>
 
   <div id="status">Connecting�</div>
@@ -1083,10 +996,12 @@
         setActiveConsole(null);
       }
 
-      // Console sections (issue #441): map activeConsole ? HTML section id
+      // Console sections (issue #441): map activeConsole → HTML section id
       // via gui/content-switcher.js. Only the matching section gets `.active`.
       // Every console (including Helm and Navigation) is an HTML iframe with
-      // its own section entry like weapons-ui.
+      // its own section entry like weapons-ui. Sections that don't exist on
+      // this ship are simply absent from the DOM; the $() call returns null
+      // and is silently skipped.
       const sections = (typeof window.consoleSections === 'function')
         ? window.consoleSections(activeConsole, inGame)
         : { 'captain-ui': inGame && activeConsole === 'captain',
@@ -1099,16 +1014,10 @@
              'science-ui': inGame && activeConsole === 'science',
               'comms-ui':  inGame && activeConsole === 'comms',
              'navigation-ui': inGame && activeConsole === 'navigation' };
-      $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
-      $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
-      $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
-      $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
-      $('power-ui').className  = sections['power-ui']  ? 'active' : '';
-      $('shields-ui').className = sections['shields-ui'] ? 'active' : '';
-      $('sensors-ui').className = sections['sensors-ui'] ? 'active' : '';
-      $('science-ui').className = sections['science-ui'] ? 'active' : '';
-      $('comms-ui').className  = sections['comms-ui']  ? 'active' : '';
-      $('navigation-ui').className = sections['navigation-ui'] ? 'active' : '';
+      for (const [sectionId, visible] of Object.entries(sections)) {
+        const el = $(sectionId);
+        if (el) el.className = visible ? 'console-section active' : 'console-section';
+      }
 
       // Orientation drives both the tab-bar layout and the container's
       // flex-direction (portrait = column, landscape = row). Computed once
@@ -1434,8 +1343,29 @@
       _pushIframe($('weapons-iframe'), 'tactical', buildWeaponsConsoleState());
     }
 
-    // Re-push when the iframe finishes loading so it receives current state.
-    if ($('weapons-iframe')) $('weapons-iframe').addEventListener('load', () => { pushWeaponsConsoleState(); injectSwipeRelay($('weapons-iframe')); });
+    // Attach on-load listener for an iframe that was created dynamically by
+    // mountConsoles(). Each iframe re-pushes its console state on load so it
+    // receives the current snapshot even after a reload or late mount, and
+    // gets the swipe relay injected so the touch-swipe gesture works inside
+    // the frame. consoleName must be the lowercase station id.
+    function _attachIframeLoadListener(iframeEl, consoleName) {
+      if (!iframeEl) return;
+      iframeEl.addEventListener('load', () => {
+        switch (consoleName) {
+          case 'tactical':   pushWeaponsConsoleState();    break;
+          case 'captain':    pushCaptainConsoleState();    break;
+          case 'helm':       pushHelmConsoleState();       break;
+          case 'repair':     pushRepairConsoleState();     break;
+          case 'power':      pushPowerConsoleState();      break;
+          case 'shields':    pushShieldsConsoleState();    break;
+          case 'sensors':    pushSensorsConsoleState();    break;
+          case 'science':    pushScienceConsoleState();    break;
+          case 'comms':      pushCommsConsoleState();      break;
+          case 'navigation': pushNavigationConsoleState(); break;
+        }
+        injectSwipeRelay(iframeEl);
+      });
+    }
 
     function renderGame(s) {
       if (activeConsole === 'captain') {
@@ -1479,9 +1409,6 @@
       _pushIframe($('captain-iframe'), 'captain', buildCaptainConsoleState());
     }
 
-    // Re-push when the iframe finishes loading so it receives current state.
-    if ($('captain-iframe')) $('captain-iframe').addEventListener('load', () => { pushCaptainConsoleState(); injectSwipeRelay($('captain-iframe')); });
-
     // -- Helm console iframe bridge (issue #423) ------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
 
@@ -1495,9 +1422,6 @@
       _pushIframe($('helm-iframe'), 'helm', buildHelmConsoleState());
     }
 
-    // Re-push when the iframe finishes loading so it receives current state.
-    if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState(); injectSwipeRelay($('helm-iframe')); });
-
     // -- Repair console iframe bridge (issue #425) ----------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildRepairConsoleState() {
@@ -1509,8 +1433,6 @@
       if (activeConsole !== 'repair') return;
       _pushIframe($('repair-iframe'), 'repair', buildRepairConsoleState());
     }
-
-    if ($('repair-iframe')) $('repair-iframe').addEventListener('load', () => { pushRepairConsoleState(); injectSwipeRelay($('repair-iframe')); });
 
     // -- Power console iframe bridge (issue #425) -----------------------------
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1524,8 +1446,6 @@
       _pushIframe($('power-iframe'), 'power', buildPowerConsoleState());
     }
 
-    if ($('power-iframe')) $('power-iframe').addEventListener('load', () => { pushPowerConsoleState(); injectSwipeRelay($('power-iframe')); });
-
     // -- Shields console iframe bridge (issue #423) ---------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildShieldsConsoleState() {
@@ -1537,8 +1457,6 @@
       if (activeConsole !== 'shields') return;
       _pushIframe($('shields-iframe'), 'shields', buildShieldsConsoleState());
     }
-
-    if ($('shields-iframe')) $('shields-iframe').addEventListener('load', () => { pushShieldsConsoleState(); injectSwipeRelay($('shields-iframe')); });
 
     // -- Sensors console iframe bridge -----------------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1552,8 +1470,6 @@
       _pushIframe($('sensors-iframe'), 'sensors', buildSensorsConsoleState());
     }
 
-    if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); injectSwipeRelay($('sensors-iframe')); });
-
     // -- Science console iframe bridge --------------------------------------------
     function buildScienceConsoleState() {
       if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('science', state);
@@ -1564,8 +1480,6 @@
       if (activeConsole !== 'science') return;
       _pushIframe($('science-iframe'), 'science', buildScienceConsoleState());
     }
-
-    if ($('science-iframe')) $('science-iframe').addEventListener('load', () => { pushScienceConsoleState(); injectSwipeRelay($('science-iframe')); });
 
     // -- Comms console iframe bridge --------------------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
@@ -1578,8 +1492,6 @@
       if (activeConsole !== 'comms') return;
       _pushIframe($('comms-iframe'), 'comms', buildCommsConsoleState());
     }
-
-    if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); injectSwipeRelay($('comms-iframe')); });
 
     // -- Coordination popup (issue #494) ---------------------------------------
     let coordinationPopupTimer = null;
@@ -1647,7 +1559,56 @@
       _pushIframe($('navigation-iframe'), 'navigation', buildNavigationConsoleState());
     }
 
-    if ($('navigation-iframe')) $('navigation-iframe').addEventListener('load', () => { pushNavigationConsoleState(); injectSwipeRelay($('navigation-iframe')); });
+    // -- Dynamic console mounting (Module H / issue #621) ----------------------
+    // Called after a Welcome message updates state.shipStations.
+    // Creates <section id="{sectionId}" class="console-section"> +
+    // <iframe id="{iframeId}"> for each station the ship has, using
+    // resolveConsoleUrl() to determine the iframe src.
+    // Stations not present on this ship have no DOM elements, keeping the DOM
+    // minimal and matching only what the current ship configuration provides.
+    function mountConsoles(shipStations) {
+      const container = $('console-container');
+      if (!container) return;
+
+      // Remove all previously-mounted console sections (identified by class),
+      // but leave the lobby-ui, tab-bar and help-area siblings untouched.
+      const existing = container.querySelectorAll('.console-section');
+      for (const el of existing) el.remove();
+
+      const stations = (shipStations && shipStations.stations) || [];
+      const registry = window.CONSOLE_REGISTRY || {};
+
+      for (const st of stations) {
+        const stationId = st.id;
+        if (!stationId) continue;
+
+        // Derive the section/iframe ids: prefer the REGISTRY entry so we stay
+        // consistent with content-switcher.js; fall back to the default scheme.
+        const entry = registry[stationId];
+        const sectionId = entry ? entry.sectionId : (stationId + '-ui');
+        const iframeId  = entry ? entry.iframeId  : (stationId + '-iframe');
+
+        const url = (typeof window.resolveConsoleUrl === 'function')
+          ? window.resolveConsoleUrl(shipStations, stationId)
+          : (st.console || ('gui/' + stationId + '-console.html'));
+
+        const section = document.createElement('section');
+        section.id = sectionId;
+        section.className = 'console-section';
+
+        const iframe = document.createElement('iframe');
+        iframe.id = iframeId;
+        iframe.src = url;
+        iframe.title = st.name || stationId;
+        iframe.allowFullscreen = true;
+
+        section.appendChild(iframe);
+        container.appendChild(section);
+
+        // Attach load listener so the iframe re-pushes state after load/reload.
+        _attachIframeLoadListener(iframe, stationId);
+      }
+    }
 
     // -- Console action postMessage bridge (issue #422) ------------------------
     // All iframe consoles send {type:'console_action', payload:json} via
@@ -1830,27 +1791,11 @@
             state.shipStations = msg.data.ship_stations || { stations: [] };
             state.players = msg.data.state.players.map(p => ({ ...p }));
           }
-          // Dynamically set iframe src from station console paths.
-          // In InProgress, only mount the player's own assigned station iframe
-          // (AC#1 of issue #626). In Lobby all iframes are eagerly loaded so
-          // the player can pick any station without a loading delay.
-          if (typeof window.resolveConsoleUrl === 'function') {
-            const stations = (state.shipStations && state.shipStations.stations) || [];
-            const myStationId = playerStation(state);
-            const inProgress = state.phase === 'InProgress';
-            for (const st of stations) {
-              // In-progress: skip stations the local player does not own.
-              if (inProgress && st.id !== myStationId) continue;
-              const entry = window.CONSOLE_REGISTRY && window.CONSOLE_REGISTRY[st.id];
-              if (!entry) continue;
-              const iframe = document.getElementById(entry.iframeId);
-              if (!iframe) continue;
-              const url = window.resolveConsoleUrl(state.shipStations, st.id);
-              if (iframe.src !== url) {
-                iframe.src = url;
-              }
-            }
-          }
+          // Mount console sections dynamically from ship_stations (Module H).
+          // mountConsoles() creates <section>+<iframe> for each station the
+          // ship carries and attaches load listeners — replacing the old static
+          // HTML sections that were hardcoded for every possible console.
+          mountConsoles(state.shipStations);
           if (window.simState) {
             // Share the module's entity array so in-place SimState position
             // updates and Entity/AsteroidSpawned appends flow through, and
@@ -1885,6 +1830,19 @@
             // rows immediately on (re)connect, before the first RepairState
             // broadcast (no-op unless Repair is the active console).
             pushRepairConsoleState();
+          }
+
+          // Inject ship theme CSS from Welcome ship_css (Fix: Module F).
+          const shipCss = (msg.data.ship_config || {}).ship_css;
+          if (shipCss) {
+            let linkEl = document.getElementById('ship-theme-css');
+            if (!linkEl) {
+              linkEl = document.createElement('link');
+              linkEl.rel = 'stylesheet';
+              linkEl.id = 'ship-theme-css';
+              document.head.appendChild(linkEl);
+            }
+            linkEl.href = shipCss;
           }
 
           if (msg.data.state.world) {

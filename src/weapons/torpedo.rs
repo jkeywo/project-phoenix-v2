@@ -630,8 +630,7 @@ impl TorpedoSystem {
         // Ã¢â€â‚¬Ã¢â€â‚¬ Auto-unload toward target_count Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         for i in 0..n_tubes {
             let tube = &self.tubes[i];
-            if tube.target_count > 0
-                && tube.load_state == TubeLoadState::Unloaded
+            if tube.load_state == TubeLoadState::Unloaded
                 && tube.loaded_count > tube.target_count
             {
                 let lt = tube.load_time;
@@ -842,6 +841,10 @@ mod tests {
 
     fn load_tube(sys: &mut TorpedoSystem, id: &str) {
         let load_time = sys.tube(id).unwrap().load_time;
+        // Set target_count = 1 before loading so the auto-unload logic
+        // inside tick() does not immediately drain the torpedo we are about
+        // to load (auto-unload fires when loaded_count > target_count).
+        sys.tube_mut(id).unwrap().target_count = 1;
         assert!(sys.start_load(id));
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(load_time, &targets, &mut no_uuid);
@@ -977,6 +980,10 @@ mod tests {
             sys.tube("fore_port").unwrap().load_state,
             TubeLoadState::Unloaded
         );
+        // Disable auto-management on this tube: the test verifies that a
+        // manual launch does NOT trigger an automatic reload on its own.
+        // (Auto-management only reloads when target_count > loaded_count.)
+        sys.tube_mut("fore_port").unwrap().target_count = 0;
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(sys.config.load_time, &targets, &mut no_uuid);
         assert_eq!(
@@ -1015,6 +1022,10 @@ mod tests {
         assert_eq!(sys.torpedoes_remaining, 9);
         assert!(sys.start_unload("fore_port"));
         assert_eq!(sys.torpedoes_remaining, 9); // not returned yet
+        // Disable auto-management so the manual-unload test is isolated: after
+        // the timer fires we expect exactly one torpedo to return to the pool
+        // and no auto-reload to start.
+        sys.tube_mut("fore_port").unwrap().target_count = 0;
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(
             sys.tube("fore_port").unwrap().load_time,
@@ -1562,6 +1573,55 @@ mod tests {
         assert_eq!(
             sys.torpedoes_remaining, 9,
             "one torpedo returned to magazine"
+        );
+    }
+
+    #[test]
+    fn auto_unload_when_target_set_to_zero() {
+        // Regression for issue #632: setting target_count=0 must drain all
+        // loaded torpedoes back to the magazine automatically.
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.load_time = 1.0;
+        let tubes = vec![volley_cfg("t1", 3)];
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        // Pre-load 2 torpedoes directly (bypass timer for test clarity).
+        sys.torpedoes_remaining -= 2;
+        {
+            let tube = sys.tube_mut("t1").unwrap();
+            tube.loaded_count = 2;
+            tube.target_count = 0; // target is already 0
+        }
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        // First tick should start unloading the first torpedo.
+        sys.tick(0.0, &targets, &mut no_uuid);
+        assert!(
+            matches!(
+                sys.tube("t1").unwrap().load_state,
+                TubeLoadState::Unloading { .. }
+            ),
+            "tube should be unloading after target_count set to 0"
+        );
+        // Complete the first unload.
+        sys.tick(1.0, &targets, &mut no_uuid);
+        assert_eq!(sys.tube("t1").unwrap().loaded_count, 1);
+        // Next tick starts unloading the second torpedo.
+        sys.tick(0.0, &targets, &mut no_uuid);
+        assert!(matches!(
+            sys.tube("t1").unwrap().load_state,
+            TubeLoadState::Unloading { .. }
+        ));
+        // Complete the second unload.
+        sys.tick(1.0, &targets, &mut no_uuid);
+        assert_eq!(sys.tube("t1").unwrap().loaded_count, 0);
+        assert_eq!(
+            sys.tube("t1").unwrap().load_state,
+            TubeLoadState::Unloaded,
+            "tube should be fully unloaded"
+        );
+        assert_eq!(
+            sys.torpedoes_remaining, 10,
+            "both torpedoes returned to magazine"
         );
     }
 }

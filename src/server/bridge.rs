@@ -20,7 +20,8 @@ use {
         ConsoleStateChanged, HudStateChanged, LobbyStateChanged, LOCAL_CONSOLE_TOKEN,
     },
     crate::lobby::{
-        InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target,
+        InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected,
+        SelectedShipResource, Target,
     },
     crate::messages::{self, DeliveryClass},
     crate::modifier_coordination::ModifierCoordinationPlugin,
@@ -32,7 +33,7 @@ use {
     crate::viewscreen_border::ViewscreenBorderPlugin,
     crate::world::WorldPlugin,
     bevy::{prelude::*, DefaultPlugins},
-    js_sys::Function,
+    js_sys::{Array, Function, Object, Reflect},
     std::cell::RefCell,
     wasm_bindgen::prelude::*,
 };
@@ -190,6 +191,12 @@ thread_local! {
     /// [`viewscreen_border::apply_camera_shake`] each frame and read by
     /// [`flush_shake_state`] for the JS callback.
     static SHAKE_OFFSET: RefCell<(f32, f32)> = const { RefCell::new((0.0, 0.0)) };
+
+    /// Template path of the player ship selected by the host. Set by
+    /// `wasm_select_ship()` before `wasm_init()`. When absent, defaults
+    /// to `"assets/entities/player_ship.toml"`.
+    static SELECTED_SHIP_TEMPLATE_PATH: RefCell<Option<String>> =
+        const { RefCell::new(None) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -330,6 +337,14 @@ pub fn wasm_init() {
         .add_plugins(crate::lobby::lobby_outbox_broadcaster());
     add_simulation_plugins(&mut app);
     app.add_plugins(WorldPlugin);
+    // Insert the selected ship resource (set by wasm_select_ship before
+    // wasm_init was called). Falls back to the legacy default path.
+    {
+        let ship_path = SELECTED_SHIP_TEMPLATE_PATH
+            .with(|slot| slot.borrow().clone())
+            .unwrap_or_else(|| "assets/entities/player_ship.toml".to_string());
+        app.insert_resource(crate::lobby::SelectedShipResource(ship_path));
+    }
     if is_automation {
         // push_lobby_state is normally registered by ViewscreenBorderPlugin,
         // which we skip in automation mode. Register it directly so the HTML
@@ -715,6 +730,50 @@ pub fn wasm_push_world_toml(path: String, toml_str: String) {
 #[wasm_bindgen]
 pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
     crate::config_cache::wasm_push_sidecar_toml(path, toml_str);
+}
+
+/// Return the list of available player ships for the currently loaded world.
+///
+/// Returns a JS array of `{ template_path: string, label: string }` objects.
+/// The list comes from the world's `[available_ships]` entries (issue #623).
+/// When the world has no `available_ships` list, returns an empty array — the
+/// host should fall back to the hardcoded `assets/entities/player_ship.toml`.
+///
+/// Uses `js_sys::Array` / `JsValue` to avoid manual JSON construction (which
+/// would need escaping for `"` and `\` in template_path or label values).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_available_ships() -> Array {
+    let world_config = crate::config_cache::get_world_config();
+    let ships = match world_config {
+        Some(ref wc) => &wc.available_ships,
+        None => return Array::new(),
+    };
+    let arr = Array::new();
+    for ship in ships {
+        let obj = Object::new();
+        let label = ship
+            .label
+            .as_deref()
+            .unwrap_or(&ship.template_path);
+        Reflect::set(&obj, &JsValue::from_str("template_path"), &JsValue::from_str(&ship.template_path)).ok();
+        Reflect::set(&obj, &JsValue::from_str("label"), &JsValue::from_str(label)).ok();
+        arr.push(&obj);
+    }
+    arr
+}
+
+/// Store the host's chosen player ship template path.
+///
+/// Must be called before `wasm_init()`. The path is used by
+/// `update_session_with_config` and `spawn_game_start_entities` to
+/// load the correct ship config and entity template.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_select_ship(template_path: &str) {
+    SELECTED_SHIP_TEMPLATE_PATH.with(|slot| {
+        *slot.borrow_mut() = Some(template_path.to_string());
+    });
 }
 
 // ── Bevy bridge systems ────────────────────────────────────────────────────

@@ -8,7 +8,10 @@ use crate::messages::{
 use crate::server::asset_preload::AssetPreloadResource;
 use crate::session::SessionManager;
 use crate::ship::rating;
-use crate::ship_plugin::{ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources};
+use crate::ship_plugin::{
+    load_ship_config_from_disk, ActiveStationRatings, PendingShipConfig, ShipConfigComponent,
+    ShipSystemControlSources,
+};
 use crate::stations_config::{stations_from_ship_config, ShipStations};
 
 /// Cached `GameState` snapshot derived from `Sessions` + `GamePhase` each frame.
@@ -44,6 +47,13 @@ pub struct ShipClientConfigResource(pub ShipClientConfig);
 /// and replayed inside `Welcome` for mid-game reconnects.
 #[derive(Resource, Clone, Default)]
 pub struct WorldResource(pub WorldData);
+
+/// Template path of the player ship selected during the host first screen.
+/// Set by JS via `wasm_select_ship` before `wasm_init`. Defaults to
+/// `"assets/entities/player_ship.toml"` for legacy worlds that don't
+/// expose an `available_ships` list.
+#[derive(Resource, Clone)]
+pub struct SelectedShipResource(pub String);
 
 // ── Messages (Bevy 0.18 pull-based message system) ─────────────────────────
 
@@ -109,15 +119,26 @@ impl Plugin for LobbyPlugin {
 fn update_session_with_config(
     mut ship_stations: ResMut<ShipStations>,
     mut ship_client_config: ResMut<ShipClientConfigResource>,
+    pending_ship_config: Option<Res<PendingShipConfig>>,
+    selected_ship: Option<Res<SelectedShipResource>>,
 ) {
-    let ship_config_resource = crate::ship_plugin::load_ship_config_from_disk();
+    let ship_config_resource = if let Some(pending) = pending_ship_config {
+        ShipConfigComponent(pending.0.clone())
+    } else {
+        load_ship_config_from_disk()
+    };
     if ship_stations.stations.is_empty() {
         *ship_stations = stations_from_ship_config(&ship_config_resource.0);
     }
 
-    // Get the config cache from thread-local storage
-    if let Some(ship_config) =
-        crate::config_cache::get_config_cache().get("assets/entities/player_ship.toml")
+    // Use the selected ship path (from available_ships) or fall back to the
+    // legacy default for worlds without an `available_ships` list.
+    let config_path = selected_ship
+        .as_ref()
+        .map(|s| s.0.as_str())
+        .unwrap_or("assets/entities/player_ship.toml");
+
+    if let Some(ship_config) = crate::config_cache::get_config_cache().get(config_path)
     {
         // Build the client-facing ship config from the same source-of-truth.
         // `HelmConsoleConfig::effective_radar_range()` prefers the structured
@@ -783,5 +804,63 @@ mod tests {
             }),
             "ReleaseStation should work during InProgress phase"
         );
+    }
+
+    #[test]
+    fn selected_ship_resource_populates_ship_stations_via_update_session() {
+        use crate::messages::StationId;
+        use crate::ship::config::{ShipConfig, StationConfig, StationRatingConfig};
+        use std::collections::HashMap;
+
+        let mut app = test_app();
+
+        // Insert PendingShipConfig so update_session_with_config uses it.
+        // ShipStations starts empty (init_resource in LobbyPlugin).
+        let ship_config = ShipConfig {
+            stations: vec![
+                StationConfig {
+                    id: StationId("helm".into()),
+                    name: "Helm".into(),
+                    description: "Helm station".into(),
+                    rank: "Crew".into(),
+                    short_code: "H".into(),
+                    ratings: vec![StationRatingConfig {
+                        name: "Std".into(),
+                        automated_systems: vec![],
+                        ai_tuning: None,
+                    }],
+                    console: None,
+                },
+                StationConfig {
+                    id: StationId("tactical".into()),
+                    name: "Tactical".into(),
+                    description: "Tactical station".into(),
+                    rank: "Crew".into(),
+                    short_code: "T".into(),
+                    ratings: vec![StationRatingConfig {
+                        name: "Std".into(),
+                        automated_systems: vec![],
+                        ai_tuning: None,
+                    }],
+                    console: None,
+                },
+            ],
+            systems: vec![],
+            power_groups: HashMap::new(),
+            coordination_lag_secs: 2.0,
+        };
+        app.world_mut()
+            .insert_resource(crate::ship_plugin::PendingShipConfig(ship_config.clone()));
+
+        // First update runs Startup systems including update_session_with_config
+        app.update();
+
+        // Assert stations were populated from PendingShipConfig
+        let stations = app.world().resource::<ShipStations>();
+        assert_eq!(stations.stations.len(), 2);
+        assert_eq!(stations.stations[0].id.0, "helm");
+        assert_eq!(stations.stations[0].name, "Helm");
+        assert_eq!(stations.stations[1].id.0, "tactical");
+        assert_eq!(stations.stations[1].name, "Tactical");
     }
 }

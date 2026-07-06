@@ -1708,22 +1708,70 @@ function finishInit() {
     set_console_state_callback(window.__updateConsole);
   }
 
-  // Validate station config before starting PeerJS or the Bevy app.
-  // A malformed [stations] section must refuse to boot.
-  fetch('assets/entities/player_ship.toml')
-    .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
-    .then(toml => {
-      try {
-        wasm_validate_stations(toml);
-      } catch (err) {
-        showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
-        return;
-      }
-      startServer();
-    })
-    .catch(err => {
-      showFatalError('Failed to load player_ship.toml: ' + String(err));
-    });
+  // ── Available ships from world config (issue #623) ──────────────────────
+  window.wasm_get_available_ships = wasmBindings.wasm_get_available_ships;
+  window.wasm_select_ship = wasmBindings.wasm_select_ship;
+
+  const ships = wasm_get_available_ships();
+
+  if (ships.length === 0) {
+    // Legacy world without available_ships: fall back to player_ship.toml.
+    fetch('assets/entities/player_ship.toml')
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(toml => {
+        wasm_select_ship('assets/entities/player_ship.toml');
+        try { wasm_validate_stations(toml); } catch (err) {
+          showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+          return;
+        }
+        startServer();
+      })
+      .catch(err => { showFatalError('Failed to load player_ship.toml: ' + String(err)); });
+  } else if (ships.length === 1) {
+    // Single ship — auto-select and proceed.
+    const ship = ships[0];
+    wasm_select_ship(ship.template_path);
+    fetch(ship.template_path)
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(toml => {
+        try { wasm_validate_stations(toml); } catch (err) {
+          showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+          return;
+        }
+        startServer();
+      })
+      .catch(err => { showFatalError('Failed to load ' + ship.template_path + ': ' + String(err)); });
+  } else {
+    // Multiple ships — show ship picker, defer server start until selection.
+    const panel = document.getElementById('scenario-panel');
+    const worldList = document.getElementById('world-list');
+    // Replace world list label
+    document.getElementById('world-list-label').textContent = 'Select a ship';
+    // Clear existing world buttons
+    worldList.innerHTML = '';
+    for (const ship of ships) {
+      const btn = document.createElement('button');
+      btn.className = 'world-btn';
+      btn.textContent = ship.label || ship.template_path;
+      btn.addEventListener('click', function() {
+        wasm_select_ship(ship.template_path);
+        panel.style.display = 'none';
+        fetch(ship.template_path)
+          .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+          .then(toml => {
+            try { wasm_validate_stations(toml); } catch (err) {
+              showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+              return;
+            }
+            startServer();
+          })
+          .catch(err => { showFatalError('Failed to load ' + ship.template_path + ': ' + String(err)); });
+      });
+      worldList.appendChild(btn);
+    }
+    // Show the panel again (it may have been hidden by world selection)
+    panel.style.display = '';
+  }
 }
 
 function showFatalError(message) {

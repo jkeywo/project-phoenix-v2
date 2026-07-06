@@ -1861,6 +1861,12 @@ fn setup_world(
     }
 }
 
+fn player_spawn_rotation_yaw(rot: [f32; 3]) -> (bevy::math::Quat, f32) {
+    let q = bevy::math::Quat::from_euler(bevy::math::EulerRot::YXZ, rot[1], rot[0], rot[2]);
+    let (yaw, _, _) = q.to_euler(bevy::math::EulerRot::YXZ);
+    (q, yaw)
+}
+
 /// Spawn entities with `spawn_on = GameStart` (e.g. player ship) when the
 /// game transitions to InProgress. Registered in `OnEnter(GamePhase::InProgress)`.
 fn spawn_game_start_entities(
@@ -1916,6 +1922,44 @@ fn spawn_game_start_entities(
             }
         };
 
+        // Override with player_spawn position when spawning the player ship
+        // (issue #623).
+        let pos = if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
+            if let Some(ref spawn) = mc.player_spawn {
+                if let Some(ref anchor_name) = spawn.anchor {
+                    match mc.anchors.get(anchor_name) {
+                        Some(a) => Vec3::new(a[0], a[1], a[2]),
+                        None => {
+                            bevy::log::error!(
+                                "player_spawn anchor '{}' not found", anchor_name
+                            );
+                            pos
+                        }
+                    }
+                } else if let Some(p) = spawn.position {
+                    Vec3::new(p[0], p[1], p[2])
+                } else {
+                    pos
+                }
+            } else {
+                pos
+            }
+        } else {
+            pos
+        };
+
+        // Override with player_spawn rotation when spawning the player ship (issue #623).
+        let player_spawn_rot: Option<bevy::math::Quat> = if !ship_spawned
+            && config.tags.iter().any(|t| t == "ship")
+        {
+            mc.player_spawn.as_ref().and_then(|s| s.rotation).map(|r| {
+                let (q, _) = player_spawn_rotation_yaw(r);
+                q
+            })
+        } else {
+            None
+        };
+
         let spawned = crate::entity_spawner::spawn_entity(
             &mut commands,
             &config,
@@ -1923,6 +1967,21 @@ fn spawn_game_start_entities(
             uuid,
             entity_inst.id.clone(),
         );
+
+        // Apply rotation on the spawned entity's Transform
+        if let Some(q) = player_spawn_rot {
+            commands.entity(spawned).insert(
+                bevy::prelude::Transform::from_translation(pos).with_rotation(q),
+            );
+        }
+
+        // Extract yaw for ShipPhysicsComponent
+        let initial_yaw = player_spawn_rot
+            .map(|q| {
+                let (yaw, _, _) = q.to_euler(bevy::math::EulerRot::YXZ);
+                yaw
+            })
+            .unwrap_or(0.0);
 
         // The first GameStart entity with tags containing "ship" gets the Ship marker
         if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
@@ -1970,6 +2029,7 @@ fn spawn_game_start_entities(
                 .insert(ShipPhysicsComponent {
                     x: pos.x,
                     z: pos.z,
+                    yaw: initial_yaw,
                     ..Default::default()
                 })
                 .insert(crate::ai_plugin::ShipAiMemory::default())
@@ -6566,6 +6626,38 @@ mod tests {
         assert!(
             !shield_status[3].is_focused,
             "Starboard should not be focused"
+        );
+    }
+
+    #[test]
+    fn player_spawn_rotation_yaw_extracts_yaw_correctly() {
+        let (q, yaw) = player_spawn_rotation_yaw([0.0, std::f32::consts::FRAC_PI_2, 0.0]);
+        assert!(
+            (yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-6,
+            "yaw-only rotation should produce matching yaw"
+        );
+        let (y, _, _) = q.to_euler(bevy::math::EulerRot::YXZ);
+        assert!(
+            (y - std::f32::consts::FRAC_PI_2).abs() < 1e-6,
+            "quaternion yaw should match input"
+        );
+    }
+
+    #[test]
+    fn player_spawn_rotation_yaw_pitch_only_gives_zero_yaw() {
+        let (_, yaw) = player_spawn_rotation_yaw([std::f32::consts::FRAC_PI_4, 0.0, 0.0]);
+        assert!(
+            yaw.abs() < 1e-6,
+            "pitch-only rotation should give zero yaw"
+        );
+    }
+
+    #[test]
+    fn player_spawn_rotation_yaw_roll_only_gives_zero_yaw() {
+        let (_, yaw) = player_spawn_rotation_yaw([0.0, 0.0, std::f32::consts::FRAC_PI_3]);
+        assert!(
+            yaw.abs() < 1e-6,
+            "roll-only rotation should give zero yaw"
         );
     }
 }

@@ -365,6 +365,23 @@ struct RawCommsEntry {
     follow_up: Option<RawCommsFollowUp>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailableShipEntry {
+    pub template_path: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerSpawnEntry {
+    #[serde(default)]
+    pub anchor: Option<String>,
+    #[serde(default)]
+    pub position: Option<[f32; 3]>,
+    #[serde(default)]
+    pub rotation: Option<[f32; 3]>,
+}
+
 /// Raw single-pass deserialization of a world TOML.
 #[derive(Debug, Default, Deserialize)]
 pub struct RawWorld {
@@ -384,6 +401,12 @@ pub struct RawWorld {
     /// Optional world-level ambient light override.
     #[serde(default)]
     pub ambient_light: Option<AmbientLightConfig>,
+    /// List of selectable player ship options for this world.
+    #[serde(default)]
+    pub available_ships: Vec<AvailableShipEntry>,
+    /// Optional spawn point for the player ship.
+    #[serde(default)]
+    pub player_spawn: Option<PlayerSpawnEntry>,
 }
 
 // -- Trigger / comms pure config types --------------------------------------
@@ -1094,6 +1117,10 @@ pub struct WorldConfig {
     /// Optional world-level ambient light override; `None` means the
     /// renderer falls back to its built-in constants.
     pub ambient_light: Option<AmbientLightConfig>,
+    /// List of selectable player ship options for this world.
+    pub available_ships: Vec<AvailableShipEntry>,
+    /// Optional spawn point for the player ship.
+    pub player_spawn: Option<PlayerSpawnEntry>,
 }
 
 impl WorldConfig {
@@ -1214,6 +1241,38 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         }
     }
 
+    // Legacy compat: if no available_ships are declared, scan entities for
+    // GameStart entries whose template_path ends with "player_ship.toml",
+    // matching the filename convention used by the player ship entity
+    // template (matches the tags + ship_config convention at the
+    // EntityConfig level, used downstream in server_app.rs).
+    let available_ships = if raw.available_ships.is_empty() {
+        let legacy: Vec<AvailableShipEntry> = raw
+            .entities
+            .iter()
+            .filter(|e| {
+                e.spawn_on == WorldEntitySpawnOn::GameStart
+                    && e.template_path.ends_with("player_ship.toml")
+            })
+            .map(|e| AvailableShipEntry {
+                template_path: e.template_path.clone(),
+                label: Some(
+                    raw.global
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| "Player Ship".to_string()),
+                ),
+            })
+            .collect();
+        if legacy.is_empty() {
+            raw.available_ships
+        } else {
+            legacy
+        }
+    } else {
+        raw.available_ships
+    };
+
     Ok(WorldConfig {
         global: raw.global,
         anchors,
@@ -1223,6 +1282,8 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         name_to_uuid: HashMap::new(),
         extra_worlds: raw.extra_worlds,
         ambient_light: raw.ambient_light,
+        available_ships,
+        player_spawn: raw.player_spawn,
     })
 }
 
@@ -1276,13 +1337,14 @@ where
 /// callback (PRD #338). Returned in stable iteration order so the queue
 /// sequence is deterministic across runs.
 ///
-/// Walks three reference surfaces:
+/// Walks four reference surfaces:
 /// 1. Static `[[entity]]` declarations.
-/// 2. `[[trigger.action]] type = "spawn_entity"` references (needed for
+/// 2. `available_ships[*].template_path` entries (issue #623).
+/// 3. `[[trigger.action]] type = "spawn_entity"` references (needed for
 ///    timer-driven wave spawns and similar — discovered too late by the
 ///    asset-preload pipeline otherwise, since trigger actions don't run
 ///    until after preload completes). (#475)
-/// 3. `[[comms.response.action]] type = "spawn_entity"` references nested
+/// 4. `[[comms.response.action]] type = "spawn_entity"` references nested
 ///    arbitrarily deep in dialogue follow-ups. (#475)
 pub fn entity_template_paths(world: &WorldConfig) -> Vec<String> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1295,7 +1357,14 @@ pub fn entity_template_paths(world: &WorldConfig) -> Vec<String> {
         }
     }
 
-    // 2. `[[trigger.action]]` spawn_entity references.
+    // 2. `available_ships[*].template_path` entries (issue #623).
+    for ship in &world.available_ships {
+        if seen.insert(ship.template_path.clone()) {
+            out.push(ship.template_path.clone());
+        }
+    }
+
+    // 3. `[[trigger.action]]` spawn_entity references.
     for trigger in &world.triggers {
         for action in &trigger.actions {
             if let TriggerAction::SpawnEntity { template_path, .. } = action {
@@ -1306,7 +1375,7 @@ pub fn entity_template_paths(world: &WorldConfig) -> Vec<String> {
         }
     }
 
-    // 3. Comms dialogue spawn_entity references (root + arbitrarily-nested
+    // 4. Comms dialogue spawn_entity references (root + arbitrarily-nested
     //    response follow-ups + the optional `root_follow_up` chained node).
     fn walk_node(
         node: &CommsDialogueNode,
@@ -1752,6 +1821,182 @@ transform = { anchor = "patrol_alpha" }
                 .is_none(),
             "no inline position when anchor is supplied"
         );
+    }
+
+    // -- available_ships (issue #623) ---------------------------------------
+
+    #[test]
+    fn parse_world_reads_available_ships() {
+        let toml = r#"
+[[available_ships]]
+template_path = "assets/entities/ship_scout.toml"
+label = "Scout"
+
+[[available_ships]]
+template_path = "assets/entities/ship_cruiser.toml"
+label = "Cruiser"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.available_ships.len(), 2);
+        assert_eq!(cfg.available_ships[0].template_path, "assets/entities/ship_scout.toml");
+        assert_eq!(cfg.available_ships[0].label.as_deref(), Some("Scout"));
+        assert_eq!(cfg.available_ships[1].template_path, "assets/entities/ship_cruiser.toml");
+        assert_eq!(cfg.available_ships[1].label.as_deref(), Some("Cruiser"));
+    }
+
+    #[test]
+    fn parse_world_available_ships_defaults_to_empty() {
+        let cfg = parse_world("").expect("must parse");
+        assert!(cfg.available_ships.is_empty());
+    }
+
+    #[test]
+    fn parse_world_available_ships_optional_label() {
+        let toml = r#"
+[[available_ships]]
+template_path = "assets/entities/ship_scout.toml"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.available_ships.len(), 1);
+        assert!(cfg.available_ships[0].label.is_none());
+    }
+
+    // -- player_spawn (issue #623) -------------------------------------------
+
+    #[test]
+    fn parse_world_reads_player_spawn_position() {
+        let toml = r#"
+[player_spawn]
+position = [100.0, 0.0, 200.0]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let spawn = cfg.player_spawn.expect("player_spawn must be Some");
+        assert_eq!(spawn.position, Some([100.0, 0.0, 200.0]));
+        assert!(spawn.anchor.is_none());
+        assert!(spawn.rotation.is_none());
+    }
+
+    #[test]
+    fn parse_world_reads_player_spawn_anchor() {
+        let toml = r#"
+[anchors]
+spawn_point = [50.0, 0.0, 0.0]
+
+[player_spawn]
+anchor = "spawn_point"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let spawn = cfg.player_spawn.expect("player_spawn must be Some");
+        assert_eq!(spawn.anchor.as_deref(), Some("spawn_point"));
+        assert!(spawn.position.is_none());
+    }
+
+    #[test]
+    fn parse_world_player_spawn_defaults_to_none() {
+        let cfg = parse_world("").expect("must parse");
+        assert!(cfg.player_spawn.is_none());
+    }
+
+    // -- legacy available_ships compat (issue #623) --------------------------
+
+    #[test]
+    fn parse_world_legacy_available_ships_falls_back_to_game_start_player_ship() {
+        // Legacy world without [[available_ships]] but with a GameStart entity
+        // whose template_path contains "player_ship" should auto-generate a
+        // single-entry list using the world title.
+        let toml = r#"
+[global]
+title = "Test World"
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.available_ships.len(), 1);
+        assert_eq!(
+            cfg.available_ships[0].template_path,
+            "assets/entities/player_ship.toml"
+        );
+        assert_eq!(cfg.available_ships[0].label.as_deref(), Some("Test World"));
+    }
+
+    #[test]
+    fn parse_world_legacy_available_ships_no_game_start_yields_empty() {
+        // Legacy world with no GameStart player_ship entity and no
+        // available_ships should remain empty.
+        let toml = r#"
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert!(cfg.available_ships.is_empty());
+    }
+
+    #[test]
+    fn parse_world_explicit_available_ships_skips_legacy_fallback() {
+        // World with explicit [[available_ships]] must not scan GameStart
+        // entities for legacy fallback.
+        let toml = r#"
+[[available_ships]]
+template_path = "assets/entities/ship_scout.toml"
+label = "Scout"
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.available_ships.len(), 1);
+        assert_eq!(
+            cfg.available_ships[0].template_path,
+            "assets/entities/ship_scout.toml"
+        );
+    }
+
+    // -- entity_template_paths + available_ships (issue #623) ----------------
+
+    #[test]
+    fn entity_template_paths_includes_available_ship_templates() {
+        let toml = r#"
+[[available_ships]]
+template_path = "assets/entities/ship_scout.toml"
+label = "Scout"
+
+[[available_ships]]
+template_path = "assets/entities/ship_cruiser.toml"
+label = "Cruiser"
+
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let paths = entity_template_paths(&cfg);
+        assert!(paths.contains(&"assets/entities/ship_scout.toml".to_string()));
+        assert!(paths.contains(&"assets/entities/ship_cruiser.toml".to_string()));
+        assert!(paths.contains(&"assets/entities/star_sun.toml".to_string()));
+    }
+
+    #[test]
+    fn entity_template_paths_dedups_available_ships_with_entity_list() {
+        let toml = r#"
+[[available_ships]]
+template_path = "assets/entities/player_ship.toml"
+label = "Player Ship"
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let paths = entity_template_paths(&cfg);
+        let count = paths.iter().filter(|p| *p == "assets/entities/player_ship.toml").count();
+        assert_eq!(count, 1, "duplicate ship path must be collapsed to one entry");
     }
 
     // -- resolve_entity_position (PRD #337 slice 3) ------------------------

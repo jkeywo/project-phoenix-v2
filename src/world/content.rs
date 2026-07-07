@@ -919,6 +919,68 @@ mod tests {
     }
 
     #[test]
+    fn on_all_destroyed_after_secs_gates_until_time_elapsed() {
+        use crate::world::flags::FlagStore;
+
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnAllDestroyed {
+                    group: "waves".into(),
+                    after_secs: 10.0,
+                },
+                actions: vec![add_obj("obj-waves-cleared")],
+                when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("raider".into(), "uuid-r".into());
+        let entity_groups: HashMap<String, HashSet<String>> = [(
+            "waves".to_string(),
+            ["raider".to_string()].into_iter().collect(),
+        )]
+        .into_iter()
+        .collect();
+
+        // Destroy the only group member while elapsed is below the gate.
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-r".into(),
+        }];
+
+        // elapsed = 5.0 < after_secs = 10.0 → trigger must NOT fire.
+        let fired = evaluate_triggers_with_flags(
+            &mut states,
+            &events,
+            &name_to_uuid,
+            &[],
+            &entity_groups,
+            5.0,
+        );
+        assert!(
+            fired.is_empty(),
+            "OnAllDestroyed must not fire before after_secs gate"
+        );
+        assert!(!states[0].fired);
+        assert!(states[0].seen_destroyed.contains("raider"));
+
+        // No new events, but elapsed is now 15.0 > after_secs → trigger fires.
+        let fired2 = evaluate_triggers_with_flags(
+            &mut states,
+            &[],
+            &name_to_uuid,
+            &[],
+            &entity_groups,
+            15.0,
+        );
+        assert_eq!(fired2.len(), 1);
+        assert!(states[0].fired);
+    }
+
+    #[test]
     fn on_timer_fires_when_elapsed_exceeds_threshold() {
         let mut states = vec![TriggerState {
             trigger: Trigger {
@@ -1018,6 +1080,94 @@ mod tests {
         assert_eq!(fired.len(), 1);
         assert!(states[0].fired);
         assert!(!states[1].fired);
+    }
+
+    #[test]
+    fn action_predicates_filter_individual_actions() {
+        use crate::world::flags::{parse_predicate, FlagStore};
+
+        let pred_armed = parse_predicate("flag(armed)").expect("parse");
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnDestroyed {
+                    entity_name: "raider".into(),
+                },
+                actions: vec![add_obj("always"), add_obj("only-when-armed")],
+                when: None,
+                action_predicates: vec![None, Some(pred_armed)],
+                action_delays: vec![],
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("raider".into(), "uuid-r".into());
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-r".into(),
+        }];
+
+        // With flag unset, second action's predicate is false → second action filtered.
+        let flag_store = FlagStore::default();
+        let chain: [&FlagStore; 1] = [&flag_store];
+        let fired = evaluate_triggers_with_flags(
+            &mut states,
+            &events,
+            &name_to_uuid,
+            &chain,
+            &HashMap::new(),
+            0.0,
+        );
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].actions.len(), 1);
+        assert!(matches!(
+            fired[0].actions[0],
+            TriggerAction::AddObjective { ref id, .. } if id == "always"
+        ));
+
+        // Reset state and set the flag; now second action should be included.
+        states[0].fired = false;
+        states[0].seen_destroyed.clear();
+        let mut flag_store_armed = FlagStore::default();
+        flag_store_armed.set_flag("armed");
+        let chain_armed: [&FlagStore; 1] = [&flag_store_armed];
+        let fired2 = evaluate_triggers_with_flags(
+            &mut states,
+            &events,
+            &name_to_uuid,
+            &chain_armed,
+            &HashMap::new(),
+            0.0,
+        );
+        assert_eq!(fired2.len(), 1);
+        assert_eq!(fired2[0].actions.len(), 2);
+    }
+
+    #[test]
+    fn action_delays_passed_through_to_fired_trigger() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnDestroyed {
+                    entity_name: "raider".into(),
+                },
+                actions: vec![add_obj("immediate"), add_obj("delayed")],
+                when: None,
+                action_predicates: vec![],
+                action_delays: vec![0.0, 10.0],
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("raider".into(), "uuid-r".into());
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-r".into(),
+        }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].actions.len(), 2);
+        assert_eq!(fired[0].action_delays, vec![0.0, 10.0]);
     }
 
     #[test]

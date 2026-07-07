@@ -83,15 +83,15 @@ color      = [0.6, 0.55, 0.5]
 brightness = 300.0
 
 [dust]
-max_motes         = 120
+max_motes         = 240
 max_spawn_rate    = 40.0
-spawn_radius      = 60.0
+spawn_radius      = 30.0
 lifetime_secs     = 3.5
-mote_radius       = 0.08
+mote_radius       = 0.04
 color             = [0.9, 0.92, 1.0, 0.6]
 min_opacity       = 0.05
 max_opacity       = 0.6
-emissive_strength = 1.2
+emissive_strength = 1.5
 
 # ── Anchors ───────────────────────────────────────────────────────────────────
 #

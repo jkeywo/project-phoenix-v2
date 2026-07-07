@@ -298,6 +298,7 @@ impl Plugin for WeaponsPlugin {
                     handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
                     operate_tactical_ai.in_set(crate::sim_sets::SimSet::Input),
+                    tick_blaster_auto_fire.in_set(crate::sim_sets::SimSet::Input),
                     handle_fire_blaster.in_set(crate::sim_sets::SimSet::Input),
                 ),
             )
@@ -498,6 +499,36 @@ fn any_bank_operates_ai(
         .systems
         .iter()
         .filter(|s| s.kind == crate::system_registry::PHASER_BANK_KIND)
+        .map(|s| s.id.clone())
+        .collect();
+    if bank_system_ids.is_empty() {
+        return control_sources
+            .0
+            .policy_for(&crate::system_registry::tactical_system_id())
+            .operate_ai;
+    }
+    bank_system_ids
+        .iter()
+        .any(|id| control_sources.0.policy_for(id).operate_ai)
+}
+
+/// True when ANY blaster bank on the ship has an operable fine system whose
+/// policy has `operate_ai == true`.
+///
+/// Used as the ship-level early-skip gate in `tick_blaster_auto_fire`.
+///
+/// Fallback: when the ship config declares NO `blaster_bank` fine systems
+/// (legacy / test ship path), returns the coarse `tactical.operate_ai`
+/// policy so existing tests that seed only the coarse SystemId continue
+/// to pass.
+fn any_blaster_bank_operates_ai(
+    control_sources: &ShipSystemControlSources,
+    ship_config: &crate::ship::config::ShipConfig,
+) -> bool {
+    let bank_system_ids: Vec<SystemId> = ship_config
+        .systems
+        .iter()
+        .filter(|s| s.kind == crate::system_registry::BLASTER_BANK_KIND)
         .map(|s| s.id.clone())
         .collect();
     if bank_system_ids.is_empty() {
@@ -2045,6 +2076,7 @@ fn handle_fire_torpedo(
 fn handle_fire_blaster(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
+    ai_registry: Option<Res<AiTokenRegistry>>,
     localship_q: Query<
         (Entity, &crate::ship_plugin::ShipConfigComponent),
         With<crate::server_app::LocalShip>,
@@ -2078,9 +2110,16 @@ fn handle_fire_blaster(
             _ => continue,
         };
 
-        // Resolve shooter entity — only the LocalShip for human tokens.
+        // Resolve shooter entity — AI tokens route through AiTokenRegistry;
+        // human tokens route to the LocalShip.
         let shooter_entity: Entity = if ev.token.starts_with("ai:") {
-            continue; // AI support deferred.
+            match ai_registry
+                .as_deref()
+                .and_then(|r| r.bevy_entity_for_token(&ev.token))
+            {
+                Some(e) => e,
+                None => continue,
+            }
         } else {
             match local_ship {
                 Some((e, cfg)) if tactical_authorized(&sessions, cfg, &ev.token) => e,
@@ -2092,7 +2131,8 @@ fn handle_fire_blaster(
             continue;
         };
 
-        // Gate on the bank's fine-system policy.
+        // Gate on the bank's fine-system policy. AI tokens require operate_ai;
+        // human tokens require accept_human_input.
         let bank_system_id = crate::system_registry::blaster_bank_system_id(&bank_id)
             .filter(|id| system_is_registered(control_sources, id));
         let policy = match &bank_system_id {
@@ -2101,7 +2141,12 @@ fn handle_fire_blaster(
                 .0
                 .policy_for(&crate::system_registry::tactical_system_id()),
         };
-        let authorized = policy.accept_human_input;
+        let is_ai_token = ev.token.starts_with("ai:");
+        let authorized = if is_ai_token {
+            policy.operate_ai
+        } else {
+            policy.accept_human_input
+        };
         if !authorized {
             continue;
         }
@@ -2113,6 +2158,100 @@ fn handle_fire_blaster(
             } else {
                 bank.request_charge_cancel();
             }
+        }
+    }
+}
+
+/// Auto-fire blaster banks for AI-controlled ships.
+///
+/// Iterates every ship (`With<Ship>`) — player + NPC — and calls
+/// `request_charge_start()` on each blaster bank whose fine-system policy
+/// has `operate_ai == true` when the ship has a valid target in range and
+/// within the bank's fire arc. Ships whose config declares no `blaster_bank`
+/// fine systems fall back to the coarse `tactical.operate_ai` policy.
+///
+/// Target selection: [`WeaponsTarget`] first, [`ShipAiMemory::target`] fallback
+/// for NPCs. Range and arc checks use each bank's config values.
+fn tick_blaster_auto_fire(
+    mut ship_q: Query<
+        (
+            &ShipSystemControlSources,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            &ShipPhysics,
+            Option<&WeaponsTarget>,
+            &mut BlasterSystemResource,
+            Option<&crate::ai_plugin::ShipAiMemory>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+) {
+    for (
+        control_sources,
+        ship_config_opt,
+        physics,
+        weapons_target_opt,
+        mut blaster_res,
+        ai_memory_opt,
+    ) in ship_q.iter_mut()
+    {
+        // Gate: only run when at least one blaster bank is AI-controlled.
+        let ai_controlled = match ship_config_opt {
+            Some(cfg) => any_blaster_bank_operates_ai(control_sources, &cfg.0),
+            None => {
+                control_sources
+                    .0
+                    .policy_for(&crate::system_registry::tactical_system_id())
+                    .operate_ai
+            }
+        };
+        if !ai_controlled {
+            continue;
+        }
+
+        // Target selection: WeaponsTarget first, ShipAiMemory fallback for NPCs.
+        let target_uuid: Option<String> = weapons_target_opt
+            .and_then(|wt| wt.0.clone())
+            .or_else(|| {
+                ai_memory_opt
+                    .and_then(|m| m.0.target)
+                    .map(|u| u.to_string())
+            });
+        let Some(target_uuid) = target_uuid else {
+            continue;
+        };
+        let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+            continue;
+        };
+
+        for bank in blaster_res.0.iter_mut() {
+            // Skip banks that are not ready to accept a new fire command.
+            if !bank.is_fire_ready() {
+                continue;
+            }
+
+            // Range check.
+            let dx = tx - physics.x;
+            let dz = tz - physics.z;
+            if dx * dx + dz * dz > bank.config.range * bank.config.range {
+                continue;
+            }
+
+            // Arc check: convert target to ship-local coordinates.
+            let (rx, ry) = crate::weapons::phaser::ship_local(
+                tx, tz, physics.x, physics.z, physics.yaw,
+            );
+            if !crate::weapons::phaser::in_arc(
+                rx,
+                ry,
+                bank.config.facing_deg,
+                bank.config.fire_arc_deg,
+            ) {
+                continue;
+            }
+
+            bank.request_charge_start();
         }
     }
 }
@@ -8845,6 +8984,246 @@ ai_only = true
         assert_eq!(
             target_after, target_before,
             "Target behind asteroid must NOT take damage (before={target_before}, after={target_after})"
+        );
+    }
+
+    // ── Blaster AI auto-fire tests ──────────────────────────────────────
+
+    /// NPC with tactical set to Ai and target in range must have the auto-fire
+    /// system call `request_charge_start` on the blaster bank.
+    #[test]
+    fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
+        use crate::entity_spawner::EntityUuid;
+
+        let mut app = test_app();
+
+        let npc_uuid = "bb000000-0000-0000-0000-000000000010";
+        let target_uuid = "bb000000-0000-0000-0000-000000000011";
+
+        let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        sources.set(
+            crate::system_registry::tactical_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        // NPC at (10, 10) — away from LocalShip at origin — facing -Z (target at 10, -10).
+        // This avoids the projectile immediately hitting the LocalShip which
+        // occupies (0, 0) in test_app().
+        let mut npc_physics = ShipPhysics::default();
+        npc_physics.x = 10.0;
+        npc_physics.z = 10.0;
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid(npc_uuid.to_string()),
+                crate::ship_plugin::ShipSystemControlSources(sources),
+                WeaponsTarget(Some(target_uuid.to_string())),
+                npc_physics,
+                BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+                    crate::blaster::BlasterBankConfig {
+                        id: "fore".into(),
+                        facing_deg: 180.0, // face toward -Z (toward target)
+                        fire_arc_deg: 360.0,
+                        volley_count: 1,
+                        volley_interval_secs: 0.1,
+                        cooldown_secs: 3.0,
+                        charge_time_secs: 0.0,
+                        projectile_speed: 40.0,
+                        collision_radius: 1.5,
+                        visual_scale: 1.0,
+                        damage: 10,
+                        shield_pierce: 0.0,
+                        recoil_impulse: 0.0,
+                        screenshake_magnitude: 0.0,
+                        marker: None,
+                        range: 35.0,
+                    },
+                )]),
+                Transform::from_xyz(10.0, 0.0, 10.0),
+            ))
+            .id();
+
+        // Spawn target directly ahead (-Z), well within blaster range.
+        app.world_mut().spawn((
+            EntityUuid(target_uuid.to_string()),
+            crate::entity_spawner::EntitySystemHull(
+                crate::damage::SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    50.0,
+                )]),
+            ),
+            Transform::from_xyz(10.0, 0.0, -10.0),
+        ));
+
+        // Check initial state before update.
+        let init_bank = &app.world().get::<BlasterSystemResource>(npc_entity).unwrap().0[0];
+        eprintln!(
+            "[DEBUG] init: fire_ready={} on_cooldown={} pending={} charging={}",
+            init_bank.is_fire_ready(),
+            init_bank.volley.on_cooldown,
+            init_bank.volley.pending_volley,
+            init_bank.volley.charging,
+        );
+
+        app.update();
+
+        let blaster_res = app.world().get::<BlasterSystemResource>(npc_entity).unwrap();
+        let bank = &blaster_res.0[0];
+        // tick_blaster_auto_fire (Input) calls request_charge_start, then
+        // tick_blaster_system (Physics) fires the projectile same-tick.
+        // The projectile ends up in in_flight.
+        assert!(
+            !bank.in_flight.is_empty(),
+            "tick_blaster_auto_fire must fire a blaster projectile when tactical is Ai \
+             and target is in range/arc (in_flight={})",
+            bank.in_flight.len(),
+        );
+    }
+
+    /// NPC with AI-controlled blaster has target out of range — must NOT fire.
+    #[test]
+    fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
+        use crate::entity_spawner::EntityUuid;
+
+        let mut app = test_app();
+
+        let npc_uuid = "bb000000-0000-0000-0000-000000000020";
+        let target_uuid = "bb000000-0000-0000-0000-000000000021";
+
+        let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        sources.set(
+            crate::system_registry::tactical_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid(npc_uuid.to_string()),
+                crate::ai_plugin::AiControllerComponent,
+                crate::ai_plugin::ShipAiMemory::default(),
+                crate::ship_plugin::ShipSystemControlSources(sources),
+                WeaponsTarget(Some(target_uuid.to_string())),
+                ShipPhysics::default(),
+                BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+                    crate::blaster::BlasterBankConfig {
+                        id: "fore".into(),
+                        facing_deg: 0.0,
+                        fire_arc_deg: 360.0,
+                        volley_count: 1,
+                        volley_interval_secs: 0.1,
+                        cooldown_secs: 3.0,
+                        charge_time_secs: 0.0,
+                        projectile_speed: 40.0,
+                        collision_radius: 1.5,
+                        visual_scale: 1.0,
+                        damage: 10,
+                        shield_pierce: 0.0,
+                        recoil_impulse: 0.0,
+                        screenshake_magnitude: 0.0,
+                        marker: None,
+                        range: 35.0,
+                    },
+                )]),
+                Transform::default(),
+            ))
+            .id();
+
+        // Spawn target well outside blaster range (35 units).
+        app.world_mut().spawn((
+            EntityUuid(target_uuid.to_string()),
+            crate::entity_spawner::EntitySystemHull(
+                crate::damage::SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    50.0,
+                )]),
+            ),
+            Transform::from_xyz(0.0, 0.0, -100.0),
+        ));
+
+        app.update();
+
+        let blaster_res = app.world().get::<BlasterSystemResource>(npc_entity).unwrap();
+        assert_eq!(
+            blaster_res.0[0].volley.pending_volley, 0,
+            "tick_blaster_auto_fire must NOT fire when target is out of range"
+        );
+    }
+
+    /// AI token sent through `handle_fire_blaster` must route to the NPC and fire.
+    #[test]
+    fn handle_fire_blaster_accepts_ai_token() {
+        use crate::entity_spawner::EntityUuid;
+
+        let mut app = test_app();
+        app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+
+        let npc_uuid = "bb000000-0000-0000-0000-000000000030";
+        let _target_uuid = "bb000000-0000-0000-0000-000000000031";
+
+        // NPC with Tactical set to Ai.
+        let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        sources.set(
+            crate::system_registry::tactical_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid(npc_uuid.to_string()),
+                crate::ai_plugin::AiControllerComponent,
+                crate::ai_plugin::ShipAiMemory::default(),
+                crate::ship_plugin::ShipSystemControlSources(sources),
+                BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+                    crate::blaster::BlasterBankConfig {
+                        id: "fore".into(),
+                        facing_deg: 0.0,
+                        fire_arc_deg: 360.0,
+                        volley_count: 1,
+                        volley_interval_secs: 0.1,
+                        cooldown_secs: 3.0,
+                        charge_time_secs: 0.0,
+                        projectile_speed: 40.0,
+                        collision_radius: 1.5,
+                        visual_scale: 1.0,
+                        damage: 10,
+                        shield_pierce: 0.0,
+                        recoil_impulse: 0.0,
+                        screenshake_magnitude: 0.0,
+                        marker: None,
+                        range: 35.0,
+                    },
+                )]),
+                Transform::default(),
+            ))
+            .id();
+
+        // Register the AI token so handle_fire_blaster can resolve it.
+        {
+            let mut reg = app
+                .world_mut()
+                .resource_mut::<crate::ai_plugin::AiTokenRegistry>();
+            reg.register_with_entity(npc_uuid, npc_entity);
+        }
+
+        // Send a FireBlaster ControlSystem message via the AI token.
+        let ai_token = format!("ai:{}", npc_uuid);
+        push(
+            &mut app,
+            &ai_token,
+            ClientMessage::ControlSystem {
+                target: SystemId("blaster-fore".into()),
+                payload: SystemControlPayload::FireBlaster,
+            },
+        );
+
+        app.update();
+
+        let blaster_res = app.world().get::<BlasterSystemResource>(npc_entity).unwrap();
+        assert!(
+            blaster_res.0[0].volley.pending_volley > 0,
+            "handle_fire_blaster must accept AI token and start blaster volley"
         );
     }
 }

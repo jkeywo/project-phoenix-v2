@@ -2035,6 +2035,12 @@ mod tests {
         station_systems.insert("tactical".to_string(), vec!["tactical".to_string()]);
         let config = ShipClientConfig {
             station_systems,
+            blaster_banks: vec![BlasterBankClientConfig {
+                id: "fore".into(),
+                facing_deg: 0.0,
+                fire_arc_deg: 120.0,
+                cooldown_secs: 2.5,
+            }],
             ..ShipClientConfig::default()
         };
         let msg = ServerMessage::Welcome {
@@ -2050,6 +2056,7 @@ mod tests {
         let decoded = JsonCodec.decode_server(&json).unwrap();
         if let ServerMessage::Welcome { ship_config, .. } = decoded {
             assert_eq!(ship_config.station_systems, config.station_systems);
+            assert_eq!(ship_config.blaster_banks, config.blaster_banks);
         } else {
             panic!("expected Welcome");
         }

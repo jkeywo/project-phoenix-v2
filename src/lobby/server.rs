@@ -221,6 +221,25 @@ fn update_session_with_config(
                 })
                 .collect();
         }
+        // [weapons_console.blaster_banks] — per-bank layout (id/facing/fire_arc/cooldown).
+        // Mirrors the phaser "zero means absent" fallback so clients always see the real
+        // cooldown duration. Default cooldown is 3.0 s (matches BlasterBankConfig default).
+        if let Some(wc) = &ship_config.weapons_console {
+            next.blaster_banks = wc
+                .blaster_banks
+                .iter()
+                .map(|b| crate::core::messages::BlasterBankClientConfig {
+                    id: b.id.clone(),
+                    facing_deg: b.facing_deg,
+                    fire_arc_deg: b.fire_arc_deg,
+                    cooldown_secs: if b.cooldown_secs > 0.0 {
+                        b.cooldown_secs
+                    } else {
+                        3.0
+                    },
+                })
+                .collect();
+        }
         // Radar shows lists — push the TOML-configured tag filters to the
         // client so each console widget can build its RadarFilter without
         // hardcoding tag names.

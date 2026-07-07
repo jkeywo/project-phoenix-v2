@@ -138,6 +138,11 @@ pub type PhaserBank = String;
 /// and `TorpedoTubeClientConfig`.
 pub type TorpedoTube = String;
 
+/// String identifier for a blaster bank, matching the `id` field of the
+/// `[[weapons_console.blaster_banks]]` array in the ship TOML (e.g. `"fore"`,
+/// `"aft"`). Used in `BlasterBankState` and `BlasterBankClientConfig`.
+pub type BlasterBank = String;
+
 /// How an outbound `ServerMessage` should be delivered over the wire.
 ///
 /// `Reliable` rides the ordered/retransmit DataChannel (PeerJS default).
@@ -271,6 +276,17 @@ pub struct TorpedoTubeClientConfig {
     pub id: TorpedoTube,
     pub facing_deg: f32,
     pub fire_arc_deg: f32,
+}
+
+/// Static, per-bank configuration sent to clients in `Welcome` so the
+/// Tactical UI can render blaster fire arcs on radar.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BlasterBankClientConfig {
+    pub id: BlasterBank,
+    pub facing_deg: f32,
+    pub fire_arc_deg: f32,
+    #[serde(default)]
+    pub cooldown_secs: f32,
 }
 
 /// Firing mode for phaser banks. Matches `phaser::PhaserMode`.
@@ -520,6 +536,10 @@ pub struct ShipClientConfig {
     /// Torpedo tubes defined on the ship, in TOML order.
     #[serde(default)]
     pub torpedo_tubes: Vec<TorpedoTubeClientConfig>,
+    /// Blaster banks defined on the ship, in TOML order. Used by the Tactical
+    /// UI to render fire-arc overlays on radar and per-bank cooldown bars.
+    #[serde(default)]
+    pub blaster_banks: Vec<BlasterBankClientConfig>,
     /// RGBA colour the renderer uses for phaser beams (from `[weapons_console]
     /// beam_color`). Defaults to a generic orange when missing from TOML.
     #[serde(default = "default_phaser_beam_color")]
@@ -644,6 +664,7 @@ impl Default for ShipClientConfig {
             impulse_charge_duration: default_impulse_charge_duration(),
             phaser_banks: Vec::new(),
             torpedo_tubes: Vec::new(),
+            blaster_banks: Vec::new(),
             phaser_beam_color: default_phaser_beam_color(),
             torpedo_arc_color: default_torpedo_arc_color(),
             helm_radar_shows: Vec::new(),

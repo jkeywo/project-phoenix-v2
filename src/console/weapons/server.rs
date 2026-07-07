@@ -2082,9 +2082,17 @@ fn handle_fire_blaster(
         With<crate::server_app::LocalShip>,
     >,
     mut ship_q: Query<
-        (&ShipSystemControlSources, &mut BlasterSystemResource),
+        (
+            &ShipSystemControlSources,
+            &ShipPhysics,
+            Option<&WeaponsTarget>,
+            &mut BlasterSystemResource,
+            Option<&crate::ai_plugin::ShipAiMemory>,
+        ),
         With<crate::server_app::Ship>,
     >,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     let local_ship: Option<(Entity, &crate::ship_plugin::ShipConfigComponent)> =
         localship_q.single().ok();
@@ -2127,7 +2135,9 @@ fn handle_fire_blaster(
             }
         };
 
-        let Ok((control_sources, mut blaster_res)) = ship_q.get_mut(shooter_entity) else {
+        let Ok((control_sources, physics, weapons_target_opt, mut blaster_res, ai_memory_opt)) =
+            ship_q.get_mut(shooter_entity)
+        else {
             continue;
         };
 
@@ -2149,6 +2159,48 @@ fn handle_fire_blaster(
         };
         if !authorized {
             continue;
+        }
+
+        // Arc check: resolve the player's locked target and verify it's within the
+        // bank's fire arc. Target selection mirrors tick_blaster_auto_fire:
+        // WeaponsTarget first, then ShipAiMemory fallback for NPCs.
+        // AI tokens skip this check — arc enforcement for AI fire is handled by
+        // tick_blaster_auto_fire instead.
+        if is_charge_start && !is_ai_token {
+            let target_uuid: Option<String> = weapons_target_opt
+                .and_then(|wt| wt.0.clone())
+                .or_else(|| {
+                    ai_memory_opt
+                        .and_then(|m| m.0.target)
+                        .map(|u| u.to_string())
+                });
+            let Some(target_uuid) = target_uuid else {
+                continue;
+            };
+            let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+                continue;
+            };
+
+            // Find the bank to check its arc config.
+            let bank_arc_ok = blaster_res
+                .0
+                .iter()
+                .find(|b| b.config.id == bank_id)
+                .map(|bank| {
+                    let (rx, ry) = crate::weapons::phaser::ship_local(
+                        tx, tz, physics.x, physics.z, physics.yaw,
+                    );
+                    crate::weapons::phaser::in_arc(
+                        rx,
+                        ry,
+                        bank.config.facing_deg,
+                        bank.config.fire_arc_deg,
+                    )
+                })
+                .unwrap_or(false);
+            if !bank_arc_ok {
+                continue;
+            }
         }
 
         // Dispatch to the matching bank.
@@ -9150,7 +9202,7 @@ ai_only = true
         );
     }
 
-    /// AI token sent through `handle_fire_blaster` must route to the NPC and fire.
+/// AI token sent through `handle_fire_blaster` must route to the NPC and fire.
     #[test]
     fn handle_fire_blaster_accepts_ai_token() {
         use crate::entity_spawner::EntityUuid;
@@ -9159,7 +9211,7 @@ ai_only = true
         app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
 
         let npc_uuid = "bb000000-0000-0000-0000-000000000030";
-        let _target_uuid = "bb000000-0000-0000-0000-000000000031";
+        let target_uuid_str = "bb000000-0000-0000-0000-000000000031";
 
         // NPC with Tactical set to Ai.
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
@@ -9167,14 +9219,19 @@ ai_only = true
             crate::system_registry::tactical_system_id(),
             crate::ship::control_source::ControlSource::Ai,
         );
+        let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();
         let npc_entity = app
             .world_mut()
             .spawn((
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory::default(),
+                crate::ai_plugin::ShipAiMemory(crate::ai::AiMemory {
+                    target: Some(target_uuid_parsed),
+                    ..Default::default()
+                }),
                 crate::ship_plugin::ShipSystemControlSources(sources),
+                ShipPhysics::default(),
                 BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
                     crate::blaster::BlasterBankConfig {
                         id: "fore".into(),
@@ -9199,6 +9256,19 @@ ai_only = true
             ))
             .id();
 
+        // Spawn target entity at (0, -10) — directly ahead of NPC at origin,
+        // within the 35-unit range and inside the 360° fire arc.
+        app.world_mut().spawn((
+            EntityUuid(target_uuid_str.to_string()),
+            crate::entity_spawner::EntitySystemHull(
+                crate::damage::SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    50.0,
+                )]),
+            ),
+            Transform::from_xyz(0.0, 0.0, -10.0),
+        ));
+
         // Register the AI token so handle_fire_blaster can resolve it.
         {
             let mut reg = app
@@ -9221,9 +9291,13 @@ ai_only = true
         app.update();
 
         let blaster_res = app.world().get::<BlasterSystemResource>(npc_entity).unwrap();
+        // After app.update(): handle_fire_blaster (Input) arms the volley, then
+        // tick_blaster_system (Physics) fires it and enters cooldown. By the time
+        // we check, pending_volley is 0 and on_cooldown is true — verify cooldown
+        // as evidence the volley was dispatched.
         assert!(
-            blaster_res.0[0].volley.pending_volley > 0,
-            "handle_fire_blaster must accept AI token and start blaster volley"
+            blaster_res.0[0].volley.on_cooldown,
+            "handle_fire_blaster must accept AI token and enter cooldown after firing"
         );
     }
 }

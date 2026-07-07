@@ -21,6 +21,15 @@ use crate::world::content::{
     TriggerState, WorldEvent,
 };
 
+/// An action queued for deferred dispatch via the `action_delays` trigger field.
+#[derive(Clone, Debug)]
+pub struct DelayedAction {
+    pub action: TriggerAction,
+    pub origin_layer: Option<String>,
+    pub entity_name: Option<String>,
+    pub fire_at_elapsed: f32,
+}
+
 // -- Resources --------------------------------------------------------------
 
 /// Server-side runtime state for the currently active world content.
@@ -85,6 +94,10 @@ pub struct WorldContentRuntime {
     /// which case `handle_ai_events` skips emitting `TimerElapsed` events.
     /// (#475)
     pub world_loaded_at_secs: Option<f32>,
+    /// Maps named groups to the set of entity names currently in that group.
+    pub entity_groups: HashMap<String, HashSet<String>>,
+    /// Actions queued for deferred dispatch (via `action_delays` on triggers).
+    pub pending_delayed_actions: Vec<DelayedAction>,
 }
 
 /// Bevy resource wrapping the server-side comms inbox.
@@ -226,6 +239,10 @@ impl Plugin for WorldPlugin {
             .add_systems(
                 Update,
                 handle_ai_events.in_set(crate::sim_sets::SimSet::Physics),
+            )
+            .add_systems(
+                Update,
+                tick_delayed_actions.in_set(crate::sim_sets::SimSet::Physics).after(handle_ai_events),
             )
             .add_systems(
                 Update,
@@ -756,6 +773,7 @@ pub(crate) fn tick_pending_follow_ups(
 
     let mut ready: Vec<PendingFollowUp> = Vec::new();
     let mut keep: Vec<PendingFollowUp> = Vec::with_capacity(runtime.pending_follow_ups.len());
+    let entity_groups = runtime.entity_groups.clone();
 
     for mut pfu in runtime.pending_follow_ups.drain(..) {
         pfu.elapsed_secs += dt;
@@ -767,6 +785,7 @@ pub(crate) fn tick_pending_follow_ups(
             &flags_snapshot,
             &inside_region_uuids,
             &live_uuids,
+            &entity_groups,
         );
         if fires {
             ready.push(pfu);
@@ -833,6 +852,7 @@ pub(crate) fn follow_up_trigger_holds(
     flags: &crate::world::flags::FlagStore,
     inside_region_uuids: &HashSet<String>,
     live_uuids: &HashSet<String>,
+    entity_groups: &HashMap<String, HashSet<String>>,
 ) -> bool {
     let Some(condition) = trigger else {
         return true;
@@ -874,12 +894,24 @@ pub(crate) fn follow_up_trigger_holds(
                 })
                 .unwrap_or(false)
         }
-        TriggerCondition::OnAllDestroyed { entity_names } => entity_names.iter().all(|name| {
-            name_to_uuid
-                .get(name)
-                .map(|u| !live_uuids.contains(u))
-                .unwrap_or(false)
-        }),
+        TriggerCondition::OnAllDestroyed { group, after_secs } => {
+            if elapsed_secs < *after_secs {
+                return false;
+            }
+            let members: HashSet<String> = entity_groups
+                .get(group)
+                .cloned()
+                .unwrap_or_else(|| std::iter::once(group.clone()).collect());
+            if members.is_empty() {
+                return false;
+            }
+            members.iter().all(|name| {
+                name_to_uuid
+                    .get(name)
+                    .map(|u| !live_uuids.contains(u))
+                    .unwrap_or(false)
+            })
+        }
         TriggerCondition::OnAttacked { entity_name } => name_to_uuid
             .get(entity_name)
             .map(|u| {
@@ -1202,11 +1234,13 @@ fn handle_ai_events(
     // Single-shot semantics on `TriggerState.fired` prevent re-firing.
     // `Time` is optional so test apps without `TimePlugin` continue to
     // work (they just never see `TimerElapsed`).
-    if let (Some(t), Some(loaded_at)) = (time.as_ref(), runtime.world_loaded_at_secs) {
-        let elapsed_secs = (t.elapsed_secs() - loaded_at).max(0.0);
-        world_events.push(WorldEvent::TimerElapsed { elapsed_secs });
+    let elapsed_secs = time.as_ref().and_then(|t| {
+        runtime.world_loaded_at_secs.map(|loaded_at| (t.elapsed_secs() - loaded_at).max(0.0))
+    });
+    if let Some(es) = elapsed_secs {
+        world_events.push(WorldEvent::TimerElapsed { elapsed_secs: es });
     }
-    if world_events.is_empty() {
+    if world_events.is_empty() && runtime.pending_delayed_actions.is_empty() {
         return;
     }
 
@@ -1310,6 +1344,17 @@ fn handle_ai_events(
     let max_passes = 16;
     loop {
         pass += 1;
+        // Compute current_elapsed from TimerElapsed events in current_events.
+        let current_elapsed = current_events
+            .iter()
+            .filter_map(|e| {
+                if let crate::world::content::WorldEvent::TimerElapsed { elapsed_secs } = e {
+                    Some(*elapsed_secs)
+                } else {
+                    None
+                }
+            })
+            .fold(0.0_f32, |max_e, e| e.max(max_e));
         // Snapshot per-layer flag stores and loader pointers once per pass.
         let base_flags_snapshot = runtime.flags.clone();
         let layer_flags_snapshot: HashMap<String, crate::world::flags::FlagStore> = layer_map
@@ -1339,6 +1384,7 @@ fn handle_ai_events(
             .iter()
             .map(|s| s.origin_layer.clone())
             .collect();
+        let entity_groups = runtime.entity_groups.clone();
         for (idx, origin) in trigger_origins.iter().enumerate() {
             // Build the flag-store and layer-path chains for this trigger.
             let mut flag_chain_owned: Vec<&crate::world::flags::FlagStore> = Vec::new();
@@ -1372,6 +1418,8 @@ fn handle_ai_events(
                 &name_to_uuid,
                 &flag_chain_owned,
                 &layer_chain,
+                &entity_groups,
+                current_elapsed,
             );
             if let Some(ft) = result {
                 fired.push(ft);
@@ -1384,7 +1432,17 @@ fn handle_ai_events(
 
         let mut next_events: Vec<WorldEvent> = Vec::new();
         for ft in fired {
-            for action in &ft.actions {
+            for (i, action) in ft.actions.iter().enumerate() {
+                let delay = ft.action_delays.get(i).copied().unwrap_or(0.0);
+                if delay > 0.0 && elapsed_secs.is_some() {
+                    runtime.pending_delayed_actions.push(DelayedAction {
+                        action: action.clone(),
+                        origin_layer: ft.origin_layer.clone(),
+                        entity_name: ft.entity_name.clone(),
+                        fire_at_elapsed: elapsed_secs.unwrap() + delay,
+                    });
+                    continue;
+                }
                 match action {
                     TriggerAction::AddObjective {
                         id,
@@ -1703,6 +1761,7 @@ fn handle_ai_events(
                         position,
                         rotation,
                         scale,
+                        groups,
                     } => {
                         // Resolve spawn position. `anchor` looks up in the
                         // origin layer's anchors (or the base world's anchors
@@ -1823,6 +1882,11 @@ fn handle_ai_events(
 
                         // Register name ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ uuid for subsequent triggers.
                         runtime.name_to_uuid.insert(name.clone(), uuid);
+
+                        // Register entity in groups for OnAllDestroyed tracking.
+                        for g in groups {
+                            runtime.entity_groups.entry(g.clone()).or_default().insert(name.clone());
+                        }
 
                         // Attach to the parent layer's spawned_entities so
                         // `UnloadWorld` despawns the entity (base-world
@@ -1978,6 +2042,625 @@ fn handle_ai_events(
             break;
         }
         current_events = next_events;
+    }
+}
+
+/// Dispatch a single `TriggerAction` using the provided execution context.
+///
+/// This is the shared action-dispatch path used by both `handle_ai_events` (for
+/// immediate actions) and `tick_delayed_actions` (for `action_delays` queue).
+///
+/// All parameters are consumed/borrowed directly to avoid lifetime issues when
+/// called from `tick_delayed_actions`, which re-builds `uuid_to_entity` each tick
+/// rather than capturing a handle-ai-events-local binding.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn dispatch_single_action(
+    action: &TriggerAction,
+    origin_layer: &Option<String>,
+    entity_name: &Option<String>,
+    name_to_uuid: &HashMap<String, String>,
+    uuid_to_entity: &std::collections::HashMap<String, Entity>,
+    mut runtime: &mut WorldContentRuntime,
+    mut objectives: &mut ObjectiveManagerRes,
+    mut pending_layers: Option<&mut PendingWorldLayerChanges>,
+    mut layer_map: Option<&mut WorldLayerMap>,
+    base_world_config: Option<&crate::world::config::WorldConfig>,
+    entity_uuid_query: &Query<(Entity, &EntityUuid)>,
+    mut commands: &mut Commands,
+    mut ship_modifiers: &mut ShipModifiersParams,
+    mut next_state: Option<&mut NextState<GamePhase>>,
+    mut game_over_reason: Option<&mut crate::simulation::GameOverReason>,
+    mut faction_dispatch: &mut FactionDispatchParams,
+) {
+    match action {
+        TriggerAction::AddObjective {
+            id,
+            text,
+            mandatory,
+            targets,
+            directive,
+            utility,
+            source,
+        } => {
+            let resolved = if targets.is_empty() {
+                entity_name.clone().into_iter().collect()
+            } else {
+                targets.clone()
+            };
+            objectives.0.add_full(
+                id.clone(),
+                text.clone(),
+                *mandatory,
+                resolved,
+                directive.clone(),
+                utility.clone(),
+                source.clone(),
+            );
+        }
+        TriggerAction::CompleteObjective { id } => {
+            objectives.0.complete(id);
+        }
+        TriggerAction::FailObjective { id } => {
+            objectives.0.fail(id);
+        }
+        TriggerAction::SetAiState {
+            entity,
+            state,
+            target: _,
+        } => {
+            bevy::log::warn!(
+                "dispatch_single_action: SetAiState('{entity}' → '{state}') ignored — doctrine-based AI"
+            );
+        }
+        TriggerAction::ApplyModifier {
+            entity,
+            tag,
+            slot,
+            bonus,
+        } => {
+            let Some(uuid) = name_to_uuid.get(entity) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyModifier: unknown entity name '{entity}'"
+                );
+                return;
+            };
+            let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                );
+                return;
+            };
+            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyModifier: entity '{entity}' has no ShipModifiers component"
+                );
+                return;
+            };
+            mods.add_or_update(crate::modifiers::Modifier {
+                source: crate::messages::ModifierSource::World {
+                    id: "world".to_string(),
+                    tag: tag.clone(),
+                },
+                slot: slot.clone(),
+                bonus: *bonus,
+            });
+        }
+        TriggerAction::RemoveModifier { entity, tag, slot } => {
+            let Some(uuid) = name_to_uuid.get(entity) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveModifier: unknown entity name '{entity}'"
+                );
+                return;
+            };
+            let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                );
+                return;
+            };
+            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveModifier: entity '{entity}' has no ShipModifiers component"
+                );
+                return;
+            };
+            mods.remove(
+                &crate::messages::ModifierSource::World {
+                    id: "world".to_string(),
+                    tag: tag.clone(),
+                },
+                slot,
+            );
+        }
+        TriggerAction::ApplyFlag { entity, tag, kind } => {
+            let Some(uuid) = name_to_uuid.get(entity) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyFlag: unknown entity name '{entity}'"
+                );
+                return;
+            };
+            let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                );
+                return;
+            };
+            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyFlag: entity '{entity}' has no ShipModifiers component"
+                );
+                return;
+            };
+            mods.add_flag(
+                crate::messages::ModifierSource::World {
+                    id: "world".to_string(),
+                    tag: tag.clone(),
+                },
+                kind.clone(),
+            );
+        }
+        TriggerAction::RemoveFlag { entity, tag, kind } => {
+            let Some(uuid) = name_to_uuid.get(entity) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveFlag: unknown entity name '{entity}'"
+                );
+                return;
+            };
+            let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                );
+                return;
+            };
+            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveFlag: entity '{entity}' has no ShipModifiers component"
+                );
+                return;
+            };
+            mods.remove_flag(
+                crate::messages::ModifierSource::World {
+                    id: "world".to_string(),
+                    tag: tag.clone(),
+                },
+                kind.clone(),
+            );
+        }
+        TriggerAction::ApplyIntModifier {
+            entity,
+            tag,
+            slot,
+            bonus,
+        } => {
+            let Some(uuid) = name_to_uuid.get(entity) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyIntModifier: unknown entity name '{entity}'"
+                );
+                return;
+            };
+            let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                );
+                return;
+            };
+            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: ApplyIntModifier: entity '{entity}' has no ShipModifiers component"
+                );
+                return;
+            };
+            mods.add_or_update_int(crate::modifiers::IntModifier {
+                source: crate::messages::ModifierSource::World {
+                    id: "world".to_string(),
+                    tag: tag.clone(),
+                },
+                slot: slot.clone(),
+                bonus: *bonus,
+            });
+        }
+        TriggerAction::RemoveIntModifier { entity, tag, slot } => {
+            let Some(uuid) = name_to_uuid.get(entity) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveIntModifier: unknown entity name '{entity}'"
+                );
+                return;
+            };
+            let Some(target) = uuid_to_entity.get(uuid).copied() else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
+                );
+                return;
+            };
+            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveIntModifier: entity '{entity}' has no ShipModifiers component"
+                );
+                return;
+            };
+            mods.remove_int(
+                &crate::messages::ModifierSource::World {
+                    id: "world".to_string(),
+                    tag: tag.clone(),
+                },
+                slot,
+            );
+        }
+        TriggerAction::GameOver { message } => {
+            let reason = message.clone().unwrap_or_default();
+            if let Some(ref mut gr) = game_over_reason {
+                gr.0 = Some(reason);
+            }
+            if let Some(ref mut ns) = next_state {
+                ns.set(GamePhase::GameOver);
+            }
+        }
+        TriggerAction::LoadWorld { path } => {
+            if let Some(ref mut lc) = pending_layers {
+                lc.0.push(WorldLayerChange::Load {
+                    path: path.clone(),
+                    loader_path: origin_layer.clone(),
+                });
+            }
+        }
+        TriggerAction::UnloadWorld { path } => {
+            if let Some(ref mut lc) = pending_layers {
+                lc.0.push(WorldLayerChange::Unload(path.clone()));
+            }
+        }
+        TriggerAction::SetWorldFlag { name } => {
+            if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                &mut runtime.flags,
+                layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                origin_layer,
+                name,
+                FlagMutation::Set,
+            ) {
+                let mut next_events: Vec<WorldEvent> = Vec::new();
+                emit_flag_transition(
+                    &mut next_events,
+                    &stripped,
+                    &target_layer,
+                    before,
+                    after,
+                );
+                runtime.pending_world_events.extend(next_events);
+            }
+        }
+        TriggerAction::ClearWorldFlag { name } => {
+            if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                &mut runtime.flags,
+                layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                origin_layer,
+                name,
+                FlagMutation::Clear,
+            ) {
+                let mut next_events: Vec<WorldEvent> = Vec::new();
+                emit_flag_transition(
+                    &mut next_events,
+                    &stripped,
+                    &target_layer,
+                    before,
+                    after,
+                );
+                runtime.pending_world_events.extend(next_events);
+            }
+        }
+        TriggerAction::IncrementWorldFlag { name, by } => {
+            if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                &mut runtime.flags,
+                layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                origin_layer,
+                name,
+                FlagMutation::Increment(*by),
+            ) {
+                let mut next_events: Vec<WorldEvent> = Vec::new();
+                emit_flag_transition(
+                    &mut next_events,
+                    &stripped,
+                    &target_layer,
+                    before,
+                    after,
+                );
+                runtime.pending_world_events.extend(next_events);
+            }
+        }
+        TriggerAction::SetWorldFlagValue { name, value } => {
+            if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                &mut runtime.flags,
+                layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                origin_layer,
+                name,
+                FlagMutation::SetValue(*value),
+            ) {
+                let mut next_events: Vec<WorldEvent> = Vec::new();
+                emit_flag_transition(
+                    &mut next_events,
+                    &stripped,
+                    &target_layer,
+                    before,
+                    after,
+                );
+                runtime.pending_world_events.extend(next_events);
+            }
+        }
+        TriggerAction::SpawnEntity {
+            template_path,
+            name,
+            anchor,
+            position,
+            rotation,
+            scale,
+            groups,
+        } => {
+            let pos_arr: [f32; 3] = if let Some(pos) = position {
+                *pos
+            } else if let Some(anchor_name) = anchor {
+                let lookup = match origin_layer {
+                    Some(layer_path) => layer_map
+                        .as_ref()
+                        .and_then(|lm| lm.0.get(layer_path))
+                        .map(|wr| wr.anchors.get(anchor_name).copied())
+                        .unwrap_or(None),
+                    None => base_world_config
+                        .and_then(|wc| wc.anchors.get(anchor_name).copied()),
+                };
+                match lookup {
+                    Some(p) => p,
+                    None => {
+                        bevy::log::warn!(
+                            "dispatch_single_action: SpawnEntity '{name}' anchor '{anchor_name}' not found"
+                        );
+                        return;
+                    }
+                }
+            } else {
+                bevy::log::warn!(
+                    "dispatch_single_action: SpawnEntity '{name}' has neither anchor nor position"
+                );
+                return;
+            };
+
+            let config_cache = crate::config_cache::get_config_cache();
+            let template_inst = crate::world::config::WorldEntity {
+                template_path: template_path.clone(),
+                ..Default::default()
+            };
+            let entity_config = match crate::entity_loader::resolve_entity(
+                &template_inst,
+                &config_cache,
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        match std::fs::read_to_string(template_path) {
+                            Ok(toml_str) => {
+                                match crate::entity_config::EntityConfig::from_toml(&toml_str) {
+                                    Ok(c) => c,
+                                    Err(err) => {
+                                        bevy::log::warn!(
+                                            "dispatch_single_action: SpawnEntity '{name}' template '{template_path}' parse error: {err:?}"
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                bevy::log::warn!(
+                                    "dispatch_single_action: SpawnEntity '{name}' template '{template_path}' not in cache nor on disk: {e}"
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        bevy::log::warn!(
+                            "dispatch_single_action: SpawnEntity '{name}' template '{template_path}' not in cache: {e}"
+                        );
+                        return;
+                    }
+                }
+            };
+
+            let uuid = crate::entity_loader::assign_uuid();
+            let pos_vec = Vec3::new(pos_arr[0], pos_arr[1], pos_arr[2]);
+            let mut entity_config = entity_config;
+            if !name.is_empty() {
+                entity_config.name = Some(name.clone());
+            }
+            let spawned = crate::entity_spawner::spawn_entity(
+                &mut commands,
+                &entity_config,
+                pos_vec,
+                uuid.clone(),
+                None,
+            );
+
+            if rotation.is_some() || scale.is_some() {
+                let [rx, ry, rz] = rotation.unwrap_or([0.0, 0.0, 0.0]);
+                let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
+                let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
+                let scale_vec = Vec3::new(sx, sy, sz);
+                commands.entity(spawned).insert(Transform {
+                    translation: pos_vec,
+                    rotation: quat,
+                    scale: scale_vec,
+                });
+            }
+
+            runtime.name_to_uuid.insert(name.clone(), uuid);
+
+            for g in groups {
+                runtime.entity_groups.entry(g.clone()).or_default().insert(name.clone());
+            }
+
+            if let (Some(layer_path), Some(ref mut lm)) = (origin_layer, &mut layer_map) {
+                if let Some(layer) = lm.0.get_mut(layer_path) {
+                    layer.spawned_entities.push(spawned);
+                }
+            }
+        }
+        TriggerAction::DestroyEntity { entity } => {
+            let uuid = match runtime.name_to_uuid.get(entity) {
+                Some(u) => u.clone(),
+                None => {
+                    bevy::log::warn!(
+                        "dispatch_single_action: DestroyEntity: unknown entity name '{entity}'"
+                    );
+                    return;
+                }
+            };
+            let mut target_entity: Option<Entity> = None;
+            for (ent, uuid_comp) in entity_uuid_query.iter() {
+                if uuid_comp.0 == uuid {
+                    target_entity = Some(ent);
+                    break;
+                }
+            }
+            runtime
+                .pending_world_events
+                .push(WorldEvent::Destroyed { uuid: uuid.clone() });
+            let msg_uuid = uuid.clone();
+            commands.queue(move |world: &mut World| {
+                if let Some(mut msgs) = world
+                    .get_resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
+                {
+                    msgs.write(crate::ai_plugin::AiEntityDestroyed {
+                        entity_uuid: msg_uuid,
+                    });
+                }
+            });
+            if let Some(ent) = target_entity {
+                commands.entity(ent).try_despawn();
+            }
+        }
+        TriggerAction::AddFactionEnemy { faction, enemy } => {
+            let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
+                bevy::log::warn!(
+                    "dispatch_single_action: AddFactionEnemy skipped: FactionRegistryResource not present"
+                );
+                return;
+            };
+            let faction_uuid = match registry.0.uuid_by_name(faction) {
+                Some(u) => u,
+                None => {
+                    bevy::log::warn!(
+                        "dispatch_single_action: AddFactionEnemy: unknown faction name '{faction}'"
+                    );
+                    return;
+                }
+            };
+            let enemy_uuid = match registry.0.uuid_by_name(enemy) {
+                Some(u) => u,
+                None => {
+                    bevy::log::warn!(
+                        "dispatch_single_action: AddFactionEnemy: unknown enemy faction name '{enemy}'"
+                    );
+                    return;
+                }
+            };
+            registry.0.add_enemy(faction_uuid, enemy_uuid);
+        }
+        TriggerAction::RemoveFactionEnemy { faction, enemy } => {
+            let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
+                bevy::log::warn!(
+                    "dispatch_single_action: RemoveFactionEnemy skipped: FactionRegistryResource not present"
+                );
+                return;
+            };
+            let faction_uuid = match registry.0.uuid_by_name(faction) {
+                Some(u) => u,
+                None => {
+                    bevy::log::warn!(
+                        "dispatch_single_action: RemoveFactionEnemy: unknown faction name '{faction}'"
+                    );
+                    return;
+                }
+            };
+            let enemy_uuid = match registry.0.uuid_by_name(enemy) {
+                Some(u) => u,
+                None => {
+                    bevy::log::warn!(
+                        "dispatch_single_action: RemoveFactionEnemy: unknown enemy faction name '{enemy}'"
+                    );
+                    return;
+                }
+            };
+            registry.0.remove_enemy(faction_uuid, enemy_uuid);
+        }
+    }
+}
+
+/// Drain actions from `pending_delayed_actions` whose `fire_at_elapsed` has
+/// elapsed and dispatch them via `dispatch_single_action`.
+///
+/// Registered after `handle_ai_events` in `SimSet::Physics` so that it sees
+/// the same tick's `world_loaded_at_secs` anchor.
+fn tick_delayed_actions(
+    mut runtime: ResMut<WorldContentRuntime>,
+    time: Option<Res<bevy::time::Time>>,
+    mut objectives: ResMut<ObjectiveManagerRes>,
+    mut commands: Commands,
+    mut ship_modifiers: ShipModifiersParams,
+    mut next_state: Option<ResMut<NextState<GamePhase>>>,
+    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
+    mut layer_map: Option<ResMut<WorldLayerMap>>,
+    base_world_config: Option<Res<crate::world::config::WorldConfig>>,
+    entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    mut faction_dispatch: FactionDispatchParams,
+) {
+    let Some(elapsed) = time.as_ref().and_then(|t| {
+        runtime
+            .world_loaded_at_secs
+            .map(|loaded| (t.elapsed_secs() - loaded).max(0.0))
+    }) else {
+        return;
+    };
+
+    if runtime.pending_delayed_actions.is_empty() {
+        return;
+    }
+
+    let uuid_to_entity: std::collections::HashMap<String, Entity> = entity_uuid_query
+        .iter()
+        .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
+        .collect();
+
+    let name_to_uuid = runtime.name_to_uuid.clone();
+
+    let mut ready: Vec<DelayedAction> = Vec::new();
+    let mut still_pending: Vec<DelayedAction> = Vec::new();
+    for pda in runtime.pending_delayed_actions.drain(..) {
+        if elapsed >= pda.fire_at_elapsed {
+            ready.push(pda);
+        } else {
+            still_pending.push(pda);
+        }
+    }
+    runtime.pending_delayed_actions = still_pending;
+
+    for pda in ready {
+        dispatch_single_action(
+            &pda.action,
+            &pda.origin_layer,
+            &pda.entity_name,
+            &name_to_uuid,
+            &uuid_to_entity,
+            &mut runtime,
+            &mut objectives,
+            pending_layers.as_deref_mut(),
+            layer_map.as_deref_mut(),
+            base_world_config.as_deref(),
+            &entity_uuid_query,
+            &mut commands,
+            &mut ship_modifiers,
+            next_state.as_deref_mut(),
+            game_over_reason.as_deref_mut(),
+            &mut faction_dispatch,
+        );
     }
 }
 
@@ -2908,6 +3591,8 @@ pub(crate) mod tests {
                     source: crate::messages::ObjectiveSource::default(),
                 }],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -2985,6 +3670,8 @@ pub(crate) mod tests {
                 },
                 actions,
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -3313,10 +4000,17 @@ pub(crate) mod tests {
         runtime
             .name_to_uuid
             .insert("wave_b".to_string(), uuid_b.to_string());
+        runtime.entity_groups.insert(
+            "waves".to_string(),
+            ["wave_a".to_string(), "wave_b".to_string()]
+                .into_iter()
+                .collect(),
+        );
         runtime.trigger_states = vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnAllDestroyed {
-                    entity_names: vec!["wave_a".to_string(), "wave_b".to_string()],
+                    group: "waves".into(),
+                    after_secs: 0.0,
                 },
                 actions: vec![TriggerAction::AddObjective {
                     id: "obj-victory".to_string(),
@@ -3328,6 +4022,8 @@ pub(crate) mod tests {
                     source: crate::messages::ObjectiveSource::default(),
                 }],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -3398,6 +4094,8 @@ pub(crate) mod tests {
                         source: crate::messages::ObjectiveSource::default(),
                     }],
                     when: Some(crate::world::flags::parse_predicate("flag(green_light)").unwrap()),
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -3458,6 +4156,8 @@ pub(crate) mod tests {
                         },
                         actions: vec![TriggerAction::SetWorldFlag { name: "a".into() }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -3476,6 +4176,8 @@ pub(crate) mod tests {
                             source: crate::messages::ObjectiveSource::default(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -3526,6 +4228,8 @@ pub(crate) mod tests {
                         },
                         actions: vec![TriggerAction::SetWorldFlag { name: "a".into() }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -3544,6 +4248,8 @@ pub(crate) mod tests {
                             source: crate::messages::ObjectiveSource::default(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -3590,6 +4296,8 @@ pub(crate) mod tests {
                             name: "shields_up".into(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -3610,6 +4318,8 @@ pub(crate) mod tests {
                             source: crate::messages::ObjectiveSource::default(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -3681,6 +4391,8 @@ pub(crate) mod tests {
                         source: crate::messages::ObjectiveSource::default(),
                     }],
                     when: Some(crate::world::flags::parse_predicate("flag(parent:armed)").unwrap()),
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
@@ -3739,6 +4451,8 @@ pub(crate) mod tests {
                             name: "armed".into(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: Some(layer_path.clone()),
@@ -3750,9 +4464,9 @@ pub(crate) mod tests {
                         condition: TriggerCondition::OnFlagSet {
                             name: "armed".into(),
                         },
-                        actions: vec![TriggerAction::AddObjective {
+actions: vec![TriggerAction::AddObjective {
                             id: "obj-base-armed".into(),
-                            text: "should NOT fire Ã¢â‚¬â€ different layer".into(),
+                            text: "should NOT fire Ã¢输了¬â€� different layer".into(),
                             mandatory: false,
                             targets: vec![],
                             directive: crate::messages::AiDirective::None,
@@ -3760,6 +4474,8 @@ pub(crate) mod tests {
                             source: crate::messages::ObjectiveSource::default(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -3806,17 +4522,19 @@ pub(crate) mod tests {
             runtime
                 .name_to_uuid
                 .insert("source".into(), npc_uuid.into());
-            runtime.trigger_states = vec![TriggerState {
+runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnDestroyed {
                         entity_name: "source".into(),
                     },
                     // Base-world trigger (origin_layer=None) tries to mutate
-                    // `parent:armed` Ã¢â‚¬â€ must be a no-op.
+                    // `parent:armed` Ã¯Â¿Â½ must be a no-op.
                     actions: vec![TriggerAction::SetWorldFlag {
                         name: "parent:armed".into(),
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -3868,6 +4586,8 @@ pub(crate) mod tests {
                         source: crate::messages::ObjectiveSource::default(),
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -3933,6 +4653,8 @@ pub(crate) mod tests {
                         target: None,
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -3973,6 +4695,8 @@ pub(crate) mod tests {
                     condition: TriggerCondition::OnWorldLoaded,
                     actions,
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -4164,6 +4888,8 @@ pub(crate) mod tests {
                             },
                         ],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -4179,6 +4905,8 @@ pub(crate) mod tests {
                             enemy: "Federation".into(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -4940,6 +5668,8 @@ base_priority = 35.0
                         path: "assets/worlds/patrol.toml".into(),
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -4985,6 +5715,8 @@ base_priority = 35.0
                         path: "assets/worlds/patrol.toml".into(),
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -5850,10 +6582,12 @@ entity = "layer_npc"
                         targets: vec![],
                         directive: crate::messages::AiDirective::None,
                         utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
-                    when: None,
-                },
+source: crate::messages::ObjectiveSource::default(),
+                        }],
+                        when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
+                    },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
@@ -5909,6 +6643,8 @@ entity = "layer_npc"
                 source: crate::messages::ObjectiveSource::default(),
             }],
             when: None,
+            action_predicates: vec![],
+            action_delays: vec![],
         });
         app.insert_resource(cfg);
 
@@ -6187,10 +6923,12 @@ condition = "on_world_loaded"
                     targets: vec![],
                     directive: crate::messages::AiDirective::None,
                     utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
-                }],
-                when: None,
-            },
+source: crate::messages::ObjectiveSource::default(),
+                        }],
+                        when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
+                    },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -6482,11 +7220,13 @@ condition = "on_world_loaded"
                         targets: vec![],
                         directive: crate::messages::AiDirective::None,
                         utility: crate::objectives::UtilityConfig::default(),
-                        source: crate::messages::ObjectiveSource::default(),
-                    }],
-                    when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
-                },
-                fired: false,
+source: crate::messages::ObjectiveSource::default(),
+                        }],
+                        when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
+                    },
+                    fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
             });
@@ -6574,8 +7314,11 @@ size_max = 2.0
                         position: Some([7.0, 0.0, 3.0]),
                         rotation: None,
                         scale: None,
+                        groups: vec![],
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -6650,8 +7393,11 @@ size_max = 2.0
                         position: None,
                         rotation: None,
                         scale: None,
+                        groups: vec![],
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -6734,8 +7480,11 @@ size_max = 2.0
                         position: None,
                         rotation: None,
                         scale: None,
+                        groups: vec![],
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
@@ -6832,6 +7581,8 @@ size_max = 2.0
                             entity: "doomed".into(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -6852,6 +7603,8 @@ size_max = 2.0
                             source: crate::messages::ObjectiveSource::default(),
                         }],
                         when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
                     },
                     fired: false,
                     origin_layer: None,
@@ -6919,6 +7672,8 @@ size_max = 2.0
                         entity: "does_not_exist".into(),
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -6971,8 +7726,11 @@ size_max = 2.0
                         position: Some([1.0, 0.0, 1.0]),
                         rotation: None,
                         scale: None,
+                        groups: vec![],
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
@@ -7043,10 +7801,13 @@ size_max = 2.0
                         position: Some([0.0, 0.0, 0.0]),
                         rotation: None,
                         scale: None,
+                        groups: vec![],
                     }],
                     when: Some(crate::world::flags::Predicate::Flag {
                         name: "ready".into(),
                     }),
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -7103,8 +7864,11 @@ size_max = 2.0
                         position: Some([1.0, 2.0, 3.0]),
                         rotation: Some([0.0, std::f32::consts::FRAC_PI_2, 0.0]),
                         scale: Some([2.0, 2.0, 2.0]),
+                        groups: vec![],
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -7195,8 +7959,11 @@ size_max = 2.0
                         position: Some([1.0, 0.0, 1.0]),
                         rotation: None,
                         scale: None,
+                        groups: vec![],
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -7255,8 +8022,11 @@ size_max = 2.0
                         position: Some([0.0, 0.0, 0.0]),
                         rotation: None,
                         scale: None,
+                        groups: vec![],
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -7307,8 +8077,11 @@ size_max = 2.0
                         position: Some([50.0, 0.0, 50.0]),
                         rotation: None,
                         scale: None,
+                        groups: vec![],
                     }],
                     when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
                 },
                 fired: false,
                 origin_layer: None,
@@ -7367,6 +8140,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7382,6 +8156,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7400,6 +8175,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
         // At/above threshold: fires.
         assert!(follow_up_trigger_holds(
@@ -7410,6 +8186,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
         assert!(follow_up_trigger_holds(
             Some(&cond),
@@ -7419,6 +8196,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7439,6 +8217,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
         // Ship inside: fires.
         let mut inside = HashSet::new();
@@ -7451,6 +8230,7 @@ size_max = 2.0
             &flags,
             &inside,
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7473,6 +8253,7 @@ size_max = 2.0
             &flags,
             &inside,
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7498,6 +8279,7 @@ size_max = 2.0
             &flags,
             &inside,
             &HashSet::new(),
+            &HashMap::new(),
         ));
         // Ship outside: fires.
         assert!(follow_up_trigger_holds(
@@ -7508,6 +8290,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7527,11 +8310,12 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
     #[test]
-    fn follow_up_trigger_holds_on_flag_set_does_not_fire_when_flag_unset() {
+fn follow_up_trigger_holds_on_flag_set_does_not_fire_when_flag_unset() {
         let n2u = HashMap::new();
         let flags = crate::world::flags::FlagStore::new();
         let cond = TriggerCondition::OnFlagSet {
@@ -7545,6 +8329,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7567,6 +8352,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7574,10 +8360,10 @@ size_max = 2.0
     fn follow_up_trigger_holds_on_flag_cleared_fires_when_flag_already_unset() {
         let n2u = HashMap::new();
         let flags = crate::world::flags::FlagStore::new();
-        let cond = TriggerCondition::OnFlagCleared {
+let cond = TriggerCondition::OnFlagCleared {
             name: "shields_offline".into(),
         };
-        // Unset flag is treated as "cleared" Ã¢â‚¬â€ fires immediately.
+        // Unset flag is treated as "cleared" fires immediately.
         assert!(follow_up_trigger_holds(
             Some(&cond),
             0.0,
@@ -7586,6 +8372,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7593,11 +8380,11 @@ size_max = 2.0
     fn follow_up_trigger_holds_on_destroyed_fires_when_entity_already_destroyed() {
         let n2u = name_map(&[("Ironveil", "ironveil-uuid")]);
         let flags = crate::world::flags::FlagStore::new();
-        let cond = TriggerCondition::OnDestroyed {
+let cond = TriggerCondition::OnDestroyed {
             entity_name: "Ironveil".into(),
         };
 
-        // Ironveil's UUID is registered but NOT in the live set Ã¢â‚¬â€ fires.
+        // Ironveil's UUID is registered but NOT in the live set fires.
         assert!(follow_up_trigger_holds(
             Some(&cond),
             0.0,
@@ -7606,6 +8393,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7626,6 +8414,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &live,
+            &HashMap::new(),
         ));
     }
 
@@ -7647,6 +8436,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
         // Matching event in the snapshot: fires.
         let events = vec![WorldEvent::Attacked {
@@ -7661,6 +8451,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7682,6 +8473,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &HashMap::new(),
         ));
     }
 
@@ -7690,8 +8482,17 @@ size_max = 2.0
         let n2u = name_map(&[("A", "a-uuid"), ("B", "b-uuid"), ("C", "c-uuid")]);
         let flags = crate::world::flags::FlagStore::new();
         let cond = TriggerCondition::OnAllDestroyed {
-            entity_names: vec!["A".into(), "B".into(), "C".into()],
+            group: "test".into(),
+            after_secs: 0.0,
         };
+        let entity_groups: HashMap<String, HashSet<String>> = [(
+            "test".to_string(),
+            ["A".to_string(), "B".to_string(), "C".to_string()]
+                .into_iter()
+                .collect(),
+        )]
+        .into_iter()
+        .collect();
 
         // All three live: does NOT fire.
         let mut live = HashSet::new();
@@ -7706,6 +8507,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &live,
+            &entity_groups,
         ));
 
         // A destroyed, B+C still alive: does NOT fire.
@@ -7720,6 +8522,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &live,
+            &entity_groups,
         ));
 
         // All three destroyed: fires.
@@ -7731,6 +8534,7 @@ size_max = 2.0
             &flags,
             &HashSet::new(),
             &HashSet::new(),
+            &entity_groups,
         ));
     }
 

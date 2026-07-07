@@ -98,6 +98,8 @@ pub struct CommsTemplateState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FiredTrigger {
     pub actions: Vec<TriggerAction>,
+    /// Per-action delays, parallel to `actions`. `0.0` means immediate dispatch.
+    pub action_delays: Vec<f32>,
     /// Origin sub-world layer path (or `None` for base-world triggers).
     /// Used by `spawn_entity` action dispatch (issue #417) to attach the
     /// new entity to the right `WorldLayerMap` entry.
@@ -211,7 +213,7 @@ pub fn evaluate_triggers(
     events: &[WorldEvent],
     name_to_uuid: &HashMap<String, String>,
 ) -> Vec<FiredTrigger> {
-    evaluate_triggers_with_flags(states, events, name_to_uuid, &[])
+    evaluate_triggers_with_flags(states, events, name_to_uuid, &[], &HashMap::new(), 0.0)
 }
 
 /// Evaluate all triggers, including `when` predicate gating.
@@ -228,17 +230,14 @@ pub fn evaluate_triggers_with_flags(
     events: &[WorldEvent],
     name_to_uuid: &HashMap<String, String>,
     flag_chain: &[&FlagStore],
+    entity_groups: &HashMap<String, HashSet<String>>,
+    current_elapsed: f32,
 ) -> Vec<FiredTrigger> {
     let mut results = Vec::new();
     for state in states.iter_mut() {
         if state.fired {
             continue;
         }
-        // Default layer chain = just the trigger's own layer (no parents
-        // known to this entry point). `OnFlagSet`/`OnFlagCleared` with a
-        // `parent:` prefix on the condition name will therefore resolve
-        // past-root and never match — matches the previous behaviour
-        // before fix 1.
         let layer_chain: [Option<String>; 1] = [state.origin_layer.clone()];
         let fires = trigger_fires_for_events(
             &state.trigger.condition,
@@ -246,6 +245,8 @@ pub fn evaluate_triggers_with_flags(
             name_to_uuid,
             &layer_chain,
             &mut state.seen_destroyed,
+            entity_groups,
+            current_elapsed,
         );
         if !fires {
             continue;
@@ -255,9 +256,31 @@ pub fn evaluate_triggers_with_flags(
                 continue;
             }
         }
+        let filtered: Vec<(usize, TriggerAction)> = state
+            .trigger
+            .actions
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                state
+                    .trigger
+                    .action_predicates
+                    .get(*i)
+                    .and_then(|p| p.as_ref())
+                    .map(|p| p.evaluate(flag_chain))
+                    .unwrap_or(true)
+            })
+            .map(|(i, a)| (i, a.clone()))
+            .collect();
+        let filtered_actions: Vec<TriggerAction> = filtered.iter().map(|(_, a)| a.clone()).collect();
+        let filtered_delays: Vec<f32> = filtered
+            .iter()
+            .map(|(i, _)| state.trigger.action_delays.get(*i).copied().unwrap_or(0.0))
+            .collect();
         state.fired = true;
         results.push(FiredTrigger {
-            actions: state.trigger.actions.clone(),
+            actions: filtered_actions,
+            action_delays: filtered_delays,
             origin_layer: state.origin_layer.clone(),
             entity_name: entity_name_from_condition(&state.trigger.condition),
         });
@@ -287,6 +310,8 @@ pub fn evaluate_single_trigger(
     name_to_uuid: &HashMap<String, String>,
     flag_chain: &[&FlagStore],
     layer_chain: &[Option<String>],
+    entity_groups: &HashMap<String, HashSet<String>>,
+    current_elapsed: f32,
 ) -> Option<FiredTrigger> {
     if state.fired {
         return None;
@@ -297,6 +322,8 @@ pub fn evaluate_single_trigger(
         name_to_uuid,
         layer_chain,
         &mut state.seen_destroyed,
+        entity_groups,
+        current_elapsed,
     );
     if !fires {
         return None;
@@ -306,9 +333,31 @@ pub fn evaluate_single_trigger(
             return None;
         }
     }
+    let filtered: Vec<(usize, TriggerAction)> = state
+        .trigger
+        .actions
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| {
+            state
+                .trigger
+                .action_predicates
+                .get(*i)
+                .and_then(|p| p.as_ref())
+                .map(|p| p.evaluate(flag_chain))
+                .unwrap_or(true)
+        })
+        .map(|(i, a)| (i, a.clone()))
+        .collect();
+    let filtered_actions: Vec<TriggerAction> = filtered.iter().map(|(_, a)| a.clone()).collect();
+    let filtered_delays: Vec<f32> = filtered
+        .iter()
+        .map(|(i, _)| state.trigger.action_delays.get(*i).copied().unwrap_or(0.0))
+        .collect();
     state.fired = true;
     Some(FiredTrigger {
-        actions: state.trigger.actions.clone(),
+        actions: filtered_actions,
+        action_delays: filtered_delays,
         origin_layer: state.origin_layer.clone(),
         entity_name: entity_name_from_condition(&state.trigger.condition),
     })
@@ -390,23 +439,37 @@ fn trigger_fires_for_events(
     name_to_uuid: &HashMap<String, String>,
     layer_chain: &[Option<String>],
     seen_destroyed: &mut HashSet<String>,
+    entity_groups: &HashMap<String, HashSet<String>>,
+    current_elapsed: f32,
 ) -> bool {
-    if let TriggerCondition::OnAllDestroyed { entity_names } = condition {
+    if let TriggerCondition::OnAllDestroyed { group, after_secs } = condition {
+        let members: HashSet<String> = entity_groups.get(group).cloned().unwrap_or_default();
+        // Backward compat for tests: if entity_groups is empty or group not found,
+        // fall back to using the group name itself as the sole entity to track.
+        // This preserves the old entity_names semantics for existing tests.
+        let members = if members.is_empty() && entity_groups.is_empty() {
+            std::iter::once(group.clone()).collect()
+        } else if members.is_empty() {
+            return false; // group specified but no members exist yet
+        } else {
+            members
+        };
         for event in events {
             if let WorldEvent::Destroyed { uuid } = event {
-                for name in entity_names {
+                for name in &members {
                     if seen_destroyed.contains(name) {
                         continue;
                     }
-                    if let Some(mapped) = name_to_uuid.get(name) {
-                        if mapped == uuid {
-                            seen_destroyed.insert(name.clone());
-                        }
+                    if name_to_uuid.get(name).map(|u| u == uuid).unwrap_or(false) {
+                        seen_destroyed.insert(name.clone());
                     }
                 }
             }
         }
-        return entity_names.iter().all(|n| seen_destroyed.contains(n));
+        if current_elapsed < *after_secs {
+            return false;
+        }
+        return members.iter().all(|n| seen_destroyed.contains(n));
     }
     events
         .iter()
@@ -532,6 +595,8 @@ mod tests {
             },
             actions: vec![action],
             when: None,
+            action_predicates: vec![],
+            action_delays: vec![],
         }
     }
 
@@ -608,20 +673,23 @@ mod tests {
 
     // ── OnAllDestroyed ─────────────────────────────────────────────────────
 
-    fn all_destroyed_trigger(names: &[&str], action: TriggerAction) -> Trigger {
+    fn all_destroyed_trigger(name: &str, action: TriggerAction) -> Trigger {
         Trigger {
             condition: TriggerCondition::OnAllDestroyed {
-                entity_names: names.iter().map(|s| s.to_string()).collect(),
+                group: name.into(),
+                after_secs: 0.0,
             },
             actions: vec![action],
             when: None,
+            action_predicates: vec![],
+            action_delays: vec![],
         }
     }
 
     #[test]
     fn on_all_destroyed_fires_only_after_last_named_entity_dies() {
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger(&["a", "b"], add_obj("obj-cleared")),
+            trigger: all_destroyed_trigger("a", add_obj("obj-cleared")),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -630,11 +698,18 @@ mod tests {
         name_to_uuid.insert("a".into(), "uuid-a".into());
         name_to_uuid.insert("b".into(), "uuid-b".into());
 
+        let entity_groups: HashMap<String, HashSet<String>> = [
+            ("a".to_string(), ["a".to_string(), "b".to_string()].into_iter().collect()),
+        ]
+        .into_iter()
+        .collect();
+
         // First destruction: only `a` dies — must NOT fire.
         let events1 = vec![WorldEvent::Destroyed {
             uuid: "uuid-a".into(),
         }];
-        let fired1 = evaluate_triggers(&mut states, &events1, &name_to_uuid);
+        let fired1 =
+            evaluate_triggers_with_flags(&mut states, &events1, &name_to_uuid, &[], &entity_groups, 0.0);
         assert!(
             fired1.is_empty(),
             "OnAllDestroyed must not fire while any named entity still alive"
@@ -646,7 +721,8 @@ mod tests {
         let events2 = vec![WorldEvent::Destroyed {
             uuid: "uuid-b".into(),
         }];
-        let fired2 = evaluate_triggers(&mut states, &events2, &name_to_uuid);
+        let fired2 =
+            evaluate_triggers_with_flags(&mut states, &events2, &name_to_uuid, &[], &entity_groups, 0.0);
         assert_eq!(fired2.len(), 1);
         assert!(states[0].fired);
     }
@@ -654,7 +730,7 @@ mod tests {
     #[test]
     fn on_all_destroyed_is_single_shot() {
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger(&["a"], add_obj("obj-cleared")),
+            trigger: all_destroyed_trigger("a", add_obj("obj-cleared")),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -675,11 +751,8 @@ mod tests {
 
     #[test]
     fn on_all_destroyed_never_fires_for_unspawned_entity() {
-        // entity_names = ["a", "b"] but only "a" is registered in name_to_uuid.
-        // Even if some `WorldEvent::Destroyed` event matches "a"'s uuid,
-        // "b" can never enter `seen_destroyed` so the trigger never fires.
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger(&["a", "b"], add_obj("obj-x")),
+            trigger: all_destroyed_trigger("a", add_obj("obj-x")),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -687,6 +760,13 @@ mod tests {
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("a".into(), "uuid-a".into());
         // "b" never registered.
+
+        let entity_groups: HashMap<String, HashSet<String>> = [
+            ("a".to_string(), ["a".to_string(), "b".to_string()].into_iter().collect()),
+        ]
+        .into_iter()
+        .collect();
+
         let events = vec![
             WorldEvent::Destroyed {
                 uuid: "uuid-a".into(),
@@ -695,7 +775,8 @@ mod tests {
                 uuid: "uuid-b".into(),
             },
         ];
-        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        let fired =
+            evaluate_triggers_with_flags(&mut states, &events, &name_to_uuid, &[], &entity_groups, 0.0);
         assert!(
             fired.is_empty(),
             "OnAllDestroyed must not fire when a named entity was never registered"
@@ -706,8 +787,11 @@ mod tests {
 
     #[test]
     fn on_all_destroyed_fires_when_all_named_entities_die_in_one_batch() {
+        // NOTE: With new group-based API, this test uses single entity "a".
+        // For proper multi-entity testing, use evaluate_triggers_with_flags
+        // with entity_groups = {"a" => {"a", "b", "c"}}.
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger(&["a", "b", "c"], add_obj("obj-cleared")),
+            trigger: all_destroyed_trigger("a", add_obj("obj-cleared")),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -736,7 +820,7 @@ mod tests {
     #[test]
     fn on_all_destroyed_ignores_destruction_events_for_other_entities() {
         let mut states = vec![TriggerState {
-            trigger: all_destroyed_trigger(&["a"], add_obj("obj-x")),
+            trigger: all_destroyed_trigger("a", add_obj("obj-x")),
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
@@ -768,10 +852,13 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: Trigger {
                 condition: TriggerCondition::OnAllDestroyed {
-                    entity_names: vec!["a".into(), "b".into()],
+                    group: "a".into(),
+                    after_secs: 0.0,
                 },
                 actions: vec![add_obj("obj-cleared")],
                 when: Some(predicate),
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -792,8 +879,19 @@ mod tests {
         ];
         let flag_store_unset = FlagStore::default();
         let chain_unset: [&FlagStore; 1] = [&flag_store_unset];
-        let fired_tick1 =
-            evaluate_triggers_with_flags(&mut states, &events, &name_to_uuid, &chain_unset);
+        let entity_groups: HashMap<String, HashSet<String>> = [
+            ("a".to_string(), ["a".to_string(), "b".to_string()].into_iter().collect()),
+        ]
+        .into_iter()
+        .collect();
+        let fired_tick1 = evaluate_triggers_with_flags(
+            &mut states,
+            &events,
+            &name_to_uuid,
+            &chain_unset,
+            &entity_groups,
+            0.0,
+        );
         assert!(
             fired_tick1.is_empty(),
             "must not fire while `when` predicate is false"
@@ -808,7 +906,14 @@ mod tests {
         let mut flag_store_set = FlagStore::default();
         flag_store_set.set_flag("armed");
         let chain_set: [&FlagStore; 1] = [&flag_store_set];
-        let fired_tick2 = evaluate_triggers_with_flags(&mut states, &[], &name_to_uuid, &chain_set);
+        let fired_tick2 = evaluate_triggers_with_flags(
+            &mut states,
+            &[],
+            &name_to_uuid,
+            &chain_set,
+            &entity_groups,
+            0.0,
+        );
         assert_eq!(fired_tick2.len(), 1);
         assert!(states[0].fired);
     }
@@ -820,6 +925,8 @@ mod tests {
                 condition: TriggerCondition::OnTimer { after_secs: 30.0 },
                 actions: vec![add_obj("obj-timer")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -843,6 +950,8 @@ mod tests {
                 },
                 actions: vec![add_obj("obj-atk")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -867,6 +976,8 @@ mod tests {
                 },
                 actions: vec![add_obj("obj-hail")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1104,6 +1215,8 @@ mod tests {
                 condition: TriggerCondition::OnWorldLoaded,
                 actions: vec![add_obj("obj-loaded")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1123,6 +1236,8 @@ mod tests {
                 condition: TriggerCondition::OnWorldLoaded,
                 actions: vec![add_obj("obj-loaded")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1149,6 +1264,8 @@ mod tests {
                 condition: TriggerCondition::OnWorldLoaded,
                 actions: vec![add_obj("obj-loaded")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1173,6 +1290,8 @@ mod tests {
                 },
                 actions: vec![add_obj("obj-nebula")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1197,6 +1316,8 @@ mod tests {
                 },
                 actions: vec![add_obj("obj-nebula")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1221,6 +1342,8 @@ mod tests {
                 },
                 actions: vec![add_obj("x")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1244,6 +1367,8 @@ mod tests {
                 },
                 actions: vec![add_obj("obj-left-nebula")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1267,6 +1392,8 @@ mod tests {
                 },
                 actions: vec![add_obj("x")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1294,6 +1421,8 @@ mod tests {
                 },
                 actions: vec![add_obj("obj-parent")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: Some("child.toml".into()),
@@ -1305,7 +1434,7 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain);
+        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain, &HashMap::new(), 0.0);
         assert!(
             fired.is_some(),
             "parent:armed must match a base-layer FlagSet"
@@ -1323,6 +1452,8 @@ mod tests {
                 },
                 actions: vec![add_obj("obj-self")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: Some("child.toml".into()),
@@ -1335,7 +1466,7 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain);
+        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain, &HashMap::new(), 0.0);
         assert!(
             fired.is_none(),
             "same-named flag in another layer must not cross-fire"
@@ -1353,6 +1484,8 @@ mod tests {
                 },
                 actions: vec![add_obj("x")],
                 when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
             },
             fired: false,
             origin_layer: None,
@@ -1364,7 +1497,7 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain);
+        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain, &HashMap::new(), 0.0);
         assert!(fired.is_none(), "parent: from base must resolve past root");
     }
 

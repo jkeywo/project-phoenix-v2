@@ -485,30 +485,36 @@ when       = "counter(ship_power) >= 100"
 
 [[trigger]]
 condition = "on_all_destroyed"
-entities  = ["wave_1", "wave_2", "wave_3", "wave_4", "wave_5", "wave_6", "wave_7", "wave_8"]
+group     = "waves"
+after_secs = 301.0
 when      = "counter(ship_power) < 90"
 
   [[trigger.action]]
-  type    = "game_over"
-  message = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  type       = "game_over"
+  message    = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  delay_secs = 5.0
 
 [[trigger]]
 condition = "on_all_destroyed"
-entities  = ["wave_1", "wave_1b", "wave_2", "wave_3", "wave_3b", "wave_4", "wave_5", "wave_5b", "wave_6", "wave_7", "wave_7b", "wave_8"]
+group     = "waves"
+after_secs = 301.0
 when      = "counter(ship_power) >= 90 and counter(ship_power) < 100"
 
   [[trigger.action]]
-  type    = "game_over"
-  message = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  type       = "game_over"
+  message    = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  delay_secs = 5.0
 
 [[trigger]]
 condition = "on_all_destroyed"
-entities  = ["wave_1", "wave_1b", "wave_2", "wave_2b", "wave_3", "wave_3b", "wave_4", "wave_4b", "wave_5", "wave_5b", "wave_6", "wave_6b", "wave_7", "wave_7b", "wave_8", "wave_8b"]
+group     = "waves"
+after_secs = 301.0
 when      = "counter(ship_power) >= 100"
 
   [[trigger.action]]
-  type    = "game_over"
-  message = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  type       = "game_over"
+  message    = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  delay_secs = 5.0
 
 # Defeat: Starbase Alpha destroyed.
 [[trigger]]

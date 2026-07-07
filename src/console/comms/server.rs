@@ -659,6 +659,7 @@ pub(crate) fn handle_respond_to_message(
                     position,
                     rotation,
                     scale,
+                    groups: _,
                 } => {
                     let pos_arr: [f32; 3] = if let Some(pos) = position {
                         *pos
@@ -1613,6 +1614,7 @@ mod tests {
             position: Some([5.0, 0.0, 9.0]),
             rotation: None,
             scale: None,
+            groups: vec![],
         }]);
 
         let uuid = app
@@ -1873,6 +1875,7 @@ mod tests {
                     position: None,
                     rotation: None,
                     scale: None,
+                    groups: vec![],
                 },
                 TriggerAction::DestroyEntity { entity: "x".into() },
                 TriggerAction::AddFactionEnemy {

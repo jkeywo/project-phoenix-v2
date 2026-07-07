@@ -191,9 +191,8 @@ struct RawTriggerEntry {
     #[serde(default)]
     entity: Option<String>,
     /// Required by `on_all_destroyed`; ignored by every other condition.
-    /// (#470)
     #[serde(default)]
-    entities: Option<Vec<String>>,
+    group: Option<String>,
     #[serde(default)]
     after_secs: Option<f32>,
     #[serde(default)]
@@ -312,6 +311,19 @@ struct RawActionEntry {
     /// Zero-gate veto conditions.
     #[serde(default)]
     zero_gates: Option<Vec<RawZeroGate>>,
+    /// Named groups for `spawn_entity` action. The entity is tracked as a
+    /// member of each group and removed from all groups on destruction.
+    #[serde(default)]
+    groups: Option<Vec<String>>,
+    /// Per-action predicate gate. When `Some`, the action only fires if the
+    /// predicate evaluates to true at dispatch time.
+    #[serde(default)]
+    when: Option<String>,
+    /// Delay in seconds before this action fires (relative to trigger fire time).
+    /// Actions with `delay_secs > 0.0` are queued and dispatched after the
+    /// delay period expires.
+    #[serde(default)]
+    delay_secs: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -342,7 +354,7 @@ struct RawCommsFollowUp {
     entity: Option<String>,
     /// Entity list for `on_all_destroyed`.
     #[serde(default)]
-    entities: Option<Vec<String>>,
+    group: Option<String>,
     /// Elapsed-seconds threshold for `on_timer`. For follow-ups the timer
     /// is measured from the moment the follow-up is queued (i.e. the
     /// response is picked or the parent message is injected), not from
@@ -377,7 +389,7 @@ struct RawCommsEntry {
     entity: Option<String>,
     /// Entity list for `on_all_destroyed` root triggers.
     #[serde(default)]
-    entities: Option<Vec<String>>,
+    group: Option<String>,
     /// Elapsed-seconds threshold for `on_timer` root triggers.
     #[serde(default)]
     after_secs: Option<f32>,
@@ -456,14 +468,14 @@ pub struct RawWorld {
 pub enum TriggerCondition {
     /// Fires when the named entity (by name, resolved to UUID at runtime) is destroyed.
     OnDestroyed { entity_name: String },
-    /// Fires when **all** of the named entities have been destroyed at
-    /// least once during the world's lifetime. Tracks observed
-    /// destruction events across ticks via `TriggerState.seen_destroyed`;
-    /// fires single-shot on the tick the last named entity is destroyed.
-    /// Names that are never spawned (never enter `name_to_uuid`) cause
-    /// the trigger to never fire — matches the "unknown entity → never
-    /// matches" semantics of `OnDestroyed`. (#470)
-    OnAllDestroyed { entity_names: Vec<String> },
+    /// Fires when every entity in a named group has been destroyed.
+    ///
+    /// Group membership is tracked dynamically via `entity_groups` in
+    /// `WorldContentRuntime` — entities spawn into groups via
+    /// `SpawnEntity { groups: [...] }`, and are removed when destroyed.
+    /// `after_secs` is a minimum time gate; the trigger cannot fire before
+    /// that many seconds have elapsed (default 0.0 = no minimum).
+    OnAllDestroyed { group: String, after_secs: f32 },
     /// Fires when the named entity is attacked.
     OnAttacked { entity_name: String },
     /// Fires once when `elapsed_secs` crosses `after_secs`.
@@ -586,6 +598,10 @@ pub enum TriggerAction {
         position: Option<[f32; 3]>,
         rotation: Option<[f32; 3]>,
         scale: Option<[f32; 3]>,
+        /// Named groups this entity belongs to. The entity is automatically
+        /// removed from each group when it is destroyed, enabling
+        /// `OnAllDestroyed { group }` triggers to track dynamic membership.
+        groups: Vec<String>,
     },
     /// Destroy an entity by `name` (looked up in `name_to_uuid`).
     ///
@@ -636,6 +652,12 @@ pub struct Trigger {
     /// suppresses actions for that firing but does NOT consume the trigger
     /// lifecycle (the `fired` flag stays unset).
     pub when: Option<crate::world::flags::Predicate>,
+    /// Per-action predicate gates, parallel to `actions`. `None` means no gate
+    /// (action always fires). `Some(pred)` filters the action at dispatch time.
+    pub action_predicates: Vec<Option<crate::world::flags::Predicate>>,
+    /// Per-action delays in seconds, parallel to `actions`. `0.0` means
+    /// immediate dispatch. `> 0.0` queues the action for deferred dispatch.
+    pub action_delays: Vec<f32>,
 }
 
 /// A single response option within a comms dialogue node.
@@ -799,8 +821,10 @@ fn parse_flag_kind(s: &str) -> Result<crate::flag_kind::FlagKind, String> {
     }
 }
 
-fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction>, String> {
+fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<(Vec<TriggerAction>, Vec<Option<String>>, Vec<f32>), String> {
     let mut actions = Vec::new();
+    let mut raw_predicates: Vec<Option<String>> = Vec::new();
+    let mut delay_secs: Vec<f32> = Vec::new();
     for raw_action in raw_actions {
         let action =
             match raw_action.kind.as_str() {
@@ -1005,6 +1029,7 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                         position: raw_action.position,
                         rotation: raw_action.rotation,
                         scale: raw_action.scale,
+                        groups: raw_action.groups.clone().unwrap_or_default(),
                     }
                 }
                 "destroy_entity" => TriggerAction::DestroyEntity {
@@ -1031,8 +1056,10 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                 other => return Err(format!("Unknown trigger action '{}'", other)),
             };
         actions.push(action);
+        raw_predicates.push(raw_action.when.clone());
+        delay_secs.push(raw_action.delay_secs.unwrap_or(0.0));
     }
-    Ok(actions)
+    Ok((actions, raw_predicates, delay_secs))
 }
 
 fn parse_comms_follow_up(raw_fu: &RawCommsFollowUp) -> Result<CommsDialogueNode, String> {
@@ -1041,7 +1068,7 @@ fn parse_comms_follow_up(raw_fu: &RawCommsFollowUp) -> Result<CommsDialogueNode,
         Some(name) => Some(parse_trigger_condition_from_string(
             name,
             raw_fu.entity.clone(),
-            raw_fu.entities.clone(),
+            raw_fu.group.clone(),
             raw_fu.after_secs,
             raw_fu.name.clone(),
             "Comms follow-up",
@@ -1059,7 +1086,7 @@ fn parse_comms_follow_up(raw_fu: &RawCommsFollowUp) -> Result<CommsDialogueNode,
 fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<CommsResponse>, String> {
     let mut responses = Vec::new();
     for raw_resp in raw_responses {
-        let actions = parse_raw_actions(&raw_resp.actions)?;
+        let (actions, _, _) = parse_raw_actions(&raw_resp.actions)?;
         let follow_up = if let Some(ref raw_fu) = raw_resp.follow_up {
             Some(parse_comms_follow_up(raw_fu)?)
         } else {
@@ -1077,7 +1104,7 @@ fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<Comms
 fn parse_trigger_condition_from_string(
     name: &str,
     entity: Option<String>,
-    entities: Option<Vec<String>>,
+    group: Option<String>,
     after_secs: Option<f32>,
     flag_name: Option<String>,
     ctx: &str,
@@ -1088,14 +1115,11 @@ fn parse_trigger_condition_from_string(
                 .ok_or_else(|| format!("{ctx} 'on_destroyed' requires an 'entity' field"))?,
         }),
         "on_all_destroyed" => {
-            let entity_names = entities
-                .ok_or_else(|| format!("{ctx} 'on_all_destroyed' requires an 'entities' field"))?;
-            if entity_names.is_empty() {
-                return Err(format!(
-                    "{ctx} 'on_all_destroyed' requires a non-empty 'entities' list"
-                ));
-            }
-            Ok(TriggerCondition::OnAllDestroyed { entity_names })
+            let group = group.ok_or_else(|| format!("{ctx} 'on_all_destroyed' requires a 'group' field"))?;
+            Ok(TriggerCondition::OnAllDestroyed {
+                group,
+                after_secs: after_secs.unwrap_or(0.0),
+            })
         }
         "on_attacked" => Ok(TriggerCondition::OnAttacked {
             entity_name: entity
@@ -1213,12 +1237,17 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         let condition = parse_trigger_condition_from_string(
             &raw_trigger.condition,
             raw_trigger.entity,
-            raw_trigger.entities,
+            raw_trigger.group,
             raw_trigger.after_secs,
             raw_trigger.name,
             "Trigger",
         )?;
-        let actions = parse_raw_actions(&raw_trigger.actions)?;
+        let (actions, raw_predicates, delay_secs) = parse_raw_actions(&raw_trigger.actions)?;
+        let action_predicates: Vec<Option<crate::world::flags::Predicate>> = raw_predicates
+            .into_iter()
+            .map(|s| s.and_then(|src| crate::world::flags::parse_predicate(&src).ok()))
+            .collect();
+        let action_delays: Vec<f32> = delay_secs;
         let when = match raw_trigger.when {
             Some(src) => Some(
                 crate::world::flags::parse_predicate(&src)
@@ -1230,6 +1259,8 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             condition,
             actions,
             when,
+            action_predicates,
+            action_delays,
         });
     }
 
@@ -1239,7 +1270,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         let trigger = parse_trigger_condition_from_string(
             &raw_comms.trigger,
             raw_comms.entity,
-            raw_comms.entities,
+            raw_comms.group,
             raw_comms.after_secs,
             raw_comms.name,
             "Comms block",
@@ -2293,11 +2324,11 @@ entity    = "raider_alpha"
     // ── on_all_destroyed parser ────────────────────────────────────────────
 
     #[test]
-    fn parse_world_reads_on_all_destroyed_trigger_with_entities_list() {
+    fn parse_world_reads_on_all_destroyed_trigger_with_group() {
         let toml = r#"
 [[trigger]]
 condition = "on_all_destroyed"
-entities  = ["wave_1_a", "wave_1_b", "wave_2_a"]
+group      = "waves"
 
   [[trigger.action]]
   type    = "game_over"
@@ -2306,15 +2337,9 @@ entities  = ["wave_1_a", "wave_1_b", "wave_2_a"]
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.triggers.len(), 1);
         match &cfg.triggers[0].condition {
-            TriggerCondition::OnAllDestroyed { entity_names } => {
-                assert_eq!(
-                    entity_names,
-                    &vec![
-                        "wave_1_a".to_string(),
-                        "wave_1_b".to_string(),
-                        "wave_2_a".to_string(),
-                    ]
-                );
+            TriggerCondition::OnAllDestroyed { group, after_secs } => {
+                assert_eq!(group, "waves");
+                assert_eq!(*after_secs, 0.0);
             }
             other => panic!("expected OnAllDestroyed, got {other:?}"),
         }
@@ -2330,29 +2355,32 @@ condition = "on_all_destroyed"
   type    = "game_over"
   message = "Victory."
 "#;
-        let err = parse_world(toml).expect_err("missing entities must error");
+        let err = parse_world(toml).expect_err("missing group must error");
         assert!(
-            err.contains("on_all_destroyed") && err.contains("entities"),
-            "error must mention condition + entities field: {err}"
+            err.contains("on_all_destroyed") && err.contains("group"),
+            "error must mention condition + group field: {err}"
         );
     }
 
     #[test]
-    fn parse_world_rejects_on_all_destroyed_with_empty_entities_list() {
+    fn parse_world_accepts_on_all_destroyed_with_empty_group() {
         let toml = r#"
 [[trigger]]
 condition = "on_all_destroyed"
-entities  = []
+group     = ""
 
   [[trigger.action]]
   type    = "game_over"
   message = "Victory."
 "#;
-        let err = parse_world(toml).expect_err("empty entities list must error");
-        assert!(
-            err.contains("on_all_destroyed") && err.contains("non-empty"),
-            "error must mention non-empty requirement: {err}"
-        );
+        let cfg = parse_world(toml).expect("empty group should parse");
+        match &cfg.triggers[0].condition {
+            TriggerCondition::OnAllDestroyed { group, after_secs } => {
+                assert_eq!(group, "");
+                assert_eq!(*after_secs, 0.0);
+            }
+            other => panic!("expected OnAllDestroyed, got {other:?}"),
+        }
     }
 
     #[test]
@@ -3182,11 +3210,14 @@ entity    = "raider"
             .iter()
             .find(|t| matches!(t.condition, TriggerCondition::OnAllDestroyed { .. }))
             .expect("combat_test must have an on_all_destroyed victory trigger");
-        if let TriggerCondition::OnAllDestroyed { entity_names } = &victory.condition {
+        if let TriggerCondition::OnAllDestroyed { group, after_secs } = &victory.condition {
             assert_eq!(
-                entity_names.len(),
-                8,
-                "victory trigger must reference all 8 waves"
+                *group, "waves",
+                "victory trigger must reference 'waves' group"
+            );
+            assert!(
+                *after_secs >= 300.0,
+                "victory trigger after_secs should be >= 300 to allow final wave to spawn"
             );
         }
 
@@ -4027,6 +4058,7 @@ condition = "on_world_loaded"
                 position,
                 rotation,
                 scale,
+                groups: _,
             } => {
                 assert_eq!(template_path, "assets/entities/pirate_raider.toml");
                 assert_eq!(name, "raider_beta");

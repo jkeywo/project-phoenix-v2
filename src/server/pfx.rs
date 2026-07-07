@@ -42,6 +42,7 @@ const DUST_COLOR: [f32; 4] = [0.9, 0.92, 1.0, 0.6];
 const DUST_MIN_OPACITY: f32 = 0.05;
 const DUST_MAX_OPACITY: f32 = 0.6;
 const DUST_EMISSIVE_STRENGTH: f32 = 1.2;
+const DUST_MOTE_SPEED_MULTIPLIER: f32 = 2.0;
 /// Fallback max speed when no `HelmConsoleSection` is present on the local ship.
 /// Matches the typical player ship `max_speed` in TOML; never used in normal play.
 const DUST_FALLBACK_MAX_SPEED: f32 = 12.5;
@@ -1077,6 +1078,7 @@ struct DustPfxSettings {
     min_opacity: f32,
     max_opacity: f32,
     emissive_strength: f32,
+    mote_speed_multiplier: f32,
 }
 
 impl DustPfxSettings {
@@ -1100,6 +1102,9 @@ impl DustPfxSettings {
             emissive_strength: cfg
                 .and_then(|c| c.emissive_strength)
                 .unwrap_or(DUST_EMISSIVE_STRENGTH),
+            mote_speed_multiplier: cfg
+                .and_then(|c| c.mote_speed_multiplier)
+                .unwrap_or(DUST_MOTE_SPEED_MULTIPLIER),
         }
     }
 }
@@ -1204,19 +1209,21 @@ fn spawn_dust_motes(
 /// Moves all live dust motes opposite to ship heading at the ship's current forward_speed.
 fn move_dust_motes(
     time: Res<Time>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     ship_q: Query<&ShipPhysics, With<LocalShip>>,
     mut mote_q: Query<&mut Transform, With<DustMote>>,
 ) {
     let Ok(physics) = ship_q.single() else {
         return;
     };
+    let cfg = DustPfxSettings::from_world(world_config.as_deref());
     let dt = time.delta_secs();
     // Ship forward = (sin(yaw), 0, -cos(yaw)). Dust drifts opposite: (-sin, 0, +cos).
     let drift = Vec3::new(
         -physics.yaw.sin() * physics.forward_speed * dt,
         0.0,
         physics.yaw.cos() * physics.forward_speed * dt,
-    );
+    ) * cfg.mote_speed_multiplier;
     for mut transform in mote_q.iter_mut() {
         transform.translation += drift;
     }

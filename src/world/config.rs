@@ -140,6 +140,8 @@ pub struct DustPfxConfig {
     pub max_opacity: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emissive_strength: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mote_speed_multiplier: Option<f32>,
 }
 
 /// A concrete entity instance declared in the world TOML — a reference to an

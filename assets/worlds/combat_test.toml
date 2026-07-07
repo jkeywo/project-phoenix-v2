@@ -166,6 +166,16 @@ label = "Alliance Battleship"
 [player_spawn]
 position = [400.0, 0.0, 200.0]
 
+# Player ship entity — spawned by spawn_game_start_entities when the game starts.
+# The [player_spawn] section above overrides the position below. The actual ship
+# template is determined by the player's lobby selection (PendingShipConfig), which
+# is applied to this entity at spawn time.
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+id = "player-ship"
+transform = { position = [400.0, 0.0, 200.0] }
+spawn_on = "game_start"
+
 # Defended object. Named "Starbase Alpha" so on_destroyed can reference it.
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"

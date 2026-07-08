@@ -122,11 +122,15 @@ export class PhRadar extends HTMLElement {
     octx.arc(cx, cy, R, 0, Math.PI * 2);
     octx.fill();
 
+    // Atomic copy frame to visible canvas before blips (so radar always shows)
+    if (this.#offscreen) {
+      this.#ctx.drawImage(this.#offscreen, 0, 0);
+    }
+
     // Blips
     const blips = state.blips || [];
-    if (blips.length === 0) { this.#needsRender = false; return; }
     const range = state.range;
-    if (range == null || range <= 0) { this.#needsRender = false; return; }
+    if (blips.length === 0 || range == null || range <= 0) { this.#needsRender = false; return; }
     const shipHeading = state.ship_heading || 0;
     const shipHeadingRad = shipHeading * Math.PI / 180;
 

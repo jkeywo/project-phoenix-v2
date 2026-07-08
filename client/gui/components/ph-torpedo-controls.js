@@ -98,7 +98,7 @@ export class PhTorpedoControls extends HTMLElement {
         loadBtn.textContent = 'LOAD';
         loadBtn.addEventListener('click', () => {
           if (this.sendAction && !loadBtn.disabled) {
-            this.sendAction('load_tube', { tube_id: tube.id });
+            this.sendAction('load_tube', { tube: tube.id });
           }
         });
         row.appendChild(loadBtn);
@@ -108,7 +108,7 @@ export class PhTorpedoControls extends HTMLElement {
         unloadBtn.textContent = 'UNLOAD';
         unloadBtn.addEventListener('click', () => {
           if (this.sendAction && !unloadBtn.disabled) {
-            this.sendAction('unload_tube', { tube_id: tube.id });
+            this.sendAction('unload_tube', { tube: tube.id });
           }
         });
         row.appendChild(unloadBtn);
@@ -118,7 +118,7 @@ export class PhTorpedoControls extends HTMLElement {
         fireBtn.textContent = 'FIRE';
         fireBtn.addEventListener('click', () => {
           if (this.sendAction && !fireBtn.disabled) {
-            this.sendAction('fire_torpedo', { tube_id: tube.id });
+            this.sendAction('fire_torpedo', { tube: tube.id });
           }
         });
         row.appendChild(fireBtn);

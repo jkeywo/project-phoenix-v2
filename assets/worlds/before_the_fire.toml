@@ -39,7 +39,7 @@ template_path = "assets/entities/planet_earth.toml"
 transform = { position = [250.0, 0.0, 300.0] }
 
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 transform = { anchor = "ship_start" }
 spawn_on = "game_start"

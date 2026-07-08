@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-266ef39a99700312.js" crossorigin="anonymous" integrity="sha384-xKYteCFNgLMvBirCHwg0HxWNFj+AJ7GsXXmx6Vnig/W5mQXRGiiBjljPY+9HOW+3"><link rel="preload" href="./project-phoenix-266ef39a99700312_bg.wasm" crossorigin="anonymous" integrity="sha384-IlvMLQ1s1mBmEeiOsptfKZ/RLrbMF0ypY5W8rs5dcLQzdEU+634R+VFsm35eG+bY" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b41faf65564e2916.js" crossorigin="anonymous" integrity="sha384-g8jZ8Qv4CSEapF1TQF6l7+0peRmB+48glWmyly1+FVTFeCTZHbb0PWUK2IA1atf6"><link rel="preload" href="./project-phoenix-b41faf65564e2916_bg.wasm" crossorigin="anonymous" integrity="sha384-YSp4D50s3IpFg5qUDPyxAxRGCjzBGXhgXk/zob70r4905q6Y+5Sj9YtBsNWkbmo2" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -862,8 +862,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-266ef39a99700312.js';
-const wasm = await init({ module_or_path: './project-phoenix-266ef39a99700312_bg.wasm' });
+import init, * as bindings from './project-phoenix-b41faf65564e2916.js';
+const wasm = await init({ module_or_path: './project-phoenix-b41faf65564e2916_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1080,8 +1080,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     const stations = s.stations || [];
 
-    // Fill grid: always show exactly 9 cells (3×3)
-    const MAX_SLOTS = 9;
+    // Fill grid: show exactly the number of defined stations (the ship TOML
+    // defines its roster — no padding to a fixed count).
+    const MAX_SLOTS = stations.length;
     for (let i = 0; i < MAX_SLOTS; i++) {
       const st = i < stations.length ? stations[i] : null;
       const card = document.createElement('div');
@@ -1738,18 +1739,18 @@ function finishInit() {
   const shipResult = resolveShipSelection(ships);
 
   if (shipResult.action === 'legacy-fallback') {
-    // Legacy world without available_ships: fall back to player_ship.toml.
-    fetch('assets/entities/player_ship.toml')
+    // Legacy world without available_ships: fall back to alliance_cruiser.toml.
+    fetch('assets/entities/alliance_cruiser.toml')
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
-        wasm_select_ship('assets/entities/player_ship.toml');
+        wasm_select_ship('assets/entities/alliance_cruiser.toml');
         try { wasm_validate_stations(toml); } catch (err) {
           showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
           return;
         }
         startServer();
       })
-      .catch(err => { showFatalError('Failed to load player_ship.toml: ' + String(err)); });
+      .catch(err => { showFatalError('Failed to load alliance_cruiser.toml: ' + String(err)); });
   } else if (shipResult.action === 'auto-select') {
     // Single ship — auto-select and proceed.
     const templatePath = shipResult.templatePath;

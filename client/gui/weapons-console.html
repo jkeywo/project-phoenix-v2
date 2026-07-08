@@ -942,7 +942,7 @@
     function _updateBlasterBank(bankState) {
       var els = _blasterBankEls[bankState.id];
       if (!els) return;
-      els.btn.disabled = !bankState.fire_ready && !bankState.charging;
+      els.btn.disabled = !bankState.fire_ready && bankState.on_cooldown;
       var pct = Math.round((bankState.charge_progress || 0) * 100);
       els.progressFill.style.width = pct + '%';
     }

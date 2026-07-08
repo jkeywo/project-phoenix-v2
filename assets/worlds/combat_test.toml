@@ -83,15 +83,15 @@ color      = [0.6, 0.55, 0.5]
 brightness = 300.0
 
 [dust]
-max_motes         = 120
+max_motes         = 240
 max_spawn_rate    = 40.0
-spawn_radius      = 60.0
+spawn_radius      = 30.0
 lifetime_secs     = 3.5
-mote_radius       = 0.08
+mote_radius       = 0.04
 color             = [0.9, 0.92, 1.0, 0.6]
 min_opacity       = 0.05
 max_opacity       = 0.6
-emissive_strength = 1.2
+emissive_strength = 1.5
 
 # ── Anchors ───────────────────────────────────────────────────────────────────
 #
@@ -160,7 +160,7 @@ template_path = "assets/entities/alliance_cruiser.toml"
 label = "Alliance Cruiser"
 
 [[available_ships]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_battleship.toml"
 label = "Alliance Battleship"
 
 [player_spawn]
@@ -171,7 +171,7 @@ position = [400.0, 0.0, 200.0]
 # template is determined by the player's lobby selection (PendingShipConfig), which
 # is applied to this entity at spawn time.
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 transform = { position = [400.0, 0.0, 200.0] }
 spawn_on = "game_start"
@@ -485,30 +485,36 @@ when       = "counter(ship_power) >= 100"
 
 [[trigger]]
 condition = "on_all_destroyed"
-entities  = ["wave_1", "wave_2", "wave_3", "wave_4", "wave_5", "wave_6", "wave_7", "wave_8"]
+group     = "waves"
+after_secs = 301.0
 when      = "counter(ship_power) < 90"
 
   [[trigger.action]]
-  type    = "game_over"
-  message = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  type       = "game_over"
+  message    = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  delay_secs = 5.0
 
 [[trigger]]
 condition = "on_all_destroyed"
-entities  = ["wave_1", "wave_1b", "wave_2", "wave_3", "wave_3b", "wave_4", "wave_5", "wave_5b", "wave_6", "wave_7", "wave_7b", "wave_8"]
+group     = "waves"
+after_secs = 301.0
 when      = "counter(ship_power) >= 90 and counter(ship_power) < 100"
 
   [[trigger.action]]
-  type    = "game_over"
-  message = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  type       = "game_over"
+  message    = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  delay_secs = 5.0
 
 [[trigger]]
 condition = "on_all_destroyed"
-entities  = ["wave_1", "wave_1b", "wave_2", "wave_2b", "wave_3", "wave_3b", "wave_4", "wave_4b", "wave_5", "wave_5b", "wave_6", "wave_6b", "wave_7", "wave_7b", "wave_8", "wave_8b"]
+group     = "waves"
+after_secs = 301.0
 when      = "counter(ship_power) >= 100"
 
   [[trigger.action]]
-  type    = "game_over"
-  message = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  type       = "game_over"
+  message    = "VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds."
+  delay_secs = 5.0
 
 # Defeat: Starbase Alpha destroyed.
 [[trigger]]

@@ -121,7 +121,8 @@ Open (planned work):
 - **[Issue #549 — E3 Helm AI plugin](./sources/issue-549-ai-e3-helm-ai-plugin.md)** — Shipped. #520 slice E3: `operate_helm_ai` + `last_helm_intent`.
 - **[Issue #552 — B NPC Ship Components](./sources/issue-552-ai-b-npc-ship-components.md)** — Shipped. #520 slice B: NPC spawner inserts Ship + Components.
 - **[Issue #553 — E5 Cutover](./sources/issue-553-ai-e5-cutover.md)** — Shipped. #520 slice E5: `server.rs` intent-only; NPC helm via `operate_helm_ai`.
-- **[Issue #509 — phone-density layout review + layout-hint/aggregation spec](./sources/issue-509.md)** — Decided. Per-console HTML + `gui/console-ui.js` library; no declarative engine.
+- **[Issue #509 — phone-density layout review + layout-hint/aggregation spec](./sources/issue-509.md)** — Decided. Per-console HTML + `gui/console-ui.js` library; no declarative engine. *Superseded by PRD #642 for the component layer.*
+- **[PRD #642 — Web Component Console Refactor](./sources/prd-642-web-component-console-refactor.md)** — Open. 21 `ph-*` Web Components + 19 ship-specific console HTML files; old flat `gui/*-console.html` files deleted. 27 child issues (#643–#669).
 - **[Issue #523 — Console ID lookup](./sources/issue-523-console-id-lookup.md)** — Open. PRD #517 slice A4: `Console::from_console_id` helper symmetric with `station_console_id`; replaces hardcoded array in `process_coordination_lag`.
 - **[Issue #524 — serde_json outside codec cleanup](./sources/issue-524-serde-json-cleanup.md)** — Shipped. PRD #517 slice A5: removed direct `serde_json` calls from `coordination.rs`, `flag_kind.rs`, `effects.rs`; moved `RegionEffectKind` round-trips into `codec.rs`.
 - **[Issue #525 — SystemId naming convention](./sources/issue-525-systemid-naming.md)** — Shipped. PRD #517 slice A6: module-level doc + pinning tests in `system_registry.rs`; `REPAIR_SYSTEM_ID`/`repair_system_id()` added; `wiki/concepts/coarse-system-migration.md` created.

@@ -160,7 +160,7 @@ template_path = "assets/entities/alliance_cruiser.toml"
 label = "Alliance Cruiser"
 
 [[available_ships]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_battleship.toml"
 label = "Alliance Battleship"
 
 [player_spawn]

@@ -11,6 +11,7 @@ use crate::messages::GamePhase;
 use crate::model_rig::ModelMarkers;
 use crate::server::renderer::GameCamera;
 use crate::ship_state::ShipPhysics;
+use crate::console::weapons::server::BlasterSystemResource;
 use crate::simulation::{
     ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, TorpedoSystemResource,
 };
@@ -25,6 +26,14 @@ const TORPEDO_TRAIL_RADIUS: f32 = 0.18;
 const TORPEDO_TRAIL_LIFETIME_SECS: f32 = 0.32;
 const TORPEDO_TRAIL_MIN_DISTANCE: f32 = 0.35;
 const TORPEDO_BURST_LIFETIME_SECS: f32 = 0.35;
+
+// Blaster projectile visuals (issue #638).
+const BLASTER_BOLT_RADIUS: f32 = 0.18;
+const BLASTER_SPHERE_RADIUS: f32 = 0.55;
+const BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD: f32 = 1.5;
+const BLASTER_BOLT_COLOR: [f32; 4] = [0.3, 0.8, 1.0, 1.0];
+const BLASTER_SPHERE_COLOR: [f32; 4] = [1.0, 0.4, 0.05, 1.0];
+const BLASTER_EMISSIVE: f32 = 5.0;
 
 const ENGINE_DEFAULT_COLOR: [f32; 4] = [0.25, 0.75, 1.0, 0.72];
 const ENGINE_TRAIL_RADIUS: f32 = 1.5;
@@ -53,12 +62,14 @@ impl Plugin for PfxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BeamPfxState>()
             .init_resource::<TorpedoPfxState>()
+            .init_resource::<BlasterPfxState>()
             .init_resource::<EngineTrailState>()
             .add_systems(
                 Update,
                 (
                     sync_phaser_beams.run_if(in_state(GamePhase::InProgress)),
                     sync_torpedo_pfx.run_if(in_state(GamePhase::InProgress)),
+                    sync_blaster_pfx.run_if(in_state(GamePhase::InProgress)),
                     spawn_engine_trails.run_if(in_state(GamePhase::InProgress)),
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),
                     tick_bursts.run_if(in_state(GamePhase::InProgress)),
@@ -88,6 +99,9 @@ struct BeamContactGlow;
 
 #[derive(Component)]
 struct TorpedoBody;
+
+#[derive(Component)]
+struct BlasterBolt;
 
 #[derive(Component)]
 struct PfxLifetime {
@@ -131,6 +145,16 @@ struct TorpedoEntities {
 #[derive(Resource, Default)]
 struct TorpedoPfxState {
     active: HashMap<String, TorpedoEntities>,
+}
+
+struct BlasterPfxEntities {
+    body: Entity,
+    last_pos: Vec3,
+}
+
+#[derive(Resource, Default)]
+struct BlasterPfxState {
+    active: HashMap<String, BlasterPfxEntities>,
 }
 
 #[derive(Clone, Debug)]
@@ -464,6 +488,104 @@ fn sync_torpedo_pfx(
                     &mut materials,
                 );
             }
+            entities.last_pos = pos;
+            if let Ok(mut transform) = transforms.get_mut(entities.body) {
+                transform.translation = pos;
+            }
+        }
+    }
+}
+
+/// Renders every ship's in-flight blaster projectiles each frame.
+///
+/// Iterates `Query<..., With<Ship>>` so NPC blasters render alongside the
+/// player's. Uses `visual_scale` to switch between two visual variants:
+///
+///  - `visual_scale < BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD`: small glowing
+///    bolt (cyan, small radius) — used by Destroyer blasters.
+///  - `visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD`: large glowing
+///    sphere (orange, larger radius) — used by Battleship heavy blaster.
+fn sync_blaster_pfx(
+    ships_q: Query<&BlasterSystemResource, With<crate::server_app::Ship>>,
+    mut state: ResMut<BlasterPfxState>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut transforms: Query<&mut Transform, With<BlasterBolt>>,
+) {
+    let mut all_in_flight: Vec<(String, f32, f32)> = Vec::new();
+    for blaster_sys in ships_q.iter() {
+        for bank in &blaster_sys.0 {
+            for p in &bank.in_flight {
+                all_in_flight.push((p.id.clone(), p.x, p.z));
+            }
+        }
+    }
+
+    let live: HashSet<String> = all_in_flight.iter().map(|(u, _, _)| u.clone()).collect();
+    let tracked: HashSet<String> = state.active.keys().cloned().collect();
+    let (to_spawn, to_despawn) = diff_torpedo_sets(&live, &tracked);
+
+    for uuid in to_despawn {
+        if let Some(entities) = state.active.remove(&uuid) {
+            commands.entity(entities.body).despawn();
+        }
+    }
+
+    // Re-find visual_scale per projectile (need the bank config again).
+    // Build a quick lookup: projectile_id -> is_sphere.
+    let sphere_lookup: HashSet<String> = {
+        let mut s = HashSet::new();
+        for blaster_sys in ships_q.iter() {
+            for bank in &blaster_sys.0 {
+                let is_sphere =
+                    bank.config.visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD;
+                for p in &bank.in_flight {
+                    if is_sphere {
+                        s.insert(p.id.clone());
+                    }
+                }
+            }
+        }
+        s
+    };
+
+    for uuid in to_spawn {
+        if let Some((_, x, z)) = all_in_flight.iter().find(|(u, _, _)| u == &uuid) {
+            let pos = Vec3::new(*x, 0.1, *z);
+            let is_sphere = sphere_lookup.contains(&uuid);
+            let (radius, color) = if is_sphere {
+                (BLASTER_SPHERE_RADIUS, BLASTER_SPHERE_COLOR)
+            } else {
+                (BLASTER_BOLT_RADIUS, BLASTER_BOLT_COLOR)
+            };
+            let body = commands
+                .spawn((
+                    PfxEntity,
+                    BlasterBolt,
+                    Mesh3d(meshes.add(Sphere { radius })),
+                    MeshMaterial3d(glow_material(
+                        &mut materials,
+                        color,
+                        BLASTER_EMISSIVE,
+                        AlphaMode::Opaque,
+                    )),
+                    Transform::from_translation(pos),
+                ))
+                .id();
+            state.active.insert(
+                uuid,
+                BlasterPfxEntities {
+                    body,
+                    last_pos: pos,
+                },
+            );
+        }
+    }
+
+    for (uuid, x, z) in &all_in_flight {
+        let pos = Vec3::new(*x, 0.1, *z);
+        if let Some(entities) = state.active.get_mut(uuid) {
             entities.last_pos = pos;
             if let Ok(mut transform) = transforms.get_mut(entities.body) {
                 transform.translation = pos;
@@ -858,6 +980,7 @@ fn cleanup_pfx(
     query: Query<Entity, With<PfxEntity>>,
     mut beam_state: ResMut<BeamPfxState>,
     mut torpedo_state: ResMut<TorpedoPfxState>,
+    mut blaster_state: ResMut<BlasterPfxState>,
     mut engine_state: ResMut<EngineTrailState>,
 ) {
     for entity in query.iter() {
@@ -866,6 +989,7 @@ fn cleanup_pfx(
     beam_state.active.clear();
     beam_state.target_point_choices.clear();
     torpedo_state.active.clear();
+    blaster_state.active.clear();
     engine_state.emitters.clear();
 }
 

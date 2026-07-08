@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Comms Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
+    .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    ph-comms-contact-list, ph-comms-hail-list, ph-comms-current-message, ph-navigation-map { flex: 1; min-height: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Comms Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>COMMS<span class="sub">COMMUNICATIONS &amp; NAV</span></h1>
+        <span class="auto-badge" id="comms-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="col">
+          <h2>Navigation</h2>
+          <ph-navigation-map id="navigation-map"></ph-navigation-map>
+        </div>
+        <div class="col">
+          <h2>Comms</h2>
+          <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
+          <ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>
+          <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">COMMS STATION</span>
+        <span class="sep">·</span>
+        <span id="footer-target" style="color:var(--ink-faint)">NO WAYPOINT</span>
+        <span class="spacer"></span>
+        <span id="footer-right" style="color:var(--ink-faint)">—</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-comms-contact-list.js';
+    import '../components/ph-comms-hail-list.js';
+    import '../components/ph-comms-current-message.js';
+    import '../components/ph-navigation-map.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'comms',
+      render: function(s) {
+        var cl = document.getElementById('comms-contact-list');
+        var hl = document.getElementById('comms-hail-list');
+        var cm = document.getElementById('comms-current-message');
+        var nm = document.getElementById('navigation-map');
+        var comms = s.comms || {};
+        var nav = s.navigation || {};
+        cl.state = { contacts: comms.contacts || [] };
+        hl.state = comms;
+        var msgs = comms.messages || [];
+        var threadMsg = msgs.find(function(m) { return !m.is_read; }) || msgs[msgs.length - 1] || null;
+        cm.state = { thread: threadMsg };
+        nm.state = { blips: nav.blips || [], range: nav.radar_range || 5000, ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null };
+        var wp = nav.waypoint;
+        document.getElementById('footer-target').textContent = wp ? wp.name || 'WAYPOINT' : 'NO WAYPOINT';
+        var msgCount = msgs.length;
+        document.getElementById('footer-right').textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
+        setAutoState(null, document.getElementById('comms-auto-badge'), !!s.comms_auto);
+      }
+    });
+  </script>
+</body>
+</html>

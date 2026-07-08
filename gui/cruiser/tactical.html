@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Tactical Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    ph-tactical-radar { flex: 1; min-height: 0; }
+    ph-phasers-controls, ph-torpedo-controls { flex-shrink: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Tactical Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>TACTICAL<span class="sub">WEAPONS</span></h1>
+        <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+        <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
+        <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">TACTICAL STATION</span>
+        <span class="sep">·</span>
+        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span class="spacer"></span>
+        <span id="footer-right" style="color:var(--ink-faint)">—</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-tactical-radar.js';
+    import '../components/ph-phasers-controls.js';
+    import '../components/ph-torpedo-controls.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'tactical',
+      render: function(s) {
+        var r = document.getElementById('tactical-radar');
+        var p = document.getElementById('phasers-controls');
+        var t = document.getElementById('torpedo-controls');
+        r.state = { blips: s.blips || [], range: 300, ship_heading: 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null };
+        p.state = { banks: s.banks || [], target_valid: !!s.target_uuid };
+        t.state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 } };
+        var tn = s.target_name ? s.target_name : (s.target_uuid ? 'LOCKED' : 'NO TARGET');
+        document.getElementById('footer-target').textContent = tn;
+        document.getElementById('footer-target').style.color = s.target_uuid ? 'var(--fire-bright)' : 'var(--ink-faint)';
+        setAutoState(null, document.getElementById('tactical-auto-badge'), !!(s.tactical_auto || false));
+      }
+    });
+  </script>
+</body>
+</html>

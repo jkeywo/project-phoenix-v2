@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Science Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
+    .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    ph-sensor-radar, ph-sensor-panel, ph-shield-panel, ph-shield-facings { flex: 1; min-height: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
+    @media (orientation: landscape) { .console-body .col:first-child { border-right: none; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Science Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>SCIENCE<span class="sub">SENSORS &amp; SHIELDS</span></h1>
+        <span class="auto-badge" id="science-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="col">
+          <h2>Sensors</h2>
+          <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
+          <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
+        </div>
+        <div class="col">
+          <h2>Shields</h2>
+          <ph-shield-panel id="shield-panel"></ph-shield-panel>
+          <ph-shield-facings id="shield-facings"></ph-shield-facings>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">SCIENCE STATION</span>
+        <span class="sep">·</span>
+        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span class="spacer"></span>
+        <span id="footer-right" style="color:var(--ink-faint)">—</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-sensor-radar.js';
+    import '../components/ph-sensor-panel.js';
+    import '../components/ph-shield-panel.js';
+    import '../components/ph-shield-facings.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'science',
+      render: function(s) {
+        var sr = document.getElementById('sensor-radar');
+        var sp = document.getElementById('sensor-panel');
+        var shp = document.getElementById('shield-panel');
+        var shf = document.getElementById('shield-facings');
+        if (s.sensors) {
+          sr.state = s.sensors;
+          sp.state = s.sensors;
+        }
+        if (s.shields) {
+          shp.state = s.shields;
+          var sh = s.shields;
+          shf.state = { facings: sh.facings || [], focused_facing: sh.focused_facing || null, auto: !!sh.shields_auto };
+        }
+        var tn = (s.sensors && s.sensors.target_name) || null;
+        document.getElementById('footer-target').textContent = tn ? '\u25C9 ' + tn : 'NO TARGET';
+        document.getElementById('footer-target').style.color = tn ? 'var(--tactical)' : 'var(--ink-faint)';
+        setAutoState(null, document.getElementById('science-auto-badge'), !!s.science_auto);
+      }
+    });
+  </script>
+</body>
+</html>

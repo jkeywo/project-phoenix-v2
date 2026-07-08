@@ -1,5 +1,5 @@
 use crate::lobby_handler::Target;
-use crate::messages::StationId;
+use crate::messages::{StationId, SystemId};
 use crate::session::SessionManager;
 use crate::ship::config::ShipConfig;
 
@@ -8,6 +8,10 @@ use crate::ship::config::ShipConfig;
 pub enum Audience {
     All,
     Holding(StationId),
+    /// Dynamically resolves the station that owns the given system from the
+    /// ship config, then targets that station's holder.  Falls back to
+    /// `None` (skip broadcast) when no config is available.
+    HoldingSystem(SystemId),
     Token(String),
     AllExcept(String),
 }
@@ -15,21 +19,26 @@ pub enum Audience {
 impl Audience {
     /// Resolve this audience to a `Target` given current session state.
     /// Returns `None` when `Holding` names a station with no current holder,
-    /// signalling the caller to skip this broadcast.
-    ///
-    /// The `ship_config` parameter is retained for API stability with the
-    /// broadcaster dispatchers but is unused for the new station-keyed
-    /// `Holding` variant.
+    /// or when `HoldingSystem` cannot determine the owning station from the
+    /// ship config, signalling the caller to skip this broadcast.
     pub fn resolve(
         &self,
         sessions: &SessionManager,
-        _ship_config: Option<&ShipConfig>,
+        ship_config: Option<&ShipConfig>,
     ) -> Option<Target> {
         match self {
             Audience::All => Some(Target::All),
             Audience::Holding(station_id) => sessions
                 .holder_for_station(station_id)
                 .map(|t| Target::Token(t.to_string())),
+            Audience::HoldingSystem(system_id) => {
+                let station_id = ship_config
+                    .and_then(|config| config.system(system_id))
+                    .and_then(|sys| sys.station.clone())?;
+                sessions
+                    .holder_for_station(&station_id)
+                    .map(|t| Target::Token(t.to_string()))
+            }
             Audience::Token(t) => Some(Target::Token(t.clone())),
             Audience::AllExcept(t) => Some(Target::AllExcept(t.clone())),
         }
@@ -64,15 +73,35 @@ mod tests {
                     console: None,
                 },
             ],
-            systems: vec![SystemInstanceConfig {
-                id: SystemId("dummy".into()),
-                kind: "dummy".into(),
-                station: None,
-                ai_only: true,
-                power_group: None,
-                marker: None,
-                config: None,
-            }],
+            systems: vec![
+                SystemInstanceConfig {
+                    id: SystemId("dummy".into()),
+                    kind: "dummy".into(),
+                    station: None,
+                    ai_only: true,
+                    power_group: None,
+                    marker: None,
+                    config: None,
+                },
+                SystemInstanceConfig {
+                    id: SystemId("power-reactor".into()),
+                    kind: "power_reactor".into(),
+                    station: Some(StationId("power".into())),
+                    ai_only: true,
+                    power_group: None,
+                    marker: None,
+                    config: None,
+                },
+                SystemInstanceConfig {
+                    id: SystemId("helm-thruster".into()),
+                    kind: "helm".into(),
+                    station: Some(StationId("helm".into())),
+                    ai_only: true,
+                    power_group: None,
+                    marker: None,
+                    config: None,
+                },
+            ],
             power_groups: std::iter::once((
                 PowerGroupId("ops".into()),
                 PowerGroupConfig {
@@ -127,6 +156,48 @@ mod tests {
         let sm = sm_with_holder("tok1", StationId("power".into()));
         assert_eq!(
             Audience::Holding(StationId("helm".into())).resolve(&sm, Some(&ship_config())),
+            None
+        );
+    }
+
+    #[test]
+    fn audience_holding_system_resolves_to_station_holder() {
+        let sm = sm_with_holder("tok1", StationId("power".into()));
+        assert_eq!(
+            Audience::HoldingSystem(SystemId("power-reactor".into()))
+                .resolve(&sm, Some(&ship_config())),
+            Some(Target::Token("tok1".to_string()))
+        );
+    }
+
+    #[test]
+    fn audience_holding_system_returns_none_when_no_config() {
+        let sm = sm_with_holder("tok1", StationId("power".into()));
+        assert_eq!(
+            Audience::HoldingSystem(SystemId("power-reactor".into())).resolve(&sm, None),
+            None
+        );
+    }
+
+    #[test]
+    fn audience_holding_system_returns_none_when_station_unheld() {
+        let mut sm = SessionManager::new();
+        sm.register("tok1".to_string(), "Player".to_string())
+            .unwrap();
+        // tok1 holds no station, so the system's station is unheld.
+        assert_eq!(
+            Audience::HoldingSystem(SystemId("power-reactor".into()))
+                .resolve(&sm, Some(&ship_config())),
+            None
+        );
+    }
+
+    #[test]
+    fn audience_holding_system_returns_none_for_unknown_system() {
+        let sm = SessionManager::new();
+        assert_eq!(
+            Audience::HoldingSystem(SystemId("nonexistent".into()))
+                .resolve(&sm, Some(&ship_config())),
             None
         );
     }

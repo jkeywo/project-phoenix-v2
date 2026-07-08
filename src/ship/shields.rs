@@ -109,7 +109,7 @@ pub fn tick_shields(
 
 pub fn shields_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
-        Audience::Holding(StationId("shields".into())),
+        Audience::HoldingSystem(SystemId("shields-system".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {
             let Ok(shields) = world

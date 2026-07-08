@@ -143,7 +143,7 @@ impl Plugin for ShipPowerPlugin {
 /// resource for test harnesses that only insert the Resource form.
 pub fn power_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
-        Audience::Holding(StationId("power".into())),
+        Audience::HoldingSystem(SystemId("power-reactor".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {
             // Prefer per-entity component on the LocalShip; fall back to the

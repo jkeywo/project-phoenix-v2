@@ -51,7 +51,7 @@ impl Plugin for RepairPlugin {
 /// on the LocalShip entity, falling back to the global Resource for tests.
 pub fn repair_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
-        Audience::Holding(StationId("repair".into())),
+        Audience::HoldingSystem(SystemId("repair".into())),
         Cadence::Hz(10.0),
         |world: &mut World| {
             let mut q =

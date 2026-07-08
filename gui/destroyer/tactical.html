@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Tactical Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
+    .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    ph-tactical-radar, ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls, ph-comms-contact-list, ph-comms-current-message, ph-navigation-map { flex: 1; min-height: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Tactical Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>TACTICAL<span class="sub">WEAPONS &middot; NAV &middot; COMMS</span></h1>
+        <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="col">
+          <h2>Weapons</h2>
+          <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
+          <ph-phasers-controls id="phasers-controls"></ph-phasers-controls>
+          <ph-blasters-controls id="blasters-controls"></ph-blasters-controls>
+          <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
+        </div>
+        <div class="col">
+          <h2>Navigation</h2>
+          <ph-navigation-map id="navigation-map"></ph-navigation-map>
+        </div>
+        <div class="col">
+          <h2>Comms</h2>
+          <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
+          <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">TACTICAL STATION</span>
+        <span class="sep">·</span>
+        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span class="spacer"></span>
+        <span id="footer-right" style="color:var(--ink-faint)">—</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-tactical-radar.js';
+    import '../components/ph-phasers-controls.js';
+    import '../components/ph-blasters-controls.js';
+    import '../components/ph-torpedo-controls.js';
+    import '../components/ph-comms-contact-list.js';
+    import '../components/ph-comms-current-message.js';
+    import '../components/ph-navigation-map.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'tactical',
+      render: function(s) {
+        var radarEl = document.getElementById('tactical-radar');
+        var phasersEl = document.getElementById('phasers-controls');
+        var blastersEl = document.getElementById('blasters-controls');
+        var torpedoEl = document.getElementById('torpedo-controls');
+        var commsContactsEl = document.getElementById('comms-contact-list');
+        var commsMsgEl = document.getElementById('comms-current-message');
+        var navMapEl = document.getElementById('navigation-map');
+        if (s.weapons) {
+          var w = s.weapons;
+          radarEl.state = { blips: w.blips || [], range: w.range || 300, ship_heading: (s.navigation && s.navigation.ship_heading) || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
+          phasersEl.state = { banks: w.banks || [], target_valid: !!w.target_uuid };
+          blastersEl.state = { banks: w.blasters || [] };
+          torpedoEl.state = { tubes: w.tubes || [], magazine: { current: w.torpedo_count || 0, max: 20 } };
+        }
+        if (s.comms) {
+          var c = s.comms;
+          commsContactsEl.state = { contacts: c.contacts || [] };
+          var messages = c.messages || [];
+          var threadMsg = messages.find(function(m) { return !m.is_read; }) || messages[messages.length - 1] || null;
+          commsMsgEl.state = { thread: threadMsg };
+        }
+        if (s.navigation) {
+          var n = s.navigation;
+          navMapEl.state = { blips: n.blips || [], range: n.radar_range || 5000, ship_pos: { x: n.ship_x || 0, z: n.ship_z || 0 }, ship_heading: n.ship_heading || 0, waypoint: n.waypoint || null };
+        }
+        var targetName = (s.weapons && s.weapons.target_name) || (s.weapons && s.weapons.target_uuid) || null;
+        document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : 'NO TARGET';
+        document.getElementById('footer-target').style.color = targetName ? 'var(--fire-bright)' : 'var(--ink-faint)';
+        setAutoState(null, document.getElementById('tactical-auto-badge'), !!(s.tactical_auto || (s.weapons && s.weapons.tactical_auto)));
+      }
+    });
+  </script>
+</body>
+</html>

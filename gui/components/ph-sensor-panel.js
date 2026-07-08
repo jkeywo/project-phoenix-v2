@@ -1,8 +1,11 @@
-var _sensorTemplate = null;
-function _getSensorTemplate() {
-  if (!_sensorTemplate && typeof document !== 'undefined') {
-    _sensorTemplate = document.createElement('template');
-    _sensorTemplate.innerHTML = `
+export class PhSensorPanel extends HTMLElement {
+  #state = null;
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    const t = document.createElement('template');
+    t.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
     :host * { box-sizing: border-box; }
@@ -39,28 +42,18 @@ function _getSensorTemplate() {
   <div id="target-area"></div>
   <div class="scan-data" id="scan-data"></div>
 `;
-  }
-  return _sensorTemplate;
-}
-
-export class PhSensorPanel extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const t = _getSensorTemplate();
     this.shadowRoot.appendChild(t.content.cloneNode(true));
-    this._state = null;
   }
 
   set state(val) {
-    this._state = val;
-    this._render();
+    this.#state = val;
+    this.#render();
   }
 
-  get state() { return this._state; }
+  get state() { return this.#state; }
 
-  _render() {
-    const s = this._state || {};
+  #render() {
+    const s = this.#state || {};
     const root = this.shadowRoot;
 
     const range = s.scan_range || 0;

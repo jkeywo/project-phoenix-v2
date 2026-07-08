@@ -1,8 +1,11 @@
-var _damageBarTemplate = null;
-function _getDamageBarTemplate() {
-  if (!_damageBarTemplate && typeof document !== 'undefined') {
-    _damageBarTemplate = document.createElement('template');
-    _damageBarTemplate.innerHTML = `
+export class PhDamageBar extends HTMLElement {
+  #state = null;
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    const t = document.createElement('template');
+    t.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: #cce; }
     :host * { box-sizing: border-box; }
@@ -17,41 +20,18 @@ function _getDamageBarTemplate() {
     <span class="label" id="bar-label">— / —</span>
   </div>
 `;
-  }
-  return _damageBarTemplate;
-}
-
-export class PhDamageBar extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const t = _getDamageBarTemplate();
     this.shadowRoot.appendChild(t.content.cloneNode(true));
-    this._data = null;
   }
 
-  static get observedAttributes() { return ['data']; }
-
-  attributeChangedCallback(name, _old, val) {
-    if (name === 'data') {
-      try {
-        this._data = val ? JSON.parse(val) : null;
-      } catch (_) {
-        this._data = null;
-      }
-      this._render();
-    }
+  set state(val) {
+    this.#state = val;
+    this.#render();
   }
 
-  set data(val) {
-    this._data = val;
-    this._render();
-  }
+  get state() { return this.#state; }
 
-  get data() { return this._data; }
-
-  _render() {
-    const d = this._data || {};
+  #render() {
+    const d = this.#state || {};
     const pct = d.pct != null ? d.pct : 1;
     const totalCurrent = d.totalCurrent != null ? d.totalCurrent : null;
     const totalMax = d.totalMax != null ? d.totalMax : null;

@@ -323,7 +323,7 @@ name = "Captain"
 description = "Command the bridge and monitor sensors."
 rank = "Cpt."
 short_code = "CPT"
-console = "gui/destroyer-captain-console.html"
+console = "gui/destroyer/captain.html"
 
 [[station.rating]]
 name = "Std"
@@ -335,7 +335,7 @@ name = "Helm"
 description = "Pilot the ship."
 rank = "Ltn."
 short_code = "HLM"
-console = "gui/helm-console.html"
+console = "gui/destroyer/helm.html"
 
 [[station.rating]]
 name = "Std"
@@ -347,7 +347,7 @@ name = "Tactical"
 description = "Manage weapons, navigation and comms."
 rank = "Lt. Cmdr."
 short_code = "TAC"
-console = "gui/destroyer-tactical-console.html"
+console = "gui/destroyer/tactical.html"
 
 [[station.rating]]
 name = "Std"
@@ -359,7 +359,7 @@ name = "Engineering"
 description = "Manage shields, power and repairs."
 rank = "Ltn."
 short_code = "ENG"
-console = "gui/destroyer-engineering-console.html"
+console = "gui/destroyer/engineering.html"
 
 [[station.rating]]
 name = "Std"

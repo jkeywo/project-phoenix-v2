@@ -1,8 +1,11 @@
-var _shieldTemplate = null;
-function _getShieldTemplate() {
-  if (!_shieldTemplate && typeof document !== 'undefined') {
-    _shieldTemplate = document.createElement('template');
-    _shieldTemplate.innerHTML = `
+export class PhShieldPanel extends HTMLElement {
+  #state = null;
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    const t = document.createElement('template');
+    t.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
     :host * { box-sizing: border-box; }
@@ -45,28 +48,18 @@ function _getShieldTemplate() {
   <div class="facings" id="facings-container"></div>
   <div class="status" id="focus-display">FOCUS: OMNI</div>
 `;
-  }
-  return _shieldTemplate;
-}
-
-export class PhShieldPanel extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const t = _getShieldTemplate();
     this.shadowRoot.appendChild(t.content.cloneNode(true));
-    this._state = null;
   }
 
   set state(val) {
-    this._state = val;
-    this._render();
+    this.#state = val;
+    this.#render();
   }
 
-  get state() { return this._state; }
+  get state() { return this.#state; }
 
-  _render() {
-    const s = this._state || {};
+  #render() {
+    const s = this.#state || {};
     const root = this.shadowRoot;
 
     const hullPct = s.hull_integrity_pct != null ? s.hull_integrity_pct : 100;

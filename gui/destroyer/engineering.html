@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Engineering Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
+    .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    ph-shield-facings, ph-power-controls, ph-battery-bar, ph-repair-teams, ph-hull-integrity { flex: 1; min-height: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Engineering Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>ENGINEERING<span class="sub">SHIELDS &middot; POWER &middot; REPAIR</span></h1>
+        <span class="auto-badge" id="engineering-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="col">
+          <h2>Shields</h2>
+          <ph-shield-facings id="shield-facings"></ph-shield-facings>
+        </div>
+        <div class="col">
+          <h2>Power</h2>
+          <ph-power-controls id="power-controls"></ph-power-controls>
+          <ph-battery-bar id="battery-bar"></ph-battery-bar>
+        </div>
+        <div class="col">
+          <h2>Repair</h2>
+          <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
+          <ph-repair-teams id="repair-teams"></ph-repair-teams>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">ENGINEERING STATION</span>
+        <span class="spacer"></span>
+        <span id="footer-right" style="color:var(--ink-faint)">—</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-shield-facings.js';
+    import '../components/ph-power-controls.js';
+    import '../components/ph-battery-bar.js';
+    import '../components/ph-repair-teams.js';
+    import '../components/ph-hull-integrity.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'engineering',
+      render: function(s) {
+        var shieldEl = document.getElementById('shield-facings');
+        var powerEl = document.getElementById('power-controls');
+        var batteryEl = document.getElementById('battery-bar');
+        var repairTeamsEl = document.getElementById('repair-teams');
+        var hullEl = document.getElementById('hull-integrity');
+        if (s.shields) {
+          var sh = s.shields;
+          shieldEl.state = { facings: sh.facings || [], focused_facing: sh.focused_facing || null, auto: !!sh.shields_auto };
+        }
+        if (s.power) {
+          var p = s.power;
+          powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto };
+          batteryEl.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !p.locked, emergency_threshold_pct: 20 };
+        }
+        if (s.repair) {
+          var r = s.repair;
+          hullEl.state = { total_pct: (r.own_hull && r.own_hull.pct) || (s.shields && s.shields.own_hull && s.shields.own_hull.pct) || 1, systems: r.system_hull || [] };
+          repairTeamsEl.state = { teams: r.teams || [], auto: !!r.repair_auto };
+        }
+        var isAuto = !!s.engineering_auto;
+        setAutoState(null, document.getElementById('engineering-auto-badge'), isAuto);
+      }
+    });
+  </script>
+</body>
+</html>

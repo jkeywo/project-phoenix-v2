@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Helm Console</title>
+  <script src="../bg-raf-keepalive.js"></script>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+    .console-body .radar-col { display: flex; flex-direction: column; min-height: 0; }
+    .console-body .ctrl-col { display: flex; flex-direction: column; gap: 12px; min-height: 0; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; }
+    ph-helm-radar { flex: 1; min-height: 0; }
+    ph-helm-joystick { flex: 1; min-height: 0; }
+    .btn-row { display: flex; gap: 8px; }
+    .btn-row > * { flex: 1; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .sep { color: var(--line-soft); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .ctrl-col { padding: 8px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Helm Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>HELM<span class="sub">PILOTING</span></h1>
+        <span class="auto-badge" id="helm-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="radar-col">
+          <ph-helm-radar id="helm-radar"></ph-helm-radar>
+        </div>
+        <div class="ctrl-col">
+          <ph-helm-joystick id="helm-joystick"></ph-helm-joystick>
+          <div class="btn-row">
+            <ph-impulse-btn id="impulse-btn"></ph-impulse-btn>
+            <ph-boost-btn id="boost-btn"></ph-boost-btn>
+          </div>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">HELM STATION</span>
+        <span class="sep">·</span>
+        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span class="spacer"></span>
+        <span id="footer-right" style="color:var(--ink-faint)">—</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-helm-radar.js';
+    import '../components/ph-helm-joystick.js';
+    import '../components/ph-impulse-btn.js';
+    import '../components/ph-boost-btn.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'helm',
+      render: function(s) {
+        var radarEl = document.getElementById('helm-radar');
+        var joystickEl = document.getElementById('helm-joystick');
+        var impulseEl = document.getElementById('impulse-btn');
+        var boostEl = document.getElementById('boost-btn');
+        radarEl.state = { blips: s.blips || [], range: s.range || 500, ship_heading: s.heading || 0, on_screen_active: !!s.on_screen, config: {} };
+        joystickEl.state = { auto: !!s.helm_auto };
+        impulseEl.state = { state: s.impulse_charge_progress > 0 ? 'charging' : 'ready', charge_pct: s.impulse_charge_progress || 0, auto: !!s.helm_auto };
+        boostEl.state = { available: !!s.boost_enabled, active: !!s.boost_active, recharge_pct: s.boost_battery != null ? s.boost_battery * 100 : 100, auto: !!s.helm_auto };
+        setAutoState(null, document.getElementById('helm-auto-badge'), !!s.helm_auto);
+      }
+    });
+  </script>
+</body>
+</html>

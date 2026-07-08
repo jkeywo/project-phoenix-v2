@@ -2076,7 +2076,7 @@ pub(crate) fn dispatch_single_action(
     mut layer_map: Option<&mut WorldLayerMap>,
     base_world_config: Option<&crate::world::config::WorldConfig>,
     entity_uuid_query: &Query<(Entity, &EntityUuid)>,
-    mut commands: &mut Commands,
+    commands: &mut Commands,
     ship_modifiers: &mut ShipModifiersParams,
     mut next_state: Option<&mut NextState<GamePhase>>,
     mut game_over_reason: Option<&mut crate::simulation::GameOverReason>,

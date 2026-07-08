@@ -767,7 +767,9 @@ mod tests {
         let toml_str = include_str!("../../../assets/entities/alliance_battleship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
             .expect("alliance_battleship.toml must parse");
-        let rc = config.repair.expect("alliance_battleship must declare [repair]");
+        let rc = config
+            .repair
+            .expect("alliance_battleship must declare [repair]");
         let timings = rc.to_runtime();
         let teams = crate::repair_teams::RepairTeams::new_with_timings(2, timings);
         assert_eq!(teams.timings().travel_duration, rc.travel_duration_secs);

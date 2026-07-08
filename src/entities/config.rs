@@ -2637,8 +2637,11 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
     #[test]
     fn battleship_toml_parses_with_federation_faction() {
         let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
-        let faction = config.faction.expect("alliance_battleship must declare a faction");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let faction = config
+            .faction
+            .expect("alliance_battleship must declare a faction");
         // Must match the Federation UUID in assets/factions/federation.toml
         let fed_toml = include_str!("../../assets/factions/federation.toml");
         let fed = crate::faction::parse_faction_config(fed_toml).unwrap();
@@ -3291,8 +3294,11 @@ count = 99
         // Verify the [torpedoes] block in alliance_battleship.toml parses
         // and produces the expected runtime values.
         let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
-        let t = config.torpedoes.expect("alliance_battleship must have [torpedoes]");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let t = config
+            .torpedoes
+            .expect("alliance_battleship must have [torpedoes]");
         let rt = t.to_runtime();
         // Values from alliance_battleship.toml [torpedoes] block
         assert_eq!(rt.count, 30, "battleship magazine size");
@@ -3370,8 +3376,11 @@ travel_duration_secs = 9.0
         // confirm the change is intentional. (The defaults themselves match
         // the historical hardcoded constants in `repair_teams.rs`.)
         let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
-        let r = config.repair.expect("alliance_battleship must have [repair]");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let r = config
+            .repair
+            .expect("alliance_battleship must have [repair]");
         let rt = r.to_runtime();
         let baseline = crate::repair_teams::RepairTimings::default();
         assert_eq!(
@@ -3479,7 +3488,8 @@ max_hp = 250
         // Verify the [shields_console.base] block in alliance_battleship.toml
         // parses and produces the expected runtime values.
         let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
         let base = config
             .shields_console
             .expect("alliance_battleship must have [shields_console]")
@@ -3489,10 +3499,7 @@ max_hp = 250
         // Values from alliance_battleship.toml [shields_console.base] block
         assert_eq!(rt.max_hp, 140, "battleship shield facing max_hp");
         assert_eq!(rt.regen_per_sec, 3.5, "battleship shield regen");
-        assert_eq!(
-            rt.offline_duration, 10.0,
-            "offline duration"
-        );
+        assert_eq!(rt.offline_duration, 10.0, "offline duration");
     }
 
     // ── PhaserCombatConfig (player phaser tuning) tests ───────────────────

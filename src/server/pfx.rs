@@ -5,13 +5,13 @@ use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::beam_render;
+use crate::console::weapons::server::BlasterSystemResource;
 use crate::entity_config::{EnginePfxConfig, PhaserBankConfig};
 use crate::entity_spawner::{EntityUuid, HelmConsoleSection};
 use crate::messages::GamePhase;
 use crate::model_rig::ModelMarkers;
 use crate::server::renderer::GameCamera;
 use crate::ship_state::ShipPhysics;
-use crate::console::weapons::server::BlasterSystemResource;
 use crate::simulation::{
     ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, TorpedoSystemResource,
 };
@@ -538,8 +538,7 @@ fn sync_blaster_pfx(
         let mut s = HashSet::new();
         for blaster_sys in ships_q.iter() {
             for bank in &blaster_sys.0 {
-                let is_sphere =
-                    bank.config.visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD;
+                let is_sphere = bank.config.visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD;
                 for p in &bank.in_flight {
                     if is_sphere {
                         s.insert(p.id.clone());

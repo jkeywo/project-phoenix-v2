@@ -2363,12 +2363,8 @@ fn tick_blaster_system(
             let pos = live_entity_xz(uuid, &asteroid_q, &entity_q);
             let vel = ship_velocities.get(uuid);
             let (vx, vz) = vel.copied().unwrap_or((0.0, 0.0));
-            pos.map(|(x, z)| (x, z, vx, vz)).unwrap_or((
-                physics.x,
-                physics.z - 100.0,
-                0.0,
-                0.0,
-            ))
+            pos.map(|(x, z)| (x, z, vx, vz))
+                .unwrap_or((physics.x, physics.z - 100.0, 0.0, 0.0))
         } else {
             let fwd_x = physics.yaw.sin();
             let fwd_z = -physics.yaw.cos();
@@ -9083,7 +9079,11 @@ ai_only = true
         // NPC at (10, 10) — away from LocalShip at origin — facing -Z (target at 10, -10).
         // This avoids the projectile immediately hitting the LocalShip which
         // occupies (0, 0) in test_app().
-        let npc_physics = ShipPhysics { x: 10.0, z: 10.0, ..Default::default() };
+        let npc_physics = ShipPhysics {
+            x: 10.0,
+            z: 10.0,
+            ..Default::default()
+        };
         let npc_entity = app
             .world_mut()
             .spawn((

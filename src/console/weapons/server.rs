@@ -2167,9 +2167,8 @@ fn handle_fire_blaster(
         // AI tokens skip this check — arc enforcement for AI fire is handled by
         // tick_blaster_auto_fire instead.
         if is_charge_start && !is_ai_token {
-            let target_uuid: Option<String> = weapons_target_opt
-                .and_then(|wt| wt.0.clone())
-                .or_else(|| {
+            let target_uuid: Option<String> =
+                weapons_target_opt.and_then(|wt| wt.0.clone()).or_else(|| {
                     ai_memory_opt
                         .and_then(|m| m.0.target)
                         .map(|u| u.to_string())
@@ -2188,7 +2187,11 @@ fn handle_fire_blaster(
                 .find(|b| b.config.id == bank_id)
                 .map(|bank| {
                     let (rx, ry) = crate::weapons::phaser::ship_local(
-                        tx, tz, physics.x, physics.z, physics.yaw,
+                        tx,
+                        tz,
+                        physics.x,
+                        physics.z,
+                        physics.yaw,
                     );
                     crate::weapons::phaser::in_arc(
                         rx,
@@ -2263,9 +2266,8 @@ fn tick_blaster_auto_fire(
         }
 
         // Target selection: WeaponsTarget first, ShipAiMemory fallback for NPCs.
-        let target_uuid: Option<String> = weapons_target_opt
-            .and_then(|wt| wt.0.clone())
-            .or_else(|| {
+        let target_uuid: Option<String> =
+            weapons_target_opt.and_then(|wt| wt.0.clone()).or_else(|| {
                 ai_memory_opt
                     .and_then(|m| m.0.target)
                     .map(|u| u.to_string())
@@ -2291,9 +2293,8 @@ fn tick_blaster_auto_fire(
             }
 
             // Arc check: convert target to ship-local coordinates.
-            let (rx, ry) = crate::weapons::phaser::ship_local(
-                tx, tz, physics.x, physics.z, physics.yaw,
-            );
+            let (rx, ry) =
+                crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
             if !crate::weapons::phaser::in_arc(
                 rx,
                 ry,
@@ -2331,17 +2332,38 @@ fn tick_blaster_system(
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
+
+    // Pre-compute world-space velocity for every ship so the per-ship loop
+    // below can look up the target's velocity for intercept prediction.
+    // We read via `ship_q.iter()` (shared access to ShipPhysics) before the
+    // main loop uses `ship_q.iter_mut()`, avoiding a Bevy SystemParam conflict.
+    let ship_velocities: std::collections::HashMap<String, (f32, f32)> = {
+        let mut map = std::collections::HashMap::new();
+        for (uuid_opt, physics, _, _) in ship_q.iter() {
+            if let Some(uuid) = uuid_opt {
+                let vx = physics.forward_speed * physics.yaw.sin();
+                let vz = -physics.forward_speed * physics.yaw.cos();
+                map.insert(uuid.0.clone(), (vx, vz));
+            }
+        }
+        map
+    };
+
     for (source_uuid_opt, mut physics, weapons_target_opt, mut blaster_res) in ship_q.iter_mut() {
         let source_uuid = source_uuid_opt
             .map(|u| u.0.as_str())
             .unwrap_or("")
             .to_string();
 
-        // Resolve target position (velocity data not yet available — use 0).
+        // Resolve target position and velocity.
+        // Ships supply world-space velocity from ShipPhysics; asteroids/objects
+        // are stationary (velocity = 0).
         let target_uuid = weapons_target_opt.and_then(|wt| wt.0.clone());
         let (target_x, target_z, target_vx, target_vz) = if let Some(ref uuid) = target_uuid {
             let pos = live_entity_xz(uuid, &asteroid_q, &entity_q);
-            pos.map(|(x, z)| (x, z, 0.0_f32, 0.0_f32)).unwrap_or((
+            let vel = ship_velocities.get(uuid);
+            let (vx, vz) = vel.copied().unwrap_or((0.0, 0.0));
+            pos.map(|(x, z)| (x, z, vx, vz)).unwrap_or((
                 physics.x,
                 physics.z - 100.0,
                 0.0,
@@ -9060,9 +9082,7 @@ ai_only = true
         // NPC at (10, 10) — away from LocalShip at origin — facing -Z (target at 10, -10).
         // This avoids the projectile immediately hitting the LocalShip which
         // occupies (0, 0) in test_app().
-        let mut npc_physics = ShipPhysics::default();
-        npc_physics.x = 10.0;
-        npc_physics.z = 10.0;
+        let npc_physics = ShipPhysics { x: 10.0, z: 10.0, ..Default::default() };
         let npc_entity = app
             .world_mut()
             .spawn((
@@ -9098,17 +9118,19 @@ ai_only = true
         // Spawn target directly ahead (-Z), well within blaster range.
         app.world_mut().spawn((
             EntityUuid(target_uuid.to_string()),
-            crate::entity_spawner::EntitySystemHull(
-                crate::damage::SystemHull::from_config(&[(
-                    SystemId("captain".into()),
-                    50.0,
-                )]),
-            ),
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                50.0,
+            )])),
             Transform::from_xyz(10.0, 0.0, -10.0),
         ));
 
         // Check initial state before update.
-        let init_bank = &app.world().get::<BlasterSystemResource>(npc_entity).unwrap().0[0];
+        let init_bank = &app
+            .world()
+            .get::<BlasterSystemResource>(npc_entity)
+            .unwrap()
+            .0[0];
         eprintln!(
             "[DEBUG] init: fire_ready={} on_cooldown={} pending={} charging={}",
             init_bank.is_fire_ready(),
@@ -9119,7 +9141,10 @@ ai_only = true
 
         app.update();
 
-        let blaster_res = app.world().get::<BlasterSystemResource>(npc_entity).unwrap();
+        let blaster_res = app
+            .world()
+            .get::<BlasterSystemResource>(npc_entity)
+            .unwrap();
         let bank = &blaster_res.0[0];
         // tick_blaster_auto_fire (Input) calls request_charge_start, then
         // tick_blaster_system (Physics) fires the projectile same-tick.
@@ -9184,25 +9209,26 @@ ai_only = true
         // Spawn target well outside blaster range (35 units).
         app.world_mut().spawn((
             EntityUuid(target_uuid.to_string()),
-            crate::entity_spawner::EntitySystemHull(
-                crate::damage::SystemHull::from_config(&[(
-                    SystemId("captain".into()),
-                    50.0,
-                )]),
-            ),
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                50.0,
+            )])),
             Transform::from_xyz(0.0, 0.0, -100.0),
         ));
 
         app.update();
 
-        let blaster_res = app.world().get::<BlasterSystemResource>(npc_entity).unwrap();
+        let blaster_res = app
+            .world()
+            .get::<BlasterSystemResource>(npc_entity)
+            .unwrap();
         assert_eq!(
             blaster_res.0[0].volley.pending_volley, 0,
             "tick_blaster_auto_fire must NOT fire when target is out of range"
         );
     }
 
-/// AI token sent through `handle_fire_blaster` must route to the NPC and fire.
+    /// AI token sent through `handle_fire_blaster` must route to the NPC and fire.
     #[test]
     fn handle_fire_blaster_accepts_ai_token() {
         use crate::entity_spawner::EntityUuid;
@@ -9260,12 +9286,10 @@ ai_only = true
         // within the 35-unit range and inside the 360° fire arc.
         app.world_mut().spawn((
             EntityUuid(target_uuid_str.to_string()),
-            crate::entity_spawner::EntitySystemHull(
-                crate::damage::SystemHull::from_config(&[(
-                    SystemId("captain".into()),
-                    50.0,
-                )]),
-            ),
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                50.0,
+            )])),
             Transform::from_xyz(0.0, 0.0, -10.0),
         ));
 
@@ -9290,7 +9314,10 @@ ai_only = true
 
         app.update();
 
-        let blaster_res = app.world().get::<BlasterSystemResource>(npc_entity).unwrap();
+        let blaster_res = app
+            .world()
+            .get::<BlasterSystemResource>(npc_entity)
+            .unwrap();
         // After app.update(): handle_fire_blaster (Input) arms the volley, then
         // tick_blaster_system (Physics) fires it and enters cooldown. By the time
         // we check, pending_volley is 0 and on_cooldown is true — verify cooldown

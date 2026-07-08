@@ -702,6 +702,40 @@ mod tests {
     }
 
     #[test]
+    fn predict_intercept_heading_leads_moving_target() {
+        // Target moving left-to-right across the shooter's field of view at
+        // 5 units/s. Shooter at (0, 0), projectile speed 40 units/s, target
+        // at (20, -20) at the moment of firing, moving in +X.
+        // Distance = sqrt(20² + 20²) ≈ 28.28, t_est ≈ 28.28 / 40 ≈ 0.707s
+        // Predicted X = 20 + 5 * 0.707 ≈ 23.54
+        // The heading should point slightly ahead of the target's current
+        // position — i.e. a heading angle larger than straight-at.
+        let straight_at = (20.0_f32).atan2(-(-20.0_f32)); // atan2(dx, -dz)
+        let h = predict_intercept_heading(0.0, 0.0, 20.0, -20.0, 5.0, 0.0, 40.0, 0.0, 0.0);
+        assert!(
+            (h - straight_at).abs() > 0.01,
+            "heading ({h}) must differ from straight-at ({straight_at}) when target moves"
+        );
+        // With +X velocity, the intercept heading should be > straight_at
+        // (more clockwise in the atan2(dx, -dz) convention).
+        assert!(
+            h > straight_at,
+            "heading ({h}) must lead rightward-moving target (>{straight_at})"
+        );
+    }
+
+    #[test]
+    fn predict_intercept_heading_zero_speed_falls_back() {
+        // When speed is 0 or negative, must return the facing direction
+        // (shooter_yaw + facing_deg) irrespective of target velocity.
+        let h = predict_intercept_heading(0.0, 0.0, 10.0, -10.0, 100.0, 0.0, 0.0, 0.0, 0.0);
+        assert!(
+            (h - 0.0).abs() < 0.01,
+            "heading should be fallback ~0 when speed=0, got {h}"
+        );
+    }
+
+    #[test]
     fn bank_state_reflects_current_state() {
         let sys = make_system();
         let state = sys.bank_state();

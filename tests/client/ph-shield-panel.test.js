@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import '../../gui/ph-shield-panel.js';
+import '../../gui/components/ph-shield-panel.js';
 
 function setup(html) {
   document.body.innerHTML = html || '<ph-shield-panel id="test-panel"></ph-shield-panel>';

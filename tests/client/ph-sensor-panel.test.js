@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import '../../gui/ph-sensor-panel.js';
+import '../../gui/components/ph-sensor-panel.js';
 
 function setup(html) {
   document.body.innerHTML = html || '<ph-sensor-panel id="test-panel"></ph-sensor-panel>';

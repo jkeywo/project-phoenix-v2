@@ -1,8 +1,11 @@
-var _damageDetailTemplate = null;
-function _getDamageDetailTemplate() {
-  if (!_damageDetailTemplate && typeof document !== 'undefined') {
-    _damageDetailTemplate = document.createElement('template');
-    _damageDetailTemplate.innerHTML = `
+export class PhDamageDetail extends HTMLElement {
+  #state = null;
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    const t = document.createElement('template');
+    t.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: #cce; }
     :host * { box-sizing: border-box; }
@@ -20,41 +23,18 @@ function _getDamageDetailTemplate() {
   </style>
   <div class="list" id="list"></div>
 `;
-  }
-  return _damageDetailTemplate;
-}
-
-export class PhDamageDetail extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const t = _getDamageDetailTemplate();
     this.shadowRoot.appendChild(t.content.cloneNode(true));
-    this._data = null;
   }
 
-  static get observedAttributes() { return ['data']; }
-
-  attributeChangedCallback(name, _old, val) {
-    if (name === 'data') {
-      try {
-        this._data = val ? JSON.parse(val) : null;
-      } catch (_) {
-        this._data = null;
-      }
-      this._render();
-    }
+  set state(val) {
+    this.#state = val;
+    this.#render();
   }
 
-  set data(val) {
-    this._data = val;
-    this._render();
-  }
+  get state() { return this.#state; }
 
-  get data() { return this._data; }
-
-  _render() {
-    const d = this._data || {};
+  #render() {
+    const d = this.#state || {};
     const entries = Array.isArray(d.entries) ? d.entries : [];
     const list = this.shadowRoot.getElementById('list');
 

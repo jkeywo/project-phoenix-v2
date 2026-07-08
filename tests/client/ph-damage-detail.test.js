@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import '../../gui/ph-damage-detail.js';
+import '../../gui/components/ph-damage-detail.js';
 
 function setup(html) {
   document.body.innerHTML = html || '<ph-damage-detail id="test-panel"></ph-damage-detail>';
@@ -28,7 +28,7 @@ describe('PhDamageDetail', () => {
 
   it('renders correct number of rows for entries', () => {
     const { el } = setup();
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'Phaser Bank A', current: 200, max_hp: 200, tier: 3, debuff_magnitude: 0.0 },
         { display_name: 'Torpedo Launcher', current: 75, max_hp: 150, tier: 2, debuff_magnitude: 0.0 },
@@ -41,7 +41,7 @@ describe('PhDamageDetail', () => {
 
   it('renders display_name and tier badge for each entry', () => {
     const { el } = setup();
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'Phaser Bank A', current: 200, max_hp: 200, tier: 3, debuff_magnitude: 0.0 },
       ],
@@ -52,7 +52,7 @@ describe('PhDamageDetail', () => {
 
   it('a destroyed system (current === 0) renders DESTROYED text', () => {
     const { el } = setup();
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'Torpedo Launcher', current: 0, max_hp: 150, tier: 2, debuff_magnitude: 0.5 },
       ],
@@ -64,7 +64,7 @@ describe('PhDamageDetail', () => {
 
   it('a non-destroyed system does not render DESTROYED text', () => {
     const { el } = setup();
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'Phaser Bank A', current: 200, max_hp: 200, tier: 3, debuff_magnitude: 0.0 },
       ],
@@ -76,28 +76,28 @@ describe('PhDamageDetail', () => {
 
   it('missing data renders empty list without error', () => {
     const { el } = setup();
-    el.data = null;
+    el.state = null;
     const list = el.shadowRoot.getElementById('list');
     expect(list.innerHTML).toBe('');
   });
 
   it('null data set via property renders without error', () => {
     const { el } = setup();
-    expect(() => { el.data = null; }).not.toThrow();
+    expect(() => { el.state = null; }).not.toThrow();
     const list = el.shadowRoot.getElementById('list');
     expect(list.innerHTML).toBe('');
   });
 
   it('empty entries array renders empty list', () => {
     const { el } = setup();
-    el.data = { entries: [] };
+    el.state = { entries: [] };
     const rows = el.shadowRoot.querySelectorAll('.row');
     expect(rows.length).toBe(0);
   });
 
   it('applies correct colour class for healthy system (pct >= 0.75)', () => {
     const { el } = setup();
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'Healthy System', current: 200, max_hp: 200, tier: 1, debuff_magnitude: 0.0 },
       ],
@@ -108,7 +108,7 @@ describe('PhDamageDetail', () => {
 
   it('applies warn class for amber system (0.4 <= pct < 0.75)', () => {
     const { el } = setup();
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'Damaged System', current: 60, max_hp: 100, tier: 2, debuff_magnitude: 0.0 },
       ],
@@ -119,7 +119,7 @@ describe('PhDamageDetail', () => {
 
   it('applies crit class for critically damaged system (pct < 0.4)', () => {
     const { el } = setup();
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'Critical System', current: 30, max_hp: 100, tier: 2, debuff_magnitude: 0.0 },
       ],
@@ -130,13 +130,13 @@ describe('PhDamageDetail', () => {
 
   it('updates correctly when data changes', () => {
     const { el } = setup();
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'System A', current: 100, max_hp: 100, tier: 1, debuff_magnitude: 0.0 },
       ],
     };
     expect(el.shadowRoot.querySelectorAll('.row').length).toBe(1);
-    el.data = {
+    el.state = {
       entries: [
         { display_name: 'System A', current: 100, max_hp: 100, tier: 1, debuff_magnitude: 0.0 },
         { display_name: 'System B', current: 0, max_hp: 80, tier: 2, debuff_magnitude: 0.3 },

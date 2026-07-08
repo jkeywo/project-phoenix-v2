@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import '../../gui/ph-damage-bar.js';
+import '../../gui/components/ph-damage-bar.js';
 
 function setup(html) {
   document.body.innerHTML = html || '<ph-damage-bar id="test-panel"></ph-damage-bar>';
@@ -33,7 +33,7 @@ describe('PhDamageBar', () => {
 
   it('renders with full data: bar is present and label shows totalCurrent / totalMax', () => {
     const { el } = setup();
-    el.data = { pct: 0.85, damagePct: 0.15, totalCurrent: 850, totalMax: 1000 };
+    el.state = { pct: 0.85, damagePct: 0.15, totalCurrent: 850, totalMax: 1000 };
     const fill = el.shadowRoot.getElementById('bar-fill');
     expect(fill).toBeDefined();
     expect(fill.style.width).toBe('85%');
@@ -42,28 +42,28 @@ describe('PhDamageBar', () => {
 
   it('pct=1.0 renders green (no warn/crit class)', () => {
     const { el } = setup();
-    el.data = { pct: 1.0, totalCurrent: 100, totalMax: 100 };
+    el.state = { pct: 1.0, totalCurrent: 100, totalMax: 100 };
     const fill = el.shadowRoot.getElementById('bar-fill');
     expect(fill.className).toBe('fill');
   });
 
   it('pct=0.6 renders amber (warn class)', () => {
     const { el } = setup();
-    el.data = { pct: 0.6, totalCurrent: 600, totalMax: 1000 };
+    el.state = { pct: 0.6, totalCurrent: 600, totalMax: 1000 };
     const fill = el.shadowRoot.getElementById('bar-fill');
     expect(fill.className).toBe('fill warn');
   });
 
   it('pct=0.3 renders red (crit class)', () => {
     const { el } = setup();
-    el.data = { pct: 0.3, totalCurrent: 300, totalMax: 1000 };
+    el.state = { pct: 0.3, totalCurrent: 300, totalMax: 1000 };
     const fill = el.shadowRoot.getElementById('bar-fill');
     expect(fill.className).toBe('fill crit');
   });
 
   it('missing data renders without error, bar treated as full (pct=1)', () => {
     const { el } = setup();
-    el.data = null;
+    el.state = null;
     const fill = el.shadowRoot.getElementById('bar-fill');
     expect(fill).toBeDefined();
     expect(fill.style.width).toBe('100%');
@@ -72,28 +72,28 @@ describe('PhDamageBar', () => {
 
   it('null data set via property renders without error', () => {
     const { el } = setup();
-    expect(() => { el.data = null; }).not.toThrow();
+    expect(() => { el.state = null; }).not.toThrow();
   });
 
   it('updates correctly when data changes', () => {
     const { el } = setup();
-    el.data = { pct: 0.9, totalCurrent: 900, totalMax: 1000 };
+    el.state = { pct: 0.9, totalCurrent: 900, totalMax: 1000 };
     expect(queryText(el, '#bar-label')).toBe('900 / 1000');
-    el.data = { pct: 0.2, totalCurrent: 200, totalMax: 1000 };
+    el.state = { pct: 0.2, totalCurrent: 200, totalMax: 1000 };
     expect(queryText(el, '#bar-label')).toBe('200 / 1000');
     expect(el.shadowRoot.getElementById('bar-fill').className).toBe('fill crit');
   });
 
   it('pct exactly at 0.75 threshold is green', () => {
     const { el } = setup();
-    el.data = { pct: 0.75, totalCurrent: 75, totalMax: 100 };
+    el.state = { pct: 0.75, totalCurrent: 75, totalMax: 100 };
     const fill = el.shadowRoot.getElementById('bar-fill');
     expect(fill.className).toBe('fill');
   });
 
   it('pct exactly at 0.4 threshold is amber', () => {
     const { el } = setup();
-    el.data = { pct: 0.4, totalCurrent: 40, totalMax: 100 };
+    el.state = { pct: 0.4, totalCurrent: 40, totalMax: 100 };
     const fill = el.shadowRoot.getElementById('bar-fill');
     expect(fill.className).toBe('fill warn');
   });

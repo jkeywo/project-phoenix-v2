@@ -589,6 +589,7 @@ export function buildHelmConsoleState(state) {
   if (sciMarker) blips.push(sciMarker);
 
   return JSON.stringify({
+    range,
     heading:                 (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
     speed:                   forwardSpeed,
     x:                       shipX,

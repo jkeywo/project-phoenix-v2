@@ -14,10 +14,10 @@ const CRUISER_STATIONS = {
 
 const DESTROYER_STATIONS = {
   stations: [
-    { id: 'captain',     name: 'Captain',     console: 'gui/destroyer-captain-console.html' },
-    { id: 'helm',        name: 'Helm',        console: 'gui/helm-console.html' },
-    { id: 'tactical',    name: 'Tactical',    console: 'gui/destroyer-tactical-console.html' },
-    { id: 'engineering', name: 'Engineering', console: 'gui/destroyer-engineering-console.html' },
+    { id: 'captain',     name: 'Captain',     console: 'gui/destroyer/captain.html' },
+    { id: 'helm',        name: 'Helm',        console: 'gui/destroyer/helm.html' },
+    { id: 'tactical',    name: 'Tactical',    console: 'gui/destroyer/tactical.html' },
+    { id: 'engineering', name: 'Engineering', console: 'gui/destroyer/engineering.html' },
   ],
 };
 
@@ -98,20 +98,20 @@ describe('resolveConsoleUrl — Destroyer', () => {
     expect(ids).toEqual(['captain', 'engineering', 'helm', 'tactical']);
   });
 
-  it('destroyer captain resolves to bespoke destroyer-captain-console.html', () => {
-    expect(resolveConsoleUrl(DESTROYER_STATIONS, 'captain')).toBe('gui/destroyer-captain-console.html');
+  it('destroyer captain resolves to bespoke gui/destroyer/captain.html', () => {
+    expect(resolveConsoleUrl(DESTROYER_STATIONS, 'captain')).toBe('gui/destroyer/captain.html');
   });
 
-  it('destroyer helm resolves to shared helm-console.html', () => {
-    expect(resolveConsoleUrl(DESTROYER_STATIONS, 'helm')).toBe('gui/helm-console.html');
+  it('destroyer helm resolves to bespoke gui/destroyer/helm.html', () => {
+    expect(resolveConsoleUrl(DESTROYER_STATIONS, 'helm')).toBe('gui/destroyer/helm.html');
   });
 
-  it('destroyer tactical resolves to bespoke destroyer-tactical-console.html', () => {
-    expect(resolveConsoleUrl(DESTROYER_STATIONS, 'tactical')).toBe('gui/destroyer-tactical-console.html');
+  it('destroyer tactical resolves to bespoke gui/destroyer/tactical.html', () => {
+    expect(resolveConsoleUrl(DESTROYER_STATIONS, 'tactical')).toBe('gui/destroyer/tactical.html');
   });
 
-  it('destroyer engineering resolves to bespoke destroyer-engineering-console.html', () => {
-    expect(resolveConsoleUrl(DESTROYER_STATIONS, 'engineering')).toBe('gui/destroyer-engineering-console.html');
+  it('destroyer engineering resolves to bespoke gui/destroyer/engineering.html', () => {
+    expect(resolveConsoleUrl(DESTROYER_STATIONS, 'engineering')).toBe('gui/destroyer/engineering.html');
   });
 
   it('destroyer captain console differs from cruiser captain console', () => {
@@ -132,10 +132,10 @@ describe('resolveConsoleUrl — Destroyer', () => {
     expect(destroyerEngineering).not.toBe(cruiserEngineering);
   });
 
-  it('destroyer helm console matches cruiser helm console (shared)', () => {
+  it('destroyer helm console differs from cruiser helm console (bespoke)', () => {
     const destroyerHelm = resolveConsoleUrl(DESTROYER_STATIONS, 'helm');
     const cruiserHelm = resolveConsoleUrl(CRUISER_STATIONS, 'helm');
-    expect(destroyerHelm).toBe(cruiserHelm);
+    expect(destroyerHelm).not.toBe(cruiserHelm);
   });
 
   it('station not in destroyer falls back to default console path', () => {

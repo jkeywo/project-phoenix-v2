@@ -140,6 +140,17 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /** Set helm via analog joystick (ph-helm-joystick component). */
+  set_helm: (a, send) => {
+    send('ControlSystem', {
+      target: 'helm',
+      payload: {
+        type: 'HelmInput',
+        data: { thrust: a.thrust || 0, steering: a.yaw || 0 },
+      },
+    });
+  },
+
   /** Begin charging the impulse drive. */
   start_impulse_charge: (a, send) => {
     send('ControlSystem', {

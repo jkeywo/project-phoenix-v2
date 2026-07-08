@@ -1,11 +1,13 @@
-// Regression: Power and Repair stations must honor actions from their
-// holders. With the fixed-roster model (#495), each station holds exactly
-// one console — Power manages allocation, Repair dispatches teams.
+// Regression: Engineering station must honor power and repair actions
+// from its holder. With the fixed-roster model (#495), each station holds
+// exactly one console — Engineering manages power allocation and repair
+// teams.
 //
-// Power/Repair both authorize taps against `console_holder(X)` — the same
-// function that decides who receives state. So the failure mode we guard
-// against is a token/holder desync: a client believes it holds a station
-// (and receives its state) while the server rejects its actions.
+// Both power and repair actions authorize taps against
+// `console_holder(X)` — the same function that decides who receives state.
+// So the failure mode we guard against is a token/holder desync: a client
+// believes it holds a station (and receives its state) while the server
+// rejects its actions.
 
 import { test, expect } from './fixtures';
 import { readHostPeerId, createServerPage, createTestClient } from './fixtures';
@@ -80,20 +82,20 @@ async function buildFourPlayerCrew(context: import('@playwright/test').BrowserCo
   await selectAndWait(c2, 'Helm');
 
   const c3 = await createTestClient(context, hostId, { name: 'Eng' });
-  await selectAndWait(c3, 'Power');
+  await selectAndWait(c3, 'Engineering');
 
   const c4 = await createTestClient(context, hostId, { name: 'Sci' });
-  await selectAndWait(c4, 'Sensors');
+  await selectAndWait(c4, 'Science');
 
   return { c1, c2, c3, c4, hostId };
 }
 
-test('Power station is assigned correctly at 6P layout', async ({ context }) => {
+test('Engineering station is assigned correctly at 6P layout', async ({ context }) => {
   const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
 
   const a3 = await lastAssignment(c3, c3.token);
-  expect(a3.data.station).toBe('Power');
-  expect(a3.data.station_id).toBe('power');
+  expect(a3.data.station).toBe('Engineering');
+  expect(a3.data.station_id).toBe('engineering');
 
   await c1.close();
   await c2.close();
@@ -101,7 +103,7 @@ test('Power station is assigned correctly at 6P layout', async ({ context }) => 
   await c4.close();
 });
 
-test('Power player can change helm allocation', async ({ context }) => {
+test('Engineering player can change helm allocation', async ({ context }) => {
   const { c1, c2, c3, c4 } = await buildFourPlayerCrew(context);
 
   await c1.send('SetReady', { ready: true });
@@ -121,7 +123,7 @@ test('Power player can change helm allocation', async ({ context }) => {
   await c4.close();
 });
 
-test('Repair player can dispatch a repair team', async ({ context }) => {
+test('Engineering player can dispatch a repair team', async ({ context }) => {
   const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
 
@@ -132,10 +134,10 @@ test('Repair player can dispatch a repair team', async ({ context }) => {
   await selectAndWait(c2, 'Helm');
 
   const c3 = await createTestClient(context, hostId, { name: 'Eng' });
-  await selectAndWait(c3, 'Repair');
+  await selectAndWait(c3, 'Engineering');
 
   const c4 = await createTestClient(context, hostId, { name: 'Sci' });
-  await selectAndWait(c4, 'Sensors');
+  await selectAndWait(c4, 'Science');
 
   await c1.send('SetReady', { ready: true });
   await c2.send('SetReady', { ready: true });
@@ -153,7 +155,7 @@ test('Repair player can dispatch a repair team', async ({ context }) => {
     target: 'repair',
     payload: {
       type: 'DispatchRepairTeam',
-      data: { team_idx: 0, target: { type: 'Station', data: 'power' } },
+      data: { team_idx: 0, target: { type: 'Station', data: 'engineering' } },
     },
   });
   await waitForLastMessage(
@@ -168,7 +170,7 @@ test('Repair player can dispatch a repair team', async ({ context }) => {
   await c4.close();
 });
 
-test('Power acts when all four connect before selecting', async ({ context }) => {
+test('Engineering acts when all four connect before selecting', async ({ context }) => {
   const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
 
@@ -179,11 +181,11 @@ test('Power acts when all four connect before selecting', async ({ context }) =>
 
   await selectAndWait(c1, 'Captain');
   await selectAndWait(c2, 'Helm');
-  await selectAndWait(c3, 'Power');
-  await selectAndWait(c4, 'Sensors');
+  await selectAndWait(c3, 'Engineering');
+  await selectAndWait(c4, 'Science');
 
   const a3 = await lastAssignment(c3, c3.token);
-  expect(a3.data.station_id).toBe('power');
+  expect(a3.data.station_id).toBe('engineering');
 
   await c1.send('SetReady', { ready: true });
   await c2.send('SetReady', { ready: true });
@@ -202,7 +204,7 @@ test('Power acts when all four connect before selecting', async ({ context }) =>
   await c4.close();
 });
 
-test('Power can still act after a mid-game reconnect', async ({ context }) => {
+test('Engineering can still act after a mid-game reconnect', async ({ context }) => {
   const { c1, c2, c3, c4, hostId } = await buildFourPlayerCrew(context);
   const powToken = c3.token;
 
@@ -234,7 +236,7 @@ test('Power can still act after a mid-game reconnect', async ({ context }) => {
   await c4.close();
 });
 
-test('shared session-token orphans the first Power device (ghost console)', async ({ context }) => {
+test('shared session-token orphans the first Engineering device (ghost console)', async ({ context }) => {
   const { c1, c2, c3, c4, hostId } = await buildFourPlayerCrew(context);
   const powToken = c3.token;
 

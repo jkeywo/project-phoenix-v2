@@ -1069,8 +1069,9 @@
 
     const stations = s.stations || [];
 
-    // Fill grid: always show exactly 9 cells (3×3)
-    const MAX_SLOTS = 9;
+    // Fill grid: show exactly the number of defined stations (the ship TOML
+    // defines its roster — no padding to a fixed count).
+    const MAX_SLOTS = stations.length;
     for (let i = 0; i < MAX_SLOTS; i++) {
       const st = i < stations.length ? stations[i] : null;
       const card = document.createElement('div');

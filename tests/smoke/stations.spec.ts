@@ -131,11 +131,11 @@ test('ReleaseStation returns player to spectator', async ({ context }) => {
   await client.close();
 });
 
-test('10th connector when all 9 stations are filled becomes spectator', async ({ context }) => {
+test('7th connector when all 6 stations are filled becomes spectator', async ({ context }) => {
   const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
 
-  const stations = ['Captain', 'Helm', 'Tactical', 'Repair', 'Sensors', 'Shields', 'Navigation', 'Power', 'Comms'];
+  const stations = ['Captain', 'Helm', 'Tactical', 'Science', 'Engineering', 'Comms'];
   const clients = [];
   for (let i = 0; i < stations.length; i++) {
     const c = await createTestClient(context, hostId, { name: `P${i + 1}` });
@@ -144,7 +144,7 @@ test('10th connector when all 9 stations are filled becomes spectator', async ({
     clients.push(c);
   }
 
-  // 10th player joins — all 9 stations filled, should be spectator
+  // 7th player joins — all 6 stations filled, should be spectator
   const c10 = await createTestClient(context, hostId, { name: 'Spectator' });
 
   const spectatorMsg = await c10.page.evaluate(

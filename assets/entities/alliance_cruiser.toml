@@ -334,7 +334,7 @@ name = "Captain"
 description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
-console = "gui/captain-console.html"
+console = "gui/cruiser/captain.html"
 
 [[station.rating]]
 name = "Std"
@@ -346,7 +346,7 @@ name = "Helm"
 description = "Pilot the ship."
 rank = "Ltn."
 short_code = "HLM"
-console = "gui/helm-console.html"
+console = "gui/cruiser/helm.html"
 
 [[station.rating]]
 name = "Std"
@@ -358,7 +358,7 @@ name = "Tactical"
 description = "Manage weapons systems."
 rank = "Ltn."
 short_code = "TAC"
-console = "gui/tactical-console.html"
+console = "gui/cruiser/tactical.html"
 
 [[station.rating]]
 name = "Std"
@@ -370,7 +370,7 @@ name = "Science"
 description = "Monitor sensors and manage shields."
 rank = "Lt. Cmdr."
 short_code = "SCI"
-console = "gui/science-console.html"
+console = "gui/cruiser/science.html"
 
 [[station.rating]]
 name = "Std"
@@ -382,7 +382,7 @@ name = "Engineering"
 description = "Manage power and repairs."
 rank = "Ltn."
 short_code = "ENG"
-console = "gui/engineering-console.html"
+console = "gui/cruiser/engineering.html"
 
 [[station.rating]]
 name = "Std"
@@ -394,7 +394,7 @@ name = "Comms"
 description = "Hail stations, plot course and navigate."
 rank = "Ens."
 short_code = "COM"
-console = "gui/cruiser-comms-console.html"
+console = "gui/cruiser/comms.html"
 
 [[station.rating]]
 name = "Std"

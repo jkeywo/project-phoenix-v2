@@ -3,12 +3,12 @@ import { resolveConsoleUrl } from '../../gui/console-resolver.js';
 
 const CRUISER_STATIONS = {
   stations: [
-    { id: 'captain',     name: 'Captain',     console: 'gui/captain-console.html' },
-    { id: 'helm',        name: 'Helm',        console: 'gui/helm-console.html' },
-    { id: 'tactical',    name: 'Tactical',    console: 'gui/tactical-console.html' },
-    { id: 'science',     name: 'Science',     console: 'gui/science-console.html' },
-    { id: 'engineering', name: 'Engineering', console: 'gui/engineering-console.html' },
-    { id: 'comms',       name: 'Comms',       console: 'gui/cruiser-comms-console.html' },
+    { id: 'captain',     name: 'Captain',     console: 'gui/cruiser/captain.html' },
+    { id: 'helm',        name: 'Helm',        console: 'gui/cruiser/helm.html' },
+    { id: 'tactical',    name: 'Tactical',    console: 'gui/cruiser/tactical.html' },
+    { id: 'science',     name: 'Science',     console: 'gui/cruiser/science.html' },
+    { id: 'engineering', name: 'Engineering', console: 'gui/cruiser/engineering.html' },
+    { id: 'comms',       name: 'Comms',       console: 'gui/cruiser/comms.html' },
   ],
 };
 
@@ -23,7 +23,7 @@ const DESTROYER_STATIONS = {
 
 describe('resolveConsoleUrl', () => {
   it('returns station console path when station is found', () => {
-    expect(resolveConsoleUrl(CRUISER_STATIONS, 'science')).toBe('gui/science-console.html');
+    expect(resolveConsoleUrl(CRUISER_STATIONS, 'science')).toBe('gui/cruiser/science.html');
   });
 
   it('returns fallback when station not in shipStations', () => {
@@ -32,7 +32,7 @@ describe('resolveConsoleUrl', () => {
 
   it('returns same path for shared console strings', () => {
     const shared = resolveConsoleUrl(CRUISER_STATIONS, 'captain');
-    expect(shared).toBe('gui/captain-console.html');
+    expect(shared).toBe('gui/cruiser/captain.html');
     const same = resolveConsoleUrl(CRUISER_STATIONS, 'captain');
     expect(same).toBe(shared);
   });
@@ -52,28 +52,28 @@ describe('resolveConsoleUrl', () => {
 
   // ── Cruiser-specific: all 6 stations resolve through CRUISER_STATIONS ────
 
-  it('cruiser captain resolves to captain-console.html', () => {
-    expect(resolveConsoleUrl(CRUISER_STATIONS, 'captain')).toBe('gui/captain-console.html');
+  it('cruiser captain resolves to bespoke gui/cruiser/captain.html', () => {
+    expect(resolveConsoleUrl(CRUISER_STATIONS, 'captain')).toBe('gui/cruiser/captain.html');
   });
 
-  it('cruiser helm resolves to helm-console.html', () => {
-    expect(resolveConsoleUrl(CRUISER_STATIONS, 'helm')).toBe('gui/helm-console.html');
+  it('cruiser helm resolves to bespoke gui/cruiser/helm.html', () => {
+    expect(resolveConsoleUrl(CRUISER_STATIONS, 'helm')).toBe('gui/cruiser/helm.html');
   });
 
-  it('cruiser tactical resolves to tactical-console.html', () => {
-    expect(resolveConsoleUrl(CRUISER_STATIONS, 'tactical')).toBe('gui/tactical-console.html');
+  it('cruiser tactical resolves to bespoke gui/cruiser/tactical.html', () => {
+    expect(resolveConsoleUrl(CRUISER_STATIONS, 'tactical')).toBe('gui/cruiser/tactical.html');
   });
 
-  it('cruiser science resolves to science-console.html', () => {
-    expect(resolveConsoleUrl(CRUISER_STATIONS, 'science')).toBe('gui/science-console.html');
+  it('cruiser science resolves to bespoke gui/cruiser/science.html', () => {
+    expect(resolveConsoleUrl(CRUISER_STATIONS, 'science')).toBe('gui/cruiser/science.html');
   });
 
-  it('cruiser engineering resolves to bespoke engineering-console.html', () => {
-    expect(resolveConsoleUrl(CRUISER_STATIONS, 'engineering')).toBe('gui/engineering-console.html');
+  it('cruiser engineering resolves to bespoke gui/cruiser/engineering.html', () => {
+    expect(resolveConsoleUrl(CRUISER_STATIONS, 'engineering')).toBe('gui/cruiser/engineering.html');
   });
 
-  it('cruiser comms resolves to bespoke cruiser-comms-console.html', () => {
-    expect(resolveConsoleUrl(CRUISER_STATIONS, 'comms')).toBe('gui/cruiser-comms-console.html');
+  it('cruiser comms resolves to bespoke gui/cruiser/comms.html', () => {
+    expect(resolveConsoleUrl(CRUISER_STATIONS, 'comms')).toBe('gui/cruiser/comms.html');
   });
 
   it('CRUISER_STATIONS has exactly 6 stations', () => {

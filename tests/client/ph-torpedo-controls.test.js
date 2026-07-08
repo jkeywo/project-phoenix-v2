@@ -176,7 +176,7 @@ describe('PhTorpedoControls', () => {
     };
     const loadBtn = el.shadowRoot.querySelector('.load');
     loadBtn.click();
-    expect(sendAction).toHaveBeenCalledWith('load_tube', { tube_id: 'fore_port' });
+    expect(sendAction).toHaveBeenCalledWith('load_tube', { tube: 'fore_port' });
   });
 
   it('dispatches unload_tube on unload button click', () => {
@@ -188,7 +188,7 @@ describe('PhTorpedoControls', () => {
     };
     const unloadBtn = el.shadowRoot.querySelector('.unload');
     unloadBtn.click();
-    expect(sendAction).toHaveBeenCalledWith('unload_tube', { tube_id: 'fore_port' });
+    expect(sendAction).toHaveBeenCalledWith('unload_tube', { tube: 'fore_port' });
   });
 
   it('dispatches fire_torpedo on fire button click', () => {
@@ -200,7 +200,7 @@ describe('PhTorpedoControls', () => {
     };
     const fireBtn = el.shadowRoot.querySelector('.fire');
     fireBtn.click();
-    expect(sendAction).toHaveBeenCalledWith('fire_torpedo', { tube_id: 'fore_port' });
+    expect(sendAction).toHaveBeenCalledWith('fire_torpedo', { tube: 'fore_port' });
   });
 
   it('reconciles tube rows by id', () => {

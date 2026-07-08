@@ -339,6 +339,20 @@ describe('buildWeaponsConsoleState', () => {
     expect(s).toHaveProperty('tubes');
     expect(s).toHaveProperty('blips');
     expect(s).toHaveProperty('phaser_mode');
+    expect(s).toHaveProperty('torpedo_max');
+  });
+
+  it('torpedo_max falls back to torpedo_count when torpedo-magazine blackboard absent', () => {
+    const s = parse(buildWeaponsConsoleState({ weaponsTorpedoCount: 6 }));
+    expect(s.torpedo_max).toBe(6);
+  });
+
+  it('torpedo_max reads capacity from torpedo-magazine blackboard', () => {
+    const s = parse(buildWeaponsConsoleState({
+      weaponsTorpedoCount: 4,
+      blackboards: { 'torpedo-magazine': { capacity: 12 } },
+    }));
+    expect(s.torpedo_max).toBe(12);
   });
 
   it('uses state values when present', () => {

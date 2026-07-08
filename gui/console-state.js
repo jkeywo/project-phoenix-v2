@@ -430,6 +430,8 @@ export function buildWeaponsConsoleState(state) {
   const banks        = bb.banks         ?? state.weaponsBanks        ?? [];
   const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
   const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
+  const torpedoMagBb = (state.blackboards && state.blackboards['torpedo-magazine']) || {};
+  const torpedoMax   = torpedoMagBb.capacity ?? torpedoCount;
   const phaserMode   = bb.phaser_mode   ?? state.weaponsPhaserMode   ?? 'Auto';
   const regions      = bb.regions       ?? [];
   const phaserArcs   = bb.phaser_arcs   ?? state.phaserArcConfigs   ?? [];
@@ -482,6 +484,7 @@ export function buildWeaponsConsoleState(state) {
     banks,
     tubes,
     torpedo_count: torpedoCount,
+    torpedo_max:   torpedoMax,
     phaser_mode:   phaserMode,
     blips,
     regions,

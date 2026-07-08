@@ -74,8 +74,9 @@ test('total hull starts at 211 in first SystemHullUpdate', async ({ context }) =
 
   // 150 (post-#511) + 86 (fine Tactical banks/tubes/magazine added in #512,
   // alongside the retained coarse "Tactical" entry) - 25 (Shields hull moved
-  // out of console_hull into per-arc ShipArcHull in #514) = 211.
-  expect(total).toBe(211);
+  // out of console_hull into per-arc ShipArcHull in #514)
+  // + 20 (alliance_battleship/destroyer hull added in #639/#640/#641) = 231.
+  expect(total).toBe(231);
 
   await captain.close();
   await engineer.close();

@@ -18,7 +18,6 @@
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- Pure-function helpers shared with Vitest unit tests (issue #439, #440, #441). -->
-  <script type="module" src="gui/phone-bezel.js"></script>
   <script type="module" src="gui/phase-toggle.js"></script>
   <script type="module" src="gui/tab-bar.js"></script>
   <script type="module" src="gui/single-station.js"></script>
@@ -127,30 +126,53 @@
       border: none;
       display: block;
     }
-    /* --- Phone bezel frame (issue #439) ------------------------------------
-       Eight fixed-position pieces (4 corners + 4 edges) overlay the canvas /
-       weapons iframe and form the diegetic phone-console border. Corners are
-       <img>; edges are <div> with a repeating background. Red alert toggles
-       the `.alert-on` class on #phone-bezel which swaps every -alert variant
-       via CSS (and JS re-sets the four <img> srcs via bezelSrc()).
-
-       z-index: 15 � above the weapons iframe (10) and canvas (0), below the
+    /* --- Phone-bezel red alert glow animation -----------------------------
+       Pure CSS no PNGs. A thin 2px inset border holds the base frame color;
+       when .alert-on is toggled we swap `--bezel-frame` to red and kick off
+       a continuous pulse so the console rings like an alarm.
+         - 0.5s ease ease-out: fade-in / fade-out transition on the ring color.
+         - slow, infinite pulse while active (keyframes below).
+       z-index: 15 — above the weapons iframe (10) and canvas (0), below the
        top-bar status overlay (20) and the loading spinner (200). The bezel
        is purely cosmetic; pointer-events: none lets clicks through. */
-    :root { --bezel-inset: 22px; }
-    #phone-bezel {
-      position: fixed; inset: 0;
-      pointer-events: none;
-      z-index: 15;
-      display: block;
-    }
-    /* Hidden by default and during lobby � the lobby is borderless. render()
-       flips aria-hidden to 'false' once state.phase is in-game. Using an
-       attribute selector (not `style.display = ''`) so the stylesheet's
-       default state actually applies. */
-    #phone-bezel[aria-hidden="true"] { display: none; }
 
-    /* -- Coordination popup overlay (issue #494) ---------------------- */
+    :root {
+      --bezel-frame: rgba(80, 150, 230, 0.7);
+      --bezel-glow-size: 4px;
+      --bezel-pulse-intensity: 0.6;
+      --bezel-red: #ff2a2a;
+      --bezel-inset: 0px;
+    }
+
+    #phone-bezel {
+      position: fixed; inset: var(--bezel-inset);
+      z-index: 15; pointer-events: none; display: block;
+      border: 2px solid transparent;
+      transition: border-color 0.5s ease-out, box-shadow 0.5s ease-out;
+    }
+
+    #phone-bezel.alert-on {
+      border-color: var(--bezel-red);
+      box-shadow: 0 0 var(--bezel-glow-size) calc(var(--bezel-glow-size) * 3) var(--bezel-frame);
+      animation: bezel-pulse 2.8s ease-in-out forwards;
+    }
+
+    #phone-bezel.alert-on::after {
+      /* Extra outer ring visible while the slow pulse continues so corners and edges look like an actual
+         glowing frame without extra DOM nodes per edge/corner piece. */
+      content: ''; position: absolute; inset: -2px;
+      border: 1.5px solid rgba(230, 50, 50, var(--bezel-pulse-intensity));
+      border-radius: inherit; pointer-events: none; opacity: 0.85;
+    }
+
+    @keyframes bezel-pulse {
+       /* Initial fade-in up to peak intensity, then a steady slow pulsing loop. */
+      0%   { box-shadow: inset 0 0 4px transparent; border-color: rgba(255,80,60,0.5); opacity: 1; }
+     50%   { box-shadow: inset 0 0 8px var(--bezel-red), 0 0 16px calc(var(--bezel-glow-size) * 4) rgba(230,60,30,0.9); border-color: #ff5a44; opacity: 0.95; }
+    100%   { box-shadow: inset 0 0 4px transparent; border-color: rgba(255,80,60,0.5); opacity: 1; }
+}
+
+     #phone-bezel[aria-hidden="true"] { display: none; }
     #coordination-popup {
       display: none;
       position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
@@ -226,48 +248,7 @@
       max-width: 64ch;
       letter-spacing: 0.03em;
     }
-    .bezel-corner, .bezel-edge {
-      position: absolute;
-      pointer-events: none;
-      image-rendering: pixelated;
-    }
-    .bezel-corner { width: clamp(50px, 20vw, 120px); height: clamp(32px, 12vw, 72px); display: block; }
-    .bezel-corner.tl { top: 0;    left: 0; }
-    .bezel-corner.tr { top: 0;    right: 0; }
-    .bezel-corner.bl { bottom: 0; left: 0; }
-    .bezel-corner.br { bottom: 0; right: 0; }
-    .bezel-edge.top {
-      top: 0; left: clamp(50px, 20vw, 120px); right: clamp(50px, 20vw, 120px);
-      height: var(--bezel-inset);
-      background-image: url("gui/borders/phone-edge-top.png");
-      background-size: 48px 22px;
-      background-repeat: repeat-x;
-    }
-    .bezel-edge.bottom {
-      bottom: 0; left: clamp(50px, 20vw, 120px); right: clamp(50px, 20vw, 120px);
-      height: var(--bezel-inset);
-      background-image: url("gui/borders/phone-edge-bottom.png");
-      background-size: 48px 22px;
-      background-repeat: repeat-x;
-    }
-    .bezel-edge.left {
-      left: 0; top: clamp(32px, 12vw, 72px); bottom: clamp(32px, 12vw, 72px);
-      width: var(--bezel-inset);
-      background-image: url("gui/borders/phone-edge-left.png");
-      background-size: 22px 48px;
-      background-repeat: repeat-y;
-    }
-    .bezel-edge.right {
-      right: 0; top: clamp(32px, 12vw, 72px); bottom: clamp(32px, 12vw, 72px);
-      width: var(--bezel-inset);
-      background-image: url("gui/borders/phone-edge-right.png");
-      background-size: 22px 48px;
-      background-repeat: repeat-y;
-    }
-    #phone-bezel.alert-on .bezel-edge.top    { background-image: url("gui/borders/phone-edge-top-alert.png"); }
-    #phone-bezel.alert-on .bezel-edge.bottom { background-image: url("gui/borders/phone-edge-bottom-alert.png"); }
-    #phone-bezel.alert-on .bezel-edge.left   { background-image: url("gui/borders/phone-edge-left-alert.png"); }
-    #phone-bezel.alert-on .bezel-edge.right  { background-image: url("gui/borders/phone-edge-right-alert.png"); }
+
 
 
 
@@ -465,11 +446,13 @@
       transition: all .3s ease; }
     #ready-pill.go { background: #0a2830; color: var(--signal-cyan); border-color: var(--signal-cyan);
       animation: pill-pulse 1.5s ease-in-out infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @keyframes pill-pulse {
-      0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.2); }
-      50%       { box-shadow: 0 0 12px rgba(95,216,232,0.5); }
+     @keyframes spin { to { transform: rotate(360deg); } }
+
+     @keyframes pill-pulse {
+        0%, 100%{ box-shadow: 0 0 4px rgba(95,216,232,0.2); }
+       50%      { box-shadow: 0 0 12px rgba(95,216,232,0.5); }
     }
+
     /* Name input row */
     #lobby-name-row { flex-shrink: 0; padding: 6px 0 2px; }
     #lobby-name-row label { font-size: 0.7rem; color: var(--dim); margin: 0;
@@ -689,19 +672,12 @@
     <div class="popup-body" id="popup-body"></div>
   </div>
 
-  <!-- Phone bezel frame (issue #439). Eight fixed-position pieces overlay
-       the content area. The `.alert-on` class on this root, plus JS-driven
-       <img> src swaps, drives the red-alert visual swap. -->
-  <div id="phone-bezel" aria-hidden="true">
-    <img class="bezel-corner tl" data-slot="corner-tl" src="gui/borders/phone-corner-tl.png" alt="">
-    <img class="bezel-corner tr" data-slot="corner-tr" src="gui/borders/phone-corner-tr.png" alt="">
-    <img class="bezel-corner bl" data-slot="corner-bl" src="gui/borders/phone-corner-bl.png" alt="">
-    <img class="bezel-corner br" data-slot="corner-br" src="gui/borders/phone-corner-br.png" alt="">
-    <div class="bezel-edge top"></div>
-    <div class="bezel-edge bottom"></div>
-    <div class="bezel-edge left"></div>
-    <div class="bezel-edge right"></div>
-  </div>
+  <!-- Phone bezel frame (issue #439). CSS-only red alert glow; no images.
+       The .alert-on class drives the keyframe animation (see <style>).
+       Hidden by default; render() flips aria-hidden once in-game. -->
+  <div id="phone-bezel" aria-hidden="true"></div>
+
+
 
   <script>
     // -- Click sound --------------------------------------------------------
@@ -714,29 +690,6 @@
       if (!el) return;
       el.currentTime = 0;
       el.play().catch(() => {});
-    }
-
-    // -- Phone bezel red-alert swap (issue #439) ---------------------------
-    // Drives the .alert-on class on #phone-bezel (which CSS uses to swap
-    // edge background-images) and re-sets the <img> src for each corner via
-    // the bezelSrc() pure function exported by gui/phone-bezel.js.
-    let _bezelSrcMissingWarned = false;
-    function applyBezelAlert(alert) {
-      const root = document.getElementById('phone-bezel');
-      if (!root) return;
-      root.classList.toggle('alert-on', !!alert);
-      const corners = root.querySelectorAll('img.bezel-corner');
-      if (typeof window.bezelSrc !== 'function') {
-        if (!_bezelSrcMissingWarned) {
-          console.warn('[phone-bezel] window.bezelSrc not loaded; corner <img> srcs will not swap on red alert');
-          _bezelSrcMissingWarned = true;
-        }
-        return;
-      }
-      for (const el of corners) {
-        const slot = el.dataset.slot;
-        if (slot) el.src = window.bezelSrc(slot, !!alert);
-      }
     }
 
     // -- Connection status --------------------------------------------------
@@ -931,7 +884,15 @@
 
     function setStatus(text) { $('status').textContent = text; }
 
-    // -- Rendering -----------------------------------------------
+    // -- Phone bezel red-alert toggle (issue #439) -------------------------
+    // Toggles the .alert-on class on #phone-bezel; CSS keyframes drive the
+    // red glow pulse (no PNG swaps needed with the CSS-only implementation).
+    function applyBezelAlert(alert) {
+      const root = $('phone-bezel');
+      if (root) root.classList.toggle('alert-on', !!alert);
+    }
+
+
 
     const CONSOLES = ['captain', 'helm', 'tactical', 'repair', 'sensors', 'science', 'shields', 'navigation', 'power', 'comms'];
 

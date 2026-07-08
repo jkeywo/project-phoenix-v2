@@ -2,7 +2,7 @@
 //!
 //! This module is platform-agnostic and Bevy-free. The torpedo system holds
 //! a `Vec<TorpedoTube>` whose contents come from `[[torpedoes.tubes]]` in
-//! `assets/entities/player_ship.toml`. Each tube has a TOML-defined `id`,
+//! the ship entity TOML. Each tube has a TOML-defined `id`,
 //! `facing_deg`, and `fire_arc_deg`. Ammunition is a single shared pool
 //! (`[torpedoes] count`).
 //!

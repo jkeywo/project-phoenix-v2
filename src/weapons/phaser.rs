@@ -2,7 +2,7 @@
 //!
 //! This module is platform-agnostic and Bevy-free. The phaser system holds a
 //! `Vec<PhaserBank>` whose contents come from
-//! `assets/entities/player_ship.toml` (the `[[weapons_console.phaser_banks]]`
+//! a ship entity TOML (e.g. `assets/entities/alliance_battleship.toml`, the `[[weapons_console.phaser_banks]]`
 //! array). Each bank carries its own facing, fire arc, auto-fire arc, and
 //! optional per-bank beam range.
 //!

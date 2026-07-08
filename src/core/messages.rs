@@ -127,13 +127,13 @@ fn default_visual_scale() -> f32 {
 }
 
 /// String identifier for a phaser bank, matching the `id` field of the
-/// `[[weapons_console.phaser_banks]]` array in `player_ship.toml` (e.g.
+/// `[[weapons_console.phaser_banks]]` array in the ship entity TOML (e.g.
 /// `"port"`, `"starboard"`). Used in `FirePhaser`, `PhaserFired`,
 /// `PhaserBankState`, and `PhaserBankClientConfig`.
 pub type PhaserBank = String;
 
 /// String identifier for a torpedo tube, matching the `id` field of the
-/// `[[torpedoes.tubes]]` array in `player_ship.toml` (e.g. `"fore_port"`,
+/// `[[torpedoes.tubes]]` array in the ship entity TOML (e.g. `"fore_port"`,
 /// `"aft"`). Used in `FireTorpedo`, `TorpedoLaunched`, `TorpedoTubeState`,
 /// and `TorpedoTubeClientConfig`.
 pub type TorpedoTube = String;
@@ -496,7 +496,7 @@ pub struct GameState {
 
 /// Static, per-ship configuration sent to clients in `Welcome`.
 ///
-/// Carries the bits of `assets/entities/player_ship.toml` that the client UI
+/// Carries the bits of the ship entity TOML that the client UI
 /// needs to render correctly (e.g. helm radar range). Falls back to sensible
 /// defaults via `Default` so test code that builds a `Welcome` doesn't have to
 /// know about every field.

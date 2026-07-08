@@ -211,7 +211,7 @@ pub fn spawn_entity(
         ));
 
         // Build the ship's ShipConfigComponent from its own TOML [[station]]/
-        // [[system]]/[power_groups] blocks, parsed the same way player_ship.toml
+        // [[system]]/[power_groups] blocks, parsed the same way ship entity TOMLs
         // is parsed. If the entity TOML declared none, this is a truly empty
         // config (no stations, no systems) — the loop below simply sets nothing.
         let ship_config = match &config.ship_config {

@@ -796,7 +796,7 @@ max_level = 4
     // ── Helpers for station-aware tests ──────────────────────────────────
 
     fn ship_stations() -> ShipStations {
-        // Flat roster matching player_ship.toml after B3.
+        // Flat roster used by station-aware tests.
         // 9 stations, one console each.
         ShipStations {
             stations: vec![

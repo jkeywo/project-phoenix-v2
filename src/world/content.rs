@@ -272,7 +272,8 @@ pub fn evaluate_triggers_with_flags(
             })
             .map(|(i, a)| (i, a.clone()))
             .collect();
-        let filtered_actions: Vec<TriggerAction> = filtered.iter().map(|(_, a)| a.clone()).collect();
+        let filtered_actions: Vec<TriggerAction> =
+            filtered.iter().map(|(_, a)| a.clone()).collect();
         let filtered_delays: Vec<f32> = filtered
             .iter()
             .map(|(i, _)| state.trigger.action_delays.get(*i).copied().unwrap_or(0.0))
@@ -698,9 +699,10 @@ mod tests {
         name_to_uuid.insert("a".into(), "uuid-a".into());
         name_to_uuid.insert("b".into(), "uuid-b".into());
 
-        let entity_groups: HashMap<String, HashSet<String>> = [
-            ("a".to_string(), ["a".to_string(), "b".to_string()].into_iter().collect()),
-        ]
+        let entity_groups: HashMap<String, HashSet<String>> = [(
+            "a".to_string(),
+            ["a".to_string(), "b".to_string()].into_iter().collect(),
+        )]
         .into_iter()
         .collect();
 
@@ -708,8 +710,14 @@ mod tests {
         let events1 = vec![WorldEvent::Destroyed {
             uuid: "uuid-a".into(),
         }];
-        let fired1 =
-            evaluate_triggers_with_flags(&mut states, &events1, &name_to_uuid, &[], &entity_groups, 0.0);
+        let fired1 = evaluate_triggers_with_flags(
+            &mut states,
+            &events1,
+            &name_to_uuid,
+            &[],
+            &entity_groups,
+            0.0,
+        );
         assert!(
             fired1.is_empty(),
             "OnAllDestroyed must not fire while any named entity still alive"
@@ -721,8 +729,14 @@ mod tests {
         let events2 = vec![WorldEvent::Destroyed {
             uuid: "uuid-b".into(),
         }];
-        let fired2 =
-            evaluate_triggers_with_flags(&mut states, &events2, &name_to_uuid, &[], &entity_groups, 0.0);
+        let fired2 = evaluate_triggers_with_flags(
+            &mut states,
+            &events2,
+            &name_to_uuid,
+            &[],
+            &entity_groups,
+            0.0,
+        );
         assert_eq!(fired2.len(), 1);
         assert!(states[0].fired);
     }
@@ -761,9 +775,10 @@ mod tests {
         name_to_uuid.insert("a".into(), "uuid-a".into());
         // "b" never registered.
 
-        let entity_groups: HashMap<String, HashSet<String>> = [
-            ("a".to_string(), ["a".to_string(), "b".to_string()].into_iter().collect()),
-        ]
+        let entity_groups: HashMap<String, HashSet<String>> = [(
+            "a".to_string(),
+            ["a".to_string(), "b".to_string()].into_iter().collect(),
+        )]
         .into_iter()
         .collect();
 
@@ -775,8 +790,14 @@ mod tests {
                 uuid: "uuid-b".into(),
             },
         ];
-        let fired =
-            evaluate_triggers_with_flags(&mut states, &events, &name_to_uuid, &[], &entity_groups, 0.0);
+        let fired = evaluate_triggers_with_flags(
+            &mut states,
+            &events,
+            &name_to_uuid,
+            &[],
+            &entity_groups,
+            0.0,
+        );
         assert!(
             fired.is_empty(),
             "OnAllDestroyed must not fire when a named entity was never registered"
@@ -879,9 +900,10 @@ mod tests {
         ];
         let flag_store_unset = FlagStore::default();
         let chain_unset: [&FlagStore; 1] = [&flag_store_unset];
-        let entity_groups: HashMap<String, HashSet<String>> = [
-            ("a".to_string(), ["a".to_string(), "b".to_string()].into_iter().collect()),
-        ]
+        let entity_groups: HashMap<String, HashSet<String>> = [(
+            "a".to_string(),
+            ["a".to_string(), "b".to_string()].into_iter().collect(),
+        )]
         .into_iter()
         .collect();
         let fired_tick1 = evaluate_triggers_with_flags(
@@ -920,8 +942,6 @@ mod tests {
 
     #[test]
     fn on_all_destroyed_after_secs_gates_until_time_elapsed() {
-        use crate::world::flags::FlagStore;
-
         let mut states = vec![TriggerState {
             trigger: Trigger {
                 condition: TriggerCondition::OnAllDestroyed {
@@ -1584,7 +1604,15 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain, &HashMap::new(), 0.0);
+        let fired = evaluate_single_trigger(
+            &mut state,
+            &events,
+            &name_to_uuid,
+            &[],
+            &layer_chain,
+            &HashMap::new(),
+            0.0,
+        );
         assert!(
             fired.is_some(),
             "parent:armed must match a base-layer FlagSet"
@@ -1616,7 +1644,15 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain, &HashMap::new(), 0.0);
+        let fired = evaluate_single_trigger(
+            &mut state,
+            &events,
+            &name_to_uuid,
+            &[],
+            &layer_chain,
+            &HashMap::new(),
+            0.0,
+        );
         assert!(
             fired.is_none(),
             "same-named flag in another layer must not cross-fire"
@@ -1647,7 +1683,15 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain, &HashMap::new(), 0.0);
+        let fired = evaluate_single_trigger(
+            &mut state,
+            &events,
+            &name_to_uuid,
+            &[],
+            &layer_chain,
+            &HashMap::new(),
+            0.0,
+        );
         assert!(fired.is_none(), "parent: from base must resolve past root");
     }
 

@@ -79,12 +79,12 @@ pub struct CoordinationEnqueue {
     pub sender_label: String,
 }
 
-/// Load `ShipConfigComponent` from `assets/entities/player_ship.toml` (embedded at compile time).
+/// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml` (embedded at compile time).
 ///
 /// Panics if the file fails validation — the server cannot start without a valid ship
 /// configuration.
 pub(crate) fn load_ship_config_from_disk() -> ShipConfigComponent {
-    let toml_str = include_str!("../assets/entities/player_ship.toml");
+    let toml_str = include_str!("../assets/entities/alliance_battleship.toml");
     let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
         .expect("core system registry must be valid");
     let kinds: Vec<&str> = registry.kinds().collect();
@@ -504,7 +504,7 @@ fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy 
 ///  - For NPC ships with `AiControllerComponent`: also updates `last_helm_intent`
 ///    for backward compatibility until `tick_ai_controllers` is retired (#595).
 ///
-/// This replaces both the old player-ship-only `player_ship_helm_ai` and the NPC
+/// This replaces both the old player-ship-only `helm_ai` and the NPC
 /// helm path in `tick_ai_controllers`.
 #[allow(clippy::too_many_arguments)]
 fn operate_helm_ai(
@@ -2401,7 +2401,7 @@ mod tests {
 
     /// Build a ShipConfig with a captain station that has an "Assisted" rating
     /// declaring red-alert as automated. Used by rating-mechanism tests that
-    /// need automation to be configured independently of player_ship.toml.
+    /// need automation to be configured independently of the ship TOML.
     fn ship_config_with_assisted_captain() -> ShipConfigComponent {
         const TOML: &str = r#"
 [[station]]
@@ -2719,7 +2719,7 @@ station = "helm"
     }
 
     #[test]
-    fn player_ship_helm_ai_navigates_toward_reach_objective() {
+    fn helm_ai_navigates_toward_reach_objective() {
         let mut app = test_app();
         // Place anchor 100 units ahead (positive X) — ship starts at origin.
         let anchor = "station-alpha";
@@ -2737,7 +2737,7 @@ station = "helm"
     }
 
     #[test]
-    fn player_ship_helm_ai_patrols_from_viewscreen_objective() {
+    fn helm_ai_patrols_from_viewscreen_objective() {
         let mut app = test_app();
         let anchor = "starbase_patrol_east";
         set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec![anchor], 20.0)]);
@@ -2754,7 +2754,7 @@ station = "helm"
     }
 
     #[test]
-    fn player_ship_helm_ai_pursues_named_destroy_objective() {
+    fn helm_ai_pursues_named_destroy_objective() {
         let mut app = test_app();
         let target_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
@@ -2778,7 +2778,7 @@ station = "helm"
     }
 
     #[test]
-    fn player_ship_helm_ai_does_nothing_when_helm_human() {
+    fn helm_ai_does_nothing_when_helm_human() {
         let mut app = test_app();
         let anchor = "station-alpha";
         set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
@@ -2796,7 +2796,7 @@ station = "helm"
     }
 
     #[test]
-    fn player_ship_helm_ai_stays_zero_when_destroy_target_missing() {
+    fn helm_ai_stays_zero_when_destroy_target_missing() {
         let mut app = test_app();
         // Blackboard has a Destroy directive, but no live entity resolves to it.
         use crate::messages::{
@@ -2995,7 +2995,7 @@ station = "helm"
     // `helm_control_policy` still returns `operate_ai = true` so the player-ship
     // path in `operate_helm_ai` writes zero thrust/steering (safe deceleration).
     #[test]
-    fn all_backfill_player_ship_helm_policy_gates_operate_ai() {
+    fn all_backfill_helm_policy_gates_operate_ai() {
         use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 
         let mut resolver = ControlSourceResolver::new();
@@ -3016,7 +3016,7 @@ station = "helm"
     // Verifies that the player ship on Backfill uses the same unified operate_helm_ai
     // loop as NPC ships — not a Reach-only stub — satisfying issue #587 AC.
     #[test]
-    fn player_ship_backfill_runs_full_operate_helm_with_objectives() {
+    fn backfill_runs_full_operate_helm_with_objectives() {
         let mut app = test_app();
         // Give the ship a Destroy objective (non-Reach) pointing at an entity.
         let target_uuid = uuid::Uuid::new_v4().to_string();
@@ -3046,7 +3046,7 @@ station = "helm"
     }
 
     #[test]
-    fn player_ship_backfill_helm_ai_caps_long_frame_yaw_step() {
+    fn backfill_helm_ai_caps_long_frame_yaw_step() {
         let mut app = test_app();
         let target_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((

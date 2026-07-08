@@ -30,7 +30,7 @@ async function setupLobby(
 
   const hostId = await readHostPeerId(serverPage);
 
-  // Two clients: the 2-player layout in player_ship.toml is the smallest one
+  // Two clients: the 2-player layout is the smallest one
   // that exposes a "Helm" station (the 1-player layout is a single "Captain"
   // station with all consoles bundled).
   const clientA = await createTestClient(context, hostId, { name: 'Alpha' });

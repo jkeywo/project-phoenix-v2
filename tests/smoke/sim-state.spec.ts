@@ -9,7 +9,7 @@ import type { BrowserContext } from '@playwright/test';
 // Read impulse_charge_duration from the ship TOML so the test timeout is
 // derived from the configured value rather than a hardcoded constant.
 const shipToml = fs.readFileSync(
-  path.resolve(__dirname, '../../assets/entities/player_ship.toml'),
+  path.resolve(__dirname, '../../assets/entities/alliance_cruiser.toml'),
   'utf-8',
 );
 const chargeMatch = shipToml.match(/impulse_charge_duration\s*=\s*([0-9.]+)/);

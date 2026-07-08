@@ -50,7 +50,7 @@ pub struct WorldResource(pub WorldData);
 
 /// Template path of the player ship selected during the host first screen.
 /// Set by JS via `wasm_select_ship` before `wasm_init`. Defaults to
-/// `"assets/entities/player_ship.toml"` for legacy worlds that don't
+/// `"assets/entities/alliance_cruiser.toml"` for legacy worlds that don't
 /// expose an `available_ships` list.
 #[derive(Resource, Clone)]
 pub struct SelectedShipResource(pub String);
@@ -136,7 +136,7 @@ fn update_session_with_config(
     let config_path = selected_ship
         .as_ref()
         .map(|s| s.0.as_str())
-        .unwrap_or("assets/entities/player_ship.toml");
+        .unwrap_or("assets/entities/alliance_cruiser.toml");
 
     if let Some(ship_config) = crate::config_cache::get_config_cache().get(config_path) {
         // Build the client-facing ship config from the same source-of-truth.

@@ -12,10 +12,10 @@ describe('resolveShipSelection', () => {
   });
 
   it('returns auto-select with templatePath for single ship', () => {
-    const ships = [{ template_path: 'assets/entities/player_ship.toml', label: 'Default' }];
+    const ships = [{ template_path: 'assets/entities/alliance_cruiser.toml', label: 'Default' }];
     expect(resolveShipSelection(ships)).toEqual({
       action: 'auto-select',
-      templatePath: 'assets/entities/player_ship.toml',
+      templatePath: 'assets/entities/alliance_cruiser.toml',
     });
   });
 

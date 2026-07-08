@@ -194,14 +194,14 @@ thread_local! {
 
     /// Template path of the player ship selected by the host. Set by
     /// `wasm_select_ship()` before `wasm_init()`. When absent, defaults
-    /// to `"assets/entities/player_ship.toml"`.
+    /// to `"assets/entities/alliance_cruiser.toml"`.
     static SELECTED_SHIP_TEMPLATE_PATH: RefCell<Option<String>> =
         const { RefCell::new(None) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
 
-/// Called by JS with the raw player_ship.toml content to validate the
+/// Called by JS with the raw alliance_cruiser.toml content to validate the
 /// `[[station]]` schema before starting the server.
 ///
 /// On success, stores the parsed `ShipStations` internally and returns
@@ -342,7 +342,7 @@ pub fn wasm_init() {
     {
         let ship_path = SELECTED_SHIP_TEMPLATE_PATH
             .with(|slot| slot.borrow().clone())
-            .unwrap_or_else(|| "assets/entities/player_ship.toml".to_string());
+            .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
         app.insert_resource(SelectedShipResource(ship_path));
     }
     if is_automation {
@@ -737,7 +737,7 @@ pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
 /// Returns a JS array of `{ template_path: string, label: string }` objects.
 /// The list comes from the world's `[available_ships]` entries (issue #623).
 /// When the world has no `available_ships` list, returns an empty array — the
-/// host should fall back to the hardcoded `assets/entities/player_ship.toml`.
+/// host should fall back to the hardcoded `assets/entities/alliance_cruiser.toml`.
 ///
 /// Uses `js_sys::Array` / `JsValue` to avoid manual JSON construction (which
 /// would need escaping for `"` and `\` in template_path or label values).

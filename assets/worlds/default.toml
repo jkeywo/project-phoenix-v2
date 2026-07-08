@@ -55,7 +55,7 @@ template_path = "assets/entities/asteroid_field_main.toml"
 transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 transform = { position = [280.0, 0.0, 0.0] }
 spawn_on = "game_start"

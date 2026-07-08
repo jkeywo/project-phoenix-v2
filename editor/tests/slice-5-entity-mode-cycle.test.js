@@ -22,8 +22,8 @@ describe('Slice 5: Entity Mode full cycle', () => {
     expect(rows.length).toBe(2);
     const labels = rows.map((r) => r.dataset.path).sort();
     expect(labels).toEqual([
+      'assets/entities/alliance_battleship.toml',
       'assets/entities/pirate_raider.toml',
-      'assets/entities/player_ship.toml',
     ]);
   });
 

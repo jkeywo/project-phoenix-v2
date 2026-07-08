@@ -158,7 +158,7 @@ pub const TORPEDO_MAGAZINE_AI_CONTROLLER: &str = "torpedo_magazine_ai";
 
 // ── Fine-grained Power systems (issue #513) ──────────────────────────────────
 //
-// The coarse `power` kind is DELETED from `player_ship.toml`, but
+// The coarse `power` kind is DELETED from the player ship TOML, but
 // `POWER_SYSTEM_ID = "power"` remains as a stable string constant so tests
 // and legacy readers (e.g. the JS panel's aggregate `blackboards['power']`
 // entry) can still address the aggregate surface. All admission /
@@ -191,7 +191,7 @@ pub const POWER_BATTERY_AI_CONTROLLER: &str = "power_battery_ai";
 
 // ── Fine-grained Shields systems (issue #514) ────────────────────────────────
 //
-// The coarse `shields` kind is DELETED from `player_ship.toml`, but
+// The coarse `shields` kind is DELETED from the player ship TOML, but
 // `SHIELDS_SYSTEM_ID = "shields"` remains as a stable string constant so
 // tests and legacy readers (e.g. the JS panel's aggregate
 // `blackboards['shields']` entry) can still address the aggregate surface.

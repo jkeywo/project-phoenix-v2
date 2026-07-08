@@ -85,7 +85,7 @@ describe('entity-toml', () => {
       'asteroid_common_1_large.toml',
       'asteroid_common_1_small.toml',
       'asteroid_common_1_cosmetic.toml',
-      'player_ship.toml',
+      'alliance_battleship.toml',
       'station_axiom.toml',
       'station_outpost.toml',
       'star_sun.toml',

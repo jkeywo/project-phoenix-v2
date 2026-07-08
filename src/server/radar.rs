@@ -3,7 +3,7 @@
 //! Replaces the legacy gizmos-based `draw_radar_overlay` with the same
 //! `GuiRadarPlugin` + `GenericRadarWidget` + `RadarAppearance` pipeline used
 //! by all client phone consoles.  Configuration is sourced from
-//! `assets/entities/player_ship.toml` via the `config_cache` — the same path
+//! `assets/entities/alliance_cruiser.toml` via the `config_cache` — the same path
 //! `lobby/server.rs` uses — so the viewscreen and the phones always reflect the
 //! same TOML values.
 //!
@@ -171,7 +171,7 @@ struct ViewscreenRadarSpec {
 
 fn spawn_viewscreen_radar_widgets(mut commands: Commands) {
     let config_cache = crate::config_cache::get_config_cache();
-    let ship_config = config_cache.get("assets/entities/player_ship.toml");
+    let ship_config = config_cache.get("assets/entities/alliance_cruiser.toml");
 
     let helm_radar = ship_config
         .and_then(|c| c.helm_console.as_ref())

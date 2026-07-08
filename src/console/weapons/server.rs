@@ -4102,7 +4102,7 @@ mod tests {
     /// "Assisted" rating containing `torpedo_auto_fire` in its ai_tuning table.
     ///
     /// Post-#512 this now uses fine Tactical `[[system]]` blocks matching
-    /// `player_ship.toml` (phaser-fore/aft, torpedo-tube-fore-port/aft, etc.)
+    /// the ship entity TOML (phaser-fore/aft, torpedo-tube-fore-port/aft, etc.)
     /// so tests exercise the production per-fine-system gate paths rather
     /// than the legacy fallback-to-coarse-tactical path. The coarse
     /// `[[system]] id = "tactical"` block is DELETED to match production.
@@ -5370,21 +5370,21 @@ station = "tactical"
     }
 
     #[test]
-    fn torpedo_system_resource_reflects_player_ship_toml_torpedoes_block() {
+    fn torpedo_system_resource_reflects_battleship_toml_torpedoes_block() {
         // End-to-end TOML-driven wiring check: build the runtime
         // TorpedoSystem the same way `spawn_game_start_entities` does
-        // (parse player_ship.toml → TorpedoesConfig::to_runtime → TorpedoSystem)
+        // (parse alliance_battleship.toml → TorpedoesConfig::to_runtime → TorpedoSystem)
         // and assert the magazine size matches the TOML.
-        let toml_str = include_str!("../../../assets/entities/player_ship.toml");
+        let toml_str = include_str!("../../../assets/entities/alliance_battleship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
-            .expect("player_ship.toml must parse");
+            .expect("alliance_battleship.toml must parse");
         let tc = config
             .torpedoes
-            .expect("player_ship must declare [torpedoes]");
+            .expect("alliance_battleship must declare [torpedoes]");
         let runtime = tc.to_runtime();
         let sys = crate::torpedo::TorpedoSystem::new(runtime.clone());
-        // Magazine size matches TOML — changing `count = 10` to `count = 99`
-        // in player_ship.toml would fail this assertion.
+        // Magazine size matches TOML — changing `count = 30` to `count = 99`
+        // in alliance_battleship.toml would fail this assertion.
         assert_eq!(sys.torpedoes_remaining, tc.count);
         assert_eq!(sys.config.damage_hull, tc.damage_hull);
         assert_eq!(sys.config.load_time, tc.load_time);
@@ -5392,21 +5392,22 @@ station = "tactical"
     }
 
     #[test]
-    fn phaser_combat_config_resource_reflects_player_ship_toml_weapons_console() {
+    fn phaser_combat_config_resource_reflects_battleship_toml_weapons_console() {
         // End-to-end TOML-driven wiring check: build the runtime
         // PhaserCombatConfig the same way `spawn_game_start_entities` does
-        // (parse player_ship.toml → PhaserCombatConfig::from_weapons_console
+        // (parse alliance_battleship.toml → PhaserCombatConfig::from_weapons_console
         // → PhaserCombatConfigResource) and assert the resulting per-bank
         // values are exactly what the TOML says.
-        let toml_str = include_str!("../../../assets/entities/player_ship.toml");
+        let toml_str = include_str!("../../../assets/entities/alliance_battleship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
-            .expect("player_ship.toml must parse");
+            .expect("alliance_battleship.toml must parse");
         let wc = config
             .weapons_console
-            .expect("player_ship must declare [weapons_console]");
+            .expect("alliance_battleship must declare [weapons_console]");
         let combat = crate::entity_config::PhaserCombatConfig::from_weapons_console(&wc);
 
-        // player_ship.toml has two banks (fore, aft) with matching combat values.
+        // alliance_battleship.toml has two banks (fore, aft) with matching combat values.
+        // Fore bank is double-damage (8.0 dps) and shorter range (40) than the standard cruiser.
         assert_eq!(combat.banks.len(), 2, "must have fore and aft banks");
         let fore = &combat.banks[0];
         assert_eq!(fore.id, "fore");
@@ -5416,10 +5417,10 @@ station = "tactical"
             "beam_duration_secs from TOML bank"
         );
         assert_eq!(
-            fore.beam_damage_per_sec, 5.0,
+            fore.beam_damage_per_sec, 8.0,
             "beam_damage_per_sec from TOML bank"
         );
-        assert_eq!(fore.beam_range, 50.0, "beam_range from TOML bank");
+        assert_eq!(fore.beam_range, 40.0, "beam_range from TOML bank");
 
         // And starting the cooldown produces exactly that value, so it flows
         // through to live `PhaserCooldown.bank_remaining_secs`.
@@ -6320,7 +6321,7 @@ station = "tactical"
     /// HP before leaking to the hull — end-to-end ShipShields coverage for the
     /// torpedo damage path (PR2: Unified ShipShields).
     #[test]
-    fn torpedo_hit_reduces_ship_shields_on_player_ship() {
+    fn torpedo_hit_reduces_ship_shields_on_local_ship() {
         use crate::entity_spawner::EntityUuid;
         use crate::server_app::LocalShip;
         use crate::weapons::shield::{ShieldConfig, ShieldSystem};
@@ -6798,7 +6799,7 @@ station = "tactical"
     }
 
     #[test]
-    fn npc_beam_tick_applies_damage_to_player_ship_through_shields() {
+    fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
         // When the beam target is the player ship (has Ship marker), damage
         // must route through shields → hull component, not just EntitySystemHull directly.
         use crate::ai_plugin::AiTokenRegistry;

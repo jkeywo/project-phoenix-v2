@@ -241,7 +241,7 @@ describe('EntityModeShell', () => {
     });
 
     it('setFileList stores file paths', () => {
-      const paths = ['assets/entities/player_ship.toml', 'assets/entities/pirate_raider.toml'];
+      const paths = ['assets/entities/alliance_battleship.toml', 'assets/entities/pirate_raider.toml'];
       shell.setFileList(paths);
       expect(shell.getFileList()).toEqual(paths);
     });
@@ -320,8 +320,8 @@ describe('EntityModeShell', () => {
       expect(card.data.grid).toBeDefined();
     });
 
-    it('creates cards for stations section in player_ship.toml', () => {
-      shell.openFile('player_ship.toml', readEntity('player_ship.toml'));
+    it('creates cards for stations section in alliance_battleship.toml', () => {
+      shell.openFile('alliance_battleship.toml', readEntity('alliance_battleship.toml'));
       expect(shell.getCard('station')).not.toBeNull();
     });
   });

@@ -1727,18 +1727,18 @@ function finishInit() {
   const shipResult = resolveShipSelection(ships);
 
   if (shipResult.action === 'legacy-fallback') {
-    // Legacy world without available_ships: fall back to player_ship.toml.
-    fetch('assets/entities/player_ship.toml')
+    // Legacy world without available_ships: fall back to alliance_cruiser.toml.
+    fetch('assets/entities/alliance_cruiser.toml')
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
-        wasm_select_ship('assets/entities/player_ship.toml');
+        wasm_select_ship('assets/entities/alliance_cruiser.toml');
         try { wasm_validate_stations(toml); } catch (err) {
           showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
           return;
         }
         startServer();
       })
-      .catch(err => { showFatalError('Failed to load player_ship.toml: ' + String(err)); });
+      .catch(err => { showFatalError('Failed to load alliance_cruiser.toml: ' + String(err)); });
   } else if (shipResult.action === 'auto-select') {
     // Single ship — auto-select and proceed.
     const templatePath = shipResult.templatePath;

@@ -1144,11 +1144,11 @@ describe('buildNavigationConsoleState', () => {
     expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
   });
 
-  it('includes player_ship entities', () => {
+  it('includes alliance_cruiser entities', () => {
     const state = {
       shipX: 0, shipZ: 0,
-      navChartShows: ['player_ship'],
-      asteroids: [{ uuid: 'ps1', x: 5, z: 0, tags: ['player_ship'], radar_icon: 'ship' }],
+      navChartShows: ['alliance_cruiser'],
+      asteroids: [{ uuid: 'ps1', x: 5, z: 0, tags: ['alliance_cruiser'], radar_icon: 'ship' }],
     };
     const blips = parse(buildNavigationConsoleState(state)).blips;
     expect(blips.length).toBe(1);

@@ -821,7 +821,9 @@ fn parse_flag_kind(s: &str) -> Result<crate::flag_kind::FlagKind, String> {
     }
 }
 
-fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<(Vec<TriggerAction>, Vec<Option<String>>, Vec<f32>), String> {
+fn parse_raw_actions(
+    raw_actions: &[RawActionEntry],
+) -> Result<(Vec<TriggerAction>, Vec<Option<String>>, Vec<f32>), String> {
     let mut actions = Vec::new();
     let mut raw_predicates: Vec<Option<String>> = Vec::new();
     let mut delay_secs: Vec<f32> = Vec::new();
@@ -1115,7 +1117,8 @@ fn parse_trigger_condition_from_string(
                 .ok_or_else(|| format!("{ctx} 'on_destroyed' requires an 'entity' field"))?,
         }),
         "on_all_destroyed" => {
-            let group = group.ok_or_else(|| format!("{ctx} 'on_all_destroyed' requires a 'group' field"))?;
+            let group = group
+                .ok_or_else(|| format!("{ctx} 'on_all_destroyed' requires a 'group' field"))?;
             Ok(TriggerCondition::OnAllDestroyed {
                 group,
                 after_secs: after_secs.unwrap_or(0.0),
@@ -1315,37 +1318,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         }
     }
 
-    // Legacy compat: if no available_ships are declared, scan entities for
-    // GameStart entries whose template_path ends with "player_ship.toml",
-    // matching the filename convention used by the player ship entity
-    // template (matches the tags + ship_config convention at the
-    // EntityConfig level, used downstream in server_app.rs).
-    let available_ships = if raw.available_ships.is_empty() {
-        let legacy: Vec<AvailableShipEntry> = raw
-            .entities
-            .iter()
-            .filter(|e| {
-                e.spawn_on == WorldEntitySpawnOn::GameStart
-                    && e.template_path.ends_with("player_ship.toml")
-            })
-            .map(|e| AvailableShipEntry {
-                template_path: e.template_path.clone(),
-                label: Some(
-                    raw.global
-                        .title
-                        .clone()
-                        .unwrap_or_else(|| "Player Ship".to_string()),
-                ),
-            })
-            .collect();
-        if legacy.is_empty() {
-            raw.available_ships
-        } else {
-            legacy
-        }
-    } else {
-        raw.available_ships
-    };
+    let available_ships = raw.available_ships;
 
     // Parse `when` predicates on entity entries.
     let mut entities = raw.entities;
@@ -1840,7 +1813,7 @@ transform = { position = [0.0, 0.0, 0.0] }
         });
         // game_start entries are in no bucket
         cfg.entities.push(WorldEntity {
-            template_path: "assets/entities/player_ship.toml".into(),
+            template_path: "assets/entities/alliance_cruiser.toml".into(),
             spawn_on: crate::world::config::WorldEntitySpawnOn::GameStart,
             ..Default::default()
         });
@@ -1992,35 +1965,9 @@ anchor = "spawn_point"
         assert!(cfg.player_spawn.is_none());
     }
 
-    // -- legacy available_ships compat (issue #623) --------------------------
-
     #[test]
-    fn parse_world_legacy_available_ships_falls_back_to_game_start_player_ship() {
-        // Legacy world without [[available_ships]] but with a GameStart entity
-        // whose template_path contains "player_ship" should auto-generate a
-        // single-entry list using the world title.
-        let toml = r#"
-[global]
-title = "Test World"
-
-[[entity]]
-template_path = "assets/entities/player_ship.toml"
-spawn_on = "game_start"
-transform = { position = [0.0, 0.0, 0.0] }
-"#;
-        let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.available_ships.len(), 1);
-        assert_eq!(
-            cfg.available_ships[0].template_path,
-            "assets/entities/player_ship.toml"
-        );
-        assert_eq!(cfg.available_ships[0].label.as_deref(), Some("Test World"));
-    }
-
-    #[test]
-    fn parse_world_legacy_available_ships_no_game_start_yields_empty() {
-        // Legacy world with no GameStart player_ship entity and no
-        // available_ships should remain empty.
+    fn parse_world_no_available_ships_yields_empty() {
+        // World without [[available_ships]] should remain empty.
         let toml = r#"
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
@@ -2031,16 +1978,15 @@ transform = { position = [0.0, 0.0, 0.0] }
     }
 
     #[test]
-    fn parse_world_explicit_available_ships_skips_legacy_fallback() {
-        // World with explicit [[available_ships]] must not scan GameStart
-        // entities for legacy fallback.
+    fn parse_world_explicit_available_ships_works() {
+        // World with explicit [[available_ships]].
         let toml = r#"
 [[available_ships]]
 template_path = "assets/entities/ship_scout.toml"
 label = "Scout"
 
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 spawn_on = "game_start"
 transform = { position = [0.0, 0.0, 0.0] }
 "#;
@@ -2080,11 +2026,11 @@ transform = { position = [0.0, 0.0, 0.0] }
     fn entity_template_paths_dedups_available_ships_with_entity_list() {
         let toml = r#"
 [[available_ships]]
-template_path = "assets/entities/player_ship.toml"
-label = "Player Ship"
+template_path = "assets/entities/alliance_cruiser.toml"
+label = "Alliance Cruiser"
 
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 spawn_on = "game_start"
 transform = { position = [0.0, 0.0, 0.0] }
 "#;
@@ -2092,7 +2038,7 @@ transform = { position = [0.0, 0.0, 0.0] }
         let paths = entity_template_paths(&cfg);
         let count = paths
             .iter()
-            .filter(|p| *p == "assets/entities/player_ship.toml")
+            .filter(|p| *p == "assets/entities/alliance_cruiser.toml")
             .count();
         assert_eq!(
             count, 1,
@@ -2272,7 +2218,7 @@ transform     = { relative_to = "starbase_alpha", offset = [10.0, 0.0, -5.0] }
     fn parse_world_entity_spawn_on_game_start_recognised() {
         let toml = r#"
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
@@ -3649,7 +3595,7 @@ template_path = "assets/entities/asteroid_field_main.toml"
 transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 "#;

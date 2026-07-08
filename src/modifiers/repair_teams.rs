@@ -3,7 +3,7 @@ use crate::messages::{SystemId, TeamSlot};
 
 /// Tunable timings for the repair-team state machine.
 ///
-/// Sourced from the `[repair]` block in `assets/entities/player_ship.toml`
+/// Sourced from the `[repair]` block in the ship entity TOML (e.g. `assets/entities/alliance_battleship.toml`)
 /// via `RepairConfig::to_runtime()` (see `src/entities/config.rs`). Tests
 /// and code paths that don't load a ship TOML use `RepairTimings::default()`,
 /// which matches the historical hardcoded constants exactly.

@@ -15,7 +15,7 @@ function readEntityToml(relPath) {
   return parse(readFileSync(resolve(projectRoot, relPath), 'utf-8'));
 }
 
-const PLAYER_SHIP = readEntityToml('assets/entities/player_ship.toml');
+const BATTLESHIP = readEntityToml('assets/entities/alliance_battleship.toml');
 
 // ── deepMerge (unit) ──────────────────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ describe('OverrideEditor — setOverride', () => {
   let ed;
 
   beforeEach(() => {
-    ed = new OverrideEditor(PLAYER_SHIP);
+    ed = new OverrideEditor(BATTLESHIP);
   });
 
   it('overrides a top-level field', () => {
@@ -104,7 +104,7 @@ describe('OverrideEditor — setOverride', () => {
   });
 
   it('overrides a nested field without disturbing siblings', () => {
-    const originalRadius = PLAYER_SHIP.radar_appearance.radius;
+    const originalRadius = BATTLESHIP.radar_appearance.radius;
     ed.setOverride('radar_appearance.colour', [1.0, 0.0, 0.0]);
     const resolved = ed.getResolvedView();
     expect(resolved.radar_appearance.colour).toEqual([1.0, 0.0, 0.0]);
@@ -115,7 +115,7 @@ describe('OverrideEditor — setOverride', () => {
     ed.setOverride('helm_console.max_speed', 80.0);
     expect(ed.getResolvedView().helm_console.max_speed).toBe(80.0);
     // siblings in helm_console preserved
-    expect(ed.getResolvedView().helm_console.acceleration).toBe(PLAYER_SHIP.helm_console.acceleration);
+    expect(ed.getResolvedView().helm_console.acceleration).toBe(BATTLESHIP.helm_console.acceleration);
   });
 
   it('overrides an array field wholesale', () => {
@@ -128,7 +128,7 @@ describe('OverrideEditor — setOverride', () => {
     const resolved = ed.getResolvedView();
     expect(resolved.custom_module.power_draw).toBe(42);
     // template unchanged
-    expect(PLAYER_SHIP.custom_module).toBeUndefined();
+    expect(BATTLESHIP.custom_module).toBeUndefined();
   });
 
   it('supports subfields absent from the template — deeply nested', () => {
@@ -157,11 +157,11 @@ describe('OverrideEditor — clearOverride', () => {
   let ed;
 
   beforeEach(() => {
-    ed = new OverrideEditor(PLAYER_SHIP);
+    ed = new OverrideEditor(BATTLESHIP);
   });
 
   it('removes an overridden field so resolved falls back to template', () => {
-    const templateSpeed = PLAYER_SHIP.helm_console.max_speed;
+    const templateSpeed = BATTLESHIP.helm_console.max_speed;
     ed.setOverride('helm_console.max_speed', 99.0);
     ed.clearOverride('helm_console.max_speed');
     expect(ed.getResolvedView().helm_console.max_speed).toBe(templateSpeed);
@@ -222,12 +222,12 @@ describe('OverrideEditor — getResolvedView', () => {
     expect(r.weapons.damage).toBe(10);
   });
 
-  it('player_ship.toml: resolved has all template sections', () => {
-    const ed = new OverrideEditor(PLAYER_SHIP);
+  it('alliance_battleship.toml: resolved has all template sections', () => {
+    const ed = new OverrideEditor(BATTLESHIP);
     ed.setOverride('radar_appearance.colour', [1.0, 0.0, 0.0]);
     const resolved = ed.getResolvedView();
     // All top-level sections from template should be present
-    for (const key of Object.keys(PLAYER_SHIP)) {
+    for (const key of Object.keys(BATTLESHIP)) {
       expect(key in resolved).toBe(true);
     }
   });
@@ -281,7 +281,7 @@ describe('OverrideEditor — toOverridesToml', () => {
   });
 
   it('produces valid TOML that round-trips', () => {
-    const ed = new OverrideEditor(PLAYER_SHIP);
+    const ed = new OverrideEditor(BATTLESHIP);
     ed.setOverride('helm_console.max_speed', 80.0);
     ed.setOverride('radar_appearance.colour', [0.0, 1.0, 0.0]);
     const toml = ed.toOverridesToml();
@@ -292,7 +292,7 @@ describe('OverrideEditor — toOverridesToml', () => {
   });
 
   it('TOML contains only overridden fields, not the whole template', () => {
-    const ed = new OverrideEditor(PLAYER_SHIP);
+    const ed = new OverrideEditor(BATTLESHIP);
     ed.setOverride('radar_appearance.colour', [0.0, 1.0, 0.0]);
     const reparsed = parse(ed.toOverridesToml());
     // Only radar_appearance should appear (one key)
@@ -301,14 +301,14 @@ describe('OverrideEditor — toOverridesToml', () => {
   });
 
   it('TOML for a top-level scalar override round-trips', () => {
-    const ed = new OverrideEditor(PLAYER_SHIP);
+    const ed = new OverrideEditor(BATTLESHIP);
     ed.setOverride('faction', 'ffffffff-ffff-4fff-8fff-ffffffffffff');
     const reparsed = parse(ed.toOverridesToml());
     expect(reparsed.faction).toBe('ffffffff-ffff-4fff-8fff-ffffffffffff');
   });
 
   it('TOML for a novel subfield absent from template is correct', () => {
-    const ed = new OverrideEditor(PLAYER_SHIP);
+    const ed = new OverrideEditor(BATTLESHIP);
     ed.setOverride('custom_module.power_draw', 42);
     const reparsed = parse(ed.toOverridesToml());
     expect(reparsed.custom_module.power_draw).toBe(42);
@@ -319,7 +319,7 @@ describe('OverrideEditor — toOverridesToml', () => {
 
 describe('Integration: apply → clear → resolve → serialise', () => {
   it('full round-trip: set, clear one, serialise, re-parse, verify', () => {
-    const ed = new OverrideEditor(PLAYER_SHIP);
+    const ed = new OverrideEditor(BATTLESHIP);
 
     ed.setOverride('repair.repair_team_count', 5);
     ed.setOverride('helm_console.max_speed', 80.0);
@@ -335,7 +335,7 @@ describe('Integration: apply → clear → resolve → serialise', () => {
 
     // Resolved view: cleared field falls back to template
     const resolved = ed.getResolvedView();
-    expect(resolved.repair.repair_team_count).toBe(PLAYER_SHIP.repair.repair_team_count);
+    expect(resolved.repair.repair_team_count).toBe(BATTLESHIP.repair.repair_team_count);
     expect(resolved.helm_console.max_speed).toBe(80.0);
     expect(resolved.radar_appearance.colour).toEqual([1.0, 0.0, 0.0]);
 
@@ -348,17 +348,17 @@ describe('Integration: apply → clear → resolve → serialise', () => {
   });
 
   it('clear all overrides leaves empty TOML and resolved equals template', () => {
-    const ed = new OverrideEditor(PLAYER_SHIP);
+    const ed = new OverrideEditor(BATTLESHIP);
     ed.setOverride('radar_appearance.colour', [1.0, 0.0, 0.0]);
     ed.setOverride('helm_console.max_speed', 80.0);
     ed.clearOverride('radar_appearance.colour');
     ed.clearOverride('helm_console.max_speed');
     expect(ed.toOverridesToml()).toBe('');
-    expect(ed.getResolvedView()).toEqual(PLAYER_SHIP);
+    expect(ed.getResolvedView()).toEqual(BATTLESHIP);
   });
 
   it('novel subfield survives the full cycle', () => {
-    const ed = new OverrideEditor(PLAYER_SHIP);
+    const ed = new OverrideEditor(BATTLESHIP);
     ed.setOverride('exotic_drive.warp_factor', 9);
     expect(ed.getResolvedView().exotic_drive.warp_factor).toBe(9);
     const reparsed = parse(ed.toOverridesToml());

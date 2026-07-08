@@ -32,7 +32,7 @@ patrol_beta  = [500.0, 0.0, -300.0]
 patrol_gamma = [200.0, 0.0, -600.0]
 
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
@@ -81,14 +81,14 @@ async function startGameWithTactical(context: BrowserContext) {
     await route.fulfill({ contentType: 'text/plain', body: patched });
   });
 
-  // Patch player_ship.toml: boost phaser DPS so one beam kills the 60 HP
+  // Patch alliance_cruiser.toml: boost phaser DPS so one beam kills the 60 HP
   // raider. Headless Chromium throttles requestAnimationFrame on the
   // backgrounded server page (clients become foreground), so the Bevy sim
   // runs at ~1/15 of wall-clock. The default 5 DPS / 6 s beam / 6 s
   // cooldown would need two beam cycles (~3 min wall-clock), exceeding
   // the 60 s waitForFunction timeout. With boosted DPS one 6 s beam deals
   // 600 HP and destroys the raider before cooldown matters.
-  await context.route('**/assets/entities/player_ship.toml', async (route) => {
+  await context.route('**/assets/entities/alliance_cruiser.toml', async (route) => {
     const response = await route.fetch();
     const text = await response.text();
     const patched = text.replace(
@@ -168,7 +168,7 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
     { timeout: 15_000 },
   );
 
-  // Fire phasers — fore bank is defined first in player_ship.toml.
+  // Fire phasers — fore bank is defined first in alliance_cruiser.toml.
   await tactical.send('FirePhaser', { bank: 'fore' });
 
   // BeamStarted must be broadcast to all clients.

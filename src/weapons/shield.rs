@@ -1144,20 +1144,20 @@ mod tests {
     }
 
     /// End-to-end TOML-driven wiring check: build the runtime `ShieldSystem`
-    /// the same way `spawn_game_start_entities` does (parse player_ship.toml
+    /// the same way `spawn_game_start_entities` does (parse alliance_battleship.toml
     /// → ShieldsBaseConfig::to_runtime → ShieldSystem::new) and assert the
-    /// facings reflect the TOML. Changing `max_hp = 100` to `max_hp = 999`
+    /// facings reflect the TOML. Changing `max_hp = 140` to `max_hp = 999`
     /// in `[shields_console.base]` would fail this test.
     #[test]
-    fn shield_system_reflects_player_ship_toml_shields_console_base_block() {
-        let toml_str = include_str!("../../assets/entities/player_ship.toml");
+    fn shield_system_reflects_battleship_toml_shields_console_base_block() {
+        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
-            .expect("player_ship.toml must parse");
+            .expect("alliance_battleship.toml must parse");
         let base = config
             .shields_console
-            .expect("player_ship must declare [shields_console]")
+            .expect("alliance_battleship must declare [shields_console]")
             .base
-            .expect("player_ship must declare [shields_console.base]");
+            .expect("alliance_battleship must declare [shields_console.base]");
         let shield_config = base.to_runtime();
         let system = ShieldSystem::new(&shield_config);
         // Ship-wide `[shields_console.base]` no longer carries `num_facings`

@@ -757,17 +757,17 @@ mod tests {
     }
 
     /// End-to-end TOML-driven wiring check: build the runtime `RepairTeams`
-    /// the same way `spawn_game_start_entities` does (parse player_ship.toml
+    /// the same way `spawn_game_start_entities` does (parse alliance_battleship.toml
     /// → RepairConfig::to_runtime → RepairTeams::new_with_timings) and
     /// assert the timings match the TOML. Changing
-    /// `travel_duration_secs = 5.0` to e.g. `99.0` in player_ship.toml
+    /// `travel_duration_secs = 5.0` to e.g. `99.0` in alliance_battleship.toml
     /// would fail this test.
     #[test]
-    fn repair_teams_resource_reflects_player_ship_toml_repair_block() {
-        let toml_str = include_str!("../../../assets/entities/player_ship.toml");
+    fn repair_teams_resource_reflects_battleship_toml_repair_block() {
+        let toml_str = include_str!("../../../assets/entities/alliance_battleship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
-            .expect("player_ship.toml must parse");
-        let rc = config.repair.expect("player_ship must declare [repair]");
+            .expect("alliance_battleship.toml must parse");
+        let rc = config.repair.expect("alliance_battleship must declare [repair]");
         let timings = rc.to_runtime();
         let teams = crate::repair_teams::RepairTeams::new_with_timings(2, timings);
         assert_eq!(teams.timings().travel_duration, rc.travel_duration_secs);

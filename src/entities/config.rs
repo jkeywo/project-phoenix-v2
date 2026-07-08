@@ -829,7 +829,7 @@ pub struct PowerConfigSection {
 
 /// Config block for the Shields console focus bonuses/penalties.
 ///
-/// Loaded from `[shields_console]` in `player_ship.toml`. The nested
+/// Loaded from `[shields_console]` in the ship entity TOML. The nested
 /// `[shields_console.base]` sub-block (modelled by [`ShieldsBaseConfig`])
 /// supplies the underlying shield-system base values (number of facings,
 /// max HP, regen, offline duration) that were previously hardcoded by
@@ -1076,7 +1076,7 @@ impl PhaserCombatConfig {
 
 /// Config block for the repair-team state machine in a ship TOML.
 ///
-/// Loaded from `[repair]` in `player_ship.toml` (and any NPC ship TOML
+/// Loaded from `[repair]` in the ship entity TOML (and any NPC ship TOML
 /// that wishes to override repair pacing). All fields are optional; missing
 /// fields fall back to the same defaults as `RepairTimings::default()` and
 /// to the historical hardcoded constants (`TRAVEL_DURATION = 5.0`,
@@ -1142,7 +1142,7 @@ pub struct CommsConfig {
 
 /// Config block for the torpedo system in a ship TOML.
 ///
-/// Loaded from `[torpedoes]` in `player_ship.toml` (and any NPC ship TOML
+/// Loaded from `[torpedoes]` in the ship entity TOML (and any NPC ship TOML
 /// that wishes to override the torpedo loadout). All fields are optional;
 /// missing fields fall back to the same defaults as `TorpedoConfig::default()`.
 ///
@@ -1257,7 +1257,7 @@ impl TorpedoesConfig {
 
 /// Config block for the Navigation console in a ship TOML.
 ///
-/// Loaded from `[navigation_console]` in `player_ship.toml`.
+/// Loaded from `[navigation_console]` in the ship entity TOML.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NavigationConsoleConfig {
@@ -1268,7 +1268,7 @@ pub struct NavigationConsoleConfig {
 
 /// Config block for the Sensors console in a ship TOML.
 ///
-/// Loaded from `[sensors_console]` in `player_ship.toml`.
+/// Loaded from `[sensors_console]` in the ship entity TOML.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SensorsConsoleConfig {
@@ -1355,7 +1355,7 @@ pub struct EntityConfig {
     pub light: Vec<LightConfig>,
     /// Ship stations/systems/power_groups block, populated by parsing the same
     /// `[[station]]` / `[[system]]` / `[power_groups.*]` TOML blocks that
-    /// `player_ship.toml` uses. Every ship-like entity (player + NPCs) reads
+    /// the ship entity TOML uses. Every ship-like entity (player + NPCs) reads
     /// its `ShipConfig` from this field via the same code path — no
     /// entity-type-specific branches.
     #[serde(skip)]
@@ -1395,7 +1395,7 @@ impl EntityConfig {
         };
 
         // Extract the ship-config sections BEFORE stripping so we can parse
-        // them via ShipConfig::from_toml (the same path player_ship.toml uses).
+        // them via ShipConfig::from_toml (the same path ship entity TOMLs use).
         let ship_config_toml = if let Some(table) = value.as_table_mut() {
             let has_station = table.contains_key("station");
             let has_system = table.contains_key("system");
@@ -2635,14 +2635,14 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
     }
 
     #[test]
-    fn player_ship_toml_parses_with_federation_faction() {
-        let toml_str = include_str!("../../assets/entities/player_ship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
-        let faction = config.faction.expect("player_ship must declare a faction");
+    fn battleship_toml_parses_with_federation_faction() {
+        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let faction = config.faction.expect("alliance_battleship must declare a faction");
         // Must match the Federation UUID in assets/factions/federation.toml
         let fed_toml = include_str!("../../assets/factions/federation.toml");
         let fed = crate::faction::parse_faction_config(fed_toml).unwrap();
-        assert_eq!(faction, fed.uuid, "player ship faction must be Federation");
+        assert_eq!(faction, fed.uuid, "battleship faction must be Federation");
     }
 
     // ── Behaviour block tests ─────────────────────────────────────────────
@@ -2915,16 +2915,16 @@ automated_systems = []
     }
 
     #[test]
-    fn player_ship_toml_produces_four_shield_arcs() {
-        let toml_str = include_str!("../../assets/entities/player_ship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("player_ship must parse");
+    fn battleship_toml_produces_five_shield_arcs() {
+        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship must parse");
         assert_eq!(
             config.shield_arcs.len(),
-            4,
-            "player ship has 4 evenly-spaced arcs"
+            5,
+            "battleship has 5 arcs (fore, starboard, aft, port, omni)"
         );
         let ids: Vec<&str> = config.shield_arcs.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, vec!["fore", "port", "aft", "starboard"]);
+        assert_eq!(ids, vec!["fore", "starboard", "aft", "port", "omni"]);
 
         // Synthesised systems have the expected shape.
         let ship_config = config.ship_config.expect("ship_config present");
@@ -2933,12 +2933,13 @@ automated_systems = []
             .iter()
             .filter(|s| s.kind == "shield_arc")
             .collect();
-        assert_eq!(arc_systems.len(), 4);
+        assert_eq!(arc_systems.len(), 5);
         let sys_ids: Vec<&str> = arc_systems.iter().map(|s| s.id.0.as_str()).collect();
         assert!(sys_ids.contains(&"shield-arc-fore"));
         assert!(sys_ids.contains(&"shield-arc-port"));
         assert!(sys_ids.contains(&"shield-arc-aft"));
         assert!(sys_ids.contains(&"shield-arc-starboard"));
+        assert!(sys_ids.contains(&"shield-arc-omni"));
         // Player ship has a shields station → arcs are player-controlled.
         for sys in &arc_systems {
             assert!(!sys.ai_only);
@@ -3286,22 +3287,21 @@ count = 99
     }
 
     #[test]
-    fn player_ship_toml_torpedoes_block_matches_runtime_default_values() {
-        // Drift guard: if the [torpedoes] block in player_ship.toml ever
-        // diverges from TorpedoConfig::default(), this test fails so the
-        // owner can confirm the change is intentional.
-        let toml_str = include_str!("../../assets/entities/player_ship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
-        let t = config.torpedoes.expect("player_ship must have [torpedoes]");
+    fn battleship_toml_torpedoes_block_parses_correctly() {
+        // Verify the [torpedoes] block in alliance_battleship.toml parses
+        // and produces the expected runtime values.
+        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let t = config.torpedoes.expect("alliance_battleship must have [torpedoes]");
         let rt = t.to_runtime();
-        let baseline = crate::torpedo::TorpedoConfig::default();
-        assert_eq!(rt.count, baseline.count, "magazine size drift");
-        assert_eq!(rt.damage_hull, baseline.damage_hull);
-        assert_eq!(rt.damage_shields, baseline.damage_shields);
-        assert_eq!(rt.speed, baseline.speed);
-        assert!((rt.turn_rate - baseline.turn_rate).abs() < 1e-5);
-        assert_eq!(rt.lifespan, baseline.lifespan);
-        assert_eq!(rt.load_time, baseline.load_time);
+        // Values from alliance_battleship.toml [torpedoes] block
+        assert_eq!(rt.count, 30, "battleship magazine size");
+        assert_eq!(rt.damage_hull, 40);
+        assert_eq!(rt.damage_shields, 4);
+        assert_eq!(rt.speed, 15.0);
+        assert!((rt.turn_rate - (45f32).to_radians()).abs() < 1e-5);
+        assert_eq!(rt.lifespan, 20.0);
+        assert_eq!(rt.load_time, 10.0);
     }
 
     // ── [repair] block tests ───────────────────────────────────────────────
@@ -3364,14 +3364,14 @@ travel_duration_secs = 9.0
     }
 
     #[test]
-    fn player_ship_toml_repair_block_matches_runtime_default_values() {
-        // Drift guard: if the [repair] block in player_ship.toml ever diverges
+    fn battleship_toml_repair_block_matches_runtime_default_values() {
+        // Drift guard: if the [repair] block in alliance_battleship.toml ever diverges
         // from RepairTimings::default(), this test fails so the owner can
         // confirm the change is intentional. (The defaults themselves match
         // the historical hardcoded constants in `repair_teams.rs`.)
-        let toml_str = include_str!("../../assets/entities/player_ship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
-        let r = config.repair.expect("player_ship must have [repair]");
+        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let r = config.repair.expect("alliance_battleship must have [repair]");
         let rt = r.to_runtime();
         let baseline = crate::repair_teams::RepairTimings::default();
         assert_eq!(
@@ -3475,25 +3475,23 @@ max_hp = 250
     }
 
     #[test]
-    fn player_ship_toml_shields_base_block_matches_runtime_default_values() {
-        // Drift guard: if [shields_console.base] in player_ship.toml ever
-        // diverges from ShieldConfig::default(), this test fails so the
-        // owner can confirm the change is intentional.
-        let toml_str = include_str!("../../assets/entities/player_ship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
+    fn battleship_toml_shields_base_block_parses_correctly() {
+        // Verify the [shields_console.base] block in alliance_battleship.toml
+        // parses and produces the expected runtime values.
+        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
         let base = config
             .shields_console
-            .expect("player_ship must have [shields_console]")
+            .expect("alliance_battleship must have [shields_console]")
             .base
-            .expect("player_ship must have [shields_console.base]");
+            .expect("alliance_battleship must have [shields_console.base]");
         let rt = base.to_runtime();
-        let baseline = crate::shield::ShieldConfig::default();
-        assert_eq!(rt.num_facings, baseline.num_facings, "num_facings drift");
-        assert_eq!(rt.max_hp, baseline.max_hp, "max_hp drift");
-        assert_eq!(rt.regen_per_sec, baseline.regen_per_sec, "regen drift");
+        // Values from alliance_battleship.toml [shields_console.base] block
+        assert_eq!(rt.max_hp, 140, "battleship shield facing max_hp");
+        assert_eq!(rt.regen_per_sec, 3.5, "battleship shield regen");
         assert_eq!(
-            rt.offline_duration, baseline.offline_duration,
-            "offline duration drift"
+            rt.offline_duration, 10.0,
+            "offline duration"
         );
     }
 

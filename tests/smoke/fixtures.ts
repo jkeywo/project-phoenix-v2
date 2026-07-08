@@ -29,7 +29,7 @@ window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
 //
 // This minimal world keeps only what the smoke suite actually inspects:
 //
-//   - the player ship (no GLB — `player_ship.toml` is icon-only);
+  //   - the player ship (no GLB — the ship TOML is icon-only);
 //   - "Starbase Alpha" (one ~16 MB station GLB) — `comms.spec.ts` hails it
 //     and `world-bootstrap.spec.ts` asserts on its tag;
 //   - an `[[comms]] on_hailed` block with a response carrying an
@@ -61,7 +61,7 @@ brightness = 300.0
 starbase_alpha = [500.0, 0.0, 0.0]
 
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 id            = "player-ship"
 transform     = { position = [0.0, 0.0, 0.0] }
 spawn_on      = "game_start"

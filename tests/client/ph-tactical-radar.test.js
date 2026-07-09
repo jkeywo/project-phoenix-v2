@@ -190,6 +190,6 @@ describe('PhTacticalRadar', () => {
     // by = 300 + 150*sin(-π/2) = 150
     // CSS coords: /2 => (150, 75)
     canvas.dispatchEvent(new MouseEvent('click', { clientX: 150, clientY: 75 }));
-    expect(sendAction).toHaveBeenCalledWith('select_target', { uuid: 'abc' });
+    expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
   });
 });

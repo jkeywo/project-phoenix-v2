@@ -137,7 +137,7 @@ describe('PhRepairTeams', () => {
     };
     const btn = el.shadowRoot.querySelector('.dispatch-btn');
     btn.click();
-    expect(sendAction).toHaveBeenCalledWith('dispatch_repair', { team_id: 0, target_system_id: 'Helm' });
+    expect(sendAction).toHaveBeenCalledWith('dispatch_repair_team', { team_idx: 0, target: 'Helm' });
   });
 
   it('updates when state changes', () => {

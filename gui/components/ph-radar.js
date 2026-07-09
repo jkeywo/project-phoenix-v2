@@ -206,7 +206,7 @@ export class PhRadar extends HTMLElement {
     const scaleY = this.#canvas.height / rect.height;
     const blip = this.#getBlipAt(x * scaleX, y * scaleY);
     if (blip && this.sendAction) {
-      this.sendAction('select_target', { uuid: blip.uuid });
+      this.sendAction('set_target', { uuid: blip.uuid });
     }
   }
 

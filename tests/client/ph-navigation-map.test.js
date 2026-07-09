@@ -143,8 +143,8 @@ describe('PhNavigationMap', () => {
     const h = setup();
     const state = {
       blips: [
-        { uuid: 'a', kind: 'planet', label: 'Alpha', x: 1000, z: 0, stance: 'friendly' },
-        { uuid: 'b', kind: 'ship', label: 'Beta', x: -1000, z: 0, stance: 'hostile' },
+        { uuid: 'a', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' },
+        { uuid: 'b', kind: 'ship', name: 'Beta', world_x: -1000, world_z: 0, stance: 'hostile' },
       ],
       range: 5000,
       ship_pos: { x: 0, z: 0 },
@@ -175,7 +175,7 @@ describe('PhNavigationMap', () => {
     expect(h.fakeCtx._calls.moveTo.length).toBeGreaterThan(0);
   });
 
-  it('tap on empty space dispatches set_waypoint with world coordinates', () => {
+  it('tap on empty space dispatches set_navigation_waypoint with world coordinates', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
     h.el.state = {
@@ -189,7 +189,7 @@ describe('PhNavigationMap', () => {
     // Click center of canvas (300,300 in buffer = 150,150 in CSS)
     // This maps to world (0, 0) since ship is at origin
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 150, clientY: 150 }));
-    expect(sendAction).toHaveBeenCalledWith('set_waypoint', { x: 0, z: 0 });
+    expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 0, z: 0 });
   });
 
   it('tap on empty space at known position uses correct world coords', () => {
@@ -208,15 +208,15 @@ describe('PhNavigationMap', () => {
     // nx = (300-300)/0.06 = 0, ny = (150-300)/0.06 = -2500
     // heading=0, cos=1, sin=0: wx = 0 + 0 + 500 = 500, wz = 0 - (-2500) + 300 = 2800
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 150, clientY: 75 }));
-    expect(sendAction).toHaveBeenCalledWith('set_waypoint', { x: 500, z: 2800 });
+    expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 500, z: 2800 });
   });
 
-  it('tap on blip dispatches set_waypoint with entity_uuid', () => {
+  it('tap on blip dispatches set_navigation_waypoint with source_uuid', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
     h.el.state = {
       blips: [
-        { uuid: 'abc', kind: 'planet', label: 'Alpha', x: 1000, z: 0, stance: 'friendly' },
+        { uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' },
       ],
       range: 5000,
       ship_pos: { x: 0, z: 0 },
@@ -227,10 +227,10 @@ describe('PhNavigationMap', () => {
     // Blip at (1000, 0) → buffer: sx = 300+1000*0.06 = 360, sy = 300
     // CSS: x=180, y=150
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 180, clientY: 150 }));
-    expect(sendAction).toHaveBeenCalledWith('set_waypoint', {
+    expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', {
       x: 1000,
       z: 0,
-      entity_uuid: 'abc',
+      source_uuid: 'abc',
     });
   });
 
@@ -241,7 +241,7 @@ describe('PhNavigationMap', () => {
 
     h.el.state = {
       blips: [
-        { uuid: 'abc', kind: 'station', label: 'Starbase 7', x: 1000, z: 0, stance: 'friendly' },
+        { uuid: 'abc', kind: 'station', name: 'Starbase 7', world_x: 1000, world_z: 0, stance: 'friendly' },
       ],
       range: 5000,
       ship_pos: { x: 0, z: 0 },
@@ -265,7 +265,7 @@ describe('PhNavigationMap', () => {
 
     h.el.state = {
       blips: [
-        { uuid: 'abc', kind: 'planet', label: 'Alpha', x: 1000, z: 0, stance: 'friendly' },
+        { uuid: 'abc', kind: 'planet', name: 'Alpha', world_x: 1000, world_z: 0, stance: 'friendly' },
       ],
       range: 5000,
       ship_pos: { x: 0, z: 0 },

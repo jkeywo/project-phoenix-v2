@@ -71,7 +71,7 @@ describe('PhSensorRadar', () => {
     const { el, innerRadar } = setup();
     el.state = {
       blips: [{ uuid: 'a', bearing_deg: 0, range: 500 }],
-      range: 1000,
+      scan_range: 1000,
       ship_heading: 90,
       config: { max_range: 5000 },
     };
@@ -112,7 +112,7 @@ describe('PhSensorRadar', () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it('clicking DESIGNATE dispatches sendAction with set_science_target', () => {
+  it('clicking DESIGNATE dispatches sendAction with set_sensors_target', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
@@ -122,7 +122,7 @@ describe('PhSensorRadar', () => {
     const btn = el.shadowRoot.getElementById('designate-btn');
     btn.click();
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('set_science_target', { uuid: 'abc-123' });
+    expect(sendAction).toHaveBeenCalledWith('set_sensors_target', { uuid: 'abc-123' });
   });
 
   it('blip click on inner radar updates selected_target_uuid and enables button', () => {
@@ -135,8 +135,8 @@ describe('PhSensorRadar', () => {
     const btn = el.shadowRoot.getElementById('designate-btn');
     expect(btn.disabled).toBe(true);
 
-    innerRadar.sendAction('select_target', { uuid: 'abc' });
+    innerRadar.sendAction('set_target', { uuid: 'abc' });
     expect(btn.disabled).toBe(false);
-    expect(sendAction).toHaveBeenCalledWith('select_target', { uuid: 'abc' });
+    expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
   });
 });

@@ -47,39 +47,37 @@ export class PhCommsCurrentMessage extends HTMLElement {
       return;
     }
 
-    const sender = thread.sender || '';
-    const messages = Array.isArray(thread.messages) ? thread.messages : [];
+    const sender = thread.sender_name || '';
+    const body = thread.body || '';
     const responses = Array.isArray(thread.responses) ? thread.responses : [];
+    const selectedIdx = thread.selected_response;
 
-    const msgsHtml = messages.map(m => {
-      const speaker = m.speaker || '';
-      const text = m.text || '';
-      return `<div class="msg"><span class="speaker">${speaker}:</span> <span class="text">${text}</span></div>`;
-    }).join('');
+    // Single message body displayed as the current message text.
+    const bodyHtml = body
+      ? `<div class="msg"><span class="text">${body}</span></div>`
+      : '<div class="msg" style="color:#6a7178">(empty)</div>';
 
-    const respHtml = responses.map(r => {
-      const id = r.id || '';
-      const text = r.text || '';
-      const available = r.available !== false;
-      return `<button class="resp-btn" data-id="${id}"${available ? '' : ' disabled'}>${text}</button>`;
+    // Responses are plain strings from Vec<String>.
+    const respHtml = responses.map((text, idx) => {
+      const chosen = selectedIdx != null && idx === selectedIdx;
+      return `<button class="resp-btn" data-idx="${idx}"${chosen ? ' disabled' : ''}>${chosen ? '\u2713 ' : ''}${text}</button>`;
     }).join('');
 
     container.innerHTML = `
       <div class="thread">
         <div class="sender-label">${sender}</div>
-        <div class="messages">${msgsHtml || '<div class="msg" style="color:#6a7178">(no messages)</div>'}</div>
-        <div class="responses">${respHtml}</div>
+        <div class="messages">${bodyHtml}</div>
+        ${respHtml ? `<div class="responses">${respHtml}</div>` : ''}
       </div>
     `;
 
-    container.querySelectorAll('.resp-btn').forEach(btn => {
-      if (!btn.disabled) {
-        btn.addEventListener('click', () => {
-          if (this.sendAction) {
-            this.sendAction('respond', { response_id: btn.dataset.id });
-          }
-        });
-      }
+    container.querySelectorAll('.resp-btn:not([disabled])').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (this.sendAction) {
+          // Use the thread message id as the target for respond action.
+          this.sendAction('respond_to_message', { message_id: thread.id, response_index: Number(btn.dataset.idx) });
+        }
+      });
     });
   }
 }

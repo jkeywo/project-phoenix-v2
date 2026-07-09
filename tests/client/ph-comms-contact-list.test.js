@@ -115,7 +115,7 @@ describe('PhCommsContactList', () => {
     const btn = el.shadowRoot.querySelector('.hail-btn');
     btn.click();
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('hail', { entity_id: 'ent-42' });
+    expect(sendAction).toHaveBeenCalledWith('hail', { target_uuid: 'ent-42' });
   });
 
   it('clicking hail button on out-of-range contact does not call sendAction', () => {

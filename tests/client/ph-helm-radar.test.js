@@ -106,14 +106,14 @@ describe('PhHelmRadar', () => {
     expect(inner.state.config).toEqual({ max_range: 5000 });
   });
 
-  it('ON SCREEN button dispatches sendAction with set_view when clicked', () => {
+  it('ON SCREEN button dispatches sendAction with set_radar_view when clicked', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
 
     const btn = el.shadowRoot.getElementById('on-screen-btn');
     btn.click();
 
-    expect(sendAction).toHaveBeenCalledWith('set_view', { view: 'radar' });
+    expect(sendAction).toHaveBeenCalledWith('set_radar_view', {});
   });
 
   it('ON SCREEN button shows active class when on_screen_active is true', () => {

@@ -136,9 +136,9 @@ describe('PhBlastersControls', () => {
     };
     const btn = el.shadowRoot.querySelector('.charge-btn');
     btn.dispatchEvent(new MouseEvent('mousedown'));
-    expect(sendAction).toHaveBeenCalledWith('charge_blaster_start', { bank_id: 'port' });
+    expect(sendAction).toHaveBeenCalledWith('charge_blaster_start', { bank: 'port' });
     btn.dispatchEvent(new MouseEvent('mouseup'));
-    expect(sendAction).toHaveBeenCalledWith('fire_blaster', { bank_id: 'port' });
+    expect(sendAction).toHaveBeenCalledWith('fire_blaster', { bank: 'port' });
   });
 
   it('does not dispatch when button is disabled', () => {

@@ -65,7 +65,7 @@ export class PhCameraSelect extends HTMLElement {
       container.querySelectorAll('.cam-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           if (this.sendAction) {
-            this.sendAction('set_view', { view: btn.dataset.view });
+            this.sendAction('set_view', { direction: btn.dataset.view });
           }
         });
       });

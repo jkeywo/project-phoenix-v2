@@ -169,7 +169,7 @@ describe('PhRadar', () => {
 
   // ── Hit testing / target selection ───────────────────────────────
 
-  it('click on blip calls sendAction with select_target and uuid', () => {
+  it('click on blip calls sendAction with set_target and uuid', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
     h.el.state = {
@@ -188,7 +188,7 @@ describe('PhRadar', () => {
     // CSS x = 300/2 = 150, CSS y = 150/2 = 75
 
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 150, clientY: 75 }));
-    expect(sendAction).toHaveBeenCalledWith('select_target', { uuid: 'abc' });
+    expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
   });
 
   it('click on blip at bearing 90 starboard fires correctly', () => {
@@ -208,7 +208,7 @@ describe('PhRadar', () => {
     // CSS: x=225, y=150
 
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 225, clientY: 150 }));
-    expect(sendAction).toHaveBeenCalledWith('select_target', { uuid: 'def' });
+    expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'def' });
   });
 
   it('click far from blips does nothing', () => {
@@ -264,7 +264,7 @@ describe('PhRadar', () => {
     // CSS: x=75, y=150
 
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 75, clientY: 150 }));
-    expect(sendAction).toHaveBeenCalledWith('select_target', { uuid: 'abc' });
+    expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
   });
 
   // ── ResizeObserver ───────────────────────────────────────────────

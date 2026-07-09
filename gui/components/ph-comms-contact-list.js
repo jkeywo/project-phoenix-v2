@@ -69,7 +69,7 @@ export class PhCommsContactList extends HTMLElement {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           if (this.sendAction) {
-            this.sendAction('hail', { entity_id: pill.dataset.id });
+            this.sendAction('hail', { target_uuid: pill.dataset.id });
           }
         });
       }

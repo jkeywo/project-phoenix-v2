@@ -107,7 +107,7 @@ describe('PhCameraSelect', () => {
     expect(badge.style.display).toBe('none');
   });
 
-  it('clicking a view button calls sendAction with set_view and view name', () => {
+  it('clicking a view button calls sendAction with set_view and direction', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
@@ -120,7 +120,7 @@ describe('PhCameraSelect', () => {
     const btn = el.shadowRoot.querySelector('[data-view="Port"]');
     btn.click();
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('set_view', { view: 'Port' });
+    expect(sendAction).toHaveBeenCalledWith('set_view', { direction: 'Port' });
   });
 
   it('buttons disabled when auto=true', () => {

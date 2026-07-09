@@ -39,7 +39,7 @@ describe('PhCommsHailList', () => {
 
   it('renders NO MESSAGES placeholder with empty array', () => {
     const { el } = setup();
-    el.state = { threads: [] };
+    el.state = { messages: [] };
     expect(queryText(el, '.list')).toBe('NO MESSAGES');
   });
 
@@ -49,17 +49,17 @@ describe('PhCommsHailList', () => {
     expect(queryText(el, '.list')).toBe('NO MESSAGES');
   });
 
-  it('renders NO MESSAGES placeholder with threads: null', () => {
+  it('renders NO MESSAGES placeholder with messages: null', () => {
     const { el } = setup();
-    el.state = { threads: null };
+    el.state = { messages: null };
     expect(queryText(el, '.list')).toBe('NO MESSAGES');
   });
 
-  it('renders an unread thread with bold sender and blue dot', () => {
+  it('renders an unread message with bold sender and blue dot', () => {
     const { el } = setup();
     el.state = {
-      threads: [
-        { id: 'msg-1', sender: 'Starbase Alpha', preview: 'Incoming transmission...', unread: true, timestamp: '' },
+      messages: [
+        { id: 'msg-1', sender_name: 'Starbase Alpha', subject: 'Incoming transmission...', is_read: false },
       ],
     };
     const dot = el.shadowRoot.querySelector('.dot');
@@ -70,11 +70,11 @@ describe('PhCommsHailList', () => {
     expect(sender.textContent.trim()).toBe('Starbase Alpha');
   });
 
-  it('renders a read thread without bold sender and without blue dot', () => {
+  it('renders a read message without bold sender and without blue dot', () => {
     const { el } = setup();
     el.state = {
-      threads: [
-        { id: 'msg-1', sender: 'Starbase Alpha', preview: 'Previous transmission', unread: false, timestamp: '' },
+      messages: [
+        { id: 'msg-1', sender_name: 'Starbase Alpha', subject: 'Previous transmission', is_read: true },
       ],
     };
     const dot = el.shadowRoot.querySelector('.dot');
@@ -84,25 +84,25 @@ describe('PhCommsHailList', () => {
     expect(sender.classList.contains('unread')).toBe(false);
   });
 
-  it('clicking a thread row calls sendAction with open_thread', () => {
+  it('clicking a message row calls sendAction with select_comms_message', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      threads: [
-        { id: 'msg-42', sender: 'Test', preview: 'Hello', unread: true, timestamp: '' },
+      messages: [
+        { id: 'msg-42', sender_name: 'Test', subject: 'Hello', is_read: false },
       ],
     };
     const row = el.shadowRoot.querySelector('.row');
     row.click();
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('open_thread', { thread_id: 'msg-42' });
+    expect(sendAction).toHaveBeenCalledWith('select_comms_message', { message_id: 'msg-42' });
   });
 
   it('does not throw when sendAction is not set and row is clicked', () => {
     const { el } = setup();
     el.state = {
-      threads: [
-        { id: 'msg-1', sender: 'Test', preview: 'Hello', unread: false, timestamp: '' },
+      messages: [
+        { id: 'msg-1', sender_name: 'Test', subject: 'Hello', is_read: true },
       ],
     };
     const row = el.shadowRoot.querySelector('.row');

@@ -39,7 +39,7 @@ export class PhCommsHailList extends HTMLElement {
 
   #render() {
     const s = this.#state || {};
-    const raw = Array.isArray(s.threads) ? s.threads : [];
+    const raw = Array.isArray(s.messages) ? s.messages : [];
     const list = this.shadowRoot.getElementById('list');
 
     if (raw.length === 0) {
@@ -49,19 +49,18 @@ export class PhCommsHailList extends HTMLElement {
 
     list.innerHTML = raw.map(t => {
       const id = t.id || '';
-      const sender = t.sender || '';
-      const preview = t.preview || '';
-      const unread = !!t.unread;
-      const timestamp = t.timestamp || '';
+      const sender = t.sender_name || '';
+      const preview = t.subject || '';
+      const unread = !t.is_read;
       const dotCls = unread ? 'dot unread' : 'dot read';
       const senderCls = unread ? 'sender unread' : 'sender';
-      return `<div class="row" data-id="${id}"><span class="${dotCls}"></span><span class="${senderCls}">${sender}</span><span class="preview">${preview}</span><span class="timestamp">${timestamp}</span></div>`;
+      return `<div class="row" data-id="${id}"><span class="${dotCls}"></span><span class="${senderCls}">${sender}</span><span class="preview">${preview}</span></div>`;
     }).join('');
 
     list.querySelectorAll('.row').forEach(row => {
       row.addEventListener('click', () => {
         if (this.sendAction) {
-          this.sendAction('open_thread', { thread_id: row.dataset.id });
+          this.sendAction('select_comms_message', { message_id: row.dataset.id });
         }
       });
     });

@@ -107,7 +107,7 @@ describe('PhShieldFacings', () => {
     expect(badge.style.display).toBe('none');
   });
 
-  it('clicking a facing arc dispatches focus_shield action', () => {
+  it('clicking a facing arc dispatches set_shield_focus action', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
@@ -119,7 +119,7 @@ describe('PhShieldFacings', () => {
     const path = el.shadowRoot.querySelector('.arc-path');
     expect(path).toBeDefined();
     path.dispatchEvent(new MouseEvent('click'));
-    expect(sendAction).toHaveBeenCalledWith('focus_shield', { facing_id: 'fore' });
+    expect(sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore' });
   });
 
   it('does not dispatch action when auto=true', () => {

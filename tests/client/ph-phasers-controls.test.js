@@ -140,7 +140,7 @@ describe('PhPhasersControls', () => {
     const btn = el.shadowRoot.querySelector('.fire-btn');
     btn.click();
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('fire_phaser', { bank_id: 'fore' });
+    expect(sendAction).toHaveBeenCalledWith('fire_phaser', { bank: 'fore' });
   });
 
   it('reconciles banks by id, reusing existing DOM elements', () => {

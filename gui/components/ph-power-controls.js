@@ -90,7 +90,7 @@ export class PhPowerControls extends HTMLElement {
           if (!pip || auto) return;
           const level = Number(pip.dataset.level);
           if (!isNaN(level) && this.sendAction) {
-            this.sendAction('set_power', { group_id: group.id, level });
+            this.sendAction('set_power', { target: group.id, level });
           }
         });
         const incrBtn = el.querySelector('.step-btn[data-action="incr"]');
@@ -100,7 +100,7 @@ export class PhPowerControls extends HTMLElement {
           const cur = this.#currentLevel(group.id);
           const max = group.max_level != null ? group.max_level : 4;
           if (cur < max && this.sendAction) {
-            this.sendAction('set_power', { group_id: group.id, level: cur + 1 });
+            this.sendAction('set_power', { target: group.id, level: cur + 1 });
           }
         });
         decrBtn.addEventListener('click', () => {
@@ -108,7 +108,7 @@ export class PhPowerControls extends HTMLElement {
           const cur = this.#currentLevel(group.id);
           const min = group.min_level != null ? group.min_level : 0;
           if (cur > min && this.sendAction) {
-            this.sendAction('set_power', { group_id: group.id, level: cur - 1 });
+            this.sendAction('set_power', { target: group.id, level: cur - 1 });
           }
         });
         if (idx < container.children.length) {

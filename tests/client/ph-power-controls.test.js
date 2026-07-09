@@ -147,7 +147,7 @@ describe('PhPowerControls', () => {
     };
     const pips = el.shadowRoot.querySelectorAll('.pip');
     pips[3].click(); // click level 3
-    expect(sendAction).toHaveBeenCalledWith('set_power', { group_id: 'helm', level: 3 });
+    expect(sendAction).toHaveBeenCalledWith('set_power', { target: 'helm', level: 3 });
   });
 
   it('does not dispatch set_power when auto=true', () => {

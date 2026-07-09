@@ -55,42 +55,35 @@ describe('PhCommsCurrentMessage', () => {
     expect(queryText(el, '#container')).toBe('NO ACTIVE HAIL');
   });
 
-  it('renders thread with sender label and messages', () => {
+  it('renders thread with sender label and message body', () => {
     const { el } = setup();
     el.state = {
       thread: {
-        sender: 'Starbase Alpha',
-        messages: [
-          { speaker: 'Station', text: 'Welcome to the sector.' },
-          { speaker: 'Ship', text: 'Thank you for the welcome.' },
-        ],
+        id: 'm1',
+        sender_name: 'Starbase Alpha',
+        body: 'Welcome to the sector.',
         responses: [],
       },
     };
     const senderLabel = el.shadowRoot.querySelector('.sender-label');
     expect(senderLabel.textContent.trim()).toBe('Starbase Alpha');
     const msgs = el.shadowRoot.querySelectorAll('.msg');
-    expect(msgs.length).toBe(2);
+    expect(msgs.length).toBe(1);
     expect(msgs[0].textContent.trim()).toContain('Welcome to the sector.');
-    expect(msgs[1].textContent.trim()).toContain('Thank you for the welcome.');
   });
 
-  it('renders speaker labels for each message', () => {
+  it('renders empty body placeholder when body is empty', () => {
     const { el } = setup();
     el.state = {
       thread: {
-        sender: 'Test',
-        messages: [
-          { speaker: 'Station', text: 'Hello.' },
-          { speaker: 'Commander', text: 'Ready.' },
-        ],
+        id: 'm2',
+        sender_name: 'Test',
+        body: '',
         responses: [],
       },
     };
-    const speakers = el.shadowRoot.querySelectorAll('.speaker');
-    expect(speakers.length).toBe(2);
-    expect(speakers[0].textContent.trim()).toBe('Station:');
-    expect(speakers[1].textContent.trim()).toBe('Commander:');
+    const container = el.shadowRoot.getElementById('container');
+    expect(container.textContent).toContain('(empty)');
   });
 
   it('clicking a response button calls sendAction with respond', () => {
@@ -98,66 +91,48 @@ describe('PhCommsCurrentMessage', () => {
     const { el } = setup({ sendAction });
     el.state = {
       thread: {
-        sender: 'Starbase Alpha',
-        messages: [{ speaker: 'Station', text: 'Welcome.' }],
-        responses: [
-          { id: 'resp-1', text: 'Acknowledge', available: true },
-        ],
+        id: 'm1',
+        sender_name: 'Starbase Alpha',
+        body: 'Welcome.',
+        responses: ['Acknowledge', 'Ignore'],
       },
     };
-    const btn = el.shadowRoot.querySelector('.resp-btn');
-    btn.click();
+    const btns = el.shadowRoot.querySelectorAll('.resp-btn');
+    expect(btns.length).toBe(2);
+    btns[0].click();
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('respond', { response_id: 'resp-1' });
+    expect(sendAction).toHaveBeenCalledWith('respond_to_message', { message_id: 'm1', response_index: 0 });
   });
 
-  it('disables response button when available is false', () => {
+  it('highlights selected response with checkmark and disables it', () => {
     const { el } = setup();
     el.state = {
       thread: {
-        sender: 'Starbase Alpha',
-        messages: [{ speaker: 'Station', text: 'Welcome.' }],
-        responses: [
-          { id: 'resp-1', text: 'Acknowledge', available: false },
-        ],
+        id: 'm1',
+        sender_name: 'Starbase Alpha',
+        body: 'Welcome.',
+        responses: ['Acknowledge', 'Ignore'],
+        selected_response: 0,
       },
     };
-    const btn = el.shadowRoot.querySelector('.resp-btn');
-    expect(btn.disabled).toBe(true);
+    const btns = el.shadowRoot.querySelectorAll('.resp-btn');
+    expect(btns[0].disabled).toBe(true);
+    expect(btns[0].textContent.trim()).toContain('\u2713');
+    expect(btns[1].disabled).toBe(false);
+    expect(btns[1].textContent.trim()).not.toContain('\u2713');
   });
 
-  it('does not call sendAction when clicking a disabled response button', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
+  it('does not render responses section when responses array is empty', () => {
+    const { el } = setup();
     el.state = {
       thread: {
-        sender: 'Starbase Alpha',
-        messages: [{ speaker: 'Station', text: 'Welcome.' }],
-        responses: [
-          { id: 'resp-1', text: 'Acknowledge', available: false },
-        ],
+        id: 'm1',
+        sender_name: 'Test',
+        body: 'Hello.',
+        responses: [],
       },
     };
-    const btn = el.shadowRoot.querySelector('.resp-btn');
-    btn.click();
-    expect(sendAction).not.toHaveBeenCalled();
-  });
-
-  it('defaults available to true when field is missing', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
-    el.state = {
-      thread: {
-        sender: 'Test',
-        messages: [{ speaker: 'Station', text: 'Hello.' }],
-        responses: [
-          { id: 'resp-1', text: 'Reply', available: undefined },
-        ],
-      },
-    };
-    const btn = el.shadowRoot.querySelector('.resp-btn');
-    expect(btn.disabled).toBe(false);
-    btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
+    const responsesDiv = el.shadowRoot.querySelector('.responses');
+    expect(responsesDiv).toBeNull();
   });
 });

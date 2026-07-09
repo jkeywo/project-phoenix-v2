@@ -1793,6 +1793,7 @@
             state.navigationWaypoint = window.simState.navigationWaypoint;
             state.controlSources = window.simState.controlSources || {};
             state.stationRatings = window.simState.stationRatings || {};
+            state.stationSystems = window.simState.stationSystems || {};
             // Live blackboard reference � simState.blackboards is mutated in-place
             // each tick so this reference assignment keeps state.blackboards current.
             state.blackboards = window.simState.blackboards;

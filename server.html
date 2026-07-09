@@ -1377,11 +1377,11 @@
                 };
                 chan.onclose = () => {
                   const token = peerTokens.get(conn.peer);
-                  if (token) tokenSnapshotConns.delete(token);
+                  if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
                 };
                 chan.onerror = () => {
                   const token = peerTokens.get(conn.peer);
-                  if (token) tokenSnapshotConns.delete(token);
+                  if (token && tokenSnapshotConns.get(token) === chan) tokenSnapshotConns.delete(token);
                 };
               }
             };
@@ -1398,24 +1398,23 @@
               const msg = JSON.parse(json);
               if (msg.type === 'Identify') {
                 token = msg.data.token;
-                // Duplicate-token detection (issue: 4P Engineering "data shown,
-                // taps did nothing"). If another OPEN connection already claims
-                // this token, the two devices share a session-token: outbound
-                // state routes only to whichever wins this overwrite, while the
-                // loser's taps are still accepted server-side but produce no
-                // visible feedback — a "ghost" console. Warn loudly so this is
-                // obvious in the host log instead of silently mis-routing.
+                // Duplicate-token detection. If another open connection already
+                // claims this token, update tokenConns to the new connection
+                // first (so the old close handler's guard prevents a spurious
+                // wasm_player_disconnected), then close the prior connection.
+                // The old device becomes a ghost — its WebRTC link is severed
+                // so it can't receive further state updates.
                 const prior = tokenConns.get(token);
+                peerTokens.set(conn.peer, token);
+                tokenConns.set(token, conn);
                 if (prior && prior !== conn && prior.open) {
                   console.warn(
                     `[PeerJS] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +
                     `identified with a token already held by an open connection. ` +
-                    `The earlier device will become a ghost (state routes here; its ` +
-                    `taps succeed but show no feedback).`,
+                    `Closing the earlier connection — the old device will become a ghost.`,
                   );
+                  prior.close();
                 }
-                peerTokens.set(conn.peer, token);
-                tokenConns.set(token, conn);
                 console.log(`[PeerJS] ${shortId}… identified as token ${token.slice(0, 8)}…`);
               }
             } catch (_) { return; }
@@ -1427,8 +1426,6 @@
         conn.on('close', () => {
           const token = peerTokens.get(conn.peer);
           console.log(`[PeerJS] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
-          // Clean up snapshot channel
-          tokenSnapshotConns.delete(token);
           peerTokens.delete(conn.peer);
           if (!token) return;
           // On a browser refresh the new page may have already reconnected
@@ -1437,6 +1434,7 @@
           // one — otherwise we'd disconnect the freshly-restored session and
           // delete the new routing entry.
           if (tokenConns.get(token) !== conn) return;
+          tokenSnapshotConns.delete(token);
           wasmBindings.wasm_player_disconnected(token);
           tokenConns.delete(token);
         });

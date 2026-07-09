@@ -265,12 +265,16 @@ test('shared session-token orphans the first Engineering device (ghost console)'
   // that might have fired between tokenConns overwrite and this check).
   await c3.page.waitForTimeout(500);
 
-  const sawNewPower = await c3.page.evaluate((count) => {
+  // Check that c3 did NOT receive the ghostWinner's helm=2 change.
+  // We check for the specific value rather than any PowerState to avoid
+  // flakiness from a PowerState that fired just before tokenConns was
+  // updated (in-flight via BroadcastChannel past preCount).
+  const sawGhostChange = await c3.page.evaluate((count) => {
     const msgs: any[] = (window as any).__messages || [];
     const newMsgs = msgs.slice(count);
-    return newMsgs.some((m: any) => m.type === 'PowerState');
+    return newMsgs.some((m: any) => m.type === 'PowerState' && m.data?.helm === 2);
   }, preCount);
-  expect(sawNewPower).toBe(false);
+  expect(sawGhostChange).toBe(false);
 
   await c1.close();
   await c2.close();

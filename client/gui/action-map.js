@@ -106,11 +106,11 @@ export const ACTION_MAP = Object.freeze({
       });
   },
 
-  /** Switch the view-screen to a named Camera direction. */
+  /** Switch the view-screen to a named camera marker or non-camera mode. */
   set_view: (a, send) => {
     if (!a.direction) return;
-    let mode;
-    if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction)) {
+    var mode;
+    if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction) || a.direction.startsWith('camera_')) {
       mode = { kind: 'Camera', data: a.direction };
     } else {
       mode = { kind: a.direction };

@@ -66,6 +66,8 @@ export class LobbyState {
     this.gameOverReason = null;
     this.scenarioTitle = '';
     this.scenarioBody = '';
+    /** Remaining seconds in the pre-game countdown, 0 when not counting. */
+    this.countdownSecs = 0;
   }
 
   /**
@@ -131,8 +133,12 @@ export class LobbyState {
         }
         break;
       }
+      case 'GameStartCountdown':
+        this.countdownSecs = d.remaining_secs || 0;
+        break;
       case 'GameStarted':
         this.phase = 'InProgress';
+        this.countdownSecs = 0;
         break;
       case 'GameOver':
         this.phase = 'GameOver';

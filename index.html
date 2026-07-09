@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-47fc157ab0004096.js" crossorigin="anonymous" integrity="sha384-g8jZ8Qv4CSEapF1TQF6l7+0peRmB+48glWmyly1+FVTFeCTZHbb0PWUK2IA1atf6"><link rel="preload" href="./project-phoenix-47fc157ab0004096_bg.wasm" crossorigin="anonymous" integrity="sha384-S97mOM+i6HYoqIOXSIOB12Ni+BXR5zXQoJu6lZy2ib1vDuRitNxDlLardqXgn32O" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b257e691aed00ba8.js" crossorigin="anonymous" integrity="sha384-zjY2SjIig1nfy6Jh813N2uTUlQdIsUcZEixNfw4Z7TNAWiWYehcos2aLKS6NucGg"><link rel="preload" href="./project-phoenix-b257e691aed00ba8_bg.wasm" crossorigin="anonymous" integrity="sha384-/APOhpoU56zIhYdAdpv5x+rUU8YmgDoaxKTp+KvFnde5VdIOzkZ3Y72rR8lCcktK" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -755,6 +755,7 @@
           </div>
           <div class="lobby-rail-spacer"></div>
           <div id="lobby-status-hint" class="lobby-status-hint">Waiting for players to connect…</div>
+          <div id="lobby-countdown" class="lobby-countdown" style="display:none;">5</div>
         </aside>
       </div>
     </div>
@@ -862,8 +863,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-47fc157ab0004096.js';
-const wasm = await init({ module_or_path: './project-phoenix-47fc157ab0004096_bg.wasm' });
+import init, * as bindings from './project-phoenix-b257e691aed00ba8.js';
+const wasm = await init({ module_or_path: './project-phoenix-b257e691aed00ba8_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1064,12 +1065,26 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── Ready badge ───────────────────────────────────────────────────
     const badge = document.getElementById('lobby-ready-badge');
     if (badge) {
-      if (s.all_ready) {
+      if (s.countdown_secs > 0) {
+        badge.textContent = 'LAUNCHING IN ' + s.countdown_secs + 's';
+        badge.className = 'go';
+      } else if (s.all_ready) {
         badge.textContent = 'ALL CREW READY';
         badge.className = 'go';
       } else {
         badge.textContent = 'AWAITING CREW';
         badge.className = '';
+      }
+    }
+
+    // ── Countdown display ─────────────────────────────────────────────
+    const cdEl = document.getElementById('lobby-countdown');
+    if (cdEl) {
+      if (s.countdown_secs > 0) {
+        cdEl.textContent = String(s.countdown_secs);
+        cdEl.style.display = 'flex';
+      } else {
+        cdEl.style.display = 'none';
       }
     }
 
@@ -1200,7 +1215,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── Status hint ───────────────────────────────────────────────────
     const hint = document.getElementById('lobby-status-hint');
     if (hint) {
-      if (crewN === 0) {
+      if (s.countdown_secs > 0) {
+        hint.textContent = 'Launching in ' + s.countdown_secs + 's — anyone can unready to cancel';
+        hint.style.color = '#5fd8e8';
+      } else if (crewN === 0) {
         hint.textContent = 'Waiting for players to connect…';
         hint.style.color = '#667';
       } else if (s.all_ready) {

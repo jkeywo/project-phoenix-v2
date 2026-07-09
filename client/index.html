@@ -794,7 +794,7 @@
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
       shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, boostEnabled: false, boostBattery: 0, boostActive: false, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
-      stations: [], maxPlayers: 0, allFilled: false, allReady: false,
+      stations: [], maxPlayers: 0, allFilled: false, allReady: false, countdownSecs: 0,
       shipDestroyed: false, gameOverReason: null,
       // Weapons console iframe state (issue #422)
       weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto',
@@ -1204,7 +1204,13 @@
         if (myPlayer && hasStation && lobbyConsole) {
           readyBtn.style.display = 'block';
           const isReady = !!myPlayer.ready;
-          if (isReady) {
+          if (s.countdownSecs > 0) {
+            // Countdown active — keep button in ready state, show timer.
+            readyBtn.textContent = s.countdownSecs + 's';
+            readyBtn.className = 'armed glow';
+            readyBtn.disabled = false;
+            readyBtn.onclick = () => send('SetReady', { ready: false });
+          } else if (isReady) {
             readyBtn.textContent = '? READY';
             readyBtn.className = 'armed glow';
             readyBtn.disabled = false;
@@ -1227,12 +1233,14 @@
           statusLine.textContent = 'Select a station to join the crew';
         } else if (!lobbyConsole) {
           statusLine.textContent = 'Select a console at ' + myStation.name + ' to continue';
+        } else if (s.countdownSecs > 0) {
+          statusLine.textContent = 'Launching in ' + s.countdownSecs + 's  (click READY to cancel)';
         } else if (s.allReady) {
-          statusLine.textContent = 'All crew ready � launching!';
+          statusLine.textContent = 'All crew ready — launching!';
         } else if (myPlayer.ready) {
-          statusLine.textContent = 'Waiting for the rest of the crew�';
+          statusLine.textContent = 'Waiting for the rest of the crew…';
         } else {
-          statusLine.textContent = 'Standing by at ' + myStation.name + ' � press READY when ready';
+          statusLine.textContent = 'Standing by at ' + myStation.name + ' — press READY when ready';
         }
       }
     }
@@ -1260,6 +1268,7 @@
       state.allFilled = state.stations.length > 0 && state.stations.every(st => st.holder_name);
       state.allReady = state.players.length > 0 && state.players.every(p => p.ready)
         || state.players.length === 0;
+      state.countdownSecs = window.lobbyState ? window.lobbyState.countdownSecs : 0;
       scheduleRender();
     }
 
@@ -1784,6 +1793,7 @@
             state.navigationWaypoint = window.simState.navigationWaypoint;
             state.controlSources = window.simState.controlSources || {};
             state.stationRatings = window.simState.stationRatings || {};
+            state.stationSystems = window.simState.stationSystems || {};
             // Live blackboard reference � simState.blackboards is mutated in-place
             // each tick so this reference assignment keeps state.blackboards current.
             state.blackboards = window.simState.blackboards;
@@ -1873,8 +1883,13 @@
           rebuildStations();
           break;
         }
+        case 'GameStartCountdown':
+          state.countdownSecs = (msg.data && msg.data.remaining_secs) || 0;
+          rebuildStations();
+          break;
         case 'GameStarted':
           state.phase = 'InProgress';
+          state.countdownSecs = 0;
           const loadingEl = document.getElementById('asset-loading');
           if (loadingEl) loadingEl.style.display = 'none';
           break;

@@ -70,7 +70,7 @@
         var sensorEl = document.getElementById('sensor-panel');
         if (s.captain) {
           var cap = s.captain;
-          cameraEl.state = { views: ['Fore','Aft','Port','Starboard'], current_view: cap.view_direction || '', auto: cap.viewscreen_auto || false };
+          cameraEl.state = { views: cap.camera_views || [], current_view: cap.view_direction || '', auto: cap.viewscreen_auto || false };
           redAlertEl.state = { active: !!cap.red_alert, auto: cap.red_alert_auto || false };
           objectiveEl.state = { objectives: cap.objectives || [] };
         }

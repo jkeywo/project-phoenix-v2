@@ -158,7 +158,7 @@ export const WEAPONS_RADAR_RANGE = 300.0;
 export const HELM_RADAR_RANGE    = 500.0;
 export const SENSORS_RADAR_RANGE = 500.0;
 
-const CAMERA_VIEWS = new Set(['Fore', 'Port', 'Starboard', 'Aft']);
+// Camera views are now marker-name-based, supplied by the server blackboard.
 
 // ── Shared radar blip builder ───────────────────────────────────────────────
 
@@ -522,7 +522,7 @@ export function buildCaptainConsoleState(state) {
   const controlSources = state.controlSources || {};
   const redAlertAuto = controlSources['red-alert'] === 'Ai';
   const viewscreenAuto = controlSources['viewscreen'] === 'Ai';
-  const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
+  const viewDirection = state.currentView || '';
   return JSON.stringify({
     red_alert:             state.redAlert    || false,
     red_alert_system_id:   'red-alert',
@@ -1177,16 +1177,15 @@ if (typeof window !== 'undefined') {
     // Console enum names.
     switch (consoleName) {
       case 'tactical':
-        // Destroyer merged console: if navigation and comms blackboards are
-        // present on the tactical station, return the 3-system merged payload.
-        if (state.blackboards && state.blackboards['navigation'] && state.blackboards['comms']) {
+        // Destroyer tactical = weapons + navigation + comms (determined by
+        // ship_config.station_systems, not runtime blackboard presence).
+        if (state.stationSystems?.tactical?.includes('navigation')) {
           return buildDestroyerTacticalConsoleState(state);
         }
         return buildWeaponsConsoleState(state);
       case 'captain':
-        // Destroyer merged console: if a sensors blackboard is present on
-        // the captain station, return the captain + sensors merged payload.
-        if (state.blackboards && state.blackboards['sensors']) {
+        // Destroyer captain = captain + sensors.
+        if (state.stationSystems?.captain?.includes('sensors')) {
           return buildDestroyerCaptainConsoleState(state);
         }
         return buildCaptainConsoleState(state);
@@ -1196,20 +1195,16 @@ if (typeof window !== 'undefined') {
       case 'shields':     return buildShieldsConsoleState(state);
       case 'sensors':     return buildSensorsConsoleState(state);
       case 'comms':
-        // Cruiser merged console: if a navigation blackboard is present,
-        // the comms station holds both navigation and comms systems —
-        // return the merged payload. Battleship pure comms falls through
-        // to buildCommsConsoleState (no navigation blackboard).
-        if (state.blackboards && state.blackboards['navigation']) {
+        // Cruiser comms = navigation + comms.
+        if (state.stationSystems?.comms?.includes('navigation')) {
           return buildCruiserCommsConsoleState(state);
         }
         return buildCommsConsoleState(state);
       case 'navigation':  return buildNavigationConsoleState(state);
       case 'science':     return buildScienceConsoleState(state);
       case 'engineering':
-        // Destroyer merged console: if a shields blackboard is present on
-        // the engineering station, return the 3-system merged payload.
-        if (state.blackboards && state.blackboards['shields']) {
+        // Destroyer engineering = shields + power + repair.
+        if (state.stationSystems?.engineering?.includes('shields')) {
           return buildDestroyerEngineeringConsoleState(state);
         }
         return buildEngineeringConsoleState(state);

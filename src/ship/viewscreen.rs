@@ -234,6 +234,9 @@ mod tests {
         });
 
         assert_eq!(resolved.owner, crate::system_registry::captain_system_id());
-        assert_eq!(resolved.mode, ViewMode::Camera(CameraView::new("camera_port")));
+        assert_eq!(
+            resolved.mode,
+            ViewMode::Camera(CameraView::new("camera_port"))
+        );
     }
 }

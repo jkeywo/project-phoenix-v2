@@ -429,15 +429,13 @@ fn hull_camera(
         .single()
         .ok()
         .and_then(|mm| mm.get(marker_name))
-        .map(|m| {
-            (
-                Vec3::from_array(m.position),
-                Vec3::from_array(m.direction),
-            )
-        })
+        .map(|m| (Vec3::from_array(m.position), Vec3::from_array(m.direction)))
         .unwrap_or_else(|| {
             // Fallback: ship centre looking forward.
-            (Vec3::ZERO, Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos()))
+            (
+                Vec3::ZERO,
+                Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos()),
+            )
         });
 
     let camera_pos = ship_origin + yaw_rot * pos_offset;
@@ -481,7 +479,10 @@ fn update_view_direction_label(
     *vis = Visibility::Visible;
     let label = match &view_mode {
         ViewMode::Camera(cv) => {
-            let name = cv.marker_name.strip_prefix("camera_").unwrap_or(&cv.marker_name);
+            let name = cv
+                .marker_name
+                .strip_prefix("camera_")
+                .unwrap_or(&cv.marker_name);
             name.to_uppercase()
         }
         ViewMode::Radar => "RADAR".to_string(),

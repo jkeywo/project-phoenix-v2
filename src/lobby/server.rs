@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
 use crate::lobby_handler;
-pub use crate::lobby_handler::Target;
 use crate::lobby_handler::CountdownAction;
+pub use crate::lobby_handler::Target;
 use crate::messages::{
     ClientMessage, DeliveryClass, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
@@ -133,7 +133,13 @@ impl Plugin for LobbyPlugin {
             // outbox drain so countdown broadcasts reach the outbound bus.
             .add_systems(
                 Update,
-                (handle_disconnect, process_lobby, tick_countdown, update_game_state_cache).chain(),
+                (
+                    handle_disconnect,
+                    process_lobby,
+                    tick_countdown,
+                    update_game_state_cache,
+                )
+                    .chain(),
             );
     }
 }
@@ -574,7 +580,10 @@ fn apply_result(
     if let Some(ref action) = result.countdown_action {
         if let Some(ref mut timer) = countdown {
             match action {
-                CountdownAction::Start { secs, pending_phase } if timer.remaining_secs <= 0.0 => {
+                CountdownAction::Start {
+                    secs,
+                    pending_phase,
+                } if timer.remaining_secs <= 0.0 => {
                     timer.remaining_secs = *secs as f32;
                     timer.pending_phase = Some(pending_phase.clone());
                     outbox.0.push((
@@ -858,19 +867,23 @@ mod tests {
         push(&mut app, "t1", ClientMessage::SetReady { ready: true });
         push(&mut app, "t2", ClientMessage::SetReady { ready: true });
         let out = tick(&mut app);
-        assert!(out
-            .iter()
-            .any(|m| matches!(&m.msg, ServerMessage::GameStartCountdown { .. })),
-            "ready should start countdown");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::GameStartCountdown { .. })),
+            "ready should start countdown"
+        );
 
         // Fast-forward the countdown by advancing the timer directly.
         use crate::lobby::CountdownTimer;
-        app.world_mut().resource_mut::<CountdownTimer>().remaining_secs = 0.001;
+        app.world_mut()
+            .resource_mut::<CountdownTimer>()
+            .remaining_secs = 0.001;
         let out = tick(&mut app);
-        assert!(out
-            .iter()
-            .any(|m| matches!(&m.msg, ServerMessage::GameStarted)),
-            "countdown expiry must emit GameStarted");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::GameStarted)),
+            "countdown expiry must emit GameStarted"
+        );
 
         // Now in InProgress: Player2 claims Tactical (was unclaimed)
         push(
@@ -947,19 +960,23 @@ mod tests {
         // Start the game — single player ready triggers countdown
         push(&mut app, "t1", ClientMessage::SetReady { ready: true });
         let out = tick(&mut app);
-        assert!(out
-            .iter()
-            .any(|m| matches!(&m.msg, ServerMessage::GameStartCountdown { .. })),
-            "ready should start countdown");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::GameStartCountdown { .. })),
+            "ready should start countdown"
+        );
 
         // Fast-forward the countdown by advancing the timer directly.
         use crate::lobby::CountdownTimer;
-        app.world_mut().resource_mut::<CountdownTimer>().remaining_secs = 0.001;
+        app.world_mut()
+            .resource_mut::<CountdownTimer>()
+            .remaining_secs = 0.001;
         let out = tick(&mut app);
-        assert!(out
-            .iter()
-            .any(|m| matches!(&m.msg, ServerMessage::GameStarted)),
-            "countdown expiry must emit GameStarted");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::GameStarted)),
+            "countdown expiry must emit GameStarted"
+        );
 
         // Now in InProgress: Player1 releases Helm
         push(&mut app, "t1", ClientMessage::ReleaseStation);

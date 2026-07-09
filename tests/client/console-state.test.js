@@ -537,8 +537,8 @@ describe('buildCaptainConsoleState', () => {
     expect(s.objectives).toEqual(['obj-A']);
   });
 
-  it('clears view_direction for non-camera views', () => {
-    expect(parse(buildCaptainConsoleState({ currentView: 'Radar' })).view_direction).toBe('');
+  it('legacy fallback passes currentView as view_direction', () => {
+    expect(parse(buildCaptainConsoleState({ currentView: 'Radar' })).view_direction).toBe('Radar');
   });
 });
 

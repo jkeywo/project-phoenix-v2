@@ -207,12 +207,12 @@ describe('set_view', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('sends non-camera view modes by kind', () => {
+  it('sends any direction as a Camera marker view mode', () => {
     const send = mkSend();
     ACTION_MAP.set_view({ action: 'set_view', direction: 'SensorsRadar' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'viewscreen',
-      payload: { type: 'SetView', data: { mode: { kind: 'SensorsRadar' } } },
+      payload: { type: 'SetView', data: { mode: { kind: 'Camera', data: 'SensorsRadar' } } },
     });
   });
 });

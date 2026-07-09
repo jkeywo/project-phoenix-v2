@@ -129,6 +129,9 @@ mod tests {
         vm.request_view_mode(ViewMode::Radar);
         assert_eq!(vm.view_mode, ViewMode::Radar);
         vm.request_view_mode(ViewMode::Radar);
-        assert_eq!(vm.view_mode, ViewMode::Camera(CameraView::new("camera_aft")));
+        assert_eq!(
+            vm.view_mode,
+            ViewMode::Camera(CameraView::new("camera_aft"))
+        );
     }
 }

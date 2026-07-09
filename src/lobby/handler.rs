@@ -40,8 +40,6 @@ pub struct LobbyHandlerResult {
     pub countdown_action: Option<CountdownAction>,
 }
 
-
-
 /// Derive the canonical `GameState` snapshot from live session + phase state.
 /// Pure function — no Bevy, fully testable.
 pub fn derive_game_state(
@@ -224,41 +222,41 @@ pub fn process_message(
                     station_rating_update: None,
                     countdown_action: None,
                 };
-        }
- 
-        let station_def = get_station(ship_stations, station);
-        let Some(station_def) = station_def else {
-            return LobbyHandlerResult {
-                new_phase,
-                outbound,
-                station_rating_update: None,
-                countdown_action: None,
+            }
+
+            let station_def = get_station(ship_stations, station);
+            let Some(station_def) = station_def else {
+                return LobbyHandlerResult {
+                    new_phase,
+                    outbound,
+                    station_rating_update: None,
+                    countdown_action: None,
+                };
             };
-        };
- 
-        // Check if sender already holds this station (own station → no-op)
-        let sender_station = sessions.station_for_token(token).cloned();
-        if sender_station.as_ref() == Some(&station_def.id) {
-            return LobbyHandlerResult {
-                new_phase,
-                outbound,
-                station_rating_update: None,
-                countdown_action: None,
-            };
-        }
- 
-        // Check if occupied by another connected player
-        let occupied = sessions.players().iter().any(|p| {
-            p.connected && p.token != token && p.station.as_ref() == Some(&station_def.id)
-        });
-        if occupied {
-            return LobbyHandlerResult {
-                new_phase,
-                outbound,
-                station_rating_update: None,
-                countdown_action: None,
-            };
-        }
+
+            // Check if sender already holds this station (own station → no-op)
+            let sender_station = sessions.station_for_token(token).cloned();
+            if sender_station.as_ref() == Some(&station_def.id) {
+                return LobbyHandlerResult {
+                    new_phase,
+                    outbound,
+                    station_rating_update: None,
+                    countdown_action: None,
+                };
+            }
+
+            // Check if occupied by another connected player
+            let occupied = sessions.players().iter().any(|p| {
+                p.connected && p.token != token && p.station.as_ref() == Some(&station_def.id)
+            });
+            if occupied {
+                return LobbyHandlerResult {
+                    new_phase,
+                    outbound,
+                    station_rating_update: None,
+                    countdown_action: None,
+                };
+            }
 
             let mid_game_claim = phase == GamePhase::InProgress;
             if mid_game_claim {
@@ -1747,9 +1745,8 @@ max_level = 4
             result.new_phase.is_none(),
             "new_phase must be None during countdown"
         );
-        assert!(
-            !result
-                .outbound
+        assert!(!result
+            .outbound
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
     }

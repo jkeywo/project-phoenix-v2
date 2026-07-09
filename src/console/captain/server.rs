@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
 use crate::messages::{
-    AdmittedCommands, CaptainBlackboard, ObjectiveSnapshot, ObjectiveSource, SystemBlackboard,
-    CameraView, SystemControlPayload, SystemId, ViewMode,
+    AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot, ObjectiveSource,
+    SystemBlackboard, SystemControlPayload, SystemId, ViewMode,
 };
 use crate::objectives::WorldConditions;
 use crate::ship::combat_activity::RecentCombatActivity;
@@ -180,10 +180,7 @@ fn publish_captain_blackboard(
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
-    markers_q: Query<
-        &crate::model_rig::ModelMarkers,
-        With<crate::server_app::LocalShip>,
-    >,
+    markers_q: Query<&crate::model_rig::ModelMarkers, With<crate::server_app::LocalShip>>,
     ship_query: Query<
         (
             &ShipSystemControlSources,

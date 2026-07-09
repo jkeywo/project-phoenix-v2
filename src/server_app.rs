@@ -2560,8 +2560,7 @@ fn render_spawned_entities(
 ) {
     use crate::entity_config::MeshShape;
 
-    for (entity, transform, mesh_sec, star_sec, lights_opt, pending, local_ship) in
-        entities.iter()
+    for (entity, transform, mesh_sec, star_sec, lights_opt, pending, local_ship) in entities.iter()
     {
         let mesh_cfg_for_transform = mesh_sec.map(|mesh_sec| &mesh_sec.0);
         let mut ec = commands.entity(entity);
@@ -3154,7 +3153,9 @@ mod tests {
     /// Must be called after the tick that starts the countdown.
     fn fast_forward_countdown(app: &mut App) {
         use crate::lobby::CountdownTimer;
-        app.world_mut().resource_mut::<CountdownTimer>().remaining_secs = 0.001;
+        app.world_mut()
+            .resource_mut::<CountdownTimer>()
+            .remaining_secs = 0.001;
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {

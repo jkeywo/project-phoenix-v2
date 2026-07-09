@@ -16,6 +16,16 @@ pub enum Target {
     AllExcept(String),
 }
 
+/// Signal from a pure handler to the Bevy runtime about the pre-game countdown.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CountdownAction {
+    /// Start countdown for the given number of seconds, then transition to
+    /// the specified phase. Ignored if a countdown is already running.
+    Start { secs: u32, pending_phase: GamePhase },
+    /// Cancel any active countdown (someone unreadied, a new player joined, etc.).
+    Cancel,
+}
+
 pub struct LobbyHandlerResult {
     pub new_phase: Option<GamePhase>,
     pub outbound: Vec<(Target, ServerMessage)>,
@@ -24,7 +34,13 @@ pub struct LobbyHandlerResult {
     /// Set by `process_disconnect_with_stations` (backfill) and the reconnect
     /// branch of `process_message` (restore).
     pub station_rating_update: Option<(StationId, String)>,
+    /// Optional countdown action. When set, `new_phase` and the corresponding
+    /// `GameStarted` outbound message must NOT be produced for this round —
+    /// the caller (Bevy system) handles the countdown lifecycle instead.
+    pub countdown_action: Option<CountdownAction>,
 }
+
+
 
 /// Derive the canonical `GameState` snapshot from live session + phase state.
 /// Pure function — no Bevy, fully testable.
@@ -61,8 +77,9 @@ pub fn process_message(
     station_ratings: &HashMap<StationId, String>,
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
-    let mut new_phase = None;
+    let new_phase: Option<GamePhase> = None;
     let mut station_rating_update: Option<(StationId, String)> = None;
+    let mut countdown_action = None;
 
     match msg {
         ClientMessage::Identify {
@@ -205,39 +222,43 @@ pub fn process_message(
                     new_phase,
                     outbound,
                     station_rating_update: None,
+                    countdown_action: None,
                 };
-            }
-
-            let station_def = get_station(ship_stations, station);
-            let Some(station_def) = station_def else {
-                return LobbyHandlerResult {
-                    new_phase,
-                    outbound,
-                    station_rating_update: None,
-                };
+        }
+ 
+        let station_def = get_station(ship_stations, station);
+        let Some(station_def) = station_def else {
+            return LobbyHandlerResult {
+                new_phase,
+                outbound,
+                station_rating_update: None,
+                countdown_action: None,
             };
-
-            // Check if sender already holds this station (own station → no-op)
-            let sender_station = sessions.station_for_token(token).cloned();
-            if sender_station.as_ref() == Some(&station_def.id) {
-                return LobbyHandlerResult {
-                    new_phase,
-                    outbound,
-                    station_rating_update: None,
-                };
-            }
-
-            // Check if occupied by another connected player
-            let occupied = sessions.players().iter().any(|p| {
-                p.connected && p.token != token && p.station.as_ref() == Some(&station_def.id)
-            });
-            if occupied {
-                return LobbyHandlerResult {
-                    new_phase,
-                    outbound,
-                    station_rating_update: None,
-                };
-            }
+        };
+ 
+        // Check if sender already holds this station (own station → no-op)
+        let sender_station = sessions.station_for_token(token).cloned();
+        if sender_station.as_ref() == Some(&station_def.id) {
+            return LobbyHandlerResult {
+                new_phase,
+                outbound,
+                station_rating_update: None,
+                countdown_action: None,
+            };
+        }
+ 
+        // Check if occupied by another connected player
+        let occupied = sessions.players().iter().any(|p| {
+            p.connected && p.token != token && p.station.as_ref() == Some(&station_def.id)
+        });
+        if occupied {
+            return LobbyHandlerResult {
+                new_phase,
+                outbound,
+                station_rating_update: None,
+                countdown_action: None,
+            };
+        }
 
             let mid_game_claim = phase == GamePhase::InProgress;
             if mid_game_claim {
@@ -332,13 +353,22 @@ pub fn process_message(
                     ready: *ready,
                 },
             ));
-            // Auto-start when all connected players are ready.
-            if phase == GamePhase::Lobby && sessions.all_ready() {
-                if preload_complete || ship_stations.stations.is_empty() {
-                    new_phase = Some(GamePhase::InProgress);
-                    outbound.push((Target::All, ServerMessage::GameStarted));
-                } else {
-                    new_phase = Some(GamePhase::Loading);
+            // Start 5-second countdown when all players ready up during Lobby.
+            // If someone unreadies during the countdown, cancel it.
+            if phase == GamePhase::Lobby {
+                if sessions.all_ready() {
+                    let pending_phase = if preload_complete || ship_stations.stations.is_empty() {
+                        GamePhase::InProgress
+                    } else {
+                        GamePhase::Loading
+                    };
+                    countdown_action = Some(CountdownAction::Start {
+                        secs: 5,
+                        pending_phase,
+                    });
+                } else if !*ready {
+                    // Unready while countdown may be active → cancel it.
+                    countdown_action = Some(CountdownAction::Cancel);
                 }
             } else if phase == GamePhase::InProgress && *ready {
                 if let Some(station_id) = sessions.station_for_token(token).cloned() {
@@ -369,6 +399,7 @@ pub fn process_message(
         new_phase,
         outbound,
         station_rating_update,
+        countdown_action,
     }
 }
 
@@ -403,16 +434,24 @@ pub fn process_disconnect_with_stations(
 
     sessions.disconnect(token);
 
-    // Re-evaluate auto-start: if the last not-ready player disconnected,
-    // all remaining connected players may be ready.
-    let mut new_phase = None;
-    if phase == GamePhase::Lobby && sessions.all_ready() {
-        if preload_complete || ship_stations.stations.is_empty() {
-            new_phase = Some(GamePhase::InProgress);
+    // Use countdown action instead of direct phase transition.
+    let new_phase = None;
+    let countdown_action = if phase == GamePhase::Lobby && sessions.all_ready() {
+        let pending_phase = if preload_complete || ship_stations.stations.is_empty() {
+            GamePhase::InProgress
         } else {
-            new_phase = Some(GamePhase::Loading);
-        }
-    }
+            GamePhase::Loading
+        };
+        Some(CountdownAction::Start {
+            secs: 5,
+            pending_phase,
+        })
+    } else if phase == GamePhase::Lobby {
+        // Not all ready anymore → cancel any active countdown.
+        Some(CountdownAction::Cancel)
+    } else {
+        None
+    };
 
     let mut outbound = vec![(
         Target::All,
@@ -420,10 +459,6 @@ pub fn process_disconnect_with_stations(
             token: token.to_string(),
         },
     )];
-
-    if new_phase == Some(GamePhase::InProgress) {
-        outbound.push((Target::All, ServerMessage::GameStarted));
-    }
 
     let mut station_rating_update = None;
 
@@ -443,6 +478,7 @@ pub fn process_disconnect_with_stations(
         new_phase,
         outbound,
         station_rating_update,
+        countdown_action,
     }
 }
 
@@ -455,32 +491,35 @@ pub fn process_disconnect(
 ) -> LobbyHandlerResult {
     sessions.disconnect(token);
 
-    // Re-evaluate auto-start.
-    let new_phase = if phase == GamePhase::Lobby && sessions.all_ready() {
-        if preload_complete {
-            Some(GamePhase::InProgress)
-        } else {
-            Some(GamePhase::Loading)
-        }
+    // Use countdown action instead of direct phase transition.
+    let new_phase = None;
+    let countdown_action = if phase == GamePhase::Lobby && sessions.all_ready() {
+        Some(CountdownAction::Start {
+            secs: 5,
+            pending_phase: if preload_complete {
+                GamePhase::InProgress
+            } else {
+                GamePhase::Loading
+            },
+        })
+    } else if phase == GamePhase::Lobby {
+        Some(CountdownAction::Cancel)
     } else {
         None
     };
 
-    let mut outbound = vec![(
+    let outbound = vec![(
         Target::All,
         ServerMessage::PlayerLeft {
             token: token.to_string(),
         },
     )];
 
-    if new_phase == Some(GamePhase::InProgress) {
-        outbound.push((Target::All, ServerMessage::GameStarted));
-    }
-
     LobbyHandlerResult {
         new_phase,
         outbound,
         station_rating_update: None,
+        countdown_action,
     }
 }
 
@@ -619,21 +658,31 @@ max_level = 4
     #[test]
     fn disconnect_last_not_ready_auto_starts() {
         // t1 ready, t2 not-ready; t2 disconnects → all remaining connected
-        // players are ready → auto-start.
+        // players are ready → countdown starts.
         let stations = ship_stations();
         let mut sessions = sessions_with("t1", "Alice");
         sessions.register("t2".into(), "Bob".into()).unwrap();
         sessions.set_ready("t1", true);
         let result = pd_stations_with_phase("t2", &mut sessions, &stations, GamePhase::Lobby, true);
         assert_eq!(
-            result.new_phase,
-            Some(GamePhase::InProgress),
-            "disconnect of last not-ready player must auto-start"
+            result.countdown_action,
+            Some(CountdownAction::Start {
+                secs: 5,
+                pending_phase: GamePhase::InProgress
+            }),
+            "disconnect of last not-ready player must start countdown"
         );
-        assert!(result
-            .outbound
-            .iter()
-            .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
+        assert!(
+            result.new_phase.is_none(),
+            "new_phase must be None when countdown is used"
+        );
+        assert!(
+            !result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::GameStarted)),
+            "GameStarted must not be sent during countdown"
+        );
     }
 
     #[test]
@@ -645,17 +694,24 @@ max_level = 4
         let result =
             pd_stations_with_phase("t2", &mut sessions, &stations, GamePhase::Lobby, false);
         assert_eq!(
-            result.new_phase,
-            Some(GamePhase::Loading),
-            "disconnect with preload not complete must enter Loading"
+            result.countdown_action,
+            Some(CountdownAction::Start {
+                secs: 5,
+                pending_phase: GamePhase::Loading
+            }),
+            "disconnect must start countdown toward Loading when preload not complete"
         );
-        // GameStarted should NOT be sent during Loading.
+        assert!(
+            result.new_phase.is_none(),
+            "new_phase must be None when countdown is used"
+        );
+        // GameStarted should NOT be sent during countdown.
         assert!(
             !result
                 .outbound
                 .iter()
                 .any(|(_, m)| matches!(m, ServerMessage::GameStarted)),
-            "GameStarted must not be sent when entering Loading"
+            "GameStarted must not be sent during countdown"
         );
     }
 
@@ -1416,7 +1472,11 @@ max_level = 4
             result_t1.new_phase.is_none(),
             "game must not start until all players are ready"
         );
-        // t2 sets ready — now all ready → auto-start
+        assert!(
+            result_t1.countdown_action.is_none(),
+            "no countdown until all players are ready"
+        );
+        // t2 sets ready — now all ready → start countdown
         let result_t2 = pm(
             "t2",
             &ClientMessage::SetReady { ready: true },
@@ -1424,14 +1484,25 @@ max_level = 4
             GamePhase::Lobby,
             None,
         );
-        assert!(
-            result_t2.new_phase.is_some(),
-            "game should start when all players are ready"
+        assert_eq!(
+            result_t2.countdown_action,
+            Some(CountdownAction::Start {
+                secs: 5,
+                pending_phase: GamePhase::InProgress
+            }),
+            "countdown should start when all players are ready"
         );
-        assert!(result_t2
-            .outbound
-            .iter()
-            .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
+        assert!(
+            result_t2.new_phase.is_none(),
+            "new_phase must be None during countdown"
+        );
+        assert!(
+            !result_t2
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::GameStarted)),
+            "GameStarted must not be sent during countdown"
+        );
     }
 
     #[test]
@@ -1444,14 +1515,25 @@ max_level = 4
             GamePhase::Lobby,
             None,
         );
-        assert!(
-            result.new_phase.is_some(),
-            "SetReady should auto-start when only player is ready"
+        assert_eq!(
+            result.countdown_action,
+            Some(CountdownAction::Start {
+                secs: 5,
+                pending_phase: GamePhase::InProgress
+            }),
+            "countdown should start when only player is ready"
         );
-        assert!(result
-            .outbound
-            .iter()
-            .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
+        assert!(
+            result.new_phase.is_none(),
+            "new_phase must be None during countdown"
+        );
+        assert!(
+            !result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::GameStarted)),
+            "GameStarted must not be sent during countdown"
+        );
     }
 
     #[test]
@@ -1645,13 +1727,29 @@ max_level = 4
             result.new_phase.is_none(),
             "must not start when t2 not ready"
         );
+        assert!(
+            result.countdown_action.is_none(),
+            "no countdown when t2 not ready"
+        );
 
-        // t2 ready → auto-start
+        // t2 ready → countdown starts
         let msg = ClientMessage::SetReady { ready: true };
         let result = pm("t2", &msg, &mut sessions, GamePhase::Lobby, None);
-        assert!(result.new_phase.is_some(), "must auto-start when all ready");
-        assert!(result
-            .outbound
+        assert_eq!(
+            result.countdown_action,
+            Some(CountdownAction::Start {
+                secs: 5,
+                pending_phase: GamePhase::InProgress
+            }),
+            "must start countdown when all ready"
+        );
+        assert!(
+            result.new_phase.is_none(),
+            "new_phase must be None during countdown"
+        );
+        assert!(
+            !result
+                .outbound
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::GameStarted)));
     }

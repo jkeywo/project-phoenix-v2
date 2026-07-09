@@ -1154,6 +1154,12 @@ pub enum ServerMessage {
         name: String,
     },
     GameStarted,
+    /// Broadcast when all players are ready: starts a 5-second server-authoritative
+    /// countdown before `GameStarted` is emitted. `remaining_secs` counts down from
+    /// 5 to 1, then 0 signals cancellation (someone unreadied or a new player joined).
+    GameStartCountdown {
+        remaining_secs: u32,
+    },
     /// Broadcast during the `Loading` phase at ~10 Hz. Clients show a progress
     /// bar until `GameStarted` arrives, which transitions the phase to `InProgress`.
     ///
@@ -2583,6 +2589,9 @@ pub struct LobbyStatePayload {
     pub spectators: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loading_progress: Option<f32>,
+    /// Remaining seconds in the pre-game countdown, or 0 when no countdown is active.
+    #[serde(default)]
+    pub countdown_secs: u32,
 }
 
 /// One station slot in the lobby grid payload.

@@ -28,7 +28,7 @@ use rand::Rng;
 
 use crate::codec;
 use crate::console_bridge::{HudStateChanged, LobbyStateChanged};
-use crate::lobby::{OutboundMessage, Sessions, WorldResource};
+use crate::lobby::{CountdownTimer, OutboundMessage, Sessions, WorldResource};
 use crate::messages::{
     GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState,
 };
@@ -175,6 +175,7 @@ pub(crate) fn push_lobby_state(
     phase: Res<State<GamePhase>>,
     world_resource: Option<Res<WorldResource>>,
     preload: Option<Res<AssetPreloadResource>>,
+    countdown: Option<Res<CountdownTimer>>,
     mut writer: MessageWriter<LobbyStateChanged>,
 ) {
     let Some(sessions) = sessions else { return };
@@ -234,6 +235,10 @@ pub(crate) fn push_lobby_state(
         None
     };
 
+    let countdown_secs = countdown
+        .map(|t| t.remaining_secs.ceil() as u32)
+        .unwrap_or(0);
+
     let payload = LobbyStatePayload {
         phase: format!("{:?}", phase.get()),
         scenario_title,
@@ -248,6 +253,7 @@ pub(crate) fn push_lobby_state(
         stations: station_payloads,
         spectators,
         loading_progress,
+        countdown_secs,
     };
 
     if let Ok(json) = codec::encode_lobby_state(&payload) {

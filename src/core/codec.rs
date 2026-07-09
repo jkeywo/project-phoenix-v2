@@ -401,6 +401,10 @@ mod tests {
                 ServerMessage::GameStarted,
             ),
             (
+                ServerMessageDiscriminants::GameStartCountdown,
+                ServerMessage::GameStartCountdown { remaining_secs: 5 },
+            ),
+            (
                 ServerMessageDiscriminants::LoadingProgress,
                 ServerMessage::LoadingProgress { fraction: 0.5 },
             ),

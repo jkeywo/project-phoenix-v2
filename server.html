@@ -755,6 +755,7 @@
           </div>
           <div class="lobby-rail-spacer"></div>
           <div id="lobby-status-hint" class="lobby-status-hint">Waiting for players to connect…</div>
+          <div id="lobby-countdown" class="lobby-countdown" style="display:none;">5</div>
         </aside>
       </div>
     </div>
@@ -1053,12 +1054,26 @@
     // ── Ready badge ───────────────────────────────────────────────────
     const badge = document.getElementById('lobby-ready-badge');
     if (badge) {
-      if (s.all_ready) {
+      if (s.countdown_secs > 0) {
+        badge.textContent = 'LAUNCHING IN ' + s.countdown_secs + 's';
+        badge.className = 'go';
+      } else if (s.all_ready) {
         badge.textContent = 'ALL CREW READY';
         badge.className = 'go';
       } else {
         badge.textContent = 'AWAITING CREW';
         badge.className = '';
+      }
+    }
+
+    // ── Countdown display ─────────────────────────────────────────────
+    const cdEl = document.getElementById('lobby-countdown');
+    if (cdEl) {
+      if (s.countdown_secs > 0) {
+        cdEl.textContent = String(s.countdown_secs);
+        cdEl.style.display = 'flex';
+      } else {
+        cdEl.style.display = 'none';
       }
     }
 
@@ -1189,7 +1204,10 @@
     // ── Status hint ───────────────────────────────────────────────────
     const hint = document.getElementById('lobby-status-hint');
     if (hint) {
-      if (crewN === 0) {
+      if (s.countdown_secs > 0) {
+        hint.textContent = 'Launching in ' + s.countdown_secs + 's — anyone can unready to cancel';
+        hint.style.color = '#5fd8e8';
+      } else if (crewN === 0) {
         hint.textContent = 'Waiting for players to connect…';
         hint.style.color = '#667';
       } else if (s.all_ready) {

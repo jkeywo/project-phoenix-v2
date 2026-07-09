@@ -3145,6 +3145,13 @@ mod tests {
         }
     }
 
+    /// Fast-forward the pre-game countdown so the game starts immediately.
+    /// Must be called after the tick that starts the countdown.
+    fn fast_forward_countdown(app: &mut App) {
+        use crate::lobby::CountdownTimer;
+        app.world_mut().resource_mut::<CountdownTimer>().remaining_secs = 0.001;
+    }
+
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
@@ -3220,7 +3227,9 @@ mod tests {
         );
         tick(app);
         push(app, "captain", ClientMessage::SetReady { ready: true });
-        tick(app); // process_lobby → sets NextState::Set(InProgress)
+        tick(app); // process_lobby → starts countdown
+        fast_forward_countdown(app);
+        tick(app); // tick_countdown → emits GameStarted, sets NextState::Set(InProgress)
         tick(app); // NextState takes effect: Phase switches to InProgress
     }
 
@@ -3262,6 +3271,9 @@ mod tests {
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "helm", ClientMessage::SetReady { ready: true });
         tick(app);
+        fast_forward_countdown(app);
+        tick(app);
+        tick(app);
     }
 
     fn start_game_with_sensors(app: &mut App) {
@@ -3302,6 +3314,9 @@ mod tests {
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "sensors", ClientMessage::SetReady { ready: true });
         tick(app);
+        fast_forward_countdown(app);
+        tick(app);
+        tick(app);
     }
 
     fn start_game_with_navigation(app: &mut App) {
@@ -3341,6 +3356,9 @@ mod tests {
         tick(app);
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "navigation", ClientMessage::SetReady { ready: true });
+        tick(app);
+        fast_forward_countdown(app);
+        tick(app);
         tick(app);
     }
 
@@ -3592,6 +3610,9 @@ mod tests {
         tick(app);
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "comms", ClientMessage::SetReady { ready: true });
+        tick(app);
+        fast_forward_countdown(app);
+        tick(app);
         tick(app);
     }
 
@@ -3959,6 +3980,9 @@ mod tests {
         tick(app);
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "weapons", ClientMessage::SetReady { ready: true });
+        tick(app);
+        fast_forward_countdown(app);
+        tick(app);
         tick(app);
     }
 
@@ -4594,6 +4618,9 @@ mod tests {
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "eng", ClientMessage::SetReady { ready: true });
         tick(app);
+        fast_forward_countdown(app);
+        tick(app);
+        tick(app);
     }
 
     fn team_is_travelling(teams: &ShipRepairTeams, idx: usize) -> bool {
@@ -4849,6 +4876,9 @@ mod tests {
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "sensors", ClientMessage::SetReady { ready: true });
         push(app, "weapons", ClientMessage::SetReady { ready: true });
+        tick(app);
+        fast_forward_countdown(app);
+        tick(app);
         tick(app);
     }
 
@@ -5654,6 +5684,9 @@ mod tests {
         tick(app);
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "power", ClientMessage::SetReady { ready: true });
+        let _ = tick(app);
+        fast_forward_countdown(app);
+        let _ = tick(app);
         let _ = tick(app);
     }
 
@@ -6472,6 +6505,9 @@ mod tests {
         tick(app);
         push(app, "captain", ClientMessage::SetReady { ready: true });
         push(app, "shields", ClientMessage::SetReady { ready: true });
+        let _ = tick(app);
+        fast_forward_countdown(app);
+        let _ = tick(app);
         let _ = tick(app);
     }
 

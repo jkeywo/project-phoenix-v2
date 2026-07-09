@@ -37,9 +37,10 @@ describe('helpSections', () => {
     ]);
   });
 
-  it('covers all nine console keys', () => {
+  it('covers all console keys for all ship types', () => {
     for (const key of ['captain', 'helm', 'tactical', 'repair', 'power',
-                        'shields', 'sensors', 'navigation', 'comms']) {
+                        'shields', 'sensors', 'navigation', 'comms',
+                        'engineering', 'science']) {
       expect(hasHelp(key)).toBe(true);
       expect(helpSections(key).length).toBeGreaterThan(0);
     }

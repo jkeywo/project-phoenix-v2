@@ -2553,13 +2553,16 @@ fn render_spawned_entities(
             Option<&crate::entity_spawner::StarSection>,
             Option<&crate::entity_spawner::Lights>,
             Option<&PendingSceneHandle>,
+            Option<&crate::simulation::LocalShip>,
         ),
         Without<RenderProcessed>,
     >,
 ) {
     use crate::entity_config::MeshShape;
 
-    for (entity, transform, mesh_sec, star_sec, lights_opt, pending) in entities.iter() {
+    for (entity, transform, mesh_sec, star_sec, lights_opt, pending, local_ship) in
+        entities.iter()
+    {
         let mesh_cfg_for_transform = mesh_sec.map(|mesh_sec| &mesh_sec.0);
         let mut ec = commands.entity(entity);
         let mut rendered = false;
@@ -2593,9 +2596,11 @@ fn render_spawned_entities(
             let cfg = &mesh_sec.0;
 
             if let Some(model_path) = &cfg.model {
-                // PATH A: GLB model. When `no_render` is true we only need the
-                // sidecar (for ModelMarkers); we skip loading the GLB entirely.
-                if cfg.no_render {
+                // PATH A: GLB model. The local player's ship is never rendered
+                // (it's behind the camera); we still load the sidecar for its
+                // ModelMarkers (weapon mounts, camera markers). NPC ships load
+                // the full GLB scene.
+                if local_ship.is_some() {
                     // Sidecar-only path: resolve once, attach markers, done.
                     let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
                         Some(rig) => rig,
@@ -3129,7 +3134,7 @@ mod tests {
         q.single(app.world())
             .map(|vm| vm.view_mode.clone())
             .unwrap_or(crate::messages::ViewMode::Camera(
-                crate::messages::ViewDirection::Fore,
+                crate::messages::CameraView::default(),
             ))
     }
 
@@ -3470,7 +3475,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(CameraView::default())
         );
     }
 
@@ -3509,7 +3514,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(CameraView::default())
         );
     }
 
@@ -3530,7 +3535,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(CameraView::default())
         );
     }
 
@@ -3569,7 +3574,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(CameraView::default())
         );
     }
 
@@ -3656,14 +3661,14 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(ViewDirection::Aft),
+                    mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
             },
         );
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Aft)
+            ViewMode::Camera(CameraView::new("camera_aft"))
         );
     }
 
@@ -3684,7 +3689,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(CameraView::default())
         );
     }
 
@@ -3724,7 +3729,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(CameraView::default())
         );
     }
 
@@ -3738,14 +3743,14 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(ViewDirection::Aft),
+                    mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
             },
         );
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(CameraView::default())
         );
     }
 

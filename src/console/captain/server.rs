@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::messages::{
     AdmittedCommands, CaptainBlackboard, ObjectiveSnapshot, ObjectiveSource, SystemBlackboard,
-    SystemControlPayload, SystemId, ViewDirection, ViewMode,
+    CameraView, SystemControlPayload, SystemId, ViewMode,
 };
 use crate::objectives::WorldConditions;
 use crate::ship::combat_activity::RecentCombatActivity;
@@ -180,6 +180,10 @@ fn publish_captain_blackboard(
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
+    markers_q: Query<
+        &crate::model_rig::ModelMarkers,
+        With<crate::server_app::LocalShip>,
+    >,
     ship_query: Query<
         (
             &ShipSystemControlSources,
@@ -201,7 +205,7 @@ fn publish_captain_blackboard(
     let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
     let view_mode = view_mode_comp
         .map(|vm| vm.view_mode.clone())
-        .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
+        .unwrap_or(ViewMode::Camera(CameraView::default()));
 
     let hull_fraction = hull_q
         .single()
@@ -220,14 +224,24 @@ fn publish_captain_blackboard(
     let viewscreen_auto = control_sources.is_some_and(|cs| {
         cs.0.source_for(&crate::system_registry::viewscreen_system_id()) == ControlSource::Ai
     });
+
+    // Extract the current camera view marker name from the view mode.
     let view_direction = match &view_mode {
-        ViewMode::Camera(ViewDirection::Fore) => "Fore",
-        ViewMode::Camera(ViewDirection::Port) => "Port",
-        ViewMode::Camera(ViewDirection::Starboard) => "Starboard",
-        ViewMode::Camera(ViewDirection::Aft) => "Aft",
-        _ => "",
-    }
-    .to_string();
+        ViewMode::Camera(cv) => cv.marker_name.clone(),
+        _ => String::new(),
+    };
+
+    // Collect available camera marker names from the ship's model rig.
+    let camera_views: Vec<String> = markers_q
+        .single()
+        .ok()
+        .map(|mm| {
+            mm.marker_names()
+                .filter(|n| n.starts_with("camera_"))
+                .map(|n| n.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let conditions = WorldConditions {
         red_alert,
@@ -277,6 +291,7 @@ fn publish_captain_blackboard(
         viewscreen_auto,
         view_direction,
         view_mode,
+        camera_views,
         objectives: objectives_snap,
         hull_integrity_pct,
         game_status,
@@ -295,7 +310,7 @@ fn publish_captain_blackboard(
 mod tests {
     use super::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions};
-    use crate::messages::{ClientMessage, ViewDirection};
+    use crate::messages::{CameraView, ClientMessage};
     use crate::server_app::LocalShip;
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
@@ -355,7 +370,7 @@ mod tests {
             .query_filtered::<&crate::ship_state::ShipViewMode, With<LocalShip>>();
         q.single(app.world())
             .map(|vm| vm.view_mode.clone())
-            .unwrap_or(ViewMode::Camera(ViewDirection::Fore))
+            .unwrap_or(ViewMode::Camera(CameraView::default()))
     }
 
     fn set_red_alert(app: &mut App, red: bool) {
@@ -798,14 +813,14 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(ViewDirection::Starboard),
+                    mode: ViewMode::Camera(CameraView::new("camera_starboard")),
                 },
             },
         );
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Starboard)
+            ViewMode::Camera(CameraView::new("camera_starboard"))
         );
     }
 
@@ -828,14 +843,14 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(ViewDirection::Port),
+                    mode: ViewMode::Camera(CameraView::new("camera_port")),
                 },
             },
         );
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(CameraView::default())
         );
     }
 
@@ -849,14 +864,14 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(ViewDirection::Aft),
+                    mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
             },
         );
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Aft)
+            ViewMode::Camera(CameraView::new("camera_aft"))
         );
     }
 
@@ -898,7 +913,7 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(ViewDirection::Aft),
+                    mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
             },
         );
@@ -932,7 +947,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             get_view_mode(&mut app),
-            ViewMode::Camera(ViewDirection::Aft)
+            ViewMode::Camera(CameraView::new("camera_aft"))
         );
     }
 

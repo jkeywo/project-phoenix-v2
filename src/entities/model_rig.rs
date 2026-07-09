@@ -180,6 +180,11 @@ impl ModelMarkers {
         self.markers.get(name)
     }
 
+    /// Iterate over all marker names in this model rig.
+    pub fn marker_names(&self) -> impl Iterator<Item = &str> {
+        self.markers.keys().map(|s| s.as_str())
+    }
+
     pub fn target_point(&self, index: usize) -> Option<&TargetPoint> {
         self.target_points.get(index)
     }

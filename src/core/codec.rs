@@ -1201,7 +1201,7 @@ mod tests {
     #[test]
     fn decode_bridge_client_message_wraps_short_form_set_view() {
         let msg = decode_bridge_client_message(
-            r#"{"type":"SetView","data":{"mode":{"kind":"Camera","data":"Aft"}}}"#,
+            r#"{"type":"SetView","data":{"mode":{"kind":"Camera","data":"camera_aft"}}}"#,
         )
         .unwrap();
 
@@ -1210,7 +1210,7 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(ViewDirection::Aft),
+                    mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
             }
         );

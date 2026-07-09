@@ -44,3 +44,19 @@ direction = [ 0.1389302994421039, 0, 0.9903021619167189 ]
 [markers.torpedo_starbord]
 position = [ -0.25, 0, 0.25 ]
 direction = [ -0.13938093999218928, 0, 0.9902388366282621 ]
+
+[markers.camera_fore]
+position = [ 0, 0, -6 ]
+direction = [ 0, 0, -1 ]
+
+[markers.camera_aft]
+position = [ 0, 0, 6 ]
+direction = [ 0, 0, 1 ]
+
+[markers.camera_port]
+position = [ -6, 0, 0 ]
+direction = [ -1, 0, 0 ]
+
+[markers.camera_starboard]
+position = [ 6, 0, 0 ]
+direction = [ 1, 0, 0 ]

@@ -98,13 +98,9 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
     // GLB model + sidecar
     if let Some(ref mesh) = config.mesh {
         if let Some(ref model_path) = mesh.model {
-            // Only preload the GLB if it will actually be rendered; no_render
-            // entities only need the sidecar (for ModelMarkers).
-            if !mesh.no_render {
-                let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-                if !manifest.glb_models.contains(&rel.to_string()) {
-                    manifest.glb_models.push(rel.to_string());
-                }
+            let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
+            if !manifest.glb_models.contains(&rel.to_string()) {
+                manifest.glb_models.push(rel.to_string());
             }
             let sc = sidecar_path(model_path, mesh.variant.as_deref());
             if !manifest.sidecars.contains(&sc) {
@@ -812,7 +808,6 @@ mod tests {
                 emissive: None,
                 scale: 1.0,
                 rotation: [0.0, 0.0, 0.0],
-                no_render: false,
             }),
             radar_appearance: Some(RadarAppearanceConfig {
                 icon: Some("testShip".into()),
@@ -835,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn discover_entity_config_no_render_skips_glb_keeps_sidecar() {
+    fn discover_entity_config_with_model_adds_glb_and_sidecar() {
         let config = EntityConfig {
             mesh: Some(MeshConfig {
                 model: Some("assets/models/alliance_cruiser.glb".into()),
@@ -848,15 +843,17 @@ mod tests {
                 emissive: None,
                 scale: 1.0,
                 rotation: [0.0, 0.0, 0.0],
-                no_render: true,
             }),
             ..Default::default()
         };
         let mut manifest = AssetManifest::default();
         discover_entity_config_assets(&config, &mut manifest);
-        // GLB must NOT be added when no_render = true (saves blocking preload on 7.8 MB file).
-        assert!(manifest.glb_models.is_empty());
-        // Sidecar must still be added for ModelMarkers.
+        // GLB is always added; local ship rendering is skipped at render time.
+        assert!(manifest
+            .glb_models
+            .iter()
+            .any(|s| s.contains("alliance_cruiser.glb")));
+        // Sidecar must also be added for ModelMarkers.
         assert!(manifest
             .sidecars
             .iter()

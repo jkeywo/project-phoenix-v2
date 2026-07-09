@@ -158,7 +158,7 @@ export const WEAPONS_RADAR_RANGE = 300.0;
 export const HELM_RADAR_RANGE    = 500.0;
 export const SENSORS_RADAR_RANGE = 500.0;
 
-const CAMERA_VIEWS = new Set(['Fore', 'Port', 'Starboard', 'Aft']);
+// Camera views are now marker-name-based, supplied by the server blackboard.
 
 // ── Shared radar blip builder ───────────────────────────────────────────────
 
@@ -522,7 +522,7 @@ export function buildCaptainConsoleState(state) {
   const controlSources = state.controlSources || {};
   const redAlertAuto = controlSources['red-alert'] === 'Ai';
   const viewscreenAuto = controlSources['viewscreen'] === 'Ai';
-  const viewDirection = CAMERA_VIEWS.has(state.currentView) ? state.currentView : '';
+  const viewDirection = state.currentView || '';
   return JSON.stringify({
     red_alert:             state.redAlert    || false,
     red_alert_system_id:   'red-alert',

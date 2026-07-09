@@ -292,15 +292,10 @@
             </div>
           </section>
 
-          <!-- ── RIGHT: Direction pad + Red Alert ──────────────────── -->
+          <!-- ── RIGHT: Camera select + Red Alert ──────────────────── -->
           <section class="cmd-col">
-            <div class="cmd-panel">
-              <div class="dir-group" id="dir-pad">
-                <button id="dir-fore" class="dir-btn active" type="button"><span class="btn-bg"></span><span class="lbl">FWD</span></button>
-                <button id="dir-port" class="dir-btn" type="button"><span class="btn-bg"></span><span class="lbl">PORT</span></button>
-                <button id="dir-stbd" class="dir-btn" type="button"><span class="btn-bg"></span><span class="lbl">STBD</span></button>
-                <button id="dir-aft" class="dir-btn" type="button"><span class="btn-bg"></span><span class="lbl">AFT</span></button>
-              </div>
+            <div class="cmd-panel" style="display:flex;flex-direction:column;gap:0.5rem;">
+              <ph-camera-select id="camera-select"></ph-camera-select>
 
               <button id="red-alert-btn" class="btn" type="button">
                 <span class="btn-bg"></span>
@@ -338,15 +333,10 @@
   <script type="module">
     import { initConsole, renderStationDamageBar } from './console-core.js';
     import { renderRedAlertFragment, renderViewscreenFragment } from './system-registry.js';
+    import './components/ph-camera-select.js';
 
     // ── State ────────────────────────────────────────────────────────────
     var _state         = null;
-
-    // Direction names for the dir pad
-    var DIR_FORE = 'Fore';
-    var DIR_PORT = 'Port';
-    var DIR_STBD = 'Starboard';
-    var DIR_AFT  = 'Aft';
 
     // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
     // Handled by initConsole({ render }) — see bottom of script.
@@ -425,19 +415,16 @@
         if (footerAlertEl) { footerAlertEl.textContent = 'STANDARD'; footerAlertEl.style.color = 'var(--ink-faint)'; }
       }
 
-      // ── Direction pad active state ──────────────────────────────────────
-      var dir = selectedDir;
-      var btnIds = { Fore: 'dir-fore', Port: 'dir-port', Starboard: 'dir-stbd', Aft: 'dir-aft' };
-      Object.keys(btnIds).forEach(function(k) {
-        var el = document.getElementById(btnIds[k]);
-        if (el) {
-          el.className = 'dir-btn' + (k === dir ? ' active' : '');
-        }
-      });
+      // ── Camera select ───────────────────────────────────────────────────
+      var camEl = document.getElementById('camera-select');
+      if (camEl) {
+        camEl.state = { views: s.camera_views || [], current_view: s.view_direction || '', auto: s.viewscreen_auto || false };
+      }
 
       var viewStatusEl = document.getElementById('view-status');
       if (viewStatusEl) {
-        viewStatusEl.textContent = dirLabels[dir] || 'ON SCREEN';
+        var label = (s.camera_views || []).includes(s.view_direction) ? s.view_direction.toUpperCase().replace(/^CAMERA_/, '') : 'ON SCREEN';
+        viewStatusEl.textContent = label;
       }
 
       // ── Contacts count ──────────────────────────────────────────────────
@@ -464,52 +451,14 @@
       // ── Footer ticker ───────────────────────────────────────────────────
       var footerEl = document.getElementById('footer-ticker');
       if (footerEl) {
-        var dirLabel = dirLabels[dir] || 'ON SCREEN';
+        var dirLabel = (s.camera_views || []).includes(s.view_direction) ? s.view_direction.toUpperCase().replace(/^CAMERA_/, '') : 'ON SCREEN';
         footerEl.textContent = 'CAPTAIN · ' + dirLabel + ' · ' + (s.red_alert ? 'RED ALERT' : 'STANDARD');
       }
 
       renderStationDamageBar(s.own_hull, 'hull-display', 'hull-fill', 'hull-val', 'hull-sys-popup');
     }
 
-    var dirLabels = { Fore: 'FORE', Port: 'PORT', Starboard: 'STBD', Aft: 'AFT' };
-
-    // ── Optimistic direction update ───────────────────────────────────────
-    // Apply the highlight immediately on click, before the server round-trip.
-    var _lastDir = null;
-    function onDirSelected(dir) {
-      _lastDir = dir;
-      var btnIds = { Fore: 'dir-fore', Port: 'dir-port', Starboard: 'dir-stbd', Aft: 'dir-aft' };
-      Object.keys(btnIds).forEach(function(k) {
-        var el = document.getElementById(btnIds[k]);
-        if (el) el.className = 'dir-btn' + (k === dir ? ' active' : '');
-      });
-      var viewStatusEl = document.getElementById('view-status');
-      if (viewStatusEl) viewStatusEl.textContent = dirLabels[dir] || dir.toUpperCase();
-      var footerEl = document.getElementById('footer-ticker');
-      if (footerEl) {
-        var ra = document.getElementById('alert-led');
-        var alertActive = ra && ra.className.indexOf('fire') !== -1;
-        footerEl.textContent = 'CAPTAIN \u00B7 ' + (dirLabels[dir] || 'FORE') + ' \u00B7 ' + (alertActive ? 'RED ALERT' : 'STANDARD');
-      }
-    }
-
     // ── Outbound actions ──────────────────────────────────────────────────
-    document.getElementById('dir-fore').addEventListener('click', function() {
-      onDirSelected('Fore');
-      sendAction('set_view', { direction: 'Fore' });
-    });
-    document.getElementById('dir-port').addEventListener('click', function() {
-      onDirSelected('Port');
-      sendAction('set_view', { direction: 'Port' });
-    });
-    document.getElementById('dir-stbd').addEventListener('click', function() {
-      onDirSelected('Starboard');
-      sendAction('set_view', { direction: 'Starboard' });
-    });
-    document.getElementById('dir-aft').addEventListener('click', function() {
-      onDirSelected('Aft');
-      sendAction('set_view', { direction: 'Aft' });
-    });
     document.getElementById('red-alert-btn').addEventListener('click', function() {
       if (this.disabled) return;
       sendAction('toggle_red_alert', {});

@@ -1,4 +1,4 @@
-use crate::messages::{SystemId, ViewDirection, ViewMode};
+use crate::messages::{CameraView, SystemId, ViewMode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViewscreenRequest {
@@ -21,7 +21,7 @@ struct ActiveView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViewscreenArbiter {
-    captain_view_direction: ViewDirection,
+    captain_view: CameraView,
     active: Option<ActiveView>,
     sequence: u64,
 }
@@ -35,7 +35,7 @@ impl Default for ViewscreenArbiter {
 impl ViewscreenArbiter {
     pub fn new() -> Self {
         Self {
-            captain_view_direction: ViewDirection::Fore,
+            captain_view: CameraView::default(),
             active: None,
             sequence: 0,
         }
@@ -55,8 +55,8 @@ impl ViewscreenArbiter {
     pub fn request_channel_2(&mut self, request: ViewscreenRequest) -> ViewscreenResolution {
         self.sequence += 1;
         match request.mode {
-            ViewMode::Camera(direction) => {
-                self.captain_view_direction = direction;
+            ViewMode::Camera(view) => {
+                self.captain_view = view;
                 self.active = None;
             }
             mode => {
@@ -89,8 +89,8 @@ impl ViewscreenArbiter {
     pub fn show_channel_2(&mut self, request: ViewscreenRequest) -> ViewscreenResolution {
         self.sequence += 1;
         match request.mode {
-            ViewMode::Camera(direction) => {
-                self.captain_view_direction = direction;
+            ViewMode::Camera(view) => {
+                self.captain_view = view;
                 self.active = None;
             }
             mode => {
@@ -109,14 +109,14 @@ impl ViewscreenArbiter {
         self.captain_resolution()
     }
 
-    pub fn captain_view_direction(&self) -> ViewDirection {
-        self.captain_view_direction.clone()
+    pub fn captain_view(&self) -> CameraView {
+        self.captain_view.clone()
     }
 
     fn captain_resolution(&self) -> ViewscreenResolution {
         ViewscreenResolution {
             owner: crate::system_registry::captain_system_id(),
-            mode: ViewMode::Camera(self.captain_view_direction.clone()),
+            mode: ViewMode::Camera(self.captain_view.clone()),
         }
     }
 }
@@ -153,14 +153,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_captain_fore_camera() {
+    fn defaults_to_captain_camera() {
         let arbiter = ViewscreenArbiter::new();
 
         assert_eq!(
             arbiter.resolved(),
             ViewscreenResolution {
                 owner: crate::system_registry::captain_system_id(),
-                mode: ViewMode::Camera(ViewDirection::Fore),
+                mode: ViewMode::Camera(CameraView::default()),
             }
         );
     }
@@ -170,7 +170,7 @@ mod tests {
         let mut arbiter = ViewscreenArbiter::new();
         arbiter.request_channel_2(ViewscreenRequest {
             requester: crate::system_registry::captain_system_id(),
-            mode: ViewMode::Camera(ViewDirection::Aft),
+            mode: ViewMode::Camera(CameraView::new("camera_aft")),
         });
 
         let first = arbiter.request_channel_2(ViewscreenRequest {
@@ -183,7 +183,7 @@ mod tests {
             requester: crate::system_registry::helm_system_id(),
             mode: ViewMode::Radar,
         });
-        assert_eq!(second.mode, ViewMode::Camera(ViewDirection::Aft));
+        assert_eq!(second.mode, ViewMode::Camera(CameraView::new("camera_aft")));
     }
 
     #[test]
@@ -230,10 +230,10 @@ mod tests {
 
         let resolved = arbiter.request_channel_2(ViewscreenRequest {
             requester: crate::system_registry::captain_system_id(),
-            mode: ViewMode::Camera(ViewDirection::Port),
+            mode: ViewMode::Camera(CameraView::new("camera_port")),
         });
 
         assert_eq!(resolved.owner, crate::system_registry::captain_system_id());
-        assert_eq!(resolved.mode, ViewMode::Camera(ViewDirection::Port));
+        assert_eq!(resolved.mode, ViewMode::Camera(CameraView::new("camera_port")));
     }
 }

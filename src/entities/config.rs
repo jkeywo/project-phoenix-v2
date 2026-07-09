@@ -159,11 +159,6 @@ pub struct MeshConfig {
     /// Affects both GLB models and procedural shapes.
     #[serde(default)]
     pub rotation: [f32; 3],
-    /// When true, the GLB is not rendered but its rig sidecar is still loaded
-    /// and `ModelMarkers` is attached so weapons/effects can resolve mount
-    /// points by name. Only meaningful when `model` is set. Ignored otherwise.
-    #[serde(default)]
-    pub no_render: bool,
 }
 
 fn default_mesh_scale() -> f32 {

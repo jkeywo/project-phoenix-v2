@@ -106,18 +106,12 @@ export const ACTION_MAP = Object.freeze({
       });
   },
 
-  /** Switch the view-screen to a named Camera direction. */
+  /** Switch the view-screen to a named camera marker. */
   set_view: (a, send) => {
     if (!a.direction) return;
-    let mode;
-    if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction)) {
-      mode = { kind: 'Camera', data: a.direction };
-    } else {
-      mode = { kind: a.direction };
-    }
     send('ControlSystem', {
       target: 'viewscreen',
-      payload: { type: 'SetView', data: { mode } },
+      payload: { type: 'SetView', data: { mode: { kind: 'Camera', data: a.direction } } },
     });
   },
 

@@ -13,7 +13,8 @@ use std::collections::{HashMap, HashSet};
 use crate::ai_plugin::WarpOutMarker;
 use crate::entity_spawner::{RegionEffectsSection, RegionShapeSection};
 use crate::lobby::GameStateCache;
-use crate::messages::{GamePhase, ViewDirection, ViewMode};
+use crate::messages::{CameraView, GamePhase, ViewMode};
+use crate::model_rig::ModelMarkers;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::region_shape::RegionShape;
@@ -392,11 +393,13 @@ fn update_view_screen_text(
     *vis = Visibility::Hidden;
 }
 
-/// First-person hull camera: positioned at the ship's hull edge in the view direction,
-/// looking straight out. Ship is always behind the camera.
-/// Hull offset = 6.0 units (matches the ship's collision capsule radius).
+/// First-person hull camera: positioned at a named marker point on the ship's
+/// model rig, looking in the marker's direction. The ship is always behind the
+/// camera. When no marker is found the camera falls back to ship centre looking
+/// forward.
 fn hull_camera(
     view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    markers_q: Query<&ModelMarkers, With<crate::simulation::LocalShip>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
@@ -407,41 +410,43 @@ fn hull_camera(
     let view_mode = view_mode_q
         .single()
         .map(|vm| vm.view_mode.clone())
-        .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
+        .unwrap_or(ViewMode::Camera(CameraView::default()));
 
-    // Direction vectors relative to ship heading (yaw=0 → ship faces -Z).
-    // remains coherent; the radar overlay is drawn separately (#45).
-    let direction = match &view_mode {
-        ViewMode::Camera(d) => d.clone(),
-        ViewMode::Radar
-        | ViewMode::ScienceRadar
-        | ViewMode::SensorsRadar
-        | ViewMode::SystemChart
-        | ViewMode::NavigationChart
-        | ViewMode::Comms => ViewDirection::Fore,
-    };
-    let offset_dir = match direction {
-        ViewDirection::Fore => Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos()),
-        ViewDirection::Aft => Vec3::new(-physics.yaw.sin(), 0.0, physics.yaw.cos()),
-        ViewDirection::Port => Vec3::new(-physics.yaw.cos(), 0.0, -physics.yaw.sin()),
-        ViewDirection::Starboard => Vec3::new(physics.yaw.cos(), 0.0, physics.yaw.sin()),
+    // For non-camera overlay modes (Radar, Comms, etc.) keep the last camera
+    // view so the viewscreen doesn't jump when the overlay is dismissed.
+    let marker_name = match &view_mode {
+        ViewMode::Camera(cv) => cv.marker_name.as_str(),
+        _ => "",
     };
 
-    const HULL_RADIUS: f32 = 6.0;
     const LOOK_DIST: f32 = 100.0;
 
-    transform.translation = Vec3::new(
-        physics.x + offset_dir.x * HULL_RADIUS,
-        0.0,
-        physics.z + offset_dir.z * HULL_RADIUS,
-    );
+    // Rotate marker offset/direction from model-local to world space.
+    let yaw_rot = Quat::from_rotation_y(physics.yaw);
+    let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
 
-    let look_target = Vec3::new(
-        physics.x + offset_dir.x * LOOK_DIST,
-        0.0,
-        physics.z + offset_dir.z * LOOK_DIST,
-    );
-    transform.look_at(look_target, Vec3::Y);
+    let (pos_offset, dir_offset) = markers_q
+        .single()
+        .ok()
+        .and_then(|mm| mm.get(marker_name))
+        .map(|m| {
+            (
+                Vec3::from_array(m.position),
+                Vec3::from_array(m.direction),
+            )
+        })
+        .unwrap_or_else(|| {
+            // Fallback: ship centre looking forward.
+            (Vec3::ZERO, Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos()))
+        });
+
+    let camera_pos = ship_origin + yaw_rot * pos_offset;
+    let look_dir = yaw_rot * dir_offset;
+
+    if look_dir.length_squared() > 1e-6 {
+        transform.translation = camera_pos;
+        transform.look_at(camera_pos + look_dir.normalize() * LOOK_DIST, Vec3::Y);
+    }
 }
 
 fn update_view_direction_label(
@@ -472,23 +477,23 @@ fn update_view_direction_label(
     let view_mode = view_mode_q
         .single()
         .map(|vm| vm.view_mode.clone())
-        .unwrap_or(ViewMode::Camera(ViewDirection::Fore));
+        .unwrap_or(ViewMode::Camera(CameraView::default()));
     *vis = Visibility::Visible;
     let label = match &view_mode {
-        ViewMode::Camera(ViewDirection::Fore) => "FORE",
-        ViewMode::Camera(ViewDirection::Aft) => "AFT",
-        ViewMode::Camera(ViewDirection::Port) => "PORT",
-        ViewMode::Camera(ViewDirection::Starboard) => "STARBOARD",
-        ViewMode::Radar => "RADAR",
-        ViewMode::ScienceRadar => "SCIENCE RADAR",
-        ViewMode::SensorsRadar => "SENSORS",
-        ViewMode::SystemChart => "SYSTEM CHART",
-        ViewMode::NavigationChart => "NAV CHART",
-        ViewMode::Comms => "COMMS",
+        ViewMode::Camera(cv) => {
+            let name = cv.marker_name.strip_prefix("camera_").unwrap_or(&cv.marker_name);
+            name.to_uppercase()
+        }
+        ViewMode::Radar => "RADAR".to_string(),
+        ViewMode::ScienceRadar => "SCIENCE RADAR".to_string(),
+        ViewMode::SensorsRadar => "SENSORS".to_string(),
+        ViewMode::SystemChart => "SYSTEM CHART".to_string(),
+        ViewMode::NavigationChart => "NAV CHART".to_string(),
+        ViewMode::Comms => "COMMS".to_string(),
     };
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {
-            **text = label.to_string();
+            **text = label.clone();
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::messages::{ViewDirection, ViewMode};
+use crate::messages::{CameraView, ViewMode};
 use crate::ship::viewscreen::{source_system_for_view_mode, ViewscreenArbiter, ViewscreenRequest};
 use bevy::prelude::Component;
 
@@ -45,15 +45,15 @@ impl ShipRedAlert {
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct ShipViewMode {
     pub view_mode: ViewMode,
-    captain_view_direction: ViewDirection,
+    captain_view: CameraView,
     pub viewscreen: ViewscreenArbiter,
 }
 
 impl Default for ShipViewMode {
     fn default() -> Self {
         Self {
-            view_mode: ViewMode::Camera(ViewDirection::Fore),
-            captain_view_direction: ViewDirection::Fore,
+            view_mode: ViewMode::Camera(CameraView::default()),
+            captain_view: CameraView::default(),
             viewscreen: ViewscreenArbiter::new(),
         }
     }
@@ -70,7 +70,7 @@ impl ShipViewMode {
             .viewscreen
             .request_channel_2(ViewscreenRequest { requester, mode });
         self.view_mode = resolution.mode;
-        self.captain_view_direction = self.viewscreen.captain_view_direction();
+        self.captain_view = self.viewscreen.captain_view();
     }
 
     pub fn show_view_mode(&mut self, mode: ViewMode) {
@@ -79,13 +79,13 @@ impl ShipViewMode {
             .viewscreen
             .show_channel_2(ViewscreenRequest { requester, mode });
         self.view_mode = resolution.mode;
-        self.captain_view_direction = self.viewscreen.captain_view_direction();
+        self.captain_view = self.viewscreen.captain_view();
     }
 
     pub fn restore_captain_view(&mut self) {
         let resolution = self.viewscreen.restore_captain_view();
         self.view_mode = resolution.mode;
-        self.captain_view_direction = self.viewscreen.captain_view_direction();
+        self.captain_view = self.viewscreen.captain_view();
     }
 }
 
@@ -117,18 +117,18 @@ mod tests {
     }
 
     #[test]
-    fn ship_view_mode_defaults_to_camera_fore() {
+    fn ship_view_mode_defaults_to_camera() {
         let vm = ShipViewMode::default();
-        assert_eq!(vm.view_mode, ViewMode::Camera(ViewDirection::Fore));
+        assert_eq!(vm.view_mode, ViewMode::Camera(CameraView::default()));
     }
 
     #[test]
     fn ship_view_mode_request_toggles_correctly() {
         let mut vm = ShipViewMode::default();
-        vm.request_view_mode(ViewMode::Camera(ViewDirection::Aft));
+        vm.request_view_mode(ViewMode::Camera(CameraView::new("camera_aft")));
         vm.request_view_mode(ViewMode::Radar);
         assert_eq!(vm.view_mode, ViewMode::Radar);
         vm.request_view_mode(ViewMode::Radar);
-        assert_eq!(vm.view_mode, ViewMode::Camera(ViewDirection::Aft));
+        assert_eq!(vm.view_mode, ViewMode::Camera(CameraView::new("camera_aft")));
     }
 }

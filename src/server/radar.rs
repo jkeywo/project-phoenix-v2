@@ -277,7 +277,7 @@ fn sync_server_radar_bridge(
         .single()
         .map(|vm| vm.view_mode.clone())
         .unwrap_or(crate::messages::ViewMode::Camera(
-            crate::messages::ViewDirection::Fore,
+            crate::messages::CameraView::default(),
         ));
     let Some(active) = view_mode_to_console_radar(&view_mode) else {
         return;
@@ -325,7 +325,7 @@ fn toggle_viewscreen_radar_widgets(
     let view_mode = view_mode_q
         .and_then(|q| q.single().ok().map(|vm| vm.view_mode.clone()))
         .unwrap_or(crate::messages::ViewMode::Camera(
-            crate::messages::ViewDirection::Fore,
+            crate::messages::CameraView::default(),
         ));
 
     let in_game = state.get() == &GamePhase::InProgress;

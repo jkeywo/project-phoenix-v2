@@ -10,7 +10,6 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 model = "assets/models/alliance_cruiser.glb"
 shape = "sphere"
 colour = []
-no_render = true
 
 [collider]
 shape = "Capsule"

@@ -960,7 +960,7 @@ fn auto_clear_on_screen_message(
         .single()
         .map(|vm| vm.view_mode.clone())
         .unwrap_or(crate::messages::ViewMode::Camera(
-            crate::messages::ViewDirection::Fore,
+            crate::messages::CameraView::default(),
         ));
     // If the captain (or anyone) has switched away from Comms view, clear.
     if !matches!(current_view, ViewMode::Comms) {

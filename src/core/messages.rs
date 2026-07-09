@@ -344,23 +344,44 @@ pub enum TeamSlot {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum ViewDirection {
-    #[default]
-    Fore,
-    Aft,
-    Port,
-    Starboard,
+/// A named camera viewpoint defined by a marker in the ship's model rig.
+///
+/// Marker names should start with `camera_` to be shown in the captain UI
+/// (e.g. `camera_fore`, `camera_port`, `camera_aft`, `camera_starboard`).
+///
+/// Serialises as a plain string (`#[serde(transparent)]`) — wire-compatible
+/// with the old `ViewDirection` string serialization.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct CameraView {
+    pub marker_name: String,
+}
+
+impl CameraView {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            marker_name: name.into(),
+        }
+    }
+}
+
+impl Default for CameraView {
+    fn default() -> Self {
+        Self {
+            marker_name: String::new(),
+        }
+    }
 }
 
 /// What is currently shown on the viewscreen.
 ///
-/// `Camera(direction)` is the default exterior view; `Radar` is the
-/// top-down tactical view requested by the helm.
+/// `Camera(view)` is the default exterior view positioned at the named
+/// model-rig marker; `Radar` is the top-down tactical view requested by the
+/// helm.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data")]
 pub enum ViewMode {
-    Camera(ViewDirection),
+    Camera(CameraView),
     Radar,
     ScienceRadar,
     /// The Sensors operator has pushed their long-range radar to the viewscreen.
@@ -375,7 +396,7 @@ pub enum ViewMode {
 
 impl Default for ViewMode {
     fn default() -> Self {
-        ViewMode::Camera(ViewDirection::Fore)
+        ViewMode::Camera(CameraView::default())
     }
 }
 
@@ -384,8 +405,11 @@ mod view_mode_tests {
     use super::*;
 
     #[test]
-    fn default_view_mode_is_camera_fore() {
-        assert_eq!(ViewMode::default(), ViewMode::Camera(ViewDirection::Fore));
+    fn default_view_mode_is_camera() {
+        assert_eq!(
+            ViewMode::default(),
+            ViewMode::Camera(CameraView::default())
+        );
     }
 }
 
@@ -1538,14 +1562,18 @@ pub struct CaptainBlackboard {
     /// True when the Viewscreen system is AI-controlled.
     #[serde(default)]
     pub viewscreen_auto: bool,
-    /// Current camera direction: `"Fore"`, `"Port"`, `"Starboard"`, `"Aft"`,
-    /// or `""` for non-camera views.
+    /// Current camera marker name (e.g. `"camera_fore"`), or `""` for
+    /// non-camera views.
     pub view_direction: String,
     /// Full current view mode (tagged enum). Supersedes the removed
     /// `SimSnapshot.view_mode` field (issue #570) so clients can derive
     /// `state.currentView` from the blackboard alone.
     #[serde(default)]
     pub view_mode: ViewMode,
+    /// Available camera marker names for the captain to choose from.
+    /// Populated from the local ship's `ModelMarkers` component.
+    #[serde(default)]
+    pub camera_views: Vec<String>,
     /// Mission objectives. Updated when `ObjectiveManager` is dirty.
     #[serde(default)]
     pub objectives: Vec<ObjectiveSnapshot>,
@@ -1575,8 +1603,9 @@ impl Default for CaptainBlackboard {
             red_alert_auto: false,
             viewscreen_system_id: default_viewscreen_system_id(),
             viewscreen_auto: false,
-            view_direction: "Fore".into(),
-            view_mode: ViewMode::Camera(ViewDirection::Fore),
+            view_direction: String::new(),
+            view_mode: ViewMode::Camera(CameraView::default()),
+            camera_views: Vec::new(),
             objectives: Vec::new(),
             hull_integrity_pct: 100.0,
             game_status: String::new(),
@@ -2101,7 +2130,7 @@ pub enum UiAction {
     /// Set the camera view direction (captain console).
     /// The HTML captain panel sends `{ action: "set_view", direction: "Fore" }`.
     SetView {
-        direction: ViewDirection,
+        direction: String,
     },
     /// Helm joystick input (helm console).
     HelmInput {
@@ -2191,7 +2220,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::SetView { direction } => ClientMessage::ControlSystem {
             target: crate::system_registry::viewscreen_system_id(),
             payload: SystemControlPayload::SetView {
-                mode: ViewMode::Camera(direction.clone()),
+                mode: ViewMode::Camera(CameraView::new(direction.clone())),
             },
         },
         UiAction::HelmInput { thrust, steering } => ClientMessage::ControlSystem {
@@ -2337,14 +2366,14 @@ mod ui_action_tests {
     #[test]
     fn set_view_direction_maps_to_client_message() {
         let action = UiAction::SetView {
-            direction: ViewDirection::Aft,
+            direction: "camera_aft".into(),
         };
         assert_eq!(
             ui_action_to_client_message(&action),
             ClientMessage::ControlSystem {
                 target: crate::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(ViewDirection::Aft)
+                    mode: ViewMode::Camera(CameraView::new("camera_aft"))
                 }
             }
         );

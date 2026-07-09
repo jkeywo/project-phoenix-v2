@@ -16,6 +16,7 @@ test('captain console: __updateConsole renders objectives, alert status, contact
     red_alert: true,
     view_mode: 'Camera',
     view_direction: 'Port',
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
     objectives: [
       { id: 'obj-1', text: 'Scan the anomaly', mandatory: true, status: 'Active' },
       { id: 'obj-2', text: 'Neutralise raiders', mandatory: false, status: 'Completed' },
@@ -32,7 +33,7 @@ test('captain console: __updateConsole renders objectives, alert status, contact
   await expect(page.locator('.objective-data[data-id="obj-1"]')).toHaveAttribute('data-text', 'Scan the anomaly');
   await expect(page.locator('.objective-data[data-id="obj-2"]')).toHaveAttribute('data-status', 'Completed');
 
-  // Direction pad.
+  // Direction pad data-attr (populated from camera_views).
   await expect(page.locator('#dir')).toHaveAttribute('data-direction', 'Port');
 
   // Red alert.
@@ -43,11 +44,12 @@ test('captain console: __updateConsole renders objectives, alert status, contact
   await expect(page.locator('#view-status')).toHaveText('PORT');
   await expect(page.locator('#contacts-status')).toHaveText('3');
 
-  // Direction pad buttons — only Port should be active.
-  await expect(page.locator('#dir-fore')).not.toHaveClass(/active/);
-  await expect(page.locator('#dir-port')).toHaveClass(/active/);
-  await expect(page.locator('#dir-stbd')).not.toHaveClass(/active/);
-  await expect(page.locator('#dir-aft')).not.toHaveClass(/active/);
+  // Camera-select component renders camera buttons (shadow DOM).
+  const camBtns = page.locator('ph-camera-select').shadow().locator('.cam-btn');
+  await expect(camBtns).toHaveCount(4);
+  await expect(camBtns.nth(0)).toHaveText('Fore');
+  await expect(camBtns.nth(1)).toHaveText('Port');
+  await expect(camBtns.nth(1)).toHaveClass(/active/);
 
   // Red alert LED and button styling.
   await expect(page.locator('#alert-led')).toHaveClass(/led fire/);
@@ -62,6 +64,7 @@ test('captain console: standard alert state renders correctly', async ({ page })
     red_alert: false,
     view_mode: 'Camera',
     view_direction: 'Fore',
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
     objectives: [],
     hull_integrity_pct: 100,
     game_status: 'Standing by.',
@@ -73,33 +76,47 @@ test('captain console: standard alert state renders correctly', async ({ page })
   await expect(page.locator('#alert-status')).toHaveText('STANDARD');
   await expect(page.locator('#alert-led')).not.toHaveClass(/fire/);
   await expect(page.locator('#alert-label')).toHaveText('RED ALERT');
-  await expect(page.locator('#dir-fore')).toHaveClass(/active/);
   await expect(page.locator('#contacts-status')).toHaveText('0');
   await expect(page.locator('#obj-count-tag')).toHaveText('0');
 });
 
-test('captain console: dir pad buttons call __sendAction with correct envelopes', async ({ page }) => {
+test('captain console: camera-select and red alert call __sendAction with correct envelopes', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
+  const sent: string[] = [];
   await page.evaluate(() => {
     (window as any).__sent = [];
     (window as any).__sendAction = (json: string) => (window as any).__sent.push(json);
+    // ph-camera-select reads window.sendAction; wire it through __sendAction
+    (window as any).sendAction = (action: string, payload?: object) => {
+      (window as any).__sendAction(JSON.stringify(Object.assign({ action, console: 'captain' }, payload)));
+    };
   });
 
-  await page.locator('#dir-fore').click();
-  await page.locator('#dir-port').click();
-  await page.locator('#dir-stbd').click();
-  await page.locator('#dir-aft').click();
+  // Emit state to populate camera-select.
+  await page.evaluate((s) => (window as any).__updateConsole('CaptainChair', JSON.stringify(s)), {
+    red_alert: false,
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
+    view_direction: 'Fore',
+    objectives: [],
+  });
+
+  // Click camera buttons in the ph-camera-select shadow DOM.
+  const camBtns = page.locator('ph-camera-select').shadow().locator('.cam-btn');
+  await camBtns.nth(1).click(); // Port
+  await camBtns.nth(2).click(); // Starboard
+  await camBtns.nth(0).click(); // Fore
+
   await page.locator('#red-alert-btn').click();
 
-  const sent: string[] = await page.evaluate(() => (window as any).__sent);
-  expect(sent).toHaveLength(5);
+  const getSent = () => page.evaluate(() => (window as any).__sent);
+  const s = await getSent();
+  expect(s).toHaveLength(4);
 
-  expect(JSON.parse(sent[0])).toEqual({ action: 'set_view', console: 'captain', direction: 'Fore' });
-  expect(JSON.parse(sent[1])).toEqual({ action: 'set_view', console: 'captain', direction: 'Port' });
-  expect(JSON.parse(sent[2])).toEqual({ action: 'set_view', console: 'captain', direction: 'Starboard' });
-  expect(JSON.parse(sent[3])).toEqual({ action: 'set_view', console: 'captain', direction: 'Aft' });
-  expect(JSON.parse(sent[4])).toEqual({ action: 'toggle_red_alert', console: 'captain' });
+  expect(JSON.parse(s[0])).toEqual({ action: 'set_view', console: 'captain', direction: 'Port' });
+  expect(JSON.parse(s[1])).toEqual({ action: 'set_view', console: 'captain', direction: 'Starboard' });
+  expect(JSON.parse(s[2])).toEqual({ action: 'set_view', console: 'captain', direction: 'Fore' });
+  expect(JSON.parse(s[3])).toEqual({ action: 'toggle_red_alert', console: 'captain' });
 });
 
 test('captain console: AI-run Red Alert renders read-only with AUTO badge', async ({ page }) => {
@@ -111,6 +128,7 @@ test('captain console: AI-run Red Alert renders read-only with AUTO badge', asyn
     red_alert_auto: true,
     view_mode: 'Camera',
     view_direction: 'Fore',
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
     objectives: [],
     hull_integrity_pct: 100,
     game_status: 'Standing by.',

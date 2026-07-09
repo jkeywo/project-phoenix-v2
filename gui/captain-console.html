@@ -358,7 +358,7 @@
       });
 
       var dirEl = document.getElementById('dir');
-      var selectedDir = dirLabels.hasOwnProperty(s.view_direction) ? s.view_direction : '';
+      var selectedDir = (s.camera_views || []).includes(s.view_direction) ? s.view_direction : '';
       dirEl.dataset.direction = selectedDir;
 
       var alertEl = document.getElementById('alert');

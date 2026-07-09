@@ -351,7 +351,7 @@ pub enum TeamSlot {
 ///
 /// Serialises as a plain string (`#[serde(transparent)]`) — wire-compatible
 /// with the old `ViewDirection` string serialization.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct CameraView {
     pub marker_name: String,
@@ -361,14 +361,6 @@ impl CameraView {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             marker_name: name.into(),
-        }
-    }
-}
-
-impl Default for CameraView {
-    fn default() -> Self {
-        Self {
-            marker_name: String::new(),
         }
     }
 }

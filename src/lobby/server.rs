@@ -593,15 +593,13 @@ fn apply_result(
                         },
                     ));
                 }
-                CountdownAction::Cancel => {
-                    if timer.remaining_secs > 0.0 {
-                        timer.remaining_secs = 0.0;
-                        timer.pending_phase = None;
-                        outbox.0.push((
-                            Target::All,
-                            ServerMessage::GameStartCountdown { remaining_secs: 0 },
-                        ));
-                    }
+                CountdownAction::Cancel if timer.remaining_secs > 0.0 => {
+                    timer.remaining_secs = 0.0;
+                    timer.pending_phase = None;
+                    outbox.0.push((
+                        Target::All,
+                        ServerMessage::GameStartCountdown { remaining_secs: 0 },
+                    ));
                 }
                 _ => {}
             }
@@ -730,6 +728,9 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(lobby_outbox_broadcaster())
             .add_plugins(bevy::time::TimePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_secs_f32(1.0),
+            ))
             .init_resource::<Outbox>()
             .add_systems(PostUpdate, collect);
         app

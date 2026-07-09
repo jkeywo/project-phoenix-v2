@@ -161,12 +161,13 @@ impl SessionManager {
         }
     }
 
-    /// True when every connected player is ready, or when
-    /// zero connected players exist (zero-human auto-start is allowed).
+    /// True when every connected player is ready.
+    /// Returns false when zero connected players exist to prevent
+    /// auto-starting the game after the last client disconnects.
     pub fn all_ready(&self) -> bool {
         let connected: Vec<&Player> = self.players.iter().filter(|p| p.connected).collect();
         if connected.is_empty() {
-            return true; // zero-human start
+            return false; // never auto-start with zero humans
         }
         connected.iter().all(|p| p.ready)
     }
@@ -523,9 +524,9 @@ mod tests {
     }
 
     #[test]
-    fn all_ready_returns_true_when_zero_players() {
+    fn all_ready_returns_false_when_zero_players() {
         let sm = sm();
-        assert!(sm.all_ready(), "zero players → all_ready must be true");
+        assert!(!sm.all_ready(), "zero players → all_ready must be false");
     }
 
     #[test]

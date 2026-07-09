@@ -660,6 +660,25 @@ max_level = 4
     }
 
     #[test]
+    fn disconnect_last_player_does_not_auto_start() {
+        // Single player registers but never sets ready, then disconnects.
+        // The game must NOT auto-start with zero human players.
+        let mut sessions = sessions_with("t1", "Alice");
+        let result = process_disconnect("t1", &mut sessions, GamePhase::Lobby, true);
+        assert!(
+            result.new_phase.is_none(),
+            "last player disconnect must not auto-start the game"
+        );
+        assert!(
+            !result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::GameStarted)),
+            "GameStarted must not be sent when last player disconnects"
+        );
+    }
+
+    #[test]
     fn reconnect_comes_back_not_ready() {
         // t1 sets ready, disconnects (clears ready), reconnects via Identify
         // → ready must remain false.

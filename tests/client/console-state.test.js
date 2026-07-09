@@ -537,7 +537,7 @@ describe('buildCaptainConsoleState', () => {
     expect(s.objectives).toEqual(['obj-A']);
   });
 
-  it('legacy fallback passes currentView as view_direction', () => {
+  it('passes currentView as view_direction for all views', () => {
     expect(parse(buildCaptainConsoleState({ currentView: 'Radar' })).view_direction).toBe('Radar');
   });
 });

@@ -297,6 +297,13 @@
             <div class="cmd-panel" style="display:flex;flex-direction:column;gap:0.5rem;">
               <ph-camera-select id="camera-select"></ph-camera-select>
 
+              <div class="dir-group">
+                <button class="dir-btn" id="dir-fore" type="button"><span class="btn-bg"></span><span class="lbl">FORE</span></button>
+                <button class="dir-btn" id="dir-port" type="button"><span class="btn-bg"></span><span class="lbl">PORT</span></button>
+                <button class="dir-btn" id="dir-stbd" type="button"><span class="btn-bg"></span><span class="lbl">STBD</span></button>
+                <button class="dir-btn" id="dir-aft" type="button"><span class="btn-bg"></span><span class="lbl">AFT</span></button>
+              </div>
+
               <button id="red-alert-btn" class="btn" type="button">
                 <span class="btn-bg"></span>
                 <span class="led" id="alert-led"></span>
@@ -357,9 +364,23 @@
         objectivesEl.appendChild(row);
       });
 
+      var dirLabels = { Fore: true, Port: true, Starboard: true, Aft: true };
       var dirEl = document.getElementById('dir');
       var selectedDir = (s.camera_views || []).includes(s.view_direction) ? s.view_direction : '';
       dirEl.dataset.direction = selectedDir;
+
+      // ── Direction pad active state ────────────────────────────────────────
+      var dirFore = document.getElementById('dir-fore');
+      var dirPort = document.getElementById('dir-port');
+      var dirStbd = document.getElementById('dir-stbd');
+      var dirAft  = document.getElementById('dir-aft');
+      [dirFore, dirPort, dirStbd, dirAft].forEach(function(b) {
+        if (b) b.classList.remove('active');
+      });
+      if (dirLabels.hasOwnProperty(s.view_direction)) {
+        var active = { Fore: dirFore, Port: dirPort, Starboard: dirStbd, Aft: dirAft }[s.view_direction];
+        if (active) active.classList.add('active');
+      }
 
       var alertEl = document.getElementById('alert');
       alertEl.dataset.redAlert = String(!!s.red_alert);
@@ -462,6 +483,16 @@
     document.getElementById('red-alert-btn').addEventListener('click', function() {
       if (this.disabled) return;
       sendAction('toggle_red_alert', {});
+    });
+
+    var dirMap = { 'dir-fore': 'Fore', 'dir-port': 'Port', 'dir-stbd': 'Starboard', 'dir-aft': 'Aft' };
+    Object.keys(dirMap).forEach(function(id) {
+      var btn = document.getElementById(id);
+      if (btn) {
+        btn.addEventListener('click', function() {
+          sendAction('set_view', { direction: dirMap[id] });
+        });
+      }
     });
 
     var sendAction = initConsole({ name: 'captain', render: _renderConsole }).sendAction;

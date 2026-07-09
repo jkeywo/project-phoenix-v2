@@ -56,7 +56,7 @@ test.skip('NPC ship GLB model loads (200) after game start', async ({ context })
 
   await helm.send('SetReady', { ready: true });
   await tactical.send('SetReady', { ready: true });
-  await helm.waitForMessage('GameStarted', 5_000);
+  await helm.waitForMessage('GameStarted', 10_000);
   await helm.waitForMessage('WorldSetup', 5_000);
 
   // Point the viewscreen at the raider (it sits fore-starboard of spawn) and

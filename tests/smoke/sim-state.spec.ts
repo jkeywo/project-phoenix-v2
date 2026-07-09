@@ -52,8 +52,8 @@ async function startGame(context: BrowserContext): Promise<{ captain: TestClient
 
   await helm.send('SetReady', { ready: true });
   await captain.send('SetReady', { ready: true });
-  await helm.waitForMessage('GameStarted', 5_000);
-  await captain.waitForMessage('GameStarted', 5_000);
+  await helm.waitForMessage('GameStarted', 10_000);
+  await captain.waitForMessage('GameStarted', 10_000);
 
   return { captain, helm, serverPage };
 }

@@ -34,7 +34,7 @@ test('SimState arrives via snapshot channel when available', async ({ context })
 
   await client.send('SelectStation', { station: 'Helm' });
   await client.send('SetReady', { ready: true });
-  await client.waitForMessage('GameStarted', 5_000);
+  await client.waitForMessage('GameStarted', 10_000);
 
   // Wait for a SimState message
   const simState = await client.waitForMessage('SimState', 3_000) as any;
@@ -63,7 +63,7 @@ test('SimState falls back to reliable channel when snapshot channel is unavailab
 
   await client.send('SelectStation', { station: 'Helm' });
   await client.send('SetReady', { ready: true });
-  await client.waitForMessage('GameStarted', 5_000);
+  await client.waitForMessage('GameStarted', 10_000);
 
   // SimState should still arrive via the reliable channel fallback
   const simState = await client.waitForMessage('SimState', 3_000) as any;

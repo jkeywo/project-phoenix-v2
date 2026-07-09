@@ -24,8 +24,8 @@ window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
 // (~150 MB of GLBs), plus a sun and a nebula region. The lobby preload gate
 // waits for every GLB to reach a terminal `LoadState` before allowing
 // `StartGame`, and headless Chromium can't realistically fetch + parse all
-// of that on a backgrounded server page within the 5 s `GameStarted`
-// timeout used by most specs.
+// of that on a backgrounded server page within the `GameStarted` timeout
+// used by most specs.
 //
 // This minimal world keeps only what the smoke suite actually inspects:
 //

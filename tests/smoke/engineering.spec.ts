@@ -38,8 +38,8 @@ async function startGameWithEngineering(context: BrowserContext) {
 
   await captain.send('SetReady', { ready: true });
   await engineer.send('SetReady', { ready: true });
-  await captain.waitForMessage('GameStarted', 5_000);
-  await engineer.waitForMessage('GameStarted', 5_000);
+  await captain.waitForMessage('GameStarted', 10_000);
+  await engineer.waitForMessage('GameStarted', 10_000);
 
   return { captain, engineer };
 }

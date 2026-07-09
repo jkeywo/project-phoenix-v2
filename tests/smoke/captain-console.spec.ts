@@ -44,8 +44,9 @@ test('captain console: __updateConsole renders objectives, alert status, contact
   await expect(page.locator('#view-status')).toHaveText('PORT');
   await expect(page.locator('#contacts-status')).toHaveText('3');
 
-  // Camera-select component renders camera buttons (shadow DOM).
-  const camBtns = page.locator('ph-camera-select').shadow().locator('.cam-btn');
+  // Camera-select component renders camera buttons (shadow DOM). Playwright's
+  // CSS engine pierces open shadow roots automatically — no special API needed.
+  const camBtns = page.locator('ph-camera-select').locator('.cam-btn');
   await expect(camBtns).toHaveCount(4);
   await expect(camBtns.nth(0)).toHaveText('Fore');
   await expect(camBtns.nth(1)).toHaveText('Port');
@@ -102,7 +103,7 @@ test('captain console: camera-select and red alert call __sendAction with correc
   });
 
   // Click camera buttons in the ph-camera-select shadow DOM.
-  const camBtns = page.locator('ph-camera-select').shadow().locator('.cam-btn');
+  const camBtns = page.locator('ph-camera-select').locator('.cam-btn');
   await camBtns.nth(1).click(); // Port
   await camBtns.nth(2).click(); // Starboard
   await camBtns.nth(0).click(); // Fore

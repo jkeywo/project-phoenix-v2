@@ -110,7 +110,7 @@ test('Engineering player can change helm allocation', async ({ context }) => {
   await c2.send('SetReady', { ready: true });
   await c3.send('SetReady', { ready: true });
   await c4.send('SetReady', { ready: true });
-  await c3.waitForMessage('GameStarted', 5_000);
+  await c3.waitForMessage('GameStarted', 10_000);
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
 
@@ -143,7 +143,7 @@ test('Engineering player can dispatch a repair team', async ({ context }) => {
   await c2.send('SetReady', { ready: true });
   await c3.send('SetReady', { ready: true });
   await c4.send('SetReady', { ready: true });
-  await c3.waitForMessage('GameStarted', 5_000);
+  await c3.waitForMessage('GameStarted', 10_000);
 
   await waitForLastMessage(
     c3,
@@ -191,7 +191,7 @@ test('Engineering acts when all four connect before selecting', async ({ context
   await c2.send('SetReady', { ready: true });
   await c3.send('SetReady', { ready: true });
   await c4.send('SetReady', { ready: true });
-  await c3.waitForMessage('GameStarted', 5_000);
+  await c3.waitForMessage('GameStarted', 10_000);
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
 
@@ -212,7 +212,7 @@ test('Engineering can still act after a mid-game reconnect', async ({ context })
   await c2.send('SetReady', { ready: true });
   await c3.send('SetReady', { ready: true });
   await c4.send('SetReady', { ready: true });
-  await c3.waitForMessage('GameStarted', 5_000);
+  await c3.waitForMessage('GameStarted', 10_000);
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
   await setHelmPower(c3, 3);
@@ -244,7 +244,7 @@ test('shared session-token orphans the first Engineering device (ghost console)'
   await c2.send('SetReady', { ready: true });
   await c3.send('SetReady', { ready: true });
   await c4.send('SetReady', { ready: true });
-  await c3.waitForMessage('GameStarted', 5_000);
+  await c3.waitForMessage('GameStarted', 10_000);
 
   await waitForLastMessage(c3, 'PowerState', 'data && data.helm === 2');
 

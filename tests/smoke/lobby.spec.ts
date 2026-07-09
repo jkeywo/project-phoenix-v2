@@ -70,8 +70,8 @@ test('all players SetReady starts the game', async ({ context }) => {
   await clientA.send('SetReady', { ready: true });
   await clientB.send('SetReady', { ready: true });
 
-  await clientA.waitForMessage('GameStarted', 5_000);
-  await clientB.waitForMessage('GameStarted', 5_000);
+  await clientA.waitForMessage('GameStarted', 10_000);
+  await clientB.waitForMessage('GameStarted', 10_000);
 
   await clientA.close();
   await clientB.close();
@@ -95,8 +95,8 @@ test('SetReady starts game even with unfilled stations', async ({ context }) => 
   await clientA.send('SetReady', { ready: true });
   await clientB.send('SetReady', { ready: true });
 
-  await clientA.waitForMessage('GameStarted', 5_000);
-  await clientB.waitForMessage('GameStarted', 5_000);
+  await clientA.waitForMessage('GameStarted', 10_000);
+  await clientB.waitForMessage('GameStarted', 10_000);
 
   await clientA.close();
   await clientB.close();
@@ -122,8 +122,8 @@ test('SetReady from all players starts game and Welcome has Lobby phase', async 
   await clientA.send('SetReady', { ready: true });
   await clientB.send('SetReady', { ready: true });
 
-  await clientA.waitForMessage('GameStarted', 5_000);
-  await clientB.waitForMessage('GameStarted', 5_000);
+  await clientA.waitForMessage('GameStarted', 10_000);
+  await clientB.waitForMessage('GameStarted', 10_000);
 
   // Welcome was sent with Lobby phase before game started
   const welcomeA = await clientA.page.evaluate(

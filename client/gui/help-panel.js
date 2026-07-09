@@ -71,6 +71,17 @@ const HELP_SECTIONS = {
     ['Messages', 'Incoming transmissions can carry mission-critical intelligence.'],
     ['Objectives', 'Mission goals update as the situation changes. Alert the Captain when new orders arrive.'],
   ],
+  engineering: [
+    ['Engineering Officer', 'Keep the ship running under fire. You manage shields, power, and repairs from a single station.'],
+    ['Shields', 'Four facings: Fore, Aft, Port, Starboard. Focus one to tank heavy fire, tap again to rebalance.'],
+    ['Power Allocation', 'Distribute base points across systems. Higher level means better performance. Keep an eye on the battery reserve.'],
+    ['Repair Teams', 'Dispatch teams to damaged systems. Damaged systems degrade everyone\'s performance — act early.'],
+  ],
+  science: [
+    ['Science Officer', 'Extend the crew\'s awareness and keep the shields up. You monitor long-range sensors and manage defensive coverage.'],
+    ['Long-Range Scan', 'Detect contacts before they enter combat range and provide extra information on their status.'],
+    ['Shield Facings', 'Four quadrants: Fore, Aft, Port, Starboard. Focus capacity on one facing to tank heavy fire.'],
+  ],
 };
 
 /**

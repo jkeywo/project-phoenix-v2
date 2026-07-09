@@ -121,7 +121,7 @@ export class PhShieldFacings extends HTMLElement {
         if (auto) return;
         const id = path.dataset.facingId;
         if (this.sendAction && id) {
-          this.sendAction('focus_shield', { facing_id: id });
+          this.sendAction('set_shield_focus', { arc_id: id });
         }
       });
     });

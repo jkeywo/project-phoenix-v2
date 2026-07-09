@@ -160,14 +160,14 @@ export class PhNavigationMap extends HTMLElement {
     this.#projectedBlips = [];
     const blipR = Math.max(3, R * 0.015);
     for (const b of blips) {
-      const [sx, sy] = this.#worldToScreen(b.x, b.z, shipPos.x, shipPos.z, headingRad, scale, cx, cy);
+      const [sx, sy] = this.#worldToScreen(b.world_x, b.world_z, shipPos.x, shipPos.z, headingRad, scale, cx, cy);
       if (sx < -50 || sx > W + 50 || sy < -50 || sy > H + 50) continue;
       const color = this.#blipColor(b.stance);
       this.#drawBlipShape(octx, b.kind, sx, sy, blipR, color);
-      if (b.label) {
+      if (b.name) {
         octx.font = '10px "JetBrains Mono", monospace';
         octx.fillStyle = color;
-        octx.fillText(b.label, sx + blipR + 4, sy + 4);
+        octx.fillText(b.name, sx + blipR + 4, sy + 4);
       }
       this.#projectedBlips.push({ uuid: b.uuid, sx, sy, hitR: Math.max(14, blipR + 6), blip: b });
     }
@@ -327,7 +327,7 @@ export class PhNavigationMap extends HTMLElement {
       this.#overlay.classList.remove('show');
       return;
     }
-    nameEl.textContent = blip.label || blip.uuid || 'UNKNOWN';
+    nameEl.textContent = blip.name || blip.uuid || 'UNKNOWN';
     kindEl.textContent = (blip.kind || 'unknown').toUpperCase();
     stanceEl.textContent = (blip.stance || 'UNKNOWN').toUpperCase();
     stanceEl.className = 'st-' + (blip.stance || 'unknown');
@@ -375,11 +375,11 @@ export class PhNavigationMap extends HTMLElement {
     if (hit && this.sendAction) {
       this.#selectedBlip = hit.blip;
       this.#showOverlay(hit.blip);
-      this.sendAction('set_waypoint', { x: hit.blip.x, z: hit.blip.z, entity_uuid: hit.uuid });
+      this.sendAction('set_navigation_waypoint', { x: hit.blip.world_x, z: hit.blip.world_z, source_uuid: hit.uuid });
     } else if (this.sendAction) {
       this.#selectedBlip = null;
       this.#showOverlay(null);
-      this.sendAction('set_waypoint', { x: wx, z: wz });
+      this.sendAction('set_navigation_waypoint', { x: wx, z: wz });
     }
   }
 

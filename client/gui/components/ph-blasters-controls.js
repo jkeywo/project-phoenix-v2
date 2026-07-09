@@ -87,34 +87,34 @@ export class PhBlastersControls extends HTMLElement {
         btn.textContent = 'CHARGE';
         btn.addEventListener('mousedown', () => {
           if (!btn.disabled && this.sendAction) {
-            this.sendAction('charge_blaster_start', { bank_id: bank.id });
+            this.sendAction('charge_blaster_start', { bank: bank.id });
           }
         });
         btn.addEventListener('mouseup', () => {
           if (!btn.disabled && this.sendAction) {
-            this.sendAction('fire_blaster', { bank_id: bank.id });
+            this.sendAction('fire_blaster', { bank: bank.id });
           }
         });
         btn.addEventListener('mouseleave', () => {
           if (!btn.disabled && this.sendAction && bank.state === 'charging') {
-            this.sendAction('fire_blaster', { bank_id: bank.id });
+            this.sendAction('fire_blaster', { bank: bank.id });
           }
         });
         btn.addEventListener('touchstart', (e) => {
           e.preventDefault();
           if (!btn.disabled && this.sendAction) {
-            this.sendAction('charge_blaster_start', { bank_id: bank.id });
+            this.sendAction('charge_blaster_start', { bank: bank.id });
           }
         }, { passive: false });
         btn.addEventListener('touchend', (e) => {
           e.preventDefault();
           if (!btn.disabled && this.sendAction) {
-            this.sendAction('fire_blaster', { bank_id: bank.id });
+            this.sendAction('fire_blaster', { bank: bank.id });
           }
         }, { passive: false });
         btn.addEventListener('touchcancel', () => {
           if (!btn.disabled && this.sendAction && bank.state === 'charging') {
-            this.sendAction('fire_blaster', { bank_id: bank.id });
+            this.sendAction('fire_blaster', { bank: bank.id });
           }
         });
         top.appendChild(btn);

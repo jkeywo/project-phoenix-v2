@@ -134,7 +134,7 @@ export class PhRepairTeams extends HTMLElement {
             const st = this.#state || {};
             const teamsArr = Array.isArray(st.teams) ? st.teams : [];
             const t = teamsArr.find(x => x.id === team.id);
-            this.sendAction('dispatch_repair', { team_id: team.id, target_system_id: t && t.target ? t.target : null });
+            this.sendAction('dispatch_repair_team', { team_idx: team.id, target: t && t.target ? t.target : null });
           }
         });
         if (idx < container.children.length) {

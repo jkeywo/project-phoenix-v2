@@ -80,7 +80,7 @@ export class PhPhasersControls extends HTMLElement {
         btn.textContent = 'FIRE';
         btn.addEventListener('click', () => {
           if (this.sendAction && !btn.disabled) {
-            this.sendAction('fire_phaser', { bank_id: bank.id });
+            this.sendAction('fire_phaser', { bank: bank.id });
           }
         });
         row.appendChild(btn);

@@ -48,7 +48,7 @@ export class PhHelmRadar extends HTMLElement {
     }
     this.shadowRoot.getElementById('on-screen-btn').addEventListener('click', () => {
       if (this.sendAction) {
-        this.sendAction('set_view', { view: 'radar' });
+        this.sendAction('set_radar_view', {});
       }
     });
   }

@@ -40,7 +40,7 @@ export class PhSensorRadar extends HTMLElement {
     this.sendAction ??= window.sendAction;
     if (this.#innerRadar) {
       this.#innerRadar.sendAction = (action, payload) => {
-        if (action === 'select_target') {
+        if (action === 'set_target') {
           this.#state = { ...this.#state, selected_target_uuid: payload.uuid };
           this.#updateButton();
         }
@@ -51,7 +51,7 @@ export class PhSensorRadar extends HTMLElement {
     btn.addEventListener('click', () => {
       const sel = this.#state?.selected_target_uuid;
       if (sel && this.sendAction) {
-        this.sendAction('set_science_target', { uuid: sel });
+        this.sendAction('set_sensors_target', { uuid: sel });
       }
     });
   }
@@ -68,8 +68,8 @@ export class PhSensorRadar extends HTMLElement {
     if (this.#innerRadar) {
       this.#innerRadar.state = {
         blips: s.blips || [],
-        range: s.range,
-        ship_heading: s.ship_heading,
+        range: s.scan_range || 0,
+        ship_heading: s.ship_heading || 0,
         config: s.config || {},
       };
     }

@@ -616,14 +616,88 @@ export function buildHelmConsoleState(state) {
 }
 
 /**
+ * Normalize a Rust `TeamSlot` serde enum into the flat format the
+ * `ph-repair-teams` web component expects.
+ *
+ * Rust TeamSlot is an externally-tagged enum:
+ *   {"Idle":{}}
+ *   {"Travelling":{"system_id":"..","display_name":"..","elapsed":2.5}}
+ *   {"Repairing":{"system_id":"..","display_name":".."}}
+ *   {"Returning":{"remaining":1.0,"system_id":"..","display_name":"..",...}}
+ *
+ * Returns { id, label, status, target, progress_pct }.
+ *
+ * @param {object} slot - Raw serde serialization of a TeamSlot
+ * @param {number} idx  - 0-based index for ID / label generation
+ * @param {number} travelDurationSecs - travel duration for progress scaling
+ */
+function normalizeTeamSlot(slot, idx, travelDurationSecs) {
+  const id = idx;
+  const label = 'Team ' + (idx + 1);
+  const dur = travelDurationSecs > 0 ? travelDurationSecs : 5.0;
+
+  // Detect which enum variant is active by checking for known variant keys.
+  const variant = slot.Idle !== undefined ? 'Idle'
+    : slot.Travelling !== undefined ? 'Travelling'
+    : slot.Repairing !== undefined ? 'Repairing'
+    : slot.Returning !== undefined ? 'Returning'
+    : null;
+
+  if (!variant) {
+    // Already flat format or unknown — pass through if it looks flat.
+    if (slot.status) return { id, label, status: slot.status, target: slot.target || '', progress_pct: slot.progress_pct || 0 };
+    return { id, label, status: 'idle', target: '', progress_pct: 0 };
+  }
+
+  switch (variant) {
+    case 'Idle':
+      return { id, label, status: 'idle', target: '', progress_pct: 0 };
+    case 'Travelling': {
+      const data = slot.Travelling;
+      const elapsed = data.elapsed || 0;
+      return {
+        id, label,
+        status: 'travelling',
+        target: data.display_name || data.system_id || '',
+        progress_pct: Math.min(elapsed / dur, 1),
+      };
+    }
+    case 'Repairing': {
+      const data = slot.Repairing;
+      return {
+        id, label,
+        status: 'repairing',
+        target: data.display_name || data.system_id || '',
+        progress_pct: 1.0,
+      };
+    }
+    case 'Returning': {
+      const data = slot.Returning;
+      const remaining = data.remaining || 0;
+      return {
+        id, label,
+        status: 'returning',
+        target: data.display_name || data.system_id || '',
+        progress_pct: 1 - Math.min(remaining / dur, 1),
+      };
+    }
+    default:
+      return { id, label, status: 'idle', target: '', progress_pct: 0 };
+  }
+}
+
+/**
  * Repair console.
  * @param {{ blackboards, repairTeams, consoleHull }} state
  */
 export function buildRepairConsoleState(state) {
   const bb = state.blackboards && state.blackboards['repair'];
   if (bb) {
+    const rawTeams = bb.teams || [];
+    const travelDur = bb.travel_duration_secs ?? 5.0;
+    const teams = rawTeams.map((slot, idx) => normalizeTeamSlot(slot, idx, travelDur));
     return JSON.stringify({
-      teams:                bb.teams                ?? [],
+      teams,
       // SystemId-keyed fields (post issues #618/#619).
       system_hull:          bb.system_hull          ?? [],
       damageable_systems:   bb.damageable_systems   ?? [],
@@ -814,6 +888,7 @@ export function buildSensorsConsoleState(state) {
 
   return JSON.stringify({
     scan_range:              range,
+    ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
     complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',

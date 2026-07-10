@@ -825,7 +825,7 @@ pub fn bridge_sim_to_radar(
         if seen.contains(uuid) {
             true
         } else {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             false
         }
     });
@@ -1222,7 +1222,7 @@ fn sync_radar_blip_nodes(
                             }
                         }
                     } else {
-                        commands.entity(child).despawn();
+                        commands.entity(child).try_despawn();
                     }
                 } else if let Ok((mut node, mut bg, mut border_color, tag)) =
                     existing_region_nodes.get_mut(child)
@@ -1242,7 +1242,7 @@ fn sync_radar_blip_nodes(
                             radar_radius_px,
                         );
                     } else {
-                        commands.entity(child).despawn();
+                        commands.entity(child).try_despawn();
                     }
                 } else if let Ok((mut node, tag)) = existing_label_nodes.get_mut(child) {
                     if let Some((_text, label_left, label_top)) =
@@ -1251,7 +1251,7 @@ fn sync_radar_blip_nodes(
                         node.left = Val::Px(label_left);
                         node.top = Val::Px(label_top);
                     } else {
-                        commands.entity(child).despawn();
+                        commands.entity(child).try_despawn();
                     }
                 }
             }
@@ -1390,7 +1390,7 @@ fn sync_radar_blip_nodes(
                 None => {
                     // No highlighted blip — despawn the ring node if it exists.
                     if let Some(e) = ring.0.take() {
-                        commands.entity(e).despawn();
+                        commands.entity(e).try_despawn();
                     }
                 }
             }
@@ -1444,7 +1444,7 @@ fn sync_radar_blip_nodes(
             // Despawn rings for blips that are no longer objective targets.
             for (blip, ring) in &rings.0 {
                 if !next_rings.iter().any(|(b, _)| b == blip) {
-                    commands.entity(*ring).despawn();
+                    commands.entity(*ring).try_despawn();
                 }
             }
 
@@ -1729,7 +1729,7 @@ fn sync_radar_arc_nodes(
                             mat.half_arc_rad = arc.fire_arc_deg.to_radians() * 0.5;
                         }
                     } else {
-                        commands.entity(child).despawn();
+                        commands.entity(child).try_despawn();
                     }
                 }
             }

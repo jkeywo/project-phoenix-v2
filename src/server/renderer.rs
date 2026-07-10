@@ -738,7 +738,7 @@ fn sync_comms_overlay(
 
     // Always despawn any existing overlay first.
     for entity in overlay_q.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
 
     let Some(ref msg) = on_screen.0 else { return };
@@ -870,7 +870,7 @@ fn tick_ripples(
     for (entity, mut ripple) in query.iter_mut() {
         ripple.elapsed += dt;
         if ripple.elapsed >= RIPPLE_DURATION {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             continue;
         }
 
@@ -1052,7 +1052,7 @@ fn spawn_nebula_cloud_particles(
     for region in dead {
         if let Some(particles) = state.entities.remove(&region) {
             for p in particles {
-                commands.entity(p).despawn();
+                commands.entity(p).try_despawn();
             }
         }
     }

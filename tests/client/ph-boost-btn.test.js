@@ -78,22 +78,25 @@ describe('PhBoostBtn', () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it('clicking button when available calls sendAction with toggle_boost', () => {
+  it('holding button when available calls sendAction with set_boost active on pointerdown and inactive on pointerup', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = { available: true, active: false, recharge_pct: 100, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    btn.click();
+    btn.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1 }));
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('toggle_boost', {});
+    expect(sendAction).toHaveBeenCalledWith('set_boost', { active: true });
+    btn.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+    expect(sendAction).toHaveBeenCalledTimes(2);
+    expect(sendAction).toHaveBeenCalledWith('set_boost', { active: false });
   });
 
-  it('clicking button when recharging does not dispatch action', () => {
+  it('holding button when recharging does not dispatch action', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = { available: true, active: false, recharge_pct: 30, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    btn.click();
+    btn.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1 }));
     expect(sendAction).not.toHaveBeenCalled();
   });
 

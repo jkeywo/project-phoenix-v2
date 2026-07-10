@@ -35,11 +35,22 @@ export class PhBoostBtn extends HTMLElement {
   connectedCallback() {
     this.sendAction ??= window.sendAction;
     const btn = this.shadowRoot.getElementById('btn');
-    btn.addEventListener('click', () => {
-      if (this.sendAction && !btn.disabled) {
-        this.sendAction('toggle_boost', {});
-      }
+    let pointerId = null;
+    btn.addEventListener('pointerdown', (e) => {
+      if (pointerId !== null || !this.sendAction || btn.disabled) return;
+      pointerId = e.pointerId;
+      if (btn.setPointerCapture) btn.setPointerCapture(e.pointerId);
+      this.sendAction('set_boost', { active: true });
+      e.preventDefault();
     });
+    const release = (e) => {
+      if (e.pointerId !== pointerId) return;
+      pointerId = null;
+      try { if (btn.releasePointerCapture) btn.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (this.sendAction) this.sendAction('set_boost', { active: false });
+    };
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointercancel', release);
   }
 
   set state(val) {

@@ -2445,8 +2445,14 @@ fn tick_blaster_system(
         map
     };
 
-    for (source_uuid_opt, transform, markers_opt, mut physics, weapons_target_opt, mut blaster_res) in
-        ship_q.iter_mut()
+    for (
+        source_uuid_opt,
+        transform,
+        markers_opt,
+        mut physics,
+        weapons_target_opt,
+        mut blaster_res,
+    ) in ship_q.iter_mut()
     {
         let source_uuid = source_uuid_opt
             .map(|u| u.0.as_str())

@@ -1933,7 +1933,10 @@ fn spawn_game_start_entities(
         // EntityConfig-derived systems into agreement. Matched on the same
         // predicate used below for the player-ship position/rotation/marker.
         let config = if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
-            match selected_ship.as_ref().and_then(|sel| config_cache.get(&sel.0)) {
+            match selected_ship
+                .as_ref()
+                .and_then(|sel| config_cache.get(&sel.0))
+            {
                 Some(selected_cfg) => selected_cfg.clone(),
                 None => config,
             }

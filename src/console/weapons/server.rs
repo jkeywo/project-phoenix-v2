@@ -2244,11 +2244,15 @@ fn tick_blaster_auto_fire(
 ) {
     let ship_count = ship_q.iter().len();
     #[cfg(target_arch = "wasm32")]
-    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-        &format!("[DEBUG] tick_blaster_auto_fire: {} ship(s) in query", ship_count),
-    ));
+    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+        "[DEBUG] tick_blaster_auto_fire: {} ship(s) in query",
+        ship_count
+    )));
     #[cfg(not(target_arch = "wasm32"))]
-    eprintln!("[DEBUG] tick_blaster_auto_fire: {} ship(s) in query", ship_count);
+    eprintln!(
+        "[DEBUG] tick_blaster_auto_fire: {} ship(s) in query",
+        ship_count
+    );
 
     for (
         control_sources,
@@ -2302,27 +2306,39 @@ fn tick_blaster_auto_fire(
             continue;
         };
         #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-            &format!("[DEBUG] tick_blaster_auto_fire: target UUID = {}", target_uuid),
-        ));
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+            "[DEBUG] tick_blaster_auto_fire: target UUID = {}",
+            target_uuid
+        )));
         #[cfg(not(target_arch = "wasm32"))]
-        eprintln!("[DEBUG] tick_blaster_auto_fire: target UUID = {}", target_uuid);
+        eprintln!(
+            "[DEBUG] tick_blaster_auto_fire: target UUID = {}",
+            target_uuid
+        );
 
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
             #[cfg(target_arch = "wasm32")]
-            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-                &format!("[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive", target_uuid),
-            ));
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+                "[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive",
+                target_uuid
+            )));
             #[cfg(not(target_arch = "wasm32"))]
-            eprintln!("[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive", target_uuid);
+            eprintln!(
+                "[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive",
+                target_uuid
+            );
             continue;
         };
         #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-            &format!("[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})", tx, tz),
-        ));
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+            "[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})",
+            tx, tz
+        )));
         #[cfg(not(target_arch = "wasm32"))]
-        eprintln!("[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})", tx, tz);
+        eprintln!(
+            "[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})",
+            tx, tz
+        );
 
         for bank in blaster_res.0.iter_mut() {
             // Skip banks that are not ready to accept a new fire command.
@@ -2343,11 +2359,17 @@ fn tick_blaster_auto_fire(
             let range_sq = bank.config.range * bank.config.range;
             if dist_sq > range_sq {
                 #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-                    &format!("[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})", dist_sq.sqrt(), range_sq.sqrt()),
-                ));
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+                    "[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})",
+                    dist_sq.sqrt(),
+                    range_sq.sqrt()
+                )));
                 #[cfg(not(target_arch = "wasm32"))]
-                eprintln!("[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})", dist_sq.sqrt(), range_sq.sqrt());
+                eprintln!(
+                    "[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})",
+                    dist_sq.sqrt(),
+                    range_sq.sqrt()
+                );
                 continue;
             }
 

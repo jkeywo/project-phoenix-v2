@@ -350,6 +350,10 @@ mod tests {
                     payload: CoordinationPayload::FrequencyHint { frequency: 0.33 },
                 },
             ),
+            (
+                ClientMessageDiscriminants::ReturnToLobby,
+                ClientMessage::ReturnToLobby,
+            ),
         ]
     }
 

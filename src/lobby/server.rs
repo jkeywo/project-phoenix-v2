@@ -387,8 +387,9 @@ pub fn process_lobby(
     // can claim vacated stations mid-game and press Ready to hand control back
     // from Backfill AI — `SetReady`'s InProgress branch in
     // `lobby_handler::process_message` is unreachable without this, since it's
-    // the only place that handles that message. All other message types are
-    // left for the in-game systems.
+    // the only place that handles that message. `ReturnToLobby` is allowed so
+    // the GameOver screen's button works even though GameOver isn't `accepts_all`.
+    // All other message types are left for the in-game systems.
     // (Bevy `MessageReader`s have independent cursors, so reading here never
     // hides messages from those systems.)
     //
@@ -435,6 +436,7 @@ pub fn process_lobby(
                 || matches!(ev.msg, ClientMessage::SelectStation { .. })
                 || matches!(ev.msg, ClientMessage::ReleaseStation)
                 || matches!(ev.msg, ClientMessage::SetReady { .. })
+                || matches!(ev.msg, ClientMessage::ReturnToLobby)
         })
         .cloned()
         .collect();

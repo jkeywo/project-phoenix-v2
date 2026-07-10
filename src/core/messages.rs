@@ -1105,6 +1105,10 @@ pub enum ClientMessage {
         target: SystemId,
         payload: CoordinationPayload,
     },
+    /// Sent from the GameOver screen to return everyone to the Lobby for
+    /// another round. Only honoured while `GamePhase::GameOver` is active;
+    /// ignored otherwise. Any connected player may trigger it.
+    ReturnToLobby,
 }
 
 /// Typed payload for a channel-3 coordination message (issue #494).
@@ -2193,6 +2197,10 @@ pub enum UiAction {
     ///
     /// The HTML navigation panel sends `{ action: "clear_navigation_waypoint", console: "Navigation" }`.
     ClearNavigationWaypoint,
+    /// Return to the Lobby from the GameOver screen.
+    ///
+    /// The HTML game-over overlay sends `{ action: "return_to_lobby" }`.
+    ReturnToLobby,
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
@@ -2295,6 +2303,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             target: crate::system_registry::navigation_system_id(),
             payload: SystemControlPayload::ClearNavigationWaypoint,
         },
+        UiAction::ReturnToLobby => ClientMessage::ReturnToLobby,
     }
 }
 

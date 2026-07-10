@@ -248,6 +248,19 @@
       max-width: 64ch;
       letter-spacing: 0.03em;
     }
+    #game-over-overlay .game-over-return-btn {
+      margin-top: 32px;
+      padding: 12px 32px;
+      font-family: 'Chakra Petch', monospace;
+      font-size: 1rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #cde;
+      background: rgba(140, 180, 220, 0.12);
+      border: 1px solid #8ac;
+      border-radius: 2px;
+      cursor: pointer;
+    }
 
 
 
@@ -662,6 +675,7 @@
        "Ship Destroyed" (hull death) or the scenario's game_over message. -->
   <div id="game-over-overlay">
     <div class="game-over-message" id="game-over-message"></div>
+    <button id="return-to-lobby-btn" class="game-over-return-btn">Return to Lobby</button>
   </div>
 
   <!-- Coordination popup overlay (issue #494). Shown for AI-to-human
@@ -748,6 +762,13 @@
         p && p.catch(() => {});
       });
       document.addEventListener('fullscreenchange', syncIcon);
+    })();
+
+    // -- Return to Lobby (GameOver overlay button) ---------------------------
+    (function initReturnToLobby() {
+      const btn = document.getElementById('return-to-lobby-btn');
+      if (!btn) return;
+      btn.addEventListener('click', () => send('ReturnToLobby'));
     })();
 
     setConnectionStatus('connecting');

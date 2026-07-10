@@ -75,7 +75,7 @@ pub fn process_message(
     station_ratings: &HashMap<StationId, String>,
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
-    let new_phase: Option<GamePhase> = None;
+    let mut new_phase: Option<GamePhase> = None;
     let mut station_rating_update: Option<(StationId, String)> = None;
     let mut countdown_action = None;
 
@@ -380,6 +380,21 @@ pub fn process_message(
                     ));
                     station_rating_update = Some((station_id, default_rating));
                 }
+            }
+        }
+        ClientMessage::ReturnToLobby => {
+            if phase == GamePhase::GameOver {
+                sessions.reset_ready();
+                for p in sessions.players() {
+                    outbound.push((
+                        Target::All,
+                        ServerMessage::ReadyChanged {
+                            token: p.token.clone(),
+                            ready: false,
+                        },
+                    ));
+                }
+                new_phase = Some(GamePhase::Lobby);
             }
         }
         // SetReady IS handled above (not a no-op in lobby).
@@ -1531,6 +1546,60 @@ max_level = 4
                 .iter()
                 .any(|(_, m)| matches!(m, ServerMessage::GameStarted)),
             "GameStarted must not be sent during countdown"
+        );
+    }
+
+    // ── ReturnToLobby ────────────────────────────────────────────────────
+
+    #[test]
+    fn return_to_lobby_during_game_over_transitions_phase_and_resets_ready() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.register("t2".into(), "Bob".into()).unwrap();
+        sessions.set_ready("t1", true);
+        sessions.set_ready("t2", true);
+
+        let result = pm(
+            "t1",
+            &ClientMessage::ReturnToLobby,
+            &mut sessions,
+            GamePhase::GameOver,
+            None,
+        );
+
+        assert_eq!(result.new_phase, Some(GamePhase::Lobby));
+        assert!(
+            !sessions.players().iter().any(|p| p.ready),
+            "ready flags must be cleared on return to lobby"
+        );
+        for token in ["t1", "t2"] {
+            assert!(
+                result.outbound.iter().any(|(target, m)| {
+                    matches!(target, Target::All)
+                        && matches!(m, ServerMessage::ReadyChanged { token: t, ready: false } if t == token)
+                }),
+                "expected ReadyChanged(false) broadcast for {token}"
+            );
+        }
+    }
+
+    #[test]
+    fn return_to_lobby_outside_game_over_is_noop() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_ready("t1", true);
+
+        let result = pm(
+            "t1",
+            &ClientMessage::ReturnToLobby,
+            &mut sessions,
+            GamePhase::InProgress,
+            None,
+        );
+
+        assert!(result.new_phase.is_none());
+        assert!(result.outbound.is_empty());
+        assert!(
+            sessions.players().iter().any(|p| p.ready),
+            "ready flags must be untouched outside GameOver"
         );
     }
 

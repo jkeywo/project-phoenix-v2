@@ -10,14 +10,33 @@ export class PhNavigationMap extends HTMLElement {
   #selectedBlip = null;
   #overlay = null;
 
+  #zoom = 1;
+  #panX = 0;
+  #panY = 0;
+  #ZOOM_MIN = 0.25;
+  #ZOOM_MAX = 8;
+
+  #isDragging = false;
+  #tapMoved = false;
+  #dragStartX = 0;
+  #dragStartY = 0;
+  #startPanX = 0;
+  #startPanY = 0;
+
+  #lastPinchDist = 0;
+  #pinchMidX = 0;
+  #pinchMidY = 0;
+
+  #touchActive = false;
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
     const t = document.createElement('template');
     t.innerHTML = [
       '<style>',
-      ':host { display: block; position: relative; }',
-      'canvas { display: block; width: 100%; height: 100%; }',
+      ':host { display: block; position: relative; touch-action: none; }',
+      'canvas { display: block; width: 100%; height: 100%; touch-action: none; }',
       '#overlay {',
       '  position: absolute; bottom: 0; left: 0; right: 0;',
       '  padding: 10px 14px 14px;',
@@ -55,8 +74,15 @@ export class PhNavigationMap extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
-    this.#canvas.addEventListener('click', this.#boundTap);
-    this.#canvas.addEventListener('touchstart', this.#boundTap, { passive: false });
+    this.#canvas.addEventListener('mousedown', this.#boundMouseDown);
+    this.#canvas.addEventListener('mousemove', this.#boundMouseMove);
+    this.#canvas.addEventListener('mouseup', this.#boundMouseUp);
+    this.#canvas.addEventListener('mouseleave', this.#boundMouseUp);
+    this.#canvas.addEventListener('wheel', this.#boundWheel, { passive: false });
+    this.#canvas.addEventListener('touchstart', this.#boundTouchStart, { passive: false });
+    this.#canvas.addEventListener('touchmove', this.#boundTouchMove, { passive: false });
+    this.#canvas.addEventListener('touchend', this.#boundTouchEnd);
+    this.#canvas.addEventListener('touchcancel', this.#boundTouchEnd);
   }
 
   disconnectedCallback() {
@@ -68,8 +94,15 @@ export class PhNavigationMap extends HTMLElement {
       this.#resizeObserver.disconnect();
       this.#resizeObserver = null;
     }
-    this.#canvas.removeEventListener('click', this.#boundTap);
-    this.#canvas.removeEventListener('touchstart', this.#boundTap);
+    this.#canvas.removeEventListener('mousedown', this.#boundMouseDown);
+    this.#canvas.removeEventListener('mousemove', this.#boundMouseMove);
+    this.#canvas.removeEventListener('mouseup', this.#boundMouseUp);
+    this.#canvas.removeEventListener('mouseleave', this.#boundMouseUp);
+    this.#canvas.removeEventListener('wheel', this.#boundWheel);
+    this.#canvas.removeEventListener('touchstart', this.#boundTouchStart);
+    this.#canvas.removeEventListener('touchmove', this.#boundTouchMove);
+    this.#canvas.removeEventListener('touchend', this.#boundTouchEnd);
+    this.#canvas.removeEventListener('touchcancel', this.#boundTouchEnd);
   }
 
   set state(val) {
@@ -106,17 +139,39 @@ export class PhNavigationMap extends HTMLElement {
     const dz = wz - shipZ;
     const rx = dx * Math.cos(headingRad) + dz * Math.sin(headingRad);
     const rz = dx * Math.sin(headingRad) - dz * Math.cos(headingRad);
-    return [cx + rx * scale, cy + rz * scale];
+    return [
+      cx + this.#panX + rx * scale * this.#zoom,
+      cy + this.#panY + rz * scale * this.#zoom,
+    ];
   }
 
   #screenToWorld(sx, sy, shipX, shipZ, headingRad, scale, cx, cy) {
-    const nx = (sx - cx) / scale;
-    const ny = (sy - cy) / scale;
+    const nx = (sx - cx - this.#panX) / (scale * this.#zoom);
+    const ny = (sy - cy - this.#panY) / (scale * this.#zoom);
     const cosH = Math.cos(headingRad);
     const sinH = Math.sin(headingRad);
-    const wx = nx * cosH + ny * sinH + shipX;
-    const wz = nx * sinH - ny * cosH + shipZ;
-    return [wx, wz];
+    return [
+      nx * cosH + ny * sinH + shipX,
+      nx * sinH - ny * cosH + shipZ,
+    ];
+  }
+
+  #eventBufPos(e) {
+    const rect = this.#canvas.getBoundingClientRect();
+    let src;
+    if (e.touches && e.touches.length > 0) {
+      src = e.touches[0];
+    } else if (e.changedTouches && e.changedTouches.length > 0) {
+      src = e.changedTouches[0];
+    } else {
+      src = e;
+    }
+    const cssX = src.clientX - rect.left;
+    const cssY = src.clientY - rect.top;
+    return {
+      x: cssX * (this.#canvas.width / rect.width),
+      y: cssY * (this.#canvas.height / rect.height),
+    };
   }
 
   #render() {
@@ -180,28 +235,28 @@ export class PhNavigationMap extends HTMLElement {
   }
 
   #drawGrid(octx, cx, cy, scale, shipX, shipZ, headingRad, W, H, range) {
-    const cosH = Math.cos(headingRad);
-    const sinH = Math.sin(headingRad);
-
-    const toScreen = (wx, wz) => {
-      const dx = wx - shipX;
-      const dz = wz - shipZ;
-      const rx = dx * cosH + dz * sinH;
-      const rz = dx * sinH - dz * cosH;
-      return [cx + rx * scale, cy + rz * scale];
-    };
-
-    const half = range * 1.5;
-    const minWX = shipX - half;
-    const maxWX = shipX + half;
-    const minWZ = shipZ - half;
-    const maxWZ = shipZ + half;
+    const [tlwx, tlwz] = this.#screenToWorld(0, 0, shipX, shipZ, headingRad, scale, cx, cy);
+    const [brwx, brwz] = this.#screenToWorld(W, H, shipX, shipZ, headingRad, scale, cx, cy);
+    const minWX = Math.min(tlwx, brwx);
+    const maxWX = Math.max(tlwx, brwx);
+    const minWZ = Math.min(tlwz, brwz);
+    const maxWZ = Math.max(tlwz, brwz);
 
     let minor, major;
     if (range > 50000) { minor = 2000; major = 10000; }
     else if (range > 10000) { minor = 500; major = 2000; }
     else if (range > 2000) { minor = 100; major = 500; }
     else { minor = 50; major = 200; }
+
+    const cosH = Math.cos(headingRad);
+    const sinH = Math.sin(headingRad);
+    const toScreen = (wx, wz) => {
+      const dx = wx - shipX;
+      const dz = wz - shipZ;
+      const rx = dx * cosH + dz * sinH;
+      const rz = dx * sinH - dz * cosH;
+      return [cx + this.#panX + rx * scale * this.#zoom, cy + this.#panY + rz * scale * this.#zoom];
+    };
 
     octx.strokeStyle = 'rgba(40,58,120,0.18)';
     octx.lineWidth = 0.5;
@@ -347,18 +402,8 @@ export class PhNavigationMap extends HTMLElement {
     return best;
   }
 
-  #onPointerTap(e) {
-    if (!this.#canvas) return;
-    const rect = this.#canvas.getBoundingClientRect();
-    const touch = e.touches ? e.touches[0] : e;
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    const scaleX = this.#canvas.width / rect.width;
-    const scaleY = this.#canvas.height / rect.height;
-    const canvasX = x * scaleX;
-    const canvasY = y * scaleY;
-
-    const hit = this.#getBlipAt(canvasX, canvasY);
+  #handleTap(bufX, bufY) {
+    const hit = this.#getBlipAt(bufX, bufY);
     const state = this.#state || {};
     const shipPos = state.ship_pos || { x: 0, z: 0 };
     const range = state.range || 50000;
@@ -370,7 +415,7 @@ export class PhNavigationMap extends HTMLElement {
     const cx = this.#canvas.width / 2;
     const cy = this.#canvas.height / 2;
 
-    const [wx, wz] = this.#screenToWorld(canvasX, canvasY, shipPos.x, shipPos.z, headingRad, scale, cx, cy);
+    const [wx, wz] = this.#screenToWorld(bufX, bufY, shipPos.x, shipPos.z, headingRad, scale, cx, cy);
 
     if (hit && this.sendAction) {
       this.#selectedBlip = hit.blip;
@@ -383,7 +428,125 @@ export class PhNavigationMap extends HTMLElement {
     }
   }
 
-  #boundTap = (e) => this.#onPointerTap(e);
+  #onPointerTap(e) {
+    if (!this.#canvas) return;
+    const cpos = this.#eventBufPos(e);
+    this.#handleTap(cpos.x, cpos.y);
+  }
+
+  #boundMouseDown = (e) => {
+    if (this.#touchActive) return;
+    const cpos = this.#eventBufPos(e);
+    this.#isDragging = true;
+    this.#tapMoved = false;
+    this.#dragStartX = cpos.x;
+    this.#dragStartY = cpos.y;
+    this.#startPanX = this.#panX;
+    this.#startPanY = this.#panY;
+  };
+
+  #boundMouseMove = (e) => {
+    if (!this.#isDragging) return;
+    const cpos = this.#eventBufPos(e);
+    const dx = cpos.x - this.#dragStartX;
+    const dy = cpos.y - this.#dragStartY;
+    if (Math.hypot(dx, dy) > 5) {
+      this.#tapMoved = true;
+      this.#panX = this.#startPanX + dx;
+      this.#panY = this.#startPanY + dy;
+      this.#needsRender = true;
+    }
+  };
+
+  #boundMouseUp = (e) => {
+    if (!this.#isDragging) return;
+    this.#isDragging = false;
+    if (!this.#tapMoved) {
+      this.#handleTap(this.#dragStartX, this.#dragStartY);
+    }
+  };
+
+  #boundWheel = (e) => {
+    e.preventDefault();
+    const cpos = this.#eventBufPos(e);
+    const factor = e.deltaY < 0 ? 1.13 : 0.885;
+    const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, this.#zoom * factor));
+    const canvas = this.#canvas;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const zoomRatio = newZoom / this.#zoom;
+    this.#panX = cpos.x - cx - (cpos.x - cx - this.#panX) * zoomRatio;
+    this.#panY = cpos.y - cy - (cpos.y - cy - this.#panY) * zoomRatio;
+    this.#zoom = newZoom;
+    this.#needsRender = true;
+  };
+
+  #boundTouchStart = (e) => {
+    this.#touchActive = true;
+    if (e.touches.length === 1) {
+      const cpos = this.#eventBufPos(e);
+      this.#isDragging = true;
+      this.#tapMoved = false;
+      this.#dragStartX = cpos.x;
+      this.#dragStartY = cpos.y;
+      this.#startPanX = this.#panX;
+      this.#startPanY = this.#panY;
+    } else if (e.touches.length === 2) {
+      this.#isDragging = false;
+      this.#tapMoved = true;
+      const t0 = e.touches[0], t1 = e.touches[1];
+      this.#lastPinchDist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+      const rect = this.#canvas.getBoundingClientRect();
+      const mx = ((t0.clientX + t1.clientX) / 2 - rect.left) * (this.#canvas.width / rect.width);
+      const my = ((t0.clientY + t1.clientY) / 2 - rect.top) * (this.#canvas.height / rect.height);
+      this.#pinchMidX = mx;
+      this.#pinchMidY = my;
+    }
+  };
+
+  #boundTouchMove = (e) => {
+    e.preventDefault();
+    if (e.touches.length === 2 && this.#lastPinchDist > 0) {
+      const t0 = e.touches[0], t1 = e.touches[1];
+      const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+      const factor = dist / this.#lastPinchDist;
+      const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, this.#zoom * factor));
+      const canvas = this.#canvas;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      const zoomRatio = newZoom / this.#zoom;
+      this.#panX = this.#pinchMidX - cx - (this.#pinchMidX - cx - this.#panX) * zoomRatio;
+      this.#panY = this.#pinchMidY - cy - (this.#pinchMidY - cy - this.#panY) * zoomRatio;
+      this.#zoom = newZoom;
+      this.#lastPinchDist = dist;
+      this.#needsRender = true;
+    } else if (e.touches.length === 1 && this.#isDragging) {
+      const cpos = this.#eventBufPos(e);
+      const dx = cpos.x - this.#dragStartX;
+      const dy = cpos.y - this.#dragStartY;
+      if (Math.hypot(dx, dy) > 5) {
+        this.#tapMoved = true;
+        this.#panX = this.#startPanX + dx;
+        this.#panY = this.#startPanY + dy;
+        this.#needsRender = true;
+      }
+    }
+  };
+
+  #boundTouchEnd = (e) => {
+    if (this.#lastPinchDist > 0) {
+      this.#lastPinchDist = 0;
+    }
+    if (this.#isDragging) {
+      this.#isDragging = false;
+      if (!this.#tapMoved && e.changedTouches.length > 0) {
+        this.#onPointerTap(e);
+      }
+    }
+    if (e.touches.length === 0) {
+      this.#touchActive = false;
+    }
+  };
 }
 
 if (typeof window !== 'undefined' && !customElements.get('ph-navigation-map')) {

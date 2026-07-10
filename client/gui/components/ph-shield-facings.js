@@ -1,5 +1,9 @@
 export class PhShieldFacings extends HTMLElement {
   #state = null;
+  #facingGs = new Map();
+  #emptyEl = null;
+  #svgEl = null;
+  #arcsGroup = null;
 
   constructor() {
     super();
@@ -26,7 +30,8 @@ export class PhShieldFacings extends HTMLElement {
     <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
   </div>
   <div class="arc-container" id="arc-container">
-    <div class="empty">NO FACING DATA</div>
+    <div class="empty" id="empty-placeholder">NO FACING DATA</div>
+    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" id="facing-svg" style="display:none"><g id="facing-arcs"></g></svg>
   </div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
@@ -48,23 +53,34 @@ export class PhShieldFacings extends HTMLElement {
     const facings = Array.isArray(s.facings) ? s.facings : [];
     const focused = s.focused_facing || null;
     const auto = !!s.auto;
-    const container = this.shadowRoot.getElementById('arc-container');
     const badge = this.shadowRoot.getElementById('auto-badge');
     badge.style.display = auto ? 'inline' : 'none';
 
+    if (!this.#emptyEl) this.#emptyEl = this.shadowRoot.getElementById('empty-placeholder');
+    if (!this.#svgEl) this.#svgEl = this.shadowRoot.getElementById('facing-svg');
+    if (!this.#arcsGroup) this.#arcsGroup = this.shadowRoot.getElementById('facing-arcs');
+
     if (facings.length === 0) {
-      container.innerHTML = '<div class="empty">NO FACING DATA</div>';
+      this.#emptyEl.style.display = '';
+      this.#svgEl.style.display = 'none';
       return;
     }
+    this.#emptyEl.style.display = 'none';
+    this.#svgEl.style.display = '';
 
     const n = facings.length;
     const cx = 100, cy = 100, r = 70, ir = 35;
     const angleStep = (Math.PI * 2) / n;
     const startAngle = -Math.PI / 2 - angleStep / 2;
 
-    let svg = `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">`;
+    const NS = 'http://www.w3.org/2000/svg';
+    const live = new Set(facings.map(f => f.id));
+    for (const [key, g] of this.#facingGs) {
+      if (!live.has(key)) { g.remove(); this.#facingGs.delete(key); }
+    }
 
     facings.forEach((f, i) => {
+      const id = f.id;
       const a0 = startAngle + i * angleStep;
       const a1 = a0 + angleStep;
       const pct = f.max_hp > 0 ? Math.min(1, Math.max(0, f.hp / f.max_hp)) : 0;
@@ -78,14 +94,37 @@ export class PhShieldFacings extends HTMLElement {
 
       const largeArc = angleStep > Math.PI ? 1 : 0;
 
-      // Full arc outline (background)
+      const midAngle = a0 + angleStep / 2;
+
+      let g = this.#facingGs.get(id);
+      if (!g) {
+        g = document.createElementNS(NS, 'g');
+        g.innerHTML = '<path class="arc-path"/><path class="hp-fill" stroke="none"/><text class="facing-label"/><text class="hp-text" text-anchor="middle" font-size="0.5rem"/>';
+        g.querySelector('.arc-path').addEventListener('click', () => {
+          if (auto) return;
+          if (this.sendAction && id) {
+            this.sendAction('set_shield_focus', { arc_id: id });
+          }
+        });
+        this.#facingGs.set(id, g);
+        this.#arcsGroup.appendChild(g);
+      }
+
+      // Arc outline
       const outer = `M ${x0} ${y0} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1} L ${xi1} ${yi1} A ${ir} ${ir} 0 ${largeArc} 0 ${xi0} ${yi0} Z`;
       const fillColor = !online ? '#282c38' : isFocused ? '#4ec870' : '#1a3a28';
       const opacity = online ? (isFocused ? 0.9 : 0.5) : 0.2;
-
-      svg += `<path class="arc-path${isFocused ? ' focused' : ''}${!online ? ' down' : ''}" d="${outer}" fill="${fillColor}" opacity="${opacity}" stroke="${isFocused ? '#4ec870' : '#282c38'}" stroke-width="${isFocused ? 2 : 1}" data-facing-id="${f.id}" />`;
+      const outline = g.children[0];
+      outline.setAttribute('d', outer);
+      outline.setAttribute('fill', fillColor);
+      outline.setAttribute('opacity', opacity);
+      outline.setAttribute('stroke', isFocused ? '#4ec870' : '#282c38');
+      outline.setAttribute('stroke-width', isFocused ? '2' : '1');
+      outline.setAttribute('data-facing-id', id);
+      outline.setAttribute('class', 'arc-path' + (isFocused ? ' focused' : '') + (!online ? ' down' : ''));
 
       // HP fill arc
+      const hpFill = g.children[1];
       if (online && pct > 0) {
         const fillPct = Math.min(1, Math.max(0, pct));
         const a0p = a0 + (1 - fillPct) * angleStep;
@@ -94,36 +133,36 @@ export class PhShieldFacings extends HTMLElement {
 
         const fillOuter = `M ${x0p} ${y0p} L ${x1p} ${y1p} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1} L ${xi1} ${yi1} A ${ir} ${ir} 0 ${largeArc} 0 ${xi0} ${yi0} A ${ir} ${ir} 0 ${largeArc} 1 ${x0p} ${y0p} Z`;
         const hpColor = pct > 0.6 ? '#4ec870' : pct > 0.25 ? '#d8a040' : '#e0402c';
-        svg += `<path d="${fillOuter}" fill="${hpColor}" opacity="${isFocused ? 0.85 : 0.55}" stroke="none" data-facing-id="${f.id}" />`;
+        hpFill.setAttribute('d', fillOuter);
+        hpFill.setAttribute('fill', hpColor);
+        hpFill.setAttribute('opacity', isFocused ? '0.85' : '0.55');
+        hpFill.style.display = '';
+      } else {
+        hpFill.style.display = 'none';
       }
 
       // Label
-      const midAngle = a0 + angleStep / 2;
       const lr = r + 16;
       const lx = cx + lr * Math.cos(midAngle);
       const ly = cy + lr * Math.sin(midAngle);
       const label = (f.label || f.id || '').substring(0, 5).toUpperCase();
-      svg += `<text class="facing-label${isFocused ? ' focused-label' : ''}" x="${lx}" y="${ly}" dy="0.35em">${label}</text>`;
+      const labelEl = g.children[2];
+      labelEl.setAttribute('x', lx);
+      labelEl.setAttribute('y', ly);
+      labelEl.setAttribute('dy', '0.35em');
+      labelEl.textContent = label;
+      labelEl.setAttribute('class', 'facing-label' + (isFocused ? ' focused-label' : ''));
 
       // HP text inside arc
       const hpLabel = !online ? 'OFF' : Math.round(pct * 100) + '%';
       const ix = cx + (ir + (r - ir) / 2) * Math.cos(midAngle);
       const iy = cy + (ir + (r - ir) / 2) * Math.sin(midAngle);
-      svg += `<text x="${ix}" y="${iy}" dy="0.35em" text-anchor="middle" font-size="0.5rem" fill="${online ? '#cce' : '#6a7178'}">${hpLabel}</text>`;
-    });
-
-    svg += '</svg>';
-    container.innerHTML = svg;
-
-    // Bind click handlers
-    container.querySelectorAll('.arc-path').forEach(path => {
-      path.addEventListener('click', () => {
-        if (auto) return;
-        const id = path.dataset.facingId;
-        if (this.sendAction && id) {
-          this.sendAction('set_shield_focus', { arc_id: id });
-        }
-      });
+      const hpText = g.children[3];
+      hpText.setAttribute('x', ix);
+      hpText.setAttribute('y', iy);
+      hpText.setAttribute('dy', '0.35em');
+      hpText.setAttribute('fill', online ? '#cce' : '#6a7178');
+      hpText.textContent = hpLabel;
     });
   }
 }

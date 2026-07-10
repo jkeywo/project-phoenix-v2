@@ -101,7 +101,6 @@ export class PhRadar extends HTMLElement {
     const R = Math.min(W, H) / 2;
     const state = this.#state || {};
 
-    // Double-buffer via offscreen canvas for atomic blit
     let octx = this.#ctx;
     if (typeof document !== 'undefined') {
       if (!this.#offscreen || this.#offscreen.width !== W || this.#offscreen.height !== H) {
@@ -112,44 +111,29 @@ export class PhRadar extends HTMLElement {
       octx = this.#offscreen.getContext('2d');
     }
 
-    // Opaque background fill
     octx.fillStyle = '#07080c';
     octx.fillRect(0, 0, W, H);
 
-    // Radar disc
     octx.fillStyle = 'rgba(5,8,22,0.52)';
     octx.beginPath();
     octx.arc(cx, cy, R, 0, Math.PI * 2);
     octx.fill();
 
-    // Atomic copy frame to visible canvas before blips (so radar always shows)
     if (this.#offscreen) {
       this.#ctx.drawImage(this.#offscreen, 0, 0);
     }
 
-    // Blips
     const blips = state.blips || [];
-    const range = state.range;
-    if (blips.length === 0 || range == null || range <= 0) { this.#needsRender = false; return; }
-    const shipHeading = state.ship_heading || 0;
-    const shipHeadingRad = shipHeading * Math.PI / 180;
+    if (blips.length === 0) { this.#needsRender = false; return; }
 
     this.#projectedBlips = [];
 
     for (const b of blips) {
-      const blipRange = b.range != null ? b.range : 0;
-      const bearingRad = (b.bearing_deg || 0) * Math.PI / 180;
-      // Rotate so ship heading is "up": subtract ship heading, then convert
-      // compass bearing (0 = north/up) to canvas angle (0 = right)
-      const angle = bearingRad - shipHeadingRad - Math.PI / 2;
-      const rangeFrac = range > 0 ? Math.min(blipRange / range, 1) : 0;
-      const dist = rangeFrac * R;
-      const bx = cx + dist * Math.cos(angle);
-      const by = cy + dist * Math.sin(angle);
-      const dotR = 6;
+      const bx = cx + (b.radar_x != null ? b.radar_x : 0) * R;
+      const by = cy - (b.radar_y != null ? b.radar_y : 0) * R;
+      const dotR = Math.max(6, (b.scaled_radius || 0) * R * 0.6);
       const color = b.color || '#a8b0c0';
 
-      // Icon PNG or colored circle fallback
       const iconName = b.icon;
       const icon = iconName ? this.#getIconImage(iconName) : null;
       const iconLoaded = icon && icon.complete && icon.naturalWidth > 0;
@@ -173,7 +157,6 @@ export class PhRadar extends HTMLElement {
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
     }
 
-    // Atomic copy to visible canvas
     if (this.#offscreen) {
       this.#ctx.drawImage(this.#offscreen, 0, 0);
     }

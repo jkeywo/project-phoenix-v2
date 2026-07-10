@@ -1,5 +1,7 @@
 export class PhObjectiveList extends HTMLElement {
   #state = null;
+  #rowCache = new Map();
+  #emptyEl = null;
 
   constructor() {
     super();
@@ -38,18 +40,32 @@ export class PhObjectiveList extends HTMLElement {
     const raw = Array.isArray(s.objectives) ? s.objectives : [];
     const list = this.shadowRoot.getElementById('list');
 
-    if (raw.length === 0) {
-      list.innerHTML = '<div class="empty">NO OBJECTIVES</div>';
-      return;
+    const live = new Set(raw.map(o => o.id || o.text || ''));
+    for (const [key, el] of this.#rowCache) {
+      if (!live.has(key)) { el.remove(); this.#rowCache.delete(key); }
     }
 
-    list.innerHTML = raw.map(o => {
+    if (raw.length === 0) {
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO OBJECTIVES'; list.appendChild(this.#emptyEl); }
+      return;
+    }
+    if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
+
+    raw.forEach(o => {
+      const key = o.id || o.text || '';
       const done = o.done != null ? o.done : (o.status === 'Completed');
       const text = o.text || '';
-      const rowCls = done ? 'row done' : 'row';
-      const indicatorCls = done ? 'indicator done' : 'indicator pending';
-      return `<div class="${rowCls}"><span class="${indicatorCls}"></span><span class="text">${text}</span></div>`;
-    }).join('');
+      let el = this.#rowCache.get(key);
+      if (!el) {
+        el = document.createElement('div');
+        el.innerHTML = '<span class="indicator"></span><span class="text"></span>';
+        this.#rowCache.set(key, el);
+        list.appendChild(el);
+      }
+      el.className = done ? 'row done' : 'row';
+      el.firstChild.className = done ? 'indicator done' : 'indicator pending';
+      el.lastChild.textContent = text;
+    });
   }
 }
 

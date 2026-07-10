@@ -651,8 +651,30 @@
 
       // Quadrant cards — one per facing (variable count, issue #514).
       var cardsEl = document.getElementById('quad-cards');
-      cardsEl.innerHTML = '';
+      var cardCache = window._shieldCardCache || {};
+      var liveCards = new Set(_state.facings.map(function(f) { return f.label; }));
+      for (var ck in cardCache) { if (!liveCards.has(ck)) { cardCache[ck].el.remove(); delete cardCache[ck]; } }
       _state.facings.forEach(function(facing) {
+        var key = facing.label;
+        var cached = cardCache[key];
+        if (!cached) {
+          var card = document.createElement('div'); card.className = 'quad-card';
+          card.innerHTML =
+            '<div class="qc-body">' +
+            '  <div class="qc-head"><div class="qc-name"></div></div>' +
+            '  <div class="qc-row1">' +
+            '    <div class="qc-pct"></div>' +
+            '    <div class="unit">% SHIELD</div>' +
+            '    <div class="spacer"></div>' +
+            '    <div class="eta">RECHARGE<div class="v"></div></div>' +
+            '  </div>' +
+            '  <div class="qc-bar"><div class="fill"></div><div class="ticks"></div></div>' +
+            '  <div class="qc-meta"><span><span class="k">EMITTER</span> <span class="v"></span></span><span><span class="k">PWR</span> <span class="v"></span></span></div>' +
+            '</div>';
+          cached = { el: card, nameEl: card.querySelector('.qc-name'), pctEl: card.querySelector('.qc-pct'), etaEl: card.querySelector('.eta .v'), fillEl: card.querySelector('.fill'), emitterEl: card.querySelector('.qc-meta .v'), pwrEl: card.querySelectorAll('.qc-meta .v')[1] };
+          cardCache[key] = cached;
+          cardsEl.appendChild(card);
+        }
         var pct = facing.hp;
         var pctFraction = facing.max_hp > 0 ? (facing.hp / facing.max_hp) : 0;
         var pctDisplay = facing.online ? pct : '—';
@@ -660,22 +682,18 @@
         var t = tier(pctNum);
         var e = eta(pctNum);
         var isFocused = (s.focused_facing === facing.label);
-        var card = document.createElement('div');
-        card.className = 'quad-card' + (isFocused ? ' focused' : '');
-        card.innerHTML =
-          '<div class="qc-body">' +
-          '  <div class="qc-head"><div class="qc-name">' + facing.label.toUpperCase() + '</div></div>' +
-          '  <div class="qc-row1">' +
-          '    <div class="qc-pct ' + t + '">' + pctDisplay + '</div>' +
-          '    <div class="unit">% SHIELD</div>' +
-          '    <div class="spacer"></div>' +
-          '    <div class="eta">RECHARGE<div class="v ' + e.cls + '">' + e.v + '</div></div>' +
-          '  </div>' +
-          '  <div class="qc-bar"><div class="fill ' + t + '" style="width:' + Math.max(0, pctNum) + '%"></div><div class="ticks"></div></div>' +
-          '  <div class="qc-meta"><span><span class="k">EMITTER</span> <span class="v">' + facing.label.substring(0, 2).toUpperCase() + '-04</span></span><span><span class="k">PWR</span> <span class="v">' + pctNum + '%</span></span></div>' +
-          '</div>';
-        cardsEl.appendChild(card);
+        cached.el.className = 'quad-card' + (isFocused ? ' focused' : '');
+        cached.nameEl.textContent = facing.label.toUpperCase();
+        cached.pctEl.className = 'qc-pct ' + t;
+        cached.pctEl.textContent = pctDisplay;
+        cached.etaEl.className = 'v ' + e.cls;
+        cached.etaEl.textContent = e.v;
+        cached.fillEl.className = 'fill ' + t;
+        cached.fillEl.style.width = Math.max(0, pctNum) + '%';
+        cached.emitterEl.textContent = facing.label.substring(0, 2).toUpperCase() + '-04';
+        if (cached.pwrEl) cached.pwrEl.textContent = pctNum + '%';
       });
+      window._shieldCardCache = cardCache;
 
       // Quad tag
       var upCount = _state.facings.filter(function(f) { return f.online; }).length;

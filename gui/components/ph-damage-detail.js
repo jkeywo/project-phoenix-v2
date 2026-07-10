@@ -1,5 +1,6 @@
 export class PhDamageDetail extends HTMLElement {
   #state = null;
+  #rowCache = new Map();
 
   constructor() {
     super();
@@ -38,12 +39,15 @@ export class PhDamageDetail extends HTMLElement {
     const entries = Array.isArray(d.entries) ? d.entries : [];
     const list = this.shadowRoot.getElementById('list');
 
-    if (entries.length === 0) {
-      list.innerHTML = '';
-      return;
+    const live = new Set(entries.map(e => e.display_name || ''));
+    for (const [key, el] of this.#rowCache) {
+      if (!live.has(key)) { el.remove(); this.#rowCache.delete(key); }
     }
 
-    list.innerHTML = entries.map(e => {
+    if (entries.length === 0) { list.textContent = ''; return; }
+
+    entries.forEach(e => {
+      const key = e.display_name || '';
       const max = e.max_hp != null ? e.max_hp : 0;
       const cur = e.current != null ? e.current : 0;
       const pct = max > 0 ? cur / max : 0;
@@ -55,20 +59,28 @@ export class PhDamageDetail extends HTMLElement {
       else if (pct < 0.75) fillCls += ' warn';
 
       const tierLabel = e.tier != null ? 'T' + e.tier : '';
-      const rowCls = destroyed ? 'row destroyed' : 'row';
       const nameLabel = e.display_name || '';
 
-      const destroyedSpan = destroyed
-        ? '<span class="destroyed-label">DESTROYED</span>'
-        : '';
-
-      return `<div class="${rowCls}">
-        <span class="name">${nameLabel}</span>
-        <div class="bar-wrap"><div class="${fillCls}" style="width:${widthPct}%"></div></div>
-        ${destroyedSpan}
-        <span class="tier">${tierLabel}</span>
-      </div>`;
-    }).join('');
+      let el = this.#rowCache.get(key);
+      if (!el) {
+        el = document.createElement('div');
+        el.innerHTML = '<span class="name"></span><div class="bar-wrap"><div class="fill"></div></div><span class="tier"></span>';
+        this.#rowCache.set(key, el);
+        list.appendChild(el);
+      }
+      el.className = destroyed ? 'row destroyed' : 'row';
+      el.children[0].textContent = nameLabel;
+      el.children[1].firstChild.className = fillCls;
+      el.children[1].firstChild.style.width = widthPct + '%';
+      var tierEl = el.children[2];
+      tierEl.textContent = tierLabel;
+      var dEl = el.querySelector('.destroyed-label');
+      if (destroyed) {
+        if (!dEl) { dEl = document.createElement('span'); dEl.className = 'destroyed-label'; dEl.textContent = 'DESTROYED'; el.insertBefore(dEl, tierEl); }
+      } else if (dEl) {
+        dEl.remove();
+      }
+    });
   }
 }
 

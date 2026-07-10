@@ -264,7 +264,7 @@
 <body style="background:#000; margin:0; overflow:hidden;">
 
   <!-- Hidden smoke-test containers -->
-  <div id="power-data" aria-hidden="true" style="position:absolute;left:-9999px;visibility:hidden;"></div>
+    <div id="power-data" aria-hidden="true" style="display:none"></div>
 
   <div class="frame" data-screen-label="Power Console">
     <div class="panel">
@@ -455,12 +455,14 @@
       /* ─ Smoke-test data ────────────────────────────────────── */
       var pd = document.getElementById('power-data');
       if (pd) {
-        pd.innerHTML = '';
+        var live = new Map();
         s.consoles.forEach(function(con) {
-          var d = document.createElement('div'); d.className = 'power-entry';
-          d.dataset.id = con.id; d.dataset.level = con.level; d.dataset.maxLevel = con.max_level || MAX_LEVEL;
-          pd.appendChild(d);
+          var el = pd.querySelector('[data-id="' + con.id + '"]');
+          if (!el) { el = document.createElement('div'); el.className = 'power-entry'; pd.appendChild(el); }
+          el.dataset.id = con.id; el.dataset.level = con.level; el.dataset.maxLevel = con.max_level || MAX_LEVEL;
+          live.set(con.id, el);
         });
+        Array.from(pd.children).forEach(function(el) { if (!live.has(el.dataset.id)) el.remove(); });
         pd.dataset.total    = String(total);
         pd.dataset.totalMax = String(totalMax);
         pd.dataset.locked   = String(locked);

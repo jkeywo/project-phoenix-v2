@@ -1,5 +1,7 @@
 export class PhCommsContactList extends HTMLElement {
   #state = null;
+  #pillCache = new Map();
+  #emptyEl = null;
 
   constructor() {
     super();
@@ -44,35 +46,42 @@ export class PhCommsContactList extends HTMLElement {
     const raw = Array.isArray(s.contacts) ? s.contacts : [];
     const list = this.shadowRoot.getElementById('list');
 
-    if (raw.length === 0) {
-      list.innerHTML = '<div class="empty">NO CONTACTS</div>';
-      return;
+    const live = new Set(raw.map(c => c.id || ''));
+    for (const [key, el] of this.#pillCache) {
+      if (!live.has(key)) { el.remove(); this.#pillCache.delete(key); }
     }
 
-    list.innerHTML = raw.map(c => {
+    if (raw.length === 0) {
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO CONTACTS'; list.appendChild(this.#emptyEl); }
+      return;
+    }
+    if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
+
+    raw.forEach(c => {
       const id = c.id || '';
       const name = c.name || '';
       const stance = c.stance || 'neutral';
       const inRange = !!c.in_range;
-      const pillCls = inRange ? 'pill' : 'pill out-of-range';
-      const badgeCls = `badge ${stance}`;
-      return `<div class="${pillCls}" data-id="${id}">
-        <span class="name">${name}</span>
-        <span class="${badgeCls}">${stance}</span>
-        <button class="hail-btn"${inRange ? '' : ' disabled'}>HAIL</button>
-      </div>`;
-    }).join('');
-
-    list.querySelectorAll('.pill').forEach(pill => {
-      const btn = pill.querySelector('.hail-btn');
-      if (btn && !btn.disabled) {
-        btn.addEventListener('click', (e) => {
+      let pill = this.#pillCache.get(id);
+      if (!pill) {
+        pill = document.createElement('div');
+        pill.className = 'pill';
+        pill.innerHTML = '<span class="name"></span><span class="badge"></span><button class="hail-btn">HAIL</button>';
+        pill.lastChild.addEventListener('click', (e) => {
           e.stopPropagation();
           if (this.sendAction) {
-            this.sendAction('hail', { target_uuid: pill.dataset.id });
+            this.sendAction('hail', { target_uuid: id });
           }
         });
+        this.#pillCache.set(id, pill);
+        list.appendChild(pill);
       }
+      pill.dataset.id = id;
+      pill.className = inRange ? 'pill' : 'pill out-of-range';
+      pill.children[0].textContent = name;
+      pill.children[1].className = 'badge ' + stance;
+      pill.children[1].textContent = stance;
+      pill.children[2].disabled = !inRange;
     });
   }
 }

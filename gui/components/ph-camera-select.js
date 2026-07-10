@@ -1,5 +1,7 @@
 export class PhCameraSelect extends HTMLElement {
   #state = null;
+  #btnCache = new Map();
+  #emptyEl = null;
 
   constructor() {
     super();
@@ -51,25 +53,35 @@ export class PhCameraSelect extends HTMLElement {
 
     const container = root.getElementById('container');
 
-    if (views.length === 0) {
-      container.innerHTML = '<div class="placeholder">NO CAMERA</div>';
-      return;
+    const live = new Set(views);
+    for (const [key, btn] of this.#btnCache) {
+      if (!live.has(key)) { btn.remove(); this.#btnCache.delete(key); }
     }
 
-    container.innerHTML = views.map(v => {
-      const active = v === currentView;
-      return `<button class="cam-btn${active ? ' active' : ''}" data-view="${v}"${auto ? ' disabled' : ''}>${v}</button>`;
-    }).join('');
+    if (views.length === 0) {
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'placeholder'; this.#emptyEl.textContent = 'NO CAMERA'; container.appendChild(this.#emptyEl); }
+      return;
+    }
+    if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
 
-    if (!auto) {
-      container.querySelectorAll('.cam-btn').forEach(btn => {
+    views.forEach(v => {
+      let btn = this.#btnCache.get(v);
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.className = 'cam-btn';
+        btn.dataset.view = v;
         btn.addEventListener('click', () => {
-          if (this.sendAction) {
+          if (!btn.disabled && this.sendAction) {
             this.sendAction('set_view', { direction: btn.dataset.view });
           }
         });
-      });
-    }
+        this.#btnCache.set(v, btn);
+        container.appendChild(btn);
+      }
+      btn.className = 'cam-btn' + (v === currentView ? ' active' : '');
+      btn.disabled = auto;
+      btn.textContent = v;
+    });
   }
 }
 

@@ -1,5 +1,7 @@
 export class PhPowerControls extends HTMLElement {
   #state = null;
+  #pipCache = new Map();
+  #emptyEl = null;
 
   constructor() {
     super();
@@ -56,23 +58,29 @@ export class PhPowerControls extends HTMLElement {
     badge.style.display = auto ? 'inline' : 'none';
 
     if (groups.length === 0) {
-      container.innerHTML = '<div class="empty">NO POWER GROUPS</div>';
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO POWER GROUPS'; container.appendChild(this.#emptyEl); }
       return;
     }
+    if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
 
     const newIds = new Set(groups.map(g => g.id));
     Array.from(container.children).forEach(child => {
       if (!newIds.has(child.dataset.groupId)) {
         child.remove();
+        const gid = child.dataset.groupId;
+        for (const key of this.#pipCache.keys()) {
+          if (key.startsWith(gid + ':')) this.#pipCache.delete(key);
+        }
       }
     });
 
     groups.forEach((group, idx) => {
-      let el = container.querySelector(`[data-group-id="${group.id}"]`);
+      const gid = group.id;
+      let el = container.querySelector(`[data-group-id="${gid}"]`);
       if (!el) {
         el = document.createElement('div');
         el.className = 'group';
-        el.dataset.groupId = group.id;
+        el.dataset.groupId = gid;
         el.innerHTML = `
           <div class="group-top">
             <span class="group-label"></span>
@@ -90,25 +98,25 @@ export class PhPowerControls extends HTMLElement {
           if (!pip || auto) return;
           const level = Number(pip.dataset.level);
           if (!isNaN(level) && this.sendAction) {
-            this.sendAction('set_power', { target: group.id, level });
+            this.sendAction('set_power', { target: gid, level });
           }
         });
         const incrBtn = el.querySelector('.step-btn[data-action="incr"]');
         const decrBtn = el.querySelector('.step-btn[data-action="decr"]');
         incrBtn.addEventListener('click', () => {
           if (auto) return;
-          const cur = this.#currentLevel(group.id);
+          const cur = this.#currentLevel(gid);
           const max = group.max_level != null ? group.max_level : 4;
           if (cur < max && this.sendAction) {
-            this.sendAction('set_power', { target: group.id, level: cur + 1 });
+            this.sendAction('set_power', { target: gid, level: cur + 1 });
           }
         });
         decrBtn.addEventListener('click', () => {
           if (auto) return;
-          const cur = this.#currentLevel(group.id);
+          const cur = this.#currentLevel(gid);
           const min = group.min_level != null ? group.min_level : 0;
           if (cur > min && this.sendAction) {
-            this.sendAction('set_power', { target: group.id, level: cur - 1 });
+            this.sendAction('set_power', { target: gid, level: cur - 1 });
           }
         });
         if (idx < container.children.length) {
@@ -126,12 +134,23 @@ export class PhPowerControls extends HTMLElement {
       el.querySelector('.level-text').textContent = 'LVL ' + level;
 
       const pipRow = el.querySelector('.pip-row');
-      pipRow.innerHTML = '';
+
+      const livePips = new Set();
       for (let i = minLevel; i <= maxLevel; i++) {
-        const pip = document.createElement('div');
+        const key = gid + ':' + i;
+        livePips.add(key);
+        let pip = this.#pipCache.get(key);
+        if (!pip) {
+          pip = document.createElement('div');
+          pip.className = 'pip';
+          pip.dataset.level = i;
+          this.#pipCache.set(key, pip);
+          pipRow.appendChild(pip);
+        }
         pip.className = 'pip' + (i <= level ? ' active' : ' inactive') + (auto ? ' disabled' : '');
-        pip.dataset.level = i;
-        pipRow.appendChild(pip);
+      }
+      for (const [key, pip] of this.#pipCache) {
+        if (key.startsWith(gid + ':') && !livePips.has(key)) { pip.remove(); this.#pipCache.delete(key); }
       }
 
       const incrBtn = el.querySelector('.step-btn[data-action="incr"]');

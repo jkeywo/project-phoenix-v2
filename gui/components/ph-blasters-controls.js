@@ -1,5 +1,6 @@
 export class PhBlastersControls extends HTMLElement {
   #state = null;
+  #emptyEl = null;
 
   constructor() {
     super();
@@ -49,9 +50,10 @@ export class PhBlastersControls extends HTMLElement {
     const container = this.shadowRoot.getElementById('banks');
 
     if (banks.length === 0) {
-      container.innerHTML = '<div class="empty">NO BLASTER BANKS</div>';
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO BLASTER BANKS'; container.appendChild(this.#emptyEl); }
       return;
     }
+    if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
 
     const newIds = new Set(banks.map(b => b.id));
     Array.from(container.children).forEach(child => {

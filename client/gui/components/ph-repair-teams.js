@@ -2,6 +2,7 @@ export class PhRepairTeams extends HTMLElement {
   #state = null;
   #animFrame = null;
   #displayProgress = new Map();
+  #emptyEl = null;
 
   constructor() {
     super();
@@ -101,9 +102,10 @@ export class PhRepairTeams extends HTMLElement {
     badge.style.display = auto ? 'inline' : 'none';
 
     if (teams.length === 0) {
-      container.innerHTML = '<div class="empty">NO REPAIR TEAMS</div>';
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO REPAIR TEAMS'; container.appendChild(this.#emptyEl); }
       return;
     }
+    if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
 
     const newIds = new Set(teams.map(t => t.id));
     Array.from(container.children).forEach(child => {

@@ -1,5 +1,7 @@
 export class PhShieldPanel extends HTMLElement {
   #state = null;
+  #facingCache = new Map();
+  #emptyEl = null;
 
   constructor() {
     super();
@@ -78,21 +80,36 @@ export class PhShieldPanel extends HTMLElement {
 
     const facings = s.facings || [];
     const container = root.getElementById('facings-container');
-    if (facings.length === 0) {
-      container.innerHTML = '<div style="font-size:0.6rem;color:#6a7178;padding:0.5rem 0;text-align:center">NO SHIELD DATA</div>';
-      return;
+
+    const live = new Set(facings.map(f => f.label || ''));
+    for (const [key, el] of this.#facingCache) {
+      if (!live.has(key)) { el.remove(); this.#facingCache.delete(key); }
     }
 
-    container.innerHTML = facings.map(f => {
+    if (facings.length === 0) {
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.style.cssText = 'font-size:0.6rem;color:#6a7178;padding:0.5rem 0;text-align:center'; this.#emptyEl.textContent = 'NO SHIELD DATA'; container.appendChild(this.#emptyEl); }
+      return;
+    }
+    if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
+
+    facings.forEach(f => {
+      const key = f.label || '';
       const pct = f.max_hp > 0 ? Math.round(f.hp / f.max_hp * 100) : 0;
       const cls = !f.online ? 'down' : pct > 60 ? '' : pct > 25 ? 'warn' : 'crit';
       const pctLabel = !f.online ? 'OFF' : pct + '%';
-      return `<div class="facing-row">
-        <span class="lbl">${(f.label || '?').substring(0, 4).toUpperCase()}</span>
-        <div class="bar-wrap"><div class="fill ${cls}" style="width:${pct}%"></div></div>
-        <span class="pct">${pctLabel}</span>
-      </div>`;
-    }).join('');
+      let row = this.#facingCache.get(key);
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'facing-row';
+        row.innerHTML = '<span class="lbl"></span><div class="bar-wrap"><div class="fill"></div></div><span class="pct"></span>';
+        this.#facingCache.set(key, row);
+        container.appendChild(row);
+      }
+      row.children[0].textContent = (f.label || '?').substring(0, 4).toUpperCase();
+      row.children[1].firstChild.className = 'fill ' + cls;
+      row.children[1].firstChild.style.width = pct + '%';
+      row.children[2].textContent = pctLabel;
+    });
   }
 }
 

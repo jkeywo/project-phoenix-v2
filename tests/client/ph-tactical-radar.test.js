@@ -109,14 +109,12 @@ describe('PhTacticalRadar', () => {
   it('passes base state through to inner ph-radar', () => {
     const { el, innerRadar } = setup();
     el.state = {
-      blips: [{ uuid: 'a', bearing_deg: 0, range: 500 }],
-      range: 1000,
+      blips: [{ uuid: 'a', radar_x: 0, radar_y: 0.5 }],
       ship_heading: 90,
       config: { max_range: 5000 },
     };
     expect(innerRadar.state).toEqual({
-      blips: [{ uuid: 'a', bearing_deg: 0, range: 500 }],
-      range: 1000,
+      blips: [{ uuid: 'a', radar_x: 0, radar_y: 0.5 }],
       ship_heading: 90,
       config: { max_range: 5000 },
     });
@@ -148,10 +146,9 @@ describe('PhTacticalRadar', () => {
 
   it('selected target highlight renders circle around blip position', () => {
     const { el } = setup();
+    // radar_x=0, radar_y=0.5 → bx = 50 + 0*46 = 50, by = 50 - 0.5*46 = 27
     el.state = {
-      blips: [{ uuid: 'abc', bearing_deg: 0, range: 500 }],
-      range: 1000,
-      ship_heading: 0,
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.5 }],
       selected_target_uuid: 'abc',
     };
     const g = el.shadowRoot.getElementById('selected-highlight');
@@ -166,8 +163,7 @@ describe('PhTacticalRadar', () => {
   it('no highlight rendered when selected_target_uuid is null', () => {
     const { el } = setup();
     el.state = {
-      blips: [{ uuid: 'abc', bearing_deg: 0, range: 500 }],
-      range: 1000,
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.5 }],
       selected_target_uuid: null,
     };
     const g = el.shadowRoot.getElementById('selected-highlight');
@@ -177,18 +173,12 @@ describe('PhTacticalRadar', () => {
   it('blip click on inner radar dispatches sendAction via wrapper', () => {
     const sendAction = vi.fn();
     const { el, canvas, tickRaf } = setup({ sendAction });
+    // radar_x=0, radar_y=0.5 → bx = 300 + 0*300 = 300, by = 300 - 0.5*300 = 150
+    // CSS: x=150, y=75
     el.state = {
-      blips: [{ uuid: 'abc', bearing_deg: 0, range: 500, color: '#ff0000' }],
-      range: 1000,
-      ship_heading: 0,
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.5, color: '#ff0000' }],
     };
     tickRaf();
-    // blip at bearing 0 (north), range 500 in 1000 max, canvas 600x600
-    // center (300,300), rangeFrac=0.5, dist=150
-    // angle = 0 - 0 - π/2 = -π/2
-    // bx = 300 + 150*cos(-π/2) = 300
-    // by = 300 + 150*sin(-π/2) = 150
-    // CSS coords: /2 => (150, 75)
     canvas.dispatchEvent(new MouseEvent('click', { clientX: 150, clientY: 75 }));
     expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
   });

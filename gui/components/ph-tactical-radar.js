@@ -105,15 +105,8 @@ export class PhTacticalRadar extends HTMLElement {
     if (!uuid) return;
     const blip = (s.blips || []).find(b => b.uuid === uuid);
     if (!blip) return;
-    const range = s.range;
-    if (range == null || range <= 0) return;
-    const heading = s.ship_heading || 0;
-    const blipRange = blip.range != null ? blip.range : 0;
-    const frac = Math.min(blipRange / range, 1);
-    const dist = frac * r;
-    const angleRad = ((blip.bearing_deg || 0) - heading - 90) * Math.PI / 180;
-    const bx = cx + dist * Math.cos(angleRad);
-    const by = cy + dist * Math.sin(angleRad);
+    const bx = cx + (blip.radar_x != null ? blip.radar_x : 0) * r;
+    const by = cy - (blip.radar_y != null ? blip.radar_y : 0) * r;
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', bx.toFixed(1));
     circle.setAttribute('cy', by.toFixed(1));

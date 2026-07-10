@@ -136,7 +136,7 @@ describe('PhRadar', () => {
   it('state setter triggers render (canvas draw calls)', () => {
     const h = setup();
     const before = h.fakeCtx._calls.fillRect.length;
-    h.el.state = { blips: [{ uuid: 'a', bearing_deg: 0, range: 500 }], range: 1000 };
+    h.el.state = { blips: [{ uuid: 'a', radar_x: 0, radar_y: 0.5 }] };
     h.tickRaf();
     expect(h.fakeCtx._calls.fillRect.length).toBeGreaterThan(before);
   });
@@ -172,40 +172,26 @@ describe('PhRadar', () => {
   it('click on blip calls sendAction with set_target and uuid', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
+    // radar_x=0, radar_y=0.5 → bx = 300 + 0*300 = 300, by = 300 - 0.5*300 = 150
+    // CSS: x=150, y=75
     h.el.state = {
-      blips: [{ uuid: 'abc', bearing_deg: 0, range: 500, color: '#ff0000' }],
-      range: 1000,
-      ship_heading: 0,
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.5, color: '#ff0000' }],
     };
     h.tickRaf();
-
-    // blip at bearing 0 (north/up), range 500, canvas 600×600
-    // canvas centre (300,300), R=300, rangeFrac=0.5 → dist=150
-    // angle = 0 - 0 - π/2 = -π/2
-    // bx = 300 + 150*cos(-π/2) = 300
-    // by = 300 + 150*sin(-π/2) = 150
-    // CSS coords: canvas buffer→CSS = /2 (buffer 600, CSS 300)
-    // CSS x = 300/2 = 150, CSS y = 150/2 = 75
 
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 150, clientY: 75 }));
     expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
   });
 
-  it('click on blip at bearing 90 starboard fires correctly', () => {
+  it('click on blip at starboard fires correctly', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
+    // radar_x=0.5, radar_y=0 → bx = 300 + 0.5*300 = 450, by = 300 - 0*300 = 300
+    // CSS: x=225, y=150
     h.el.state = {
-      blips: [{ uuid: 'def', bearing_deg: 90, range: 500, color: '#00ff00' }],
-      range: 1000,
-      ship_heading: 0,
+      blips: [{ uuid: 'def', radar_x: 0.5, radar_y: 0, color: '#00ff00' }],
     };
     h.tickRaf();
-
-    // bearing 90 (east/right)
-    // angle = 90° - 0 - 90° = 0 rad
-    // bx = 300 + 150*cos(0) = 450
-    // by = 300 + 150*sin(0) = 300
-    // CSS: x=225, y=150
 
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 225, clientY: 150 }));
     expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'def' });
@@ -215,9 +201,7 @@ describe('PhRadar', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
     h.el.state = {
-      blips: [{ uuid: 'abc', bearing_deg: 0, range: 500, color: '#ff0000' }],
-      range: 1000,
-      ship_heading: 0,
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.5, color: '#ff0000' }],
     };
     h.tickRaf();
 
@@ -229,9 +213,7 @@ describe('PhRadar', () => {
   it('no sendAction set does not throw on blip click', () => {
     const h = setup(); // no sendAction
     h.el.state = {
-      blips: [{ uuid: 'abc', bearing_deg: 0, range: 500, color: '#ff0000' }],
-      range: 1000,
-      ship_heading: 0,
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0.5, color: '#ff0000' }],
     };
     h.tickRaf();
 
@@ -246,22 +228,17 @@ describe('PhRadar', () => {
     expect(h.el.sendAction).toBe(sendAction);
   });
 
-  // ── Ship heading rotation ────────────────────────────────────────
+  // ── Pre-projected blip positioning ──────────────────────────────
 
-  it('ship heading rotates blip position for hit-testing', () => {
+  it('radar_x/radar_y positions blip for hit-testing', () => {
     const sendAction = vi.fn();
     const h = setup({ sendAction });
+    // radar_x=-0.5, radar_y=0 → bx = 300 + (-0.5)*300 = 150, by = 300 - 0*300 = 300
+    // CSS: x=75, y=150
     h.el.state = {
-      blips: [{ uuid: 'abc', bearing_deg: 0, range: 500, color: '#ff0000' }],
-      range: 1000,
-      ship_heading: 90, // ship facing east
+      blips: [{ uuid: 'abc', radar_x: -0.5, radar_y: 0, color: '#ff0000' }],
     };
     h.tickRaf();
-
-    // ship_heading=90: effective angle = 0 - 90° - 90° = -180° = π
-    // bx = 300 + 150*cos(π) = 300 - 150 = 150
-    // by = 300 + 150*sin(π) = 300
-    // CSS: x=75, y=150
 
     h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 75, clientY: 150 }));
     expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
@@ -316,12 +293,10 @@ describe('PhRadar', () => {
     h.el.state = {
       blips: [{
         uuid: 'icon-blip',
-        bearing_deg: 0,
-        range: 500,
+        radar_x: 0,
+        radar_y: 0.5,
         icon: 'warbird',
       }],
-      range: 1000,
-      ship_heading: 0,
     };
     // The Image mock has complete=true, naturalWidth>0, so icon is "loaded"
     h.tickRaf();
@@ -333,12 +308,10 @@ describe('PhRadar', () => {
     h.el.state = {
       blips: [{
         uuid: 'circle-blip',
-        bearing_deg: 0,
-        range: 500,
+        radar_x: 0,
+        radar_y: 0.5,
         color: '#ff3344',
       }],
-      range: 1000,
-      ship_heading: 0,
     };
     h.tickRaf();
     // Should have at least 2 arcs: disc background + blip

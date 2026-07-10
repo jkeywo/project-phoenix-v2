@@ -152,13 +152,14 @@ export class PhBlastersControls extends HTMLElement {
       row.querySelector('.auto-badge').style.display = 'none';
 
       const isCooling = !!bank.on_cooldown;
+      const hasCharge = !!bank.has_charge;
       const chargeProgress = Number(bank.charge_progress || 0);
       const isCharging = !isCooling && chargeProgress > 0;
 
       const btn = row.querySelector('.charge-btn');
       btn.disabled = isCooling;
       btn.className = 'charge-btn' + (isCharging ? ' charging' : '');
-      btn.textContent = isCharging ? 'FIRING...' : isCooling ? 'COOLDOWN' : 'CHARGE';
+      btn.textContent = isCharging ? 'FIRING...' : isCooling ? 'COOLDOWN' : hasCharge ? 'CHARGE' : 'FIRE';
 
       const fills = row.querySelectorAll('.bar-fill');
       const chargeFill = fills[0];

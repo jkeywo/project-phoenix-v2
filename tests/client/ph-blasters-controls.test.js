@@ -54,15 +54,24 @@ describe('PhBlastersControls', () => {
     expect(queryText(el, '#banks')).toBe('NO BLASTER BANKS');
   });
 
-  it('renders idle bank with label and CHARGE button', () => {
+  it('renders idle bank with label and FIRE button (instant-fire, no charge time)', () => {
     const { el } = setup();
     el.state = {
-      banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0 }],
+      banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0, has_charge: false }],
     };
     expect(queryText(el, '.lbl')).toBe('Port');
     const btn = el.shadowRoot.querySelector('.charge-btn');
-    expect(btn.textContent.trim()).toBe('CHARGE');
+    expect(btn.textContent.trim()).toBe('FIRE');
     expect(btn.disabled).toBe(false);
+  });
+
+  it('renders idle bank with CHARGE button when the bank has a charge time', () => {
+    const { el } = setup();
+    el.state = {
+      banks: [{ id: 'heavy', label: 'Heavy', on_cooldown: false, charge_progress: 0, has_charge: true }],
+    };
+    const btn = el.shadowRoot.querySelector('.charge-btn');
+    expect(btn.textContent.trim()).toBe('CHARGE');
   });
 
   it('shows FIRING... while a charge is in progress', () => {

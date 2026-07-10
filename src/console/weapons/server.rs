@@ -1434,7 +1434,7 @@ fn tick_beams(
                     if let Ok(parsed) = uuid::Uuid::parse_str(&state.shooter_uuid) {
                         commands
                             .entity(te)
-                            .insert(crate::ai_plugin::AttackerThisTick(parsed));
+                            .try_insert(crate::ai_plugin::AttackerThisTick(parsed));
                     }
                 }
             }

@@ -2621,9 +2621,9 @@ fn render_spawned_entities(
                         // path-cache, will arrive quickly) from cold loads (first
                         // request for this path, network round-trip pending).
                         bevy::log::info!(
-                        "render_spawned_entities: requesting scene {path} (load_state={:?})",
-                        asset_server.load_state(h.id())
-                    );
+                            "render_spawned_entities: requesting scene {path} (load_state={:?})",
+                            asset_server.load_state(h.id())
+                        );
                         ec.insert(PendingSceneHandle(h.clone()));
                         h
                     }

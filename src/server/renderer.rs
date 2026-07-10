@@ -393,9 +393,13 @@ fn toggle_ship_model_visibility(
     model_q: Query<&crate::server_app::LocalShipModel>,
     mut visibility_q: Query<&mut Visibility>,
 ) {
-    let Ok(view_mode) = view_mode_q.single() else { return };
+    let Ok(view_mode) = view_mode_q.single() else {
+        return;
+    };
     let is_cinematic = view_mode.view_mode == ViewMode::Cinematic;
-    let Ok(local) = local_ship_q.single() else { return };
+    let Ok(local) = local_ship_q.single() else {
+        return;
+    };
 
     // Walk the local ship's children to find the LocalShipModel child.
     fn set_vis(
@@ -407,7 +411,11 @@ fn toggle_ship_model_visibility(
     ) {
         if model_q.get(entity).is_ok() {
             if let Ok(mut vis) = visibility_q.get_mut(entity) {
-                *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+                *vis = if show {
+                    Visibility::Visible
+                } else {
+                    Visibility::Hidden
+                };
             }
             return;
         }
@@ -418,7 +426,13 @@ fn toggle_ship_model_visibility(
         }
     }
 
-    set_vis(local, is_cinematic, &children_q, &model_q, &mut visibility_q);
+    set_vis(
+        local,
+        is_cinematic,
+        &children_q,
+        &model_q,
+        &mut visibility_q,
+    );
 }
 
 fn update_view_screen_text(
@@ -497,19 +511,21 @@ fn cinematic_camera(
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     cinematic_q: Query<&CinematicCameraSection, With<crate::simulation::LocalShip>>,
     local_q: Query<&EntityUuid, With<crate::simulation::LocalShip>>,
-    all_entities: Query<(
-        &EntityUuid,
-        &Transform,
-        Option<&FactionComponent>,
-    )>,
+    all_entities: Query<(&EntityUuid, &Transform, Option<&FactionComponent>)>,
     faction_registry: Option<Res<FactionRegistryResource>>,
     time: Res<Time>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
     mut state: ResMut<CinematicCameraState>,
 ) {
-    let Ok(mut transform) = cam_query.single_mut() else { return };
-    let Ok(physics) = physics_q.single().copied() else { return };
-    let Ok(cam_cfg) = cinematic_q.single() else { return };
+    let Ok(mut transform) = cam_query.single_mut() else {
+        return;
+    };
+    let Ok(physics) = physics_q.single().copied() else {
+        return;
+    };
+    let Ok(cam_cfg) = cinematic_q.single() else {
+        return;
+    };
     let cfg = &cam_cfg.0;
 
     // Only run when cinematic mode is selected.
@@ -530,11 +546,7 @@ fn cinematic_camera(
 
     // Compute forward direction with default downward pitch.
     let pitch_rad = cfg.default_pitch_deg.to_radians();
-    let default_look = Vec3::new(
-        0.0,
-        -pitch_rad.sin(),
-        -pitch_rad.cos(),
-    );
+    let default_look = Vec3::new(0.0, -pitch_rad.sin(), -pitch_rad.cos());
     let look_ahead = cfg.look_ahead_distance;
 
     // ── Collect entity snapshot for all non-local entities ──────────
@@ -548,9 +560,7 @@ fn cinematic_camera(
     let entity_snapshot: Vec<(String, Vec3, Option<uuid::Uuid>)> = all_entities
         .iter()
         .filter(|(eu, _, _)| local_uuid_str.as_ref().map_or(true, |lu| eu.0 != *lu))
-        .map(|(eu, tf, faction)| {
-            (eu.0.clone(), tf.translation, faction.map(|f| f.0))
-        })
+        .map(|(eu, tf, faction)| (eu.0.clone(), tf.translation, faction.map(|f| f.0)))
         .collect();
 
     // ── Target selection with hysteresis ────────────────────────────
@@ -560,16 +570,29 @@ fn cinematic_camera(
     // Drop target if it's no longer within range (allow 1.5x look_range drop).
     let drop_range_sq = (cfg.entity_look_range * 1.5).powi(2);
     let keep_target = state.current_target.and_then(|uuid| {
-        entity_snapshot.iter().find(|(eu, _, _)| eu.as_str() == uuid.to_string()).and_then(|(_, pos, _)| {
-            let dx = pos.x - ship_origin.x;
-            let dz = pos.z - ship_origin.z;
-            if dx * dx + dz * dz <= drop_range_sq { Some(uuid) } else { None }
-        })
+        entity_snapshot
+            .iter()
+            .find(|(eu, _, _)| eu.as_str() == uuid.to_string())
+            .and_then(|(_, pos, _)| {
+                let dx = pos.x - ship_origin.x;
+                let dz = pos.z - ship_origin.z;
+                if dx * dx + dz * dz <= drop_range_sq {
+                    Some(uuid)
+                } else {
+                    None
+                }
+            })
     });
 
     let target = if should_re_eval {
         state.last_re_eval = now;
-        find_cinematic_target(ship_origin, cfg, local_faction, &entity_snapshot, faction_registry.as_deref())
+        find_cinematic_target(
+            ship_origin,
+            cfg,
+            local_faction,
+            &entity_snapshot,
+            faction_registry.as_deref(),
+        )
     } else {
         keep_target
     };
@@ -577,7 +600,10 @@ fn cinematic_camera(
 
     if let Some(target_uuid) = target {
         // Find target position.
-        if let Some((_, target_pos, _)) = entity_snapshot.iter().find(|(eu, _, _)| eu.as_str() == target_uuid.to_string()) {
+        if let Some((_, target_pos, _)) = entity_snapshot
+            .iter()
+            .find(|(eu, _, _)| eu.as_str() == target_uuid.to_string())
+        {
             let midpoint = (ship_origin + *target_pos) * 0.5;
 
             // Compute yaw around ship centre: angle from ship to midpoint.
@@ -623,9 +649,7 @@ fn find_cinematic_target(
         })
         .partition(|(_, _, faction)| {
             faction_registry
-                .map(|reg| {
-                    crate::faction::is_enemy(local_faction, *faction, reg)
-                })
+                .map(|reg| crate::faction::is_enemy(local_faction, *faction, reg))
                 .unwrap_or(false)
         });
 
@@ -635,12 +659,12 @@ fn find_cinematic_target(
             let db = b_pos.distance_squared(ship_origin);
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
-        ents.first().map(|(eu, _, _)| uuid::Uuid::parse_str(eu).unwrap_or_default())
+        ents.first()
+            .map(|(eu, _, _)| uuid::Uuid::parse_str(eu).unwrap_or_default())
     };
 
     // Enemies first, then friendlies.
-    pick_closest(&mut enemies)
-        .or_else(|| pick_closest(&mut friendlies))
+    pick_closest(&mut enemies).or_else(|| pick_closest(&mut friendlies))
 }
 
 fn update_view_direction_label(

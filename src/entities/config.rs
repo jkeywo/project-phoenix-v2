@@ -801,10 +801,18 @@ pub struct CinematicCameraConfig {
     pub hysteresis_secs: f32,
 }
 
-fn default_cinematic_pitch() -> f32 { 15.0 }
-fn default_cinematic_look_range() -> f32 { 60.0 }
-fn default_cinematic_look_ahead() -> f32 { 100.0 }
-fn default_cinematic_hysteresis() -> f32 { 3.0 }
+fn default_cinematic_pitch() -> f32 {
+    15.0
+}
+fn default_cinematic_look_range() -> f32 {
+    60.0
+}
+fn default_cinematic_look_ahead() -> f32 {
+    100.0
+}
+fn default_cinematic_hysteresis() -> f32 {
+    3.0
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

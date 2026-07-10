@@ -794,7 +794,9 @@ fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String>
         "PhaserDamage" => Ok(ModifierSlot::PhaserDamage),
         "HullDamageTaken" => Ok(ModifierSlot::HullDamageTaken),
         "RepairRate" => Ok(ModifierSlot::RepairRate),
-        other => Err(format!("Unknown slot '{}'; valid values: MaxSpeed, MaxYawRate, RadarRange, PhaserDamage, HullDamageTaken, RepairRate", other)),
+        "HelmRadarRange" => Ok(ModifierSlot::HelmRadarRange),
+        "SensorRadarRange" => Ok(ModifierSlot::SensorRadarRange),
+        other => Err(format!("Unknown slot '{}'; valid values: MaxSpeed, MaxYawRate, RadarRange, PhaserDamage, HullDamageTaken, RepairRate, HelmRadarRange, SensorRadarRange", other)),
     }
 }
 

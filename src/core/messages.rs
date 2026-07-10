@@ -16,6 +16,13 @@ pub enum ModifierSlot {
     PhaserDamage,
     HullDamageTaken,
     RepairRate,
+    /// Helm console's short-range radar detection range (dedicated slot —
+    /// distinct from the tactical/weapons `RadarRange` slot so damaging one
+    /// radar system doesn't bleed into another).
+    HelmRadarRange,
+    /// Sensors console's long-range radar detection range (dedicated slot —
+    /// see `HelmRadarRange`).
+    SensorRadarRange,
 }
 
 /// Who or what applied a modifier.
@@ -35,6 +42,11 @@ pub enum ModifierSource {
     /// A modifier attributed to a power group (issue #617). The
     /// SystemId-keyed successor of the retired `Console` variant.
     PowerGroup(PowerGroupId),
+    /// A modifier derived from a damaged/disabled/destroyed system's
+    /// `debuff_magnitude` (e.g. a radar system's detection range shrinking
+    /// as it takes damage). Keyed by the system's own `SystemId` so each
+    /// damaged system's contribution can be independently added/removed.
+    SystemDamage(SystemId),
 }
 
 impl Eq for ModifierSource {}
@@ -57,6 +69,10 @@ impl std::hash::Hash for ModifierSource {
             ModifierSource::PowerGroup(g) => {
                 4u8.hash(state);
                 g.hash(state);
+            }
+            ModifierSource::SystemDamage(sid) => {
+                5u8.hash(state);
+                sid.hash(state);
             }
         }
     }
@@ -1627,6 +1643,13 @@ pub struct HelmBlackboard {
     pub boost_active: bool,
     /// True when this ship's TOML includes a boost drive config.
     pub boost_enabled: bool,
+    /// Live detection range for the helm radar widget, in world units —
+    /// the configured `helm_radar_range` scaled by the `helm-radar` system's
+    /// current damage tier (shrinks when Damaged/Disabled, near-zero when
+    /// Destroyed). `0.0` (the derived `Default`) means "no live value yet";
+    /// callers should fall back to the static `ShipClientConfig` range.
+    #[serde(default)]
+    pub radar_range: f32,
 }
 
 /// Raw sim truth for a single Helm Engine fine system (port or starboard),

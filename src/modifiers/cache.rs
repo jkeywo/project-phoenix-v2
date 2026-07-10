@@ -43,7 +43,7 @@ pub struct IntModifier {
 }
 
 impl ModifierSlot {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 8;
 
     /// Maps each slot to a fixed index for use in the cache array.
     pub fn index(&self) -> usize {
@@ -54,6 +54,8 @@ impl ModifierSlot {
             ModifierSlot::PhaserDamage => 3,
             ModifierSlot::HullDamageTaken => 4,
             ModifierSlot::RepairRate => 5,
+            ModifierSlot::HelmRadarRange => 6,
+            ModifierSlot::SensorRadarRange => 7,
         }
     }
 
@@ -65,6 +67,8 @@ impl ModifierSlot {
             ModifierSlot::PhaserDamage,
             ModifierSlot::HullDamageTaken,
             ModifierSlot::RepairRate,
+            ModifierSlot::HelmRadarRange,
+            ModifierSlot::SensorRadarRange,
         ]
     }
 }
@@ -407,6 +411,7 @@ fn format_source(source: &ModifierSource) -> String {
         ModifierSource::RegionEffect { uuid } => format!("Region({})", &uuid.to_string()[..8]),
         ModifierSource::World { id, tag } => format!("World({id}/{tag})"),
         ModifierSource::PowerGroup(g) => format!("PowerGroup({})", g.0),
+        ModifierSource::SystemDamage(sid) => format!("SystemDamage({})", sid.0),
     }
 }
 

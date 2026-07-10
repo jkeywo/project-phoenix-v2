@@ -322,6 +322,7 @@ mod tests {
                 boost_battery: 1.0,
                 boost_active: true,
                 boost_enabled: true,
+                radar_range: 0.0,
             }),
         );
 
@@ -504,6 +505,7 @@ mod tests {
                         boost_battery: 1.0,
                         boost_active: false,
                         boost_enabled: true,
+                        radar_range: 0.0,
                     }),
                 );
             }
@@ -555,6 +557,7 @@ mod tests {
                     boost_battery: 5.0,
                     boost_active: true,
                     boost_enabled: true,
+                    radar_range: 0.0,
                 }),
             );
 
@@ -575,6 +578,7 @@ mod tests {
                 boost_battery: 5.0,
                 boost_active: true,
                 boost_enabled: true,
+                radar_range: 0.0,
             })),
             "resync_for_token must not mutate the shared LastBroadcastBlackboards cache"
         );

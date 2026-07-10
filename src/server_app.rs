@@ -331,6 +331,11 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
+        crate::modifier_coordination::apply_radar_damage_modifiers
+            .in_set(crate::sim_sets::SimSet::Modifiers),
+    )
+    .add_systems(
+        Update,
         publish_viewscreen_blackboard.in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_plugins(weapons_update_broadcaster())
@@ -6312,6 +6317,7 @@ mod tests {
             boost_battery: 0.8,
             boost_active: false,
             boost_enabled: true,
+            radar_range: 0.0,
         });
 
         {

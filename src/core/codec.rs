@@ -764,6 +764,7 @@ mod tests {
                             boost_battery: 0.5,
                             boost_active: true,
                             boost_enabled: true,
+                            radar_range: 0.0,
                         }),
                     )],
                 },
@@ -1669,6 +1670,7 @@ mod tests {
             boost_battery: 0.8,
             boost_active: false,
             boost_enabled: true,
+            radar_range: 0.0,
         });
         let json = serde_json::to_string(&bb).unwrap();
         assert!(json.contains("\"kind\":\"Helm\""), "got: {json}");

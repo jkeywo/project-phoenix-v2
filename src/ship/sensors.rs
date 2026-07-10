@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::lobby::Sessions;
 use crate::messages::{
-    CoordinationPayload, SensorsBlackboard, ServerMessage, StationId, SystemBlackboard,
-    SystemControlPayload, SystemId,
+    CoordinationPayload, ModifierSlot, SensorsBlackboard, ServerMessage, StationId,
+    SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -159,6 +159,7 @@ pub fn tick_sensors_frequency_hint(
 pub fn publish_sensors_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     sensors_target_q: Query<&SensorsTarget, With<crate::server_app::LocalShip>>,
+    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
     mut ship_bbs_q: Query<
         &mut crate::server_app::ShipSystemBlackboards,
         With<crate::server_app::LocalShip>,
@@ -166,8 +167,15 @@ pub fn publish_sensors_blackboard(
 ) {
     let cfg = &ship_config.0;
     let science_target_uuid = sensors_target_q.single().ok().and_then(|st| st.0.clone());
+    // Live sensor radar range: base config range scaled by the dedicated
+    // `SensorRadarRange` modifier, which `apply_radar_damage_modifiers` keeps
+    // in sync with the `sensor-radar` system's damage tier each tick.
+    let radar_mult = modifiers_q
+        .single()
+        .map(|m| m.get(&ModifierSlot::SensorRadarRange))
+        .unwrap_or(1.0);
     let bb = SensorsBlackboard {
-        radar_range: cfg.sensors_radar_range,
+        radar_range: cfg.sensors_radar_range * radar_mult,
         radar_shows: cfg.sensors_radar_shows.clone(),
         radar_selects: cfg.sensors_radar_selects.clone(),
         science_target_uuid,

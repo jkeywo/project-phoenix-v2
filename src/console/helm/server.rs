@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::damage::DamageTier;
 use crate::messages::{
-    HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue, SystemBlackboard,
-    SystemId,
+    HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue, ModifierSlot,
+    SystemBlackboard, SystemId,
 };
 use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship_plugin::BoostConfigResource;
@@ -38,6 +38,8 @@ fn publish_helm_blackboard(
     boost_q: Query<&ShipBoost, With<crate::simulation::LocalShip>>,
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
+    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>,
+    ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     queue: Res<InterSystemQueue>,
     mut ship_q: Query<
         &mut crate::server_app::ShipSystemBlackboards,
@@ -61,6 +63,15 @@ fn publish_helm_blackboard(
     let boost_active = boost_state.as_ref().map(|b| b.is_active()).unwrap_or(false);
     // view_mode is not raw sim truth; helm blackboard omits it
 
+    // Live helm radar range: base config range scaled by the dedicated
+    // `HelmRadarRange` modifier, which `apply_radar_damage_modifiers` keeps
+    // in sync with the `helm-radar` system's damage tier each tick.
+    let radar_mult = modifiers_q
+        .single()
+        .map(|m| m.get(&ModifierSlot::HelmRadarRange))
+        .unwrap_or(1.0);
+    let radar_range = ship_client_config.0.helm_radar_range * radar_mult;
+
     let bb = HelmBlackboard {
         yaw: physics.yaw,
         forward_speed: physics.forward_speed,
@@ -70,6 +81,7 @@ fn publish_helm_blackboard(
         boost_battery,
         boost_active,
         boost_enabled,
+        radar_range,
     };
 
     // Read last helm input for engine thrust fraction.
@@ -147,6 +159,7 @@ mod tests {
         app.add_systems(Update, publish_helm_blackboard);
         // Initialise InterSystemQueue so the system parameter is satisfied.
         app.init_resource::<InterSystemQueue>();
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource::default());
         // Spawn a LocalShip entity with components so the system can query it.
         app.world_mut().spawn((
             crate::simulation::LocalShip,

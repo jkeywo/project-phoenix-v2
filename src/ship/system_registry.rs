@@ -145,6 +145,24 @@ pub const TORPEDO_TUBE_AI_CONTROLLER: &str = "torpedo_tube_ai";
 pub const BLASTER_BANK_KIND: &str = "blaster_bank";
 pub const BLASTER_BANK_AI_CONTROLLER: &str = "blaster_bank_ai";
 
+/// Wire `SystemId` for the Tactical Radar fine system.
+///
+/// Mirrors `HELM_RADAR_KIND`/`HELM_RADAR_SYSTEM_ID` — the tactical station's
+/// short-range weapons radar, made damageable/repairable like every other
+/// fine system.
+pub const TACTICAL_RADAR_KIND: &str = "tactical_radar";
+pub const TACTICAL_RADAR_SYSTEM_ID: &str = "tactical-radar";
+pub const TACTICAL_RADAR_AI_CONTROLLER: &str = "tactical_radar_ai";
+
+/// Wire `SystemId` for the Sensor Radar fine system.
+///
+/// Mirrors `HELM_RADAR_KIND`/`HELM_RADAR_SYSTEM_ID` — the sensors/science
+/// station's long-range radar, made damageable/repairable like every other
+/// fine system.
+pub const SENSOR_RADAR_KIND: &str = "sensor_radar";
+pub const SENSOR_RADAR_SYSTEM_ID: &str = "sensor-radar";
+pub const SENSOR_RADAR_AI_CONTROLLER: &str = "sensor_radar_ai";
+
 /// Wire `SystemId` for the Torpedo Magazine fine system (single instance).
 ///
 /// The magazine owns the shared torpedo `count`; tubes claim a round via
@@ -347,6 +365,15 @@ impl SystemKindRegistry {
             BLASTER_BANK_KIND,
             AiControllerRegistration::new(BLASTER_BANK_AI_CONTROLLER)?,
         )?;
+        // Tactical / sensor radar fine systems
+        registry.register(
+            TACTICAL_RADAR_KIND,
+            AiControllerRegistration::new(TACTICAL_RADAR_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            SENSOR_RADAR_KIND,
+            AiControllerRegistration::new(SENSOR_RADAR_AI_CONTROLLER)?,
+        )?;
         // Fine-grained Power systems (issue #513)
         registry.register(
             POWER_REACTOR_KIND,
@@ -471,6 +498,14 @@ pub fn helm_engine_starboard_system_id() -> SystemId {
 
 pub fn helm_radar_system_id() -> SystemId {
     SystemId(HELM_RADAR_SYSTEM_ID.to_string())
+}
+
+pub fn tactical_radar_system_id() -> SystemId {
+    SystemId(TACTICAL_RADAR_SYSTEM_ID.to_string())
+}
+
+pub fn sensor_radar_system_id() -> SystemId {
+    SystemId(SENSOR_RADAR_SYSTEM_ID.to_string())
 }
 
 pub fn helm_impulse_system_id() -> SystemId {
@@ -1158,6 +1193,64 @@ mod tests {
                 "SystemId {sid:?} must start with blaster-"
             );
         }
+    }
+
+    // ── Fine Tactical/Sensor Radar system tests ───────────────────────────────
+
+    #[test]
+    fn radar_kinds_are_registered() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(
+            registry.contains(TACTICAL_RADAR_KIND),
+            "tactical_radar not registered"
+        );
+        assert!(
+            registry.contains(SENSOR_RADAR_KIND),
+            "sensor_radar not registered"
+        );
+
+        assert_eq!(
+            registry
+                .registration(TACTICAL_RADAR_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            TACTICAL_RADAR_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry
+                .registration(SENSOR_RADAR_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            SENSOR_RADAR_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn radar_system_ids_are_lowercase_kebab() {
+        let ids = [TACTICAL_RADAR_SYSTEM_ID, SENSOR_RADAR_SYSTEM_ID];
+        for id in ids {
+            assert_eq!(
+                id,
+                id.to_lowercase(),
+                "Radar SystemId {id:?} is not lowercase"
+            );
+            assert!(
+                !id.contains('_'),
+                "Radar SystemId {id:?} contains underscore (use hyphen)"
+            );
+            assert!(!id.is_empty(), "Radar SystemId must not be empty");
+        }
+        assert_eq!(TACTICAL_RADAR_SYSTEM_ID, "tactical-radar");
+        assert_eq!(SENSOR_RADAR_SYSTEM_ID, "sensor-radar");
+    }
+
+    #[test]
+    fn radar_system_id_helpers_return_expected_values() {
+        assert_eq!(tactical_radar_system_id().0, TACTICAL_RADAR_SYSTEM_ID);
+        assert_eq!(sensor_radar_system_id().0, SENSOR_RADAR_SYSTEM_ID);
     }
 
     // ── Fine Power system tests (issue #513) ──────────────────────────────────

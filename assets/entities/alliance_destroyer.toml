@@ -17,22 +17,6 @@ radius = 1.2
 length = 3
 
 [[hull.system_hull]]
-system_id = "helm"
-display_name = "Helm"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "tactical"
-display_name = "Tactical"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
 system_id = "power-reactor"
 display_name = "Power Reactor"
 max_hp = 15
@@ -73,6 +57,30 @@ disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
+system_id = "helm-radar"
+display_name = "Helm Radar"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "tactical-radar"
+display_name = "Tactical Radar"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "sensor-radar"
+display_name = "Sensor Radar"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
 system_id = "phaser-omni"
 display_name = "Phaser Bank (Omni)"
 max_hp = 15
@@ -107,14 +115,6 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft"
 display_name = "Torpedo Tube (Aft)"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "torpedo-magazine"
-display_name = "Torpedo Magazine"
 max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -392,6 +392,12 @@ station = "captain"
 power_group = "sensors"
 
 [[system]]
+id = "sensor-radar"
+kind = "sensor_radar"
+station = "captain"
+power_group = "sensors"
+
+[[system]]
 id = "helm"
 kind = "helm"
 station = "helm"
@@ -420,6 +426,12 @@ id = "helm-radar"
 kind = "helm_radar"
 station = "helm"
 power_group = "helm"
+
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "helm-impulse"

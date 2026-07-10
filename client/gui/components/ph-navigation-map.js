@@ -204,18 +204,23 @@ export class PhNavigationMap extends HTMLElement {
     octx.fillStyle = '#07080c';
     octx.fillRect(0, 0, W, H);
 
-    this.#drawGrid(octx, cx, cy, scale, shipPos.x, shipPos.z, headingRad, W, H, rangeClamped);
+    // World-anchored, north-up chart: the camera is fixed on the world origin
+    // (0,0) rather than the ship, so the ship icon is plotted at its true
+    // sector position and visibly moves as it flies — instead of being pinned
+    // to the centre of the screen. Matches the legacy navigation console.
+    this.#drawGrid(octx, cx, cy, scale, 0, 0, 0, W, H, rangeClamped);
 
     if (waypoint && Number.isFinite(waypoint.x) && Number.isFinite(waypoint.z)) {
-      this.#drawWaypoint(octx, waypoint, cx, cy, scale, shipPos, headingRad);
+      this.#drawWaypoint(octx, waypoint, cx, cy, scale);
     }
 
-    this.#drawShipMarker(octx, cx, cy, R);
+    const [shipSx, shipSy] = this.#worldToScreen(shipPos.x, shipPos.z, 0, 0, 0, scale, cx, cy);
+    this.#drawShipMarker(octx, shipSx, shipSy, R, headingRad);
 
     this.#projectedBlips = [];
     const blipR = Math.max(3, R * 0.015);
     for (const b of blips) {
-      const [sx, sy] = this.#worldToScreen(b.world_x, b.world_z, shipPos.x, shipPos.z, headingRad, scale, cx, cy);
+      const [sx, sy] = this.#worldToScreen(b.world_x, b.world_z, 0, 0, 0, scale, cx, cy);
       if (sx < -50 || sx > W + 50 || sy < -50 || sy > H + 50) continue;
       const color = this.#blipColor(b.stance);
       this.#drawBlipShape(octx, b.kind, sx, sy, blipR, color);
@@ -285,28 +290,31 @@ export class PhNavigationMap extends HTMLElement {
     }
   }
 
-  #drawShipMarker(octx, cx, cy, R) {
+  #drawShipMarker(octx, sx, sy, R, headingRad) {
     const r = Math.max(6, R * 0.025);
     octx.save();
+    octx.translate(sx, sy);
     octx.strokeStyle = 'rgba(108,182,208,0.2)';
     octx.lineWidth = 1;
-    octx.beginPath(); octx.arc(cx, cy, r * 2.2, 0, Math.PI * 2); octx.stroke();
+    octx.beginPath(); octx.arc(0, 0, r * 2.2, 0, Math.PI * 2); octx.stroke();
+    // Orient the ship glyph to its heading (north-up chart, 0 rad = north/up).
+    octx.rotate(headingRad || 0);
     octx.shadowColor = '#6cb6d0';
     octx.shadowBlur = 14;
     octx.fillStyle = '#6cb6d0';
     octx.beginPath();
-    octx.moveTo(cx, cy - r);
-    octx.lineTo(cx + r * 0.65, cy + r * 0.45);
-    octx.lineTo(cx, cy + r * 0.05);
-    octx.lineTo(cx - r * 0.65, cy + r * 0.45);
+    octx.moveTo(0, -r);
+    octx.lineTo(r * 0.65, r * 0.45);
+    octx.lineTo(0, r * 0.05);
+    octx.lineTo(-r * 0.65, r * 0.45);
     octx.closePath();
     octx.fill();
     octx.shadowBlur = 0;
     octx.restore();
   }
 
-  #drawWaypoint(octx, wp, cx, cy, scale, shipPos, headingRad) {
-    const [px, py] = this.#worldToScreen(wp.x, wp.z, shipPos.x, shipPos.z, headingRad, scale, cx, cy);
+  #drawWaypoint(octx, wp, cx, cy, scale) {
+    const [px, py] = this.#worldToScreen(wp.x, wp.z, 0, 0, 0, scale, cx, cy);
     const d = 8;
     octx.save();
     octx.fillStyle = 'rgba(212,168,32,0.18)';
@@ -405,17 +413,16 @@ export class PhNavigationMap extends HTMLElement {
   #handleTap(bufX, bufY) {
     const hit = this.#getBlipAt(bufX, bufY);
     const state = this.#state || {};
-    const shipPos = state.ship_pos || { x: 0, z: 0 };
     const range = state.range || 50000;
     const rangeClamped = range > 0 ? range : 50000;
-    const shipHeading = state.ship_heading || 0;
-    const headingRad = shipHeading * Math.PI / 180;
     const R = Math.min(this.#canvas.width, this.#canvas.height) / 2;
     const scale = R / rangeClamped;
     const cx = this.#canvas.width / 2;
     const cy = this.#canvas.height / 2;
 
-    const [wx, wz] = this.#screenToWorld(bufX, bufY, shipPos.x, shipPos.z, headingRad, scale, cx, cy);
+    // World-anchored chart: map the tapped screen point to its absolute world
+    // coordinate (camera fixed on the origin, north-up), matching #render.
+    const [wx, wz] = this.#screenToWorld(bufX, bufY, 0, 0, 0, scale, cx, cy);
 
     if (hit && this.sendAction) {
       this.#selectedBlip = hit.blip;

@@ -511,6 +511,7 @@ export function buildCaptainConsoleState(state) {
       viewscreen_auto:       bb.viewscreen_auto        ?? false,
       view_direction:        bb.view_direction         ?? '',
       view_mode:             'Camera',
+      camera_views:          bb.camera_views           ?? [],
       objectives:            bb.objectives             ?? [],
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
@@ -531,6 +532,7 @@ export function buildCaptainConsoleState(state) {
     viewscreen_auto:       viewscreenAuto,
     view_direction:        viewDirection,
     view_mode:             'Camera',
+    camera_views:          state.cameraViews || [],
     objectives:            state.objectives  || [],
     hull_integrity_pct:    state.hullPct     || 100,
     game_status:           state.redAlert

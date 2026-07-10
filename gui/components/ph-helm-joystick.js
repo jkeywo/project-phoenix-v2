@@ -5,6 +5,9 @@ export class PhHelmJoystick extends HTMLElement {
   #pointerId = null;
   #rafId = null;
   #hbId = null;
+  #keys = {};
+  #inputRaf = null;
+  #lastKbSend = 0;
 
   constructor() {
     super();
@@ -86,6 +89,31 @@ export class PhHelmJoystick extends HTMLElement {
       }
     }
     this.#bindEvents();
+    // Keyboard (WASD / arrows) + gamepad drive the same set_helm output as the
+    // on-screen thumbstick. Ported from the legacy helm-console.html so the new
+    // per-ship helm consoles keep desktop/controller control (issue: new GUI).
+    if (typeof document !== 'undefined') {
+      document.addEventListener('keydown', this.#onKeyDown);
+      document.addEventListener('keyup', this.#onKeyUp);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('blur', this.#onBlur);
+      window.addEventListener('gamepadconnected', this.#onGamepadConnected);
+    }
+  }
+
+  disconnectedCallback() {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('keydown', this.#onKeyDown);
+      document.removeEventListener('keyup', this.#onKeyUp);
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('blur', this.#onBlur);
+      window.removeEventListener('gamepadconnected', this.#onGamepadConnected);
+    }
+    if (this.#inputRaf) { cancelAnimationFrame(this.#inputRaf); this.#inputRaf = null; }
+    if (this.#hbId) { clearInterval(this.#hbId); this.#hbId = null; }
+    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
   }
 
   set state(val) {
@@ -189,6 +217,105 @@ export class PhHelmJoystick extends HTMLElement {
     root.getElementById('thrust-readout').textContent = fmt(-this.#py);
     root.getElementById('yaw-readout').textContent = fmt(this.#px);
   }
+
+  // ── Keyboard + gamepad input ──────────────────────────────────────────
+  #onKeyDown = (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const relevant = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'KeyA', 'KeyD', 'KeyW', 'KeyS'];
+    if (relevant.indexOf(e.code) === -1) return;
+    e.preventDefault();
+    this.#keys[e.code] = true;
+    this.#startInputLoop();
+  };
+
+  #onKeyUp = (e) => {
+    delete this.#keys[e.code];
+    this.#startInputLoop();
+  };
+
+  #onBlur = () => {
+    this.#keys = {};
+    this.#startInputLoop();
+  };
+
+  #onGamepadConnected = () => {
+    this.#startInputLoop();
+  };
+
+  #getGamepadInput() {
+    if (typeof navigator === 'undefined' || !navigator.getGamepads) return { x: 0, y: 0 };
+    const pads = navigator.getGamepads();
+    for (let i = 0; i < pads.length; i++) {
+      const gp = pads[i];
+      if (!gp || gp.axes.length < 2) continue;
+      const dead = 0.1;
+      return {
+        x: Math.abs(gp.axes[0]) > dead ? gp.axes[0] : 0,
+        y: Math.abs(gp.axes[1]) > dead ? gp.axes[1] : 0,
+      };
+    }
+    return { x: 0, y: 0 };
+  }
+
+  #hasGamepad() {
+    if (typeof navigator === 'undefined' || !navigator.getGamepads) return false;
+    const pads = navigator.getGamepads();
+    for (let i = 0; i < pads.length; i++) if (pads[i]) return true;
+    return false;
+  }
+
+  #startInputLoop() {
+    if (this.#inputRaf) return;
+    this.#inputRaf = requestAnimationFrame(this.#inputLoop);
+  }
+
+  #inputLoop = () => {
+    this.#inputRaf = null;
+    const auto = this.#state ? !!this.#state.auto : false;
+    const keepPolling = Object.keys(this.#keys).length > 0 || this.#hasGamepad();
+
+    // The on-screen thumbstick (pointer drag) and AUTO both take priority.
+    if (auto || this.#pointerId !== null) {
+      if (!auto && keepPolling) this.#inputRaf = requestAnimationFrame(this.#inputLoop);
+      return;
+    }
+
+    let kx = 0, ky = 0;
+    if (this.#keys['ArrowLeft'] || this.#keys['KeyA']) kx -= 1;
+    if (this.#keys['ArrowRight'] || this.#keys['KeyD']) kx += 1;
+    if (this.#keys['ArrowUp'] || this.#keys['KeyW']) ky -= 1; // forward thrust
+    if (this.#keys['ArrowDown'] || this.#keys['KeyS']) ky += 1;
+
+    const gp = this.#getGamepadInput();
+    let nx = kx !== 0 ? kx : gp.x;
+    let ny = ky !== 0 ? ky : gp.y;
+    const d = Math.hypot(nx, ny);
+    if (d > 1) { nx /= d; ny /= d; }
+
+    const hasInput = nx !== 0 || ny !== 0;
+    if (hasInput) {
+      this.#px = nx;
+      this.#py = ny;
+      this.#applyNubPosition();
+      this.#updateReadout();
+      const now = Date.now();
+      if (now - this.#lastKbSend >= 100) { this.#sendAction(); this.#lastKbSend = now; }
+      this.#inputRaf = requestAnimationFrame(this.#inputLoop);
+    } else {
+      // Input released this frame — snap back to centre and send a stop once.
+      if (this.#px !== 0 || this.#py !== 0) {
+        this.#px = 0;
+        this.#py = 0;
+        this.#applyNubPosition();
+        this.#updateReadout();
+        this.#sendAction();
+      }
+      // Keep polling while a gamepad is present (its stick can re-engage
+      // without a keydown to restart the loop).
+      if (keepPolling) this.#inputRaf = requestAnimationFrame(this.#inputLoop);
+    }
+  };
 
   #sendAction() {
     if (this.sendAction) {

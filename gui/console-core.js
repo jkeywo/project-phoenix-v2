@@ -121,6 +121,38 @@ export function initConsole({ name, render }) {
     }
   }
 
+  // ── Expose sendAction to web-component controls ────────────────────────
+  // The `gui/components/ph-*.js` custom elements dispatch user actions by
+  // calling `this.sendAction(...)`, falling back to `window.sendAction` in
+  // their `connectedCallback`. Because the console HTML imports the component
+  // modules *before* calling initConsole, each element's connectedCallback has
+  // already run (and captured an undefined `window.sendAction`) by the time we
+  // get here. So we must both (a) publish `window.sendAction` for any element
+  // that reads it lazily or upgrades later, and (b) assign `.sendAction`
+  // directly onto every custom element already in the DOM so their captured
+  // reference is repaired. Without this every control in the new per-ship
+  // consoles is inert (see the missing wiring vs. the old *-console.html files
+  // which captured `initConsole(...).sendAction` and assigned it by hand).
+  _root.sendAction = sendAction;
+  function _wireComponents() {
+    if (typeof document === 'undefined') return;
+    var all = document.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      // Custom elements always contain a hyphen in their tag name.
+      if (el.tagName && el.tagName.indexOf('-') !== -1) {
+        el.sendAction = sendAction;
+      }
+    }
+  }
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', _wireComponents);
+    } else {
+      _wireComponents();
+    }
+  }
+
   // ── Help system (issue #462) ───────────────────────────────────────────
   // Mount the shared "?" help button + click-to-dismiss modal for this
   // console. `name` is the lowercase station id (post issue #618), which

@@ -49,6 +49,7 @@
         <span class="sep">·</span>
         <span id="footer-target" style="color:var(--ink-faint)">NO WAYPOINT</span>
         <span class="spacer"></span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
@@ -58,6 +59,7 @@
     import '../components/ph-comms-hail-list.js';
     import '../components/ph-comms-current-message.js';
     import '../components/ph-navigation-map.js';
+    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
@@ -80,6 +82,7 @@
         var msgCount = msgs.length;
         document.getElementById('footer-right').textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
         setAutoState(null, document.getElementById('comms-auto-badge'), !!s.comms_auto);
+        document.getElementById('station-damage').state = s.own_hull || null;
       }
     });
   </script>

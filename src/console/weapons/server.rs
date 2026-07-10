@@ -2242,6 +2242,18 @@ fn tick_blaster_auto_fire(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
+    let ship_count = ship_q.iter().len();
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+        "[DEBUG] tick_blaster_auto_fire: {} ship(s) in query",
+        ship_count
+    )));
+    #[cfg(not(target_arch = "wasm32"))]
+    eprintln!(
+        "[DEBUG] tick_blaster_auto_fire: {} ship(s) in query",
+        ship_count
+    );
+
     for (
         control_sources,
         ship_config_opt,
@@ -2262,8 +2274,20 @@ fn tick_blaster_auto_fire(
             }
         };
         if !ai_controlled {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                "[DEBUG] tick_blaster_auto_fire: skipped — not AI controlled",
+            ));
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!("[DEBUG] tick_blaster_auto_fire: skipped — not AI controlled");
             continue;
         }
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+            "[DEBUG] tick_blaster_auto_fire: AI gate passed",
+        ));
+        #[cfg(not(target_arch = "wasm32"))]
+        eprintln!("[DEBUG] tick_blaster_auto_fire: AI gate passed");
 
         // Target selection: WeaponsTarget first, ShipAiMemory fallback for NPCs.
         let target_uuid: Option<String> =
@@ -2273,22 +2297,79 @@ fn tick_blaster_auto_fire(
                     .map(|u| u.to_string())
             });
         let Some(target_uuid) = target_uuid else {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                "[DEBUG] tick_blaster_auto_fire: skipped — no target UUID",
+            ));
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!("[DEBUG] tick_blaster_auto_fire: skipped — no target UUID");
             continue;
         };
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+            "[DEBUG] tick_blaster_auto_fire: target UUID = {}",
+            target_uuid
+        )));
+        #[cfg(not(target_arch = "wasm32"))]
+        eprintln!(
+            "[DEBUG] tick_blaster_auto_fire: target UUID = {}",
+            target_uuid
+        );
+
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+                "[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive",
+                target_uuid
+            )));
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!(
+                "[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive",
+                target_uuid
+            );
             continue;
         };
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+            "[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})",
+            tx, tz
+        )));
+        #[cfg(not(target_arch = "wasm32"))]
+        eprintln!(
+            "[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})",
+            tx, tz
+        );
 
         for bank in blaster_res.0.iter_mut() {
             // Skip banks that are not ready to accept a new fire command.
             if !bank.is_fire_ready() {
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                    "[DEBUG] tick_blaster_auto_fire: bank not fire-ready, skipping",
+                ));
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("[DEBUG] tick_blaster_auto_fire: bank not fire-ready, skipping");
                 continue;
             }
 
             // Range check.
             let dx = tx - physics.x;
             let dz = tz - physics.z;
-            if dx * dx + dz * dz > bank.config.range * bank.config.range {
+            let dist_sq = dx * dx + dz * dz;
+            let range_sq = bank.config.range * bank.config.range;
+            if dist_sq > range_sq {
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+                    "[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})",
+                    dist_sq.sqrt(),
+                    range_sq.sqrt()
+                )));
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!(
+                    "[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})",
+                    dist_sq.sqrt(),
+                    range_sq.sqrt()
+                );
                 continue;
             }
 
@@ -2301,9 +2382,21 @@ fn tick_blaster_auto_fire(
                 bank.config.facing_deg,
                 bank.config.fire_arc_deg,
             ) {
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                    &format!("[DEBUG] tick_blaster_auto_fire: bank out of arc (local=({:.1},{:.1}), facing={}, arc={})", rx, ry, bank.config.facing_deg, bank.config.fire_arc_deg),
+                ));
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("[DEBUG] tick_blaster_auto_fire: bank out of arc (local=({:.1},{:.1}), facing={}, arc={})", rx, ry, bank.config.facing_deg, bank.config.fire_arc_deg);
                 continue;
             }
 
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                "[DEBUG] tick_blaster_auto_fire: FIRING!",
+            ));
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!("[DEBUG] tick_blaster_auto_fire: FIRING!");
             bank.request_charge_start();
         }
     }

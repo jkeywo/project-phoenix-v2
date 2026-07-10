@@ -55,6 +55,7 @@
         <span class="sep">·</span>
         <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
         <span class="spacer"></span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
@@ -67,6 +68,7 @@
     import '../components/ph-comms-contact-list.js';
     import '../components/ph-comms-current-message.js';
     import '../components/ph-navigation-map.js';
+    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
@@ -82,7 +84,7 @@
         if (s.weapons) {
           var w = s.weapons;
           radarEl.state = { blips: w.blips || [], ship_heading: (s.navigation && s.navigation.ship_heading) || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
-          phasersEl.state = { banks: w.banks || [], target_valid: !!w.target_uuid };
+          phasersEl.state = { banks: w.banks || [], target_valid: !!w.target_uuid, mode: w.phaser_mode || 'Auto' };
           blastersEl.state = { banks: w.blasters || [] };
           torpedoEl.state = { tubes: w.tubes || [], magazine: { current: w.torpedo_count || 0, max: w.torpedo_max || w.torpedo_count || 0 } };
         }
@@ -101,6 +103,7 @@
         document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : 'NO TARGET';
         document.getElementById('footer-target').style.color = targetName ? 'var(--fire-bright)' : 'var(--ink-faint)';
         setAutoState(null, document.getElementById('tactical-auto-badge'), !!(s.tactical_auto || (s.weapons && s.weapons.tactical_auto)));
+        document.getElementById('station-damage').state = s.own_hull || null;
       }
     });
   </script>

@@ -142,25 +142,28 @@ export class PhBlastersControls extends HTMLElement {
         }
       }
 
-      row.querySelector('.lbl').textContent = bank.label || bank.id;
+      row.querySelector('.lbl').textContent = bank.label || bank.id || 'BLASTER';
 
-      const auto = !!bank.auto;
-      const badge = row.querySelector('.auto-badge');
-      badge.style.display = auto ? 'inline' : 'none';
+      // Wire type BlasterBankState (core/messages.rs): fire_ready / on_cooldown
+      // / cooldown_remaining / charge_progress / has_charge / pending_volley.
+      // There is no per-bank `state`, `_pct`, or `auto` field — derive display
+      // state from these. cooldown_remaining has no wire denominator, so the
+      // cooldown bar shows full while cooling (mirrors ph-phasers-controls).
+      row.querySelector('.auto-badge').style.display = 'none';
+
+      const isCooling = !!bank.on_cooldown;
+      const chargeProgress = Number(bank.charge_progress || 0);
+      const isCharging = !isCooling && chargeProgress > 0;
 
       const btn = row.querySelector('.charge-btn');
-      const isCharging = bank.state === 'charging';
-      const isCooling = bank.state === 'cooling';
-      const disabled = auto || isCooling;
-      btn.disabled = disabled;
+      btn.disabled = isCooling;
       btn.className = 'charge-btn' + (isCharging ? ' charging' : '');
       btn.textContent = isCharging ? 'FIRING...' : isCooling ? 'COOLDOWN' : 'CHARGE';
 
       const fills = row.querySelectorAll('.bar-fill');
       const chargeFill = fills[0];
       const cooldownFill = fills[1];
-      const chargePct = Math.max(0, Math.min(100, (bank.charge_pct || 0) * 100));
-      const cooldownPct = Math.max(0, Math.min(100, (bank.cooldown_pct || 0) * 100));
+      const chargePct = Math.max(0, Math.min(100, chargeProgress * 100));
 
       if (isCharging) {
         chargeFill.style.width = chargePct + '%';
@@ -169,7 +172,7 @@ export class PhBlastersControls extends HTMLElement {
         cooldownFill.style.display = 'none';
         row.querySelector('.bar-label').textContent = 'CHARGE';
       } else if (isCooling) {
-        cooldownFill.style.width = cooldownPct + '%';
+        cooldownFill.style.width = '100%';
         cooldownFill.className = 'bar-fill cooldown';
         cooldownFill.style.display = 'block';
         chargeFill.style.display = 'none';

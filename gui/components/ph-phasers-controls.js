@@ -19,9 +19,12 @@ export class PhPhasersControls extends HTMLElement {
     .fire-btn:hover:not(:disabled) { background: #16281d; }
     .fire-btn:disabled { opacity: 0.35; border-color: #6a7178; color: #6a7178; cursor: default; }
     .auto-badge { font-size: 0.55rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
+    .mode-toggle { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.1rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 1px solid #6a7178; color: #6a7178; background: #0e1117; transition: all 0.15s ease; }
+    .mode-toggle:hover { border-color: #aab; color: #aab; }
+    .mode-toggle.auto { border-color: #f0c040; color: #f0c040; }
     .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
-  <div class="header"><span>PHASERS</span></div>
+  <div class="header"><span>PHASERS</span><button class="mode-toggle" id="mode-toggle" type="button">MANUAL</button></div>
   <div id="banks"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
@@ -29,6 +32,13 @@ export class PhPhasersControls extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+    const toggle = this.shadowRoot.getElementById('mode-toggle');
+    toggle.addEventListener('click', () => {
+      if (!this.sendAction) return;
+      const mode = (this.#state && this.#state.mode) || 'Auto';
+      // Flip between the two operator modes; Auto = banks fire themselves.
+      this.sendAction('set_phaser_mode', { mode: mode === 'Auto' ? 'Manual' : 'Auto' });
+    });
   }
 
   set state(val) {
@@ -42,7 +52,13 @@ export class PhPhasersControls extends HTMLElement {
     const s = this.#state || {};
     const banks = Array.isArray(s.banks) ? s.banks : [];
     const targetValid = s.target_valid !== false;
+    const mode = s.mode || 'Auto';
+    const auto = mode === 'Auto';
     const container = this.shadowRoot.getElementById('banks');
+
+    const toggle = this.shadowRoot.getElementById('mode-toggle');
+    toggle.textContent = auto ? 'AUTO' : 'MANUAL';
+    toggle.className = 'mode-toggle' + (auto ? ' auto' : '');
 
     if (banks.length === 0) {
       container.innerHTML = '<div class="empty">NO PHASER BANKS</div>';
@@ -91,19 +107,22 @@ export class PhPhasersControls extends HTMLElement {
         }
       }
 
-      row.querySelector('.lbl').textContent = bank.label || bank.id;
+      row.querySelector('.lbl').textContent = bank.label || bank.id || 'BANK';
 
+      // Wire type is `PhaserBankState` (core/messages.rs): fire_ready /
+      // on_cooldown / cooldown_remaining — there is no per-bank `cooldown_pct`
+      // or `state`. Auto/Manual is a ship-level mode, shown via the header
+      // toggle rather than a per-bank badge.
+      const onCooldown = !!bank.on_cooldown;
+      const fireReady = !!bank.fire_ready;
       const fill = row.querySelector('.cooldown-fill');
-      const pct = Math.max(0, Math.min(100, (bank.cooldown_pct || 0) * 100));
-      fill.style.width = pct + '%';
-      fill.className = 'cooldown-fill' + (bank.state === 'cooling' ? ' cooling' : '');
+      fill.style.width = (onCooldown ? 100 : (fireReady ? 100 : 0)) + '%';
+      fill.className = 'cooldown-fill' + (onCooldown ? ' cooling' : '');
 
-      const auto = !!bank.auto;
-      const badge = row.querySelector('.auto-badge');
-      badge.style.display = auto ? 'inline' : 'none';
+      row.querySelector('.auto-badge').style.display = 'none';
 
       const btn = row.querySelector('.fire-btn');
-      btn.disabled = auto || !targetValid || (bank.cooldown_pct || 0) > 0;
+      btn.disabled = auto || !targetValid || !fireReady || onCooldown;
     });
   }
 }

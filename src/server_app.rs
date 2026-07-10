@@ -1881,6 +1881,7 @@ fn spawn_game_start_entities(
     mut commands: Commands,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut pending_ship_config: Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
+    selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
     sessions: Option<Res<crate::lobby::Sessions>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
@@ -1920,6 +1921,27 @@ fn spawn_game_start_entities(
                 );
                 continue;
             }
+        };
+
+        // The player ship's full loadout (weapons, torpedoes, blasters, shields,
+        // mesh, stations) must come from the lobby-selected ship template, not
+        // the world's `[[entity]] player-ship` placeholder. The placeholder only
+        // fixes spawn position; without this override a player who selects the
+        // Destroyer still spawns the placeholder hull's weapons (e.g. the
+        // cruiser's two phaser banks and no blasters). ShipConfigComponent is
+        // already sourced from the selection (PendingShipConfig); this brings the
+        // EntityConfig-derived systems into agreement. Matched on the same
+        // predicate used below for the player-ship position/rotation/marker.
+        let config = if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
+            match selected_ship
+                .as_ref()
+                .and_then(|sel| config_cache.get(&sel.0))
+            {
+                Some(selected_cfg) => selected_cfg.clone(),
+                None => config,
+            }
+        } else {
+            config
         };
 
         let uuid = crate::entity_loader::assign_uuid();

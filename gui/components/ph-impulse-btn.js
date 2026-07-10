@@ -36,7 +36,13 @@ export class PhImpulseBtn extends HTMLElement {
     this.sendAction ??= window.sendAction;
     const btn = this.shadowRoot.getElementById('btn');
     btn.addEventListener('click', () => {
-      if (this.sendAction && !btn.disabled) {
+      if (!this.sendAction || btn.disabled) return;
+      const s = this.#state || {};
+      const st = s.state || 'ready';
+      // Pressing IMPULSE again while it is charging cancels the charge.
+      if (st === 'charging') {
+        this.sendAction('cancel_impulse', {});
+      } else if (st === 'ready') {
         this.sendAction('start_impulse_charge', {});
       }
     });
@@ -67,9 +73,11 @@ export class PhImpulseBtn extends HTMLElement {
       btn.className = 'btn ready';
       btn.disabled = auto;
     } else if (st === 'charging') {
-      btn.textContent = 'CHARGING ' + Math.round(chargePct) + '%';
+      // Keep the button enabled during charging so a second press cancels it
+      // (disabled only under AUTO, where the operator has no manual control).
+      btn.textContent = 'CANCEL ' + Math.round(chargePct) + '%';
       btn.className = 'btn charging';
-      btn.disabled = true;
+      btn.disabled = auto;
     } else if (st === 'cooldown') {
       btn.textContent = 'COOLDOWN';
       btn.className = 'btn cooldown';

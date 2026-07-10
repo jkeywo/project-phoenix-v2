@@ -41,12 +41,21 @@ describe('PhImpulseBtn', () => {
     expect(btn.disabled).toBe(false);
   });
 
-  it('renders charging state with percentage text and disabled button', () => {
+  it('renders charging state as a tappable CANCEL button showing percentage', () => {
     const { el } = setup();
     el.state = { state: 'charging', charge_pct: 67, system_id: 'helm-impulse', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe('CHARGING 67%');
+    // Pressing IMPULSE again while charging cancels it, so the button stays
+    // enabled and reads CANCEL rather than being an inert CHARGING label.
+    expect(btn.textContent.trim()).toBe('CANCEL 67%');
     expect(btn.className).toContain('charging');
+    expect(btn.disabled).toBe(false);
+  });
+
+  it('disables the charging button under AUTO so the operator cannot cancel', () => {
+    const { el } = setup();
+    el.state = { state: 'charging', charge_pct: 67, system_id: 'helm-impulse', auto: true };
+    const btn = el.shadowRoot.getElementById('btn');
     expect(btn.disabled).toBe(true);
   });
 
@@ -88,13 +97,14 @@ describe('PhImpulseBtn', () => {
     expect(sendAction).toHaveBeenCalledWith('start_impulse_charge', {});
   });
 
-  it('clicking button when charging does not dispatch action', () => {
+  it('clicking button when charging dispatches cancel_impulse', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = { state: 'charging', charge_pct: 50, system_id: 'helm-impulse', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
     btn.click();
-    expect(sendAction).not.toHaveBeenCalled();
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledWith('cancel_impulse', {});
   });
 
   it('hides progress bar when not charging', () => {

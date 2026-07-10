@@ -144,6 +144,10 @@ export class PhHelmJoystick extends HTMLElement {
     well.addEventListener('pointermove', this.#onMove);
     well.addEventListener('pointerup', this.#onUp);
     well.addEventListener('pointercancel', this.#onUp);
+    // Safety net: if the browser silently revokes pointer capture (e.g. the
+    // finger slides off a scrolling container on mobile), treat it as a
+    // release so the stick zeroes instead of latching the last input.
+    well.addEventListener('lostpointercapture', this.#onUp);
   }
 
   #onDown = (e) => {
@@ -215,7 +219,9 @@ export class PhHelmJoystick extends HTMLElement {
     const root = this.shadowRoot;
     const fmt = (v) => (v >= 0 ? '+' : '') + v.toFixed(2);
     root.getElementById('thrust-readout').textContent = fmt(-this.#py);
-    root.getElementById('yaw-readout').textContent = fmt(this.#px);
+    // Yaw is inverted relative to the raw stick x: pushing the stick right
+    // must steer the ship starboard. Kept consistent with #sendAction.
+    root.getElementById('yaw-readout').textContent = fmt(-this.#px);
   }
 
   // ── Keyboard + gamepad input ──────────────────────────────────────────
@@ -319,7 +325,10 @@ export class PhHelmJoystick extends HTMLElement {
 
   #sendAction() {
     if (this.sendAction) {
-      this.sendAction('set_helm', { thrust: -this.#py || 0, yaw: this.#px || 0 });
+      // Invert x → yaw so pushing the stick right steers starboard (issue: new
+      // GUI helm steered the wrong way). Applies to pointer, keyboard, and
+      // gamepad since they all funnel through here.
+      this.sendAction('set_helm', { thrust: -this.#py || 0, yaw: -this.#px || 0 });
     }
   }
 }

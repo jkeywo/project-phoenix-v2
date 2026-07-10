@@ -8,6 +8,7 @@ import {
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
   NAVIGATION_RADAR_RANGE,
   aggregateStationHull,
+  repairCoreAndTargets,
   torpSlotStates,
   buildWeaponsConsoleState,
   buildCaptainConsoleState,
@@ -2116,5 +2117,53 @@ describe('torpSlotStates', () => {
   it('uses loaded boolean as fallback for loaded_count when field absent', () => {
     const slots = torpSlotStates({ volley_max: 1, loaded: true, target_count: 1 });
     expect(slots[0].state).toBe('filled');
+  });
+});
+
+describe('repairCoreAndTargets', () => {
+  const stationSystems = {
+    helm: ['helm', 'helm-engine-port'],
+    tactical: ['tactical', 'phaser-omni'],
+    engineering: ['power-reactor', 'repair'],
+  };
+
+  it('classifies ownerless systems as core', () => {
+    const hull = [
+      { system_id: 'helm', display_name: 'Helm', current: 10, max_hp: 10 },
+      { system_id: 'core', display_name: 'Core', current: 3, max_hp: 10 },
+    ];
+    const { coreSystems } = repairCoreAndTargets(hull, stationSystems);
+    expect(coreSystems.map(s => s.system_id)).toEqual(['core']);
+  });
+
+  it('lists only damaged stations as dispatch targets, with a damage fraction', () => {
+    const hull = [
+      { system_id: 'helm', display_name: 'Helm', current: 4, max_hp: 10 },        // damaged
+      { system_id: 'helm-engine-port', display_name: 'Engine', current: 10, max_hp: 10 },
+      { system_id: 'tactical', display_name: 'Tactical', current: 10, max_hp: 10 }, // healthy
+      { system_id: 'phaser-omni', display_name: 'Phaser', current: 10, max_hp: 10 },
+    ];
+    const { targets } = repairCoreAndTargets(hull, stationSystems);
+    const helm = targets.find(t => t.id === 'helm');
+    expect(helm).toBeTruthy();
+    expect(helm.label).toBe('Helm');
+    expect(helm.damage_pct).toBeCloseTo(0.3, 5); // 6 of 20 hp lost
+    expect(targets.find(t => t.id === 'tactical')).toBeUndefined();
+  });
+
+  it('adds a core bucket when a core system is damaged', () => {
+    const hull = [
+      { system_id: 'core', display_name: 'Core', current: 5, max_hp: 10 },
+    ];
+    const { targets } = repairCoreAndTargets(hull, stationSystems);
+    expect(targets.map(t => t.id)).toContain('core');
+  });
+
+  it('returns no targets when nothing is damaged', () => {
+    const hull = [
+      { system_id: 'helm', display_name: 'Helm', current: 10, max_hp: 10 },
+    ];
+    const { targets } = repairCoreAndTargets(hull, stationSystems);
+    expect(targets).toEqual([]);
   });
 });

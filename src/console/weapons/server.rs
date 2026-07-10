@@ -11,6 +11,7 @@ use crate::messages::{
     SystemBlackboard, SystemControlPayload, SystemId, TorpedoTubeClientConfig, TorpedoTubeState,
     WeaponsBlackboard,
 };
+use crate::model_rig::ModelMarkers;
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
@@ -2410,6 +2411,8 @@ fn tick_blaster_system(
     mut ship_q: Query<
         (
             Option<&crate::entity_spawner::EntityUuid>,
+            &Transform,
+            Option<&ModelMarkers>,
             &mut ShipPhysics,
             Option<&WeaponsTarget>,
             &mut BlasterSystemResource,
@@ -2432,7 +2435,7 @@ fn tick_blaster_system(
     // main loop uses `ship_q.iter_mut()`, avoiding a Bevy SystemParam conflict.
     let ship_velocities: std::collections::HashMap<String, (f32, f32)> = {
         let mut map = std::collections::HashMap::new();
-        for (uuid_opt, physics, _, _) in ship_q.iter() {
+        for (uuid_opt, _, _, physics, _, _) in ship_q.iter() {
             if let Some(uuid) = uuid_opt {
                 let vx = physics.forward_speed * physics.yaw.sin();
                 let vz = -physics.forward_speed * physics.yaw.cos();
@@ -2442,7 +2445,9 @@ fn tick_blaster_system(
         map
     };
 
-    for (source_uuid_opt, mut physics, weapons_target_opt, mut blaster_res) in ship_q.iter_mut() {
+    for (source_uuid_opt, transform, markers_opt, mut physics, weapons_target_opt, mut blaster_res) in
+        ship_q.iter_mut()
+    {
         let source_uuid = source_uuid_opt
             .map(|u| u.0.as_str())
             .unwrap_or("")
@@ -2474,10 +2479,24 @@ fn tick_blaster_system(
             let visual_scale = bank.config.visual_scale;
             let recoil_impulse = bank.config.recoil_impulse;
             let screenshake_magnitude = bank.config.screenshake_magnitude;
+
+            // Named rig marker takes priority for the projectile's spawn
+            // origin; falls back to ship center when the bank has no marker
+            // or the model's sidecar doesn't define it.
+            let (origin_x, origin_z) = bank
+                .config
+                .marker
+                .as_deref()
+                .and_then(|name| {
+                    markers_opt.and_then(|m| m.resolve_world_position(transform, name))
+                })
+                .map(|pos| (pos.x, pos.z))
+                .unwrap_or((physics.x, physics.z));
+
             let events = bank.tick(
                 dt,
-                physics.x,
-                physics.z,
+                origin_x,
+                origin_z,
                 physics.yaw,
                 target_x,
                 target_z,

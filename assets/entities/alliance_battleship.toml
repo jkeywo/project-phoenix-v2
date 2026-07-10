@@ -7,7 +7,7 @@ tags = [ "player", "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [mesh]
-model = "assets/models/alliance_cruiser.glb"
+model = "assets/models/alliance_battleship.glb"
 shape = "sphere"
 colour = []
 
@@ -188,6 +188,7 @@ marker = "phasers_aft"
 # Heavy blaster bank: hold-to-fire, 2-shot volley, heavy sphere projectile, recoil + screenshake.
 [[weapons_console.blaster_banks]]
 id = "heavy-fore"
+marker = "blaster_fore"
 facing_deg = 0
 fire_arc_deg = 22.5
 charge_time_secs = 3.0

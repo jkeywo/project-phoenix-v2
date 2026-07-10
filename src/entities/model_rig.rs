@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use bevy::math::{EulerRot, Quat, Vec3};
-use bevy::prelude::Component;
+use bevy::prelude::{Component, Transform};
 
 fn zeros() -> [f32; 3] {
     [0.0, 0.0, 0.0]
@@ -178,6 +178,15 @@ impl ModelMarkers {
     /// Resolve a marker by name (None when missing -> caller falls back).
     pub fn get(&self, name: &str) -> Option<&Marker> {
         self.markers.get(name)
+    }
+
+    /// Resolve a marker by name to a world-space position, composing the
+    /// entity's live `Transform` with the marker's post-base-rig position.
+    /// Returns `None` when the marker is missing so callers fall back to
+    /// their default origin.
+    pub fn resolve_world_position(&self, transform: &Transform, name: &str) -> Option<Vec3> {
+        let marker = self.get(name)?;
+        Some(transform.transform_point(Vec3::from_array(marker.position)))
     }
 
     /// Iterate over all marker names in this model rig.

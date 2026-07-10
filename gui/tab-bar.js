@@ -121,8 +121,7 @@ export function tabBarLayout(consoles, active, orientation, inGame, consoleHull,
   return { hidden, orientation: orient, useInitials: initials, buttons };
 }
 
-// DOM renderer. Rebuilds the tab-bar root from scratch on each call. Cheap
-// (at most 9 buttons) and avoids the bug of stale state from partial diffs.
+// DOM renderer. Reconciled in-place by index (at most 9 buttons).
 //
 //   root      — HTMLElement (the #console-tab-bar container)
 //   layout    — output of tabBarLayout()
@@ -132,8 +131,7 @@ export function tabBarLayout(consoles, active, orientation, inGame, consoleHull,
 // by the `[aria-hidden="true"] { display: none }` rule in client.html):
 //   - root.setAttribute('aria-hidden', ...) per layout.hidden
 //   - root.dataset.orientation set to the layout orientation (drives CSS)
-//   - root.innerHTML rebuilt with <button role="tab" class="tab-button [active]">
-//     for each entry. Each button's click handler calls options.onPress.
+//   - root children reconciled by index
 //
 // Returns the layout (handy for tests that want to assert on the structure).
 export function renderTabBar(root, layout, options) {
@@ -141,37 +139,38 @@ export function renderTabBar(root, layout, options) {
   const opts = options || {};
   root.setAttribute('aria-hidden', layout.hidden ? 'true' : 'false');
   root.dataset.orientation = layout.orientation;
-  // Rebuild children.
-  while (root.firstChild) root.removeChild(root.firstChild);
-  if (layout.hidden) return layout;
-  for (const btn of layout.buttons) {
+  if (layout.hidden) {
+    while (root.firstChild) root.removeChild(root.firstChild);
+    return layout;
+  }
+  const btns = layout.buttons;
+  while (root.children.length > btns.length) root.removeChild(root.children[root.children.length - 1]);
+  while (root.children.length < btns.length) {
     const el = (root.ownerDocument || document).createElement('button');
-    el.type = 'button';
-    el.className = 'tab-button' + (btn.active ? ' active' : '');
-    el.dataset.console = btn.console;
-    // role="tab" + aria-selected matches the role="tablist" container on
-    // the parent (ARIA contract — toggle buttons would use aria-pressed,
-    // but inside a tablist screen readers expect tabs with aria-selected).
-    el.setAttribute('role', 'tab');
-    el.setAttribute('aria-selected', btn.active ? 'true' : 'false');
+    el.type = 'button'; el.setAttribute('role', 'tab');
     const labelEl = (root.ownerDocument || document).createElement('span');
-    labelEl.className = 'tab-label';
-    labelEl.textContent = btn.label;
-    el.appendChild(labelEl);
-    if (btn.hullPct !== null) {
-      const bar = (root.ownerDocument || document).createElement('span');
-      bar.className = 'tab-hull-bar';
-      bar.style.setProperty('--hull-pct', btn.hullPct + '%');
-      const color = btn.hullPct > 60 ? '#4caf50' : btn.hullPct > 25 ? '#f59e0b' : '#ef4444';
-      bar.style.setProperty('--hull-color', color);
-      el.appendChild(bar);
-    }
-    if (typeof opts.onPress === 'function') {
-      // pointerdown fires immediately on touch (no 300 ms click-delay).
-      el.addEventListener('pointerdown', (e) => { e.preventDefault(); opts.onPress(btn.console); });
-    }
+    labelEl.className = 'tab-label'; el.appendChild(labelEl);
+    const hullBar = (root.ownerDocument || document).createElement('span');
+    hullBar.className = 'tab-hull-bar'; el.appendChild(hullBar);
+    (function (btn) { btn.addEventListener('pointerdown', function (e) { e.preventDefault(); if (typeof btn._onPress === 'function') btn._onPress(btn.dataset.console); }); })(el);
     root.appendChild(el);
   }
+  btns.forEach(function (btn, i) {
+    var el = root.children[i];
+    el.className = 'tab-button' + (btn.active ? ' active' : '');
+    el.dataset.console = btn.console;
+    el.setAttribute('aria-selected', btn.active ? 'true' : 'false');
+    el._onPress = typeof opts.onPress === 'function' ? opts.onPress : null;
+    el.firstChild.textContent = btn.label;
+    var hullBar = el.children[1];
+    if (btn.hullPct !== null) {
+      hullBar.style.display = '';
+      hullBar.style.setProperty('--hull-pct', btn.hullPct + '%');
+      hullBar.style.setProperty('--hull-color', btn.hullPct > 60 ? '#4caf50' : btn.hullPct > 25 ? '#f59e0b' : '#ef4444');
+    } else {
+      hullBar.style.display = 'none';
+    }
+  });
   return layout;
 }
 

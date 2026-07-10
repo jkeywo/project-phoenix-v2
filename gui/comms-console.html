@@ -442,12 +442,15 @@
     }
 
     function _renderDataContainers(s) {
-      // Playwright-readable hidden containers
+      // Playwright-readable hidden containers — keyed reconciliation by id
       var msgsEl = document.getElementById('messages-data');
-      msgsEl.innerHTML = '';
+      var msgLive = new Set((s.messages || []).map(function(m) { return m.id; }));
+      Array.from(msgsEl.children).forEach(function(el) {
+        if (el.dataset && el.dataset.id && !msgLive.has(el.dataset.id)) el.remove();
+      });
       (s.messages || []).forEach(function(m) {
-        var row = document.createElement('div');
-        row.className = 'msg-data';
+        var row = msgsEl.querySelector('[data-id="' + m.id + '"]');
+        if (!row) { row = document.createElement('div'); row.className = 'msg-data'; msgsEl.appendChild(row); }
         row.dataset.id              = m.id;
         row.dataset.sender          = m.sender_name;
         row.dataset.subject         = m.subject;
@@ -457,19 +460,20 @@
         row.dataset.senderInRange   = String(m.sender_in_range !== false);
         row.dataset.responseCount   = String((m.responses || []).length);
         row.dataset.selectedResponse = m.selected_response != null ? String(m.selected_response) : '';
-        msgsEl.appendChild(row);
       });
 
       var contsEl = document.getElementById('contacts-data');
-      contsEl.innerHTML = '';
+      var contLive = new Set((s.contacts || []).map(function(c) { return c.uuid; }));
+      Array.from(contsEl.children).forEach(function(el) {
+        if (el.dataset && el.dataset.uuid && !contLive.has(el.dataset.uuid)) el.remove();
+      });
       (s.contacts || []).forEach(function(c) {
-        var row = document.createElement('div');
-        row.className = 'contact-data';
+        var row = contsEl.querySelector('[data-uuid="' + c.uuid + '"]');
+        if (!row) { row = document.createElement('div'); row.className = 'contact-data'; contsEl.appendChild(row); }
         row.dataset.uuid     = c.uuid;
         row.dataset.name     = c.name;
         row.dataset.inRange  = String(c.in_range !== false);
         row.dataset.isUrgent = String(!!c.is_urgent);
-        contsEl.appendChild(row);
       });
 
       var selEl = document.getElementById('selected-msg');
@@ -479,11 +483,9 @@
     function _renderContacts(contacts) {
       var strip = document.getElementById('contacts-strip');
       if (contacts.length === 0) {
-        strip.innerHTML = '';
-        var ph = document.createElement('span');
-        ph.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:0.2em;color:var(--ink-faint);padding:4px 0;';
-        ph.textContent = 'NO CONTACTS';
-        strip.appendChild(ph);
+        strip.textContent = '';
+        var ph = strip.querySelector('.no-contacts-ph');
+        if (!ph) { ph = document.createElement('span'); ph.className = 'no-contacts-ph'; ph.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:0.2em;color:var(--ink-faint);padding:4px 0;'; ph.textContent = 'NO CONTACTS'; strip.appendChild(ph); }
         return;
       }
       var existing = {};
@@ -529,12 +531,9 @@
       count.textContent = String(threads.length);
 
       if (threads.length === 0) {
-        list.innerHTML = '';
-        var p = document.createElement('div');
-        p.className = 'no-msgs';
-        p.id = 'no-msgs-placeholder';
-        p.textContent = '-- NO MESSAGES --';
-        list.appendChild(p);
+        list.textContent = '';
+        var p = list.querySelector('#no-msgs-placeholder');
+        if (!p) { p = document.createElement('div'); p.className = 'no-msgs'; p.id = 'no-msgs-placeholder'; p.textContent = '-- NO MESSAGES --'; list.appendChild(p); }
         return;
       }
 
@@ -596,12 +595,9 @@
       var actionMsg = activeMsg || latestMsg;
 
       if (!latestMsg) {
-        panel.innerHTML = '';
-        var ph = document.createElement('div');
-        ph.className = 'chat-placeholder';
-        ph.id = 'chat-placeholder';
-        ph.textContent = 'SELECT A MESSAGE';
-        panel.appendChild(ph);
+        panel.textContent = '';
+        var ph = panel.querySelector('#chat-placeholder');
+        if (!ph) { ph = document.createElement('div'); ph.className = 'chat-placeholder'; ph.id = 'chat-placeholder'; ph.textContent = 'SELECT A MESSAGE'; panel.appendChild(ph); }
         _prevChatMsgId = null;
         return;
       }
@@ -681,21 +677,27 @@
     }
 
     function _renderThreadBody(bodyEl, threadMsgs) {
-      bodyEl.innerHTML = '';
-      threadMsgs.forEach(function(m) {
-        var speaker = document.createElement('div');
-        speaker.style.cssText = 'font-family:"Chakra Petch",sans-serif;font-size:11px;letter-spacing:0.16em;color:var(--ink);margin:0 0 2px;';
+      // Reconcile by message index
+      while (bodyEl.children.length > threadMsgs.length * 2) bodyEl.removeChild(bodyEl.lastChild);
+      threadMsgs.forEach(function(m, i) {
+        var si = i * 2;
+        var bi = si + 1;
+        var speaker, body;
+        if (si < bodyEl.children.length) { speaker = bodyEl.children[si]; body = bodyEl.children[bi]; }
+        else {
+          speaker = document.createElement('div');
+          speaker.style.cssText = 'font-family:"Chakra Petch",sans-serif;font-size:11px;letter-spacing:0.16em;color:var(--ink);margin:0 0 2px;';
+          body = document.createElement('div');
+          body.style.cssText = 'margin:0 0 14px;';
+          bodyEl.appendChild(speaker); bodyEl.appendChild(body);
+        }
         speaker.textContent = m.sender_name.toUpperCase();
-        var body = document.createElement('div');
-        body.style.cssText = 'margin:0 0 14px;';
         body.textContent = m.body;
-        bodyEl.appendChild(speaker);
-        bodyEl.appendChild(body);
       });
     }
     function _syncResponseBtns(actions, msg) {
       if (!msg) {
-        actions.innerHTML = '';
+        actions.textContent = '';
         return;
       }
       var canRespond = !msg.is_orphaned && msg.sender_in_range !== false;

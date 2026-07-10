@@ -1,5 +1,12 @@
 export class PhSensorPanel extends HTMLElement {
   #state = null;
+  #scanRowCache = new Map();
+  #noTargetEl = null;
+  #targetCardEl = null;
+  #targetNameEl = null;
+  #badgesEl = null;
+  #brgEl = null;
+  #rngEl = null;
 
   constructor() {
     super();
@@ -39,7 +46,17 @@ export class PhSensorPanel extends HTMLElement {
     <span>SCAN RANGE <span class="v" id="range-val">0</span></span>
     <span class="blip-count" id="blip-count">0 CONTACTS</span>
   </div>
-  <div id="target-area"></div>
+  <div id="target-area">
+    <div class="no-target" id="no-target">NO TARGET</div>
+    <div class="target-card" id="target-card" style="display:none">
+      <div class="name" id="target-name"></div>
+      <div class="badges" id="badges"></div>
+      <div class="pos-row">
+        <div><span class="k">BRG</span> <span class="v" id="brg-val">—</span><span class="u">°</span></div>
+        <div><span class="k">RNG</span> <span class="v" id="rng-val">—</span><span class="u">AU</span></div>
+      </div>
+    </div>
+  </div>
   <div class="scan-data" id="scan-data"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
@@ -56,51 +73,78 @@ export class PhSensorPanel extends HTMLElement {
     const s = this.#state || {};
     const root = this.shadowRoot;
 
-    const range = s.scan_range || 0;
-    root.getElementById('range-val').textContent = range;
+    root.getElementById('range-val').textContent = s.scan_range || 0;
 
     const blips = s.blips || [];
     root.getElementById('blip-count').textContent = blips.length + ' CONTACT' + (blips.length !== 1 ? 'S' : '');
 
-    const targetArea = root.getElementById('target-area');
+    if (!this.#noTargetEl) this.#noTargetEl = root.getElementById('no-target');
+    if (!this.#targetCardEl) this.#targetCardEl = root.getElementById('target-card');
+    if (!this.#targetNameEl) this.#targetNameEl = root.getElementById('target-name');
+    if (!this.#badgesEl) this.#badgesEl = root.getElementById('badges');
+    if (!this.#brgEl) this.#brgEl = root.getElementById('brg-val');
+    if (!this.#rngEl) this.#rngEl = root.getElementById('rng-val');
+
     const hasTarget = !!s.target_uuid;
-    if (!hasTarget) {
-      targetArea.innerHTML = '<div class="no-target">NO TARGET</div>';
-      root.getElementById('scan-data').innerHTML = '';
-      return;
+    this.#noTargetEl.style.display = hasTarget ? 'none' : '';
+    this.#targetCardEl.style.display = hasTarget ? '' : 'none';
+    root.getElementById('target-area').dataset.hasTarget = String(hasTarget);
+
+    if (hasTarget) {
+      this.#targetNameEl.textContent = s.target_name || s.target_uuid;
+
+      const kind = s.target_kind || 'unknown';
+      const stance = s.target_stance || 'neutral';
+      const stanceClass = { hostile: 'hostile', friendly: 'friendly', allied: 'friendly', neutral: 'neutral' }[stance] || 'neutral';
+      const stanceLabel = { hostile: 'HOSTILE', friendly: 'ALLIED', allied: 'ALLIED', neutral: 'NEUTRAL' }[stance] || 'UNKNOWN';
+      const kindLabel = { ship: 'WARSHIP', asteroid: 'ASTEROID', station: 'STARBASE', planet: 'PLANET', star: 'STAR' }[kind] || kind.toUpperCase();
+
+      this.#badgesEl.innerHTML = '<span class="badge"></span><span class="badge neutral"></span>';
+      this.#badgesEl.children[0].className = 'badge ' + stanceClass;
+      this.#badgesEl.children[0].textContent = stanceLabel;
+      this.#badgesEl.children[1].textContent = kindLabel;
+
+      this.#brgEl.textContent = s.target_bearing != null ? s.target_bearing.toFixed(1) : '—';
+      this.#rngEl.textContent = s.target_range != null ? Math.round(s.target_range) : '—';
     }
 
-    const kind = s.target_kind || 'unknown';
-    const stance = s.target_stance || 'neutral';
-    const stanceClass = { hostile: 'hostile', friendly: 'friendly', allied: 'friendly', neutral: 'neutral' }[stance] || 'neutral';
-    const stanceLabel = { hostile: 'HOSTILE', friendly: 'ALLIED', allied: 'ALLIED', neutral: 'NEUTRAL' }[stance] || 'UNKNOWN';
-    const kindLabel = { ship: 'WARSHIP', asteroid: 'ASTEROID', station: 'STARBASE', planet: 'PLANET', star: 'STAR' }[kind] || kind.toUpperCase();
-
-    targetArea.innerHTML = `
-      <div class="target-card">
-        <div class="name">${s.target_name || s.target_uuid}</div>
-        <div class="badges">
-          <span class="badge ${stanceClass}">${stanceLabel}</span>
-          <span class="badge neutral">${kindLabel}</span>
-        </div>
-        <div class="pos-row">
-          <div><span class="k">BRG</span> <span class="v">${s.target_bearing != null ? s.target_bearing.toFixed(1) : '—'}</span><span class="u">°</span></div>
-          <div><span class="k">RNG</span> <span class="v">${s.target_range != null ? Math.round(s.target_range) : '—'}</span><span class="u">AU</span></div>
-        </div>
-      </div>
-    `;
-
+    const sd = root.getElementById('scan-data');
     const scanRows = [];
     if (s.target_class) scanRows.push({ k: 'CLASS', v: s.target_class });
     if (s.target_hull_pct != null) scanRows.push({ k: 'HULL', v: Math.round(s.target_hull_pct) + '%' });
     if (s.target_heading != null) scanRows.push({ k: 'HEADING', v: s.target_heading.toFixed(0) + '°' });
     if (s.target_speed != null) scanRows.push({ k: 'SPEED', v: s.target_speed.toFixed(1) + ' kn' });
     if (s.target_threat) scanRows.push({ k: 'THREAT', v: s.target_threat.toUpperCase() });
-    const sd = root.getElementById('scan-data');
+
     if (scanRows.length > 0) {
-      sd.innerHTML = scanRows.map(r => `<div class="scan-row"><span class="k">${r.k}</span><span class="v">${r.v}</span></div>`).join('');
+      const live = new Set(scanRows.map(r => r.k));
+      for (const [key, el] of this.#scanRowCache) {
+        if (!live.has(key)) { el.remove(); this.#scanRowCache.delete(key); }
+      }
+      scanRows.forEach(r => {
+        let row = this.#scanRowCache.get(r.k);
+        if (!row) {
+          row = document.createElement('div');
+          row.className = 'scan-row';
+          row.innerHTML = '<span class="k"></span><span class="v"></span>';
+          this.#scanRowCache.set(r.k, row);
+          sd.appendChild(row);
+        }
+        row.children[0].textContent = r.k;
+        row.children[1].textContent = r.v;
+      });
     } else {
-      sd.innerHTML = '<div class="scan-row"><span class="k">STATUS</span><span class="v dim">SCANNING...</span></div>';
+      let scanning = this.#scanRowCache.get('__scanning');
+      if (!scanning) {
+        scanning = document.createElement('div');
+        scanning.className = 'scan-row';
+        scanning.innerHTML = '<span class="k">STATUS</span><span class="v dim">SCANNING...</span>';
+        this.#scanRowCache.set('__scanning', scanning);
+        sd.appendChild(scanning);
+      }
+      for (const [key, el] of this.#scanRowCache) {
+        if (key !== '__scanning') { el.remove(); this.#scanRowCache.delete(key); }
+      }
     }
   }
 }

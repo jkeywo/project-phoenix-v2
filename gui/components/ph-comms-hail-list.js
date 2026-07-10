@@ -1,5 +1,7 @@
 export class PhCommsHailList extends HTMLElement {
   #state = null;
+  #rowCache = new Map();
+  #emptyEl = null;
 
   constructor() {
     super();
@@ -42,27 +44,40 @@ export class PhCommsHailList extends HTMLElement {
     const raw = Array.isArray(s.messages) ? s.messages : [];
     const list = this.shadowRoot.getElementById('list');
 
-    if (raw.length === 0) {
-      list.innerHTML = '<div class="empty">NO MESSAGES</div>';
-      return;
+    const live = new Set(raw.map(t => t.id || ''));
+    for (const [key, el] of this.#rowCache) {
+      if (!live.has(key)) { el.remove(); this.#rowCache.delete(key); }
     }
 
-    list.innerHTML = raw.map(t => {
+    if (raw.length === 0) {
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO MESSAGES'; list.appendChild(this.#emptyEl); }
+      return;
+    }
+    if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
+
+    raw.forEach(t => {
       const id = t.id || '';
       const sender = t.sender_name || '';
       const preview = t.subject || '';
       const unread = !t.is_read;
-      const dotCls = unread ? 'dot unread' : 'dot read';
-      const senderCls = unread ? 'sender unread' : 'sender';
-      return `<div class="row" data-id="${id}"><span class="${dotCls}"></span><span class="${senderCls}">${sender}</span><span class="preview">${preview}</span></div>`;
-    }).join('');
-
-    list.querySelectorAll('.row').forEach(row => {
-      row.addEventListener('click', () => {
-        if (this.sendAction) {
-          this.sendAction('select_comms_message', { message_id: row.dataset.id });
-        }
-      });
+      let row = this.#rowCache.get(id);
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = '<span class="dot"></span><span class="sender"></span><span class="preview"></span>';
+        row.addEventListener('click', () => {
+          if (this.sendAction) {
+            this.sendAction('select_comms_message', { message_id: id });
+          }
+        });
+        this.#rowCache.set(id, row);
+        list.appendChild(row);
+      }
+      row.dataset.id = id;
+      row.children[0].className = unread ? 'dot unread' : 'dot read';
+      row.children[1].className = unread ? 'sender unread' : 'sender';
+      row.children[1].textContent = sender;
+      row.children[2].textContent = preview;
     });
   }
 }

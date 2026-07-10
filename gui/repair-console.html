@@ -424,15 +424,18 @@
       /* ─ Teams smoke-test container ─────────────────────────── */
       var td = document.getElementById('teams-data');
       if (td) {
-        td.innerHTML = '';
+        var teamLive = new Set(teams.map(function(s, i) { return String(i); }));
+        Array.from(td.children).forEach(function(el) {
+          if (el.dataset && !teamLive.has(el.dataset.idx)) el.remove();
+        });
         teams.forEach(function(slot, i) {
-          var d = document.createElement('div'); d.className = 'team-slot';
+          var d = td.querySelector('[data-idx="' + i + '"]');
+          if (!d) { d = document.createElement('div'); d.className = 'team-slot'; td.appendChild(d); }
           d.dataset.idx   = i;
           d.dataset.state = typeof slot === 'string' ? slot : Object.keys(slot)[0];
           if (slot.Travelling) d.dataset.console = slot.Travelling.system_id || '';
           if (slot.Repairing)  d.dataset.console = slot.Repairing.system_id || '';
           if (slot.Returning && slot.Returning.queued_system_id) d.dataset.queued = slot.Returning.queued_system_id;
-          td.appendChild(d);
         });
       }
 

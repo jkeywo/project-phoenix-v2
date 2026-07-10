@@ -509,16 +509,14 @@
         nameEl.textContent  = 'NO TARGET';
         nameEl.className    = 'tgt-name empty';
         kindTag.textContent = 'NO CONTACT';
-        badgesEl.innerHTML  = '';
+        badgesEl.textContent = '';
         bearEl.textContent  = '\u2014';
         rangeEl.textContent = '\u2014';
         shieldsCard.classList.add('panel-dim');
         scanCard.classList.add('panel-dim');
-        document.getElementById('shield-facings').innerHTML = '';
+        _clearShieldFacings();
         document.getElementById('freq-section').style.display = 'none';
-        document.getElementById('scan-rows').innerHTML =
-          '<div class="scan-row"><span class="k">STATUS</span>' +
-          '<span class="v dim">AWAITING TARGET</span></div>';
+        _renderScanPlaceholder('AWAITING TARGET');
         return;
       }
 
@@ -534,11 +532,7 @@
       var SL = { hostile:'HOSTILE', friendly:'ALLIED',   allied:'ALLIED',   neutral:'NEUTRAL' };
       var TL = { ship:'WARSHIP', asteroid:'ASTEROID', station:'STARBASE',
                  planet:'PLANET', star:'STAR', torpedo:'TORPEDO' };
-      var html = '<span class="badge ' + (SC[stance]||'neutral') + '">' +
-                 (SL[stance]||'UNKNOWN') + '</span>';
-      html += '<span class="badge type">' + (TL[kind]||kind.toUpperCase()) + '</span>';
-      if (faction) html += '<span class="badge neutral">' + faction.toUpperCase() + '</span>';
-      badgesEl.innerHTML = html;
+      _renderBadges(badgesEl, stance, kind, faction, SC, SL, TL);
 
       bearEl.textContent  = s.target_bearing != null
         ? s.target_bearing.toFixed(1) : '\u2014';
@@ -570,6 +564,21 @@
       _renderScanData(s);
     }
 
+    var _shieldFacingCache = {};
+    function _clearShieldFacings() {
+      for (var k in _shieldFacingCache) { _shieldFacingCache[k].el.remove(); }
+      _shieldFacingCache = {};
+      var sf = document.getElementById('shield-facings');
+      if (sf) sf.textContent = '';
+    }
+    function _getShieldFacingEl(key) {
+      if (_shieldFacingCache[key]) return _shieldFacingCache[key];
+      var el = document.createElement('div'); el.className = 's-facing';
+      el.innerHTML = '<span class="lbl"></span><div class="bar-w"><div class="bar-f"></div></div><span class="pct"></span>';
+      _shieldFacingCache[key] = { el: el, lbl: el.children[0], fill: el.children[1].firstChild, pct: el.children[2] };
+      return _shieldFacingCache[key];
+    }
+
     /// Render a single-facing NPC shield (#473): one horizontal bar,
     /// labelled "DOWN" in the value cell + "SHIELD DOWN" in the tag when
     /// the shield is broken (fraction = 0); "<pct>%" otherwise. Hides the
@@ -580,13 +589,12 @@
       var cls = broken ? 'off' : pct > 60 ? 'ok' : pct > 25 ? 'warn' : 'crit';
       var label = broken ? 'DOWN' : pct + '%';
       document.getElementById('shields-tag').textContent = broken ? 'SHIELD DOWN' : 'ONLINE';
-      var html =
-        '<div class="s-facing">' +
-        '<span class="lbl">SHLD</span>' +
-        '<div class="bar-w"><div class="bar-f ' + cls + '" style="width:' + pct + '%"></div></div>' +
-        '<span class="pct">' + label + '</span>' +
-        '</div>';
-      document.getElementById('shield-facings').innerHTML = html;
+      _clearShieldFacings();
+      var c = _getShieldFacingEl('_single');
+      document.getElementById('shield-facings').appendChild(c.el);
+      c.lbl.textContent = 'SHLD';
+      c.fill.className = 'bar-f ' + cls; c.fill.style.width = pct + '%';
+      c.pct.textContent = label;
       // NPCs do not carry a shield frequency.
       document.getElementById('freq-section').style.display = 'none';
     }
@@ -595,19 +603,23 @@
       var anyOn = shields.some(function(f){ return f.online !== false; });
       document.getElementById('shields-tag').textContent = anyOn ? 'ONLINE' : 'OFFLINE';
 
-      var html = '';
+      var live = new Set(shields.map(function(f) { return f.label; }));
+      for (var k in _shieldFacingCache) {
+        if (!live.has(k)) { _shieldFacingCache[k].el.remove(); delete _shieldFacingCache[k]; }
+      }
+      var container = document.getElementById('shield-facings');
+      container.textContent = '';
       shields.forEach(function(f) {
         var pct = f.max_hp > 0 ? Math.round(f.hp / f.max_hp * 100) : 0;
         var cls = f.online === false ? 'off'
                 : pct > 60 ? 'ok' : pct > 25 ? 'warn' : 'crit';
         var pctStr = f.online === false ? 'OFF' : pct + '%';
-        html += '<div class="s-facing">' +
-                '<span class="lbl">' + (f.label||'?').substring(0,4).toUpperCase() + '</span>' +
-                '<div class="bar-w"><div class="bar-f ' + cls + '" style="width:' + pct + '%"></div></div>' +
-                '<span class="pct">' + pctStr + '</span>' +
-                '</div>';
+        var c = _getShieldFacingEl(f.label);
+        container.appendChild(c.el);
+        c.lbl.textContent = (f.label||'?').substring(0,4).toUpperCase();
+        c.fill.className = 'bar-f ' + cls; c.fill.style.width = pct + '%';
+        c.pct.textContent = pctStr;
       });
-      document.getElementById('shield-facings').innerHTML = html;
 
       var showFreq = _complexity === 'full' && shieldFreq;
       document.getElementById('freq-section').style.display = showFreq ? '' : 'none';
@@ -617,6 +629,22 @@
           if (el) el.className = 'freq-chip' + (shieldFreq === f ? ' active' : '');
         });
       }
+    }
+
+    var _scanRowCache = {};
+    function _renderScanPlaceholder(text) {
+      for (var k in _scanRowCache) { _scanRowCache[k].el.remove(); }
+      _scanRowCache = {};
+      var c = _getScanRow('__placeholder');
+      c.k.textContent = 'STATUS'; c.v.textContent = text; c.v.className = 'v dim';
+      document.getElementById('scan-rows').appendChild(c.el);
+    }
+    function _getScanRow(key) {
+      if (_scanRowCache[key]) return _scanRowCache[key];
+      var el = document.createElement('div'); el.className = 'scan-row';
+      el.innerHTML = '<span class="k"></span><span class="v"></span>';
+      _scanRowCache[key] = { el: el, k: el.children[0], v: el.children[1] };
+      return _scanRowCache[key];
     }
 
     function _renderScanData(s) {
@@ -640,10 +668,35 @@
       if (!rows.length)
         rows.push({ k: 'STATUS',   v: 'SCANNING...', cls: 'dim' });
 
-      document.getElementById('scan-rows').innerHTML = rows.map(function(r) {
-        return '<div class="scan-row"><span class="k">' + r.k + '</span>' +
-               '<span class="v' + (r.cls ? ' '+r.cls : '') + '">' + r.v + '</span></div>';
-      }).join('');
+      var container = document.getElementById('scan-rows');
+      var live = new Set(rows.map(function(r) { return r.k; }));
+      for (var k in _scanRowCache) {
+        if (!live.has(k)) { _scanRowCache[k].el.remove(); delete _scanRowCache[k]; }
+      }
+      rows.forEach(function(r) {
+        var c = _getScanRow(r.k);
+        container.appendChild(c.el);
+        c.k.textContent = r.k;
+        c.v.textContent = r.v;
+        c.v.className = 'v' + (r.cls ? ' ' + r.cls : '');
+      });
+    }
+
+    function _renderBadges(el, stance, kind, faction, SC, SL, TL) {
+      var badges = [];
+      badges.push({ cls: SC[stance]||'neutral', text: SL[stance]||'UNKNOWN' });
+      badges.push({ cls: 'type', text: TL[kind]||kind.toUpperCase() });
+      if (faction) badges.push({ cls: 'neutral', text: faction.toUpperCase() });
+      var live = new Set(badges.map(function(b) { return b.text; }));
+      var existing = {};
+      for (var i = 0; i < el.children.length; i++) { var ch = el.children[i]; if (ch.dataset && ch.dataset.bkey) existing[ch.dataset.bkey] = ch; }
+      for (var k in existing) { if (!live.has(k)) { existing[k].remove(); } }
+      badges.forEach(function(b) {
+        var be = existing[b.text];
+        if (!be) { be = document.createElement('span'); be.className = 'badge'; be.dataset.bkey = b.text; el.appendChild(be); }
+        be.className = 'badge ' + b.cls;
+        be.textContent = b.text;
+      });
     }
 
     document.getElementById('btn-on-screen').addEventListener('click', function() {

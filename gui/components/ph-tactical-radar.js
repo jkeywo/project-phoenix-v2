@@ -86,35 +86,40 @@ export class PhTacticalRadar extends HTMLElement {
   #renderArcGroup(arcs, containerId, cx, cy, r, defaultColor, defaultOpacity) {
     const g = this.shadowRoot.getElementById(containerId);
     if (!g) return;
-    g.innerHTML = '';
-    for (const a of arcs) {
+    while (g.children.length > arcs.length) g.removeChild(g.lastChild);
+    arcs.forEach((a, i) => {
       const d = this.#wedgePath(cx, cy, r, a.facing_deg || 0, a.arc_deg || 0);
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      let path;
+      if (i < g.children.length) { path = g.children[i]; }
+      else { path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); g.appendChild(path); }
       path.setAttribute('d', d);
       path.setAttribute('fill', a.color || defaultColor);
       path.setAttribute('fill-opacity', String(a.opacity ?? defaultOpacity));
-      g.appendChild(path);
-    }
+    });
   }
 
   #renderHighlight(s, cx, cy, r) {
     const g = this.shadowRoot.getElementById('selected-highlight');
     if (!g) return;
-    g.innerHTML = '';
     const uuid = s.selected_target_uuid;
-    if (!uuid) return;
-    const blip = (s.blips || []).find(b => b.uuid === uuid);
-    if (!blip) return;
+    const blip = uuid ? (s.blips || []).find(b => b.uuid === uuid) : null;
+    if (!blip) {
+      while (g.firstChild) g.removeChild(g.firstChild);
+      return;
+    }
+    let circle = g.firstChild;
+    if (!circle) {
+      circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('fill', 'none');
+      circle.setAttribute('stroke', '#6cb6d0');
+      circle.setAttribute('stroke-width', '1.5');
+      g.appendChild(circle);
+    }
     const bx = cx + (blip.radar_x != null ? blip.radar_x : 0) * r;
     const by = cy - (blip.radar_y != null ? blip.radar_y : 0) * r;
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('cx', bx.toFixed(1));
     circle.setAttribute('cy', by.toFixed(1));
     circle.setAttribute('r', '5');
-    circle.setAttribute('fill', 'none');
-    circle.setAttribute('stroke', '#6cb6d0');
-    circle.setAttribute('stroke-width', '1.5');
-    g.appendChild(circle);
   }
 }
 

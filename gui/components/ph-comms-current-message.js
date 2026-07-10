@@ -1,5 +1,12 @@
 export class PhCommsCurrentMessage extends HTMLElement {
   #state = null;
+  #respCache = new Map();
+  #prevThreadId = null;
+  #placeholderEl = null;
+  #threadEl = null;
+  #senderEl = null;
+  #messagesEl = null;
+  #responsesEl = null;
 
   constructor() {
     super();
@@ -21,7 +28,13 @@ export class PhCommsCurrentMessage extends HTMLElement {
     .resp-btn:hover:not(:disabled) { background: #161b24; border-color: #4a5060; }
     .resp-btn:disabled { opacity: 0.35; cursor: default; }
   </style>
-  <div id="container"></div>
+  <div id="container">
+    <div class="placeholder" id="placeholder">NO ACTIVE HAIL</div>
+    <div class="thread" id="thread" style="display:none">
+      <div class="sender-label" id="sender-label"></div>
+      <div class="messages" id="messages"><div class="msg"><span class="text"></span></div></div>
+    </div>
+  </div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
   }
@@ -38,47 +51,77 @@ export class PhCommsCurrentMessage extends HTMLElement {
   get state() { return this.#state; }
 
   #render() {
+    const root = this.shadowRoot;
     const s = this.#state || {};
     const thread = s.thread;
-    const container = this.shadowRoot.getElementById('container');
+
+    if (!this.#placeholderEl) this.#placeholderEl = root.getElementById('placeholder');
+    if (!this.#threadEl) this.#threadEl = root.getElementById('thread');
+    if (!this.#senderEl) this.#senderEl = root.getElementById('sender-label');
+    if (!this.#messagesEl) this.#messagesEl = root.getElementById('messages');
 
     if (!thread) {
-      container.innerHTML = '<div class="placeholder">NO ACTIVE HAIL</div>';
+      this.#placeholderEl.style.display = '';
+      this.#threadEl.style.display = 'none';
+      this.#prevThreadId = null;
       return;
     }
 
+    this.#placeholderEl.style.display = 'none';
+    this.#threadEl.style.display = '';
+
+    const tid = thread.id;
     const sender = thread.sender_name || '';
     const body = thread.body || '';
     const responses = Array.isArray(thread.responses) ? thread.responses : [];
     const selectedIdx = thread.selected_response;
 
-    // Single message body displayed as the current message text.
-    const bodyHtml = body
-      ? `<div class="msg"><span class="text">${body}</span></div>`
-      : '<div class="msg" style="color:#6a7178">(empty)</div>';
+    this.#senderEl.textContent = sender;
 
-    // Responses are plain strings from Vec<String>.
-    const respHtml = responses.map((text, idx) => {
-      const chosen = selectedIdx != null && idx === selectedIdx;
-      return `<button class="resp-btn" data-idx="${idx}"${chosen ? ' disabled' : ''}>${chosen ? '\u2713 ' : ''}${text}</button>`;
-    }).join('');
+    if (tid !== this.#prevThreadId) {
+      this.#messagesEl.innerHTML = '<div class="msg"><span class="text"></span></div>';
+      this.#respCache.clear();
+      if (this.#responsesEl) { this.#responsesEl.remove(); this.#responsesEl = null; }
+      this.#prevThreadId = tid;
+    }
 
-    container.innerHTML = `
-      <div class="thread">
-        <div class="sender-label">${sender}</div>
-        <div class="messages">${bodyHtml}</div>
-        ${respHtml ? `<div class="responses">${respHtml}</div>` : ''}
-      </div>
-    `;
+    this.#messagesEl.firstChild.firstChild.textContent = body || '(empty)';
 
-    container.querySelectorAll('.resp-btn:not([disabled])').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (this.sendAction) {
-          // Use the thread message id as the target for respond action.
-          this.sendAction('respond_to_message', { message_id: thread.id, response_index: Number(btn.dataset.idx) });
+    if (responses.length === 0) {
+      if (this.#responsesEl) { this.#responsesEl.style.display = 'none'; }
+    } else {
+      if (!this.#responsesEl) {
+        this.#responsesEl = document.createElement('div');
+        this.#responsesEl.className = 'responses';
+        this.#threadEl.appendChild(this.#responsesEl);
+      }
+      this.#responsesEl.style.display = '';
+
+      const live = new Set(responses.map((_, i) => String(i)));
+      for (const [key, btn] of this.#respCache) {
+        if (!live.has(key)) { btn.remove(); this.#respCache.delete(key); }
+      }
+
+      responses.forEach((text, idx) => {
+        const key = String(idx);
+        const chosen = selectedIdx != null && idx === selectedIdx;
+        let btn = this.#respCache.get(key);
+        if (!btn) {
+          btn = document.createElement('button');
+          btn.className = 'resp-btn';
+          btn.dataset.idx = key;
+          btn.addEventListener('click', () => {
+            if (this.sendAction) {
+              this.sendAction('respond_to_message', { message_id: tid, response_index: Number(btn.dataset.idx) });
+            }
+          });
+          this.#respCache.set(key, btn);
+          this.#responsesEl.appendChild(btn);
         }
+        btn.disabled = chosen;
+        btn.textContent = chosen ? '\u2713 ' + text : text;
       });
-    });
+    }
   }
 }
 

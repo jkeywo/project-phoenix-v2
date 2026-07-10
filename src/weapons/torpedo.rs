@@ -198,7 +198,7 @@ impl TorpedoTube {
             TubeLoadState::Loading { remaining, total } => {
                 let r = (remaining - dt).max(0.0);
                 if r <= 0.0 {
-                    TubeLoadState::Unloaded
+                    TubeLoadState::Loaded
                 } else {
                     TubeLoadState::Loading {
                         remaining: r,
@@ -220,7 +220,7 @@ impl TorpedoTube {
             other => other,
         };
         match (&prev, &self.load_state) {
-            (TubeLoadState::Loading { .. }, TubeLoadState::Unloaded) => LoadTickOutcome::LoadedOne,
+            (TubeLoadState::Loading { .. }, TubeLoadState::Loaded) => LoadTickOutcome::LoadedOne,
             (TubeLoadState::Unloading { .. }, TubeLoadState::Unloaded) => {
                 LoadTickOutcome::UnloadedOne
             }
@@ -616,12 +616,14 @@ impl TorpedoSystem {
         for i in 0..n_tubes {
             let tube = &self.tubes[i];
             if tube.target_count > 0
-                && tube.load_state == TubeLoadState::Unloaded
+                && !matches!(tube.load_state, TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. })
                 && tube.loaded_count < tube.target_count
                 && tube.loaded_count < tube.volley_max
                 && self.torpedoes_remaining > 0
             {
                 self.torpedoes_remaining -= 1;
+                // start_load() requires Unloaded state, so reset from Loaded first
+                self.tubes[i].load_state = TubeLoadState::Unloaded;
                 self.tubes[i].start_load();
             }
         }
@@ -629,7 +631,9 @@ impl TorpedoSystem {
         // Ã¢â€â‚¬Ã¢â€â‚¬ Auto-unload toward target_count Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         for i in 0..n_tubes {
             let tube = &self.tubes[i];
-            if tube.load_state == TubeLoadState::Unloaded && tube.loaded_count > tube.target_count {
+            if !matches!(tube.load_state, TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. })
+                && tube.loaded_count > tube.target_count
+            {
                 let lt = tube.load_time;
                 self.tubes[i].load_state = TubeLoadState::Unloading {
                     remaining: lt,

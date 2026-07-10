@@ -559,7 +559,7 @@ fn cinematic_camera(
     });
     let entity_snapshot: Vec<(String, Vec3, Option<uuid::Uuid>)> = all_entities
         .iter()
-        .filter(|(eu, _, _)| local_uuid_str.as_ref().map_or(true, |lu| eu.0 != *lu))
+        .filter(|(eu, _, _)| local_uuid_str.as_ref().is_none_or(|lu| eu.0 != *lu))
         .map(|(eu, tf, faction)| (eu.0.clone(), tf.translation, faction.map(|f| f.0)))
         .collect();
 

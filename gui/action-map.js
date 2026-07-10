@@ -110,7 +110,7 @@ export const ACTION_MAP = Object.freeze({
   set_view: (a, send) => {
     if (!a.direction) return;
     var mode;
-    if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction) || a.direction.startsWith('camera_')) {
+    if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction) || a.direction.startsWith('camera_') || a.direction === 'cinematic') {
       mode = { kind: 'Camera', data: a.direction };
     } else {
       mode = { kind: a.direction };

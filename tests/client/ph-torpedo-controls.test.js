@@ -61,7 +61,7 @@ describe('PhTorpedoControls', () => {
   it('renders a loaded tube with label and enabled fire button', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     expect(queryText(el, '.lbl')).toBe('Fore Port');
@@ -73,7 +73,7 @@ describe('PhTorpedoControls', () => {
   it('disables fire button when tube is not loaded', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: false, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const fireBtn = el.shadowRoot.querySelector('.fire');
@@ -83,7 +83,7 @@ describe('PhTorpedoControls', () => {
   it('disables load button when tube is already loaded', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const loadBtn = el.shadowRoot.querySelector('.load');
@@ -93,7 +93,7 @@ describe('PhTorpedoControls', () => {
   it('disables load button when magazine is empty', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: false, load_progress: 0, auto: false }],
       magazine: { current: 0, max: 20 },
     };
     const loadBtn = el.shadowRoot.querySelector('.load');
@@ -103,7 +103,7 @@ describe('PhTorpedoControls', () => {
   it('enables load button when tube is unloaded and magazine has ammo', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: false, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const loadBtn = el.shadowRoot.querySelector('.load');
@@ -113,7 +113,7 @@ describe('PhTorpedoControls', () => {
   it('disables unload button when tube is not loaded', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: false, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const unloadBtn = el.shadowRoot.querySelector('.unload');
@@ -123,7 +123,7 @@ describe('PhTorpedoControls', () => {
   it('enables unload button when tube is loaded', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const unloadBtn = el.shadowRoot.querySelector('.unload');
@@ -133,7 +133,7 @@ describe('PhTorpedoControls', () => {
   it('shows load progress bar when tube state is loading', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', state: 'loading', is_loaded: false, load_progress_pct: 0.4, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', state: 'loading', loaded: false, load_progress: 0.4, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const wrap = el.shadowRoot.querySelector('.load-progress-wrap');
@@ -145,7 +145,7 @@ describe('PhTorpedoControls', () => {
   it('hides load progress bar when tube is idle', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const wrap = el.shadowRoot.querySelector('.load-progress-wrap');
@@ -155,7 +155,7 @@ describe('PhTorpedoControls', () => {
   it('shows AUTO badge and disables all buttons when auto is true', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: true }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: true }],
       magazine: { current: 6, max: 20 },
     };
     const badge = el.shadowRoot.querySelector('.auto-badge');
@@ -171,7 +171,7 @@ describe('PhTorpedoControls', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: false, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const loadBtn = el.shadowRoot.querySelector('.load');
@@ -183,7 +183,7 @@ describe('PhTorpedoControls', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const unloadBtn = el.shadowRoot.querySelector('.unload');
@@ -195,7 +195,7 @@ describe('PhTorpedoControls', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     const fireBtn = el.shadowRoot.querySelector('.fire');
@@ -207,15 +207,15 @@ describe('PhTorpedoControls', () => {
     const { el } = setup();
     el.state = {
       tubes: [
-        { id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false },
-        { id: 'fore_starboard', label: 'Fore Starboard', is_loaded: false, load_progress_pct: 0, auto: false },
+        { id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: false },
+        { id: 'fore_starboard', label: 'Fore Starboard', loaded: false, load_progress: 0, auto: false },
       ],
       magazine: { current: 6, max: 20 },
     };
     expect(el.shadowRoot.querySelectorAll('.tube-row').length).toBe(2);
 
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', loaded: true, load_progress: 0, auto: false }],
       magazine: { current: 6, max: 20 },
     };
     expect(el.shadowRoot.querySelectorAll('.tube-row').length).toBe(1);

@@ -59,13 +59,11 @@ describe('PhImpulseBtn', () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it('renders charging state and shows progress bar at correct width', () => {
+  it('renders charging state and fills the button itself proportionally', () => {
     const { el } = setup();
     el.state = { state: 'charging', charge_pct: 42, system_id: 'helm-impulse', auto: false };
-    const progressWrap = el.shadowRoot.getElementById('progress-wrap');
-    const progressFill = el.shadowRoot.getElementById('progress-fill');
-    expect(progressWrap.style.display).not.toBe('none');
-    expect(progressFill.style.width).toBe('42%');
+    const btn = el.shadowRoot.getElementById('btn');
+    expect(btn.style.getPropertyValue('--charge')).toBe('0.42');
   });
 
   it('renders cooldown state with COOLDOWN text and disabled button', () => {
@@ -107,10 +105,10 @@ describe('PhImpulseBtn', () => {
     expect(sendAction).toHaveBeenCalledWith('cancel_impulse', {});
   });
 
-  it('hides progress bar when not charging', () => {
+  it('resets the charge fill to 0 when not charging', () => {
     const { el } = setup();
     el.state = { state: 'ready', charge_pct: 0, system_id: 'helm-impulse', auto: false };
-    const progressWrap = el.shadowRoot.getElementById('progress-wrap');
-    expect(progressWrap.style.display).toBe('none');
+    const btn = el.shadowRoot.getElementById('btn');
+    expect(btn.style.getPropertyValue('--charge')).toBe('0');
   });
 });

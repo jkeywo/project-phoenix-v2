@@ -88,9 +88,12 @@ export function aggregateStationHull(stationId, consoleHull, stationSystems) {
 
 /**
  * Split the damageable-system list into ownerless "core" systems (which remain
- * on the repair console) and a list of dispatchable, currently-damaged repair
- * targets — one per station that has damage, plus a `core` bucket when any core
- * system is damaged. Used by the repair console (issue #12).
+ * on the repair console) and a list of dispatchable repair targets — one per
+ * station that owns any damageable system (regardless of current damage),
+ * plus a `core` bucket whenever any ownerless system exists. Every damageable
+ * station always gets a target/dispatch entry so repair teams can be sent
+ * proactively, not just once damage has occurred. Used by the repair console
+ * (issue #12).
  *
  * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
  * @param {Object<string,string[]>} stationSystems  station id → system ids
@@ -112,14 +115,14 @@ export function repairCoreAndTargets(systemHull, stationSystems) {
   const targets = [];
   Object.keys(stations).forEach(st => {
     const agg = aggregateStationHull(st, hull, stations);
-    if (agg.totalMax > 0 && agg.damagePct > 0.0001) {
+    if (agg.totalMax > 0) {
       targets.push({ id: st, label: titleCase(st), damage_pct: agg.damagePct });
     }
   });
 
   const coreMax = coreSystems.reduce((s, h) => s + (h.max_hp || 0), 0);
-  const coreCur = coreSystems.reduce((s, h) => s + (h.current || 0), 0);
-  if (coreMax > 0 && coreCur < coreMax) {
+  if (coreMax > 0) {
+    const coreCur = coreSystems.reduce((s, h) => s + (h.current || 0), 0);
     targets.push({ id: 'core', label: 'Core', damage_pct: 1 - coreCur / coreMax });
   }
 

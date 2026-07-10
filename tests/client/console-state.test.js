@@ -2136,7 +2136,7 @@ describe('repairCoreAndTargets', () => {
     expect(coreSystems.map(s => s.system_id)).toEqual(['core']);
   });
 
-  it('lists only damaged stations as dispatch targets, with a damage fraction', () => {
+  it('lists a dispatch target for every damageable station, with a damage fraction', () => {
     const hull = [
       { system_id: 'helm', display_name: 'Helm', current: 4, max_hp: 10 },        // damaged
       { system_id: 'helm-engine-port', display_name: 'Engine', current: 10, max_hp: 10 },
@@ -2148,7 +2148,12 @@ describe('repairCoreAndTargets', () => {
     expect(helm).toBeTruthy();
     expect(helm.label).toBe('Helm');
     expect(helm.damage_pct).toBeCloseTo(0.3, 5); // 6 of 20 hp lost
-    expect(targets.find(t => t.id === 'tactical')).toBeUndefined();
+
+    // Healthy stations still get a dispatch target — repair teams can be
+    // pre-positioned before damage occurs — just with damage_pct 0.
+    const tactical = targets.find(t => t.id === 'tactical');
+    expect(tactical).toBeTruthy();
+    expect(tactical.damage_pct).toBe(0);
   });
 
   it('adds a core bucket when a core system is damaged', () => {
@@ -2159,11 +2164,17 @@ describe('repairCoreAndTargets', () => {
     expect(targets.map(t => t.id)).toContain('core');
   });
 
-  it('returns no targets when nothing is damaged', () => {
+  it('still lists every damageable station when nothing is damaged', () => {
     const hull = [
       { system_id: 'helm', display_name: 'Helm', current: 10, max_hp: 10 },
+      { system_id: 'helm-engine-port', display_name: 'Engine', current: 10, max_hp: 10 },
+      { system_id: 'tactical', display_name: 'Tactical', current: 10, max_hp: 10 },
+      { system_id: 'phaser-omni', display_name: 'Phaser', current: 10, max_hp: 10 },
+      { system_id: 'power-reactor', display_name: 'Reactor', current: 10, max_hp: 10 },
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
     ];
     const { targets } = repairCoreAndTargets(hull, stationSystems);
-    expect(targets).toEqual([]);
+    expect(targets.map(t => t.id).sort()).toEqual(['engineering', 'helm', 'tactical']);
+    expect(targets.every(t => t.damage_pct === 0)).toBe(true);
   });
 });

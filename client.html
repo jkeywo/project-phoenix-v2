@@ -1297,6 +1297,29 @@
       } catch (_) {}
     }
 
+    // -- Generic console state push (ship-agnostic) --------------------------
+    // Every station id (including the aggregate cruiser/destroyer consoles like
+    // `engineering` = power+repair and `science` = sensors+shields) is handled
+    // generically by window.buildConsoleState(name, state), which nests the
+    // sub-panel payloads. The per-console push*ConsoleState helpers below only
+    // cover the legacy standalone iframes, so aggregate consoles (engineering,
+    // science, …) would otherwise never receive state. Route by the console
+    // registry so whatever iframe the current ship actually mounted is fed.
+    function pushConsoleStateFor(name) {
+      if (!name) return;
+      const registry = window.CONSOLE_REGISTRY || {};
+      const entry = registry[name];
+      const iframeId = entry ? entry.iframeId : (name + '-iframe');
+      const json = (typeof window.buildConsoleState === 'function')
+        ? window.buildConsoleState(name, state)
+        : '{}';
+      _pushIframe($(iframeId), name, json);
+    }
+
+    function pushActiveConsoleState() {
+      pushConsoleStateFor(activeConsole);
+    }
+
     // -- Weapons console iframe bridge (issue #422) --------------------------
     // Builds a WeaponsConsoleState JSON from client state and pushes it to the
     // gui/weapons-console.html iframe via its window.__updateConsole function.
@@ -1321,50 +1344,20 @@
     function _attachIframeLoadListener(iframeEl, consoleName) {
       if (!iframeEl) return;
       iframeEl.addEventListener('load', () => {
-        switch (consoleName) {
-          case 'tactical':   pushWeaponsConsoleState();    break;
-          case 'captain':    pushCaptainConsoleState();    break;
-          case 'helm':       pushHelmConsoleState();       break;
-          case 'repair':     pushRepairConsoleState();     break;
-          case 'power':      pushPowerConsoleState();      break;
-          case 'shields':    pushShieldsConsoleState();    break;
-          case 'sensors':    pushSensorsConsoleState();    break;
-          case 'science':    pushScienceConsoleState();    break;
-          case 'comms':      pushCommsConsoleState();      break;
-          case 'navigation': pushNavigationConsoleState(); break;
-        }
+        // Push the freshly-loaded iframe its current snapshot. Generic so it
+        // covers every station id the ship mounts (including engineering /
+        // science aggregates the old per-name switch never handled).
+        pushConsoleStateFor(consoleName);
         injectSwipeRelay(iframeEl);
       });
     }
 
     function renderGame(s) {
-      if (activeConsole === 'captain') {
-        pushCaptainConsoleState();
-      }
-      if (activeConsole === 'helm') {
-        pushHelmConsoleState();
-      }
-      if (activeConsole === 'repair') {
-        pushRepairConsoleState();
-      }
-      if (activeConsole === 'power') {
-        pushPowerConsoleState();
-      }
-      if (activeConsole === 'shields') {
-        pushShieldsConsoleState();
-      }
-      if (activeConsole === 'sensors') {
-        pushSensorsConsoleState();
-      }
-      if (activeConsole === 'science') {
-        pushScienceConsoleState();
-      }
-      if (activeConsole === 'comms') {
-        pushCommsConsoleState();
-      }
-      if (activeConsole === 'navigation') {
-        pushNavigationConsoleState();
-      }
+      // Refresh whichever console is currently visible. This is ship-agnostic:
+      // it covers the aggregate cruiser/destroyer consoles (engineering,
+      // science, …) that the per-name push helpers below do not, and the
+      // standalone consoles resolve to the same iframe via the registry.
+      pushActiveConsoleState();
     }
 
     // -- Captain console iframe bridge (issue #428) ---------------------------

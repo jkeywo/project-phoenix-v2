@@ -25,6 +25,7 @@ export const CONSOLE_LABEL = Object.freeze({
   navigation: 'Navigation',
   power: 'Power',
   comms: 'Comms',
+  engineering: 'Engineering',
 });
 
 export const CONSOLE_INITIAL = Object.freeze({
@@ -38,6 +39,7 @@ export const CONSOLE_INITIAL = Object.freeze({
   navigation: 'N',
   power: 'P',
   comms: 'C',
+  engineering: 'E',
 });
 
 // Threshold at which the portrait bar collapses to initials. Matches the

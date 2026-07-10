@@ -28,11 +28,11 @@ export class PhRepairTeams extends HTMLElement {
     .progress-fill.repairing { background: linear-gradient(90deg, #2a6838, #4ec870); }
     .progress-fill.travelling { background: linear-gradient(90deg, #805818, #d8a040); }
     .progress-fill.returning { background: linear-gradient(90deg, #184880, #6090e0); }
-    .target-select { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; color: #cce; background: #05080e; border: 1px solid #282c38; padding: 0.2rem 0.3rem; width: 100%; }
-    .target-select:disabled { opacity: 0.4; }
-    .dispatch-btn { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.2rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 2px solid #4ec870; color: #4ec870; background: #0e1117; transition: all 0.15s ease; align-self: flex-end; }
+    .dispatch-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+    .dispatch-btn { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.2rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 2px solid #4ec870; color: #4ec870; background: #0e1117; transition: all 0.15s ease; }
     .dispatch-btn:hover:not(:disabled) { background: #16281d; }
     .dispatch-btn:disabled { opacity: 0.35; border-color: #6a7178; color: #6a7178; cursor: default; }
+    .dispatch-btn.active { background: #16281d; box-shadow: 0 0 0 1px #4ec870 inset; }
     .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
@@ -128,21 +128,9 @@ export class PhRepairTeams extends HTMLElement {
             <span class="status-badge"></span>
           </div>
           <span class="target-label"></span>
-          <select class="target-select"></select>
+          <div class="dispatch-row"></div>
           <div class="progress-wrap"><div class="progress-fill" style="width:0%"></div></div>
-          <button class="dispatch-btn">DISPATCH</button>
         `;
-        const btn = card.querySelector('.dispatch-btn');
-        const sel = card.querySelector('.target-select');
-        btn.addEventListener('click', () => {
-          if (btn.disabled) return;
-          const targetId = sel.value;
-          if (this.sendAction && targetId) {
-            // target is a station id (lowercase) or 'core'; action-map wraps it
-            // into RepairTarget::{Station|Core}.
-            this.sendAction('dispatch_repair_team', { team_idx: team.id, target: targetId });
-          }
-        });
         if (idx < container.children.length) {
           container.insertBefore(card, container.children[idx]);
         } else {
@@ -157,41 +145,45 @@ export class PhRepairTeams extends HTMLElement {
       badgeEl.className = 'status-badge ' + status;
 
       const isIdle = status === 'idle';
+      // Every station that owns a damageable system gets a target/dispatch
+      // entry regardless of current damage, so teams can be pre-positioned.
       const targets = Array.isArray(s.targets) ? s.targets : [];
       const label = card.querySelector('.target-label');
-      const sel = card.querySelector('.target-select');
-      const btn = card.querySelector('.dispatch-btn');
+      const drow = card.querySelector('.dispatch-row');
 
       if (isIdle) {
-        // Idle team: pick a damaged station/core to send it to.
         const hasTargets = targets.length > 0;
         label.style.display = hasTargets ? 'none' : 'block';
-        if (!hasTargets) label.textContent = 'No damage to repair';
-        sel.style.display = hasTargets ? 'block' : 'none';
+        if (!hasTargets) label.textContent = 'No repair targets';
+        drow.style.display = hasTargets ? 'flex' : 'none';
 
         const sig = targets.map(t => t.id).join('|');
-        if (sel.dataset.sig !== sig) {
-          const prev = sel.value;
-          sel.innerHTML = '';
+        if (drow.dataset.sig !== sig) {
+          drow.innerHTML = '';
           targets.forEach(t => {
-            const o = document.createElement('option');
-            o.value = t.id;
-            o.textContent = t.label + ' — ' + Math.round((t.damage_pct || 0) * 100) + '%';
-            sel.appendChild(o);
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'dispatch-btn';
+            b.dataset.target = t.id;
+            b.textContent = t.label + ' ' + Math.round((t.damage_pct || 0) * 100) + '%';
+            b.addEventListener('click', () => {
+              if (b.disabled) return;
+              if (this.sendAction) {
+                // target is a station id (lowercase) or 'core'; action-map
+                // wraps it into RepairTarget::{Station|Core}.
+                this.sendAction('dispatch_repair_team', { team_idx: team.id, target: t.id });
+              }
+            });
+            drow.appendChild(b);
           });
-          if (targets.some(t => t.id === prev)) sel.value = prev;
-          sel.dataset.sig = sig;
+          drow.dataset.sig = sig;
         }
-        sel.disabled = auto;
-        btn.style.display = 'inline-block';
-        btn.textContent = 'DISPATCH';
-        btn.disabled = auto || !hasTargets;
+        drow.querySelectorAll('.dispatch-btn').forEach(b => { b.disabled = auto; });
       } else {
         // Busy team: show its current target; dispatch is not offered.
-        sel.style.display = 'none';
+        drow.style.display = 'none';
         label.style.display = 'block';
         label.textContent = 'Target: ' + (team.target || '—');
-        btn.style.display = 'none';
       }
 
       const fill = card.querySelector('.progress-fill');

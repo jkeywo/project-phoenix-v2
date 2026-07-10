@@ -107,6 +107,17 @@ function setup(opts) {
   return { el, canvas, fakeCtx, tickRaf };
 }
 
+function click(el, x, y) {
+  el.dispatchEvent(new MouseEvent('mousedown', { clientX: x, clientY: y, bubbles: true }));
+  el.dispatchEvent(new MouseEvent('mouseup', { clientX: x, clientY: y, bubbles: true }));
+}
+
+function drag(el, fromX, fromY, toX, toY) {
+  el.dispatchEvent(new MouseEvent('mousedown', { clientX: fromX, clientY: fromY, bubbles: true }));
+  el.dispatchEvent(new MouseEvent('mousemove', { clientX: toX, clientY: toY, bubbles: true }));
+  el.dispatchEvent(new MouseEvent('mouseup', { clientX: toX, clientY: toY, bubbles: true }));
+}
+
 describe('PhNavigationMap', () => {
   it('is defined and registered as a custom element', () => {
     expect(customElements.get('ph-navigation-map')).toBeDefined();
@@ -127,7 +138,6 @@ describe('PhNavigationMap', () => {
       h.el.state = {};
       h.tickRaf();
     }).not.toThrow();
-    // Should have at least fillRect calls for background
     expect(h.fakeCtx._calls.fillRect.length).toBeGreaterThan(0);
   });
 
@@ -155,8 +165,6 @@ describe('PhNavigationMap', () => {
     // With ship at origin, heading 0, range 5000, R=300, scale=0.06
     // Blip at (1000, 0): rx=1000, rz=0 → sx=300+1000*0.06=360, sy=300+0=300
     // Blip at (-1000, 0): rx=-1000, rz=0 → sx=300-1000*0.06=240, sy=300
-    // fill rect calls: background + station rect (but kind=planet uses arc, not rect)
-    // Actually planet uses arc, ship uses triangle path, so the arcs are drawn
     expect(h.fakeCtx._calls.arc.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -171,7 +179,6 @@ describe('PhNavigationMap', () => {
     };
     h.el.state = state;
     h.tickRaf();
-    // The waypoint should call moveTo/lineTo for the diamond path
     expect(h.fakeCtx._calls.moveTo.length).toBeGreaterThan(0);
   });
 
@@ -186,9 +193,7 @@ describe('PhNavigationMap', () => {
     };
     h.tickRaf();
 
-    // Click center of canvas (300,300 in buffer = 150,150 in CSS)
-    // This maps to world (0, 0) since ship is at origin
-    h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 150, clientY: 150 }));
+    click(h.canvas, 150, 150);
     expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 0, z: 0 });
   });
 
@@ -205,9 +210,10 @@ describe('PhNavigationMap', () => {
 
     // Click at CSS (150, 75) → buffer (300, 150)
     // cx=300, cy=300, scale=0.06 (R=300, range=5000)
-    // nx = (300-300)/0.06 = 0, ny = (150-300)/0.06 = -2500
+    // With zoom=1, pan=(0,0):
+    // nx = (300-300)/(0.06*1) = 0, ny = (150-300)/(0.06*1) = -2500
     // heading=0, cos=1, sin=0: wx = 0 + 0 + 500 = 500, wz = 0 - (-2500) + 300 = 2800
-    h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 150, clientY: 75 }));
+    click(h.canvas, 150, 75);
     expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 500, z: 2800 });
   });
 
@@ -226,7 +232,7 @@ describe('PhNavigationMap', () => {
 
     // Blip at (1000, 0) → buffer: sx = 300+1000*0.06 = 360, sy = 300
     // CSS: x=180, y=150
-    h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 180, clientY: 150 }));
+    click(h.canvas, 180, 150);
     expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', {
       x: 1000,
       z: 0,
@@ -251,7 +257,7 @@ describe('PhNavigationMap', () => {
 
     expect(overlay.classList.contains('show')).toBe(false);
 
-    h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 180, clientY: 150 }));
+    click(h.canvas, 180, 150);
     expect(overlay.classList.contains('show')).toBe(true);
 
     const nameEl = h.el.shadowRoot.getElementById('ov-name');
@@ -273,12 +279,10 @@ describe('PhNavigationMap', () => {
     };
     h.tickRaf();
 
-    // First tap the blip to show overlay
-    h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 180, clientY: 150 }));
+    click(h.canvas, 180, 150);
     expect(overlay.classList.contains('show')).toBe(true);
 
-    // Then tap far away
-    h.canvas.dispatchEvent(new MouseEvent('click', { clientX: 0, clientY: 0 }));
+    click(h.canvas, 0, 0);
     expect(overlay.classList.contains('show')).toBe(false);
   });
 
@@ -295,5 +299,207 @@ describe('PhNavigationMap', () => {
 
     expect(canvas.width).toBe(800);
     expect(canvas.height).toBe(400);
+  });
+
+  describe('zoom and pan', () => {
+    it('drag longer than 5px prevents tap action', () => {
+      const sendAction = vi.fn();
+      const h = setup({ sendAction });
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+
+      drag(h.canvas, 100, 100, 200, 100);
+      expect(sendAction).not.toHaveBeenCalled();
+    });
+
+    it('drag less than 5px still fires tap action', () => {
+      const sendAction = vi.fn();
+      const h = setup({ sendAction });
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+
+      drag(h.canvas, 100, 100, 101, 100);
+      // mousedown at CSS (100,100) → buf (200,200), <5px movement → tap at (200,200)
+      // nx=(200-300)/0.06=-1666.67, ny=(200-300)/0.06=-1666.67
+      // heading=0: wx=-1666.67, wz=-(-1666.67)=1666.67
+      expect(sendAction).toHaveBeenCalledTimes(1);
+      const call = sendAction.mock.calls[0][1];
+      expect(call.x).toBeCloseTo(-1666.67, 1);
+      expect(call.z).toBeCloseTo(1666.67, 1);
+    });
+
+    it('drag pans the map and subsequent tap uses updated world coords', () => {
+      const sendAction = vi.fn();
+      const h = setup({ sendAction });
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+
+      // Drag right by 100 CSS pixels (200 buffer pixels)
+      drag(h.canvas, 100, 100, 200, 100);
+      // No tap expected (drag > 5px)
+      sendAction.mockClear();
+
+      // Now tap at the same CSS position where the drag ended
+      // panX = 200 (buf: 400-200), panY = 0
+      // Tap at CSS (200, 100) → buf (400, 200) → tap uses press pos (400, 200)
+      // nx = (400 - 300 - 200) / 0.06 = -100/0.06 = -1666.67
+      // ny = (200 - 300 - 0) / 0.06 = -1666.67
+      // heading=0: wx = -1666.67, wz = 1666.67
+      click(h.canvas, 200, 100);
+      expect(sendAction).toHaveBeenCalledTimes(1);
+      const call = sendAction.mock.calls[0][1];
+      expect(call.x).toBeCloseTo(-1666.67, 1);
+      expect(call.z).toBeCloseTo(1666.67, 1);
+    });
+
+    it('wheel zoom changes zoom level and affects tap world coords', () => {
+      const sendAction = vi.fn();
+      const h = setup({ sendAction });
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+
+      // Baseline: tap top-left to get world coords at zoom=1
+      click(h.canvas, 0, 0);
+      const baselineCall = sendAction.mock.calls[0][1];
+
+      sendAction.mockClear();
+
+      // Dispatch wheel event to zoom in
+      h.canvas.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -120,
+        clientX: 150,
+        clientY: 150,
+        bubbles: true,
+        cancelable: true,
+      }));
+
+      // Now tap top-left again — it should map to a different world position (closer to ship)
+      click(h.canvas, 0, 0);
+      const zoomedCall = sendAction.mock.calls[0][1];
+
+      // At zoom=1, world coords at (0,0) CSS center:
+      //   nx=(0-300)/0.06 = -5000, ny=(0-300)/0.06 = -5000, wx=-5000, wz=-5000
+      // At zoom=1.13, same CSS (0,0):
+      //   nx=(0-300)/(0.06*1.13) = -300/0.0678 = -4424.78, wx=-4424.78
+      expect(Math.abs(zoomedCall.x)).toBeLessThan(Math.abs(baselineCall.x));
+      expect(Math.abs(zoomedCall.z)).toBeLessThan(Math.abs(baselineCall.z));
+    });
+
+    it('zoom and pan survive state updates', () => {
+      const sendAction = vi.fn();
+      const h = setup({ sendAction });
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+
+      // Zoom in (wheel at center → zoom=1.13)
+      h.canvas.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: -120,
+        clientX: 150,
+        clientY: 150,
+        bubbles: true,
+        cancelable: true,
+      }));
+      // Drag right by 50 CSS pixels (100 buffer px) → panX=100
+      drag(h.canvas, 150, 100, 200, 100);
+
+      sendAction.mockClear();
+
+      // Update state (simulating new server data)
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 100, z: 100 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+
+      // Tap at center CSS (150,150) → buf (300,300)
+      // With zoom=1.13, panX=100, panY=0:
+      //   nx = (300-300-100)/(0.06*1.13) = -100/0.0678 = -1474.93
+      //   ny = (300-300-0)/(0.06*1.13) = 0
+      //   heading=0: wx = -1474.93 + 100 = -1374.93, wz = -0 + 100 = 100
+      click(h.canvas, 150, 150);
+      expect(sendAction).toHaveBeenCalledTimes(1);
+      const call = sendAction.mock.calls[0][1];
+      expect(call.x).toBeCloseTo(-1374.93, 1);
+      expect(call.z).toBe(100);
+    });
+
+    it('mousemove without prior mousedown does not affect pan', () => {
+      const sendAction = vi.fn();
+      const h = setup({ sendAction });
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+
+      // Dispatch mousemove without preceding mousedown (should be no-op)
+      h.canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200, bubbles: true }));
+
+      // Tap should still work with default pan
+      click(h.canvas, 150, 150);
+      expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 0, z: 0 });
+    });
+
+    it('wheel zoom clamps to min and max', () => {
+      const sendAction = vi.fn();
+      const h = setup({ sendAction });
+      h.el.state = {
+        blips: [],
+        range: 5000,
+        ship_pos: { x: 0, z: 0 },
+        ship_heading: 0,
+      };
+      h.tickRaf();
+
+      // Zoom out many times (deltaY > 0 = zoom out)
+      for (let i = 0; i < 20; i++) {
+        h.canvas.dispatchEvent(new WheelEvent('wheel', {
+          deltaY: 120,
+          clientX: 150,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }));
+      }
+
+      // Compute expected zoom after 20 zoom-outs (factor 0.885 each)
+      // 1 * 0.885^20 ≈ 0.089, clamped to 0.25
+      // Tap at top-left after extreme zoom out
+      sendAction.mockClear();
+      click(h.canvas, 0, 0);
+      const call = sendAction.mock.calls[0][1];
+      // At zoom=0.25 (clamped), top-left maps to:
+      // nx = (0-300)/(0.06*0.25) = -300/0.015 = -20000
+      expect(call.x).toBeCloseTo(-20000, 0);
+    });
   });
 });

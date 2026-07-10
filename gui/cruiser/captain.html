@@ -45,6 +45,7 @@
         <span class="sep">·</span>
         <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
         <span class="spacer"></span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
@@ -53,6 +54,7 @@
     import '../components/ph-camera-select.js';
     import '../components/ph-red-alert.js';
     import '../components/ph-objective-list.js';
+    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     initConsole({
       name: 'captain',
@@ -66,6 +68,7 @@
         var n = (s.blips && s.blips.length) || 0;
         document.getElementById('footer-target').textContent = n > 0 ? n + ' contacts' : 'NO TARGET';
         document.getElementById('footer-target').style.color = n > 0 ? 'var(--ink-dim)' : 'var(--ink-faint)';
+        document.getElementById('station-damage').state = s.own_hull || null;
       }
     });
   </script>

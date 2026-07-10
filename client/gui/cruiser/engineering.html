@@ -15,7 +15,9 @@
     .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-power-controls, ph-battery-bar, ph-repair-teams, ph-hull-integrity { flex: 1; min-height: 0; }
+    ph-power-controls, ph-repair-teams, ph-hull-integrity { flex: 1; min-height: 0; }
+    /* Battery bar sits at the bottom of the Power column, under the (growing) power controls. */
+    ph-battery-bar { flex: 0 0 auto; margin-top: 8px; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
@@ -47,6 +49,7 @@
         <span class="dot"></span>
         <span id="footer-status">ENGINEERING STATION</span>
         <span class="spacer"></span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
@@ -56,6 +59,7 @@
     import '../components/ph-battery-bar.js';
     import '../components/ph-repair-teams.js';
     import '../components/ph-hull-integrity.js';
+    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
@@ -72,9 +76,12 @@
         }
         if (s.repair) {
           var r = s.repair;
-          hul.state = { total_pct: (r.own_hull && r.own_hull.pct) || (s.power && s.power.own_hull && s.power.own_hull.pct) || 1, systems: r.system_hull || [] };
-          rep.state = { teams: r.teams || [], auto: !!r.repair_auto };
+          // Repair console lists ONLY ownerless core systems; per-station system
+          // status moved to each console's footer damage bar (issue #12).
+          hul.state = { total_pct: (r.own_hull && r.own_hull.pct) || (s.power && s.power.own_hull && s.power.own_hull.pct) || 1, systems: r.core_systems || [] };
+          rep.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [] };
         }
+        document.getElementById('station-damage').state = s.own_hull || null;
         setAutoState(null, document.getElementById('engineering-auto-badge'), !!s.engineering_auto);
       }
     });

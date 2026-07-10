@@ -132,10 +132,12 @@ export class PhTorpedoControls extends HTMLElement {
 
       row.querySelector('.lbl').textContent = tube.label || tube.id;
 
-      const isLoaded = !!tube.is_loaded;
+      // Server wire type is `TorpedoTubeState` (core/messages.rs): the fields
+      // are `loaded` / `load_progress`, not `is_loaded` / `load_progress_pct`.
+      const isLoaded = !!tube.loaded;
       const isBusy = tube.state === 'loading' || tube.state === 'unloading';
       const auto = !!tube.auto;
-      const progressPct = Math.max(0, Math.min(100, (tube.load_progress_pct || 0) * 100));
+      const progressPct = Math.max(0, Math.min(100, (tube.load_progress || 0) * 100));
 
       const progressWrap = row.querySelector('.load-progress-wrap');
       const progressFill = row.querySelector('.load-progress-fill');

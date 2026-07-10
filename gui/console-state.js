@@ -86,6 +86,46 @@ export function aggregateStationHull(stationId, consoleHull, stationSystems) {
   return { entries, totalCurrent, totalMax, pct, damagePct: 1 - pct };
 }
 
+/**
+ * Split the damageable-system list into ownerless "core" systems (which remain
+ * on the repair console) and a list of dispatchable, currently-damaged repair
+ * targets — one per station that has damage, plus a `core` bucket when any core
+ * system is damaged. Used by the repair console (issue #12).
+ *
+ * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
+ * @param {Object<string,string[]>} stationSystems  station id → system ids
+ */
+export function repairCoreAndTargets(systemHull, stationSystems) {
+  const hull = Array.isArray(systemHull) ? systemHull : [];
+  const stations = stationSystems || {};
+
+  const owned = new Set();
+  Object.keys(stations).forEach(st => (stations[st] || []).forEach(id => owned.add(id)));
+
+  const coreSystems = hull.filter(h => !owned.has(h.system_id));
+
+  const titleCase = (id) => String(id)
+    .split(/[-_]/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+
+  const targets = [];
+  Object.keys(stations).forEach(st => {
+    const agg = aggregateStationHull(st, hull, stations);
+    if (agg.totalMax > 0 && agg.damagePct > 0.0001) {
+      targets.push({ id: st, label: titleCase(st), damage_pct: agg.damagePct });
+    }
+  });
+
+  const coreMax = coreSystems.reduce((s, h) => s + (h.max_hp || 0), 0);
+  const coreCur = coreSystems.reduce((s, h) => s + (h.current || 0), 0);
+  if (coreMax > 0 && coreCur < coreMax) {
+    targets.push({ id: 'core', label: 'Core', damage_pct: 1 - coreCur / coreMax });
+  }
+
+  return { coreSystems, targets };
+}
+
 function withObjectiveTargets(entities, objectives) {
   const targets = activeObjectiveTargetNames(objectives);
   if (targets.size === 0) return entities || [];
@@ -700,21 +740,32 @@ export function buildRepairConsoleState(state) {
     const rawTeams = bb.teams || [];
     const travelDur = bb.travel_duration_secs ?? 5.0;
     const teams = rawTeams.map((slot, idx) => normalizeTeamSlot(slot, idx, travelDur));
+    const systemHull = bb.system_hull ?? [];
+    const { coreSystems, targets } = repairCoreAndTargets(systemHull, state.stationSystems);
     return JSON.stringify({
       teams,
       // SystemId-keyed fields (post issues #618/#619).
-      system_hull:          bb.system_hull          ?? [],
+      system_hull:          systemHull,
       damageable_systems:   bb.damageable_systems   ?? [],
+      // Only ownerless "core" systems stay on the repair console; per-station
+      // system status moved to each console's footer bar (issue #12).
+      core_systems:         coreSystems,
+      // Dispatchable, currently-damaged repair targets (stations + core).
+      dispatch_targets:     targets,
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
       repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
     });
   }
   // Legacy fallback: derive damageable_systems from consoleHull (SystemId-keyed
   // after issue #618) so the repair panel renders even without the blackboard.
+  const legacyHull = state.consoleHull || [];
+  const legacy = repairCoreAndTargets(legacyHull, state.stationSystems);
   return JSON.stringify({
     teams:                state.repairTeams || [],
-    system_hull:          state.consoleHull || [],
-    damageable_systems:   (state.consoleHull || []).map(h => h.system_id),
+    system_hull:          legacyHull,
+    damageable_systems:   legacyHull.map(h => h.system_id),
+    core_systems:         legacy.coreSystems,
+    dispatch_targets:     legacy.targets,
     travel_duration_secs: 5.0,
     repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
   });
@@ -1173,8 +1224,27 @@ export function buildDestroyerEngineeringConsoleState(state) {
 
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
+/**
+ * Compute the per-station footer damage aggregate for `consoleName` and merge
+ * it into the built console JSON as `own_hull`. `consoleName` is the station id
+ * (issue #12), so `aggregateStationHull` gives the console operator's own
+ * systems — the footer `ph-station-damage` bar reads this.
+ */
+function withStationDamage(consoleName, state, json) {
+  try {
+    const obj = JSON.parse(json);
+    obj.own_hull = aggregateStationHull(consoleName, state.consoleHull, state.stationSystems);
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
+}
+
 if (typeof window !== 'undefined') {
   window.buildConsoleState = function buildConsoleState(consoleName, state) {
+    return withStationDamage(consoleName, state, buildConsoleStateInner(consoleName, state));
+  };
+  window.buildConsoleStateInner = function buildConsoleStateInner(consoleName, state) {
     // Post issue #618: `consoleName` is a lowercase station id (from each
     // per-console iframe's `initConsole({ name: '...' })` and from
     // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase

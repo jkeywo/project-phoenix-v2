@@ -511,7 +511,7 @@ fn cinematic_camera(
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     cinematic_q: Query<&CinematicCameraSection, With<crate::simulation::LocalShip>>,
     local_q: Query<&EntityUuid, With<crate::simulation::LocalShip>>,
-    all_entities: Query<(&EntityUuid, &Transform, Option<&FactionComponent>)>,
+    all_entities: Query<(&EntityUuid, &Transform, Option<&FactionComponent>), Without<GameCamera>>,
     faction_registry: Option<Res<FactionRegistryResource>>,
     time: Res<Time>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,

@@ -168,6 +168,36 @@ describe('PhNavigationMap', () => {
     expect(h.fakeCtx._calls.arc.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('draws the ship marker at its true world position, not the screen centre', () => {
+    const h = setup();
+    // Canvas 600x600 → cx=cy=300, R=300, range=5000 → scale=0.06.
+    // World-anchored (camera on origin): ship at (2000,0) projects to
+    // sx = 300 + 2000*0.06 = 420, sy = 300 (unchanged on z=0).
+    h.el.state = {
+      blips: [],
+      range: 5000,
+      ship_pos: { x: 2000, z: 0 },
+      ship_heading: 0,
+    };
+    h.tickRaf();
+    // #drawShipMarker is the only code path that calls translate().
+    const translateCalls = h.fakeCtx.translate.mock.calls;
+    expect(translateCalls.length).toBeGreaterThan(0);
+    const [sx, sy] = translateCalls[translateCalls.length - 1];
+    expect(sx).toBeCloseTo(420, 1);
+    expect(sy).toBeCloseTo(300, 1);
+  });
+
+  it('ship marker sits at centre only when the ship is at the world origin', () => {
+    const h = setup();
+    h.el.state = { blips: [], range: 5000, ship_pos: { x: 0, z: 0 }, ship_heading: 0 };
+    h.tickRaf();
+    const c = h.fakeCtx.translate.mock.calls;
+    const [sx, sy] = c[c.length - 1];
+    expect(sx).toBeCloseTo(300, 1);
+    expect(sy).toBeCloseTo(300, 1);
+  });
+
   it('waypoint marker renders diamond shape when waypoint is set', () => {
     const h = setup();
     const state = {
@@ -210,11 +240,11 @@ describe('PhNavigationMap', () => {
 
     // Click at CSS (150, 75) → buffer (300, 150)
     // cx=300, cy=300, scale=0.06 (R=300, range=5000)
-    // With zoom=1, pan=(0,0):
+    // World-anchored (camera on origin, north-up), zoom=1, pan=(0,0):
     // nx = (300-300)/(0.06*1) = 0, ny = (150-300)/(0.06*1) = -2500
-    // heading=0, cos=1, sin=0: wx = 0 + 0 + 500 = 500, wz = 0 - (-2500) + 300 = 2800
+    // wx = 0, wz = -(-2500) = 2500 (independent of ship_pos)
     click(h.canvas, 150, 75);
-    expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 500, z: 2800 });
+    expect(sendAction).toHaveBeenCalledWith('set_navigation_waypoint', { x: 0, z: 2500 });
   });
 
   it('tap on blip dispatches set_navigation_waypoint with source_uuid', () => {
@@ -439,15 +469,15 @@ describe('PhNavigationMap', () => {
       h.tickRaf();
 
       // Tap at center CSS (150,150) → buf (300,300)
-      // With zoom=1.13, panX=100, panY=0:
+      // World-anchored (camera on origin), zoom=1.13, panX=100, panY=0:
       //   nx = (300-300-100)/(0.06*1.13) = -100/0.0678 = -1474.93
       //   ny = (300-300-0)/(0.06*1.13) = 0
-      //   heading=0: wx = -1474.93 + 100 = -1374.93, wz = -0 + 100 = 100
+      //   wx = -1474.93, wz = 0 (independent of ship_pos)
       click(h.canvas, 150, 150);
       expect(sendAction).toHaveBeenCalledTimes(1);
       const call = sendAction.mock.calls[0][1];
-      expect(call.x).toBeCloseTo(-1374.93, 1);
-      expect(call.z).toBe(100);
+      expect(call.x).toBeCloseTo(-1474.93, 1);
+      expect(call.z).toBe(0);
     });
 
     it('mousemove without prior mousedown does not affect pan', () => {

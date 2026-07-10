@@ -791,7 +791,7 @@
 
     // -- State ---------------------------------------------------
 
-    const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
+    const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', cameraViews: [], hullIntegrity: 100,
       shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, boostEnabled: false, boostBattery: 0, boostActive: false, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
       stations: [], maxPlayers: 0, allFilled: false, allReady: false, countdownSecs: 0,
@@ -1991,7 +1991,10 @@
             if (bb) {
               const vm = bb.view_mode;
               const vd = vm && vm.kind === 'Camera' ? vm.data : null;
-              state.currentView = vd || (vm && vm.kind) || state.currentView;
+              // Map the Cinematic enum tag to the camera-button label "cinematic".
+              const kind = vm && vm.kind === 'Cinematic' ? 'cinematic' : (vm && vm.kind);
+              state.currentView = vd || kind || state.currentView;
+              if (bb.camera_views) state.cameraViews = bb.camera_views;
               const nextAlert = !!bb.red_alert;
               if (state.redAlert !== nextAlert) {
                 state.redAlert = nextAlert;

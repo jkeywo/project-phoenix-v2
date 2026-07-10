@@ -54,6 +54,12 @@ pub struct Ship;
 #[derive(Component)]
 pub struct LocalShip;
 
+/// Marker component on the scene-root child entity of the local ship's GLB
+/// model. The child starts `Visibility::Hidden` and is toggled by the
+/// cinematic camera system.
+#[derive(Component)]
+pub struct LocalShipModel;
+
 #[derive(Component)]
 pub struct Asteroid;
 
@@ -2595,12 +2601,52 @@ fn render_spawned_entities(
             let cfg = &mesh_sec.0;
 
             if let Some(model_path) = &cfg.model {
-                // PATH A: GLB model. The local player's ship is never rendered
-                // (it's behind the camera); we still load the sidecar for its
-                // ModelMarkers (weapon mounts, camera markers). NPC ships load
-                // the full GLB scene.
-                if local_ship.is_some() {
-                    // Sidecar-only path: resolve once, attach markers, done.
+                // PATH A: GLB model. Load the GLB scene and its sidecar. The local
+                // player's ship starts hidden (shown only in cinematic camera mode);
+                // NPC ships are visible by default.
+                let scene: Handle<bevy::scene::Scene> = match pending {
+                    Some(p) => p.0.clone(),
+                    None => {
+                        // `asset_server` resolves paths relative to the `assets/`
+                        // root, but the TOML `model` field carries an `assets/`
+                        // prefix (matching the `template_path` convention, which is
+                        // read via `std::fs` relative to the cwd). Strip it so the
+                        // GLB resolves correctly instead of looking for
+                        // `assets/assets/models/...` and silently failing to load —
+                        // which leaves the entity unrendered and invisible.
+                        let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
+                        let path = format!("{}#Scene0", rel);
+                        let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
+                        // Diagnostic: distinguish prefetch hits (asset already in
+                        // path-cache, will arrive quickly) from cold loads (first
+                        // request for this path, network round-trip pending).
+                        bevy::log::info!(
+                        "render_spawned_entities: requesting scene {path} (load_state={:?})",
+                        asset_server.load_state(h.id())
+                    );
+                        ec.insert(PendingSceneHandle(h.clone()));
+                        h
+                    }
+                };
+                // Hard-fail surface: a `LoadState::Failed` GLB will never appear in
+                // `Assets<Scene>`, so the `scenes.get(...).is_some()` check would
+                // spin forever. Mark such entities `RenderProcessed` so we stop
+                // retrying them every frame, and warn once per entity.
+                if matches!(
+                    asset_server.load_state(scene.id()),
+                    bevy::asset::LoadState::Failed(_)
+                ) {
+                    bevy::log::warn!(
+                    "render_spawned_entities: GLB failed to load for entity {entity:?}, path={model_path} — entity will exist without a mesh"
+                );
+                    ec.remove::<PendingSceneHandle>();
+                    ec.insert(RenderProcessed);
+                    continue;
+                }
+                // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
+                // The sidecar resolves to an identity rig when genuinely absent, so
+                // models without a sidecar still render (visually unchanged).
+                if scenes.get(&scene).is_some() {
                     let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
                         Some(rig) => rig,
                         None => {
@@ -2608,87 +2654,42 @@ fn render_spawned_entities(
                             continue;
                         }
                     };
-                    ec.insert(crate::model_rig::ModelMarkers::from_rig(&rig));
-                    rendered = true;
-                } else {
-                    // PATH A (render): load the GLB scene and its sidecar. Issue the
-                    // load once and store the handle so the asset server keeps the
-                    // asset alive. On subsequent frames the same strong handle is
-                    // retrieved via `pending`, and we check readiness against it.
-                    let scene: Handle<bevy::scene::Scene> = match pending {
-                        Some(p) => p.0.clone(),
-                        None => {
-                            // `asset_server` resolves paths relative to the `assets/`
-                            // root, but the TOML `model` field carries an `assets/`
-                            // prefix (matching the `template_path` convention, which is
-                            // read via `std::fs` relative to the cwd). Strip it so the
-                            // GLB resolves correctly instead of looking for
-                            // `assets/assets/models/...` and silently failing to load —
-                            // which leaves the entity unrendered and invisible.
-                            let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-                            let path = format!("{}#Scene0", rel);
-                            let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
-                            // Diagnostic: distinguish prefetch hits (asset already in
-                            // path-cache, will arrive quickly) from cold loads (first
-                            // request for this path, network round-trip pending).
-                            bevy::log::info!(
-                            "render_spawned_entities: requesting scene {path} (load_state={:?})",
-                            asset_server.load_state(h.id())
-                        );
-                            ec.insert(PendingSceneHandle(h.clone()));
-                            h
-                        }
-                    };
-                    // Hard-fail surface: a `LoadState::Failed` GLB will never appear in
-                    // `Assets<Scene>`, so the `scenes.get(...).is_some()` check would
-                    // spin forever. Mark such entities `RenderProcessed` so we stop
-                    // retrying them every frame, and warn once per entity.
-                    if matches!(
-                        asset_server.load_state(scene.id()),
-                        bevy::asset::LoadState::Failed(_)
-                    ) {
-                        bevy::log::warn!(
-                        "render_spawned_entities: GLB failed to load for entity {entity:?}, path={model_path} — entity will exist without a mesh"
-                    );
-                        ec.remove::<PendingSceneHandle>();
-                        ec.insert(RenderProcessed);
-                        continue;
-                    }
-                    // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
-                    // The sidecar resolves to an identity rig when genuinely absent, so
-                    // models without a sidecar still render (visually unchanged).
-                    if scenes.get(&scene).is_some() {
-                        let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
-                            Some(rig) => rig,
-                            None => {
-                                // Sidecar fetch still in flight (wasm) — retry next frame.
-                                continue;
-                            }
-                        };
 
-                        ec.remove::<PendingSceneHandle>();
+                    ec.remove::<PendingSceneHandle>();
 
-                        // Composition: entityTransform ∘ baseRig ∘ model. The base rig
-                        // is applied INNER to the per-entity transform by spawning the
-                        // GLB SceneRoot as a CHILD carrying `base_bevy_transform()`,
-                        // while the per-entity Transform (spawn position + per-entity
-                        // scale/rotation) stays on the parent below. Spawning the scene
-                        // on a child (instead of the entity) also keeps the base rig's
-                        // non-uniform scale from composing badly with the per-entity
-                        // rotation on a single Transform.
-                        let base_tf = rig.base_bevy_transform();
-                        let scene_for_child = scene.clone();
+                    // Composition: entityTransform ∘ baseRig ∘ model. The base rig
+                    // is applied INNER to the per-entity transform by spawning the
+                    // GLB SceneRoot as a CHILD carrying `base_bevy_transform()`,
+                    // while the per-entity Transform (spawn position + per-entity
+                    // scale/rotation) stays on the parent below. Spawning the scene
+                    // on a child (instead of the entity) also keeps the base rig's
+                    // non-uniform scale from composing badly with the per-entity
+                    // rotation on a single Transform.
+                    let base_tf = rig.base_bevy_transform();
+                    let scene_for_child = scene.clone();
+                    if local_ship.is_some() {
+                        // Local ship model: hidden by default; shown only when the
+                        // cinematic camera is active.
+                        ec.with_children(|parent| {
+                            parent.spawn((
+                                bevy::scene::SceneRoot(scene_for_child),
+                                base_tf,
+                                Visibility::Hidden,
+                                LocalShipModel,
+                            ));
+                        });
+                    } else {
                         ec.with_children(|parent| {
                             parent.spawn((bevy::scene::SceneRoot(scene_for_child), base_tf));
                         });
-
-                        // Attach the resolved marker map so downstream systems (weapons,
-                        // exhaust, …) can resolve mount points by name.
-                        ec.insert(crate::model_rig::ModelMarkers::from_rig(&rig));
-
-                        rendered = true;
                     }
-                } // end else (render path)
+
+                    // Attach the resolved marker map so downstream systems (weapons,
+                    // exhaust, …) can resolve mount points by name.
+                    ec.insert(crate::model_rig::ModelMarkers::from_rig(&rig));
+
+                    rendered = true;
+                }
             } else {
                 // PATH B: Procedural primitive.
                 let color = if cfg.colour.len() >= 3 {

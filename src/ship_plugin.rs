@@ -1852,6 +1852,7 @@ mod tests {
             power_rating: None,
             css: None,
             target: None,
+            cinematic_camera: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();

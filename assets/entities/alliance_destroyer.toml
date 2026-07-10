@@ -496,3 +496,10 @@ id = "repair"
 kind = "repair"
 station = "engineering"
 power_group = "ops"
+
+[cinematic_camera]
+position = [0, 6, 12]
+default_pitch_deg = 12
+entity_look_range = 50
+look_ahead_distance = 80
+hysteresis_secs = 3

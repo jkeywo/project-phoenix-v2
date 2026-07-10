@@ -658,3 +658,10 @@ id = "comms"
 kind = "comms"
 station = "comms"
 power_group = "ops"
+
+[cinematic_camera]
+position = [0, 12, 22]
+default_pitch_deg = 18
+entity_look_range = 80
+look_ahead_distance = 150
+hysteresis_secs = 3

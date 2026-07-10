@@ -783,6 +783,31 @@ pub struct CaptainConsoleConfig {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CinematicCameraConfig {
+    /// Offset from ship centre in ship-local space (Y-up, Z-behind).
+    /// e.g. [0, 8, 15] means 8 units above and 15 units behind.
+    pub position: [f32; 3],
+    /// Downward pitch from horizontal, in degrees. e.g. 15.0
+    #[serde(default = "default_cinematic_pitch")]
+    pub default_pitch_deg: f32,
+    /// Maximum distance (world units) to consider entities for tracking.
+    #[serde(default = "default_cinematic_look_range")]
+    pub entity_look_range: f32,
+    /// Distance of the default look-ahead point when no entity is tracked.
+    #[serde(default = "default_cinematic_look_ahead")]
+    pub look_ahead_distance: f32,
+    /// Minimum seconds between target re-evaluations (hysteresis).
+    #[serde(default = "default_cinematic_hysteresis")]
+    pub hysteresis_secs: f32,
+}
+
+fn default_cinematic_pitch() -> f32 { 15.0 }
+fn default_cinematic_look_range() -> f32 { 60.0 }
+fn default_cinematic_look_ahead() -> f32 { 100.0 }
+fn default_cinematic_hysteresis() -> f32 { 3.0 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PowerAiConfigToml {
     /// Battery fraction below which the AI won't boost weapons power.
     #[serde(default = "default_weapons_battery_floor")]
@@ -1355,6 +1380,10 @@ pub struct EntityConfig {
     /// entity-type-specific branches.
     #[serde(skip)]
     pub ship_config: Option<crate::ship::config::ShipConfig>,
+    /// Cinematic camera config. When present the ship supports the
+    /// `ViewMode::Cinematic` viewscreen mode with dynamic entity tracking.
+    #[serde(default)]
+    pub cinematic_camera: Option<CinematicCameraConfig>,
     /// Designer-authored shield arcs (issue #514). Populated from
     /// top-level `[[shield_arc]]` TOML blocks. When non-empty, the parser
     /// auto-synthesises a matching `[[system]]` entry per arc with

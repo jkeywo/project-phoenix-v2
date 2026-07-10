@@ -11,7 +11,10 @@ use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
 
 use crate::ai_plugin::WarpOutMarker;
-use crate::entity_spawner::{RegionEffectsSection, RegionShapeSection};
+use crate::config_cache::FactionRegistryResource;
+use crate::entity_spawner::{
+    CinematicCameraSection, EntityUuid, FactionComponent, RegionEffectsSection, RegionShapeSection,
+};
 use crate::lobby::GameStateCache;
 use crate::messages::{CameraView, GamePhase, ViewMode};
 use crate::model_rig::ModelMarkers;
@@ -80,6 +83,7 @@ impl Plugin for RendererPlugin {
         app.add_plugins(PfxPlugin)
             .init_resource::<NebulaFogState>()
             .init_resource::<NebulaCloudState>()
+            .init_resource::<CinematicCameraState>()
             .add_systems(Startup, setup)
             .add_systems(
                 PostStartup,
@@ -98,7 +102,9 @@ impl Plugin for RendererPlugin {
                     toggle_cameras,
                     update_view_screen_text,
                     update_view_direction_label,
+                    toggle_ship_model_visibility,
                     hull_camera.run_if(in_state(GamePhase::InProgress)),
+                    cinematic_camera.run_if(in_state(GamePhase::InProgress)),
                     sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
                 ),
             )
@@ -378,6 +384,43 @@ fn toggle_cameras(
     }
 }
 
+/// Toggles the local ship model's visibility based on the current view mode.
+/// The model is visible only in `Cinematic` mode.
+fn toggle_ship_model_visibility(
+    view_mode_q: Query<&crate::ship_state::ShipViewMode, Changed<crate::ship_state::ShipViewMode>>,
+    local_ship_q: Query<Entity, With<crate::server_app::LocalShip>>,
+    children_q: Query<&Children>,
+    model_q: Query<&crate::server_app::LocalShipModel>,
+    mut visibility_q: Query<&mut Visibility>,
+) {
+    let Ok(view_mode) = view_mode_q.single() else { return };
+    let is_cinematic = view_mode.view_mode == ViewMode::Cinematic;
+    let Ok(local) = local_ship_q.single() else { return };
+
+    // Walk the local ship's children to find the LocalShipModel child.
+    fn set_vis(
+        entity: Entity,
+        show: bool,
+        children_q: &Query<&Children>,
+        model_q: &Query<&crate::server_app::LocalShipModel>,
+        visibility_q: &mut Query<&mut Visibility>,
+    ) {
+        if model_q.get(entity).is_ok() {
+            if let Ok(mut vis) = visibility_q.get_mut(entity) {
+                *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+            }
+            return;
+        }
+        if let Ok(children) = children_q.get(entity) {
+            for child in children.iter() {
+                set_vis(child, show, children_q, model_q, visibility_q);
+            }
+        }
+    }
+
+    set_vis(local, is_cinematic, &children_q, &model_q, &mut visibility_q);
+}
+
 fn update_view_screen_text(
     cache: Res<GameStateCache>,
     mut query: Query<(&mut Text, &mut Visibility), With<ViewScreenText>>,
@@ -447,6 +490,159 @@ fn hull_camera(
     }
 }
 
+/// Cinematic camera: positions the view above and behind the ship, tracks
+/// nearby entities with hysteresis (enemy > friendly > closest).
+fn cinematic_camera(
+    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
+    cinematic_q: Query<&CinematicCameraSection, With<crate::simulation::LocalShip>>,
+    local_q: Query<&EntityUuid, With<crate::simulation::LocalShip>>,
+    all_entities: Query<(
+        &EntityUuid,
+        &Transform,
+        Option<&FactionComponent>,
+    )>,
+    faction_registry: Option<Res<FactionRegistryResource>>,
+    time: Res<Time>,
+    mut cam_query: Query<&mut Transform, With<GameCamera>>,
+    mut state: ResMut<CinematicCameraState>,
+) {
+    let Ok(mut transform) = cam_query.single_mut() else { return };
+    let Ok(physics) = physics_q.single().copied() else { return };
+    let Ok(cam_cfg) = cinematic_q.single() else { return };
+    let cfg = &cam_cfg.0;
+
+    // Only run when cinematic mode is selected.
+    let view_mode = view_mode_q
+        .single()
+        .map(|vm| vm.view_mode.clone())
+        .unwrap_or(ViewMode::Camera(CameraView::default()));
+    if view_mode != ViewMode::Cinematic {
+        return;
+    }
+
+    let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
+    let yaw_rot = Quat::from_rotation_y(physics.yaw);
+
+    // Camera position: fixed offset from ship centre (above and behind).
+    let offset = Vec3::from_array(cfg.position);
+    let camera_pos = ship_origin + yaw_rot * offset;
+
+    // Compute forward direction with default downward pitch.
+    let pitch_rad = cfg.default_pitch_deg.to_radians();
+    let default_look = Vec3::new(
+        0.0,
+        -pitch_rad.sin(),
+        -pitch_rad.cos(),
+    );
+    let look_ahead = cfg.look_ahead_distance;
+
+    // ── Collect entity snapshot for all non-local entities ──────────
+    let local_uuid_str = local_q.single().ok().map(|u| u.0.clone());
+    let local_faction: Option<uuid::Uuid> = local_uuid_str.as_ref().and_then(|lu| {
+        all_entities
+            .iter()
+            .find(|(eu, _, _)| eu.0 == *lu)
+            .and_then(|(_, _, lf)| lf.map(|f| f.0))
+    });
+    let entity_snapshot: Vec<(String, Vec3, Option<uuid::Uuid>)> = all_entities
+        .iter()
+        .filter(|(eu, _, _)| local_uuid_str.as_ref().map_or(true, |lu| eu.0 != *lu))
+        .map(|(eu, tf, faction)| {
+            (eu.0.clone(), tf.translation, faction.map(|f| f.0))
+        })
+        .collect();
+
+    // ── Target selection with hysteresis ────────────────────────────
+    let now = time.elapsed_secs_f64();
+    let should_re_eval = now - state.last_re_eval > cfg.hysteresis_secs as f64;
+
+    // Drop target if it's no longer within range (allow 1.5x look_range drop).
+    let drop_range_sq = (cfg.entity_look_range * 1.5).powi(2);
+    let keep_target = state.current_target.and_then(|uuid| {
+        entity_snapshot.iter().find(|(eu, _, _)| eu.as_str() == uuid.to_string()).and_then(|(_, pos, _)| {
+            let dx = pos.x - ship_origin.x;
+            let dz = pos.z - ship_origin.z;
+            if dx * dx + dz * dz <= drop_range_sq { Some(uuid) } else { None }
+        })
+    });
+
+    let target = if should_re_eval {
+        state.last_re_eval = now;
+        find_cinematic_target(ship_origin, cfg, local_faction, &entity_snapshot, faction_registry.as_deref())
+    } else {
+        keep_target
+    };
+    state.current_target = target;
+
+    if let Some(target_uuid) = target {
+        // Find target position.
+        if let Some((_, target_pos, _)) = entity_snapshot.iter().find(|(eu, _, _)| eu.as_str() == target_uuid.to_string()) {
+            let midpoint = (ship_origin + *target_pos) * 0.5;
+
+            // Compute yaw around ship centre: angle from ship to midpoint.
+            let dir_to_mid = (midpoint - ship_origin).normalize_or_zero();
+            if dir_to_mid.length_squared() > 1e-6 {
+                // Yaw the camera around the ship centre.
+                let target_yaw = f32::atan2(dir_to_mid.x, -dir_to_mid.z);
+                let yawed_offset = Quat::from_rotation_y(target_yaw) * offset;
+                let yawed_pos = ship_origin + yawed_offset;
+
+                // Pitch from camera position toward midpoint.
+                transform.translation = yawed_pos;
+                transform.look_at(midpoint, Vec3::Y);
+                return;
+            }
+        }
+    }
+
+    // No target (or target not found): look ahead with default pitch.
+    transform.translation = camera_pos;
+    let look_target = camera_pos + yaw_rot * (default_look * look_ahead);
+    transform.look_at(look_target, Vec3::Y);
+}
+
+/// Pure heuristic: find the best entity for the cinematic camera to track.
+/// Priority: enemies first, then non-enemies; within each tier by closest XZ range.
+fn find_cinematic_target(
+    ship_origin: Vec3,
+    cfg: &crate::entity_config::CinematicCameraConfig,
+    local_faction: Option<uuid::Uuid>,
+    entities: &[(String, Vec3, Option<uuid::Uuid>)],
+    faction_registry: Option<&FactionRegistryResource>,
+) -> Option<uuid::Uuid> {
+    let range_sq = cfg.entity_look_range.powi(2);
+
+    // Collect entities within range, categorised by hostility.
+    let (mut enemies, mut friendlies): (Vec<_>, Vec<_>) = entities
+        .iter()
+        .filter(|(_, pos, _)| {
+            let dx = pos.x - ship_origin.x;
+            let dz = pos.z - ship_origin.z;
+            dx * dx + dz * dz <= range_sq
+        })
+        .partition(|(_, _, faction)| {
+            faction_registry
+                .map(|reg| {
+                    crate::faction::is_enemy(local_faction, *faction, reg)
+                })
+                .unwrap_or(false)
+        });
+
+    let pick_closest = |ents: &mut Vec<&(String, Vec3, Option<uuid::Uuid>)>| -> Option<uuid::Uuid> {
+        ents.sort_by(|(_, a_pos, _), (_, b_pos, _)| {
+            let da = a_pos.distance_squared(ship_origin);
+            let db = b_pos.distance_squared(ship_origin);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        ents.first().map(|(eu, _, _)| uuid::Uuid::parse_str(eu).unwrap_or_default())
+    };
+
+    // Enemies first, then friendlies.
+    pick_closest(&mut enemies)
+        .or_else(|| pick_closest(&mut friendlies))
+}
+
 fn update_view_direction_label(
     view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
     view_mode_changed: Query<
@@ -485,6 +681,7 @@ fn update_view_direction_label(
                 .unwrap_or(&cv.marker_name);
             name.to_uppercase()
         }
+        ViewMode::Cinematic => "CINEMATIC".to_string(),
         ViewMode::Radar => "RADAR".to_string(),
         ViewMode::ScienceRadar => "SCIENCE RADAR".to_string(),
         ViewMode::SensorsRadar => "SENSORS".to_string(),
@@ -712,6 +909,14 @@ impl Default for NebulaFogState {
             density: 0.0,
         }
     }
+}
+
+/// Tracks the cinematic camera's current target and last re-evaluation time
+/// for hysteresis — the target only changes when enough time has passed.
+#[derive(Resource, Default)]
+pub struct CinematicCameraState {
+    pub current_target: Option<uuid::Uuid>,
+    pub last_re_eval: f64,
 }
 
 /// How fast the fog intensity approaches its target (per second).

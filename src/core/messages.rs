@@ -384,6 +384,10 @@ pub enum ViewMode {
     NavigationChart,
     /// The Comms officer has pushed a message to the viewscreen.
     Comms,
+    /// Cinematic camera: dynamic above-and-behind view that tracks nearby
+    /// entities, with configurable offset, pitch, and target hysteresis.
+    /// Selected via the synthetic "cinematic" camera button.
+    Cinematic,
 }
 
 impl Default for ViewMode {

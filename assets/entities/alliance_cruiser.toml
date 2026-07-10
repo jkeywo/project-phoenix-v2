@@ -531,3 +531,10 @@ id = "viewscreen"
 kind = "viewscreen"
 station = "captain"
 power_group = "ops"
+
+[cinematic_camera]
+position = [0, 8, 15]
+default_pitch_deg = 15
+entity_look_range = 60
+look_ahead_distance = 100
+hysteresis_secs = 3

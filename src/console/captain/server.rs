@@ -59,19 +59,26 @@ fn handle_toggle_red_alert(
 fn view_request_from_admitted(
     cmd: &crate::messages::AdmittedCommand,
 ) -> Option<(SystemId, ViewMode)> {
+    /// Map a "cinematic" marker name to the Cinematic view mode.
+    fn resolve(mode: &ViewMode) -> ViewMode {
+        match mode {
+            ViewMode::Camera(cv) if cv.marker_name == "cinematic" => ViewMode::Cinematic,
+            _ => mode.clone(),
+        }
+    }
     match &cmd.payload {
         SystemControlPayload::SetView { mode }
             if cmd.target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID =>
         {
             Some((
                 crate::ship::viewscreen::source_system_for_view_mode(mode),
-                mode.clone(),
+                resolve(mode),
             ))
         }
         SystemControlPayload::SetView { mode }
             if cmd.target.0 == crate::system_registry::HELM_SYSTEM_ID =>
         {
-            Some((crate::system_registry::helm_system_id(), mode.clone()))
+            Some((crate::system_registry::helm_system_id(), resolve(mode)))
         }
         _ => None,
     }
@@ -181,6 +188,10 @@ fn publish_captain_blackboard(
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
     markers_q: Query<&crate::model_rig::ModelMarkers, With<crate::server_app::LocalShip>>,
+    cinematic_q: Query<
+        Option<&crate::entity_spawner::CinematicCameraSection>,
+        With<crate::server_app::LocalShip>,
+    >,
     ship_query: Query<
         (
             &ShipSystemControlSources,
@@ -222,14 +233,15 @@ fn publish_captain_blackboard(
         cs.0.source_for(&crate::system_registry::viewscreen_system_id()) == ControlSource::Ai
     });
 
-    // Extract the current camera view marker name from the view mode.
+    // Extract the current camera view name from the view mode.
     let view_direction = match &view_mode {
         ViewMode::Camera(cv) => cv.marker_name.clone(),
+        ViewMode::Cinematic => "cinematic".to_string(),
         _ => String::new(),
     };
 
     // Collect available camera marker names from the ship's model rig.
-    let camera_views: Vec<String> = markers_q
+    let mut camera_views: Vec<String> = markers_q
         .single()
         .ok()
         .map(|mm| {
@@ -239,6 +251,12 @@ fn publish_captain_blackboard(
                 .collect()
         })
         .unwrap_or_default();
+
+    // Add synthetic "cinematic" button if the ship has a cinematic camera config.
+    let has_cinematic = cinematic_q.single().ok().is_some_and(|c| c.is_some());
+    if has_cinematic {
+        camera_views.push("cinematic".to_string());
+    }
 
     let conditions = WorldConditions {
         red_alert,

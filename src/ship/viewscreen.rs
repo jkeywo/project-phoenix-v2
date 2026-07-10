@@ -59,6 +59,9 @@ impl ViewscreenArbiter {
                 self.captain_view = view;
                 self.active = None;
             }
+            ViewMode::Cinematic => {
+                self.active = None;
+            }
             mode => {
                 let request_priority = view_priority(&request.requester, &mode);
                 let should_clear = self.active.as_ref().is_some_and(|active| {
@@ -91,6 +94,9 @@ impl ViewscreenArbiter {
         match request.mode {
             ViewMode::Camera(view) => {
                 self.captain_view = view;
+                self.active = None;
+            }
+            ViewMode::Cinematic => {
                 self.active = None;
             }
             mode => {
@@ -132,6 +138,7 @@ pub fn source_system_for_view_mode(mode: &ViewMode) -> SystemId {
             crate::system_registry::navigation_system_id()
         }
         ViewMode::Comms => crate::system_registry::comms_system_id(),
+        ViewMode::Cinematic => crate::system_registry::captain_system_id(),
     }
 }
 
@@ -145,6 +152,7 @@ fn view_priority(source: &SystemId, mode: &ViewMode) -> u8 {
         ViewMode::ScienceRadar | ViewMode::SensorsRadar | ViewMode::SystemChart => 60,
         ViewMode::Radar => 50,
         ViewMode::Camera(_) => 100,
+        ViewMode::Cinematic => 100,
     }
 }
 

@@ -890,6 +890,7 @@ mod tests {
             radar_appearance: None,
             mesh: None,
             target: None,
+            cinematic_camera: None,
         };
 
         let mut commands = app.world_mut().commands();

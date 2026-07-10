@@ -91,6 +91,11 @@ pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfi
 #[derive(Component, Clone, Debug)]
 pub struct EntityTarget(pub crate::entity_target::TargetSection);
 
+/// Present when the EntityConfig has a `[cinematic_camera]` section.
+/// The viewscreen reads this for cinematic camera positioning and tracking.
+#[derive(Component, Clone, Debug)]
+pub struct CinematicCameraSection(pub crate::entity_config::CinematicCameraConfig);
+
 /// Hull tracker attached to any entity (NPC ship, asteroid) that carries a
 /// `[hull]` section in its TOML config. For NPC ships the HP is placed in a
 /// single `CaptainChair` console slot; asteroids use the same single-slot
@@ -201,6 +206,11 @@ pub fn spawn_entity(
         if !effects.is_empty() {
             entity_commands.insert(RegionEffectsSection(effects.to_kinds()));
         }
+    }
+
+    // Cinematic camera section
+    if let Some(cam) = &config.cinematic_camera {
+        entity_commands.insert(CinematicCameraSection(cam.clone()));
     }
 
     // Behaviour section — signals ai_plugin to attach an AiControllerComponent.
@@ -725,6 +735,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            cinematic_camera: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -771,6 +782,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            cinematic_camera: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -814,6 +826,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            cinematic_camera: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -862,6 +875,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            cinematic_camera: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -911,6 +925,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            cinematic_camera: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -973,6 +988,7 @@ mod tests {
             star: None,
             ship_config: None,
             shield_arcs: Vec::new(),
+            cinematic_camera: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1037,6 +1053,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            cinematic_camera: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1089,6 +1106,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            cinematic_camera: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1177,6 +1195,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            cinematic_camera: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1236,6 +1255,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            cinematic_camera: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1289,6 +1309,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            cinematic_camera: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -1369,6 +1390,7 @@ mod tests {
             radar_appearance: None,
             target: None,
             mesh: None,
+            cinematic_camera: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -1485,6 +1507,7 @@ hull_integrity = 60.0
             radar_appearance: None,
             target: None,
             mesh: None,
+            cinematic_camera: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);

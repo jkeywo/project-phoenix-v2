@@ -154,6 +154,13 @@ export class PhRadar extends HTMLElement {
         octx.fillText(b.label, bx + dotR + 4, by + 4);
       }
 
+      if (state.selected_target_uuid && state.selected_target_uuid === b.uuid) {
+        this.#drawRing(octx, bx, by, dotR + 6, 2, '#5fd8e8');
+      }
+      if (state.target_uuid && state.target_uuid === b.uuid) {
+        this.#drawRing(octx, bx, by, dotR + 8, 2, '#ff3344');
+      }
+
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
     }
 
@@ -162,6 +169,14 @@ export class PhRadar extends HTMLElement {
     }
 
     this.#needsRender = false;
+  }
+
+  #drawRing(ctx, x, y, r, lineWidth, color) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
   }
 
   #getBlipAt(canvasX, canvasY) {

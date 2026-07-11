@@ -713,6 +713,10 @@ mod tests {
                 },
             ),
             (
+                ServerMessageDiscriminants::ReturnedToLobby,
+                ServerMessage::ReturnedToLobby,
+            ),
+            (
                 ServerMessageDiscriminants::RatingChanged,
                 ServerMessage::RatingChanged {
                     station_id: StationId("captain".into()),

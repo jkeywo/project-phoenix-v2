@@ -394,6 +394,7 @@ pub fn process_message(
                         },
                     ));
                 }
+                outbound.push((Target::All, ServerMessage::ReturnedToLobby));
                 new_phase = Some(GamePhase::Lobby);
             }
         }
@@ -1580,6 +1581,12 @@ max_level = 4
                 "expected ReadyChanged(false) broadcast for {token}"
             );
         }
+        assert!(
+            result.outbound.iter().any(|(target, m)| {
+                matches!(target, Target::All) && matches!(m, ServerMessage::ReturnedToLobby)
+            }),
+            "expected ReturnedToLobby broadcast"
+        );
     }
 
     #[test]

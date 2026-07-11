@@ -1402,6 +1402,9 @@ pub enum ServerMessage {
     GameOver {
         reason: String,
     },
+    /// Broadcast when all players return to the lobby from the GameOver screen.
+    /// Clients should switch back to the lobby panel.
+    ReturnedToLobby,
     /// Broadcast to all when a station's active rating changes.
     /// Clients use this to update AUTO/read-only badges for system fragments
     /// belonging to the affected station.

@@ -853,7 +853,7 @@ fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     for (physics, mut transform) in ship_query.iter_mut() {
         transform.translation.x = physics.x;
         transform.translation.z = physics.z;
-        transform.rotation = Quat::from_euler(EulerRot::YXZ, physics.yaw, 0.0, physics.roll);
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, -physics.yaw, 0.0, physics.roll);
     }
 }
 

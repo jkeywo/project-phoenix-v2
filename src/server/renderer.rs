@@ -103,8 +103,12 @@ impl Plugin for RendererPlugin {
                     update_view_screen_text,
                     update_view_direction_label,
                     toggle_ship_model_visibility,
-                    hull_camera.run_if(in_state(GamePhase::InProgress)),
-                    cinematic_camera.run_if(in_state(GamePhase::InProgress)),
+                    hull_camera
+                        .run_if(in_state(GamePhase::InProgress))
+                        .after(crate::sim_sets::SimSet::Physics),
+                    cinematic_camera
+                        .run_if(in_state(GamePhase::InProgress))
+                        .after(crate::sim_sets::SimSet::Physics),
                     sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
                 ),
             )

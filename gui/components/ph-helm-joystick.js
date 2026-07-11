@@ -4,7 +4,8 @@ export class PhHelmJoystick extends HTMLElement {
   #py = 0;
   #pointerId = null;
   #rafId = null;
-  #hbId = null;
+  #hbRaf = null;
+  #lastHbSend = 0;
   #keys = {};
   #inputRaf = null;
   #lastKbSend = 0;
@@ -112,7 +113,7 @@ export class PhHelmJoystick extends HTMLElement {
       window.removeEventListener('gamepadconnected', this.#onGamepadConnected);
     }
     if (this.#inputRaf) { cancelAnimationFrame(this.#inputRaf); this.#inputRaf = null; }
-    if (this.#hbId) { clearInterval(this.#hbId); this.#hbId = null; }
+    if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
   }
 
@@ -158,11 +159,27 @@ export class PhHelmJoystick extends HTMLElement {
     const well = this.shadowRoot.getElementById('well');
     if (well.setPointerCapture) well.setPointerCapture(e.pointerId);
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
-    if (!this.#hbId) {
-      this.#hbId = setInterval(() => this.#sendAction(), 100);
+    if (!this.#hbRaf) {
+      this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
     }
     this.#setFromPointer(e.clientX, e.clientY);
     e.preventDefault();
+  };
+
+  // Frame-driven heartbeat: samples the current stick position and sends it
+  // at a throttled rate while dragging. Replaces a bare setInterval, which
+  // drifts and bunches under main-thread load (rAF here is scheduling next
+  // to the paint step so the send cadence stays even). Mirrors the keyboard
+  // input loop's throttling approach.
+  #heartbeatLoop = () => {
+    this.#hbRaf = null;
+    if (this.#pointerId === null) return;
+    const now = performance.now();
+    if (now - this.#lastHbSend >= 100) {
+      this.#sendAction();
+      this.#lastHbSend = now;
+    }
+    this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
   };
 
   #onMove = (e) => {
@@ -175,10 +192,12 @@ export class PhHelmJoystick extends HTMLElement {
     this.#pointerId = null;
     const well = this.shadowRoot.getElementById('well');
     try { if (well.releasePointerCapture) well.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
-    if (this.#hbId) { clearInterval(this.#hbId); this.#hbId = null; }
+    if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
+    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
     this.#px = 0;
     this.#py = 0;
-    this.#scheduleApply();
+    this.#applyNubPosition();
+    this.#updateReadout();
     this.#sendAction();
   };
 

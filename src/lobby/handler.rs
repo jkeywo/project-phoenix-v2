@@ -1634,7 +1634,11 @@ max_level = 4
     #[test]
     fn confirm_scenario_outside_lobby_is_noop() {
         let mut sessions = sessions_with("t1", "Alice");
-        for phase in [GamePhase::Loading, GamePhase::InProgress, GamePhase::GameOver] {
+        for phase in [
+            GamePhase::Loading,
+            GamePhase::InProgress,
+            GamePhase::GameOver,
+        ] {
             let phase_copy = phase.clone();
             let result = pm(
                 "t1",
@@ -1643,7 +1647,10 @@ max_level = 4
                 phase,
                 None,
             );
-            assert!(result.outbound.is_empty(), "no outbound for phase {phase_copy:?}");
+            assert!(
+                result.outbound.is_empty(),
+                "no outbound for phase {phase_copy:?}"
+            );
         }
     }
 

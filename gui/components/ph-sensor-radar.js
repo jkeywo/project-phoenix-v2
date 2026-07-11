@@ -57,11 +57,13 @@ export class PhSensorRadar extends HTMLElement {
   }
 
   set state(val) {
-    const prevSelected = this.#state?.selected_target_uuid;
-    let selected_target_uuid = null;
-    if (prevSelected != null && prevSelected !== val?.target_uuid) {
-      const stillPresent = (val?.blips || []).some((b) => b.uuid === prevSelected);
-      if (stillPresent) selected_target_uuid = prevSelected;
+    let selected_target_uuid = val?.selected_target_uuid ?? null;
+    if (selected_target_uuid == null) {
+      const prevSelected = this.#state?.selected_target_uuid;
+      if (prevSelected != null && prevSelected !== val?.science_target_uuid) {
+        const stillPresent = (val?.blips || []).some((b) => b.uuid === prevSelected);
+        if (stillPresent) selected_target_uuid = prevSelected;
+      }
     }
     this.#state = { ...val, selected_target_uuid };
     this.#render();
@@ -78,7 +80,7 @@ export class PhSensorRadar extends HTMLElement {
         ship_heading: s.ship_heading || 0,
         config: s.config || {},
         selected_target_uuid: s.selected_target_uuid || null,
-        target_uuid: s.target_uuid || null,
+        target_uuid: s.science_target_uuid || null,
       };
     }
     this.#updateButton();
@@ -89,7 +91,7 @@ export class PhSensorRadar extends HTMLElement {
     const btn = this.shadowRoot.getElementById('designate-btn');
     if (!btn) return;
     const sel = s.selected_target_uuid;
-    const confirmed = s.target_uuid;
+    const confirmed = s.science_target_uuid;
     btn.disabled = sel == null || sel === confirmed;
   }
 }

@@ -80,6 +80,8 @@ describe('PhSensorRadar', () => {
       range: 1000,
       ship_heading: 90,
       config: { max_range: 5000 },
+      selected_target_uuid: null,
+      target_uuid: null,
     });
   });
 

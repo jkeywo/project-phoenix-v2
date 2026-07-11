@@ -145,10 +145,7 @@ const RADAR_DESTROYED_BONUS: f32 = -999.0;
 /// the fresh multiplier the same tick).
 pub fn apply_radar_damage_modifiers(
     mut ships_q: Query<
-        (
-            &crate::entity_spawner::EntitySystemHull,
-            &mut ShipModifiers,
-        ),
+        (&crate::entity_spawner::EntitySystemHull, &mut ShipModifiers),
         With<crate::server_app::Ship>,
     >,
 ) {

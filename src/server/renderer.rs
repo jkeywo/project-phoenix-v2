@@ -487,19 +487,29 @@ fn hull_camera(
 
     const LOOK_DIST: f32 = 100.0;
 
-    // Rotate marker offset/direction from model-local to world space.
-    let yaw_rot = Quat::from_rotation_y(physics.yaw);
+    // Physics heading uses positive-yaw = CW from above, but
+    // Quat::from_rotation_y uses CCW (right-hand rule). Negate to match.
+    let yaw_rot = Quat::from_rotation_y(-physics.yaw);
     let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
+
+    // All current models apply Ry(π) as their base rotation (see
+    // base rotation in each model's .toml). Camera markers are authored
+    // in the raw-GLB frame (+Z = forward); the base rotation brings them
+    // into the game frame (-Z = forward).
+    let base_rot = Quat::from_rotation_y(std::f32::consts::PI);
 
     let (pos_offset, dir_offset) = markers_q
         .single()
         .ok()
         .and_then(|mm| mm.get(marker_name))
-        .map(|m| (Vec3::from_array(m.position), Vec3::from_array(m.direction)))
+        .map(|m| {
+            (
+                base_rot * Vec3::from_array(m.position),
+                base_rot * Vec3::from_array(m.direction),
+            )
+        })
         .unwrap_or_else(|| {
-            // Fallback: ship centre, model-local forward direction.
-            // `yaw_rot` below transforms this to world space for consistency
-            // with the marker path.
+            // Fallback: ship centre, game-forward direction.
             (Vec3::ZERO, Vec3::NEG_Z)
         });
 
@@ -546,7 +556,7 @@ fn cinematic_camera(
     }
 
     let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
-    let yaw_rot = Quat::from_rotation_y(physics.yaw);
+    let yaw_rot = Quat::from_rotation_y(-physics.yaw);
 
     // Camera position: fixed offset from ship centre (above and behind).
     let offset = Vec3::from_array(cfg.position);
@@ -619,7 +629,7 @@ fn cinematic_camera(
             if dir_to_mid.length_squared() > 1e-6 {
                 // Yaw the camera around the ship centre.
                 let target_yaw = f32::atan2(dir_to_mid.x, -dir_to_mid.z);
-                let yawed_offset = Quat::from_rotation_y(target_yaw) * offset;
+                let yawed_offset = Quat::from_rotation_y(-target_yaw) * offset;
                 let yawed_pos = ship_origin + yawed_offset;
 
                 // Pitch from camera position toward midpoint.

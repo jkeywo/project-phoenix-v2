@@ -52,9 +52,9 @@ describe('PhShieldFacings', () => {
     const { el } = setup();
     el.state = {
       facings: [
-        { id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
-        { id: 'port', label: 'Port', hp: 50, max_hp: 100, online: true },
-        { id: 'aft', label: 'Aft', hp: 0, max_hp: 100, online: false },
+        { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
+        { arc_id: 'port', label: 'Port', hp: 50, max_hp: 100, online: true },
+        { arc_id: 'aft', label: 'Aft', hp: 0, max_hp: 100, online: false },
       ],
       focused_facing: 'port',
       system_id: 'shields-system',
@@ -71,7 +71,7 @@ describe('PhShieldFacings', () => {
     const { el } = setup();
     el.state = {
       facings: [
-        { id: 'aft', label: 'Aft', hp: 0, max_hp: 100, online: false },
+        { arc_id: 'aft', label: 'Aft', hp: 0, max_hp: 100, online: false },
       ],
     };
     expect(el.shadowRoot.textContent).toContain('OFF');
@@ -81,7 +81,7 @@ describe('PhShieldFacings', () => {
     const { el } = setup();
     el.state = {
       facings: [
-        { id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
+        { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
       ],
     };
     expect(el.shadowRoot.textContent).toContain('100%');
@@ -90,7 +90,7 @@ describe('PhShieldFacings', () => {
   it('shows AUTO badge and disables interaction when auto=true', () => {
     const { el } = setup();
     el.state = {
-      facings: [{ id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true }],
+      facings: [{ arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true }],
       auto: true,
     };
     const badge = el.shadowRoot.getElementById('auto-badge');
@@ -100,7 +100,7 @@ describe('PhShieldFacings', () => {
   it('hides AUTO badge when auto=false', () => {
     const { el } = setup();
     el.state = {
-      facings: [{ id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true }],
+      facings: [{ arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true }],
       auto: false,
     };
     const badge = el.shadowRoot.getElementById('auto-badge');
@@ -112,7 +112,7 @@ describe('PhShieldFacings', () => {
     const { el } = setup({ sendAction });
     el.state = {
       facings: [
-        { id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
+        { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
       ],
       auto: false,
     };
@@ -127,7 +127,7 @@ describe('PhShieldFacings', () => {
     const { el } = setup({ sendAction });
     el.state = {
       facings: [
-        { id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
+        { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
       ],
       auto: true,
     };
@@ -139,14 +139,14 @@ describe('PhShieldFacings', () => {
   it('updates when state changes', () => {
     const { el } = setup();
     el.state = {
-      facings: [{ id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true }],
+      facings: [{ arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true }],
       focused_facing: null,
     };
     expect(el.shadowRoot.textContent).toContain('FORE');
     el.state = {
       facings: [
-        { id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
-        { id: 'port', label: 'Port', hp: 50, max_hp: 100, online: true },
+        { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
+        { arc_id: 'port', label: 'Port', hp: 50, max_hp: 100, online: true },
       ],
       focused_facing: 'port',
     };

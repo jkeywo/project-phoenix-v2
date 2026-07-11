@@ -1300,8 +1300,10 @@ if (typeof window !== 'undefined') {
       case 'navigation':  return buildNavigationConsoleState(state);
       case 'science':     return buildScienceConsoleState(state);
       case 'engineering':
-        // Destroyer engineering = shields + power + repair.
-        if (state.stationSystems?.engineering?.includes('shields')) {
+        // Destroyer engineering = shields + power + repair. The shields
+        // system's TOML id is "shields-system" (its `kind` is "shields"),
+        // not "shields" — station_systems lists are built from system ids.
+        if (state.stationSystems?.engineering?.includes('shields-system')) {
           return buildDestroyerEngineeringConsoleState(state);
         }
         return buildEngineeringConsoleState(state);

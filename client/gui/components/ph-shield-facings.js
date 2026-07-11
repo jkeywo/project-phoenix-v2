@@ -74,13 +74,13 @@ export class PhShieldFacings extends HTMLElement {
     const startAngle = -Math.PI / 2 - angleStep / 2;
 
     const NS = 'http://www.w3.org/2000/svg';
-    const live = new Set(facings.map(f => f.id));
+    const live = new Set(facings.map(f => f.arc_id));
     for (const [key, g] of this.#facingGs) {
       if (!live.has(key)) { g.remove(); this.#facingGs.delete(key); }
     }
 
     facings.forEach((f, i) => {
-      const id = f.id;
+      const id = f.arc_id;
       const a0 = startAngle + i * angleStep;
       const a1 = a0 + angleStep;
       const pct = f.max_hp > 0 ? Math.min(1, Math.max(0, f.hp / f.max_hp)) : 0;
@@ -145,7 +145,7 @@ export class PhShieldFacings extends HTMLElement {
       const lr = r + 16;
       const lx = cx + lr * Math.cos(midAngle);
       const ly = cy + lr * Math.sin(midAngle);
-      const label = (f.label || f.id || '').substring(0, 5).toUpperCase();
+      const label = (f.label || f.arc_id || '').substring(0, 5).toUpperCase();
       const labelEl = g.children[2];
       labelEl.setAttribute('x', lx);
       labelEl.setAttribute('y', ly);

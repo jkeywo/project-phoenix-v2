@@ -8,19 +8,31 @@
   <style>
     body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
     .frame { height: 100%; }
-    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; position: relative; }
     .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
     .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
     .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
-    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-    .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
+    .console-body { flex: 1; min-height: 0; }
+    .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; height: 100%; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    ph-tactical-radar, ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls, ph-comms-contact-list, ph-comms-current-message, ph-navigation-map { flex: 1; min-height: 0; }
+    ph-tactical-radar, ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls { flex-shrink: 0; }
+    ph-tactical-radar { flex: 1; min-height: 0; }
+    .overlay-toggle { position: absolute; top: 72px; z-index: 10; background: rgba(14,17,23,0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.2em; padding: 6px 12px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; }
+    .overlay-toggle:hover { background: rgba(30,35,50,0.9); border-color: var(--ink-dim); }
+    .overlay-toggle.active { background: rgba(30,50,80,0.9); border-color: var(--cyan); color: var(--cyan); }
+    .overlay-toggle.nav-btn { left: 8px; }
+    .overlay-toggle.comms-btn { right: 8px; }
+    .overlay-toggle .unread-badge { display: none; margin-left: 6px; background: var(--fire-bright); color: #000; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 2px; line-height: 1.4; }
+    .overlay-toggle .unread-badge.show { display: inline-block; }
+    .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(5,8,24,0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 60px 16px 60px; }
+    .overlay-panel.open { display: flex; }
+    .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    .overlay-panel ph-navigation-map, .overlay-panel ph-comms-contact-list, .overlay-panel ph-comms-current-message { flex: 1; min-height: 0; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
     .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body .col { padding: 8px; } .overlay-toggle { top: 62px; font-size: 10px; padding: 4px 8px; } .overlay-toggle.nav-btn { left: 4px; } .overlay-toggle.comms-btn { right: 4px; } .overlay-panel { padding: 50px 8px 50px; } }
   </style>
 </head>
 <body>
@@ -28,9 +40,11 @@
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>TACTICAL<span class="sub">WEAPONS &middot; NAV &middot; COMMS</span></h1>
+        <h1>TACTICAL<span class="sub">WEAPONS</span></h1>
         <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
       </div>
+      <button class="overlay-toggle nav-btn" id="nav-toggle" data-active="false">Nav</button>
+      <button class="overlay-toggle comms-btn" id="comms-toggle" data-active="false">Comms<span class="unread-badge" id="comms-unread">!</span></button>
       <div class="console-body">
         <div class="col">
           <h2>Weapons</h2>
@@ -39,15 +53,15 @@
           <ph-blasters-controls id="blasters-controls"></ph-blasters-controls>
           <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
         </div>
-        <div class="col">
-          <h2>Navigation</h2>
-          <ph-navigation-map id="navigation-map"></ph-navigation-map>
-        </div>
-        <div class="col">
-          <h2>Comms</h2>
-          <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
-          <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
-        </div>
+      </div>
+      <div class="overlay-panel" id="nav-overlay">
+        <h2>Navigation</h2>
+        <ph-navigation-map id="navigation-map"></ph-navigation-map>
+      </div>
+      <div class="overlay-panel" id="comms-overlay">
+        <h2>Comms</h2>
+        <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
+        <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
@@ -71,6 +85,27 @@
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
+
+    function toggleOverlay(id, btnId) {
+      var overlay = document.getElementById(id);
+      var btn = document.getElementById(btnId);
+      var isOpen = btn.dataset.active === 'true';
+      // Close all overlays first
+      ['nav-overlay', 'comms-overlay'].forEach(function(oid) {
+        var el = document.getElementById(oid);
+        if (el) el.classList.remove('open');
+      });
+      document.querySelectorAll('.overlay-toggle').forEach(function(b) {
+        b.dataset.active = 'false';
+        b.classList.remove('active');
+      });
+      if (!isOpen) {
+        overlay.classList.add('open');
+        btn.dataset.active = 'true';
+        btn.classList.add('active');
+      }
+    }
+
     initConsole({
       name: 'tactical',
       render: function(s) {
@@ -81,6 +116,7 @@
         var commsContactsEl = document.getElementById('comms-contact-list');
         var commsMsgEl = document.getElementById('comms-current-message');
         var navMapEl = document.getElementById('navigation-map');
+        var commsUnread = document.getElementById('comms-unread');
         if (s.weapons) {
           var w = s.weapons;
           radarEl.state = { blips: w.blips || [], ship_heading: (s.navigation && s.navigation.ship_heading) || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
@@ -92,6 +128,8 @@
           var c = s.comms;
           commsContactsEl.state = { contacts: c.contacts || [] };
           var messages = c.messages || [];
+          var hasUnread = messages.some(function(m) { return !m.is_read; });
+          commsUnread.classList.toggle('show', hasUnread);
           var threadMsg = messages.find(function(m) { return !m.is_read; }) || messages[messages.length - 1] || null;
           commsMsgEl.state = { thread: threadMsg };
         }
@@ -106,6 +144,9 @@
         document.getElementById('station-damage').state = s.own_hull || null;
       }
     });
+
+    document.getElementById('nav-toggle').addEventListener('click', function() { toggleOverlay('nav-overlay', 'nav-toggle'); });
+    document.getElementById('comms-toggle').addEventListener('click', function() { toggleOverlay('comms-overlay', 'comms-toggle'); });
   </script>
 </body>
 </html>

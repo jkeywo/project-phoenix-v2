@@ -641,7 +641,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-303fadb1b8b7b66d.js" crossorigin="anonymous" integrity="sha384-nZiZsEu5hQxxKPx0M+P9bRYsmMeUQ70HwZMEj3nStT6xyyz1vzpijZVu1H92QzGA"><link rel="preload" href="./project-phoenix-303fadb1b8b7b66d_bg.wasm" crossorigin="anonymous" integrity="sha384-2QhrJ/lqtvVMZ849zLxEc7TwZGl3QHBHXw4R0vQ1EhGZ+o5kSkmuLKMag39S0YeU" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-fc95b80b26d3bba7.js" crossorigin="anonymous" integrity="sha384-apB6F0Rm9HwXiDiJwNxRB2a7gzk1qIl9oHQvYFp0FgtahzLwtWqrr+30n1vIyJsL"><link rel="preload" href="./project-phoenix-fc95b80b26d3bba7_bg.wasm" crossorigin="anonymous" integrity="sha384-XVG3B+E6nT6dm6d/wQQjOmPhvJBD+swyWDd+QIfxFuk6TGILDpxACHUlM6cZIQH2" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -779,6 +779,7 @@
   <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
   <div id="game-over-overlay" style="display:none;position:fixed;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
     <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+    <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;">Return to Lobby</button>
   </div>
 
   <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
@@ -863,8 +864,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-303fadb1b8b7b66d.js';
-const wasm = await init({ module_or_path: './project-phoenix-303fadb1b8b7b66d_bg.wasm' });
+import init, * as bindings from './project-phoenix-fc95b80b26d3bba7.js';
+const wasm = await init({ module_or_path: './project-phoenix-fc95b80b26d3bba7_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1027,8 +1028,20 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // the smoke tests. The canvas must stay in the render tree at all times.
     if (qrOverlay) {
       if (isLobby) { qrVisible = true; qrOverlay.style.display = 'block'; }
-      else if (s.phase === 'Loading') { qrVisible = false; qrOverlay.style.display = 'none'; }
-      // During InProgress/GameOver the toggle button is the sole controller
+      else if (s.phase === 'Loading' || s.phase === 'GameOver') { qrVisible = false; qrOverlay.style.display = 'none'; }
+      // During InProgress the toggle button is the sole controller
+    }
+    // The GameOver screen never shows the QR code (issue: no mid-game join
+    // prompt over the end-of-scenario summary), so hide its toggle target too.
+    const qrToggleBtn = document.getElementById('qr-toggle-btn');
+    if (qrToggleBtn) qrToggleBtn.style.display = s.phase === 'GameOver' ? 'none' : '';
+
+    // ── Game-over overlay: force-hidden once the phase leaves GameOver ──
+    // (the HUD push that normally drives this overlay only fires while
+    // InProgress, so returning to Lobby needs its own hide here.)
+    if (s.phase !== 'GameOver') {
+      const goOverlay = document.getElementById('game-over-overlay');
+      if (goOverlay) goOverlay.style.display = 'none';
     }
 
     // ── Title / subtitle ──────────────────────────────────────────────
@@ -1700,6 +1713,11 @@ function finishInit() {
     const qrOverlay = document.getElementById('overlay');
     qrVisible = !qrVisible;
     qrOverlay.style.display = qrVisible ? 'block' : 'none';
+  });
+
+  // ── Return to Lobby (GameOver overlay button) ─────────────────────────
+  document.getElementById('return-to-lobby-btn').addEventListener('click', function() {
+    window.__sendAction(JSON.stringify({ action: 'return_to_lobby' }));
   });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────

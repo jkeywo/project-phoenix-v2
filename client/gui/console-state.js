@@ -609,7 +609,9 @@ export function buildHelmConsoleState(state) {
   const boostBattery = bb.boost_battery ?? state.boostBattery ?? 0;
   const boostActive  = bb.boost_active  ?? state.boostActive  ?? false;
 
-  const range = state.helmRadarRange ?? HELM_RADAR_RANGE;
+  // Prefer the live per-tick range (shrinks as the helm-radar system takes
+  // damage — see `apply_radar_damage_modifiers`) over the static ship config.
+  const range = bb.radar_range ?? state.helmRadarRange ?? HELM_RADAR_RANGE;
   // Exclude objective_marker entities — objectives only show on the nav chart.
   const helmEntities = (state.asteroids || []).filter(e => {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
@@ -734,6 +736,20 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
 }
 
 /**
+ * Aggregate hull health across every damageable system on the ship (all of
+ * `system_hull`, not just one station's slice) — the "overall hull" figure
+ * for the Repair console's hero bar.
+ *
+ * @param {Array<{current,max_hp}>} systemHull
+ */
+export function overallHull(systemHull) {
+  const hull = Array.isArray(systemHull) ? systemHull : [];
+  const current = hull.reduce((s, h) => s + (h.current || 0), 0);
+  const max = hull.reduce((s, h) => s + (h.max_hp || 0), 0);
+  return { current, max, pct: max > 0 ? current / max : 1 };
+}
+
+/**
  * Repair console.
  * @param {{ blackboards, repairTeams, consoleHull }} state
  */
@@ -750,6 +766,9 @@ export function buildRepairConsoleState(state) {
       // SystemId-keyed fields (post issues #618/#619).
       system_hull:          systemHull,
       damageable_systems:   bb.damageable_systems   ?? [],
+      // Overall ship-wide hull aggregate (every damageable system, not just
+      // one station's slice) — feeds the Repair console's hero hull bar.
+      overall_hull:         overallHull(systemHull),
       // Only ownerless "core" systems stay on the repair console; per-station
       // system status moved to each console's footer bar (issue #12).
       core_systems:         coreSystems,
@@ -767,6 +786,7 @@ export function buildRepairConsoleState(state) {
     teams:                state.repairTeams || [],
     system_hull:          legacyHull,
     damageable_systems:   legacyHull.map(h => h.system_id),
+    overall_hull:         overallHull(legacyHull),
     core_systems:         legacy.coreSystems,
     dispatch_targets:     legacy.targets,
     travel_duration_secs: 5.0,

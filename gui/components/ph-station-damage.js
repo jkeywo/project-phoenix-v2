@@ -46,17 +46,30 @@ export class PhStationDamage extends HTMLElement {
     .popup-title { font-size: 0.6rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; margin-bottom: 0.4rem; padding-bottom: 0.3rem; border-bottom: 1px solid #282c38; }
   </style>
   <button class="bar" id="bar" type="button" aria-haspopup="true" aria-expanded="false" title="Station systems">
-    <span class="bar-label">Station</span>
+    <span class="bar-label" id="bar-label">Station</span>
     <span class="bar-wrap"><span class="fill" id="fill" style="width:100%"></span></span>
     <span class="pct" id="pct">—</span>
     <span class="caret">▲</span>
   </button>
   <div class="popup" id="popup">
-    <div class="popup-title">Station Systems</div>
+    <div class="popup-title" id="popup-title">Station Systems</div>
     <ph-damage-detail id="detail"></ph-damage-detail>
   </div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
+  }
+
+  static get observedAttributes() { return ['label']; }
+
+  attributeChangedCallback(name, oldVal, newVal) {
+    if (name === 'label') this.#applyLabel(newVal || 'Station');
+  }
+
+  #applyLabel(label) {
+    const root = this.shadowRoot;
+    root.getElementById('bar-label').textContent = label;
+    root.getElementById('popup-title').textContent = label + ' Systems';
+    root.getElementById('bar').title = label + ' systems';
   }
 
   connectedCallback() {
@@ -65,6 +78,7 @@ export class PhStationDamage extends HTMLElement {
     // Close when clicking anywhere outside the popup.
     this.#onDocClick = () => { if (this.#open) this.#toggle(false); };
     document.addEventListener('click', this.#onDocClick);
+    this.#applyLabel(this.getAttribute('label') || 'Station');
   }
 
   disconnectedCallback() {

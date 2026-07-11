@@ -19,22 +19,6 @@ length = 4
 # ── System hull HP — Cruiser baseline × 1.4 (rounded) ───────────────────────
 
 [[hull.system_hull]]
-system_id = "helm"
-display_name = "Helm"
-max_hp = 35
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "tactical"
-display_name = "Tactical"
-max_hp = 35
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
 system_id = "power-reactor"
 display_name = "Power Reactor"
 max_hp = 21
@@ -69,6 +53,30 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
 display_name = "Engine (Starboard)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-radar"
+display_name = "Helm Radar"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "tactical-radar"
+display_name = "Tactical Radar"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "sensor-radar"
+display_name = "Sensor Radar"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -134,14 +142,6 @@ debuff_magnitude = 0.20
 system_id = "torpedo-tube-aft-starboard"
 display_name = "Torpedo Tube (Aft Starboard)"
 max_hp = 21
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "torpedo-magazine"
-display_name = "Torpedo Magazine"
-max_hp = 28
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -557,6 +557,12 @@ station = "helm"
 power_group = "helm"
 
 [[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
 station = "helm"
@@ -625,6 +631,12 @@ power_group = "ops"
 [[system]]
 id = "sensors"
 kind = "sensors"
+station = "sensors"
+power_group = "sensors"
+
+[[system]]
+id = "sensor-radar"
+kind = "sensor_radar"
 station = "sensors"
 power_group = "sensors"
 

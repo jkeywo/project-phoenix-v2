@@ -46,6 +46,7 @@
         <div class="col">
           <h2>Repair</h2>
           <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
+          <ph-station-damage id="core-damage" label="Core"></ph-station-damage>
           <ph-repair-teams id="repair-teams"></ph-repair-teams>
         </div>
       </div>
@@ -86,9 +87,13 @@
         }
         if (s.repair) {
           var r = s.repair;
-          // Repair console lists ONLY ownerless core systems; per-station system
-          // status moved to each console's footer damage bar (issue #12).
-          hullEl.state = { total_pct: (r.own_hull && r.own_hull.pct) || (s.shields && s.shields.own_hull && s.shields.own_hull.pct) || 1, systems: r.core_systems || [] };
+          // Overall ship-wide hull (every damageable system), not just this
+          // station's own systems.
+          var oh = r.overall_hull || {};
+          hullEl.state = { total_pct: oh.pct != null ? oh.pct : 1 };
+          // Ownerless "core" systems get their own click-to-expand bar that
+          // hides itself entirely when there are none (issue #12).
+          document.getElementById('core-damage').state = { entries: r.core_systems || [] };
           repairTeamsEl.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [] };
         }
         document.getElementById('station-damage').state = s.own_hull || null;

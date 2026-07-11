@@ -159,14 +159,10 @@
     .radar-col > .readout        { padding: 10px 22px; }
     .radar-col > .readout .v     { font-size: 28px; }
     .torpedo-bay .inset-body {
-      display: grid;
-      grid-template-columns: minmax(112px, 0.8fr) minmax(0, 1.7fr);
-      align-items: start;
-      gap: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
       height: 100%;
-    }
-    .torpedo-summary {
-      min-width: 0;
     }
     .torpedo-summary .section-header {
       flex-wrap: wrap;
@@ -211,9 +207,11 @@
       .radar-col > .readout .v { font-size: 20px; }
       .section-header { font-size: 14px; }
       .torpedo-bay .inset-body {
-        grid-template-columns: minmax(88px, 0.7fr) minmax(0, 1.8fr);
-        gap: 10px;
+        gap: 8px;
       }
+      .mag-row { padding-top: 6px; margin-top: 8px; }
+      .mag-row .mag-value { font-size: 24px; min-width: 44px; }
+      .mag-row .mag-unit { font-size: 10px; }
     }
 
     /* Short landscape phones: keep the whole console inside the iframe. */
@@ -297,8 +295,7 @@
         font-size: 8px;
       }
       .torpedo-bay .inset-body {
-        grid-template-columns: minmax(72px, 0.58fr) minmax(0, 1.9fr);
-        gap: 7px;
+        gap: 6px;
       }
       #tube-list {
         max-height: none;
@@ -493,13 +490,24 @@
       .ctrl-col .frequency .freq-bar { height: 1.25rem; }
 
       .ctrl-col .tubes { gap: 0.25rem; margin-top: 0.25rem; }
-      .torpedo-bay .inset-body {
-        display: block;
-        height: auto;
+      .mag-row {
+        gap: 4px;
+        margin-top: 6px;
+        padding-top: 6px;
+      }
+      .mag-row .mag-value {
+        font-size: 1.25rem;
+        min-width: 40px;
+      }
+      .mag-row .mag-unit {
+        font-size: 0.55rem;
       }
       #tube-list {
         overflow-y: visible;
         padding-right: 0;
+      }
+      .torpedo-bay .inset-body {
+        gap: 6px;
       }
 
       .console-footer { font-size: 0.65rem; gap: 0.5rem; }
@@ -564,12 +572,6 @@
                     <span class="tag" id="tube-count-tag">— TUBES</span>
                   </div>
 
-                  <div class="readout">
-                    <div class="k">MAG</div>
-                    <div class="v tactical" id="torpedo-count" data-count="0">0</div>
-                    <div class="u">RDS</div>
-                    <div class="spacer"></div>
-                  </div>
                 </div>
 
                 <!-- Per-tube rows (built dynamically) -->
@@ -578,6 +580,28 @@
             </div>
 
             <style>
+              .mag-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-top: 12px;
+                padding-top: 10px;
+                border-top: 1px solid var(--line-faint);
+              }
+              .mag-row .mag-value {
+                font-family: "Chakra Petch", sans-serif;
+                font-size: 36px;
+                font-weight: 700;
+                color: var(--tactical);
+                min-width: 60px;
+                text-align: right;
+              }
+              .mag-row .mag-unit {
+                font-family: "JetBrains Mono", monospace;
+                font-size: 12px;
+                color: var(--ink-faint);
+                letter-spacing: 0.08em;
+              }
               .tube-row {
                 display: flex;
                 align-items: center;
@@ -734,6 +758,18 @@
               }
 
               @media (orientation: landscape) and (max-height: 480px) {
+                .mag-row {
+                  gap: 5px;
+                  margin-top: 6px;
+                  padding-top: 5px;
+                }
+                .mag-row .mag-value {
+                  font-size: clamp(18px, 6vh, 23px);
+                  min-width: 40px;
+                }
+                .mag-row .mag-unit {
+                  font-size: 8px;
+                }
                 .tube-row {
                   gap: 5px;
                 }
@@ -1206,12 +1242,9 @@
       });
 
       // ── Torpedo magazine count ───────────────────────────────────────────
-      var countEl = document.getElementById('torpedo-count');
       var n = (typeof s.torpedo_count === 'number') ? s.torpedo_count : 0;
-      countEl.textContent   = String(n);
-      countEl.dataset.count = String(n);
 
-      // ── Per-tube rows ────────────────────────────────────────────────────
+      // ── Per-tube rows + mag row ──────────────────────────────────────────
       var tubes = s.tubes || [];
       var tubeCountTag = document.getElementById('tube-count-tag');
       if (tubeCountTag) tubeCountTag.textContent = tubes.length + ' TUBE' + (tubes.length !== 1 ? 'S' : '');
@@ -1257,6 +1290,40 @@
         if (els.minusBtn) els.minusBtn.disabled = targetCount <= 0;
         if (els.plusBtn)  els.plusBtn.disabled  = targetCount >= vollMax;
       });
+
+      // ── Mag row (next to tubes) ──────────────────────────────────────────
+      var magRow = document.getElementById('mag-row');
+      if (!magRow) {
+        magRow = document.createElement('div');
+        magRow.id = 'mag-row';
+        magRow.className = 'tube-row mag-row';
+
+        var magName = document.createElement('span');
+        magName.className = 'tube-name';
+        magName.textContent = 'MAGAZINE';
+
+        var magBtns = document.createElement('div');
+        magBtns.className = 'tube-buttons';
+        magBtns.style.cssText = 'justify-content:flex-end; gap:12px; align-items:center;';
+
+        var magValue = document.createElement('span');
+        magValue.className = 'mag-value';
+        magValue.id = 'torpedo-count';
+        magValue.dataset.count = '0';
+
+        var magUnit = document.createElement('span');
+        magUnit.className = 'mag-unit';
+        magUnit.textContent = 'RDS';
+
+        magBtns.appendChild(magValue);
+        magBtns.appendChild(magUnit);
+        magRow.appendChild(magName);
+        magRow.appendChild(magBtns);
+        tubeList.appendChild(magRow);
+      }
+      var magValueEl = magRow.querySelector('.mag-value');
+      magValueEl.textContent = String(n);
+      magValueEl.dataset.count = String(n);
 
       // ── Phaser state ─────────────────────────────────────────────────────
       var banks   = s.banks || [];

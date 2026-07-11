@@ -19,6 +19,7 @@ export class PhBoostBtn extends HTMLElement {
     .btn:disabled { opacity: 0.4; cursor: default; }
     .recharge-wrap { width: 100%; height: 0.4rem; background: #05080e; border: 1px solid #282c38; overflow: hidden; margin-bottom: 0.3rem; }
     .recharge-fill { height: 100%; background: linear-gradient(90deg, #2a6838, #4ec870); transition: width 0.3s ease; }
+    .recharge-fill.draining { background: linear-gradient(90deg, #a06720, #e8a030); }
   </style>
   <div class="header">
     <span>BOOST</span>
@@ -64,7 +65,7 @@ export class PhBoostBtn extends HTMLElement {
     const s = this.#state || {};
     const available = s.available !== false;
     const active = !!s.active;
-    const rechargePct = s.recharge_pct != null ? Math.max(0, Math.min(100, Number(s.recharge_pct))) : 100;
+    const batteryPct = s.recharge_pct != null ? Math.max(0, Math.min(100, Number(s.recharge_pct))) : 100;
     const auto = !!s.auto;
 
     const root = this.shadowRoot;
@@ -73,14 +74,15 @@ export class PhBoostBtn extends HTMLElement {
     const rechargeFill = root.getElementById('recharge-fill');
     const badge = root.getElementById('auto-badge');
 
-    const recharging = !available || (rechargePct < 100 && !active);
+    const draining = active && batteryPct < 100;
+    const recharging = !active && batteryPct < 100;
 
     if (active) {
-      btn.textContent = 'BOOSTING';
+      btn.textContent = batteryPct < 100 ? 'BOOSTING ' + Math.round(batteryPct) + '%' : 'BOOSTING';
       btn.className = 'btn active';
       btn.disabled = false;
-    } else if (recharging && rechargePct < 100) {
-      btn.textContent = 'RECHARGING ' + Math.round(rechargePct) + '%';
+    } else if (recharging) {
+      btn.textContent = 'RECHARGING ' + Math.round(batteryPct) + '%';
       btn.className = 'btn recharging';
       btn.disabled = true;
     } else {
@@ -89,10 +91,11 @@ export class PhBoostBtn extends HTMLElement {
       btn.disabled = auto;
     }
 
-    // Recharge bar visible when recharging
-    if (recharging && rechargePct < 100) {
+    // Battery bar visible when not full (shows drain during boost, fill during recharge)
+    if (draining || recharging) {
       rechargeWrap.style.display = 'block';
-      rechargeFill.style.width = rechargePct + '%';
+      rechargeFill.style.width = batteryPct + '%';
+      rechargeFill.className = 'recharge-fill' + (draining ? ' draining' : '');
     } else {
       rechargeWrap.style.display = 'none';
     }

@@ -144,6 +144,11 @@ export class LobbyState {
         this.phase = 'GameOver';
         this.gameOverReason = d.reason != null ? d.reason : '';
         break;
+      case 'ReturnedToLobby':
+        this.phase = 'Lobby';
+        this.gameOverReason = null;
+        this.countdownSecs = 0;
+        break;
       default:
         // Not relevant to the lobby model.
         break;

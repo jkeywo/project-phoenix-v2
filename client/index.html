@@ -262,7 +262,30 @@
       cursor: pointer;
     }
 
-
+    /* -- Waiting-for-scenario overlay (shown after ReturnToLobby until host picks) */
+    #waiting-overlay {
+      display: none;
+      position: fixed; inset: 0; z-index: 185;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.92);
+      color: #9ab;
+      font-family: 'Chakra Petch', monospace;
+      text-align: center;
+      padding: 32px;
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      letter-spacing: 0.06em;
+    }
+    #waiting-overlay .spinner-ring {
+      display: inline-block;
+      width: 32px; height: 32px;
+      margin-bottom: 24px;
+      border: 2px solid rgba(140, 180, 220, 0.2);
+      border-top-color: #8ac;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
 
 
     /* -- Console tab bar (issue #441) ----------------------------------
@@ -678,6 +701,13 @@
     <button id="return-to-lobby-btn" class="game-over-return-btn">Return to Lobby</button>
   </div>
 
+  <!-- Waiting-for-scenario overlay: shown after ReturnToLobby while the
+       host picks a scenario from the server's scenario-selection panel. -->
+  <div id="waiting-overlay">
+    <div class="spinner-ring"></div>
+    <span>Waiting for host to select a scenario&hellip;</span>
+  </div>
+
   <!-- Coordination popup overlay (issue #494). Shown for AI-to-human
        coordination messages. Click-to-dismiss, auto-dismiss after 8s. -->
   <div id="coordination-popup" onclick="dismissCoordinationPopup()">
@@ -1062,8 +1092,15 @@
         }
       }
 
+      // Waiting-for-scenario overlay: shown after ReturnToLobby while the
+      // host selects a scenario from the server scenario-selection panel.
+      const waitingEl = document.getElementById('waiting-overlay');
+      if (waitingEl) {
+        waitingEl.style.display = (window.lobbyState && window.lobbyState.waitingForScenario) ? 'flex' : 'none';
+      }
+
       if (inGame) renderGame(s);
-      else renderLobby(s);
+      else if (!(window.lobbyState && window.lobbyState.waitingForScenario)) renderLobby(s);
     }
 
     function renderLobby(s) {
@@ -2223,6 +2260,8 @@
           break;
         case 'ObjectiveSummary':
           break; // fall through to scheduleRender
+        case 'ScenarioLoaded':
+          break; // fall through to scheduleRender (render reads window.lobbyState.waitingForScenario)
         default:
           return; // unknown � skip re-render
       }

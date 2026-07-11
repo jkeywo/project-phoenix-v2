@@ -68,6 +68,9 @@ export class LobbyState {
     this.scenarioBody = '';
     /** Remaining seconds in the pre-game countdown, 0 when not counting. */
     this.countdownSecs = 0;
+    /** True when the host has returned to scenario selection after GameOver
+     *  and clients should show a waiting screen instead of the lobby. */
+    this.waitingForScenario = false;
   }
 
   /**
@@ -93,6 +96,7 @@ export class LobbyState {
     switch (msg.type) {
       case 'Welcome':
         this.replaceFrom(d.state || {}, d.ship_stations, d.ship_config);
+        this.waitingForScenario = false;
         break;
       case 'PlayerJoined': {
         const player = normalisePlayer(d.player || {});
@@ -148,6 +152,10 @@ export class LobbyState {
         this.phase = 'Lobby';
         this.gameOverReason = null;
         this.countdownSecs = 0;
+        this.waitingForScenario = true;
+        break;
+      case 'ScenarioLoaded':
+        this.waitingForScenario = false;
         break;
       default:
         // Not relevant to the lobby model.
@@ -178,7 +186,7 @@ export class LobbyState {
 
   /** True when the lobby panel should be visible. */
   showLobbyPanel(myToken) {
-    if (this.phase === 'Lobby') return true;
+    if (this.phase === 'Lobby' && !this.waitingForScenario) return true;
     if (this.phase === 'Loading') return true;
     if (this.phase === 'InProgress') {
       const player = this.players.find(p => p.token === myToken);

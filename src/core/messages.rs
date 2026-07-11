@@ -367,10 +367,18 @@ pub enum TeamSlot {
 ///
 /// Serialises as a plain string (`#[serde(transparent)]`) — wire-compatible
 /// with the old `ViewDirection` string serialization.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct CameraView {
     pub marker_name: String,
+}
+
+impl Default for CameraView {
+    fn default() -> Self {
+        Self {
+            marker_name: "camera_fore".into(),
+        }
+    }
 }
 
 impl CameraView {

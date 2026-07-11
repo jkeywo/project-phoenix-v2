@@ -492,11 +492,10 @@ fn hull_camera(
         .and_then(|mm| mm.get(marker_name))
         .map(|m| (Vec3::from_array(m.position), Vec3::from_array(m.direction)))
         .unwrap_or_else(|| {
-            // Fallback: ship centre looking forward.
-            (
-                Vec3::ZERO,
-                Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos()),
-            )
+            // Fallback: ship centre, model-local forward direction.
+            // `yaw_rot` below transforms this to world space for consistency
+            // with the marker path.
+            (Vec3::ZERO, Vec3::NEG_Z)
         });
 
     let camera_pos = ship_origin + yaw_rot * pos_offset;

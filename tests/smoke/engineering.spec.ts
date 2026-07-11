@@ -65,7 +65,7 @@ test('Engineering player receives SystemHullUpdate after game start', async ({ c
   await engineer.close();
 });
 
-test('total hull starts at 211 in first SystemHullUpdate', async ({ context }) => {
+test('total hull starts at 206 in first SystemHullUpdate', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
   const msg = await engineer.waitForMessage('SystemHullUpdate', 2_000) as any;
@@ -76,7 +76,9 @@ test('total hull starts at 211 in first SystemHullUpdate', async ({ context }) =
   // alongside the retained coarse "Tactical" entry) - 25 (Shields hull moved
   // out of console_hull into per-arc ShipArcHull in #514)
   // + 20 (alliance_battleship/destroyer hull added in #639/#640/#641) = 231.
-  expect(total).toBe(231);
+  // - 25 (coarse Helm/Tactical/Torpedo-Magazine entries replaced by the
+  // smaller helm-radar/tactical-radar/sensor-radar entries) = 206.
+  expect(total).toBe(206);
 
   await captain.close();
   await engineer.close();

@@ -473,6 +473,11 @@ fn hull_camera(
         .map(|vm| vm.view_mode.clone())
         .unwrap_or(ViewMode::Camera(CameraView::default()));
 
+    // Cinematic mode has its own dedicated camera system; don't overwrite it.
+    if view_mode == ViewMode::Cinematic {
+        return;
+    }
+
     // For non-camera overlay modes (Radar, Comms, etc.) keep the last camera
     // view so the viewscreen doesn't jump when the overlay is dismissed.
     let marker_name = match &view_mode {

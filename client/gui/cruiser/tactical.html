@@ -61,7 +61,7 @@
         var t = document.getElementById('torpedo-controls');
         r.state = { blips: s.blips || [], ship_heading: 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null };
         p.state = { banks: s.banks || [], target_valid: !!s.target_uuid, mode: s.phaser_mode || 'Auto' };
-        t.state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 } };
+        t.state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 }, target_uuid: s.target_uuid || null };
         var tn = s.target_name ? s.target_name : (s.target_uuid ? 'LOCKED' : 'NO TARGET');
         document.getElementById('footer-target').textContent = tn;
         document.getElementById('footer-target').style.color = s.target_uuid ? 'var(--fire-bright)' : 'var(--ink-faint)';

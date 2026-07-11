@@ -101,9 +101,11 @@ export class PhShieldFacings extends HTMLElement {
         g = document.createElementNS(NS, 'g');
         g.innerHTML = '<path class="arc-path"/><path class="hp-fill" stroke="none"/><text class="facing-label"/><text class="hp-text" text-anchor="middle" font-size="0.5rem"/>';
         g.querySelector('.arc-path').addEventListener('click', () => {
-          if (auto) return;
+          const cur = this.#state || {};
+          if (cur.auto) return;
           if (this.sendAction && id) {
-            this.sendAction('set_shield_focus', { arc_id: id });
+            const isFocusedNow = cur.focused_facing === id || cur.focused_facing === f.label;
+            this.sendAction('set_shield_focus', { arc_id: id, focused: !isFocusedNow });
           }
         });
         this.#facingGs.set(id, g);
@@ -123,15 +125,15 @@ export class PhShieldFacings extends HTMLElement {
       outline.setAttribute('data-facing-id', id);
       outline.setAttribute('class', 'arc-path' + (isFocused ? ' focused' : '') + (!online ? ' down' : ''));
 
-      // HP fill arc
+      // HP fill arc — fills/drains radially from the inner edge outward
       const hpFill = g.children[1];
       if (online && pct > 0) {
         const fillPct = Math.min(1, Math.max(0, pct));
-        const a0p = a0 + (1 - fillPct) * angleStep;
-        const x0p = cx + ir * Math.cos(a0p), y0p = cy + ir * Math.sin(a0p);
-        const x1p = cx + r * Math.cos(a0p), y1p = cy + r * Math.sin(a0p);
+        const ro = ir + fillPct * (r - ir);
+        const xo0 = cx + ro * Math.cos(a0), yo0 = cy + ro * Math.sin(a0);
+        const xo1 = cx + ro * Math.cos(a1), yo1 = cy + ro * Math.sin(a1);
 
-        const fillOuter = `M ${x0p} ${y0p} L ${x1p} ${y1p} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1} L ${xi1} ${yi1} A ${ir} ${ir} 0 ${largeArc} 0 ${xi0} ${yi0} A ${ir} ${ir} 0 ${largeArc} 1 ${x0p} ${y0p} Z`;
+        const fillOuter = `M ${xi0} ${yi0} L ${xo0} ${yo0} A ${ro} ${ro} 0 ${largeArc} 1 ${xo1} ${yo1} L ${xi1} ${yi1} A ${ir} ${ir} 0 ${largeArc} 0 ${xi0} ${yi0} Z`;
         const hpColor = pct > 0.6 ? '#4ec870' : pct > 0.25 ? '#d8a040' : '#e0402c';
         hpFill.setAttribute('d', fillOuter);
         hpFill.setAttribute('fill', hpColor);

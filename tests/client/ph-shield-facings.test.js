@@ -107,19 +107,35 @@ describe('PhShieldFacings', () => {
     expect(badge.style.display).toBe('none');
   });
 
-  it('clicking a facing arc dispatches set_shield_focus action', () => {
+  it('clicking an unfocused facing arc dispatches set_shield_focus with focused: true', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
       facings: [
         { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
       ],
+      focused_facing: null,
       auto: false,
     };
     const path = el.shadowRoot.querySelector('.arc-path');
     expect(path).toBeDefined();
     path.dispatchEvent(new MouseEvent('click'));
-    expect(sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore' });
+    expect(sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore', focused: true });
+  });
+
+  it('clicking the already-focused facing arc dispatches set_shield_focus with focused: false', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = {
+      facings: [
+        { arc_id: 'fore', label: 'Fore', hp: 100, max_hp: 100, online: true },
+      ],
+      focused_facing: 'fore',
+      auto: false,
+    };
+    const path = el.shadowRoot.querySelector('.arc-path');
+    path.dispatchEvent(new MouseEvent('click'));
+    expect(sendAction).toHaveBeenCalledWith('set_shield_focus', { arc_id: 'fore', focused: false });
   });
 
   it('does not dispatch action when auto=true', () => {

@@ -354,6 +354,10 @@ mod tests {
                 ClientMessageDiscriminants::ReturnToLobby,
                 ClientMessage::ReturnToLobby,
             ),
+            (
+                ClientMessageDiscriminants::ConfirmScenario,
+                ClientMessage::ConfirmScenario,
+            ),
         ]
     }
 
@@ -715,6 +719,10 @@ mod tests {
             (
                 ServerMessageDiscriminants::ReturnedToLobby,
                 ServerMessage::ReturnedToLobby,
+            ),
+            (
+                ServerMessageDiscriminants::ScenarioLoaded,
+                ServerMessage::ScenarioLoaded,
             ),
             (
                 ServerMessageDiscriminants::RatingChanged,

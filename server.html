@@ -1491,6 +1491,10 @@
 
     let selectedScenario = null;
     let wasmReady = false;
+    /** True after ReturnToLobby from GameOver shows the scenario panel
+     *  for re-selection. Scenario button clicks re-confirm instead of
+     *  starting a new server. */
+    let _returnedToSelection = false;
 
     function showLobbyPanel() {
       const panel = document.getElementById('lobby-panel');
@@ -1502,9 +1506,16 @@
         selectedScenario = this.dataset.path;
         document.getElementById('scenario-panel').style.display = 'none';
         showLobbyPanel();
-        initPeerJS();
-        acquireWakeLock();
-        if (wasmReady) startPhoenix();
+        if (_returnedToSelection) {
+          // Re-selection flow: server is already running, confirm the scenario.
+          _returnedToSelection = false;
+          window.__sendAction(JSON.stringify({ action: 'confirm_scenario' }));
+        } else {
+          // Initial selection flow: start everything fresh.
+          initPeerJS();
+          acquireWakeLock();
+          if (wasmReady) startPhoenix();
+        }
       });
     });
 
@@ -1707,6 +1718,11 @@ function finishInit() {
   // ── Return to Lobby (GameOver overlay button) ─────────────────────────
   document.getElementById('return-to-lobby-btn').addEventListener('click', function() {
     window.__sendAction(JSON.stringify({ action: 'return_to_lobby' }));
+    // Show the scenario selection panel so the host can pick a new (or same)
+    // scenario. The lobby panel stays hidden until the host confirms.
+    document.getElementById('scenario-panel').style.display = '';
+    document.getElementById('lobby-panel').style.display = 'none';
+    _returnedToSelection = true;
   });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────

@@ -1133,6 +1133,10 @@ pub enum ClientMessage {
     /// another round. Only honoured while `GamePhase::GameOver` is active;
     /// ignored otherwise. Any connected player may trigger it.
     ReturnToLobby,
+    /// Sent from the server UI when the host selects a scenario after
+    /// returning to scenario selection from GameOver. Tells the server
+    /// to finalize the selection and broadcast lobby state to clients.
+    ConfirmScenario,
 }
 
 /// Typed payload for a channel-3 coordination message (issue #494).
@@ -1413,6 +1417,9 @@ pub enum ServerMessage {
     /// Broadcast when all players return to the lobby from the GameOver screen.
     /// Clients should switch back to the lobby panel.
     ReturnedToLobby,
+    /// Broadcast when the host selects a scenario from the scenario selection
+    /// screen. Clients should transition from waiting to the lobby view.
+    ScenarioLoaded,
     /// Broadcast to all when a station's active rating changes.
     /// Clients use this to update AUTO/read-only badges for system fragments
     /// belonging to the affected station.
@@ -2235,6 +2242,11 @@ pub enum UiAction {
     ///
     /// The HTML game-over overlay sends `{ action: "return_to_lobby" }`.
     ReturnToLobby,
+    /// Confirm scenario selection after returning from GameOver.
+    ///
+    /// The host clicks a scenario button on the server HTML page,
+    /// which sends `{ action: "confirm_scenario" }`.
+    ConfirmScenario,
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
@@ -2338,6 +2350,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             payload: SystemControlPayload::ClearNavigationWaypoint,
         },
         UiAction::ReturnToLobby => ClientMessage::ReturnToLobby,
+        UiAction::ConfirmScenario => ClientMessage::ConfirmScenario,
     }
 }
 

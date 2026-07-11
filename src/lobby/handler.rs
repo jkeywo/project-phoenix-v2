@@ -398,6 +398,11 @@ pub fn process_message(
                 new_phase = Some(GamePhase::Lobby);
             }
         }
+        ClientMessage::ConfirmScenario => {
+            if phase == GamePhase::Lobby {
+                outbound.push((Target::All, ServerMessage::ScenarioLoaded));
+            }
+        }
         // SetReady IS handled above (not a no-op in lobby).
         ClientMessage::FirePhaser { .. }
         | ClientMessage::SetPhaserFrequency { .. }
@@ -1608,6 +1613,38 @@ max_level = 4
             sessions.players().iter().any(|p| p.ready),
             "ready flags must be untouched outside GameOver"
         );
+    }
+
+    #[test]
+    fn confirm_scenario_during_lobby_broadcasts_scenario_loaded() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let result = pm(
+            "t1",
+            &ClientMessage::ConfirmScenario,
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert!(result.new_phase.is_none());
+        assert!(result.outbound.iter().any(|(target, m)| {
+            matches!(target, Target::All) && matches!(m, ServerMessage::ScenarioLoaded)
+        }));
+    }
+
+    #[test]
+    fn confirm_scenario_outside_lobby_is_noop() {
+        let mut sessions = sessions_with("t1", "Alice");
+        for phase in [GamePhase::Loading, GamePhase::InProgress, GamePhase::GameOver] {
+            let phase_copy = phase.clone();
+            let result = pm(
+                "t1",
+                &ClientMessage::ConfirmScenario,
+                &mut sessions,
+                phase,
+                None,
+            );
+            assert!(result.outbound.is_empty(), "no outbound for phase {phase_copy:?}");
+        }
     }
 
     #[test]

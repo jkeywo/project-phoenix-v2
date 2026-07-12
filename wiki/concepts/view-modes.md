@@ -3,7 +3,7 @@ title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
 sources: [src/core/messages.rs, src/server/renderer.rs, src/server/radar.rs, PRD-036]
-updated: 2026-07-03
+updated: 2026-07-12
 ---
 
 # View Modes
@@ -76,6 +76,8 @@ Ignored otherwise — silently, no error.
 ## Reconnect persistence
 
 `SimSnapshot.view_mode` is included in the 10 Hz broadcast, so a captain who refreshes their phone immediately sees the correct button highlighted. Same mechanism keeps the client UI in sync after a brief disconnect.
+
+The shared web-component Sensors control path (`gui/components/ph-sensor-radar.js`) requests `set_view { direction: "SensorsRadar" }` so Science and combined Captain/Sensors stations target the Sensors viewscreen mode, rather than Helm's `set_radar_view` helper (`ViewMode::Radar`).
 
 ## Viewscreen chrome (PRD #180)
 

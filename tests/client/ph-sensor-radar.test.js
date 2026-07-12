@@ -67,11 +67,11 @@ describe('PhSensorRadar', () => {
     expect(el.shadowRoot.getElementById('on-screen-btn')).toBeDefined();
   });
 
-  it('on-screen button click calls sendAction with set_radar_view', () => {
+  it('on-screen button click calls sendAction with SensorsRadar view request', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.shadowRoot.getElementById('on-screen-btn').click();
-    expect(sendAction).toHaveBeenCalledWith('set_radar_view', {});
+    expect(sendAction).toHaveBeenCalledWith('set_view', { direction: 'SensorsRadar' });
   });
 
   it('passes base state through to inner ph-radar', () => {

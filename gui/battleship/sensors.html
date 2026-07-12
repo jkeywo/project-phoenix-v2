@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix - Sensors Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .hero h1 { margin: 0; font-size: 26px; letter-spacing: 0.22em; color: var(--ink); }
+    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: auto 1fr; gap: 16px; }
+    .radar-col { height: 100%; aspect-ratio: 1 / 1; }
+    .data-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    .data-panel { display: flex; flex-direction: column; gap: 8px; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; }
+    .data-panel h2 { margin: 0; font-family: "Chakra Petch", sans-serif; font-size: 12px; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
+    .metric { display: flex; justify-content: space-between; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); }
+    .metric strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 16px; }
+    #btn-cancel-impulse[hidden] { display: none; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; } .radar-col { width: 100%; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Sensors Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>SENSORS<span class="sub">LONG-RANGE SCAN</span></h1>
+        <span class="auto-badge" id="sensors-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="radar-col">
+          <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
+        </div>
+        <div class="data-col">
+          <div class="data-panel">
+            <h2>Scan Summary</h2>
+            <div class="metric"><span>Scan Range</span><strong id="scan-range-val">0</strong></div>
+            <div class="metric"><span>Contacts</span><strong id="contact-sub">0 CONTACTS</strong></div>
+            <button class="btn" id="btn-cancel-impulse" type="button" hidden><span class="btn-bg"></span><span class="label">Cancel Impulse</span></button>
+          </div>
+          <div class="data-panel">
+            <h2>Target Analysis</h2>
+            <div class="metric"><span>Name</span><strong id="tgt-name">NO TARGET</strong></div>
+            <div class="metric"><span>Kind</span><strong id="tgt-kind-tag">NO CONTACT</strong></div>
+            <div id="shield-facings">NO SHIELD DATA</div>
+            <div class="metric"><span>Shield Status</span><strong id="shields-tag">NO DATA</strong></div>
+          </div>
+          <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span>SENSORS STATION</span>
+        <span class="spacer"></span>
+        <span id="footer-target">NO TARGET</span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-sensor-radar.js';
+    import '../components/ph-sensor-panel.js';
+    import '../components/ph-station-damage.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+
+    function renderShieldFacings(state) {
+      var target = document.getElementById('shield-facings');
+      var shields = state.target_shields || [];
+      if (!shields.length && state.target_shield_fraction == null) {
+        target.textContent = 'NO SHIELD DATA';
+        document.getElementById('shields-tag').textContent = 'NO DATA';
+        return;
+      }
+      if (!shields.length && state.target_shield_fraction != null) {
+        var pct = Math.max(0, Math.round(state.target_shield_fraction * 100));
+        target.innerHTML = '<div class="s-facing"><span class="lbl">SHLD</span> <span class="pct">' + (pct > 0 ? pct + '%' : 'DOWN') + '</span></div>';
+        document.getElementById('shields-tag').textContent = pct > 0 ? 'ONLINE' : 'SHIELD DOWN';
+        return;
+      }
+      target.innerHTML = shields.map(function(f) {
+        var pct = f.max_hp > 0 ? Math.round((f.hp / f.max_hp) * 100) : 0;
+        return '<div class="s-facing"><span class="lbl">' + (f.label || '?').toUpperCase() + '</span> <span class="pct">' + (f.online === false ? 'DOWN' : pct + '%') + '</span></div>';
+      }).join('');
+      document.getElementById('shields-tag').textContent = shields.some(function(f) { return f.online === false; }) ? 'DEGRADED' : 'ONLINE';
+    }
+
+    var consoleApi = initConsole({
+      name: 'sensors',
+      render: function(s) {
+        document.getElementById('sensor-radar').state = s;
+        document.getElementById('sensor-panel').state = s;
+        document.getElementById('station-damage').state = s.own_hull || null;
+        document.getElementById('scan-range-val').textContent = String(s.scan_range || 0);
+        var contactText = ((s.blips || []).length) + ' CONTACT' + ((s.blips || []).length === 1 ? '' : 'S');
+        document.getElementById('contact-sub').textContent = contactText;
+        document.getElementById('tgt-name').textContent = s.target_name || 'NO TARGET';
+        document.getElementById('tgt-kind-tag').textContent = s.target_kind ? String(s.target_kind).toUpperCase() : 'NO CONTACT';
+        document.getElementById('footer-target').textContent = s.target_name || 'NO TARGET';
+        document.getElementById('btn-cancel-impulse').hidden = !(s.impulse_charge_progress > 0);
+        renderShieldFacings(s);
+        setAutoState(document.getElementById('btn-cancel-impulse'), document.getElementById('sensors-auto-badge'), !!s.sensors_auto);
+      }
+    });
+
+    document.getElementById('btn-cancel-impulse').addEventListener('click', function() {
+      consoleApi.sendAction('cancel_impulse', {});
+    });
+  </script>
+</body>
+</html>

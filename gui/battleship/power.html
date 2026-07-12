@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix - Power Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .hero h1 { margin: 0; font-size: 26px; letter-spacing: 0.22em; color: var(--ink); }
+    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+    .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
+    ph-power-controls { flex: 1; min-height: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { padding: 8px; } }
+  </style>
+</head>
+<body>
+  <div id="power-data" hidden></div>
+  <div class="frame" data-screen-label="Power Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>POWER<span class="sub">ALLOCATION &amp; BATTERY</span></h1>
+        <span class="auto-badge" id="power-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <ph-power-controls id="power-controls"></ph-power-controls>
+        <ph-battery-bar id="battery-bar"></ph-battery-bar>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span>POWER STATION</span>
+        <span class="spacer"></span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
+        <span id="bat-val">0%</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-power-controls.js';
+    import '../components/ph-battery-bar.js';
+    import '../components/ph-station-damage.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'power',
+      render: function(s) {
+        var groups = s.groups || s.consoles || [];
+        var pct = s.battery_max > 0 ? (s.battery_charge / s.battery_max) * 100 : 0;
+        document.getElementById('power-controls').state = { groups: groups, auto: !!s.power_auto };
+        document.getElementById('battery-bar').state = { level_pct: pct, charging: !s.locked, emergency_threshold_pct: 20 };
+        document.getElementById('station-damage').state = s.own_hull || null;
+        document.getElementById('bat-val').textContent = Math.round(pct) + '%';
+        setAutoState(null, document.getElementById('power-auto-badge'), !!s.power_auto);
+        var dataEl = document.getElementById('power-data');
+        dataEl.dataset.total = String(s.total || 0);
+        dataEl.dataset.totalMax = String(s.total_max || 0);
+        dataEl.dataset.locked = String(!!s.locked);
+        dataEl.replaceChildren();
+        groups.forEach(function(group) {
+          var entry = document.createElement('div');
+          entry.className = 'power-entry';
+          entry.dataset.id = group.id || '';
+          entry.dataset.level = String(group.level || 0);
+          entry.dataset.maxLevel = String(group.max_level || 0);
+          dataEl.appendChild(entry);
+        });
+      }
+    });
+  </script>
+</body>
+</html>

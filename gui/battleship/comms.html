@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix - Comms Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .hero h1 { margin: 0; font-size: 26px; letter-spacing: 0.22em; color: var(--ink); }
+    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+    .side-col, .main-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    .panel-col { min-height: 0; display: flex; flex-direction: column; gap: 8px; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
+    .panel-col h2 { margin: 0; font-family: "Chakra Petch", sans-serif; font-size: 12px; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
+    ph-comms-contact-list { flex: 1; min-height: 0; }
+    ph-comms-current-message { flex: 1; min-height: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Comms Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>COMMS<span class="sub">CONTACTS &amp; TRAFFIC</span></h1>
+        <span class="auto-badge" id="comms-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="side-col">
+          <div class="panel-col" style="flex:1">
+            <h2>Contacts</h2>
+            <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
+          </div>
+        </div>
+        <div class="main-col">
+          <div class="panel-col">
+            <h2>Available Hails</h2>
+            <ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>
+          </div>
+          <div class="panel-col" style="flex:1">
+            <h2>Current Thread</h2>
+            <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
+          </div>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span>COMMS STATION</span>
+        <span class="spacer"></span>
+        <span id="footer-target">NO ACTIVE HAIL</span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-comms-contact-list.js';
+    import '../components/ph-comms-hail-list.js';
+    import '../components/ph-comms-current-message.js';
+    import '../components/ph-station-damage.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'comms',
+      render: function(s) {
+        var comms = s.comms || s;
+        var msgs = comms.messages || [];
+        var threadMsg = msgs.find(function(m) { return !m.is_read; }) || msgs[msgs.length - 1] || null;
+        document.getElementById('comms-contact-list').state = { contacts: comms.contacts || [] };
+        document.getElementById('comms-hail-list').state = comms;
+        document.getElementById('comms-current-message').state = { thread: threadMsg };
+        document.getElementById('station-damage').state = s.own_hull || null;
+        document.getElementById('footer-target').textContent = threadMsg ? (threadMsg.sender_name || 'ACTIVE HAIL') : 'NO ACTIVE HAIL';
+        setAutoState(null, document.getElementById('comms-auto-badge'), !!s.comms_auto);
+      }
+    });
+  </script>
+</body>
+</html>

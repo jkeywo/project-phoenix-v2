@@ -1611,7 +1611,8 @@
 
         const url = (typeof window.resolveConsoleUrl === 'function')
           ? window.resolveConsoleUrl(shipStations, stationId)
-          : (st.console || ('gui/' + stationId + '-console.html'));
+          : (st.console || null);
+        if (!url) continue;
 
         const section = document.createElement('section');
         section.id = sectionId;

@@ -808,6 +808,7 @@ mod tests {
                 emissive: None,
                 scale: 1.0,
                 rotation: [0.0, 0.0, 0.0],
+                lod: Vec::new(),
             }),
             radar_appearance: Some(RadarAppearanceConfig {
                 icon: Some("testShip".into()),
@@ -843,6 +844,7 @@ mod tests {
                 emissive: None,
                 scale: 1.0,
                 rotation: [0.0, 0.0, 0.0],
+                lod: Vec::new(),
             }),
             ..Default::default()
         };

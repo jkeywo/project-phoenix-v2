@@ -102,13 +102,29 @@
 
 
   <style>
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000 url('assets/logo.png') center center / contain no-repeat; overflow: hidden; }
-    #canvas { display: block; width: 100vw; height: 100vh; background: #000; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    body { font-family: monospace; }
+    #server-shell {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      overflow: hidden;
+    }
+    #viewscreen-shell {
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 0;
+      height: 100%;
+      background: #000 url('assets/logo.png') center center / contain no-repeat;
+      overflow: hidden;
+    }
+    #canvas { display: block; width: 100%; height: 100%; background: #000; }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
-    #qr-toggle-btn { position: fixed; bottom: 0; left: 0; width: 80px; height: 80px; z-index: 200; opacity: 0.01; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    #qr-toggle-btn { position: absolute; bottom: 0; left: 0; width: 80px; height: 80px; z-index: 200; opacity: 0.01; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     #qr { display: none; }
     #top-bar {
-      position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
+      position: absolute; top: 0.75rem; right: 0.75rem; z-index: 20;
       display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; font-family: monospace;
     }
     #top-bar-row { display: flex; align-items: center; gap: 0.5rem; }
@@ -119,7 +135,7 @@
       cursor: pointer; padding: 0; line-height: 1;
     }
     #wasm-spinner {
-      position: fixed; inset: 0; z-index: 100;
+      position: absolute; inset: 0; z-index: 100;
       background: #000 url('assets/logo.png') center 40% / min(55vw, 55vh) auto no-repeat;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
@@ -643,20 +659,47 @@
 
     /* ── Debug panel ─────────────────────────────────────────── */
     #debug-toggle-btn {
-      position: fixed; top: 0; left: 0;
-      width: 28px; height: 28px; z-index: 10000;
-      opacity: 0.04; cursor: pointer;
-      background: #444; border: 1px solid #666;
+      width: 100%;
+      height: 42px;
+      z-index: 2;
+      opacity: 1;
+      cursor: pointer;
+      background: #0f141b;
+      border: 0;
+      border-bottom: 1px solid #223246;
+      color: #8ca4c2;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
       -webkit-tap-highlight-color: transparent;
-      transition: opacity 0.2s;
+      transition: background 0.2s, color 0.2s;
     }
-    #debug-toggle-btn:hover { opacity: 0.25; }
+    #debug-toggle-btn:hover { background: #162131; color: #c9d8ea; }
+    #debug-dock {
+      display: flex;
+      flex-direction: column;
+      flex: 0 0 52px;
+      width: 52px;
+      height: 100%;
+      min-width: 52px;
+      background: #05080d;
+      border-left: 1px solid #1e2a39;
+      overflow: hidden;
+      transition: flex-basis 0.2s ease, width 0.2s ease;
+    }
+    #debug-dock.open {
+      flex-basis: min(28vw, 420px);
+      width: min(28vw, 420px);
+    }
     #debug-panel {
-      position: fixed; top: 0; right: 0;
-      width: 25vw; height: 100vh;
-      z-index: 9999;
+      position: relative;
+      width: 100%;
+      height: calc(100% - 42px);
+      z-index: 1;
       background: rgba(0,0,0,0.88);
-      border-left: 1px solid #334;
+      border-left: 0;
       display: none;
       flex-direction: column;
       font-family: monospace;
@@ -715,13 +758,30 @@
       line-height: 1.35;
       color: #0f0;
     }
-    /* Portrait: top 25% instead of right 25% */
+    /* Portrait: keep the panel inline by docking it below the viewscreen. */
     @media (orientation: portrait) {
-      #debug-panel {
-        width: 100vw; height: 25vh;
-        top: 0; right: 0;
+      #server-shell {
+        flex-direction: column;
+      }
+      #viewscreen-shell {
+        min-height: 0;
+      }
+      #debug-dock {
+        width: 100%;
+        min-width: 0;
+        height: 42px;
         border-left: none;
-        border-bottom: 1px solid #334;
+        border-top: 1px solid #1e2a39;
+      }
+      #debug-dock.open {
+        width: 100%;
+        flex-basis: 28vh;
+        height: 28vh;
+      }
+      #debug-panel {
+        width: 100%;
+        height: calc(100% - 42px);
+        border-bottom: 0;
       }
       #debug-actions { flex-direction: row; }
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
@@ -847,107 +907,112 @@
     </div>
   </div>
 
-  <!-- Loading spinner shown until WASM is ready -->
-  <div id="wasm-spinner">
-    <div class="spinner-ring"></div>
-    <span>Loading…</span>
-  </div>
-
-  <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
-  <div id="asset-loading" style="display:none;position:fixed;inset:0;z-index:90;background:#000 url('assets/logo.png') center 40% / min(55vw,55vh) auto no-repeat;flex-direction:column;align-items:center;justify-content:center;color:#aae;font-family:monospace;font-size:0.9rem;gap:1rem;padding-bottom:15vh;">
-    <div class="spinner-ring"></div>
-    <span>Preparing scenario&hellip; <span id="asset-loading-pct">0</span>%</span>
-  </div>
-
-  <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
-  <canvas id="canvas"></canvas>
-
-  <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
-  <div id="game-over-overlay" style="display:none;position:fixed;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
-    <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
-    <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;">Return to Lobby</button>
-  </div>
-
-  <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
-       z-index; pointer-events:none so it never intercepts canvas input.
-       Driven by window.__updateHud(stateJson).
-       Also hosts the viewscreen border frame (corners/edges/caps/status-strip)
-       from raw/gui/borders/demo.html — assets served from gui/borders/. -->
-  <div id="hud-overlay">
-    <div id="hud-vignette"></div>
-
-    <!-- Hidden backward-compat elements (smoke-test targets: #hud-heading etc.) -->
-    <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
-      <span id="hud-heading">000</span>
-      <span id="hud-hull">100</span>
-      <span id="hud-condition">NOMINAL</span>
-    </div>
-
-    <!-- Viewscreen border frame (tiled edges) -->
-    <div class="vs-edge top"></div>
-    <div class="vs-edge bottom"></div>
-    <div class="vs-edge left"></div>
-    <div class="vs-edge right"></div>
-    <!-- Corners -->
-    <div class="vs-piece vs-corner tl"></div>
-    <div class="vs-piece vs-corner tr"></div>
-    <div class="vs-piece vs-corner bl"></div>
-    <div class="vs-piece vs-corner br"></div>
-    <!-- Caps (centred top/bottom) -->
-    <div class="vs-piece vs-cap top"></div>
-    <div class="vs-piece vs-cap bottom"></div>
-    <!-- Ship designation (top-centre, above cap) -->
-    <div class="vs-designation" id="hud-designation">PHOENIX</div>
-    <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
-    <div class="vs-status-strip">
-      <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
-    </div>
-  </div>
-
-  <!-- QR code shown over the canvas during lobby phase (or toggled mid-game) -->
-  <div id="overlay">
-    <a id="qr-link" target="_blank" style="cursor:pointer">
-      <canvas id="qr"></canvas>
-    </a>
-    <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
-      Preparing scenario&hellip; <span id="loading-progress-pct">0</span>%
-    </div>
-  </div>
-
-  <!-- Invisible click-target in bottom-left corner to toggle QR mid-game -->
-  <button id="qr-toggle-btn" title="Toggle QR code"></button>
-
-  <!-- Debug panel toggle (hidden button, top-left) -->
-  <button id="debug-toggle-btn" title="Toggle debug panel"></button>
-
-  <!-- Debug panel (right side, ~25% width; top 25% on portrait) -->
-  <div id="debug-panel">
-    <div id="debug-toolbar">
-      <div id="debug-actions">
-        <button class="debug-action" data-action="pause" title="Pause simulation">⏸</button>
-        <button class="debug-action" data-action="wireframes" title="Toggle region wireframes">🌐</button>
-        <button class="debug-action" data-action="godmode" title="God mode (no damage)">🛡</button>
-        <button class="debug-action" data-action="instagib" title="Instagib (100x damage)">⚡</button>
+  <div id="server-shell">
+    <div id="viewscreen-shell">
+      <!-- Loading spinner shown until WASM is ready -->
+      <div id="wasm-spinner">
+        <div class="spinner-ring"></div>
+        <span>Loading…</span>
       </div>
-      <div id="debug-tabs">
-        <button class="debug-tab active" data-tab="0">Mod</button>
-        <button class="debug-tab" data-tab="1">Dmg</button>
-        <button class="debug-tab" data-tab="2">Ent</button>
-        <button class="debug-tab" data-tab="3">Insp</button>
+
+      <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
+      <div id="asset-loading" style="display:none;position:absolute;inset:0;z-index:90;background:#000 url('assets/logo.png') center 40% / min(55vw,55vh) auto no-repeat;flex-direction:column;align-items:center;justify-content:center;color:#aae;font-family:monospace;font-size:0.9rem;gap:1rem;padding-bottom:15vh;">
+        <div class="spinner-ring"></div>
+        <span>Preparing scenario&hellip; <span id="asset-loading-pct">0</span>%</span>
+      </div>
+
+      <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
+      <canvas id="canvas"></canvas>
+
+      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
+      <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
+        <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+        <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;">Return to Lobby</button>
+      </div>
+
+      <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
+           z-index; pointer-events:none so it never intercepts canvas input.
+           Driven by window.__updateHud(stateJson).
+           Also hosts the viewscreen border frame (corners/edges/caps/status-strip)
+           from raw/gui/borders/demo.html — assets served from gui/borders/. -->
+      <div id="hud-overlay">
+        <div id="hud-vignette"></div>
+
+        <!-- Hidden backward-compat elements (smoke-test targets: #hud-heading etc.) -->
+        <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
+          <span id="hud-heading">000</span>
+          <span id="hud-hull">100</span>
+          <span id="hud-condition">NOMINAL</span>
+        </div>
+
+        <!-- Viewscreen border frame (tiled edges) -->
+        <div class="vs-edge top"></div>
+        <div class="vs-edge bottom"></div>
+        <div class="vs-edge left"></div>
+        <div class="vs-edge right"></div>
+        <!-- Corners -->
+        <div class="vs-piece vs-corner tl"></div>
+        <div class="vs-piece vs-corner tr"></div>
+        <div class="vs-piece vs-corner bl"></div>
+        <div class="vs-piece vs-corner br"></div>
+        <!-- Caps (centred top/bottom) -->
+        <div class="vs-piece vs-cap top"></div>
+        <div class="vs-piece vs-cap bottom"></div>
+        <!-- Ship designation (top-centre, above cap) -->
+        <div class="vs-designation" id="hud-designation">PHOENIX</div>
+        <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
+        <div class="vs-status-strip">
+          <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
+        </div>
+      </div>
+
+      <!-- QR code shown over the canvas during lobby phase (or toggled mid-game) -->
+      <div id="overlay">
+        <a id="qr-link" target="_blank" style="cursor:pointer">
+          <canvas id="qr"></canvas>
+        </a>
+        <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
+          Preparing scenario&hellip; <span id="loading-progress-pct">0</span>%
+        </div>
+      </div>
+
+      <!-- Invisible click-target in bottom-left corner to toggle QR mid-game -->
+      <button id="qr-toggle-btn" title="Toggle QR code"></button>
+
+      <div id="top-bar">
+        <div id="top-bar-row">
+          <span id="conn-label"></span>
+          <span id="conn-dot"></span>
+          <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+        </div>
       </div>
     </div>
-    <pre id="debug-content">(panel closed)</pre>
-  </div>
 
-  <div id="top-bar">
-    <div id="top-bar-row">
-      <span id="conn-label"></span>
-      <span id="conn-dot"></span>
-      <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
-    </div>
+    <aside id="debug-dock">
+      <button id="debug-toggle-btn" title="Toggle debug panel">Debug</button>
+
+      <!-- Debug panel -->
+      <div id="debug-panel">
+        <div id="debug-toolbar">
+          <div id="debug-actions">
+            <button class="debug-action" data-action="pause" title="Pause simulation">⏸</button>
+            <button class="debug-action" data-action="wireframes" title="Toggle region wireframes">🌐</button>
+            <button class="debug-action" data-action="godmode" title="God mode (no damage)">🛡</button>
+            <button class="debug-action" data-action="instagib" title="Instagib (100x damage)">⚡</button>
+          </div>
+          <div id="debug-tabs">
+            <button class="debug-tab active" data-tab="0">Mod</button>
+            <button class="debug-tab" data-tab="1">Dmg</button>
+            <button class="debug-tab" data-tab="2">Ent</button>
+            <button class="debug-tab" data-tab="3">Insp</button>
+          </div>
+        </div>
+        <pre id="debug-content">(panel closed)</pre>
+      </div>
+    </aside>
   </div>
 
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
@@ -1003,12 +1068,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   // overlay + border) shakes together. When offset is (0, 0) the transform
   // is removed.
   window.__applyShake = function(x, y) {
+    const shell = document.getElementById('viewscreen-shell');
+    if (!shell) return;
     if (x === 0 && y === 0) {
-      document.body.style.transform = '';
-      document.body.style.willChange = '';
+      shell.style.transform = '';
+      shell.style.willChange = '';
     } else {
-      document.body.style.transform = 'translate(' + x + 'px,' + y + 'px)';
-      document.body.style.willChange = 'transform';
+      shell.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+      shell.style.willChange = 'transform';
     }
   };
 
@@ -2037,6 +2104,7 @@ window.addEventListener('TrunkApplicationStarted', () => {
 
     // ── Debug panel (replaces old F-key overlays) ──────────────────────────
     (function() {
+      var dock = document.getElementById('debug-dock');
       var panel = document.getElementById('debug-panel');
       var toggleBtn = document.getElementById('debug-toggle-btn');
       var content = document.getElementById('debug-content');
@@ -2066,7 +2134,10 @@ window.addEventListener('TrunkApplicationStarted', () => {
 
       function openPanel() {
         panelOpen = true;
+        dock.classList.add('open');
         panel.classList.add('open');
+        toggleBtn.textContent = 'Close';
+        toggleBtn.setAttribute('aria-expanded', 'true');
         // Enable all 4 debug Bevy resources (each toggle flips once)
         if (!debugResourcesOn) {
           debugResourcesOn = true;
@@ -2081,7 +2152,10 @@ window.addEventListener('TrunkApplicationStarted', () => {
 
       function closePanel() {
         panelOpen = false;
+        dock.classList.remove('open');
         panel.classList.remove('open');
+        toggleBtn.textContent = 'Debug';
+        toggleBtn.setAttribute('aria-expanded', 'false');
         // Disable all 4 debug Bevy resources
         if (debugResourcesOn) {
           debugResourcesOn = false;

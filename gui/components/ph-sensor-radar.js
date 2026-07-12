@@ -50,7 +50,7 @@ export class PhSensorRadar extends HTMLElement {
     }
     this.shadowRoot.getElementById('on-screen-btn').addEventListener('click', () => {
       if (this.sendAction) {
-        this.sendAction('set_radar_view', {});
+        this.sendAction('set_view', { direction: 'SensorsRadar' });
       }
     });
   }

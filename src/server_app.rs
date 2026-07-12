@@ -2703,6 +2703,7 @@ fn render_spawned_entities(
                                 base_tf,
                                 Visibility::Hidden,
                                 LocalShipModel,
+                                bevy::camera::visibility::NoFrustumCulling,
                             ));
                         });
                     } else {

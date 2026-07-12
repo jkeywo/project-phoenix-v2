@@ -799,6 +799,12 @@ pub struct CinematicCameraConfig {
     /// Minimum seconds between target re-evaluations (hysteresis).
     #[serde(default = "default_cinematic_hysteresis")]
     pub hysteresis_secs: f32,
+    /// How fast (degrees/second) the chase camera's yaw catches up to the
+    /// ship's actual heading. A rigid 1:1 lock makes the ship look frozen in
+    /// frame during turns (camera and hull rotate identically), so the
+    /// camera intentionally lags behind and lets the ship's turn be visible.
+    #[serde(default = "default_cinematic_yaw_follow_rate")]
+    pub yaw_follow_deg_per_sec: f32,
 }
 
 fn default_cinematic_pitch() -> f32 {
@@ -812,6 +818,9 @@ fn default_cinematic_look_ahead() -> f32 {
 }
 fn default_cinematic_hysteresis() -> f32 {
     3.0
+}
+fn default_cinematic_yaw_follow_rate() -> f32 {
+    45.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

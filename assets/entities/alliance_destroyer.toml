@@ -518,3 +518,4 @@ default_pitch_deg = 12
 entity_look_range = 50
 look_ahead_distance = 80
 hysteresis_secs = 3
+yaw_follow_deg_per_sec = 45

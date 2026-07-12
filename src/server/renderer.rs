@@ -556,7 +556,18 @@ fn cinematic_camera(
     }
 
     let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
-    let yaw_rot = Quat::from_rotation_y(-physics.yaw);
+
+    // Lag the camera's yaw toward the ship's actual heading instead of
+    // locking to it exactly — a rigid lock keeps the ship at an identical
+    // angle in frame at all times, which reads as "the ship never turns".
+    let current_yaw = state.camera_yaw.unwrap_or(physics.yaw);
+    let target_delta = (physics.yaw - current_yaw + std::f32::consts::PI)
+        .rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
+    let max_step = cfg.yaw_follow_deg_per_sec.to_radians() * time.delta_secs();
+    let smoothed_yaw = current_yaw + target_delta.clamp(-max_step, max_step);
+    state.camera_yaw = Some(smoothed_yaw);
+    let yaw_rot = Quat::from_rotation_y(-smoothed_yaw);
 
     // Camera position: fixed offset from ship centre (above and behind).
     let offset = Vec3::from_array(cfg.position);
@@ -959,6 +970,10 @@ impl Default for NebulaFogState {
 pub struct CinematicCameraState {
     pub current_target: Option<uuid::Uuid>,
     pub last_re_eval: f64,
+    /// Smoothed camera yaw, lagging behind `ShipPhysics.yaw` so the ship's
+    /// turning is visible on screen instead of being masked by a camera that
+    /// rotates in perfect lockstep with the hull. `None` until the first tick.
+    pub camera_yaw: Option<f32>,
 }
 
 /// How fast the fog intensity approaches its target (per second).

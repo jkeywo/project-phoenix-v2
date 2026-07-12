@@ -119,7 +119,7 @@
         var commsUnread = document.getElementById('comms-unread');
         if (s.weapons) {
           var w = s.weapons;
-          radarEl.state = { blips: w.blips || [], ship_heading: (s.navigation && s.navigation.ship_heading) || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
+          radarEl.state = { blips: w.blips || [], x: (s.navigation && s.navigation.ship_x) || 0, z: (s.navigation && s.navigation.ship_z) || 0, heading: (s.navigation && s.navigation.ship_heading) || 0, speed: (s.navigation && s.navigation.ship_speed) || 0, ship_heading: (s.navigation && s.navigation.ship_heading) || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
           phasersEl.state = { banks: w.banks || [], target_valid: !!w.target_uuid, mode: w.phaser_mode || 'Auto' };
           blastersEl.state = { banks: w.blasters || [] };
           torpedoEl.state = { tubes: w.tubes || [], magazine: { current: w.torpedo_count || 0, max: w.torpedo_max || w.torpedo_count || 0 }, target_uuid: w.target_uuid || null };

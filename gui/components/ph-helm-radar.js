@@ -15,8 +15,16 @@ export class PhHelmRadar extends HTMLElement {
       'ph-radar { display: block; width: 100%; height: 100%; }',
       '.svg-overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
       '.thrust-arc { fill: none; stroke: #6cb6d0; stroke-width: 4; stroke-linecap: round; }',
+      '.corner-label {',
+      '  position: absolute; pointer-events: none; z-index: 10;',
+      '  font-family: \'JetBrains Mono\', monospace; font-size: 0.6rem;',
+      '  letter-spacing: 0.1em; color: #5a6a7e;',
+      '}',
+      '.corner-label.top-left { top: 4%; left: 6%; }',
+      '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
+      '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
       '.on-screen-btn {',
-      '  position: absolute; bottom: 6%; left: 50%; transform: translateX(-50%);',
+      '  position: absolute; bottom: 6%; right: 6%;',
       '  pointer-events: auto; z-index: 10;',
       '  font-family: \'JetBrains Mono\', monospace; font-size: 0.65rem;',
       '  letter-spacing: 0.15em; color: #8899b0; background: rgba(5,8,22,0.85);',
@@ -33,6 +41,9 @@ export class PhHelmRadar extends HTMLElement {
       '    <path class="thrust-arc" id="arc-port" />',
       '    <path class="thrust-arc" id="arc-stbd" />',
       '  </svg>',
+      '  <div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
+      '  <div class="corner-label top-right" id="label-bearing">000°</div>',
+      '  <div class="corner-label bottom-left" id="label-speed">0.0 km/s</div>',
       '  <button class="on-screen-btn" id="on-screen-btn" type="button">ON SCREEN</button>',
       '</div>',
     ].join('\n');
@@ -73,6 +84,25 @@ export class PhHelmRadar extends HTMLElement {
     }
 
     this.#updateThrustArcs(s);
+
+    const posLabel = this.shadowRoot.getElementById('label-pos');
+    if (posLabel) {
+      const x = s.x != null ? s.x : 0;
+      const z = s.z != null ? s.z : 0;
+      posLabel.textContent = 'X: ' + x.toFixed(0) + '  Z: ' + z.toFixed(0);
+    }
+
+    const bearingLabel = this.shadowRoot.getElementById('label-bearing');
+    if (bearingLabel) {
+      const h = s.heading != null ? ((s.heading % 360) + 360) % 360 : 0;
+      bearingLabel.textContent = String(h.toFixed(0)).padStart(3, '0') + '\u00B0';
+    }
+
+    const speedLabel = this.shadowRoot.getElementById('label-speed');
+    if (speedLabel) {
+      const spd = s.speed != null ? s.speed : 0;
+      speedLabel.textContent = (spd * 3.6).toFixed(1) + ' km/s';
+    }
 
     const btn = this.shadowRoot.getElementById('on-screen-btn');
     if (btn) {

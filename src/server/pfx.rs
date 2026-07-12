@@ -1118,8 +1118,10 @@ fn marker_origin(
     markers: Option<&ModelMarkers>,
     marker_name: Option<&str>,
 ) -> Option<Vec3> {
-    let marker = markers?.get(marker_name?)?;
-    Some(transform.transform_point(Vec3::from_array(marker.position)))
+    // Composes `entityTransform ∘ baseRig ∘ marker`: marker positions are
+    // authored in the raw-GLB frame, so the base rig must be applied to place
+    // the emitter on the correct (fore) end of the ship rather than the rear.
+    markers?.resolve_world_position(transform, marker_name?)
 }
 
 fn marker_emitter(

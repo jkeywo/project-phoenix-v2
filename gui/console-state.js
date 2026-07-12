@@ -481,6 +481,15 @@ export function buildWeaponsConsoleState(state) {
   const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
   const blasters     = bb.blasters      ?? state.blasterBanks        ?? [];
 
+  // AUTO gate: per-system, not whole-station — a "Simplified" rating only
+  // automates the phaser bank(s), leaving torpedoes/blasters human. Derive
+  // from the generic per-system control-source map intersected with this
+  // ship's actual phaser system ids (data-driven; works for the destroyer's
+  // single bank and the battleship/cruiser's two banks alike).
+  const phaserSystemIds = (state.stationSystems?.['tactical'] || []).filter(id => id.startsWith('phaser-'));
+  const controlSources = state.controlSources || {};
+  const tacticalAuto = phaserSystemIds.length > 0 && phaserSystemIds.every(id => controlSources[id] === 'Ai');
+
   const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
   const mappedPhaserArcs = phaserArcs.map(a => ({
     ...a,
@@ -539,7 +548,7 @@ export function buildWeaponsConsoleState(state) {
     torpedo_arcs:  torpedoArcs,
     blasters,
     own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
-    tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
+    tactical_auto: tacticalAuto,
   });
 }
 
@@ -779,7 +788,11 @@ export function buildRepairConsoleState(state) {
       // Dispatchable, currently-damaged repair targets (stations + core).
       dispatch_targets:     targets,
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
-      repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
+      // Per-system, not whole-station: the repair *system* id is always the
+      // literal "repair" regardless of which station owns it (battleship's
+      // dedicated Repair station vs. cruiser/destroyer's Engineering), so
+      // this works uniformly across all ship classes.
+      repair_auto:          state.controlSources?.['repair'] === 'Ai',
     });
   }
   // Legacy fallback: derive damageable_systems from consoleHull (SystemId-keyed
@@ -794,7 +807,7 @@ export function buildRepairConsoleState(state) {
     core_systems:         legacy.coreSystems,
     dispatch_targets:     legacy.targets,
     travel_duration_secs: 5.0,
-    repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
+    repair_auto:          state.controlSources?.['repair'] === 'Ai',
   });
 }
 
@@ -1222,7 +1235,7 @@ export function buildDestroyerTacticalConsoleState(state) {
     weapons,
     navigation,
     comms,
-    tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
+    tactical_auto: weapons.tactical_auto,
   });
 }
 

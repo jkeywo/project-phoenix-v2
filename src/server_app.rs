@@ -1895,7 +1895,7 @@ fn spawn_game_start_entities(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut pending_ship_config: Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
     selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
-    sessions: Option<Res<crate::lobby::Sessions>>,
+    mut sessions: Option<ResMut<crate::lobby::Sessions>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
 ) {
@@ -2042,8 +2042,10 @@ fn spawn_game_start_entities(
             } else {
                 crate::ship_plugin::load_ship_config_from_disk()
             };
-            let initial_control_sources = {
+            let (initial_control_sources, initial_active_ratings) = {
                 let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
+                let mut active_ratings: std::collections::HashMap<StationId, String> =
+                    std::collections::HashMap::new();
                 if let Some(ref sess) = sessions {
                     let manned: std::collections::HashSet<_> = sess
                         .0
@@ -2053,18 +2055,36 @@ fn spawn_game_start_entities(
                         .filter_map(|p| p.station.as_ref())
                         .collect();
                     for station in &ship_config.0.stations {
-                        if !manned.contains(&station.id) {
-                            crate::ship::rating::apply_rating(
-                                &ship_config.0,
-                                &station.id,
-                                crate::ship::rating::BACKFILL_RATING,
-                                &mut resolver,
-                            );
-                        }
+                        // Manned stations apply the player's lobby-chosen
+                        // complexity toggle (if any), else the station's base
+                        // (first) rating. Unmanned stations are fully
+                        // AI-backfilled, as before.
+                        let rating_name = if manned.contains(&station.id) {
+                            sess.0
+                                .pending_rating_for(&station.id)
+                                .cloned()
+                                .or_else(|| station.ratings.first().map(|r| r.name.clone()))
+                                .unwrap_or_else(|| "Std".to_string())
+                        } else {
+                            crate::ship::rating::BACKFILL_RATING.to_string()
+                        };
+                        crate::ship::rating::apply_rating(
+                            &ship_config.0,
+                            &station.id,
+                            &rating_name,
+                            &mut resolver,
+                        );
+                        active_ratings.insert(station.id.clone(), rating_name);
                     }
                 }
-                crate::ship_plugin::ShipSystemControlSources(resolver)
+                (
+                    crate::ship_plugin::ShipSystemControlSources(resolver),
+                    crate::ship_plugin::ActiveStationRatings(active_ratings),
+                )
             };
+            if let Some(ref mut sess) = sessions {
+                sess.0.clear_all_pending_ratings();
+            }
             commands
                 .entity(spawned)
                 .insert(Ship)
@@ -2072,7 +2092,7 @@ fn spawn_game_start_entities(
                 .insert(ShipSystemBlackboards::default())
                 .insert(ship_config)
                 .insert(initial_control_sources)
-                .insert(crate::ship_plugin::ActiveStationRatings::default())
+                .insert(initial_active_ratings)
                 .insert(crate::ship_plugin::CoordinationQueue::default())
                 .insert(crate::messages::AdmittedCommands::default())
                 .insert(ShipPhysicsComponent {

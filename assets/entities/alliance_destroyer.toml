@@ -331,6 +331,10 @@ console = "gui/destroyer/captain.html"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["red-alert"]
+
 [[station]]
 id = "helm"
 name = "Helm"
@@ -355,6 +359,10 @@ console = "gui/destroyer/tactical.html"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["phaser-omni"]
+
 [[station]]
 id = "engineering"
 name = "Engineering"
@@ -366,6 +374,10 @@ console = "gui/destroyer/engineering.html"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["repair"]
 
 [[system]]
 id = "captain"

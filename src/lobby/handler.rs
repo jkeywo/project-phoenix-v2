@@ -291,6 +291,20 @@ pub fn process_message(
                         },
                     ));
                     station_rating_update = Some((previous_station, backfill));
+                } else {
+                    // Pre-InProgress: don't let a new claimant inherit a
+                    // stranger's lobby-chosen complexity toggle.
+                    sessions.clear_pending_rating(&previous_station);
+                    let base_rating = get_station(ship_stations, &previous_station.0)
+                        .and_then(|def| def.ratings.first().cloned())
+                        .unwrap_or_else(|| "Std".to_string());
+                    outbound.push((
+                        Target::All,
+                        ServerMessage::RatingChanged {
+                            station_id: previous_station,
+                            rating_name: base_rating,
+                        },
+                    ));
                 }
             }
 
@@ -340,6 +354,20 @@ pub fn process_message(
                     ));
                     station_rating_update = Some((station_id, backfill));
                 }
+            } else if let Some(station_id) = released_station {
+                // Pre-InProgress: don't let a new claimant inherit a
+                // stranger's lobby-chosen complexity toggle.
+                sessions.clear_pending_rating(&station_id);
+                let base_rating = get_station(ship_stations, &station_id.0)
+                    .and_then(|def| def.ratings.first().cloned())
+                    .unwrap_or_else(|| "Std".to_string());
+                outbound.push((
+                    Target::All,
+                    ServerMessage::RatingChanged {
+                        station_id,
+                        rating_name: base_rating,
+                    },
+                ));
             }
         }
         ClientMessage::SetReady { ready } => {
@@ -385,6 +413,7 @@ pub fn process_message(
         ClientMessage::ReturnToLobby => {
             if phase == GamePhase::GameOver {
                 sessions.reset_ready();
+                sessions.clear_all_pending_ratings();
                 for p in sessions.players() {
                     outbound.push((
                         Target::All,
@@ -403,12 +432,36 @@ pub fn process_message(
                 outbound.push((Target::All, ServerMessage::ScenarioLoaded));
             }
         }
+        ClientMessage::SetStationRating { rating_name } => {
+            // InProgress is handled by `ship_plugin::handle_station_rating_change`
+            // against the live Ship entity. Pre-spawn (Lobby/Loading), there is
+            // no ControlSourceResolver to apply to yet, so record the choice as
+            // "pending" and apply it once the ship spawns
+            // (`spawn_game_start_entities`), while still broadcasting it live so
+            // other lobby clients see the toggle update immediately.
+            if phase == GamePhase::Lobby || phase == GamePhase::Loading {
+                if let Some(station_id) = sessions.station_for_token(token).cloned() {
+                    let valid = get_station(ship_stations, &station_id.0)
+                        .map(|def| def.ratings.iter().any(|r| r == rating_name))
+                        .unwrap_or(false);
+                    if valid {
+                        sessions.set_pending_rating(&station_id, rating_name.clone());
+                        outbound.push((
+                            Target::All,
+                            ServerMessage::RatingChanged {
+                                station_id,
+                                rating_name: rating_name.clone(),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
         // SetReady IS handled above (not a no-op in lobby).
         ClientMessage::FirePhaser { .. }
         | ClientMessage::SetPhaserFrequency { .. }
         | ClientMessage::FireTorpedo { .. }
         | ClientMessage::ControlSystem { .. }
-        | ClientMessage::SetStationRating { .. }
         | ClientMessage::SendCoordination { .. }
         | ClientMessage::LoadTube { .. }
         | ClientMessage::UnloadTube { .. } => {}
@@ -901,6 +954,7 @@ max_level = 4
                     rank: "Cpt.".into(),
                     short_code: "CPT".into(),
                     console: None,
+                    ratings: vec!["Std".into(), "Simplified".into()],
                 },
                 StationDef {
                     id: StationId("helm".into()),
@@ -909,6 +963,7 @@ max_level = 4
                     rank: "Ltn.".into(),
                     short_code: "HLM".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("tactical".into()),
@@ -917,6 +972,7 @@ max_level = 4
                     rank: "Ltn.".into(),
                     short_code: "TAC".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("repair".into()),
@@ -925,6 +981,7 @@ max_level = 4
                     rank: "Ltn.".into(),
                     short_code: "ENG".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("sensors".into()),
@@ -933,6 +990,7 @@ max_level = 4
                     rank: "Ens.".into(),
                     short_code: "SCI".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("shields".into()),
@@ -941,6 +999,7 @@ max_level = 4
                     rank: "Ens.".into(),
                     short_code: "SHD".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("navigation".into()),
@@ -949,6 +1008,7 @@ max_level = 4
                     rank: "Ens.".into(),
                     short_code: "NAV".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("power".into()),
@@ -957,6 +1017,7 @@ max_level = 4
                     rank: "Ltn.".into(),
                     short_code: "PWR".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("comms".into()),
@@ -965,6 +1026,7 @@ max_level = 4
                     rank: "Ens.".into(),
                     short_code: "COM".into(),
                     console: None,
+                    ratings: vec![],
                 },
             ],
         }
@@ -2194,5 +2256,135 @@ max_level = 4
             .players()
             .iter()
             .any(|p| p.token == clamped_token && p.connected));
+    }
+
+    // ── SetStationRating: pre-InProgress pending-rating path ───────────────
+
+    #[test]
+    fn set_station_rating_in_lobby_records_pending_and_broadcasts() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        let msg = ClientMessage::SetStationRating {
+            rating_name: "Simplified".into(),
+        };
+        let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+
+        assert_eq!(
+            sessions.pending_rating_for(&StationId("captain".into())),
+            Some(&"Simplified".to_string())
+        );
+        assert!(result.outbound.iter().any(|(t, m)| {
+            matches!(t, Target::All)
+                && matches!(
+                    m,
+                    ServerMessage::RatingChanged { station_id, rating_name }
+                        if *station_id == StationId("captain".into()) && rating_name == "Simplified"
+                )
+        }));
+        // No live resolver yet — nothing for the Bevy runtime to apply.
+        assert!(result.station_rating_update.is_none());
+    }
+
+    #[test]
+    fn set_station_rating_in_lobby_rejects_unknown_rating_name() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        let msg = ClientMessage::SetStationRating {
+            rating_name: "NotARealRating".into(),
+        };
+        let _result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+        assert!(sessions
+            .pending_rating_for(&StationId("captain".into()))
+            .is_none());
+    }
+
+    #[test]
+    fn set_station_rating_in_lobby_ignored_when_sender_holds_no_station() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let msg = ClientMessage::SetStationRating {
+            rating_name: "Simplified".into(),
+        };
+        let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+        assert!(result
+            .outbound
+            .iter()
+            .all(|(_, m)| !matches!(m, ServerMessage::RatingChanged { .. })));
+    }
+
+    #[test]
+    fn set_station_rating_ignored_during_in_progress_lobby_path() {
+        // InProgress SetStationRating is handled by ship_plugin against the live
+        // Ship entity, not this pure lobby handler — no pending state, no broadcast.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        let msg = ClientMessage::SetStationRating {
+            rating_name: "Simplified".into(),
+        };
+        let result = pm_stations("t1", &msg, &mut sessions, GamePhase::InProgress, None);
+        assert!(sessions
+            .pending_rating_for(&StationId("captain".into()))
+            .is_none());
+        assert!(result.outbound.is_empty());
+    }
+
+    #[test]
+    fn release_station_in_lobby_clears_pending_rating_and_resets_broadcast() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        sessions.set_pending_rating(&StationId("captain".into()), "Simplified".into());
+
+        let result = pm_stations(
+            "t1",
+            &ClientMessage::ReleaseStation,
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+
+        assert!(sessions
+            .pending_rating_for(&StationId("captain".into()))
+            .is_none());
+        assert!(result.outbound.iter().any(|(t, m)| {
+            matches!(t, Target::All)
+                && matches!(
+                    m,
+                    ServerMessage::RatingChanged { station_id, rating_name }
+                        if *station_id == StationId("captain".into()) && rating_name == "Std"
+                )
+        }));
+    }
+
+    #[test]
+    fn select_station_away_from_previous_in_lobby_clears_previous_pending_rating() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        sessions.set_pending_rating(&StationId("captain".into()), "Simplified".into());
+
+        let msg = ClientMessage::SelectStation {
+            station: "Helm".into(),
+        };
+        let _result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
+
+        assert!(sessions
+            .pending_rating_for(&StationId("captain".into()))
+            .is_none());
+    }
+
+    #[test]
+    fn return_to_lobby_clears_all_pending_ratings() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_pending_rating(&StationId("captain".into()), "Simplified".into());
+        sessions.set_pending_rating(&StationId("tactical".into()), "Simplified".into());
+        sessions.set_ready("t1", true);
+
+        let _result = pm_stations(
+            "t1",
+            &ClientMessage::ReturnToLobby,
+            &mut sessions,
+            GamePhase::GameOver,
+            None,
+        );
+
+        assert!(sessions.pending_ratings().is_empty());
     }
 }

@@ -209,16 +209,24 @@ thread_local! {
 
 pub fn is_god_mode() -> bool {
     #[cfg(target_arch = "wasm32")]
-    { GOD_MODE.with(|v| *v.borrow()) }
+    {
+        GOD_MODE.with(|v| *v.borrow())
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    { false }
+    {
+        false
+    }
 }
 
 pub fn is_instagib() -> bool {
     #[cfg(target_arch = "wasm32")]
-    { INSTAGIB.with(|v| *v.borrow()) }
+    {
+        INSTAGIB.with(|v| *v.borrow())
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    { false }
+    {
+        false
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

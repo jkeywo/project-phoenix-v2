@@ -1481,7 +1481,10 @@ fn tick_beams(
                 if let Some(ref mut ob) = outbox {
                     ob.0.push((
                         Target::All,
-                        ServerMessage::DamageTaken { hull: 0.0, shield: 0.0 },
+                        ServerMessage::DamageTaken {
+                            hull: 0.0,
+                            shield: 0.0,
+                        },
                     ));
                 }
                 break;
@@ -2677,7 +2680,10 @@ fn handle_blaster_hits(
             if is_local && crate::bridge::is_god_mode() {
                 outbox.0.push((
                     Target::All,
-                    ServerMessage::DamageTaken { hull: 0.0, shield: 0.0 },
+                    ServerMessage::DamageTaken {
+                        hull: 0.0,
+                        shield: 0.0,
+                    },
                 ));
                 break;
             }

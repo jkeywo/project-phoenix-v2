@@ -16,11 +16,21 @@
     .console-body .col { display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
     ph-comms-contact-list, ph-comms-hail-list, ph-comms-current-message, ph-navigation-map { flex: 1; min-height: 0; }
+    .hero-controls { display: flex; align-items: center; gap: 8px; }
+    .overlay-toggle { background: rgba(14,17,23,0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.2em; padding: 8px 16px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; white-space: nowrap; }
+    .overlay-toggle:hover { background: rgba(30,35,50,0.9); border-color: var(--ink-dim); }
+    .overlay-toggle.active { background: rgba(30,50,80,0.9); border-color: var(--cyan); color: var(--cyan); }
+    .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(14,17,23,0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; }
+    .overlay-back:hover { background: rgba(30,35,50,0.9); border-color: var(--ink-dim); }
+    .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(5,8,24,0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
+    .overlay-panel.open { display: flex; }
+    .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+    .overlay-panel ph-navigation-map { flex: 1; min-height: 0; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
     .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } .overlay-toggle { font-size: 11px; padding: 6px 12px; } .overlay-panel { padding: 8px; } }
   </style>
 </head>
 <body>
@@ -29,7 +39,10 @@
     <div class="panel-inner">
       <div class="hero">
         <h1>COMMS<span class="sub">COMMUNICATIONS &amp; NAV</span></h1>
-        <span class="auto-badge" id="comms-auto-badge" hidden>AUTO</span>
+        <div class="hero-controls">
+          <span class="auto-badge" id="comms-auto-badge" hidden>AUTO</span>
+          <button class="overlay-toggle" id="nav-toggle" data-active="false">Nav</button>
+        </div>
       </div>
       <div class="console-body">
         <div class="col">
@@ -53,6 +66,11 @@
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
+    <div class="overlay-panel" id="nav-overlay">
+      <button class="overlay-back" id="nav-back">&#8592; Back</button>
+      <h2>Navigation</h2>
+      <ph-navigation-map id="nav-overlay-map"></ph-navigation-map>
+    </div>
   </div>
   <script type="module">
     import '../components/ph-comms-contact-list.js';
@@ -62,6 +80,30 @@
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
+
+    function closeAllOverlays() {
+      ['nav-overlay'].forEach(function(oid) {
+        var el = document.getElementById(oid);
+        if (el) el.classList.remove('open');
+      });
+      document.querySelectorAll('.overlay-toggle').forEach(function(b) {
+        b.dataset.active = 'false';
+        b.classList.remove('active');
+      });
+    }
+
+    function toggleOverlay(id, btnId) {
+      var overlay = document.getElementById(id);
+      var btn = document.getElementById(btnId);
+      var isOpen = btn.dataset.active === 'true';
+      closeAllOverlays();
+      if (!isOpen) {
+        overlay.classList.add('open');
+        btn.dataset.active = 'true';
+        btn.classList.add('active');
+      }
+    }
+
     initConsole({
       name: 'comms',
       render: function(s) {
@@ -69,6 +111,7 @@
         var hl = document.getElementById('comms-hail-list');
         var cm = document.getElementById('comms-current-message');
         var nm = document.getElementById('navigation-map');
+        var nmOv = document.getElementById('nav-overlay-map');
         var comms = s.comms || {};
         var nav = s.navigation || {};
         cl.state = { contacts: comms.contacts || [] };
@@ -76,7 +119,9 @@
         var msgs = comms.messages || [];
         var threadMsg = msgs.find(function(m) { return !m.is_read; }) || msgs[msgs.length - 1] || null;
         cm.state = { thread: threadMsg };
-        nm.state = { blips: nav.blips || [], range: nav.radar_range || 5000, ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null };
+        var navState = { blips: nav.blips || [], range: nav.radar_range || 5000, ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null };
+        nm.state = navState;
+        if (nmOv) nmOv.state = navState;
         var wp = nav.waypoint;
         document.getElementById('footer-target').textContent = wp ? wp.name || 'WAYPOINT' : 'NO WAYPOINT';
         var msgCount = msgs.length;
@@ -85,6 +130,9 @@
         document.getElementById('station-damage').state = s.own_hull || null;
       }
     });
+
+    document.getElementById('nav-toggle').addEventListener('click', function() { toggleOverlay('nav-overlay', 'nav-toggle'); });
+    document.getElementById('nav-back').addEventListener('click', closeAllOverlays);
   </script>
 </body>
 </html>

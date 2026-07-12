@@ -22,17 +22,6 @@ export class PhTacticalRadar extends HTMLElement {
       '.corner-label.top-left { top: 4%; left: 6%; }',
       '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
       '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
-      '.on-screen-btn {',
-      '  position: absolute; bottom: 6%; right: 6%;',
-      '  pointer-events: auto; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: 0.65rem;',
-      '  letter-spacing: 0.15em; color: #8899b0; background: rgba(5,8,22,0.85);',
-      '  border: 1px solid var(--line-faint); border-radius: 2px; padding: 2px 12px;',
-      '  cursor: pointer; text-transform: uppercase;',
-      '  transition: border-color 0.15s, color 0.15s, background 0.15s;',
-      '}',
-      '.on-screen-btn:hover { border-color: #6cb6d0; }',
-      '.on-screen-btn.active { border-color: #6cb6d0; color: #6cb6d0; background: rgba(108,182,208,0.18); }',
       '</style>',
       '<div class="container">',
       '  <ph-radar id="inner-radar"></ph-radar>',
@@ -44,7 +33,6 @@ export class PhTacticalRadar extends HTMLElement {
       '  <div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
       '  <div class="corner-label top-right" id="label-bearing">000°</div>',
       '  <div class="corner-label bottom-left" id="label-speed">0.0 km/s</div>',
-      '  <button class="on-screen-btn" id="on-screen-btn" type="button">ON SCREEN</button>',
       '</div>',
     ].join('\n');
     this.shadowRoot.appendChild(t.content.cloneNode(true));
@@ -58,11 +46,6 @@ export class PhTacticalRadar extends HTMLElement {
         this.sendAction?.(action, payload);
       };
     }
-    this.shadowRoot.getElementById('on-screen-btn').addEventListener('click', () => {
-      if (this.sendAction) {
-        this.sendAction('set_radar_view', {});
-      }
-    });
   }
 
   set state(val) {
@@ -80,6 +63,7 @@ export class PhTacticalRadar extends HTMLElement {
         range: s.range,
         ship_heading: s.ship_heading,
         config: s.config || {},
+        target_uuid: s.target_uuid || null,
       };
     }
     this.#renderOverlays(s);
@@ -103,10 +87,6 @@ export class PhTacticalRadar extends HTMLElement {
       speedLabel.textContent = (spd * 3.6).toFixed(1) + ' km/s';
     }
 
-    const btn = this.shadowRoot.getElementById('on-screen-btn');
-    if (btn) {
-      btn.classList.toggle('active', !!s.on_screen_active);
-    }
   }
 
   #renderOverlays(s) {

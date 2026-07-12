@@ -465,7 +465,10 @@ pub fn process_lobby(
                 countdown.as_deref_mut(),
             );
         } else {
-            let empty_ratings = std::collections::HashMap::new();
+            // No Ship entity yet (Lobby/Loading) — fall back to whatever
+            // ratings players have picked in the lobby so far, so (re)joining
+            // clients' Welcome reflects current toggle state.
+            let pending_ratings = sessions.0.pending_ratings().clone();
             let result = lobby_handler::process_message(
                 &ev.token,
                 &ev.msg,
@@ -475,7 +478,7 @@ pub fn process_lobby(
                 stations,
                 &ship_client_config.0,
                 preload_complete,
-                &empty_ratings,
+                &pending_ratings,
             );
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(

@@ -20,5 +20,16 @@ shape = "sphere"
 radius = 4
 colour = [0.6, 0.55, 0.45]
 
+# Distance-based LOD: full GLB up close, shared sphere far away.
+[[mesh.lod]]
+max_distance = 50.0
+model = "assets/models/asteroid_common_2.glb"
+variant = "large"
+
+[[mesh.lod]]
+shape = "sphere"
+radius = 4
+colour = [0.6, 0.55, 0.45]
+
 [radar_appearance]
 icon = "asteroid"

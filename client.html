@@ -563,13 +563,13 @@
     #detail-panel .detail-consoles .chip:hover { border-color: var(--signal-cyan); color: var(--signal-cyan); }
     #detail-panel .detail-consoles .chip.selected { background: #0a2830;
       border-color: var(--signal-cyan); color: var(--signal-cyan); }
-    #detail-panel .segmented { display: flex; gap: 2px; }
-    #detail-panel .segmented button { padding: 2px 10px; border-radius: 3px;
+    #detail-panel .detail-ratings { display: flex; gap: 2px; margin: 4px 0; }
+    #detail-panel .detail-ratings .rating-btn { padding: 2px 10px; border-radius: 3px;
       font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
       font-weight: 500; cursor: pointer; border: 1px solid var(--edge);
       background: var(--surface); color: var(--dim); display: block; width: auto; margin: 0;
       transition: background .15s, border-color .15s; }
-    #detail-panel .segmented button.active { background: #0a2830;
+    #detail-panel .detail-ratings .rating-btn.active { background: #0a2830;
       border-color: var(--signal-cyan); color: var(--signal-cyan); }
     #detail-panel .detail-release-btn { padding: 2px 10px; border-radius: 3px;
       font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
@@ -657,7 +657,7 @@
         </div>
         <div id="detail-console-area">
           <div class="detail-consoles"></div>
-          <!-- Complexity selectors removed in #534 -->
+          <div class="detail-ratings"></div>
         </div>
       </div>
 
@@ -1235,6 +1235,25 @@
             });
             consolesArea.appendChild(chip);
           }
+
+          // Complexity toggle: purely data-driven off the station's declared
+          // ratings (excluding the implicit runtime-only "Backfill") — never
+          // hardcode which stations get one here. Hidden entirely when the
+          // station only has its base rating.
+          const ratingsArea = detail.querySelector('.detail-ratings');
+          ratingsArea.innerHTML = '';
+          if (myStation.ratings && myStation.ratings.length > 1) {
+            const activeRating = (s.stationRatings && s.stationRatings[myStation.id]) || myStation.ratings[0];
+            for (const r of myStation.ratings) {
+              const btn = document.createElement('button');
+              btn.className = 'rating-btn' + (r === activeRating ? ' active' : '');
+              btn.textContent = r === 'Std' ? 'STANDARD' : r.toUpperCase();
+              btn.addEventListener('click', () => {
+                if (r !== activeRating) send('SetStationRating', { rating_name: r });
+              });
+              ratingsArea.appendChild(btn);
+            }
+          }
         } else {
           detail.className = 'idle';
           detailHeader.innerHTML = '';
@@ -1243,6 +1262,7 @@
           nameSpan.textContent = 'No station assigned';
           detailHeader.appendChild(nameSpan);
           detail.querySelector('.detail-consoles').innerHTML = '';
+          detail.querySelector('.detail-ratings').innerHTML = '';
           lobbyConsole = null;
         }
       }
@@ -1321,6 +1341,7 @@
           rank: def.rank || '',
           holder_name: holder ? holder.name : null,
           holder_token: holder ? holder.token : null,
+          ratings: def.ratings || [],
         };
       });
       state.allFilled = state.stations.length > 0 && state.stations.every(st => st.holder_name);

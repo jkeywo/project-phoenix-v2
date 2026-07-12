@@ -4,7 +4,7 @@ type: source
 tags: [console, gui, web-components, refactor, destroyer, cruiser, battleship]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/642
 status: open
-updated: 2026-07-08
+updated: 2026-07-13
 ---
 
 ## Summary
@@ -29,6 +29,7 @@ Two layers:
 
 - `sendAction` injected as a property by the console HTML (not imported inside components).
 - Each component handles its own portrait/landscape reflow via `@media` in its Shadow DOM `<style>`.
+- Shadow-DOM internals should avoid reusing page-level `id` selectors exposed by the surrounding console HTML, and decorative SVG layers should opt out of pointer events so Playwright and touch input hit the intended interactive path.
 - Console HTML assigns position/size only; component fills that slot and adapts internally.
 - Paths: `gui/{ship}/{station}.html` (subdirectory per ship class).
 - Old flat files deleted in the final slice (#669), not before.

@@ -280,7 +280,9 @@ pub fn add_simulation_plugins(app: &mut App) {
         )
             .chain(),
     )
+    .init_resource::<ProceduralMeshCache>()
     .add_systems(Update, render_spawned_entities)
+    .add_systems(Update, update_mesh_lod.after(render_spawned_entities))
     .add_systems(Update, face_player_lights.after(render_spawned_entities))
     .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
     .insert_resource(GameOverReason(None))
@@ -1893,7 +1895,7 @@ fn spawn_game_start_entities(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut pending_ship_config: Option<ResMut<crate::ship_plugin::PendingShipConfig>>,
     selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
-    sessions: Option<Res<crate::lobby::Sessions>>,
+    mut sessions: Option<ResMut<crate::lobby::Sessions>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
 ) {
@@ -2040,8 +2042,10 @@ fn spawn_game_start_entities(
             } else {
                 crate::ship_plugin::load_ship_config_from_disk()
             };
-            let initial_control_sources = {
+            let (initial_control_sources, initial_active_ratings) = {
                 let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
+                let mut active_ratings: std::collections::HashMap<StationId, String> =
+                    std::collections::HashMap::new();
                 if let Some(ref sess) = sessions {
                     let manned: std::collections::HashSet<_> = sess
                         .0
@@ -2051,18 +2055,36 @@ fn spawn_game_start_entities(
                         .filter_map(|p| p.station.as_ref())
                         .collect();
                     for station in &ship_config.0.stations {
-                        if !manned.contains(&station.id) {
-                            crate::ship::rating::apply_rating(
-                                &ship_config.0,
-                                &station.id,
-                                crate::ship::rating::BACKFILL_RATING,
-                                &mut resolver,
-                            );
-                        }
+                        // Manned stations apply the player's lobby-chosen
+                        // complexity toggle (if any), else the station's base
+                        // (first) rating. Unmanned stations are fully
+                        // AI-backfilled, as before.
+                        let rating_name = if manned.contains(&station.id) {
+                            sess.0
+                                .pending_rating_for(&station.id)
+                                .cloned()
+                                .or_else(|| station.ratings.first().map(|r| r.name.clone()))
+                                .unwrap_or_else(|| "Std".to_string())
+                        } else {
+                            crate::ship::rating::BACKFILL_RATING.to_string()
+                        };
+                        crate::ship::rating::apply_rating(
+                            &ship_config.0,
+                            &station.id,
+                            &rating_name,
+                            &mut resolver,
+                        );
+                        active_ratings.insert(station.id.clone(), rating_name);
                     }
                 }
-                crate::ship_plugin::ShipSystemControlSources(resolver)
+                (
+                    crate::ship_plugin::ShipSystemControlSources(resolver),
+                    crate::ship_plugin::ActiveStationRatings(active_ratings),
+                )
             };
+            if let Some(ref mut sess) = sessions {
+                sess.0.clear_all_pending_ratings();
+            }
             commands
                 .entity(spawned)
                 .insert(Ship)
@@ -2070,7 +2092,7 @@ fn spawn_game_start_entities(
                 .insert(ShipSystemBlackboards::default())
                 .insert(ship_config)
                 .insert(initial_control_sources)
-                .insert(crate::ship_plugin::ActiveStationRatings::default())
+                .insert(initial_active_ratings)
                 .insert(crate::ship_plugin::CoordinationQueue::default())
                 .insert(crate::messages::AdmittedCommands::default())
                 .insert(ShipPhysicsComponent {
@@ -2567,6 +2589,266 @@ fn resolve_sidecar_rig(
     }
 }
 
+/// Outcome of attempting to spawn a GLB visual (flat render or LOD swap).
+enum GlbSpawnOutcome {
+    /// The scene + rig resolved; the `SceneRoot` child entity was spawned.
+    Spawned(Entity),
+    /// The scene asset or rig sidecar is still loading — retry next frame.
+    Pending,
+    /// The GLB failed to load permanently.
+    Failed,
+}
+
+/// Spawn a GLB scene as a child of `entity`, mirroring PATH A of the flat
+/// renderer. Resolves the scene handle (storing a [`PendingSceneHandle`] on the
+/// parent to keep it alive across frames), waits for both the scene asset and
+/// the rig sidecar, then spawns the `SceneRoot` child (hidden +
+/// `NoFrustumCulling` for the local ship) and attaches
+/// [`crate::model_rig::ModelMarkers`] to the parent. Returns the spawned child
+/// so the LOD system can tear it down on a level switch.
+///
+/// Shared by [`render_spawned_entities`] (initial flat render) and
+/// [`update_mesh_lod`] (LOD-level swaps) so both go through identical async
+/// loading + rig-composition logic.
+fn spawn_glb_visual(
+    commands: &mut Commands,
+    asset_server: &AssetServer,
+    scenes: &Assets<bevy::scene::Scene>,
+    entity: Entity,
+    model_path: &str,
+    variant: Option<&str>,
+    is_local_ship: bool,
+    pending: Option<&PendingSceneHandle>,
+) -> GlbSpawnOutcome {
+    let scene: Handle<bevy::scene::Scene> = match pending {
+        Some(p) => p.0.clone(),
+        None => {
+            // `asset_server` resolves paths relative to the `assets/` root, but
+            // the TOML `model` field carries an `assets/` prefix. Strip it so
+            // the GLB resolves instead of looking for `assets/assets/...`.
+            let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
+            let path = format!("{}#Scene0", rel);
+            let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
+            bevy::log::info!(
+                "spawn_glb_visual: requesting scene {path} (load_state={:?})",
+                asset_server.load_state(h.id())
+            );
+            commands
+                .entity(entity)
+                .insert(PendingSceneHandle(h.clone()));
+            h
+        }
+    };
+    // A `LoadState::Failed` GLB never appears in `Assets<Scene>`, so stop
+    // retrying and let the caller settle without a mesh.
+    if matches!(
+        asset_server.load_state(scene.id()),
+        bevy::asset::LoadState::Failed(_)
+    ) {
+        bevy::log::warn!(
+            "spawn_glb_visual: GLB failed to load for entity {entity:?}, path={model_path} — entity will exist without a mesh"
+        );
+        commands.entity(entity).remove::<PendingSceneHandle>();
+        return GlbSpawnOutcome::Failed;
+    }
+    // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
+    if scenes.get(&scene).is_none() {
+        return GlbSpawnOutcome::Pending;
+    }
+    let rig = match resolve_sidecar_rig(model_path, variant) {
+        Some(rig) => rig,
+        // Sidecar fetch still in flight (wasm) — retry next frame.
+        None => return GlbSpawnOutcome::Pending,
+    };
+    commands.entity(entity).remove::<PendingSceneHandle>();
+
+    // Composition: entityTransform ∘ baseRig ∘ model. The base rig is applied
+    // INNER to the per-entity transform by spawning the GLB SceneRoot as a
+    // CHILD carrying `base_bevy_transform()`.
+    let base_tf = rig.base_bevy_transform();
+    let child = if is_local_ship {
+        // Local ship model: hidden by default; shown only in cinematic camera.
+        commands
+            .spawn((
+                bevy::scene::SceneRoot(scene),
+                base_tf,
+                Visibility::Hidden,
+                LocalShipModel,
+                bevy::camera::visibility::NoFrustumCulling,
+            ))
+            .id()
+    } else {
+        commands
+            .spawn((bevy::scene::SceneRoot(scene), base_tf))
+            .id()
+    };
+    commands.entity(entity).add_child(child);
+    // Attach the resolved marker map so downstream systems (weapons, exhaust, …)
+    // can resolve mount points by name.
+    commands
+        .entity(entity)
+        .insert(crate::model_rig::ModelMarkers::from_rig(&rig));
+    GlbSpawnOutcome::Spawned(child)
+}
+
+/// Rounded key for a cached procedural mesh (geometry only — colour/emissive do
+/// not affect the mesh, so they are excluded to maximise sharing).
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ProcMeshKey {
+    /// Shape discriminant: 0 = sphere, 1 = cuboid, 2 = torus.
+    shape: u8,
+    radius_q: i32,
+    size_q: [i32; 3],
+    minor_q: i32,
+}
+
+/// Rounded key for a cached procedural material (appearance only).
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ProcMatKey {
+    colour_q: [i32; 3],
+    emissive_q: i32,
+}
+
+/// Quantise a float to milli-units for use in a hashable cache key.
+fn quantize_key(v: f32) -> i32 {
+    (v * 1000.0).round() as i32
+}
+
+/// Deduplicates procedural meshes and materials by rounded key so that all
+/// identical primitives (e.g. every distant asteroid's far-LOD sphere) share a
+/// single mesh handle and a single material handle. Reusing handles lets the
+/// renderer batch/instance the draws instead of issuing one per entity.
+#[derive(Resource, Default)]
+struct ProceduralMeshCache {
+    meshes: HashMap<ProcMeshKey, Handle<Mesh>>,
+    materials: HashMap<ProcMatKey, Handle<StandardMaterial>>,
+}
+
+/// Build — or fetch from `cache` — the `Mesh3d`/material handles for a
+/// procedural primitive. Mirrors PATH B of the flat renderer but routes through
+/// the cache so identical primitives share handles. Shared by the flat renderer
+/// and the LOD system.
+fn procedural_mesh_material(
+    cache: &mut ProceduralMeshCache,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    shape: crate::entity_config::MeshShape,
+    radius: f32,
+    size: Option<[f32; 3]>,
+    minor_radius: f32,
+    colour: &[f32],
+    emissive_mul: f32,
+) -> (Handle<Mesh>, Handle<StandardMaterial>) {
+    use crate::entity_config::MeshShape;
+
+    let (shape_id, size_for_key) = match shape {
+        MeshShape::Sphere => (0u8, [0.0; 3]),
+        MeshShape::Cuboid => (1u8, size.unwrap_or([2.0, 1.0, 3.0])),
+        MeshShape::Torus => (2u8, [0.0; 3]),
+    };
+    let mesh_key = ProcMeshKey {
+        shape: shape_id,
+        radius_q: quantize_key(radius),
+        size_q: [
+            quantize_key(size_for_key[0]),
+            quantize_key(size_for_key[1]),
+            quantize_key(size_for_key[2]),
+        ],
+        minor_q: quantize_key(minor_radius),
+    };
+    let mesh_handle = cache
+        .meshes
+        .entry(mesh_key)
+        .or_insert_with(|| match shape {
+            MeshShape::Sphere => meshes.add(Sphere {
+                radius: radius.max(0.1),
+            }),
+            MeshShape::Cuboid => {
+                let [x, y, z] = size.unwrap_or([2.0, 1.0, 3.0]);
+                meshes.add(Cuboid::new(x, y, z))
+            }
+            MeshShape::Torus => meshes.add(Torus {
+                major_radius: radius.max(0.5),
+                minor_radius: minor_radius.max(0.1),
+            }),
+        })
+        .clone();
+
+    let rgb = if colour.len() >= 3 {
+        [colour[0], colour[1], colour[2]]
+    } else {
+        [0.6, 0.6, 0.6]
+    };
+    let mat_key = ProcMatKey {
+        colour_q: [
+            quantize_key(rgb[0]),
+            quantize_key(rgb[1]),
+            quantize_key(rgb[2]),
+        ],
+        emissive_q: quantize_key(emissive_mul),
+    };
+    let mat_handle = cache
+        .materials
+        .entry(mat_key)
+        .or_insert_with(|| {
+            let color = Color::srgb(rgb[0], rgb[1], rgb[2]);
+            let emissive = LinearRgba::from(color) * emissive_mul;
+            materials.add(StandardMaterial {
+                base_color: color,
+                emissive,
+                ..default()
+            })
+        })
+        .clone();
+
+    (mesh_handle, mat_handle)
+}
+
+/// Distance-based mesh LOD state, attached to entities whose `[mesh]` config
+/// declares one or more `lod` levels. [`update_mesh_lod`] selects and swaps the
+/// active level each frame based on camera distance; [`render_spawned_entities`]
+/// skips rendering these entities directly.
+#[derive(Component)]
+struct MeshLods {
+    /// Ordered near→far LOD levels copied from the entity's `MeshConfig`.
+    levels: Vec<crate::entity_config::LodLevel>,
+    /// Flat mesh config supplying fallback fields (colour/radius/emissive/size/
+    /// minor_radius) and the shared `variant` for levels that omit them.
+    base: crate::entity_config::MeshConfig,
+    /// Active level index; `None` until the first evaluation establishes it.
+    current: Option<usize>,
+    /// The spawned GLB `SceneRoot` child when the active level is a GLB level.
+    scene_child: Option<Entity>,
+    /// True when the active level's `Mesh3d`/`MeshMaterial3d` live on the parent.
+    procedural_on_parent: bool,
+    /// Whether this entity is the local player's ship (GLB starts hidden).
+    is_local_ship: bool,
+}
+
+/// Remove whichever visual the active LOD level installed, so a new level can be
+/// built cleanly. Despawns the GLB child (via `try_despawn`, safe if it was
+/// already removed — Bevy 0.18 `despawn` panics on an already-despawned entity)
+/// and/or strips the parent's procedural mesh + material.
+///
+/// Note: this intentionally does NOT remove `ModelMarkers`. On a GLB→GLB switch
+/// the new level's `spawn_glb_visual` re-inserts `ModelMarkers`, and because
+/// commands apply in enqueue order, a blanket `remove` here (queued after that
+/// insert) would clobber the new markers. `ModelMarkers` is instead cleared
+/// explicitly in the procedural branch of [`update_mesh_lod`] when switching
+/// away from a GLB level to a shape level.
+fn teardown_lod_visual(commands: &mut Commands, entity: Entity, lods: &mut MeshLods) {
+    if let Some(child) = lods.scene_child.take() {
+        commands.entity(child).try_despawn();
+    }
+    if lods.procedural_on_parent {
+        commands
+            .entity(entity)
+            .remove::<Mesh3d>()
+            .remove::<MeshMaterial3d<StandardMaterial>>();
+        lods.procedural_on_parent = false;
+    }
+}
+
 /// Add visual meshes and materials to spawned entities that have a `[mesh]`
 /// section but no `RenderProcessed` yet. When `cfg.model` is set, loads a GLB
 /// scene instead of creating a procedural shape — but defers insertion until
@@ -2576,6 +2858,9 @@ fn resolve_sidecar_rig(
 /// component (from one or more `[[light]]` TOML entries), attach the matching
 /// `PointLight`/`DirectionalLight` components (single light → inline, multiple
 /// → spawned as child entities).
+///
+/// Entities whose `MeshConfig.lod` is non-empty are NOT rendered here: they
+/// receive a [`MeshLods`] component and are driven by [`update_mesh_lod`].
 fn render_spawned_entities(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -2583,6 +2868,7 @@ fn render_spawned_entities(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut star_surface_materials: ResMut<Assets<crate::entity_star::StarSurfaceMaterial>>,
     mut star_halo_materials: ResMut<Assets<crate::entity_star::StarHaloMaterial>>,
+    mut proc_cache: ResMut<ProceduralMeshCache>,
     scenes: Res<Assets<bevy::scene::Scene>>,
     entities: Query<
         (
@@ -2597,13 +2883,9 @@ fn render_spawned_entities(
         Without<RenderProcessed>,
     >,
 ) {
-    use crate::entity_config::MeshShape;
-
     for (entity, transform, mesh_sec, star_sec, lights_opt, pending, local_ship) in entities.iter()
     {
         let mesh_cfg_for_transform = mesh_sec.map(|mesh_sec| &mesh_sec.0);
-        let mut ec = commands.entity(entity);
-        let mut rendered = false;
 
         if let Some(star_sec) = star_sec {
             let cfg = &star_sec.0;
@@ -2614,12 +2896,12 @@ fn render_spawned_entities(
             ));
             let surface_mat =
                 star_surface_materials.add(crate::entity_star::surface_material_from_config(cfg));
-            ec.insert((Mesh3d(surface_mesh), MeshMaterial3d(surface_mat)));
-
             let halo_radius = cfg.radius * cfg.halo_radius_multiplier.max(1.0);
             let halo_mesh = meshes.add(crate::entity_star::halo_quad_mesh(halo_radius));
             let halo_mat =
                 star_halo_materials.add(crate::entity_star::halo_material_from_config(cfg));
+            let mut ec = commands.entity(entity);
+            ec.insert((Mesh3d(surface_mesh), MeshMaterial3d(surface_mat)));
             ec.with_children(|parent| {
                 parent.spawn((
                     Mesh3d(halo_mesh),
@@ -2633,157 +2915,80 @@ fn render_spawned_entities(
         } else if let Some(mesh_sec) = mesh_sec {
             let cfg = &mesh_sec.0;
 
-            if let Some(model_path) = &cfg.model {
-                // PATH A: GLB model. Load the GLB scene and its sidecar. The local
-                // player's ship starts hidden (shown only in cinematic camera mode);
-                // NPC ships are visible by default.
-                let scene: Handle<bevy::scene::Scene> = match pending {
-                    Some(p) => p.0.clone(),
-                    None => {
-                        // `asset_server` resolves paths relative to the `assets/`
-                        // root, but the TOML `model` field carries an `assets/`
-                        // prefix (matching the `template_path` convention, which is
-                        // read via `std::fs` relative to the cwd). Strip it so the
-                        // GLB resolves correctly instead of looking for
-                        // `assets/assets/models/...` and silently failing to load —
-                        // which leaves the entity unrendered and invisible.
-                        let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-                        let path = format!("{}#Scene0", rel);
-                        let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
-                        // Diagnostic: distinguish prefetch hits (asset already in
-                        // path-cache, will arrive quickly) from cold loads (first
-                        // request for this path, network round-trip pending).
-                        bevy::log::info!(
-                            "render_spawned_entities: requesting scene {path} (load_state={:?})",
-                            asset_server.load_state(h.id())
-                        );
-                        ec.insert(PendingSceneHandle(h.clone()));
-                        h
-                    }
-                };
-                // Hard-fail surface: a `LoadState::Failed` GLB will never appear in
-                // `Assets<Scene>`, so the `scenes.get(...).is_some()` check would
-                // spin forever. Mark such entities `RenderProcessed` so we stop
-                // retrying them every frame, and warn once per entity.
-                if matches!(
-                    asset_server.load_state(scene.id()),
-                    bevy::asset::LoadState::Failed(_)
+            if !cfg.lod.is_empty() {
+                // LOD entity: defer the visual to `update_mesh_lod`, which
+                // selects a level by camera distance each frame. Attach the LOD
+                // state; the flat paths below are skipped for this entity.
+                commands.entity(entity).insert(MeshLods {
+                    levels: cfg.lod.clone(),
+                    base: cfg.clone(),
+                    current: None,
+                    scene_child: None,
+                    procedural_on_parent: false,
+                    is_local_ship: local_ship.is_some(),
+                });
+            } else if let Some(model_path) = &cfg.model {
+                // PATH A: GLB model (shared helper preserves the async logic).
+                match spawn_glb_visual(
+                    &mut commands,
+                    &asset_server,
+                    &scenes,
+                    entity,
+                    model_path,
+                    cfg.variant.as_deref(),
+                    local_ship.is_some(),
+                    pending,
                 ) {
-                    bevy::log::warn!(
-                    "render_spawned_entities: GLB failed to load for entity {entity:?}, path={model_path} — entity will exist without a mesh"
-                );
-                    ec.remove::<PendingSceneHandle>();
-                    ec.insert(RenderProcessed);
-                    continue;
-                }
-                // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
-                // The sidecar resolves to an identity rig when genuinely absent, so
-                // models without a sidecar still render (visually unchanged).
-                if scenes.get(&scene).is_some() {
-                    let rig = match resolve_sidecar_rig(model_path, cfg.variant.as_deref()) {
-                        Some(rig) => rig,
-                        None => {
-                            // Sidecar fetch still in flight (wasm) — retry next frame.
-                            continue;
-                        }
-                    };
-
-                    ec.remove::<PendingSceneHandle>();
-
-                    // Composition: entityTransform ∘ baseRig ∘ model. The base rig
-                    // is applied INNER to the per-entity transform by spawning the
-                    // GLB SceneRoot as a CHILD carrying `base_bevy_transform()`,
-                    // while the per-entity Transform (spawn position + per-entity
-                    // scale/rotation) stays on the parent below. Spawning the scene
-                    // on a child (instead of the entity) also keeps the base rig's
-                    // non-uniform scale from composing badly with the per-entity
-                    // rotation on a single Transform.
-                    let base_tf = rig.base_bevy_transform();
-                    let scene_for_child = scene.clone();
-                    if local_ship.is_some() {
-                        // Local ship model: hidden by default; shown only when the
-                        // cinematic camera is active.
-                        ec.with_children(|parent| {
-                            parent.spawn((
-                                bevy::scene::SceneRoot(scene_for_child),
-                                base_tf,
-                                Visibility::Hidden,
-                                LocalShipModel,
-                                bevy::camera::visibility::NoFrustumCulling,
-                            ));
-                        });
-                    } else {
-                        ec.with_children(|parent| {
-                            parent.spawn((bevy::scene::SceneRoot(scene_for_child), base_tf));
-                        });
+                    GlbSpawnOutcome::Spawned(_) => {}
+                    // GLB / rig not loaded yet — try again next frame.
+                    GlbSpawnOutcome::Pending => continue,
+                    GlbSpawnOutcome::Failed => {
+                        // Stop retrying an entity whose GLB will never load.
+                        commands.entity(entity).insert(RenderProcessed);
+                        continue;
                     }
-
-                    // Attach the resolved marker map so downstream systems (weapons,
-                    // exhaust, …) can resolve mount points by name.
-                    ec.insert(crate::model_rig::ModelMarkers::from_rig(&rig));
-
-                    rendered = true;
                 }
             } else {
-                // PATH B: Procedural primitive.
-                let color = if cfg.colour.len() >= 3 {
-                    Color::srgb(cfg.colour[0], cfg.colour[1], cfg.colour[2])
-                } else {
-                    Color::srgb(0.6, 0.6, 0.6)
-                };
-
+                // PATH B: Procedural primitive (deduped via the shared cache).
                 let emissive_mul = cfg.emissive.unwrap_or(0.4);
-                let emissive = LinearRgba::from(color) * emissive_mul;
-
-                let mesh = match cfg.shape {
-                    MeshShape::Sphere => meshes.add(Sphere {
-                        radius: cfg.radius.max(0.1),
-                    }),
-                    MeshShape::Cuboid => {
-                        let [x, y, z] = cfg.size.unwrap_or([2.0, 1.0, 3.0]);
-                        meshes.add(Cuboid::new(x, y, z))
-                    }
-                    MeshShape::Torus => meshes.add(Torus {
-                        major_radius: cfg.radius.max(0.5),
-                        minor_radius: cfg.minor_radius.max(0.1),
-                    }),
-                };
-
-                let mat = materials.add(StandardMaterial {
-                    base_color: color,
-                    emissive,
-                    ..default()
-                });
-
-                ec.insert((Mesh3d(mesh), MeshMaterial3d(mat)));
-                rendered = true;
-            }
-
-            if !rendered {
-                // GLB not loaded yet — try again next frame.
-                continue;
-            }
-
-            // Apply scale/rotation to both paths — preserves spawn position.
-            if let Some(cfg) = mesh_cfg_for_transform
-                .filter(|cfg| cfg.scale != 1.0 || cfg.rotation != [0.0, 0.0, 0.0])
-            {
-                ec.insert(Transform {
-                    translation: transform.translation,
-                    rotation: bevy::math::Quat::from_euler(
-                        bevy::math::EulerRot::XYZ,
-                        cfg.rotation[0],
-                        cfg.rotation[1],
-                        cfg.rotation[2],
-                    ),
-                    scale: Vec3::splat(cfg.scale),
-                });
+                let (mesh, mat) = procedural_mesh_material(
+                    &mut proc_cache,
+                    &mut meshes,
+                    &mut materials,
+                    cfg.shape,
+                    cfg.radius,
+                    cfg.size,
+                    cfg.minor_radius,
+                    &cfg.colour,
+                    emissive_mul,
+                );
+                commands
+                    .entity(entity)
+                    .insert((Mesh3d(mesh), MeshMaterial3d(mat)));
             }
         } else {
             continue;
         }
 
+        // Apply scale/rotation — preserves spawn position. `mesh_cfg_for_transform`
+        // is `None` for stars, so this is a no-op on that path.
+        if let Some(cfg) =
+            mesh_cfg_for_transform.filter(|cfg| cfg.scale != 1.0 || cfg.rotation != [0.0, 0.0, 0.0])
+        {
+            commands.entity(entity).insert(Transform {
+                translation: transform.translation,
+                rotation: bevy::math::Quat::from_euler(
+                    bevy::math::EulerRot::XYZ,
+                    cfg.rotation[0],
+                    cfg.rotation[1],
+                    cfg.rotation[2],
+                ),
+                scale: Vec3::splat(cfg.scale),
+            });
+        }
+
         // Mark processed so we never visit this entity again.
+        let mut ec = commands.entity(entity);
         ec.insert(RenderProcessed);
 
         // Attach lights, if any. A light that needs to face the player must
@@ -2803,6 +3008,127 @@ fn render_spawned_entities(
                     });
                 }
             }
+        }
+    }
+}
+
+/// Distance-based LOD driver. For each entity carrying a [`MeshLods`] component,
+/// computes the 3-D distance from the [`GameCamera`](crate::server::renderer::GameCamera)
+/// to the entity, selects the appropriate level via
+/// [`crate::entity_config::select_lod`] (with hysteresis), and — when the chosen
+/// level differs from the current one — tears down the old visual and builds the
+/// new one through the same helpers the flat renderer uses.
+///
+/// GLB levels that are still async-loading keep the current visual and retry
+/// next frame, so a switch never leaves the entity permanently invisible.
+/// Runs after [`render_spawned_entities`] so newly-attached `MeshLods` are
+/// established the same frame they are spawned.
+fn update_mesh_lod(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut proc_cache: ResMut<ProceduralMeshCache>,
+    scenes: Res<Assets<bevy::scene::Scene>>,
+    camera: Query<&GlobalTransform, With<crate::server::renderer::GameCamera>>,
+    mut lod_entities: Query<(
+        Entity,
+        &Transform,
+        &mut MeshLods,
+        Option<&PendingSceneHandle>,
+    )>,
+) {
+    use crate::entity_config::select_lod;
+
+    // No camera → nothing to measure distance against; try again next frame.
+    let Some(cam_tf) = camera.iter().next() else {
+        return;
+    };
+    let cam_pos = cam_tf.translation();
+
+    for (entity, transform, mut lods, pending) in lod_entities.iter_mut() {
+        // Use the entity's LOCAL transform, not its `GlobalTransform`: on the
+        // frame an entity is first rendered its `MeshLods` is inserted this same
+        // Update, but global transforms aren't propagated until PostUpdate, so a
+        // `GlobalTransform` read here would still be the identity default and pick
+        // the initial level from distance-to-origin (a one-frame wrong-LOD flash).
+        // Asteroids are top-level/unparented, so local == world. If a parented
+        // entity ever needs LOD, this must switch to a propagated world position.
+        let distance = transform.translation.distance(cam_pos);
+        let target = select_lod(&lods.levels, distance, lods.current);
+        if lods.current == Some(target) {
+            continue;
+        }
+
+        // Copy the target level out so the `lods` borrow is free for teardown.
+        let Some(level) = lods.levels.get(target).cloned() else {
+            continue;
+        };
+
+        if let Some(model_path) = level.model.as_deref() {
+            let variant = level.variant.clone().or_else(|| lods.base.variant.clone());
+            match spawn_glb_visual(
+                &mut commands,
+                &asset_server,
+                &scenes,
+                entity,
+                model_path,
+                variant.as_deref(),
+                lods.is_local_ship,
+                pending,
+            ) {
+                // Keep the current visual until the new GLB resolves — avoids a
+                // visible gap. `current` is left unchanged so we retry next frame.
+                GlbSpawnOutcome::Pending => continue,
+                GlbSpawnOutcome::Failed => {
+                    // Give up on this level; drop the old visual and settle so we
+                    // stop retrying it every frame.
+                    teardown_lod_visual(&mut commands, entity, &mut lods);
+                    lods.current = Some(target);
+                }
+                GlbSpawnOutcome::Spawned(child) => {
+                    teardown_lod_visual(&mut commands, entity, &mut lods);
+                    lods.scene_child = Some(child);
+                    lods.current = Some(target);
+                }
+            }
+        } else if let Some(shape) = level.shape {
+            // Procedural level — fields fall back to the flat `base` config.
+            let radius = level.radius.unwrap_or(lods.base.radius);
+            let minor = level.minor_radius.unwrap_or(lods.base.minor_radius);
+            let size = level.size.or(lods.base.size);
+            let emissive_mul = level.emissive.or(lods.base.emissive).unwrap_or(0.4);
+            let colour = level
+                .colour
+                .clone()
+                .unwrap_or_else(|| lods.base.colour.clone());
+            let (mesh, mat) = procedural_mesh_material(
+                &mut proc_cache,
+                &mut meshes,
+                &mut materials,
+                shape,
+                radius,
+                size,
+                minor,
+                &colour,
+                emissive_mul,
+            );
+            teardown_lod_visual(&mut commands, entity, &mut lods);
+            // Switching to a shape level: drop any `ModelMarkers` left by a prior
+            // GLB level (no-op if absent). Enqueued after teardown and before the
+            // mesh insert, so it never races a freshly-inserted marker map.
+            commands
+                .entity(entity)
+                .remove::<crate::model_rig::ModelMarkers>()
+                .insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+            lods.procedural_on_parent = true;
+            lods.current = Some(target);
+        } else {
+            // Neither model nor shape — invalid level. Settle so we don't spin.
+            bevy::log::warn!(
+                "update_mesh_lod: LOD level {target} on {entity:?} has neither model nor shape — skipping"
+            );
+            lods.current = Some(target);
         }
     }
 }

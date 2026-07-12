@@ -339,6 +339,10 @@ console = "gui/cruiser/captain.html"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["red-alert"]
+
 [[station]]
 id = "helm"
 name = "Helm"
@@ -363,6 +367,10 @@ console = "gui/cruiser/tactical.html"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["phaser-fore", "phaser-aft"]
+
 [[station]]
 id = "science"
 name = "Science"
@@ -386,6 +394,10 @@ console = "gui/cruiser/engineering.html"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["repair"]
 
 [[station]]
 id = "comms"

@@ -1442,29 +1442,38 @@ describe('auto fields', () => {
     expect(parse(buildHelmConsoleState(EMPTY)).helm_auto).toBe(false);
   });
 
-  // tactical_auto
-  it('tactical_auto is true when stationRatings.tactical === Backfill', () => {
-    expect(parse(buildWeaponsConsoleState({ stationRatings: { tactical: 'Backfill' } })).tactical_auto).toBe(true);
+  // tactical_auto — per-system: every phaser system id (from stationSystems.tactical)
+  // must be controlled by 'Ai' in controlSources.
+  it('tactical_auto is true when every phaser system is Ai-controlled', () => {
+    const state = {
+      stationSystems: { tactical: ['phaser-fore', 'phaser-aft'] },
+      controlSources: { 'phaser-fore': 'Ai', 'phaser-aft': 'Ai' },
+    };
+    expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(true);
   });
 
-  it('tactical_auto is false when stationRatings.tactical is a different rating', () => {
-    expect(parse(buildWeaponsConsoleState({ stationRatings: { tactical: 'Full' } })).tactical_auto).toBe(false);
+  it('tactical_auto is false when only some phaser systems are Ai-controlled', () => {
+    const state = {
+      stationSystems: { tactical: ['phaser-fore', 'phaser-aft'] },
+      controlSources: { 'phaser-fore': 'Ai', 'phaser-aft': 'Human' },
+    };
+    expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(false);
   });
 
-  it('tactical_auto is false when stationRatings is absent', () => {
+  it('tactical_auto is false when stationSystems/controlSources are absent', () => {
     expect(parse(buildWeaponsConsoleState(EMPTY)).tactical_auto).toBe(false);
   });
 
-  // repair_auto
-  it('repair_auto is true when stationRatings.repair === Backfill', () => {
-    expect(parse(buildRepairConsoleState({ stationRatings: { repair: 'Backfill' } })).repair_auto).toBe(true);
+  // repair_auto — per-system: the literal 'repair' system id must be Ai-controlled.
+  it('repair_auto is true when controlSources.repair === Ai', () => {
+    expect(parse(buildRepairConsoleState({ controlSources: { repair: 'Ai' } })).repair_auto).toBe(true);
   });
 
-  it('repair_auto is false when stationRatings.repair is a different rating', () => {
-    expect(parse(buildRepairConsoleState({ stationRatings: { repair: 'Full' } })).repair_auto).toBe(false);
+  it('repair_auto is false when controlSources.repair is a different value', () => {
+    expect(parse(buildRepairConsoleState({ controlSources: { repair: 'Human' } })).repair_auto).toBe(false);
   });
 
-  it('repair_auto is false when stationRatings is absent', () => {
+  it('repair_auto is false when controlSources is absent', () => {
     expect(parse(buildRepairConsoleState(EMPTY)).repair_auto).toBe(false);
   });
 
@@ -1848,13 +1857,19 @@ describe('buildDestroyerTacticalConsoleState', () => {
     expect(Array.isArray(s.comms.contacts)).toBe(true);
   });
 
-  it('tactical_auto is true when stationRatings.tactical === Backfill', () => {
-    const s = parse(buildDestroyerTacticalConsoleState({ stationRatings: { tactical: 'Backfill' } }));
+  it('tactical_auto is true when the phaser system is Ai-controlled', () => {
+    const s = parse(buildDestroyerTacticalConsoleState({
+      stationSystems: { tactical: ['phaser-omni'] },
+      controlSources: { 'phaser-omni': 'Ai' },
+    }));
     expect(s.tactical_auto).toBe(true);
   });
 
-  it('tactical_auto is false when stationRatings.tactical is a different rating', () => {
-    const s = parse(buildDestroyerTacticalConsoleState({ stationRatings: { tactical: 'Full' } }));
+  it('tactical_auto is false when the phaser system is not Ai-controlled', () => {
+    const s = parse(buildDestroyerTacticalConsoleState({
+      stationSystems: { tactical: ['phaser-omni'] },
+      controlSources: { 'phaser-omni': 'Human' },
+    }));
     expect(s.tactical_auto).toBe(false);
   });
 

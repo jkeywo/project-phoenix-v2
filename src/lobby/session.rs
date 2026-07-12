@@ -553,7 +553,10 @@ mod tests {
         assert!(sm.pending_rating_for(&captain).is_none());
 
         sm.set_pending_rating(&captain, "Simplified".into());
-        assert_eq!(sm.pending_rating_for(&captain), Some(&"Simplified".to_string()));
+        assert_eq!(
+            sm.pending_rating_for(&captain),
+            Some(&"Simplified".to_string())
+        );
         assert_eq!(sm.pending_ratings().len(), 1);
 
         sm.clear_pending_rating(&captain);

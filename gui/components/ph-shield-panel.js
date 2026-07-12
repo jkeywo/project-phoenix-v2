@@ -43,12 +43,12 @@ export class PhShieldPanel extends HTMLElement {
   <div id="hull-section">
     <div class="hull-row">
       <span class="lbl">INTEGRITY</span>
-      <div class="bar-wrap"><div class="fill" id="hull-fill" style="width:100%"></div></div>
-      <span class="val" id="hull-val">100%</span>
+      <div class="bar-wrap"><div class="fill" id="panel-hull-fill" style="width:100%"></div></div>
+      <span class="val" id="panel-hull-val">100%</span>
     </div>
   </div>
   <div class="facings" id="facings-container"></div>
-  <div class="status" id="focus-display">FOCUS: OMNI</div>
+  <div class="status" id="panel-focus-display">FOCUS: OMNI</div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
   }
@@ -65,10 +65,10 @@ export class PhShieldPanel extends HTMLElement {
     const root = this.shadowRoot;
 
     const hullPct = s.hull_integrity_pct != null ? s.hull_integrity_pct : 100;
-    const hullFill = root.getElementById('hull-fill');
+    const hullFill = root.getElementById('panel-hull-fill');
     hullFill.style.width = hullPct + '%';
     hullFill.className = 'fill' + (hullPct < 30 ? ' crit' : hullPct < 60 ? ' warn' : '');
-    root.getElementById('hull-val').textContent = Math.round(hullPct) + '%';
+    root.getElementById('panel-hull-val').textContent = Math.round(hullPct) + '%';
 
     const gridStatus = s.grid_status || 'GRID NOMINAL';
     const gs = root.getElementById('grid-status');
@@ -76,7 +76,7 @@ export class PhShieldPanel extends HTMLElement {
     gs.className = gridStatus === 'GRID OFFLINE' ? 'grid-offline' : 'grid-online';
 
     const focusName = s.focused_facing || 'OMNI';
-    root.getElementById('focus-display').textContent = 'FOCUS: ' + focusName;
+    root.getElementById('panel-focus-display').textContent = 'FOCUS: ' + focusName;
 
     const facings = s.facings || [];
     const container = root.getElementById('facings-container');

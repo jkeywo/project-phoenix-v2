@@ -158,9 +158,11 @@ describe('unload_tube', () => {
 });
 
 describe('set_target', () => {
-  it('calls send SetTarget with uuid', () => {
+  it('calls mutate with weaponsTarget and send SetTarget with uuid', () => {
     const send = mkSend();
-    ACTION_MAP.set_target({ action: 'set_target', uuid: 'abc' }, send);
+    const mutate = mkMutate();
+    ACTION_MAP.set_target({ action: 'set_target', uuid: 'abc' }, send, mutate);
+    expect(mutate).toHaveBeenCalledWith({ weaponsTarget: 'abc' });
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'tactical',
       payload: { type: 'SetTarget', data: { uuid: 'abc' } },
@@ -169,8 +171,10 @@ describe('set_target', () => {
 
   it('does nothing when uuid is absent', () => {
     const send = mkSend();
-    ACTION_MAP.set_target({ action: 'set_target' }, send);
+    const mutate = mkMutate();
+    ACTION_MAP.set_target({ action: 'set_target' }, send, mutate);
     expect(send).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
   });
 });
 

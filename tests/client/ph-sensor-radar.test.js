@@ -97,7 +97,7 @@ describe('PhSensorRadar', () => {
     el.state = {
       blips: [{ uuid: 'abc', bearing_deg: 45, range: 300 }],
       scan_range: 2000,
-      science_target_uuid: 'abc',
+      target_uuid: 'abc',
     };
     expect(innerRadar.state.selected_target_uuid).toBe('abc');
     expect(innerRadar.state.target_uuid).toBe('abc');

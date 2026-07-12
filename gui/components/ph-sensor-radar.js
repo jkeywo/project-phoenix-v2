@@ -62,8 +62,8 @@ export class PhSensorRadar extends HTMLElement {
         range: val?.scan_range || 0,
         ship_heading: val?.ship_heading || 0,
         config: val?.config || {},
-        selected_target_uuid: val?.science_target_uuid || null,
-        target_uuid: val?.science_target_uuid || null,
+        selected_target_uuid: val?.target_uuid || null,
+        target_uuid: val?.target_uuid || null,
       };
     }
 

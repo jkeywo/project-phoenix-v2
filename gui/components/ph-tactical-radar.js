@@ -63,6 +63,7 @@ export class PhTacticalRadar extends HTMLElement {
         range: s.range,
         ship_heading: s.ship_heading,
         config: s.config || {},
+        target_uuid: s.target_uuid || null,
       };
     }
     this.#renderOverlays(s);

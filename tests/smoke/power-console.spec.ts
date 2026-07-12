@@ -1,55 +1,32 @@
-// Issue #425 — Smoke test: HTML power console tracer bullet.
-//
-// The power console page (gui/power-console.html) is a static HTML file
-// copied into dist/gui/ by Trunk. It exercises the ADR-0001 bridge contract:
-//   - window.__updateConsole(name, stateJson) renders PowerConsoleState into DOM.
-//   - The +/- buttons call window.__sendAction(...) with the action envelope.
-
 import { test, expect } from './fixtures';
 
-const CONSOLE_URL = '/gui/power-console.html';
+const CONSOLE_URL = '/gui/battleship/power.html';
 
 test('power console: __updateConsole renders power entries and battery', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
-  // The `id` on each PowerGroupEntry is a lowercase PowerGroupId (matches
-  // the Rust `PowerGroupId(String)` newtype).
   const state = {
     consoles: [
-      { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },
+      { id: 'helm', label: 'HELM', level: 2, max_level: 4 },
       { id: 'weapons', label: 'WEAPONS', level: 1, max_level: 4 },
       { id: 'sensors', label: 'SENSORS', level: 3, max_level: 4 },
     ],
-    total:          6,
-    total_max:      8,
+    total: 6,
+    total_max: 8,
     battery_charge: 75.0,
-    battery_max:    100.0,
-    locked:         false,
+    battery_max: 100.0,
+    locked: false,
   };
 
   await page.evaluate((s) => (window as any).__updateConsole('power', JSON.stringify(s)), state);
 
-  // Three entries rendered in #power-data.
   await expect(page.locator('#power-data .power-entry')).toHaveCount(3);
-
-  // Each entry carries correct data attrs.
-  const helm = page.locator('.power-entry[data-id="helm"]');
-  await expect(helm).toHaveAttribute('data-level', '2');
-  await expect(helm).toHaveAttribute('data-max-level', '4');
-
-  const weapons = page.locator('.power-entry[data-id="weapons"]');
-  await expect(weapons).toHaveAttribute('data-level', '1');
-
-  const sensors = page.locator('.power-entry[data-id="sensors"]');
-  await expect(sensors).toHaveAttribute('data-level', '3');
-
-  // #power-data carries pool totals and lock flag.
-  const pd = page.locator('#power-data');
-  await expect(pd).toHaveAttribute('data-total', '6');
-  await expect(pd).toHaveAttribute('data-total-max', '8');
-  await expect(pd).toHaveAttribute('data-locked', 'false');
-
-  // Battery percentage displayed.
+  await expect(page.locator('.power-entry[data-id="helm"]')).toHaveAttribute('data-level', '2');
+  await expect(page.locator('.power-entry[data-id="weapons"]')).toHaveAttribute('data-level', '1');
+  await expect(page.locator('.power-entry[data-id="sensors"]')).toHaveAttribute('data-level', '3');
+  await expect(page.locator('#power-data')).toHaveAttribute('data-total', '6');
+  await expect(page.locator('#power-data')).toHaveAttribute('data-total-max', '8');
+  await expect(page.locator('#power-data')).toHaveAttribute('data-locked', 'false');
   await expect(page.locator('#bat-val')).toHaveText('75%');
 });
 
@@ -58,15 +35,15 @@ test('power console: __updateConsole reflects locked state', async ({ page }) =>
 
   const state = {
     consoles: [
-      { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },
+      { id: 'helm', label: 'HELM', level: 2, max_level: 4 },
       { id: 'weapons', label: 'WEAPONS', level: 2, max_level: 4 },
       { id: 'sensors', label: 'SENSORS', level: 2, max_level: 4 },
     ],
-    total:          6,
-    total_max:      8,
+    total: 6,
+    total_max: 8,
     battery_charge: 40.0,
-    battery_max:    100.0,
-    locked:         true,
+    battery_max: 100.0,
+    locked: true,
   };
 
   await page.evaluate((s) => (window as any).__updateConsole('power', JSON.stringify(s)), state);
@@ -78,7 +55,6 @@ test('power console: __updateConsole reflects locked state', async ({ page }) =>
 test('power console: +/- buttons call __sendAction with correct envelopes', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
-  // Stub __sendAction to capture calls.
   await page.evaluate(() => {
     (window as any).__sent = [];
     (window as any).__sendAction = (json: string) => (window as any).__sent.push(json);
@@ -86,28 +62,24 @@ test('power console: +/- buttons call __sendAction with correct envelopes', asyn
 
   const state = {
     consoles: [
-      { id: 'helm',    label: 'HELM',    level: 2, max_level: 4 },
+      { id: 'helm', label: 'HELM', level: 2, max_level: 4 },
       { id: 'weapons', label: 'WEAPONS', level: 2, max_level: 4 },
       { id: 'sensors', label: 'SENSORS', level: 2, max_level: 4 },
     ],
-    total:          6,
-    total_max:      8,
+    total: 6,
+    total_max: 8,
     battery_charge: 80.0,
-    battery_max:    100.0,
-    locked:         false,
+    battery_max: 100.0,
+    locked: false,
   };
 
   await page.evaluate((s) => (window as any).__updateConsole('power', JSON.stringify(s)), state);
 
-  // Click the increment button for helm.
-  await page.locator('#inc-helm').click();
+  await page.locator('ph-power-controls [data-group-id="helm"] .mini-btn[data-action="incr"]').click();
+  await page.locator('ph-power-controls [data-group-id="sensors"] .mini-btn[data-action="decr"]').click();
 
-  // Click the decrement button for sensors.
-  await page.locator('#dec-sensors').click();
-
-  const sent: string[] = await page.evaluate(() => (window as any).__sent);
+  const sent = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(2);
-
   expect(JSON.parse(sent[0])).toEqual({
     action: 'set_power',
     console: 'power',

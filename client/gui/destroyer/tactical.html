@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="../console.css">
   <style>
     body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
-    .frame { height: 100%; }
+    .frame { height: 100%; position: relative; }
     .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; position: relative; }
     .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
     .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
@@ -23,7 +23,9 @@
     .overlay-toggle.active { background: rgba(30,50,80,0.9); border-color: var(--cyan); color: var(--cyan); }
     .overlay-toggle .unread-badge { display: none; margin-left: 6px; background: var(--fire-bright); color: #000; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 2px; line-height: 1.4; }
     .overlay-toggle .unread-badge.show { display: inline-block; }
-    .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(5,8,24,0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 60px 16px 60px; }
+    .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(14,17,23,0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; }
+    .overlay-back:hover { background: rgba(30,35,50,0.9); border-color: var(--ink-dim); }
+    .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(5,8,24,0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
     .overlay-panel.open { display: flex; }
     .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
     .overlay-panel ph-navigation-map, .overlay-panel ph-comms-contact-list, .overlay-panel ph-comms-current-message { flex: 1; min-height: 0; }
@@ -31,7 +33,7 @@
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
     .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body .col { padding: 8px; } .overlay-toggle { font-size: 11px; padding: 6px 12px; } .overlay-panel { padding: 50px 8px 50px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body .col { padding: 8px; } .overlay-toggle { font-size: 11px; padding: 6px 12px; } .overlay-panel { padding: 8px; } }
   </style>
 </head>
 <body>
@@ -55,15 +57,6 @@
           <ph-torpedo-controls id="torpedo-controls"></ph-torpedo-controls>
         </div>
       </div>
-      <div class="overlay-panel" id="nav-overlay">
-        <h2>Navigation</h2>
-        <ph-navigation-map id="navigation-map"></ph-navigation-map>
-      </div>
-      <div class="overlay-panel" id="comms-overlay">
-        <h2>Comms</h2>
-        <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
-        <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
-      </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
         <span id="footer-status">TACTICAL STATION</span>
@@ -73,6 +66,17 @@
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
+    </div>
+    <div class="overlay-panel" id="nav-overlay">
+      <button class="overlay-back" id="nav-back">&#8592; Back</button>
+      <h2>Navigation</h2>
+      <ph-navigation-map id="navigation-map"></ph-navigation-map>
+    </div>
+    <div class="overlay-panel" id="comms-overlay">
+      <button class="overlay-back" id="comms-back">&#8592; Back</button>
+      <h2>Comms</h2>
+      <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
+      <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
     </div>
   </div>
   <script type="module">
@@ -87,11 +91,7 @@
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
 
-    function toggleOverlay(id, btnId) {
-      var overlay = document.getElementById(id);
-      var btn = document.getElementById(btnId);
-      var isOpen = btn.dataset.active === 'true';
-      // Close all overlays first
+    function closeAllOverlays() {
       ['nav-overlay', 'comms-overlay'].forEach(function(oid) {
         var el = document.getElementById(oid);
         if (el) el.classList.remove('open');
@@ -100,6 +100,13 @@
         b.dataset.active = 'false';
         b.classList.remove('active');
       });
+    }
+
+    function toggleOverlay(id, btnId) {
+      var overlay = document.getElementById(id);
+      var btn = document.getElementById(btnId);
+      var isOpen = btn.dataset.active === 'true';
+      closeAllOverlays();
       if (!isOpen) {
         overlay.classList.add('open');
         btn.dataset.active = 'true';
@@ -148,6 +155,8 @@
 
     document.getElementById('nav-toggle').addEventListener('click', function() { toggleOverlay('nav-overlay', 'nav-toggle'); });
     document.getElementById('comms-toggle').addEventListener('click', function() { toggleOverlay('comms-overlay', 'comms-toggle'); });
+    document.getElementById('nav-back').addEventListener('click', closeAllOverlays);
+    document.getElementById('comms-back').addEventListener('click', closeAllOverlays);
   </script>
 </body>
 </html>

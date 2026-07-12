@@ -82,7 +82,7 @@ describe('PhPhasersControls', () => {
       target_valid: true,
       mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
@@ -93,7 +93,7 @@ describe('PhPhasersControls', () => {
       target_valid: false,
       mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
@@ -104,7 +104,7 @@ describe('PhPhasersControls', () => {
       target_valid: true,
       mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
@@ -115,7 +115,7 @@ describe('PhPhasersControls', () => {
       target_valid: true,
       mode: 'Auto',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
@@ -126,7 +126,7 @@ describe('PhPhasersControls', () => {
       target_valid: true,
       mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(false);
   });
 
@@ -158,7 +158,7 @@ describe('PhPhasersControls', () => {
       target_valid: true,
       mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     btn.click();
     expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith('fire_phaser', { bank: 'fore' });

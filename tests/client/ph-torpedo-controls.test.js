@@ -26,15 +26,15 @@ function slots(host, tubeId) {
 }
 
 function minusBtn(host, tubeId) {
-  return tubeRow(host, tubeId).querySelectorAll('.volley-btn')[0];
+  return tubeRow(host, tubeId).querySelectorAll('.mini-btn')[0];
 }
 
 function plusBtn(host, tubeId) {
-  return tubeRow(host, tubeId).querySelectorAll('.volley-btn')[1];
+  return tubeRow(host, tubeId).querySelectorAll('.mini-btn')[1];
 }
 
 function fireBtn(host, tubeId) {
-  return tubeRow(host, tubeId).querySelector('.fire-btn');
+  return tubeRow(host, tubeId).querySelector('.btn');
 }
 
 describe('PhTorpedoControls', () => {

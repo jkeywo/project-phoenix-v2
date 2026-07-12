@@ -3261,12 +3261,8 @@ fn operate_tactical_ai(
         // guard, tick_phaser_auto_fire and the torpedo path both skip on the
         // dead entity UUID and never acquire a fresh target.
         if let Some(ref current) = weapons_target.0 {
-            let alive = asteroid_q
-                .iter()
-                .any(|(u, _)| u.0 == *current)
-                || other_ships_q
-                    .iter()
-                    .any(|(u, _, _)| u.0 == *current);
+            let alive = asteroid_q.iter().any(|(u, _)| u.0 == *current)
+                || other_ships_q.iter().any(|(u, _, _)| u.0 == *current);
             if !alive {
                 weapons_target.0 = None;
             }

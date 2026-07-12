@@ -68,7 +68,7 @@ describe('PhRepairTeams', () => {
     };
     const drow = el.shadowRoot.querySelector('.dispatch-row');
     expect(drow.style.display).not.toBe('none');
-    const btns = drow.querySelectorAll('.dispatch-btn');
+    const btns = drow.querySelectorAll('.btn');
     expect(btns.length).toBe(2);
     expect(btns[0].dataset.target).toBe('helm');
     expect(btns[1].dataset.target).toBe('tactical');
@@ -135,7 +135,7 @@ describe('PhRepairTeams', () => {
       teams: [{ id: 0, label: 'T1', status: 'idle' }],
       targets: [],
     };
-    const btns = el.shadowRoot.querySelectorAll('.dispatch-btn');
+    const btns = el.shadowRoot.querySelectorAll('.btn');
     expect(btns.length).toBe(0);
   });
 
@@ -146,7 +146,7 @@ describe('PhRepairTeams', () => {
       targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
       auto: true,
     };
-    const btn = el.shadowRoot.querySelector('.dispatch-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
@@ -169,7 +169,7 @@ describe('PhRepairTeams', () => {
         { id: 'core', label: 'Core', damage_pct: 0.2 },
       ],
     };
-    const btn = el.shadowRoot.querySelector('.dispatch-btn[data-target="core"]');
+    const btn = el.shadowRoot.querySelector('.btn[data-target="core"]');
     btn.click();
     expect(sendAction).toHaveBeenCalledWith('dispatch_repair_team', { team_idx: 0, target: 'core' });
   });

@@ -60,7 +60,7 @@ describe('PhBlastersControls', () => {
       banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0, has_charge: false }],
     };
     expect(queryText(el, '.lbl')).toBe('Port');
-    const btn = el.shadowRoot.querySelector('.charge-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.textContent.trim()).toBe('FIRE');
     expect(btn.disabled).toBe(false);
   });
@@ -70,7 +70,7 @@ describe('PhBlastersControls', () => {
     el.state = {
       banks: [{ id: 'heavy', label: 'Heavy', on_cooldown: false, charge_progress: 0, has_charge: true }],
     };
-    const btn = el.shadowRoot.querySelector('.charge-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.textContent.trim()).toBe('CHARGE');
   });
 
@@ -79,9 +79,9 @@ describe('PhBlastersControls', () => {
     el.state = {
       banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0.6 }],
     };
-    const btn = el.shadowRoot.querySelector('.charge-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.textContent.trim()).toBe('FIRING...');
-    expect(btn.classList.contains('charging')).toBe(true);
+    expect(btn.classList.contains('tactical')).toBe(true);
   });
 
   it('shows COOLDOWN while on cooldown and disables button', () => {
@@ -89,7 +89,7 @@ describe('PhBlastersControls', () => {
     el.state = {
       banks: [{ id: 'port', label: 'Port', on_cooldown: true, charge_progress: 0 }],
     };
-    const btn = el.shadowRoot.querySelector('.charge-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.textContent.trim()).toBe('COOLDOWN');
     expect(btn.disabled).toBe(true);
   });
@@ -136,7 +136,7 @@ describe('PhBlastersControls', () => {
     el.state = {
       banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0 }],
     };
-    const btn = el.shadowRoot.querySelector('.charge-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     btn.dispatchEvent(new MouseEvent('mousedown'));
     expect(sendAction).toHaveBeenCalledWith('charge_blaster_start', { bank: 'port' });
     btn.dispatchEvent(new MouseEvent('mouseup'));
@@ -149,7 +149,7 @@ describe('PhBlastersControls', () => {
     el.state = {
       banks: [{ id: 'port', label: 'Port', on_cooldown: true, charge_progress: 0 }],
     };
-    const btn = el.shadowRoot.querySelector('.charge-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     btn.dispatchEvent(new MouseEvent('mousedown'));
     expect(sendAction).not.toHaveBeenCalled();
   });

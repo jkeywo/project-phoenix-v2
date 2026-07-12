@@ -93,7 +93,7 @@ describe('PhPowerControls', () => {
         { id: 'helm', label: 'HELM', level: 4, min_level: 1, max_level: 4 },
       ],
     };
-    const incr = el.shadowRoot.querySelector('.step-btn[data-action="incr"]');
+    const incr = el.shadowRoot.querySelector('.mini-btn[data-action="incr"]');
     expect(incr.disabled).toBe(true);
   });
 
@@ -104,7 +104,7 @@ describe('PhPowerControls', () => {
         { id: 'helm', label: 'HELM', level: 1, min_level: 1, max_level: 4 },
       ],
     };
-    const decr = el.shadowRoot.querySelector('.step-btn[data-action="decr"]');
+    const decr = el.shadowRoot.querySelector('.mini-btn[data-action="decr"]');
     expect(decr.disabled).toBe(true);
   });
 
@@ -115,7 +115,7 @@ describe('PhPowerControls', () => {
         { id: 'helm', label: 'HELM', level: 2, min_level: 1, max_level: 4 },
       ],
     };
-    const incr = el.shadowRoot.querySelector('.step-btn[data-action="incr"]');
+    const incr = el.shadowRoot.querySelector('.mini-btn[data-action="incr"]');
     expect(incr.disabled).toBe(false);
   });
 

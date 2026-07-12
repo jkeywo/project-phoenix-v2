@@ -50,7 +50,7 @@ test('repair console: renders overall hull and dispatch targets', async ({ page 
 
   // Two idle team cards, each offering the three dispatch targets.
   await expect(page.locator('ph-repair-teams .card')).toHaveCount(2);
-  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .dispatch-btn')).toHaveCount(3);
+  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .btn')).toHaveCount(3);
 });
 
 test('repair console: Core bar hides when there are no damageable core systems', async ({ page }) => {
@@ -86,10 +86,10 @@ test('repair console: dispatch buttons call __sendAction with correct envelope',
   await page.evaluate((s) => (window as any).__updateConsole('repair', JSON.stringify(s)), repairState());
 
   // Dispatch team 0 → helm.
-  await page.locator('ph-repair-teams .card[data-team-id="0"] .dispatch-btn[data-target="helm"]').click();
+  await page.locator('ph-repair-teams .card[data-team-id="0"] .btn[data-target="helm"]').click();
 
   // Dispatch team 1 → tactical.
-  await page.locator('ph-repair-teams .card[data-team-id="1"] .dispatch-btn[data-target="tactical"]').click();
+  await page.locator('ph-repair-teams .card[data-team-id="1"] .btn[data-target="tactical"]').click();
 
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(2);

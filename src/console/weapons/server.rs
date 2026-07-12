@@ -1398,6 +1398,11 @@ fn tick_beams(
             continue;
         }
 
+        // Instagib: local ship deals 100x damage.
+        if state.is_local_shooter && crate::bridge::is_instagib() {
+            state.damage_to_apply = state.damage_to_apply.saturating_mul(100);
+        }
+
         // Always mark the effective target ship as attacked, even when
         // damage_to_apply == 0 (mirrors the historical NPC path which tagged
         // the target every tick the beam was live). Skip for asteroid targets.
@@ -1470,6 +1475,17 @@ fn tick_beams(
             }
             damage_applied = true;
             let is_asteroid = ast_uuid.is_some();
+
+            // God mode: local ship takes no damage.
+            if target_is_local && crate::bridge::is_god_mode() {
+                if let Some(ref mut ob) = outbox {
+                    ob.0.push((
+                        Target::All,
+                        ServerMessage::DamageTaken { hull: 0.0, shield: 0.0 },
+                    ));
+                }
+                break;
+            }
 
             // Route damage through shields if present and any facing online.
             let (damage_to_hull, shield_amount) = if let Some(ref mut shields) = ship_shields_comp {
@@ -2655,6 +2671,15 @@ fn handle_blaster_hits(
                 || ent_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str());
             if !uuid_matches {
                 continue;
+            }
+
+            // God mode: local ship takes no damage.
+            if is_local && crate::bridge::is_god_mode() {
+                outbox.0.push((
+                    Target::All,
+                    ServerMessage::DamageTaken { hull: 0.0, shield: 0.0 },
+                ));
+                break;
             }
 
             let mut hull_damage = det.damage as f32;

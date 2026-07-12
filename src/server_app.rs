@@ -959,6 +959,12 @@ fn handle_collisions(
             });
         }
 
+        // God mode: local ship takes no damage.
+        if is_local && crate::bridge::is_god_mode() {
+            total_hull = 0.0;
+            shield_amount = 0.0;
+        }
+
         let mut ship_destroyed = false;
         let hull_applied = if total_hull > 0.0 {
             let rng = &mut rand::rngs::SmallRng::from_os_rng();

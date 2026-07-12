@@ -1,3 +1,5 @@
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
+
 export class PhBlastersControls extends HTMLElement {
   #state = null;
   #emptyEl = null;
@@ -8,29 +10,26 @@ export class PhBlastersControls extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .bank-row { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.3rem 0; }
     .bank-top { display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; }
-    .bank-top .lbl { min-width: 2.5rem; color: #6a7178; }
-    .bar-wrap { flex: 1; height: 0.5rem; background: #05080e; border: 1px solid #282c38; overflow: hidden; }
+    .bank-top .lbl { min-width: 2.5rem; color: var(--ink-dim); }
+    .bar-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
     .bar-fill { height: 100%; transition: width 0.15s ease; }
-    .bar-fill.charge { background: linear-gradient(90deg, #805818, #f0c040); }
-    .bar-fill.cooldown { background: linear-gradient(90deg, #6a1a12, #e0402c); }
-    .charge-btn { font-family: 'Chakra Petch', sans-serif; font-size: 0.6rem; font-weight: 700; padding: 0.3rem 0.8rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 2px solid #4ec870; color: #4ec870; background: #0e1117; transition: all 0.15s ease; touch-action: manipulation; }
-    .charge-btn:hover:not(:disabled) { background: #16281d; }
-    .charge-btn:disabled { opacity: 0.35; border-color: #6a7178; color: #6a7178; cursor: default; }
-    .charge-btn.charging { background: #2a1a0a; border-color: #f0c040; color: #f0c040; }
-    .auto-badge { font-size: 0.55rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
+    .bar-fill.charge { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    .bar-fill.cooldown { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
+    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
     .bar-row { display: flex; align-items: center; gap: 0.4rem; padding-left: 2.9rem; }
-    .bar-label { font-size: 0.55rem; color: #6a7178; min-width: 2rem; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .bar-label { font-size: 0.55rem; color: var(--ink-dim); min-width: 2rem; }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header"><span>BLASTERS</span></div>
   <div id="banks"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
+    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
@@ -85,8 +84,9 @@ export class PhBlastersControls extends HTMLElement {
         badge.textContent = 'AUTO';
         top.appendChild(badge);
         const btn = document.createElement('button');
-        btn.className = 'charge-btn';
-        btn.textContent = 'CHARGE';
+        btn.type = 'button';
+        btn.className = 'btn';
+        btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">CHARGE</span>';
         btn.addEventListener('mousedown', () => {
           if (!btn.disabled && this.sendAction) {
             this.sendAction('charge_blaster_start', { bank: bank.id });
@@ -156,10 +156,12 @@ export class PhBlastersControls extends HTMLElement {
       const chargeProgress = Number(bank.charge_progress || 0);
       const isCharging = !isCooling && chargeProgress > 0;
 
-      const btn = row.querySelector('.charge-btn');
+      const btn = row.querySelector('.btn');
       btn.disabled = isCooling;
-      btn.className = 'charge-btn' + (isCharging ? ' charging' : '');
-      btn.textContent = isCharging ? 'FIRING...' : isCooling ? 'COOLDOWN' : hasCharge ? 'CHARGE' : 'FIRE';
+      // charging → amber (tactical) pill, cooling → dimmed/disabled, else armed.
+      btn.className = 'btn ' + (isCharging ? 'tactical' : isCooling ? 'disabled' : 'armed');
+      btn.querySelector('.led').className = 'led' + (isCharging ? ' amber keep' : isCooling ? '' : ' on');
+      btn.querySelector('.label').textContent = isCharging ? 'FIRING...' : isCooling ? 'COOLDOWN' : hasCharge ? 'CHARGE' : 'FIRE';
 
       const fills = row.querySelectorAll('.bar-fill');
       const chargeFill = fills[0];

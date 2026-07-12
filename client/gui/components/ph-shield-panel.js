@@ -9,29 +9,29 @@ export class PhShieldPanel extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
-    .header .v { color: #f08438; font-weight: 600; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .header .v { color: var(--tactical); font-weight: 600; }
     .hull-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.65rem; }
-    .hull-row .lbl { color: #6a7178; min-width: 3rem; }
-    .hull-row .bar-wrap { flex: 1; height: 0.7rem; background: #05080e; border: 1px solid #282c38; position: relative; overflow: hidden; }
-    .hull-row .bar-wrap .fill { position: absolute; inset: 0; background: linear-gradient(90deg, #2a6838, #4ec870); transition: width 0.5s ease; }
-    .hull-row .bar-wrap .fill.warn { background: linear-gradient(90deg, #805818, #d8a040); }
-    .hull-row .bar-wrap .fill.crit { background: linear-gradient(90deg, #6a1a12, #e0402c); }
+    .hull-row .lbl { color: var(--ink-dim); min-width: 3rem; }
+    .hull-row .bar-wrap { flex: 1; height: 0.7rem; background: var(--bg-deep); border: 1px solid var(--line-faint); position: relative; overflow: hidden; }
+    .hull-row .bar-wrap .fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.5s ease; }
+    .hull-row .bar-wrap .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    .hull-row .bar-wrap .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .hull-row .val { min-width: 3rem; text-align: right; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 0.9rem; }
     .facings { display: flex; flex-direction: column; gap: 0.25rem; }
     .facing-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.6rem; }
-    .facing-row .lbl { color: #6a7178; min-width: 2.5rem; letter-spacing: 0.15em; }
-    .facing-row .bar-wrap { flex: 1; height: 0.5rem; background: #05080e; border: 1px solid #282c38; position: relative; overflow: hidden; }
-    .facing-row .bar-wrap .fill { position: absolute; inset: 0; background: linear-gradient(90deg, #2a6838, #4ec870); transition: width 0.5s ease; }
-    .facing-row .bar-wrap .fill.warn { background: linear-gradient(90deg, #805818, #d8a040); }
-    .facing-row .bar-wrap .fill.crit { background: linear-gradient(90deg, #6a1a12, #e0402c); }
-    .facing-row .bar-wrap .fill.down { background: #282c38; opacity: 0.4; }
-    .facing-row .pct { min-width: 2rem; text-align: right; color: #6a7178; }
-    .status { font-size: 0.6rem; color: #6a7178; letter-spacing: 0.2em; }
-    .grid-online { color: #4ec870; }
-    .grid-offline { color: #e0402c; }
+    .facing-row .lbl { color: var(--ink-dim); min-width: 2.5rem; letter-spacing: 0.15em; }
+    .facing-row .bar-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); position: relative; overflow: hidden; }
+    .facing-row .bar-wrap .fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.5s ease; }
+    .facing-row .bar-wrap .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    .facing-row .bar-wrap .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
+    .facing-row .bar-wrap .fill.down { background: var(--line-faint); opacity: 0.4; }
+    .facing-row .pct { min-width: 2rem; text-align: right; color: var(--ink-dim); }
+    .status { font-size: 0.6rem; color: var(--ink-dim); letter-spacing: 0.2em; }
+    .grid-online { color: var(--loaded); }
+    .grid-offline { color: var(--fire); }
     @media (orientation: portrait) {
       .hull-row .val { font-size: 0.75rem; }
     }
@@ -87,7 +87,7 @@ export class PhShieldPanel extends HTMLElement {
     }
 
     if (facings.length === 0) {
-      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.style.cssText = 'font-size:0.6rem;color:#6a7178;padding:0.5rem 0;text-align:center'; this.#emptyEl.textContent = 'NO SHIELD DATA'; container.appendChild(this.#emptyEl); }
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.style.cssText = 'font-size:0.6rem;color:var(--ink-dim);padding:0.5rem 0;text-align:center'; this.#emptyEl.textContent = 'NO SHIELD DATA'; container.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }

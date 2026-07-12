@@ -9,6 +9,8 @@
 // This mirrors gui/weapons-console.html's tube UI but is a standalone custom
 // element so it can be embedded in the per-hull tactical consoles
 // (destroyer/tactical.html, cruiser/tactical.html).
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
+
 export class PhTorpedoControls extends HTMLElement {
   #state = null;
   #tubeEls = {};
@@ -19,21 +21,14 @@ export class PhTorpedoControls extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
-    .magazine { font-size: 0.9rem; color: #f08438; font-weight: 600; font-family: 'Chakra Petch', sans-serif; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .magazine { font-size: 0.9rem; color: var(--tactical); font-weight: 600; font-family: 'Chakra Petch', sans-serif; }
     .tube-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.65rem; padding: 0.3rem 0; }
-    .tube-row + .tube-row { border-top: 1px solid #1c202a; }
-    .tube-row .lbl { min-width: 4rem; color: #6a7178; flex-shrink: 0; }
+    .tube-row + .tube-row { border-top: 1px solid var(--line-faint); }
+    .tube-row .lbl { min-width: 4rem; color: var(--ink-dim); flex-shrink: 0; }
     .tube-controls { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
-    .volley-btn {
-      width: 1.4rem; height: 1.4rem; flex-shrink: 0; border: 1px solid #282c38; border-radius: 3px;
-      background: #0e1117; color: #cce; font-family: 'Chakra Petch', sans-serif; font-weight: 700;
-      font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
-    }
-    .volley-btn:hover:not(:disabled) { background: #161b24; border-color: #4a5060; }
-    .volley-btn:disabled { opacity: 0.35; cursor: default; }
     .torp-slots { display: flex; gap: 0.2rem; align-items: center; }
     .torp-slot {
       position: relative; width: 0.85rem; height: 1.4rem; border-radius: 2px; overflow: hidden; flex-shrink: 0;
@@ -43,25 +38,17 @@ export class PhTorpedoControls extends HTMLElement {
       border-color: rgba(78,200,112,0.55); border-style: dashed;
     }
     .torp-slot[data-state="filled"] {
-      border-color: #4ec870; box-shadow: 0 0 4px rgba(78,200,112,0.5);
+      border-color: var(--loaded); box-shadow: 0 0 4px rgba(78,200,112,0.5);
     }
     .torp-slot[data-state="queued-to-empty"] {
       border-color: rgba(255,255,255,0.45); border-style: dashed;
     }
     .torp-slot .fill {
       position: absolute; bottom: 0; left: 0; right: 0; height: 0%;
-      background: linear-gradient(0deg, #4ec870 0%, #7ee29a 100%);
+      background: linear-gradient(0deg, var(--loaded) 0%, #7ee29a 100%);
       transition: height 0.15s linear;
     }
-    .fire-btn {
-      font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.2rem 0.5rem;
-      letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; border: 2px solid #282c38; color: #cce;
-      background: #0e1117; transition: all 0.15s ease; flex-shrink: 0;
-    }
-    .fire-btn:hover:not(:disabled) { background: #16281d; border-color: #4ec870; }
-    .fire-btn:disabled { opacity: 0.35; cursor: default; }
-    .fire-btn.armed { border-color: #4ec870; color: #4ec870; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
     <span>TORPEDOES</span>
@@ -70,6 +57,7 @@ export class PhTorpedoControls extends HTMLElement {
   <div id="tubes"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
+    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
@@ -97,8 +85,8 @@ export class PhTorpedoControls extends HTMLElement {
 
     const minusBtn = document.createElement('button');
     minusBtn.type = 'button';
-    minusBtn.className = 'volley-btn';
-    minusBtn.textContent = '-';
+    minusBtn.className = 'mini-btn';
+    minusBtn.innerHTML = '<span class="mini-bg"></span><span class="lbl">−</span>';
     minusBtn.addEventListener('click', () => {
       const tube = (this.#state && this.#state.tubes || []).find((x) => x.id === tubeId);
       const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
@@ -107,8 +95,8 @@ export class PhTorpedoControls extends HTMLElement {
 
     const plusBtn = document.createElement('button');
     plusBtn.type = 'button';
-    plusBtn.className = 'volley-btn';
-    plusBtn.textContent = '+';
+    plusBtn.className = 'mini-btn';
+    plusBtn.innerHTML = '<span class="mini-bg"></span><span class="lbl">+</span>';
     plusBtn.addEventListener('click', () => {
       const tube = (this.#state && this.#state.tubes || []).find((x) => x.id === tubeId);
       const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
@@ -118,8 +106,8 @@ export class PhTorpedoControls extends HTMLElement {
 
     const fireBtn = document.createElement('button');
     fireBtn.type = 'button';
-    fireBtn.className = 'fire-btn';
-    fireBtn.textContent = 'FIRE';
+    fireBtn.className = 'btn';
+    fireBtn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">FIRE</span>';
     fireBtn.addEventListener('click', () => {
       if (fireBtn.disabled || !this.sendAction) return;
       const targetUuid = this.#state && this.#state.target_uuid ? this.#state.target_uuid : null;
@@ -242,7 +230,8 @@ export class PhTorpedoControls extends HTMLElement {
       els.minusBtn.disabled = targetCount <= 0;
       els.plusBtn.disabled = targetCount >= vollMax;
       els.fireBtn.disabled = !canFire;
-      els.fireBtn.className = canFire ? 'fire-btn armed' : 'fire-btn';
+      els.fireBtn.className = canFire ? 'btn armed' : 'btn disabled';
+      els.fireBtn.querySelector('.led').className = 'led' + (canFire ? ' on' : '');
     });
   }
 }

@@ -59,7 +59,7 @@
         var r = document.getElementById('tactical-radar');
         var p = document.getElementById('phasers-controls');
         var t = document.getElementById('torpedo-controls');
-        r.state = { blips: s.blips || [], ship_heading: 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null };
+        r.state = { blips: s.blips || [], x: s.ship_x || 0, z: s.ship_z || 0, heading: s.ship_heading || 0, speed: s.ship_speed || 0, ship_heading: s.ship_heading || 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null };
         p.state = { banks: s.banks || [], target_valid: !!s.target_uuid, mode: s.phaser_mode || 'Auto' };
         t.state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 }, target_uuid: s.target_uuid || null };
         var tn = s.target_name ? s.target_name : (s.target_uuid ? 'LOCKED' : 'NO TARGET');

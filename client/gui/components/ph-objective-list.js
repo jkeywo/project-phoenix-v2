@@ -9,17 +9,17 @@ export class PhObjectiveList extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: block; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.35rem; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
     .row { display: flex; align-items: flex-start; gap: 0.4rem; font-size: 0.7rem; line-height: 1.3; }
     .row .indicator { flex-shrink: 0; width: 0.7rem; height: 0.7rem; margin-top: 0.2rem; border: 1px solid #4a5060; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-    .row .indicator.done { background: #2a6838; border-color: #4ec870; }
-    .row .indicator.done::after { content: '\\2713'; font-size: 0.5rem; color: #4ec870; }
+    .row .indicator.done { background: var(--loaded-dim); border-color: var(--loaded); }
+    .row .indicator.done::after { content: '\\2713'; font-size: 0.5rem; color: var(--loaded); }
     .row .indicator.pending { background: transparent; border-color: #4a5060; }
     .row .text { flex: 1; min-width: 0; }
-    .row.done .text { text-decoration: line-through; color: #6a7178; }
+    .row.done .text { text-decoration: line-through; color: var(--ink-dim); }
   </style>
   <div class="list" id="list"></div>
 `;

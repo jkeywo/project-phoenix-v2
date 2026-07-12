@@ -38,8 +38,8 @@
 
     .ctrl-col .stick-area { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
     .ctrl-col .btn-row { display: flex; gap: 12px; width: 100%; }
-    .ctrl-col .btn-row .btn { flex: 1; --h: 68px; font-size: 22px; padding: 0 16px 0 52px; }
-    .ctrl-col .btn-row .btn .led { width: 18px; height: 18px; left: 16px; }
+    .ctrl-col .btn-row .btn { --h: 68px; font-size: 22px; width: var(--h); height: var(--h); padding: 0; display: inline-flex; align-items: center; justify-content: center; position: relative; }
+    .ctrl-col .btn-row .btn .led { width: 18px; height: 18px; position: absolute; top: 8px; left: 8px; }
 
     .side-rail {
       position: absolute;
@@ -277,15 +277,6 @@
       animation: none;
       opacity: 0.35;
     }
-    .boost-control {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      width: 100%;
-    }
-    .boost-control .btn {
-      width: 100%;
-    }
     .boost-battery-track {
       width: 100%;
       height: 8px;
@@ -350,8 +341,8 @@
     .stick-readout { display: none; }
     .stick-directions { display: none; }
     .ctrl-col .stick-area { gap: 0; }
-    .ctrl-col .btn-row .btn { --h: 44px; font-size: 14px; padding: 0 10px 0 36px; }
-    .ctrl-col .btn-row .btn .led { width: 14px; height: 14px; left: 10px; }
+    .ctrl-col .btn-row .btn { --h: 44px; font-size: 14px; }
+    .ctrl-col .btn-row .btn .led { width: 14px; height: 14px; top: 5px; left: 5px; }
     .stick-nub { width: 40px; height: 40px; }
     .stick-nub::after { inset: 12px; }
     .readout .v { font-size: 24px; }
@@ -381,12 +372,25 @@
     }
 
     .panel-mid {
-      flex-direction: column;
+      flex-direction: row;
       gap: 0.5rem;
     }
 
-    .panel-mid > .radar-col { width: 100%; }
-    .panel-mid > .ctrl-col  { width: 100%; }
+    .panel-mid > .radar-col {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-mid > .ctrl-col {
+      width: auto;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      justify-content: center;
+    }
 
     .hero {
       padding: 0.25rem 0;
@@ -400,17 +404,60 @@
 
     .side-rail { display: none; }
 
-    .radar-col .radar-wrap { min-height: 35vh; }
-    /* Portrait: radar circle fills full screen width (surround-frame at 125vw so 80% = 100vw). */
-    .radar-col .radar-surround-frame { width: calc(100vw * 1.25); height: auto; max-height: none; max-width: none; }
+    .radar-col .radar-wrap {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* Portrait: radar circle fills full screen height (surround-frame at 125dvh so 80% = 100dvh). */
+    .radar-col .radar-surround-frame {
+      width: auto;
+      height: calc(100dvh * 1.25);
+      max-height: none;
+      max-width: none;
+    }
     .radar-col > .readout { padding: 0.4rem 0.6rem; }
     .radar-col > .readout .v { font-size: 1.25rem; }
 
-    .ctrl-col .stick-area { gap: 0.25rem; }
-    .stick-container { width: min(75vw, 240px); height: min(75vw, 240px); }
+    .ctrl-col .btn-row {
+      flex-direction: column;
+      gap: 0.5rem;
+    }
 
-    .ctrl-col .btn-row .btn { --h: 3rem; font-size: 0.9rem; padding: 0 0.5rem 0 2.5rem; }
-    .ctrl-col .btn-row .btn .led { width: 12px; height: 12px; left: 10px; }
+    .ctrl-col .btn-row .btn {
+      --h: 3.5rem;
+      font-size: 0.85rem;
+      width: 3.5rem;
+      height: 3.5rem;
+    }
+
+    .ctrl-col .btn-row .btn .led {
+      width: 10px;
+      height: 10px;
+      top: 4px;
+      left: 4px;
+    }
+
+    .ctrl-col .stick-area {
+      gap: 0.25rem;
+      flex: none;
+    }
+    .ctrl-col .stick-container { width: min(25vw, 100px); height: min(25vw, 100px); }
+    .ctrl-col .stick-nub { width: 28px; height: 28px; }
+    .ctrl-col .stick-nub::after { inset: 8px; }
+    .ctrl-col .stick-ring.outer { inset: 10px; }
+    .ctrl-col .stick-ring.mid { inset: 32px; }
+    .ctrl-col .stick-cross-h { left: 12px; right: 12px; }
+    .ctrl-col .stick-cross-v { top: 12px; bottom: 12px; }
+    .ctrl-col .stick-readout { display: none; }
+    .ctrl-col .stick-directions { display: none; }
+    .ctrl-col .stick-axis-label { font-size: 7px; }
+    .ctrl-col .stick-axis-label.top { top: 12px; }
+    .ctrl-col .stick-axis-label.bottom { bottom: 12px; }
+    .ctrl-col .stick-axis-label.left { left: 10px; }
+    .ctrl-col .stick-axis-label.right { right: 10px; }
 
     .side-rail.top,
     .side-rail.bottom { display: none; }
@@ -531,27 +578,25 @@
             </div>
 
             <div class="btn-row">
-              <button id="on-screen-btn" class="btn" type="button">
+              <button id="boost-btn" class="btn" type="button" style="display:none;">
                 <span class="btn-bg"></span>
-                <span class="led" id="screen-led"></span>
-                <span class="label">ON SCREEN</span>
+                <span class="led" id="boost-led"></span>
+                <span class="label">BOOST</span>
               </button>
               <button id="impulse-btn" class="btn" type="button">
                 <span class="btn-bg"></span>
                 <span class="led" id="impulse-led"></span>
                 <span class="label">IMPULSE</span>
               </button>
+              <button id="on-screen-btn" class="btn" type="button">
+                <span class="btn-bg"></span>
+                <span class="led" id="screen-led"></span>
+                <span class="label">ON SCREEN</span>
+              </button>
             </div>
             <span class="auto-badge" id="helm-auto-badge" hidden>AUTO</span>
-            <div class="boost-control" id="boost-control" style="display:none;">
-              <button id="boost-btn" class="btn" type="button">
-                <span class="btn-bg"></span>
-                <span class="led" id="boost-led"></span>
-                <span class="label">BOOST</span>
-              </button>
-              <div class="boost-battery-track">
-                <div class="boost-battery-fill" id="boost-battery-fill"></div>
-              </div>
+            <div class="boost-battery-track" id="boost-battery-track" style="display:none;">
+              <div class="boost-battery-fill" id="boost-battery-fill"></div>
             </div>
             <div id="engine-state" class="ctrl-group">
               <div class="engine-row">
@@ -666,20 +711,22 @@ document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padSt
         if (impulseBtn.className !== 'btn') impulseBtn.className = 'btn';
       }
 
-      var boostControl = document.getElementById('boost-control');
+      var boostBtn = document.getElementById('boost-btn');
+      var boostTrack = document.getElementById('boost-battery-track');
       if (s.boost_enabled) {
-        boostControl.style.display = '';
+        boostBtn.style.display = '';
+        boostTrack.style.display = '';
         var batt = s.boost_battery || 0;
         document.getElementById('boost-battery-fill').style.transform = 'scaleX(' + batt + ')';
         var boostLed = document.getElementById('boost-led');
         var boostLedTarget = s.boost_active ? 'led on' : 'led';
         if (boostLed.className !== boostLedTarget) boostLed.className = boostLedTarget;
         // engaged → danger; empty & idle → disabled (can't engage); else ready.
-        var boostBtn = document.getElementById('boost-btn');
         var boostCls = s.boost_active ? 'btn danger' : (batt <= 0 ? 'btn disabled' : 'btn');
         if (boostBtn.className !== boostCls) boostBtn.className = boostCls;
       } else {
-        boostControl.style.display = 'none';
+        boostBtn.style.display = 'none';
+        boostTrack.style.display = 'none';
       }
 
       var footerMode = document.getElementById('footer-mode');

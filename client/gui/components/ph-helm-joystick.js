@@ -16,14 +16,14 @@ export class PhHelmJoystick extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; margin-bottom: 0.5rem; }
-    .auto-badge { font-size: 0.6rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.5rem; }
+    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
     .well {
       position: relative; width: 240px; height: 240px; border-radius: 50%;
       background: radial-gradient(circle at center, #0a0d11 0%, #14171c 75%, #050608 100%);
-      border: 1px solid #282c38; box-shadow: inset 0 0 0 4px #0a0d11, inset 0 0 0 5px rgba(108,182,208,0.35);
+      border: 1px solid var(--line-faint); box-shadow: inset 0 0 0 4px #0a0d11, inset 0 0 0 5px rgba(108,182,208,0.35);
       cursor: grab; touch-action: none; flex-shrink: 0;
     }
     .well:active { cursor: grabbing; }
@@ -39,7 +39,7 @@ export class PhHelmJoystick extends HTMLElement {
     .arrow.rev { bottom: 8px; left: 50%; transform: translateX(-50%); border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid rgba(108,182,208,0.5); }
     .arrow.port { left: 8px; top: 50%; transform: translateY(-50%); border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-right: 8px solid rgba(108,182,208,0.5); }
     .arrow.stbd { right: 8px; top: 50%; transform: translateY(-50%); border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 8px solid rgba(108,182,208,0.5); }
-    .ax-label { position: absolute; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 10px; color: #6a7178; letter-spacing: 0.22em; pointer-events: none; }
+    .ax-label { position: absolute; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 10px; color: var(--ink-dim); letter-spacing: 0.22em; pointer-events: none; }
     .ax-label.fwd { top: 20px; left: 50%; transform: translateX(-50%); }
     .ax-label.rev { bottom: 20px; left: 50%; transform: translateX(-50%); }
     .ax-label.port { left: 18px; top: 50%; transform: translateY(-50%) rotate(-90deg); }
@@ -53,7 +53,7 @@ export class PhHelmJoystick extends HTMLElement {
     }
     .nub::after { content: ''; position: absolute; inset: 18px; border-radius: 50%; background: #14171c; border: 1px solid rgba(108,182,208,0.3); }
     .readout { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.8rem; color: rgba(108,182,208,0.8); letter-spacing: 0.1em; }
-    .readout .sep { color: #6a7178; }
+    .readout .sep { color: var(--ink-dim); }
   </style>
   <div class="header">
     <span>HELM</span>

@@ -531,6 +531,10 @@ export function buildWeaponsConsoleState(state) {
     phaser_mode:   phaserMode,
     blips,
     regions,
+    ship_heading:  (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
+    ship_x:        state.shipX || 0,
+    ship_z:        state.shipZ || 0,
+    ship_speed:    state.forwardSpeed || 0,
     phaser_arcs:   mappedPhaserArcs,
     torpedo_arcs:  torpedoArcs,
     blasters,
@@ -966,7 +970,10 @@ export function buildSensorsConsoleState(state) {
 
   return JSON.stringify({
     scan_range:              range,
+    ship_x:                  state.shipX || 0,
+    ship_z:                  state.shipZ || 0,
     ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
+    ship_speed:              state.forwardSpeed || 0,
     complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',

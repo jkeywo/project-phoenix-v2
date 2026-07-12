@@ -14,28 +14,28 @@ export class PhSensorPanel extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
-    .header .v { color: #5fd8e8; font-weight: 600; }
-    .blip-count { font-size: 0.65rem; color: #6a7178; }
-    .target-card { background: #0e1117; border: 1px solid #282c38; padding: 0.5rem; }
-    .target-card .name { font-family: 'Chakra Petch', sans-serif; font-size: 1rem; font-weight: 600; color: #cce; letter-spacing: 0.07em; }
-    .target-card .name.empty { font-size: 0.75rem; color: #6a7178; letter-spacing: 0.28em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .header .v { color: var(--cyan); font-weight: 600; }
+    .blip-count { font-size: 0.65rem; color: var(--ink-dim); }
+    .target-card { background: var(--bg-card); border: 1px solid var(--line-faint); padding: 0.5rem; }
+    .target-card .name { font-family: 'Chakra Petch', sans-serif; font-size: 1rem; font-weight: 600; color: var(--ink); letter-spacing: 0.07em; }
+    .target-card .name.empty { font-size: 0.75rem; color: var(--ink-dim); letter-spacing: 0.28em; }
     .target-card .badges { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.25rem; }
     .target-card .badge { font-size: 0.55rem; letter-spacing: 0.18em; padding: 0.1rem 0.35rem; border: 1px solid; }
-    .target-card .badge.hostile { color: #e0402c; border-color: #8a2a1e; }
-    .target-card .badge.friendly { color: #4ec870; border-color: #2a6838; }
+    .target-card .badge.hostile { color: var(--fire); border-color: #8a2a1e; }
+    .target-card .badge.friendly { color: var(--loaded); border-color: var(--loaded-dim); }
     .target-card .badge.neutral { color: #6cb6d0; border-color: #3a5a68; }
-    .target-card .pos-row { display: flex; gap: 0.75rem; margin-top: 0.4rem; padding-top: 0.3rem; border-top: 1px solid #282c38; font-size: 0.65rem; }
-    .target-card .pos-row .k { color: #6a7178; }
-    .target-card .pos-row .v { font-family: 'Chakra Petch', sans-serif; font-size: 1rem; font-weight: 600; color: #cce; }
-    .target-card .pos-row .u { color: #6a7178; font-size: 0.55rem; }
-    .no-target { font-size: 0.7rem; color: #6a7178; letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
+    .target-card .pos-row { display: flex; gap: 0.75rem; margin-top: 0.4rem; padding-top: 0.3rem; border-top: 1px solid var(--line-faint); font-size: 0.65rem; }
+    .target-card .pos-row .k { color: var(--ink-dim); }
+    .target-card .pos-row .v { font-family: 'Chakra Petch', sans-serif; font-size: 1rem; font-weight: 600; color: var(--ink); }
+    .target-card .pos-row .u { color: var(--ink-dim); font-size: 0.55rem; }
+    .no-target { font-size: 0.7rem; color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
     .scan-data { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.6rem; }
     .scan-row { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid rgba(40,44,56,0.5); }
-    .scan-row .k { color: #6a7178; }
-    .scan-row .v { color: #cce; }
+    .scan-row .k { color: var(--ink-dim); }
+    .scan-row .v { color: var(--ink); }
     @media (orientation: portrait) {
       :host { gap: 0.35rem; }
       .target-card { padding: 0.35rem; }

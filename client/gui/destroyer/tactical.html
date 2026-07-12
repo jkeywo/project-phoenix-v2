@@ -17,11 +17,10 @@
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
     ph-tactical-radar, ph-phasers-controls, ph-blasters-controls, ph-torpedo-controls { flex-shrink: 0; }
     ph-tactical-radar { flex: 1; min-height: 0; }
-    .overlay-toggle { position: absolute; top: 72px; z-index: 10; background: rgba(14,17,23,0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.2em; padding: 6px 12px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; }
+    .hero-controls { display: flex; align-items: center; gap: 8px; }
+    .overlay-toggle { background: rgba(14,17,23,0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.2em; padding: 8px 16px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; white-space: nowrap; }
     .overlay-toggle:hover { background: rgba(30,35,50,0.9); border-color: var(--ink-dim); }
     .overlay-toggle.active { background: rgba(30,50,80,0.9); border-color: var(--cyan); color: var(--cyan); }
-    .overlay-toggle.nav-btn { left: 8px; }
-    .overlay-toggle.comms-btn { right: 8px; }
     .overlay-toggle .unread-badge { display: none; margin-left: 6px; background: var(--fire-bright); color: #000; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 2px; line-height: 1.4; }
     .overlay-toggle .unread-badge.show { display: inline-block; }
     .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(5,8,24,0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 60px 16px 60px; }
@@ -32,7 +31,7 @@
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
     .console-footer .spacer { flex: 1; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body .col { padding: 8px; } .overlay-toggle { top: 62px; font-size: 10px; padding: 4px 8px; } .overlay-toggle.nav-btn { left: 4px; } .overlay-toggle.comms-btn { right: 4px; } .overlay-panel { padding: 50px 8px 50px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body .col { padding: 8px; } .overlay-toggle { font-size: 11px; padding: 6px 12px; } .overlay-panel { padding: 50px 8px 50px; } }
   </style>
 </head>
 <body>
@@ -41,10 +40,12 @@
     <div class="panel-inner">
       <div class="hero">
         <h1>TACTICAL<span class="sub">WEAPONS</span></h1>
-        <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
+        <div class="hero-controls">
+          <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
+          <button class="overlay-toggle" id="nav-toggle" data-active="false">Nav</button>
+          <button class="overlay-toggle" id="comms-toggle" data-active="false">Comms<span class="unread-badge" id="comms-unread">!</span></button>
+        </div>
       </div>
-      <button class="overlay-toggle nav-btn" id="nav-toggle" data-active="false">Nav</button>
-      <button class="overlay-toggle comms-btn" id="comms-toggle" data-active="false">Comms<span class="unread-badge" id="comms-unread">!</span></button>
       <div class="console-body">
         <div class="col">
           <h2>Weapons</h2>
@@ -119,7 +120,7 @@
         var commsUnread = document.getElementById('comms-unread');
         if (s.weapons) {
           var w = s.weapons;
-          radarEl.state = { blips: w.blips || [], ship_heading: (s.navigation && s.navigation.ship_heading) || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
+          radarEl.state = { blips: w.blips || [], x: (s.navigation && s.navigation.ship_x) || 0, z: (s.navigation && s.navigation.ship_z) || 0, heading: (s.navigation && s.navigation.ship_heading) || 0, speed: (s.navigation && s.navigation.ship_speed) || 0, ship_heading: (s.navigation && s.navigation.ship_heading) || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
           phasersEl.state = { banks: w.banks || [], target_valid: !!w.target_uuid, mode: w.phaser_mode || 'Auto' };
           blastersEl.state = { banks: w.blasters || [] };
           torpedoEl.state = { tubes: w.tubes || [], magazine: { current: w.torpedo_count || 0, max: w.torpedo_max || w.torpedo_count || 0 }, target_uuid: w.target_uuid || null };

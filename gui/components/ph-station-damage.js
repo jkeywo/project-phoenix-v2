@@ -22,20 +22,20 @@ export class PhStationDamage extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: inline-flex; position: relative; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: inline-flex; position: relative; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host([hidden]) { display: none; }
     :host * { box-sizing: border-box; }
     .bar {
       display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer;
       background: none; border: none; padding: 0; color: inherit; font: inherit;
     }
-    .bar-label { font-size: 0.62rem; letter-spacing: 0.15em; color: #6a7178; text-transform: uppercase; white-space: nowrap; }
-    .bar-wrap { position: relative; width: 90px; height: 0.7em; background: #05080e; border: 1px solid #282c38; overflow: hidden; }
-    .bar-wrap .fill { position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, #2a6838, #4ec870); transition: width 0.4s ease; }
-    .bar-wrap .fill.warn { background: linear-gradient(90deg, #805818, #d8a040); }
-    .bar-wrap .fill.crit { background: linear-gradient(90deg, #6a1a12, #e0402c); }
+    .bar-label { font-size: 0.62rem; letter-spacing: 0.15em; color: var(--ink-dim); text-transform: uppercase; white-space: nowrap; }
+    .bar-wrap { position: relative; width: 90px; height: 0.7em; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
+    .bar-wrap .fill { position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.4s ease; }
+    .bar-wrap .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    .bar-wrap .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .pct { font-size: 0.62rem; color: #aab; min-width: 2.2rem; text-align: right; }
-    .caret { font-size: 0.5rem; color: #6a7178; }
+    .caret { font-size: 0.5rem; color: var(--ink-dim); }
     .popup {
       position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 50;
       width: 260px; max-height: 40vh; overflow-y: auto;
@@ -43,7 +43,7 @@ export class PhStationDamage extends HTMLElement {
       padding: 0.6rem; display: none;
     }
     .popup.open { display: block; }
-    .popup-title { font-size: 0.6rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; margin-bottom: 0.4rem; padding-bottom: 0.3rem; border-bottom: 1px solid #282c38; }
+    .popup-title { font-size: 0.6rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--line-faint); }
   </style>
   <button class="bar" id="bar" type="button" aria-haspopup="true" aria-expanded="false" title="Station systems">
     <span class="bar-label" id="bar-label">Station</span>

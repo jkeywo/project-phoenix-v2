@@ -11,19 +11,19 @@ export class PhShieldFacings extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
-    .auto-badge { font-size: 0.55rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
     .arc-container { display: flex; justify-content: center; align-items: center; padding: 0.5rem 0; }
     svg { width: 100%; max-width: 200px; height: auto; overflow: visible; }
     .arc-path { cursor: pointer; transition: opacity 0.2s, filter 0.2s; }
     .arc-path:hover { filter: brightness(1.3); }
-    .arc-path.focused { filter: brightness(1.5) drop-shadow(0 0 4px #4ec870); }
+    .arc-path.focused { filter: brightness(1.5) drop-shadow(0 0 4px var(--loaded)); }
     .arc-path.down { opacity: 0.3; cursor: default; }
-    .facing-label { font-size: 0.55rem; fill: #6a7178; text-anchor: middle; pointer-events: none; }
-    .facing-label.focused-label { fill: #cce; font-weight: 600; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .facing-label { font-size: 0.55rem; fill: var(--ink-dim); text-anchor: middle; pointer-events: none; }
+    .facing-label.focused-label { fill: var(--ink); font-weight: 600; }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
     <span>SHIELD FACINGS</span>

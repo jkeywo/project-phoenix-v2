@@ -1,3 +1,5 @@
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
+
 export class PhRepairTeams extends HTMLElement {
   #state = null;
   #animFrame = null;
@@ -10,30 +12,26 @@ export class PhRepairTeams extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
-    .auto-badge { font-size: 0.55rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
-    .card { border: 1px solid #282c38; background: #0e1117; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
+    .card { border: 1px solid var(--line-faint); background: var(--bg-card); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; }
     .card-top { display: flex; justify-content: space-between; align-items: center; }
     .team-label { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.15em; }
     .status-badge { font-size: 0.55rem; padding: 0.05rem 0.3rem; letter-spacing: 0.15em; border: 1px solid; }
-    .status-badge.idle { color: #6a7178; border-color: #6a7178; }
-    .status-badge.travelling { color: #d8a040; border-color: #d8a040; }
-    .status-badge.repairing { color: #4ec870; border-color: #4ec870; }
-    .status-badge.returning { color: #6090e0; border-color: #6090e0; }
-    .target-label { font-size: 0.6rem; color: #6a7178; }
-    .progress-wrap { width: 100%; height: 0.4rem; background: #05080e; border: 1px solid #282c38; overflow: hidden; }
-    .progress-fill { height: 100%; background: linear-gradient(90deg, #2a6838, #4ec870); transition: none; }
-    .progress-fill.repairing { background: linear-gradient(90deg, #2a6838, #4ec870); }
-    .progress-fill.travelling { background: linear-gradient(90deg, #805818, #d8a040); }
-    .progress-fill.returning { background: linear-gradient(90deg, #184880, #6090e0); }
+    .status-badge.idle { color: var(--ink-dim); border-color: var(--ink-dim); }
+    .status-badge.travelling { color: var(--reloading); border-color: var(--reloading); }
+    .status-badge.repairing { color: var(--loaded); border-color: var(--loaded); }
+    .status-badge.returning { color: var(--cyan); border-color: var(--cyan); }
+    .target-label { font-size: 0.6rem; color: var(--ink-dim); }
+    .progress-wrap { width: 100%; height: 0.4rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: none; }
+    .progress-fill.repairing { background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); }
+    .progress-fill.travelling { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    .progress-fill.returning { background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); }
     .dispatch-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-    .dispatch-btn { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.2rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 2px solid #4ec870; color: #4ec870; background: #0e1117; transition: all 0.15s ease; }
-    .dispatch-btn:hover:not(:disabled) { background: #16281d; }
-    .dispatch-btn:disabled { opacity: 0.35; border-color: #6a7178; color: #6a7178; cursor: default; }
-    .dispatch-btn.active { background: #16281d; box-shadow: 0 0 0 1px #4ec870 inset; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
     <span>REPAIR TEAMS</span>
@@ -42,6 +40,7 @@ export class PhRepairTeams extends HTMLElement {
   <div id="teams-container"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
+    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
@@ -163,9 +162,10 @@ export class PhRepairTeams extends HTMLElement {
           targets.forEach(t => {
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = 'dispatch-btn';
+            b.className = 'btn armed';
             b.dataset.target = t.id;
-            b.textContent = t.label + ' ' + Math.round((t.damage_pct || 0) * 100) + '%';
+            b.innerHTML = '<span class="btn-bg"></span><span class="led on"></span><span class="label"></span>';
+            b.querySelector('.label').textContent = t.label;
             b.addEventListener('click', () => {
               if (b.disabled) return;
               if (this.sendAction) {
@@ -178,7 +178,7 @@ export class PhRepairTeams extends HTMLElement {
           });
           drow.dataset.sig = sig;
         }
-        drow.querySelectorAll('.dispatch-btn').forEach(b => { b.disabled = auto; });
+        drow.querySelectorAll('.btn').forEach(b => { b.disabled = auto; });
       } else {
         // Busy team: show its current target; dispatch is not offered.
         drow.style.display = 'none';

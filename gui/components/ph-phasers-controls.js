@@ -1,3 +1,5 @@
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
+
 export class PhPhasersControls extends HTMLElement {
   #state = null;
 
@@ -7,27 +9,25 @@ export class PhPhasersControls extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .bank-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; padding: 0.3rem 0; }
-    .bank-row .lbl { min-width: 2.5rem; color: #6a7178; }
-    .cooldown-wrap { flex: 1; height: 0.5rem; background: #05080e; border: 1px solid #282c38; overflow: hidden; }
-    .cooldown-fill { height: 100%; background: linear-gradient(90deg, #2a6838, #4ec870); transition: width 0.3s ease; }
-    .cooldown-fill.cooling { background: linear-gradient(90deg, #6a1a12, #e0402c); }
-    .fire-btn { font-family: 'Chakra Petch', sans-serif; font-size: 0.6rem; font-weight: 700; padding: 0.25rem 0.6rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 2px solid #4ec870; color: #4ec870; background: #0e1117; transition: all 0.15s ease; }
-    .fire-btn:hover:not(:disabled) { background: #16281d; }
-    .fire-btn:disabled { opacity: 0.35; border-color: #6a7178; color: #6a7178; cursor: default; }
-    .auto-badge { font-size: 0.55rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
-    .mode-toggle { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.1rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 1px solid #6a7178; color: #6a7178; background: #0e1117; transition: all 0.15s ease; }
-    .mode-toggle:hover { border-color: #aab; color: #aab; }
-    .mode-toggle.auto { border-color: #f0c040; color: #f0c040; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .bank-row .lbl { min-width: 2.5rem; color: var(--ink-dim); }
+    .cooldown-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
+    .cooldown-fill { height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.3s ease; }
+    .cooldown-fill.cooling { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
+    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
+    .mode-toggle { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.1rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: var(--bg-card); transition: all 0.15s ease; }
+    .mode-toggle:hover { border-color: var(--ink); color: var(--ink); }
+    .mode-toggle.auto { border-color: var(--reloading); color: var(--reloading); }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header"><span>PHASERS</span><button class="mode-toggle" id="mode-toggle" type="button">MANUAL</button></div>
   <div id="banks"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
+    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
@@ -92,8 +92,9 @@ export class PhPhasersControls extends HTMLElement {
         badge.textContent = 'AUTO';
         row.appendChild(badge);
         const btn = document.createElement('button');
-        btn.className = 'fire-btn';
-        btn.textContent = 'FIRE';
+        btn.type = 'button';
+        btn.className = 'btn';
+        btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">FIRE</span>';
         btn.addEventListener('click', () => {
           if (this.sendAction && !btn.disabled) {
             this.sendAction('fire_phaser', { bank: bank.id });
@@ -121,8 +122,11 @@ export class PhPhasersControls extends HTMLElement {
 
       row.querySelector('.auto-badge').style.display = 'none';
 
-      const btn = row.querySelector('.fire-btn');
-      btn.disabled = auto || !targetValid || !fireReady || onCooldown;
+      const btn = row.querySelector('.btn');
+      const ready = !auto && targetValid && fireReady && !onCooldown;
+      btn.disabled = !ready;
+      btn.className = 'btn' + (ready ? ' armed' : ' disabled');
+      btn.querySelector('.led').className = 'led' + (ready ? ' on' : '');
     });
   }
 }

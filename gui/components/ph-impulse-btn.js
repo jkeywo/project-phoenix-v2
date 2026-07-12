@@ -7,15 +7,15 @@ export class PhImpulseBtn extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: block; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; margin-bottom: 0.4rem; }
-    .auto-badge { font-size: 0.6rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
+    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
     .btn { --charge: 0; width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.9rem; font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: background 0.3s ease; }
-    .btn.ready { background: #0e1117; border-color: #4ec870; color: #4ec870; }
-    .btn.ready:hover:not(:disabled) { background: #16281d; }
-    .btn.charging { background: linear-gradient(90deg, #d8a040 calc(var(--charge) * 100%), #0e1117 calc(var(--charge) * 100%)); border-color: #d8a040; color: #d8a040; }
-    .btn.cooldown { background: #0e1117; border-color: #6a7178; color: #6a7178; }
+    .btn.ready { background: var(--bg-card); border-color: var(--loaded); color: var(--loaded); }
+    .btn.ready:hover:not(:disabled) { background: var(--loaded-dim); }
+    .btn.charging { background: linear-gradient(90deg, var(--reloading) calc(var(--charge) * 100%), var(--bg-card) calc(var(--charge) * 100%)); border-color: var(--reloading); color: var(--reloading); }
+    .btn.cooldown { background: var(--bg-card); border-color: var(--ink-dim); color: var(--ink-dim); }
     .btn:disabled { opacity: 0.4; cursor: default; }
   </style>
   <div class="header">

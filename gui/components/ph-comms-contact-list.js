@@ -9,11 +9,11 @@ export class PhCommsContactList extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: block; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.25rem; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
-    .pill { display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; padding: 0.35rem 0.4rem; border: 1px solid #282c38; border-radius: 3px; }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .pill { display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; padding: 0.35rem 0.4rem; border: 1px solid var(--line-faint); border-radius: 3px; }
     .pill.out-of-range { opacity: 0.45; }
     .name { flex: 1; min-width: 0; }
     .badge { font-size: 0.55rem; padding: 0.1rem 0.35rem; border-radius: 2px; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -21,7 +21,7 @@ export class PhCommsContactList extends HTMLElement {
     .badge.friendly { background: #153a1e; color: #55e070; }
     .badge.neutral { background: #15283a; color: #5590e0; }
     .badge.allied { background: #153a1e; color: #55e070; }
-    .hail-btn { background: #0e1117; border: 1px solid #282c38; color: #cce; font-family: 'Chakra Petch', sans-serif; font-size: 0.6rem; font-weight: 600; padding: 0.25rem 0.5rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; }
+    .hail-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: 0.6rem; font-weight: 600; padding: 0.25rem 0.5rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; }
     .hail-btn:hover:not(:disabled) { background: #161b24; border-color: #4a5060; }
     .hail-btn:disabled { opacity: 0.35; cursor: default; }
   </style>

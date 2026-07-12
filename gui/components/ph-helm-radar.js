@@ -28,7 +28,7 @@ export class PhHelmRadar extends HTMLElement {
       '  pointer-events: auto; z-index: 10;',
       '  font-family: \'JetBrains Mono\', monospace; font-size: 0.65rem;',
       '  letter-spacing: 0.15em; color: #8899b0; background: rgba(5,8,22,0.85);',
-      '  border: 1px solid #282c38; border-radius: 2px; padding: 2px 12px;',
+      '  border: 1px solid var(--line-faint); border-radius: 2px; padding: 2px 12px;',
       '  cursor: pointer; text-transform: uppercase;',
       '  transition: border-color 0.15s, color 0.15s, background 0.15s;',
       '}',

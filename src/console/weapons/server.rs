@@ -3255,6 +3255,23 @@ fn operate_tactical_ai(
             weapons_target.0 = Some(uuid);
         }
 
+        // Stale-target guard: if WeaponsTarget points to an entity that no
+        // longer exists in the world, clear it. This prevents AI from sitting
+        // idle after its last Destroy-objective target is killed — without this
+        // guard, tick_phaser_auto_fire and the torpedo path both skip on the
+        // dead entity UUID and never acquire a fresh target.
+        if let Some(ref current) = weapons_target.0 {
+            let alive = asteroid_q
+                .iter()
+                .any(|(u, _)| u.0 == *current)
+                || other_ships_q
+                    .iter()
+                    .any(|(u, _, _)| u.0 == *current);
+            if !alive {
+                weapons_target.0 = None;
+            }
+        }
+
         // ── TORPEDO AUTO-FIRE (future: split to torpedo_tube system) ─────
         //
         // When the station is claimed, gate on whether the active rating's
@@ -7684,6 +7701,28 @@ station = "tactical"
             get_weapons_target(&mut app).as_deref(),
             Some(target_uuid.as_str()),
             "Tactical AI must lock the live entity named by the Destroy objective"
+        );
+    }
+
+    #[test]
+    fn tactical_ai_clears_stale_weapons_target_when_objective_target_dead() {
+        let mut app = test_app();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        // Pre-set a stale target UUID — simulates a prior Destroy objective
+        // whose entity was killed.
+        set_weapons_target(&mut app, Some("dead-target-uuid".into()));
+        // No last attacker.
+        // Still have a Destroy objective for a target that is no longer alive.
+        insert_destroy_objective_blackboard(&mut app, "wave_gone", 80.0);
+        // No entity named "wave_gone" exists → resolve returns None.
+
+        tick(&mut app);
+
+        assert!(
+            get_weapons_target(&mut app).is_none(),
+            "Tactical AI must clear WeaponsTarget when the objective target is \
+             dead and no last attacker is available, fixing the stale-target bug \
+             that caused AI to sit idle after killing its last target"
         );
     }
 

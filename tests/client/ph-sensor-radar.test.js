@@ -60,11 +60,18 @@ describe('PhSensorRadar', () => {
     expect(customElements.get('ph-sensor-radar')).toBeDefined();
   });
 
-  it('creates a shadow root with inner ph-radar (no designate button)', () => {
+  it('creates a shadow root with inner ph-radar and on-screen button', () => {
     const { el } = setup();
     expect(el.shadowRoot).toBeDefined();
     expect(el.shadowRoot.getElementById('inner-radar')).toBeDefined();
-    expect(el.shadowRoot.getElementById('designate-btn')).toBeNull();
+    expect(el.shadowRoot.getElementById('on-screen-btn')).toBeDefined();
+  });
+
+  it('on-screen button click calls sendAction with set_radar_view', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.shadowRoot.getElementById('on-screen-btn').click();
+    expect(sendAction).toHaveBeenCalledWith('set_radar_view', {});
   });
 
   it('passes base state through to inner ph-radar', () => {

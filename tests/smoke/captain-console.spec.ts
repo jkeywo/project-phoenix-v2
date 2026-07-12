@@ -2,24 +2,23 @@ import { test, expect } from './fixtures';
 
 const CONSOLE_URL = '/gui/battleship/captain.html';
 
+// The battleship's Captain station does not own a sensors system (Sensors is
+// its own dedicated station), so buildCaptainConsoleState — and the state
+// pushed here — is flat, not nested under `captain`/`sensors` keys (that
+// nesting is only used by the Destroyer's combined captain+sensors console).
+
 test('captain console: __updateConsole renders objectives, target, and direction state', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
   const state = {
-    captain: {
-      red_alert: true,
-      view_direction: 'Port',
-      camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
-      objectives: [
-        { id: 'obj-1', text: 'Scan the anomaly', mandatory: true, status: 'Active' },
-        { id: 'obj-2', text: 'Neutralise raiders', mandatory: false, status: 'Completed' },
-      ],
-    },
-    sensors: {
-      target_name: 'ANOMALY ALPHA',
-      blips: [{ uuid: 'e1' }, { uuid: 'e2' }, { uuid: 'e3' }],
-      scan_range: 1200,
-    },
+    red_alert: true,
+    view_direction: 'Port',
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
+    objectives: [
+      { id: 'obj-1', text: 'Scan the anomaly', mandatory: true, status: 'Active' },
+      { id: 'obj-2', text: 'Neutralise raiders', mandatory: false, status: 'Completed' },
+    ],
+    blips: [{ uuid: 'e1' }, { uuid: 'e2' }, { uuid: 'e3' }],
   };
 
   await page.evaluate((s) => (window as any).__updateConsole('captain', JSON.stringify(s)), state);
@@ -29,7 +28,7 @@ test('captain console: __updateConsole renders objectives, target, and direction
   await expect(page.locator('.objective-data[data-id="obj-2"]')).toHaveAttribute('data-status', 'Completed');
   await expect(page.locator('#dir')).toHaveAttribute('data-direction', 'Port');
   await expect(page.locator('#alert')).toHaveAttribute('data-red-alert', 'true');
-  await expect(page.locator('#footer-target')).toContainText('ANOMALY ALPHA');
+  await expect(page.locator('#footer-target')).toContainText('3 CONTACTS');
 
   const camBtns = page.locator('ph-camera-select').locator('.cam-btn');
   await expect(camBtns).toHaveCount(4);
@@ -45,16 +44,11 @@ test('captain console: standard alert state renders correctly', async ({ page })
   await page.goto(CONSOLE_URL);
 
   const state = {
-    captain: {
-      red_alert: false,
-      view_direction: 'Fore',
-      camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
-      objectives: [],
-    },
-    sensors: {
-      blips: [],
-      scan_range: 1200,
-    },
+    red_alert: false,
+    view_direction: 'Fore',
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
+    objectives: [],
+    blips: [],
   };
 
   await page.evaluate((s) => (window as any).__updateConsole('captain', JSON.stringify(s)), state);
@@ -76,16 +70,11 @@ test('captain console: camera-select and red alert call __sendAction with correc
   });
 
   await page.evaluate((s) => (window as any).__updateConsole('captain', JSON.stringify(s)), {
-    captain: {
-      red_alert: false,
-      camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
-      view_direction: 'Fore',
-      objectives: [],
-    },
-    sensors: {
-      blips: [],
-      scan_range: 1200,
-    },
+    red_alert: false,
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
+    view_direction: 'Fore',
+    objectives: [],
+    blips: [],
   });
 
   const camBtns = page.locator('ph-camera-select').locator('.cam-btn');
@@ -106,17 +95,12 @@ test('captain console: AI-run Red Alert renders read-only with AUTO badge', asyn
   await page.goto(CONSOLE_URL);
 
   const state = {
-    captain: {
-      red_alert: false,
-      red_alert_auto: true,
-      view_direction: 'Fore',
-      camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
-      objectives: [],
-    },
-    sensors: {
-      blips: [],
-      scan_range: 1200,
-    },
+    red_alert: false,
+    red_alert_auto: true,
+    view_direction: 'Fore',
+    camera_views: ['Fore', 'Port', 'Starboard', 'Aft'],
+    objectives: [],
+    blips: [],
   };
 
   await page.evaluate((s) => (window as any).__updateConsole('captain', JSON.stringify(s)), state);

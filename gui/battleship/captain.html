@@ -12,12 +12,10 @@
     .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
     .hero h1 { margin: 0; font-size: 26px; letter-spacing: 0.22em; color: var(--ink); }
     .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-faint); }
-    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: auto 1fr; gap: 16px; }
-    .radar-col { height: 100%; aspect-ratio: 1 / 1; }
-    .cmd-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
     .controls-row { display: flex; gap: 12px; }
     .controls-row > * { flex: 1; min-width: 0; }
-    ph-objective-list, ph-sensor-panel { flex: 1; min-height: 0; }
+    ph-objective-list { flex: 1; min-height: 0; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .spacer { flex: 1; }
@@ -25,8 +23,6 @@
       .panel-inner { padding: 10px 12px; gap: 8px; }
       .hero h1 { font-size: 20px; }
       .hero h1 .sub { font-size: 10px; }
-      .console-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-      .radar-col { width: 100%; }
       .controls-row { gap: 8px; }
     }
   </style>
@@ -43,17 +39,11 @@
         <span class="auto-badge" id="captain-auto-badge" hidden>AUTO</span>
       </div>
       <div class="console-body">
-        <div class="radar-col">
-          <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
+        <div class="controls-row">
+          <ph-camera-select id="camera-select"></ph-camera-select>
+          <ph-red-alert id="red-alert"></ph-red-alert>
         </div>
-        <div class="cmd-col">
-          <div class="controls-row">
-            <ph-camera-select id="camera-select"></ph-camera-select>
-            <ph-red-alert id="red-alert"></ph-red-alert>
-          </div>
-          <ph-objective-list id="objective-list"></ph-objective-list>
-          <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
-        </div>
+        <ph-objective-list id="objective-list"></ph-objective-list>
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
@@ -68,8 +58,6 @@
     import '../components/ph-camera-select.js';
     import '../components/ph-red-alert.js';
     import '../components/ph-objective-list.js';
-    import '../components/ph-sensor-radar.js';
-    import '../components/ph-sensor-panel.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
@@ -77,20 +65,22 @@
     initConsole({
       name: 'captain',
       render: function(s) {
-        var cap = s.captain || {};
-        var sensors = s.sensors || {};
-        document.getElementById('camera-select').state = { views: cap.camera_views || [], current_view: cap.view_direction || '', auto: !!cap.viewscreen_auto };
-        document.getElementById('red-alert').state = { active: !!cap.red_alert, auto: !!cap.red_alert_auto };
-        document.getElementById('objective-list').state = { objectives: cap.objectives || [] };
-        document.getElementById('sensor-radar').state = sensors;
-        document.getElementById('sensor-panel').state = sensors;
+        // The battleship's Captain station does not own a sensors system
+        // (Sensors is its own dedicated station) — buildCaptainConsoleState
+        // returns its fields flat, not nested under `s.captain`/`s.sensors`
+        // (that nesting only applies to the Destroyer's combined
+        // captain+sensors console). Read flat, matching gui/cruiser/captain.html.
+        document.getElementById('camera-select').state = { views: s.camera_views || [], current_view: s.view_direction || '', auto: !!s.viewscreen_auto };
+        document.getElementById('red-alert').state = { active: !!s.red_alert, auto: !!s.red_alert_auto };
+        document.getElementById('objective-list').state = { objectives: s.objectives || [] };
         document.getElementById('station-damage').state = s.own_hull || null;
-        document.getElementById('footer-target').textContent = sensors.target_name || 'NO TARGET';
+        var contacts = (s.blips && s.blips.length) || 0;
+        document.getElementById('footer-target').textContent = contacts > 0 ? contacts + ' CONTACTS' : 'NO TARGET';
         setAutoState(null, document.getElementById('captain-auto-badge'), !!s.captain_auto);
 
         var objectivesEl = document.getElementById('objectives');
         objectivesEl.replaceChildren();
-        (cap.objectives || []).forEach(function(o) {
+        (s.objectives || []).forEach(function(o) {
           var row = document.createElement('div');
           row.className = 'objective-data';
           row.dataset.id = o.id || '';
@@ -98,8 +88,8 @@
           row.dataset.status = o.status || '';
           objectivesEl.appendChild(row);
         });
-        document.getElementById('dir').dataset.direction = cap.view_direction || '';
-        document.getElementById('alert').dataset.redAlert = String(!!cap.red_alert);
+        document.getElementById('dir').dataset.direction = s.view_direction || '';
+        document.getElementById('alert').dataset.redAlert = String(!!s.red_alert);
       }
     });
   </script>

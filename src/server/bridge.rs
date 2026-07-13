@@ -17,7 +17,8 @@ use {
     crate::codec::{self, JsonCodec, MessageCodec},
     crate::config_cache::ConfigCachePlugin,
     crate::console_bridge::{
-        ConsoleStateChanged, HudStateChanged, LobbyStateChanged, LOCAL_CONSOLE_TOKEN,
+        AiChatterEvent, ConsoleStateChanged, HudStateChanged, LobbyStateChanged,
+        LOCAL_CONSOLE_TOKEN,
     },
     crate::lobby::{
         InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected,
@@ -181,6 +182,11 @@ thread_local! {
     /// JS callback registered by the HTML lobby overlay to receive lobby state
     /// pushes. Signature: `callback(stateJson: string)`.
     static LOBBY_STATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// JS callback registered by the HTML viewscreen overlay to receive chatter
+    /// events. Signature: `callback(stateJson: string)` where stateJson is a
+    /// JSON string containing `{from_label, to_label, text}`.
+    static CHATTER_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
 
     /// JS callback registered by the HTML viewscreen overlay to receive screen
     /// shake offsets. Signature: `callback(x: number, y: number)`.
@@ -371,7 +377,8 @@ pub fn wasm_init() {
         // normally registered by ViewscreenBorderPlugin / RendererPlugin
         // which we skip in automation mode.
         app.add_message::<crate::console_bridge::HudStateChanged>()
-            .add_message::<crate::console_bridge::LobbyStateChanged>();
+            .add_message::<crate::console_bridge::LobbyStateChanged>()
+            .add_message::<crate::console_bridge::AiChatterEvent>();
     } else {
         app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
             primary_window: Some(bevy::window::Window {
@@ -446,6 +453,7 @@ pub fn wasm_init() {
             flush_hud_state,
             flush_console_state,
             flush_lobby_state,
+            flush_chatter,
             flush_shake_state,
         ),
     );
@@ -551,6 +559,17 @@ pub fn set_lobby_state_callback(callback: Function) {
 #[wasm_bindgen]
 pub fn set_shake_callback(callback: Function) {
     SHAKE_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by JS once to register the viewscreen chatter callback.
+/// Bevy calls `callback(stateJson: string)` for each AI→AI coordination
+/// event. The JSON is `{from_label, to_label, text}`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_chatter_callback(callback: Function) {
+    CHATTER_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
     });
 }
@@ -1088,6 +1107,33 @@ fn flush_shake_state() {
                 &JsValue::from_f64(current.0 as f64),
                 &JsValue::from_f64(current.1 as f64),
             );
+        }
+    });
+}
+
+/// Reads `AiChatterEvent` messages each frame and forwards them to the
+/// registered chatter callback as JSON via `cb.call1(NULL, json)`.
+#[cfg(target_arch = "wasm32")]
+fn flush_chatter(mut reader: MessageReader<AiChatterEvent>) {
+    let payloads: Vec<String> = reader
+        .read()
+        .map(|ev| {
+            format!(
+                r#"{{"from_label":"{}","to_label":"{}","text":"{}"}}"#,
+                ev.from_label.replace('\\', "\\\\").replace('"', "\\\""),
+                ev.to_label.replace('\\', "\\\\").replace('"', "\\\""),
+                ev.text.replace('\\', "\\\\").replace('"', "\\\""),
+            )
+        })
+        .collect();
+    if payloads.is_empty() {
+        return;
+    }
+    CHATTER_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            for json in &payloads {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
+            }
         }
     });
 }

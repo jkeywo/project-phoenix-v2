@@ -2,6 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::console_bridge::AiChatterEvent;
 use crate::control_source::{ControlSourceResolver, ControlTickPolicy};
 use crate::damage::DamageTier;
 use crate::entity_spawner::RegionEffectsSection;
@@ -274,6 +275,7 @@ impl Plugin for ShipPlugin {
         )))
         .init_resource::<BankConfigResource>()
         .add_message::<CoordinationEnqueue>()
+        .add_message::<AiChatterEvent>()
         .add_systems(
             Update,
             (
@@ -1254,6 +1256,32 @@ pub fn handle_coordination_enqueue(
     }
 }
 
+/// Format a `CoordinationPayload` into a short text string for viewscreen chatter.
+fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
+    match payload {
+        CoordinationPayload::Advisory { message } => message.clone(),
+        CoordinationPayload::Alert { title, body } => {
+            if body.is_empty() {
+                title.clone()
+            } else {
+                format!("{title}: {body}")
+            }
+        }
+        CoordinationPayload::FrequencyHint { frequency } => {
+            format!("Frequency hint: {frequency:.1}")
+        }
+        CoordinationPayload::ShieldFacingDown {
+            label,
+            offline_remaining,
+        } => {
+            format!("{label} offline ({offline_remaining:.0}s)")
+        }
+        CoordinationPayload::ShieldFacingRestored { label } => {
+            format!("{label} restored")
+        }
+    }
+}
+
 pub fn process_coordination_lag(
     time: Res<Time>,
     mut ship_components: Query<
@@ -1267,6 +1295,7 @@ pub fn process_coordination_lag(
     >,
     sessions: Res<Sessions>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
+    mut chatter_writer: MessageWriter<AiChatterEvent>,
 ) {
     let now = time.elapsed_secs();
     for (ship_config, control_sources, mut queue, is_local) in ship_components.iter_mut() {
@@ -1276,7 +1305,23 @@ pub fn process_coordination_lag(
             let action = coordination::route_coordination(msg.sender_origin, target_control);
 
             match action {
-                coordination::DeliverAction::Consume => {}
+                coordination::DeliverAction::Consume => {
+                    // AI→AI: emit viewscreen chatter for the LocalShip only.
+                    if is_local {
+                        let from_label = if msg.sender_label.is_empty() {
+                            "AI".to_string()
+                        } else {
+                            msg.sender_label.clone()
+                        };
+                        let to_label = msg.target.0.clone();
+                        let text = format_coordination_chatter(&msg.payload);
+                        chatter_writer.write(AiChatterEvent {
+                            from_label,
+                            to_label,
+                            text,
+                        });
+                    }
+                }
                 coordination::DeliverAction::Suppress => {}
                 coordination::DeliverAction::Popup => {
                     // Popups require a browser-connected console holder.

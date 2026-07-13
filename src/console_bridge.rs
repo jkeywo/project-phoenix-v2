@@ -44,3 +44,13 @@ pub struct ConsoleStateChanged {
 pub struct LobbyStateChanged {
     pub json: String,
 }
+
+/// Emitted by the coordination lag processor when an AI→AI coordination
+/// message is delivered. Carries pre-formatted labels and text for the
+/// viewscreen chatter widget. Read by `bridge::flush_chatter` (wasm).
+#[derive(Message, Clone, Debug)]
+pub struct AiChatterEvent {
+    pub from_label: String,
+    pub to_label: String,
+    pub text: String,
+}

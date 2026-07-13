@@ -657,6 +657,58 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
 
+    /* ── AI chatter widget (bottom-left) ──────────────────────── */
+    #chatter-container {
+      position: absolute;
+      bottom: 78px; left: 12px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 4px;
+      max-height: 320px;
+      width: 320px;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .chatter-bubble {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px;
+      line-height: 1.4;
+      color: #b8c0c8;
+      background: rgba(10, 14, 20, 0.75);
+      border: 1px solid rgba(95, 216, 232, 0.25);
+      border-radius: 3px;
+      padding: 4px 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0;
+      animation: chatter-fadein 0.2s ease forwards;
+      transition: opacity 0.3s ease;
+    }
+    .chatter-bubble .chatter-from {
+      color: #5fd8e8;
+      font-weight: 600;
+    }
+    .chatter-bubble .chatter-arrow {
+      color: #4a5a6a;
+      margin: 0 4px;
+    }
+    .chatter-bubble .chatter-to {
+      color: #88b8c8;
+    }
+    .chatter-bubble .chatter-text {
+      color: #a0b8c8;
+      margin-left: 6px;
+    }
+    .chatter-bubble.expired {
+      opacity: 0;
+    }
+    @keyframes chatter-fadein {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
     /* ── Debug panel ─────────────────────────────────────────── */
     #debug-toggle-btn {
       width: 100%;
@@ -967,6 +1019,9 @@
           <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
           <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
         </div>
+
+        <!-- AI chatter bubbles (bottom-left) -->
+        <div id="chatter-container"></div>
       </div>
 
       <!-- QR code shown over the canvas during lobby phase (or toggled mid-game) -->
@@ -1402,6 +1457,60 @@
       aiBtn.style.display = noPlayers ? '' : 'none';
     }
   };
+
+  // ── Viewscreen AI chatter widget ────────────────────────────────────────
+  // Receives AiChatterEvent from the Rust bridge and displays text bubbles
+  // in #chatter-container. Each bubble auto-expires after 10 s. Buffer caps
+  // at 10 bubbles — oldest is evicted first.
+
+  const CHATTER_MAX = 10;
+  const CHATTER_TTL_MS = 10_000;
+  let chatterBubbles = [];
+
+  window.__updateChatter = function(json) {
+    let ev;
+    try { ev = JSON.parse(json); } catch (e) { return; }
+    const { from_label, to_label, text } = ev;
+    if (!from_label && !text) return;
+
+    const container = document.getElementById('chatter-container');
+    if (!container) return;
+
+    // Create bubble element
+    const bubble = document.createElement('div');
+    bubble.className = 'chatter-bubble';
+    bubble.innerHTML = '<span class="chatter-from">' + escapeHtml(from_label)
+      + '</span><span class="chatter-arrow">→</span><span class="chatter-to">' + escapeHtml(to_label)
+      + '</span><span class="chatter-text">' + escapeHtml(text) + '</span>';
+
+    container.appendChild(bubble);
+
+    // Track bubbles for expiry and eviction
+    const entry = { el: bubble, timer: null };
+    chatterBubbles.push(entry);
+
+    // Evict oldest if over max
+    while (chatterBubbles.length > CHATTER_MAX) {
+      const old = chatterBubbles.shift();
+      if (old.el.parentNode) old.el.parentNode.removeChild(old.el);
+      if (old.timer) clearTimeout(old.timer);
+    }
+
+    // Schedule auto-removal
+    entry.timer = setTimeout(function() {
+      entry.el.classList.add('expired');
+      setTimeout(function() {
+        if (entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
+      }, 300);
+      const idx = chatterBubbles.indexOf(entry);
+      if (idx !== -1) chatterBubbles.splice(idx, 1);
+    }, CHATTER_TTL_MS);
+  };
+
+  function escapeHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
 
     // ── AI-only launch button click handler ───────────────────────────────
     (function() {
@@ -1914,6 +2023,7 @@ function finishInit() {
   window.set_hud_state_callback = wasmBindings.set_hud_state_callback;
   window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;
   window.set_shake_callback = wasmBindings.set_shake_callback;
+  window.set_chatter_callback = wasmBindings.set_chatter_callback;
   if (typeof set_hud_state_callback === 'function') {
     set_hud_state_callback(window.__updateHud);
   }
@@ -1922,6 +2032,9 @@ function finishInit() {
   }
   if (typeof set_shake_callback === 'function') {
     set_shake_callback(window.__applyShake);
+  }
+  if (typeof set_chatter_callback === 'function') {
+    set_chatter_callback(window.__updateChatter);
   }
 
   // ── HTML console state relay (issue #428) ────────────────────────────────

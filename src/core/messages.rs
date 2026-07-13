@@ -1452,6 +1452,18 @@ pub enum ServerMessage {
         #[serde(default)]
         sender_label: String,
     },
+    /// AI-to-AI coordination chatter displayed on the viewscreen.
+    /// Emitted when an AI-controlled system sends a level-3 coordination
+    /// message to another AI-controlled system. Broadcast to the viewscreen
+    /// only (not forwarded to phone clients).
+    AiChatter {
+        /// Human-readable label of the sending system (e.g. "Shields", "Sensors").
+        from_label: String,
+        /// Human-readable label of the target system (e.g. "Helm", "Weapons").
+        to_label: String,
+        /// Concise message body derived from the original CoordinationPayload.
+        text: String,
+    },
     /// Dirty-tracked per-system blackboard sync (issue #557, Channel 1).
     ///
     /// Emitted only for systems whose blackboard changed since the last send.

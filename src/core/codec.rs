@@ -763,6 +763,14 @@ mod tests {
                 },
             ),
             (
+                ServerMessageDiscriminants::AiChatter,
+                ServerMessage::AiChatter {
+                    from_label: "Shields".into(),
+                    to_label: "Helm".into(),
+                    text: "Fore shield offline (12s)".into(),
+                },
+            ),
+            (
                 ServerMessageDiscriminants::BlackboardUpdate,
                 ServerMessage::BlackboardUpdate {
                     updates: vec![(

@@ -308,6 +308,8 @@ focus_bonus_regen = 5
 focus_penalty_max_hp = 35
 focus_penalty_regen = 1.0
 focus_decay_rate = 10
+focus_focused_damage_multiplier = 0.7
+focus_unfocused_damage_multiplier = 1.25
 
 [shields_console.base]
 max_hp = 140

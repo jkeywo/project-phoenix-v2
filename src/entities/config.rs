@@ -1065,6 +1065,9 @@ pub struct PowerConfigSection {
 /// supplies the underlying shield-system base values (number of facings,
 /// max HP, regen, offline duration) that were previously hardcoded by
 /// `ShieldConfig::default()` at `src/weapons/shield.rs:50-58`.
+///
+/// Damage multiplier fields `focus_focused_damage_multiplier` and
+/// `focus_unfocused_damage_multiplier` default to 1.0 (no change).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShieldsConsoleConfig {
@@ -1083,6 +1086,14 @@ pub struct ShieldsConsoleConfig {
     /// HP per second decay applied to non-focused facings when above reduced max.
     #[serde(default = "default_focus_decay_rate")]
     pub focus_decay_rate: f32,
+    /// Damage multiplier applied to incoming damage on the focused arc.
+    /// 1.0 = no change, 0.7 = 30% reduction.
+    #[serde(default = "default_focus_focused_damage_multiplier")]
+    pub focus_focused_damage_multiplier: f32,
+    /// Damage multiplier applied to incoming damage on non-focused arcs
+    /// (when another arc is focused). 1.0 = no change, 1.25 = 25% increase.
+    #[serde(default = "default_focus_unfocused_damage_multiplier")]
+    pub focus_unfocused_damage_multiplier: f32,
     /// Base shield-system values (number of facings, max HP, regen,
     /// offline duration). When absent the historical hardcoded defaults
     /// from `ShieldConfig::default()` are used.
@@ -1105,6 +1116,12 @@ fn default_focus_penalty_regen() -> f32 {
 fn default_focus_decay_rate() -> f32 {
     10.0
 }
+fn default_focus_focused_damage_multiplier() -> f32 {
+    1.0
+}
+fn default_focus_unfocused_damage_multiplier() -> f32 {
+    1.0
+}
 
 impl Default for ShieldsConsoleConfig {
     fn default() -> Self {
@@ -1114,6 +1131,8 @@ impl Default for ShieldsConsoleConfig {
             focus_penalty_max_hp: default_focus_penalty_max_hp(),
             focus_penalty_regen: default_focus_penalty_regen(),
             focus_decay_rate: default_focus_decay_rate(),
+            focus_focused_damage_multiplier: default_focus_focused_damage_multiplier(),
+            focus_unfocused_damage_multiplier: default_focus_unfocused_damage_multiplier(),
             base: None,
         }
     }

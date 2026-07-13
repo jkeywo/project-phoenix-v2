@@ -589,6 +589,8 @@ pub fn spawn_entity(
             penalty_max_hp: sc.focus_penalty_max_hp,
             penalty_regen: sc.focus_penalty_regen,
             decay_rate: sc.focus_decay_rate,
+            focused_damage_multiplier: sc.focus_focused_damage_multiplier,
+            unfocused_damage_multiplier: sc.focus_unfocused_damage_multiplier,
         };
         entity_commands.insert(shields);
     } else if !config.shield_arcs.is_empty() {

@@ -73,6 +73,9 @@ impl Default for ShieldConfig {
 /// - The other three facings lose `penalty_max_hp` capacity and `penalty_regen` regen.
 /// - Non-focused facings decay HP at `decay_rate` per second when above their
 ///   reduced maximum.
+/// - Incoming damage on the focused facing is scaled by `focused_damage_multiplier`
+///   (e.g. 0.7 = 30% reduction), and on non-focused facings by
+///   `unfocused_damage_multiplier` (e.g. 1.25 = 25% increase).
 #[derive(Clone, Debug)]
 pub struct ShieldFocusConfig {
     /// Extra max HP applied to the focused facing.
@@ -85,6 +88,12 @@ pub struct ShieldFocusConfig {
     pub penalty_regen: f32,
     /// HP per second decay applied to non-focused facings when above reduced max.
     pub decay_rate: f32,
+    /// Damage multiplier applied to incoming damage on the focused arc.
+    /// 1.0 = no change, 0.7 = 30% reduction.
+    pub focused_damage_multiplier: f32,
+    /// Damage multiplier applied to incoming damage on non-focused arcs
+    /// (when another arc is focused). 1.0 = no change, 1.25 = 25% increase.
+    pub unfocused_damage_multiplier: f32,
 }
 
 impl Default for ShieldFocusConfig {
@@ -95,6 +104,8 @@ impl Default for ShieldFocusConfig {
             penalty_max_hp: 25,
             penalty_regen: 1.0,
             decay_rate: 10.0,
+            focused_damage_multiplier: 1.0,
+            unfocused_damage_multiplier: 1.0,
         }
     }
 }
@@ -136,6 +147,9 @@ pub struct ShieldFacing {
     /// Hit-routing priority. Higher value wins when multiple arcs cover the same bearing.
     /// Set at construction from TOML config and never mutated at runtime.
     pub priority: u32,
+    /// Damage multiplier applied to incoming damage on this facing.
+    /// Set by `ShieldSystem::recalculate_focus` based on focus state.
+    pub damage_multiplier: f32,
 }
 
 impl ShieldFacing {
@@ -160,6 +174,7 @@ impl ShieldFacing {
             base_max_hp: max_hp,
             base_regen_per_sec: regen_per_sec,
             priority: 1,
+            damage_multiplier: 1.0,
         }
     }
 
@@ -191,6 +206,7 @@ impl ShieldFacing {
             base_max_hp: max_hp,
             base_regen_per_sec: regen_per_sec,
             priority,
+            damage_multiplier: 1.0,
         }
     }
 
@@ -201,24 +217,27 @@ impl ShieldFacing {
 
     /// Apply `amount` damage to this facing.
     ///
+    /// The incoming `amount` is scaled by `self.damage_multiplier` before
+    /// being subtracted from HP, so focus-based damage reduction/increase
+    /// is applied here.
+    ///
     /// Returns the damage that passed through to the hull:
-    /// - If the facing is offline, all damage passes through.
+    /// - If the facing is offline, all damage passes through (unscaled).
     /// - If the facing absorbs the hit and HP drops to 0, the facing goes offline
     ///   and any overflow damage passes through to the hull.
     pub fn apply_damage(&mut self, amount: i32) -> i32 {
         if !self.is_online() {
-            // Facing is down — all damage passes to hull.
             return amount;
         }
-        if amount <= self.hp {
-            self.hp -= amount;
+        let effective = (amount as f32 * self.damage_multiplier).round().max(0.0) as i32;
+        if effective <= self.hp {
+            self.hp -= effective;
             if self.hp == 0 {
                 self.offline_remaining = self.offline_duration;
             }
-            0 // no hull passthrough
+            0
         } else {
-            // Overflow: shield absorbs what it has, rest bleeds through.
-            let overflow = amount - self.hp;
+            let overflow = effective - self.hp;
             self.hp = 0;
             self.offline_remaining = self.offline_duration;
             overflow
@@ -472,18 +491,20 @@ impl ShieldSystem {
                 facing.max_hp = facing.base_max_hp + fc.bonus_max_hp;
                 facing.regen_per_sec = facing.base_regen_per_sec + fc.bonus_regen;
                 facing.is_focused = true;
+                facing.damage_multiplier = fc.focused_damage_multiplier;
             } else if self.focused_facing.is_some() {
                 // Another arc is focused: penalty on this arc's own baseline.
                 facing.max_hp = (facing.base_max_hp - fc.penalty_max_hp).max(0);
                 facing.regen_per_sec = (facing.base_regen_per_sec - fc.penalty_regen).max(0.0);
                 facing.is_focused = false;
+                facing.damage_multiplier = fc.unfocused_damage_multiplier;
             } else {
                 // No focus: restore this arc's own baseline values.
                 facing.max_hp = facing.base_max_hp;
                 facing.regen_per_sec = facing.base_regen_per_sec;
                 facing.is_focused = false;
+                facing.damage_multiplier = 1.0;
             }
-            // Clamp HP to effective max_hp (but we don't reduce it here — decay does that over time)
         }
     }
 
@@ -1521,5 +1542,126 @@ mod tests {
         );
         let snap = &s.snapshot()[0];
         assert_eq!(snap.priority, 5);
+    }
+
+    // ── Damage multiplier (focus reduction/increase) ───────────────────────────
+
+    #[test]
+    fn default_damage_multiplier_is_one() {
+        let s = ShieldSystem::default();
+        for f in &s.facings {
+            assert!((f.damage_multiplier - 1.0).abs() < 1e-6, "default multiplier must be 1.0");
+        }
+    }
+
+    #[test]
+    fn focused_arc_gets_configured_damage_multiplier() {
+        let mut s = ShieldSystem::default();
+        s.focus_config.focused_damage_multiplier = 0.7;
+        s.set_focused_facing(Some(0));
+        assert!((s.facings[0].damage_multiplier - 0.7).abs() < 1e-6, "focused arc should get damage reduction");
+    }
+
+    #[test]
+    fn non_focused_arcs_get_unfocused_damage_multiplier() {
+        let mut s = ShieldSystem::default();
+        s.focus_config.unfocused_damage_multiplier = 1.25;
+        s.set_focused_facing(Some(0));
+        for i in 1..s.facings.len() {
+            assert!((s.facings[i].damage_multiplier - 1.25).abs() < 1e-6, "non-focused arc should get damage increase");
+        }
+    }
+
+    #[test]
+    fn clearing_focus_resets_damage_multiplier_to_one() {
+        let mut s = ShieldSystem::default();
+        s.focus_config.focused_damage_multiplier = 0.7;
+        s.set_focused_facing(Some(0));
+        s.set_focused_facing(None);
+        for f in &s.facings {
+            assert!((f.damage_multiplier - 1.0).abs() < 1e-6, "clearing focus resets multiplier to 1.0");
+        }
+    }
+
+    #[test]
+    fn apply_damage_scales_by_damage_multiplier() {
+        let mut s = ShieldSystem::default();
+        // Focus arc 0 with 30% reduction.
+        s.focus_config.focused_damage_multiplier = 0.7;
+        s.set_focused_facing(Some(0));
+        // Damage 100 → effective 70 on 100 HP shield → no leak.
+        let leak = s.apply_damage(100, 0.0); // bearing 0 = fore
+        assert_eq!(leak, 0, "all damage absorbed");
+        assert_eq!(s.facings[0].hp, 30, "100 dmg * 0.7 = 70 taken");
+    }
+
+    #[test]
+    fn apply_damage_non_focused_gets_increase_multiplier() {
+        let mut s = ShieldSystem::default();
+        // Focus arc 0 (fore), so arc 1 (port) gets unfocused multiplier.
+        s.focus_config.unfocused_damage_multiplier = 1.5;
+        s.set_focused_facing(Some(0));
+        // Damage 100 to port (bearing -90°) → effective 150 on 100 HP shield.
+        let port_bearing = -std::f32::consts::FRAC_PI_2;
+        let leak = s.apply_damage(100, port_bearing);
+        // Shield takes 150 dmg, has 100 HP → overflow of 50.
+        assert_eq!(leak, 50, "overflow passthrough = 150 - 100");
+        assert_eq!(s.facings[1].hp, 0, "port facing depleted");
+    }
+
+    #[test]
+    fn apply_damage_multiplier_with_no_focus_is_unity() {
+        let mut s = ShieldSystem::default();
+        let leak = s.apply_damage(50, 0.0);
+        assert_eq!(leak, 0);
+        assert_eq!(s.facings[0].hp, 50, "no multiplier change: 50 dmg → 50 taken");
+    }
+
+    #[test]
+    fn from_arcs_per_arc_overrides_preserve_damage_multiplier_across_focus() {
+        let arcs = vec![
+            ArcRuntimeConfig {
+                id: "fore".into(),
+                label: "Fore".into(),
+                center_deg: 0.0,
+                width_deg: 180.0,
+                max_hp: Some(200),
+                regen_per_sec: Some(4.0),
+                offline_duration: None,
+                priority: 1,
+            },
+            ArcRuntimeConfig {
+                id: "aft".into(),
+                label: "Aft".into(),
+                center_deg: 180.0,
+                width_deg: 180.0,
+                max_hp: Some(50),
+                regen_per_sec: Some(1.0),
+                offline_duration: None,
+                priority: 1,
+            },
+        ];
+        let mut s = ShieldSystem::from_arcs(&arcs, &ship_wide());
+        s.focus_config.focused_damage_multiplier = 0.5;
+        s.focus_config.unfocused_damage_multiplier = 2.0;
+
+        // No focus: all at 1.0.
+        assert!((s.facings[0].damage_multiplier - 1.0).abs() < 1e-6);
+        assert!((s.facings[1].damage_multiplier - 1.0).abs() < 1e-6);
+
+        // Focus fore → fore gets 0.5, aft gets 2.0.
+        s.set_focused_facing(Some(0));
+        assert!((s.facings[0].damage_multiplier - 0.5).abs() < 1e-6);
+        assert!((s.facings[1].damage_multiplier - 2.0).abs() < 1e-6);
+
+        // Switch focus to aft → aft gets 0.5, fore gets 2.0.
+        s.set_focused_facing(Some(1));
+        assert!((s.facings[0].damage_multiplier - 2.0).abs() < 1e-6);
+        assert!((s.facings[1].damage_multiplier - 0.5).abs() < 1e-6);
+
+        // Clear focus → all back to 1.0.
+        s.set_focused_facing(None);
+        assert!((s.facings[0].damage_multiplier - 1.0).abs() < 1e-6);
+        assert!((s.facings[1].damage_multiplier - 1.0).abs() < 1e-6);
     }
 }

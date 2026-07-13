@@ -219,6 +219,31 @@ pub fn should_emit(last: f32, current: f32, epsilon: f32) -> bool {
     (current - last).abs() > epsilon
 }
 
+// ── visible_entities ──────────────────────────────────────────────────────────
+
+/// Filter `all` down to the entities within `range` of `center`, measured as
+/// XZ-plane distance (ignores the Y/vertical component, matching the rest of
+/// the AI's ground-plane steering math).
+///
+/// `range <= 0.0` or a non-finite `range` (NaN/infinite) means "unlimited" —
+/// used for rangeless systems that have no radar gating at all. Entities
+/// exactly at the boundary (`distance == range`) are included.
+pub fn visible_entities(center: [f32; 3], range: f32, all: &[AiWorldEntity]) -> Vec<AiWorldEntity> {
+    if range <= 0.0 || !range.is_finite() {
+        return all.to_vec();
+    }
+
+    all.iter()
+        .filter(|e| {
+            let dx = e.position[0] - center[0];
+            let dz = e.position[2] - center[2];
+            let dist = (dx * dx + dz * dz).sqrt();
+            dist <= range
+        })
+        .cloned()
+        .collect()
+}
+
 // ── Collision avoidance helpers ───────────────────────────────────────────────
 
 fn offset_approach_target(self_pos: [f32; 3], target_pos: [f32; 3], min_dist: f32) -> [f32; 3] {
@@ -965,6 +990,98 @@ mod tests {
     #[test]
     fn should_emit_returns_false_when_equal() {
         assert!(!should_emit(0.3, 0.3, 0.0));
+    }
+
+    // ── visible_entities ──────────────────────────────────────────────────
+
+    #[test]
+    fn visible_entities_includes_in_range_entity() {
+        let near = AiWorldEntity {
+            uuid: Uuid::from_u128(1),
+            position: [10.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let result = visible_entities([0.0, 0.0, 0.0], 20.0, std::slice::from_ref(&near));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].uuid, near.uuid);
+    }
+
+    #[test]
+    fn visible_entities_excludes_out_of_range_entity() {
+        let far = AiWorldEntity {
+            uuid: Uuid::from_u128(1),
+            position: [100.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let result = visible_entities([0.0, 0.0, 0.0], 20.0, &[far]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn visible_entities_includes_entity_exactly_at_boundary() {
+        let boundary = AiWorldEntity {
+            uuid: Uuid::from_u128(1),
+            position: [20.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let result = visible_entities([0.0, 0.0, 0.0], 20.0, &[boundary]);
+        assert_eq!(result.len(), 1, "entity exactly at range must be included");
+    }
+
+    #[test]
+    fn visible_entities_ignores_y_component() {
+        // Same XZ position, wildly different Y — should still be in range.
+        let above = AiWorldEntity {
+            uuid: Uuid::from_u128(1),
+            position: [5.0, 500.0, 0.0],
+            ..Default::default()
+        };
+        let result = visible_entities([0.0, 0.0, 0.0], 20.0, &[above]);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn visible_entities_unlimited_when_range_zero() {
+        let far = AiWorldEntity {
+            uuid: Uuid::from_u128(1),
+            position: [10_000.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let result = visible_entities([0.0, 0.0, 0.0], 0.0, &[far]);
+        assert_eq!(result.len(), 1, "range <= 0 must mean unlimited");
+    }
+
+    #[test]
+    fn visible_entities_unlimited_when_range_negative() {
+        let far = AiWorldEntity {
+            uuid: Uuid::from_u128(1),
+            position: [10_000.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let result = visible_entities([0.0, 0.0, 0.0], -5.0, &[far]);
+        assert_eq!(result.len(), 1, "negative range must mean unlimited");
+    }
+
+    #[test]
+    fn visible_entities_unlimited_when_range_nan() {
+        let far = AiWorldEntity {
+            uuid: Uuid::from_u128(1),
+            position: [10_000.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let result = visible_entities([0.0, 0.0, 0.0], f32::NAN, &[far]);
+        assert_eq!(result.len(), 1, "NaN range must mean unlimited");
+    }
+
+    #[test]
+    fn visible_entities_unlimited_when_range_infinite() {
+        let far = AiWorldEntity {
+            uuid: Uuid::from_u128(1),
+            position: [10_000.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let result = visible_entities([0.0, 0.0, 0.0], f32::INFINITY, &[far]);
+        assert_eq!(result.len(), 1, "infinite range must mean unlimited");
     }
 
     #[test]

@@ -532,6 +532,7 @@ fn operate_helm_ai(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     entity_fallback_q: Query<(
         &crate::entity_spawner::EntityUuid,
         &Transform,
@@ -644,16 +645,44 @@ fn operate_helm_ai(
             continue;
         }
 
-        // ── Build WorldView (exclude self) ───────────────────────────────────
+        // ── Build WorldView (exclude self, gate by radar range) ───────────────
         let self_uuid_str = entity_uuid.map(|u| u.0.as_str()).unwrap_or("");
-        let entities: Vec<crate::ai::AiWorldEntity> = snapshot_entities
+        let self_filtered: Vec<crate::ai::AiWorldEntity> = snapshot_entities
             .iter()
             .filter(|e| e.uuid.to_string() != self_uuid_str)
             .cloned()
             .collect();
 
+        // Damage-scaled helm radar range (issue #674). Prefer the live,
+        // damage-scaled value from this ship's own Helm blackboard entry
+        // (populated only for the player's ship today, see #674 notes);
+        // fall back to static config for NPC ships (no Helm blackboard
+        // entry) and for the player before the blackboard is first published.
+        let blackboard_radar_range =
+            match blackboards.0.get(&crate::system_registry::helm_system_id()) {
+                Some(crate::messages::SystemBlackboard::Helm(bb)) if bb.radar_range > 0.0 => {
+                    Some(bb.radar_range)
+                }
+                _ => None,
+            };
+        let helm_radar_range = blackboard_radar_range.unwrap_or_else(|| {
+            if is_local {
+                ship_client_config
+                    .as_ref()
+                    .map(|c| c.0.helm_radar_range)
+                    .unwrap_or(0.0)
+            } else {
+                helm_section
+                    .map(|hc| hc.0.effective_radar_range())
+                    .unwrap_or(0.0)
+            }
+        });
+
+        let entity_pos = [physics.x, 0.0, physics.z];
+        let entities = crate::ai::visible_entities(entity_pos, helm_radar_range, &self_filtered);
+
         let world_view = crate::ai::WorldView {
-            entity_pos: [physics.x, 0.0, physics.z],
+            entity_pos,
             entity_yaw: physics.yaw,
             anchors: anchors.clone(),
             entities,
@@ -2954,6 +2983,73 @@ station = "helm"
         assert!(
             last.thrust > 0.0,
             "AI helm must pursue named Destroy objective target; got {last:?}"
+        );
+    }
+
+    // ── #674: helm radar gating ─────────────────────────────────────────────
+
+    #[test]
+    fn helm_ai_ignores_hostile_beyond_radar_range() {
+        let mut app = test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        // Hostile is 100 units away.
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.name_to_uuid.insert("wave_1".into(), target_uuid);
+        app.insert_resource(runtime);
+        // Radar range (10.0) is far shorter than the hostile's distance (100.0).
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 10.0,
+                ..Default::default()
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        let last = get_last_helm_input(&mut app);
+        assert_eq!(
+            last,
+            LastHelmInput::default(),
+            "hostile beyond helm radar range must not be perceived; pursuit should fall through to idle, got {last:?}"
+        );
+    }
+
+    #[test]
+    fn helm_ai_pursues_hostile_within_radar_range() {
+        let mut app = test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        // Hostile is 100 units away.
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.name_to_uuid.insert("wave_1".into(), target_uuid);
+        app.insert_resource(runtime);
+        // Radar range (500.0) comfortably covers the hostile's distance (100.0).
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 500.0,
+                ..Default::default()
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        let last = get_last_helm_input(&mut app);
+        assert!(
+            last.thrust > 0.0,
+            "hostile within helm radar range must still be pursued as before; got {last:?}"
         );
     }
 

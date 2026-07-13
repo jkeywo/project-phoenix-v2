@@ -2055,6 +2055,7 @@ fn spawn_game_start_entities(
                 .insert(initial_control_sources)
                 .insert(initial_active_ratings)
                 .insert(crate::ship_plugin::CoordinationQueue::default())
+                .insert(crate::ship_plugin::PendingArcBearingRequest::default())
                 .insert(crate::messages::AdmittedCommands::default())
                 .insert(ShipPhysicsComponent {
                     x: pos.x,
@@ -2066,6 +2067,7 @@ fn spawn_game_start_entities(
                 .insert(crate::weapons_plugin::WeaponsTarget::default())
                 .insert(crate::weapons_plugin::ActiveBeam::default())
                 .insert(crate::weapons_plugin::PhaserCooldown::default())
+                .insert(crate::weapons_plugin::WeaponsArcRequestState::default())
                 .insert(crate::sensors_plugin::SensorsTarget::default())
                 .insert(crate::ship_state::ShipRedAlert::default())
                 .insert(crate::ship_state::ShipViewMode::default())

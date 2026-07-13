@@ -1168,6 +1168,11 @@ pub enum CoordinationPayload {
     /// AI Tactical consumes it silently, human Tactical gets a popup
     /// (issue #676 — replaces the old direct `SensorsTargetSuggestion`).
     TargetDesignation { uuid: String, label: String },
+    /// Weapons asks Helm to yaw so the phaser firing arc bears on `uuid`.
+    /// AI Helm folds this into its steering; human Helm gets a popup
+    /// ("Tactical: come about, bring phasers to bear") via `route_coordination`
+    /// (issue #677).
+    ArcBearingRequest { uuid: String, label: String },
 }
 
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a

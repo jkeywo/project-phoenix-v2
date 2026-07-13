@@ -286,6 +286,11 @@ pub fn spawn_entity(
         // `CoordinationEnqueue.source_entity`.
         entity_commands.insert(crate::ship::shields::ShieldsCoordinationState::default());
         entity_commands.insert(crate::ship::sensors::SensorsFrequencyState::default());
+        // Weapons->Helm arc-bearing request state (issue #677): per-ship
+        // debounce for the channel-3 request, and the pending bearing Helm
+        // AI folds into its steering once the request is consumed.
+        entity_commands.insert(crate::weapons_plugin::WeaponsArcRequestState::default());
+        entity_commands.insert(crate::ship_plugin::PendingArcBearingRequest::default());
         entity_commands.insert(crate::power_plugin::ShipPowerSystem(
             crate::modifiers::power_system::PowerSystem::default(),
         ));

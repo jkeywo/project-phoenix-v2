@@ -1687,6 +1687,9 @@
       } else if (payload.type === 'TargetDesignation') {
         title = 'Sensors designates: ' + (payload.data?.label || payload.label || '?');
         body = '';
+      } else if (payload.type === 'ArcBearingRequest') {
+        title = 'Tactical: come about, bring phasers to bear';
+        body = payload.data?.label || payload.label || '';
       } else {
         title = payload.type || 'Advisory';
         body = '';

@@ -5,14 +5,14 @@ use crate::ai_plugin::AiTokenRegistry;
 use crate::entity_spawner::{EntitySystemHull, FactionComponent};
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    AdmittedCommands, BlasterBankState, ClientMessage, GamePhase, InterSystemMsg,
-    InterSystemPayload, InterSystemQueue, ModifierSlot, PhaserBank, PhaserBankClientConfig,
-    PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage, StationId,
-    SystemBlackboard, SystemControlPayload, SystemId, TorpedoTubeClientConfig, TorpedoTubeState,
-    WeaponsBlackboard,
+    AdmittedCommands, BlasterBankState, ClientMessage, CoordinationPayload, GamePhase,
+    InterSystemMsg, InterSystemPayload, InterSystemQueue, ModifierSlot, PhaserBank,
+    PhaserBankClientConfig, PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage,
+    StationId, SystemBlackboard, SystemControlPayload, SystemId, TorpedoTubeClientConfig,
+    TorpedoTubeState, WeaponsBlackboard,
 };
 use crate::model_rig::ModelMarkers;
-use crate::ship_plugin::ShipSystemControlSources;
+use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
 use crate::torpedo::{TorpedoConfig, TorpedoSystem};
@@ -284,6 +284,7 @@ impl Plugin for WeaponsPlugin {
                 TorpedoConfig::default(),
             )))
             .add_message::<AsteroidDestroyedVfx>()
+            .add_message::<CoordinationEnqueue>()
             .add_observer(on_beam_started)
             .add_observer(on_beam_ended)
             .add_systems(
@@ -292,6 +293,7 @@ impl Plugin for WeaponsPlugin {
                     handle_set_target.in_set(crate::sim_sets::SimSet::Input),
                     handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
                     tick_phaser_auto_fire.in_set(crate::sim_sets::SimSet::Input),
+                    tick_weapons_arc_request.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
                     handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Input),
@@ -1004,6 +1006,141 @@ fn tick_phaser_auto_fire(
             bank: bank_id,
             target_uuid,
             source_entity: ship_entity,
+        });
+    }
+}
+
+/// Tracks the last target for which Weapons asked Helm to bring the phaser
+/// arc to bear, so the channel-3 request only fires on a new/changed arc
+/// miss rather than every tick (issue #677).
+#[derive(Component, Default, Clone)]
+pub struct WeaponsArcRequestState {
+    pub last_notified_target: Option<String>,
+}
+
+/// Emit a channel-3 `ArcBearingRequest` coordination message to Helm whenever
+/// the current weapons target is within at least one bank's range but
+/// outside every bank's firing arc.
+///
+/// Iterates every ship (player + NPC), mirroring `tick_sensors_frequency_hint`.
+/// Debounced via [`WeaponsArcRequestState`]: only fires when the arc-missed
+/// target changes (including transitioning from "no miss" to "miss" or back),
+/// not on every tick the same miss persists.
+fn tick_weapons_arc_request(
+    mut ship_q: Query<
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &ShipPhysics,
+            &crate::simulation::WeaponsTarget,
+            Option<&PhaserCombatConfigResource>,
+            Option<&crate::modifiers::ShipModifiers>,
+            &mut WeaponsArcRequestState,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    entity_name_q: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::entities::spawner::EntityName,
+    )>,
+    mut writer: MessageWriter<CoordinationEnqueue>,
+) {
+    use crate::entity_config::PhaserCombatConfig;
+
+    for (
+        ship_entity,
+        control_sources,
+        physics,
+        weapons_target,
+        combat_config_opt,
+        modifiers_opt,
+        mut state,
+    ) in ship_q.iter_mut()
+    {
+        let Some(target_uuid) = weapons_target.0.clone() else {
+            state.last_notified_target = None;
+            continue;
+        };
+        let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+            state.last_notified_target = None;
+            continue;
+        };
+
+        let combat_config_default = PhaserCombatConfigResource::default();
+        let combat_config: &PhaserCombatConfigResource =
+            combat_config_opt.unwrap_or(&combat_config_default);
+        // No banks configured means no meaningful "firing arc" concept —
+        // nothing to request Helm to bear on.
+        if combat_config.0.banks.is_empty() {
+            state.last_notified_target = None;
+            continue;
+        }
+        let modifiers_default = crate::modifiers::ShipModifiers::new();
+        let modifiers: &crate::modifiers::ShipModifiers =
+            modifiers_opt.unwrap_or(&modifiers_default);
+
+        // A target is a valid arc-request candidate when it's within range of
+        // at least one bank but outside every bank's arc — i.e. Weapons could
+        // fire if Helm brought the ship around, but can't right now.
+        let any_in_range_and_arc = combat_config.0.banks.iter().any(|b| {
+            let bank_base_range = if b.beam_range > 0.0 {
+                b.beam_range
+            } else {
+                PhaserCombatConfig::DEFAULT_PHASER_RANGE
+            };
+            let effective_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
+            let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
+                <= effective_range * effective_range;
+            let (rx, ry) =
+                crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
+            let arc_ok = crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
+            range_ok && arc_ok
+        });
+        let any_in_range = combat_config.0.banks.iter().any(|b| {
+            let bank_base_range = if b.beam_range > 0.0 {
+                b.beam_range
+            } else {
+                PhaserCombatConfig::DEFAULT_PHASER_RANGE
+            };
+            let effective_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
+            (tx - physics.x).powi(2) + (tz - physics.z).powi(2) <= effective_range * effective_range
+        });
+
+        let arc_missed = any_in_range && !any_in_range_and_arc;
+        if !arc_missed {
+            state.last_notified_target = None;
+            continue;
+        }
+
+        if state.last_notified_target.as_deref() == Some(target_uuid.as_str()) {
+            // Already notified Helm about this exact arc miss; debounced.
+            continue;
+        }
+        state.last_notified_target = Some(target_uuid.clone());
+
+        let label = entity_name_q
+            .iter()
+            .find_map(|(u, n)| (u.0 == target_uuid).then(|| n.0.clone()))
+            .unwrap_or_else(|| target_uuid.clone());
+
+        // No coarse weapons SystemId exists; the fore phaser bank is used as
+        // the representative sender for control-source resolution, mirroring
+        // `emit_shields_coordination`'s "first arc as representative sender".
+        let sender_origin = control_sources
+            .0
+            .source_for(&crate::system_registry::phaser_fore_system_id());
+
+        writer.write(CoordinationEnqueue {
+            source_entity: ship_entity,
+            sender_origin,
+            target: crate::system_registry::helm_system_id(),
+            payload: CoordinationPayload::ArcBearingRequest {
+                uuid: target_uuid,
+                label,
+            },
+            sender_label: "Weapons".to_string(),
         });
     }
 }
@@ -4256,6 +4393,18 @@ mod tests {
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
+    #[derive(Resource, Default)]
+    struct ArcRequestLog(Vec<CoordinationEnqueue>);
+
+    fn collect_arc_requests(
+        mut reader: MessageReader<CoordinationEnqueue>,
+        mut log: ResMut<ArcRequestLog>,
+    ) {
+        for m in reader.read() {
+            log.0.push(m.clone());
+        }
+    }
+
     /// Build a minimal `ShipConfigComponent` with a tactical station that has an
     /// "Assisted" rating containing `torpedo_auto_fire` in its ai_tuning table.
     ///
@@ -4360,6 +4509,7 @@ station = "tactical"
         )))
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
+        .init_resource::<ArcRequestLog>()
         .init_resource::<crate::world::server::WorldContentRuntime>()
         .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
         .add_plugins(WeaponsPlugin)
@@ -4405,7 +4555,7 @@ station = "tactical"
         // now lives on `ShipShieldsPlugin`. Include it so tests that spawn NPCs
         // with `ShipShields` observe regen on every frame.
         .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
-        .add_systems(PostUpdate, collect);
+        .add_systems(PostUpdate, (collect, collect_arc_requests));
         // Spawn the Ship entity with config/control-source components so all
         // weapons systems that use `Query<..., With<Ship>>.single()` have a
         // valid entity to operate on, matching what `spawn_game_start_entities`
@@ -7445,6 +7595,181 @@ station = "tactical"
             beam.bank.as_deref(),
             Some("fore"),
             "NPC should fire the in-arc bank selected from its own PhaserCombatConfigResource"
+        );
+    }
+
+    /// `tick_weapons_arc_request` (issue #677): a target within a bank's
+    /// range but outside its firing arc should enqueue a channel-3
+    /// `ArcBearingRequest` addressed to Helm.
+    #[test]
+    fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+        let mut app = test_app();
+        let target_uuid = "bb000000-0000-0000-0000-000000000001";
+
+        let ship_entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                ShipSystemControlSources::default(),
+                ShipPhysics::default(),
+                WeaponsTarget(Some(target_uuid.to_string())),
+                WeaponsArcRequestState::default(),
+                PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                    banks: vec![crate::entity_config::PhaserBankConfig {
+                        id: "fore".into(),
+                        facing_deg: 0.0,
+                        fire_arc_deg: 30.0,
+                        auto_arc_deg: 30.0,
+                        beam_range: 50.0,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 3.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    }],
+                }),
+            ))
+            .id();
+
+        // Target is directly to starboard (x=20, z=0): in range (distance 20 <
+        // beam_range 50) but 90 degrees off the fore bank's 30-degree arc.
+        app.world_mut().spawn((
+            EntityUuid(target_uuid.to_string()),
+            EntitySystemHull(SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                50.0,
+            )])),
+            Transform::from_xyz(20.0, 0.0, 0.0),
+        ));
+
+        app.update();
+
+        let log = app.world().resource::<ArcRequestLog>();
+        let request = log
+            .0
+            .iter()
+            .find(|e| matches!(&e.payload, CoordinationPayload::ArcBearingRequest { .. }))
+            .expect("expected an ArcBearingRequest CoordinationEnqueue event");
+        assert_eq!(request.source_entity, ship_entity);
+        assert_eq!(request.target, crate::system_registry::helm_system_id());
+        match &request.payload {
+            CoordinationPayload::ArcBearingRequest { uuid, .. } => {
+                assert_eq!(uuid, target_uuid);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// A target within the firing arc must not trigger an arc-bearing
+    /// request — Weapons can already fire without Helm's help.
+    #[test]
+    fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+        let mut app = test_app();
+        let target_uuid = "bb000000-0000-0000-0000-000000000002";
+
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            ShipSystemControlSources::default(),
+            ShipPhysics::default(),
+            WeaponsTarget(Some(target_uuid.to_string())),
+            WeaponsArcRequestState::default(),
+            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                banks: vec![crate::entity_config::PhaserBankConfig {
+                    id: "fore".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 30.0,
+                    auto_arc_deg: 30.0,
+                    beam_range: 50.0,
+                    beam_damage_per_sec: 5.0,
+                    beam_duration_secs: 3.0,
+                    cooldown_secs: 6.0,
+                    beam_color: vec![],
+                    shield_pierce: None,
+                    marker: None,
+                }],
+            }),
+        ));
+
+        // Directly ahead (forward = -Z at yaw 0): in range and in arc.
+        app.world_mut().spawn((
+            EntityUuid(target_uuid.to_string()),
+            EntitySystemHull(SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                50.0,
+            )])),
+            Transform::from_xyz(0.0, 0.0, -20.0),
+        ));
+
+        app.update();
+
+        let log = app.world().resource::<ArcRequestLog>();
+        assert!(
+            !log.0
+                .iter()
+                .any(|e| matches!(&e.payload, CoordinationPayload::ArcBearingRequest { .. })),
+            "an in-arc target must not trigger an ArcBearingRequest"
+        );
+    }
+
+    /// The request is debounced: an unchanged arc miss on the same target
+    /// must not re-enqueue every tick.
+    #[test]
+    fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+        let mut app = test_app();
+        let target_uuid = "bb000000-0000-0000-0000-000000000003";
+
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            ShipSystemControlSources::default(),
+            ShipPhysics::default(),
+            WeaponsTarget(Some(target_uuid.to_string())),
+            WeaponsArcRequestState::default(),
+            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                banks: vec![crate::entity_config::PhaserBankConfig {
+                    id: "fore".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 30.0,
+                    auto_arc_deg: 30.0,
+                    beam_range: 50.0,
+                    beam_damage_per_sec: 5.0,
+                    beam_duration_secs: 3.0,
+                    cooldown_secs: 6.0,
+                    beam_color: vec![],
+                    shield_pierce: None,
+                    marker: None,
+                }],
+            }),
+        ));
+
+        app.world_mut().spawn((
+            EntityUuid(target_uuid.to_string()),
+            EntitySystemHull(SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                50.0,
+            )])),
+            Transform::from_xyz(20.0, 0.0, 0.0),
+        ));
+
+        app.update();
+        app.update();
+        app.update();
+
+        let log = app.world().resource::<ArcRequestLog>();
+        let count = log
+            .0
+            .iter()
+            .filter(|e| matches!(&e.payload, CoordinationPayload::ArcBearingRequest { .. }))
+            .count();
+        assert_eq!(
+            count, 1,
+            "an unchanged arc miss on the same target must only enqueue once, not every tick"
         );
     }
 

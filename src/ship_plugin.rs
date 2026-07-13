@@ -60,6 +60,14 @@ pub struct ActiveStationRatings(pub HashMap<StationId, String>);
 #[derive(Component, Clone, Debug, Default)]
 pub struct CoordinationQueue(pub CoordinationLagQueue);
 
+/// Pending Weapons->Helm arc-bearing request, delivered via the channel-3
+/// coordination bus (issue #677). Set by `process_coordination_lag` when a
+/// `CoordinationPayload::ArcBearingRequest` is consumed by an AI-controlled
+/// Helm; read (and cleared once the requested entity is no longer visible)
+/// by `operate_helm_ai` to bias steering toward the requested bearing.
+#[derive(Component, Clone, Debug, Default)]
+pub struct PendingArcBearingRequest(pub Option<uuid::Uuid>);
+
 /// Newtype resource used by the WASM bridge to pass a custom `ShipConfig`
 /// before the ship entity is spawned.  Consumed during ship spawn and then
 /// removed from the world.
@@ -566,6 +574,8 @@ fn operate_helm_ai(
         Has<crate::server_app::LocalShip>,
         Option<&mut ShipImpulse>,
         Option<&ImpulseConfigResource>,
+        Option<&mut PendingArcBearingRequest>,
+        Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
     )>,
 ) {
     let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
@@ -626,6 +636,8 @@ fn operate_helm_ai(
         is_local,
         impulse_comp,
         impulse_cfg,
+        mut pending_bearing,
+        combat_config_opt,
     ) in ships.iter_mut()
     {
         let policy = helm_control_policy(sources);
@@ -702,7 +714,7 @@ fn operate_helm_ai(
             ..crate::ai::WorldView::default()
         };
 
-        let (thrust, steering) = crate::ai::operate_helm(
+        let (thrust, mut steering) = crate::ai::operate_helm(
             &mut ai_memory.0,
             &world_view,
             &scored,
@@ -719,6 +731,53 @@ fn operate_helm_ai(
                 .map(|r| &r.0)
                 .unwrap_or(&crate::faction::FactionRegistry::default()),
         );
+
+        // ── Weapons->Helm arc-bearing request (issue #677) ────────────────────
+        // Bias steering to face the requested target so the phaser firing arc
+        // can bear on it, without disturbing the thrust/range-holding decision
+        // `operate_helm` already made. Cleared once the requested entity is no
+        // longer visible (destroyed or out of radar range), OR once the ship's
+        // current facing already brings some bank's arc onto the target — the
+        // same `in_arc` check Weapons uses to decide whether to ask at all —
+        // so the bias never persists after the request has been satisfied or
+        // outlives the situation that created it.
+        if let Some(pending) = pending_bearing.as_deref_mut() {
+            if let Some(bearing_uuid) = pending.0 {
+                match world_view.entities.iter().find(|e| e.uuid == bearing_uuid) {
+                    Some(target_entity) => {
+                        let arc_satisfied = combat_config_opt.is_some_and(|cfg| {
+                            cfg.0.banks.iter().any(|b| {
+                                let (rx, ry) = crate::weapons::phaser::ship_local(
+                                    target_entity.position[0],
+                                    target_entity.position[2],
+                                    physics.x,
+                                    physics.z,
+                                    physics.yaw,
+                                );
+                                crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg)
+                            })
+                        });
+
+                        if arc_satisfied {
+                            pending.0 = None;
+                        } else {
+                            let dx = target_entity.position[0] - world_view.entity_pos[0];
+                            let dz = target_entity.position[2] - world_view.entity_pos[2];
+                            let dist = (dx * dx + dz * dz).sqrt();
+                            if dist > 1.0 {
+                                steering = crate::ai::steer_toward(
+                                    physics.yaw,
+                                    [dx / dist, dz / dist],
+                                    crate::ai::PATROL_DEADBAND_RAD,
+                                    crate::ai::PATROL_FULL_STEER_RAD,
+                                );
+                            }
+                        }
+                    }
+                    None => pending.0 = None,
+                }
+            }
+        }
 
         // ── Compute lateral thrust for obstacle avoidance (AI only) ──────────
         let lateral = crate::ai::operate_lateral_thrust(
@@ -1427,6 +1486,9 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
         CoordinationPayload::TargetDesignation { label, .. } => {
             format!("Designating target: {label}")
         }
+        CoordinationPayload::ArcBearingRequest { label, .. } => {
+            format!("Come about, bring phasers to bear on {label}")
+        }
     }
 }
 
@@ -1437,6 +1499,7 @@ pub fn process_coordination_lag(
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &mut CoordinationQueue,
+            Option<&mut PendingArcBearingRequest>,
             Has<LocalShip>,
         ),
         With<crate::server_app::Ship>,
@@ -1446,7 +1509,9 @@ pub fn process_coordination_lag(
     mut chatter_writer: MessageWriter<AiChatterEvent>,
 ) {
     let now = time.elapsed_secs();
-    for (ship_config, control_sources, mut queue, is_local) in ship_components.iter_mut() {
+    for (ship_config, control_sources, mut queue, mut pending_bearing, is_local) in
+        ship_components.iter_mut()
+    {
         let due = queue.0.due_messages(now);
         for msg in due {
             // Resolve the target through the full policy (which honours
@@ -1463,6 +1528,17 @@ pub fn process_coordination_lag(
 
             match action {
                 coordination::DeliverAction::Consume => {
+                    // AI Helm folds a consumed arc-bearing request into its
+                    // steering (issue #677) rather than only chattering about it.
+                    if target_policy.operate_ai
+                        && msg.target == crate::system_registry::helm_system_id()
+                    {
+                        if let CoordinationPayload::ArcBearingRequest { uuid, .. } = &msg.payload {
+                            if let Some(pending) = pending_bearing.as_deref_mut() {
+                                pending.0 = uuid::Uuid::parse_str(uuid).ok();
+                            }
+                        }
+                    }
                     // AI→AI: emit viewscreen chatter for the LocalShip only.
                     if is_local {
                         let from_label = if msg.sender_label.is_empty() {
@@ -3169,6 +3245,164 @@ station = "helm"
         assert!(
             last.thrust > 0.0,
             "hostile within helm radar range must still be pursued as before; got {last:?}"
+        );
+    }
+
+    // ── #677: Weapons->Helm arc-bearing request ──────────────────────────────
+
+    #[test]
+    fn helm_ai_folds_pending_arc_bearing_request_into_steering() {
+        let mut app = test_app();
+        // Destroy target directly ahead and far away, so the baseline
+        // pursuit steering (before any arc-bearing bias) is ~0.
+        let destroy_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(0.0, 0.0, -1000.0),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
+        app.insert_resource(runtime);
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 5000.0,
+                ..Default::default()
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        // A separate hostile well off to starboard is the Weapons arc-bearing
+        // request target — distinct from the Destroy pursuit target, so any
+        // steering bias can only be attributed to the pending request.
+        let bearing_uuid = uuid::Uuid::new_v4();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityName("Bearing Contact".into()),
+            Transform::from_xyz(200.0, 0.0, -1.0),
+        ));
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(PendingArcBearingRequest(Some(bearing_uuid)));
+
+        tick(&mut app);
+
+        let last = get_last_helm_input(&mut app);
+        assert!(
+            last.thrust > 0.0,
+            "pending arc-bearing request must not disturb thrust/range-holding; got {last:?}"
+        );
+        assert!(
+            last.steering.abs() > 0.01,
+            "pending arc-bearing request must bias steering toward the requested bearing; got {last:?}"
+        );
+    }
+
+    #[test]
+    fn helm_ai_clears_arc_bearing_request_once_facing_already_satisfies_the_arc() {
+        let mut app = test_app();
+        let destroy_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(0.0, 0.0, -1000.0),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
+        app.insert_resource(runtime);
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 5000.0,
+                ..Default::default()
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        // Bearing contact is directly ahead of the ship's starting facing
+        // (yaw=0, forward=-Z) — i.e. the ship is already oriented such that a
+        // wide-arc fore bank already bears on it.
+        let bearing_uuid = uuid::Uuid::new_v4();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityName("Bearing Contact".into()),
+            Transform::from_xyz(0.0, 0.0, -200.0),
+        ));
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert((
+            PendingArcBearingRequest(Some(bearing_uuid)),
+            crate::weapons_plugin::PhaserCombatConfigResource(
+                crate::entity_config::PhaserCombatConfig {
+                    banks: vec![crate::entity_config::PhaserBankConfig {
+                        id: "fore".into(),
+                        facing_deg: 0.0,
+                        fire_arc_deg: 30.0,
+                        auto_arc_deg: 30.0,
+                        beam_range: 50.0,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 3.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    }],
+                },
+            ),
+        ));
+
+        tick(&mut app);
+
+        let pending = app
+            .world()
+            .get::<PendingArcBearingRequest>(ship)
+            .expect("ship must carry PendingArcBearingRequest");
+        assert_eq!(
+            pending.0, None,
+            "a request must clear once the ship's own facing already brings a bank's arc onto the target, \
+             not persist indefinitely after being satisfied"
+        );
+    }
+
+    #[test]
+    fn helm_ai_clears_arc_bearing_request_when_target_not_visible() {
+        let mut app = test_app();
+        let destroy_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(0.0, 0.0, -1000.0),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
+        app.insert_resource(runtime);
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 5000.0,
+                ..Default::default()
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        // Pending bearing references an entity that was never spawned — it
+        // cannot be visible in the world view.
+        let stale_uuid = uuid::Uuid::new_v4();
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(PendingArcBearingRequest(Some(stale_uuid)));
+
+        tick(&mut app);
+
+        let pending = app
+            .world()
+            .get::<PendingArcBearingRequest>(ship)
+            .expect("ship must carry PendingArcBearingRequest");
+        assert_eq!(
+            pending.0, None,
+            "a pending request for a no-longer-visible target must be cleared, not stuck forever"
         );
     }
 

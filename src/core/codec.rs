@@ -949,6 +949,33 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
     }
 
+    /// `CoordinationPayload::ArcBearingRequest` round-trip, embedded in both
+    /// directions of the channel-3 bus (issue #677 — Weapons asks Helm to
+    /// bring the phaser firing arc to bear).
+    #[test]
+    fn arc_bearing_request_coordination_payload_round_trips() {
+        let send_msg = ClientMessage::SendCoordination {
+            target: crate::system_registry::helm_system_id(),
+            payload: CoordinationPayload::ArcBearingRequest {
+                uuid: "hostile-7".into(),
+                label: "Raider".into(),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, send_msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+
+        let popup_msg = ServerMessage::CoordinationPopup {
+            target: crate::system_registry::helm_system_id(),
+            payload: CoordinationPayload::ArcBearingRequest {
+                uuid: "hostile-7".into(),
+                label: "Raider".into(),
+            },
+            sender_label: "Weapons".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, popup_msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    }
+
     /// BlasterFired server message round-trip (issue #631, extended #638).
     #[test]
     fn blaster_fired_server_message_round_trips() {

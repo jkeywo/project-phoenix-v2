@@ -123,6 +123,8 @@ pub struct ImpulseConfigResource {
     pub charge_duration: f32,
     pub speed_multiplier: f32,
     pub acceleration_multiplier: f32,
+    pub engage_distance: f32,
+    pub cancel_distance: f32,
 }
 
 impl Default for ImpulseConfigResource {
@@ -131,6 +133,8 @@ impl Default for ImpulseConfigResource {
             charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
             speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
             acceleration_multiplier: crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER,
+            engage_distance: 200.0,
+            cancel_distance: 40.0,
         }
     }
 }
@@ -534,6 +538,8 @@ fn operate_helm_ai(
         Option<&crate::entities::spawner::HelmConsoleSection>,
         Option<&crate::entities::spawner::BehaviourSection>,
         Has<crate::server_app::LocalShip>,
+        Option<&mut ShipImpulse>,
+        Option<&ImpulseConfigResource>,
     )>,
 ) {
     let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
@@ -592,6 +598,8 @@ fn operate_helm_ai(
         helm_section,
         behaviour_section,
         is_local,
+        impulse_comp,
+        impulse_cfg,
     ) in ships.iter_mut()
     {
         let policy = helm_control_policy(sources);
@@ -686,6 +694,51 @@ fn operate_helm_ai(
         physics.yaw = result.yaw;
         physics.forward_speed = result.forward_speed;
 
+        // ── AI Impulse decision ──────────────────────────────────────────────
+        if let (Some(mut impulse), Some(cfg)) = (impulse_comp, impulse_cfg) {
+            let target_pos = resolve_helm_target_position(
+                &scored,
+                &world_view,
+                &anchors,
+                &ai_memory.0,
+            );
+            if let Some(tp) = target_pos {
+                // Find the matching doctrine to check use_impulse flag.
+                let top_obj = scored
+                    .iter()
+                    .find(|o| o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm));
+                let use_impulse = top_obj
+                    .and_then(|obj| {
+                        behaviour_section
+                            .and_then(|b| b.0.doctrine.iter().find(|d| d.id == obj.id))
+                    })
+                    .map(|d| d.effective_use_impulse())
+                    .unwrap_or(false);
+                if use_impulse {
+                    let decision = crate::ai::decide_impulse(
+                        &crate::ai::ImpulseDecisionInput {
+                            pos: [physics.x, physics.z],
+                            yaw: physics.yaw,
+                            target_pos: tp,
+                            phase: impulse.0.phase,
+                            engage_distance: cfg.engage_distance,
+                            cancel_distance: cfg.cancel_distance,
+                            angle_tolerance: crate::ai::IMPULSE_ANGLE_TOLERANCE_RAD,
+                        },
+                    );
+                    match decision {
+                        crate::ai::ImpulseDecision::Engage => {
+                            impulse.0.start_charge();
+                        }
+                        crate::ai::ImpulseDecision::Cancel => {
+                            impulse.0.cancel_charge();
+                        }
+                        crate::ai::ImpulseDecision::NoChange => {}
+                    }
+                }
+            }
+        }
+
         // For the player ship: also write LastHelmInput so process_helm_inputs
         // sees the AI-driven intent (though it will re-apply physics anyway).
         if is_local {
@@ -693,6 +746,37 @@ fn operate_helm_ai(
                 *li = LastHelmInput { thrust, steering };
             }
         }
+    }
+}
+
+/// Resolve the target position from the highest-scored Helm objective.
+fn resolve_helm_target_position(
+    scored: &[crate::messages::ScoredObjective],
+    world_view: &crate::ai::WorldView,
+    anchors: &std::collections::HashMap<String, [f32; 3]>,
+    memory: &crate::ai::AiMemory,
+) -> Option<[f32; 3]> {
+    use crate::messages::{AiDirective, SystemAffinity};
+    let top = scored
+        .iter()
+        .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm))?;
+    match &top.directive {
+        AiDirective::Reach { anchor } => anchors.get(anchor.as_str()).copied(),
+        AiDirective::Destroy { target } => {
+            let uuid = uuid::Uuid::parse_str(target).ok()?;
+            world_view
+                .entities
+                .iter()
+                .find(|e| e.uuid == uuid)
+                .map(|e| e.position)
+        }
+        AiDirective::Patrol {
+            anchors: waypoints, ..
+        } => {
+            let idx = memory.waypoint_index;
+            waypoints.get(idx).and_then(|wp| anchors.get(wp.as_str())).copied()
+        }
+        _ => None,
     }
 }
 
@@ -1934,6 +2018,8 @@ mod tests {
                 charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
                 speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 5.0,
+                engage_distance: 200.0,
+                cancel_distance: 40.0,
             });
         start_game_with_helm_and_science(&mut app);
 
@@ -1989,6 +2075,8 @@ mod tests {
                 charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
                 speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 5.0,
+                engage_distance: 200.0,
+                cancel_distance: 40.0,
             });
         start_game_with_helm_and_science(&mut app);
 
@@ -2031,6 +2119,8 @@ mod tests {
                 charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
                 speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 0.0,
+                engage_distance: 200.0,
+                cancel_distance: 40.0,
             });
         start_game_with_helm_and_science(&mut app);
 

@@ -3,6 +3,7 @@ pub mod faction;
 pub mod server;
 
 pub use core::{
-    operate_helm, operate_weapons, score_doctrine_pool, AiMemory, AiWorldEntity, CaptainAi,
-    WorldView, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, WAYPOINT_ARRIVAL_RADIUS,
+    decide_impulse, operate_helm, operate_weapons, score_doctrine_pool, AiMemory, AiWorldEntity,
+    CaptainAi, ImpulseDecision, ImpulseDecisionInput, WorldView, AVOIDANCE_BUFFER,
+    AVOIDANCE_LOOK_AHEAD_SECS, IMPULSE_ANGLE_TOLERANCE_RAD, WAYPOINT_ARRIVAL_RADIUS,
 };

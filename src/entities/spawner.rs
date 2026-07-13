@@ -528,6 +528,8 @@ pub fn spawn_entity(
             charge_duration: hc.impulse_charge_duration,
             speed_multiplier: hc.impulse_speed_multiplier,
             acceleration_multiplier: hc.impulse_acceleration_multiplier,
+            engage_distance: hc.impulse_engage_distance,
+            cancel_distance: hc.impulse_cancel_distance,
         });
         // Boost config (disabled when [helm_console.boost] is absent)
         let boost_cfg = hc

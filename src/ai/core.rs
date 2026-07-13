@@ -29,6 +29,87 @@ const AVOIDANCE_MIN_SPEED: f32 = 0.25;
 /// reaches zero thrust, preventing overshoot oscillation near targets.
 pub const APPROACH_DECEL_FACTOR: f32 = 1.5;
 
+/// Angular tolerance for engaging impulse: the target bearing must be within
+/// this many radians of dead-ahead to qualify.
+pub const IMPULSE_ANGLE_TOLERANCE_RAD: f32 = 0.08;
+
+// ── Impulse AI decision ───────────────────────────────────────────────────────
+
+/// Outcome of a single `decide_impulse` call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImpulseDecision {
+    /// Engage impulse (start charging).
+    Engage,
+    /// Cancel impulse (return to idle).
+    Cancel,
+    /// No change this tick.
+    NoChange,
+}
+
+/// All inputs required by `decide_impulse`.
+#[derive(Debug, Clone, Copy)]
+pub struct ImpulseDecisionInput {
+    /// Ship position [x, z].
+    pub pos: [f32; 2],
+    /// Ship yaw in radians.
+    pub yaw: f32,
+    /// Target position [x, y, z].
+    pub target_pos: [f32; 3],
+    /// Current impulse phase.
+    pub phase: crate::impulse::ImpulsePhase,
+    /// Minimum distance to engage impulse.
+    pub engage_distance: f32,
+    /// Distance below which impulse is cancelled.
+    pub cancel_distance: f32,
+    /// Angular tolerance in radians for "directly ahead".
+    pub angle_tolerance: f32,
+}
+
+/// Decide whether to engage, cancel, or leave the impulse drive unchanged.
+///
+/// Rules:
+/// - If the target is within `cancel_distance` and the impulse is not already
+///   Idle, return `Cancel`.
+/// - If the target is at least `engage_distance` away AND the target bearing
+///   is within `angle_tolerance` radians of dead-ahead AND the impulse phase
+///   is `Idle`, return `Engage`.
+/// - Otherwise return `NoChange`.
+pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
+    let dx = input.target_pos[0] - input.pos[0];
+    let dz = input.target_pos[2] - input.pos[1];
+    let dist = (dx * dx + dz * dz).sqrt();
+
+    // Cancel when close enough.
+    if dist <= input.cancel_distance && input.phase != crate::impulse::ImpulsePhase::Idle {
+        return ImpulseDecision::Cancel;
+    }
+
+    // Only engage from Idle.
+    if input.phase != crate::impulse::ImpulsePhase::Idle {
+        return ImpulseDecision::NoChange;
+    }
+
+    // Must be far enough to make impulse worthwhile.
+    if dist < input.engage_distance {
+        return ImpulseDecision::NoChange;
+    }
+
+    // Check if target is directly ahead.
+    let fwd_x = input.yaw.sin();
+    let fwd_z = -input.yaw.cos();
+    let dir_x = dx / dist;
+    let dir_z = dz / dist;
+    let cross = fwd_x * dir_z - fwd_z * dir_x;
+    let dot = fwd_x * dir_x + fwd_z * dir_z;
+    let angle = cross.atan2(dot);
+
+    if angle.abs() <= input.angle_tolerance {
+        ImpulseDecision::Engage
+    } else {
+        ImpulseDecision::NoChange
+    }
+}
+
 // ── AiMemory ──────────────────────────────────────────────────────────────────
 
 /// Private per-entity reasoning state that persists across ticks.
@@ -1758,5 +1839,192 @@ mod tests {
         assert_eq!(pool[0].id, "b");
         assert_eq!(pool[1].id, "c");
         assert_eq!(pool[2].id, "a");
+    }
+
+    // ── decide_impulse ────────────────────────────────────────────────────
+
+    fn impulse_input(
+        pos: [f32; 2],
+        yaw: f32,
+        target_pos: [f32; 3],
+        phase: crate::impulse::ImpulsePhase,
+        engage_dist: f32,
+        cancel_dist: f32,
+    ) -> ImpulseDecisionInput {
+        ImpulseDecisionInput {
+            pos,
+            yaw,
+            target_pos,
+            phase,
+            engage_distance: engage_dist,
+            cancel_distance: cancel_dist,
+            angle_tolerance: IMPULSE_ANGLE_TOLERANCE_RAD,
+        }
+    }
+
+    #[test]
+    fn impulse_decide_engage_when_ahead_and_far() {
+        // Ship at (0,0) facing -Z (yaw=0), target at (0, 0, -300)
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,     // yaw = 0 → facing -Z
+            [0.0, 0.0, -300.0], // target 300 units ahead
+            crate::impulse::ImpulsePhase::Idle,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::Engage);
+    }
+
+    #[test]
+    fn impulse_decide_engage_when_ahead_at_exact_threshold() {
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [0.0, 0.0, -200.0],
+            crate::impulse::ImpulsePhase::Idle,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::Engage);
+    }
+
+    #[test]
+    fn impulse_decide_no_engage_when_too_close() {
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [0.0, 0.0, -150.0],
+            crate::impulse::ImpulsePhase::Idle,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::NoChange);
+    }
+
+    #[test]
+    fn impulse_decide_no_engage_when_target_not_ahead() {
+        // Target at 90 degrees to the right
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [300.0, 0.0, 0.0],
+            crate::impulse::ImpulsePhase::Idle,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::NoChange);
+    }
+
+    #[test]
+    fn impulse_decide_cancel_when_close_during_charging() {
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [0.0, 0.0, -20.0],
+            crate::impulse::ImpulsePhase::Charging,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::Cancel);
+    }
+
+    #[test]
+    fn impulse_decide_cancel_when_close_during_active() {
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [0.0, 0.0, -20.0],
+            crate::impulse::ImpulsePhase::Active,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::Cancel);
+    }
+
+    #[test]
+    fn impulse_decide_noop_when_idle_and_not_ahead() {
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [300.0, 0.0, -100.0],
+            crate::impulse::ImpulsePhase::Idle,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::NoChange);
+    }
+
+    #[test]
+    fn impulse_decide_noop_when_active_and_ahead() {
+        // Already active, target is ahead and far — no change needed
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [0.0, 0.0, -500.0],
+            crate::impulse::ImpulsePhase::Active,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::NoChange);
+    }
+
+    #[test]
+    fn impulse_decide_engage_at_angle_tolerance_boundary() {
+        // Target at the edge of the tolerance cone
+        let angle = IMPULSE_ANGLE_TOLERANCE_RAD; // 0.08 rad
+        let target_x = 300.0 * angle.sin();
+        let target_z = -300.0 * angle.cos();
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [target_x, 0.0, target_z],
+            crate::impulse::ImpulsePhase::Idle,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::Engage);
+    }
+
+    #[test]
+    fn impulse_decide_noop_past_angle_tolerance() {
+        let angle = IMPULSE_ANGLE_TOLERANCE_RAD + 0.01; // just past boundary
+        let target_x = 300.0 * angle.sin();
+        let target_z = -300.0 * angle.cos();
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [target_x, 0.0, target_z],
+            crate::impulse::ImpulsePhase::Idle,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::NoChange);
+    }
+
+    #[test]
+    fn impulse_decide_cancel_at_cancel_distance_boundary() {
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [0.0, 0.0, -40.0],
+            crate::impulse::ImpulsePhase::Active,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::Cancel);
+    }
+
+    #[test]
+    fn impulse_decide_noop_barely_above_cancel_distance() {
+        let input = impulse_input(
+            [0.0, 0.0],
+            0.0,
+            [0.0, 0.0, -41.0],
+            crate::impulse::ImpulsePhase::Active,
+            200.0,
+            40.0,
+        );
+        assert_eq!(decide_impulse(&input), ImpulseDecision::NoChange);
     }
 }

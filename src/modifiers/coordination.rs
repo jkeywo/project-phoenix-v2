@@ -723,6 +723,8 @@ mod tests {
                 charge_duration: IMPULSE_CHARGE_DURATION,
                 speed_multiplier: 3.0,
                 acceleration_multiplier: 1.0,
+                engage_distance: 200.0,
+                cancel_distance: 40.0,
             });
 
         app.add_systems(Update, translate_impulse_modifiers);

@@ -55,6 +55,21 @@ pub struct DoctrineObjective {
     /// The helm stops thrusting when closer than this.
     #[serde(default = "default_maintain_range")]
     pub maintain_range: f32,
+    /// Whether the AI may engage impulse drive while executing this objective.
+    /// When absent, defaults to `true` for Reach and Destroy, `false` for Patrol.
+    #[serde(default)]
+    pub use_impulse: Option<bool>,
+}
+
+impl DoctrineObjective {
+    /// Resolved effective `use_impulse` value.
+    /// Returns `self.use_impulse` if set; otherwise defaults to `true` for
+    /// Reach and Destroy directives, `false` for Patrol.
+    pub fn effective_use_impulse(&self) -> bool {
+        self.use_impulse.unwrap_or_else(|| {
+            !matches!(self.directive_kind.as_deref(), Some("Patrol"))
+        })
+    }
 }
 
 fn default_doctrine_target_speed() -> f32 {
@@ -530,6 +545,14 @@ pub struct HelmConsoleConfig {
     /// Defaults to `IMPULSE_ACCELERATION_MULTIPLIER` (5.0) when absent.
     #[serde(default = "default_impulse_acceleration_multiplier")]
     pub impulse_acceleration_multiplier: f32,
+    /// Minimum distance from target at which AI may engage impulse (world units).
+    /// Defaults to 200.0 when absent.
+    #[serde(default = "default_impulse_engage_distance")]
+    pub impulse_engage_distance: f32,
+    /// Distance from target at which AI cancels impulse (world units).
+    /// Defaults to 40.0 when absent.
+    #[serde(default = "default_impulse_cancel_distance")]
+    pub impulse_cancel_distance: f32,
     /// Maximum visual banking (roll) angle in degrees when steering at full
     /// deflection. The ship leans into turns, lerped from 0 toward ±max_bank_deg
     /// based on steering input percentage. 0 = no banking.
@@ -602,6 +625,14 @@ fn default_impulse_charge_duration() -> f32 {
 
 fn default_impulse_speed_multiplier() -> f32 {
     crate::impulse::IMPULSE_SPEED_MULTIPLIER
+}
+
+fn default_impulse_engage_distance() -> f32 {
+    200.0
+}
+
+fn default_impulse_cancel_distance() -> f32 {
+    40.0
 }
 
 fn default_impulse_acceleration_multiplier() -> f32 {

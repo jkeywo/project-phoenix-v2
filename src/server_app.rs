@@ -2416,6 +2416,8 @@ fn spawn_game_start_entities(
                     charge_duration: hc.impulse_charge_duration,
                     speed_multiplier: hc.impulse_speed_multiplier,
                     acceleration_multiplier: hc.impulse_acceleration_multiplier,
+                    engage_distance: hc.impulse_engage_distance,
+                    cancel_distance: hc.impulse_cancel_distance,
                 })
                 .unwrap_or_default();
             commands.entity(spawned).insert(impulse_cfg);

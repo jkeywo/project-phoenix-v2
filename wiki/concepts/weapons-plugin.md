@@ -23,6 +23,7 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 | `handle_unload_tube` | Processes `UnloadTube { tube }`; manually unloads or cancels loading |
 | `tick_beams` | Advances every active phaser beam (player + NPC): damage accumulation, sever-on-range, natural end, cooldown start |
 | `tick_torpedo_system` | Advances all in-flight torpedoes; fires `TorpedoDestroyed` for expired ones |
+| `tick_weapons_arc_request` | Emits `ArcBearingRequest` channel-3 coordination to Helm when weapons target is in range but outside all firing arcs |
 
 ### Resources
 
@@ -35,12 +36,19 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 | `PhaserRenderConfig` | Beam colour and max render range, populated from ship TOML during world setup |
 | `PhaserCombatConfigResource` | Player phaser tuning (beam duration, cooldown, damage/sec, range); sourced from `[weapons_console]` |
 | `TorpedoSystemResource` | Wraps the pure-Rust `TorpedoSystem` state machine |
+| `WeaponsArcRequestState` | Tracks last arc-missed target to debounce `ArcBearingRequest` emission |
 
 ### Message type
 
 | Type | Registered by |
 |---|---|
 | `AsteroidDestroyedVfx` | `WeaponsPlugin` via `add_message::<AsteroidDestroyedVfx>()` |
+
+### Coordination payloads
+
+| Variant | Destination | Trigger | Human AI routing |
+|---|---|---|---|
+| `ArcBearingRequest { uuid, label }` | Helm | Target locked + in weapons range + outside all phaser-bank firing arcs | `route_coordination` — human Helm gets a popup; AI Helm consumes silently and biases steering via `PendingArcBearingRequest` |
 
 ### Public constants
 
@@ -56,7 +64,7 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 
 Registered by `add_simulation_plugins()` in `src/server_app.rs`. The module is declared in `src/lib.rs`.
 
-The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `WeaponsUpdate` at 10 Hz to the Tactical holder) is defined in `src/console/weapons/server.rs:2738` and registered by `add_simulation_plugins()` in `src/server_app.rs:329`.
+The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `WeaponsUpdate` at 10 Hz to the Tactical holder) is defined in `src/console/weapons/server.rs:3838` and registered by `add_simulation_plugins()` in `src/server_app.rs:329`.
 
 ## Broadcaster
 
@@ -226,10 +234,10 @@ image-heavy treatment.
 
 ## Virtual entities are excluded from torpedo detonation
 
-`tick_torpedo_system` (`src/console/weapons/server.rs:949`) builds the
+`tick_torpedo_system` (`src/console/weapons/server.rs:3010`) builds the
 proximity-detonation target list from both live ECS entities and the
 `WorldResource` snapshot. Every entry carries an `(uuid, x, z, radius)`
-that `find_detonation_hits` (`src/weapons/torpedo.rs:498`) tests against
+that `find_detonation_hits` (`src/weapons/torpedo.rs:771`) tests against
 each in-flight torpedo: a hit fires when
 `distance(torpedo, entity) ≤ detonation_radius + entity.radius`.
 
@@ -238,7 +246,7 @@ with no physical body that the player should pass through:
 
 - **Asteroid-field anchors** carry an `AsteroidFieldSection`. Their
   `EntitySnapshot.radius` is populated from the field's `outer_radius`
-  (`src/server_app.rs:1081`), so a `default.toml`-style field at the
+  (`src/server_app.rs:1598`), so a `default.toml`-style field at the
   world origin with `outer_radius = 350` registers as a 350 m torpedo
   target. With the player ship at `(280, 0, 0)`, every torpedo fired
   from the ship detonated on the field anchor on its first physics
@@ -246,7 +254,7 @@ with no physical body that the player should pass through:
   a single frame.
 - **Region trigger volumes** carry a `RegionShapeSection`. Their
   snapshot radius comes from the region shape (`Sphere.radius`,
-  `Box.max_he`, or `Torus.outer_radius`) at `src/server_app.rs:1058`.
+  `Box.max_he`, or `Torus.outer_radius`) at `src/server_app.rs:1691`.
 
 `tick_torpedo_system` excludes both via a `virtual_entity_q` query
 (`Or<(With<AsteroidFieldSection>, With<RegionShapeSection>)>`) plus a

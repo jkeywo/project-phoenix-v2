@@ -17,6 +17,8 @@ Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https
 | `process_helm_inputs` | Reads `HelmInput` messages at 10 Hz, feeds into `compute_physics` |
 | `sync_ship_position` | Syncs `ShipState` → Rapier `Transform` for the ship entity |
 | `handle_impulse_messages` | Handles `StartImpulseCharge` / `CancelImpulse`, auto-cancels on hull damage |
+| `process_coordination_lag` | Delivers channel-3 `CoordinationEnqueue` messages from each ship's `CoordinationQueue`; sets `PendingArcBearingRequest` for AI Helm on `ArcBearingRequest` delivery; emits popup for human Helm |
+| `operate_helm_ai` | Applies NPC physics from AI intent; reads `PendingArcBearingRequest` and biases steering toward the requested bearing via `steer_toward` |
 
 ### Systems that stayed in `simulation.rs`
 
@@ -31,6 +33,7 @@ Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https
 | `HelmInputTimer` | `ship_plugin.rs` | 10 Hz throttle for physics ticks |
 | `LastHelmInput` (pub) | `ship_plugin.rs` | Holds last thrust/steering (read by `ConsoleAiPlugin`) |
 | `CollisionCooldown` | `simulation.rs` | 1-second immunity after a collision hit |
+| `PendingArcBearingRequest` | `ship_plugin.rs` | Set by `process_coordination_lag` when AI Helm consumes an `ArcBearingRequest`; biases steering via `steer_toward`; cleared when the target entity is visible or arrives in firing arc |
 
 ## Registration
 

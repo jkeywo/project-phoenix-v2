@@ -18,6 +18,7 @@ The pilot's seat. The **only** console that can move the ship.
 - **Impulse button:** issues `StartImpulseCharge` when phase is `Idle`.
 - **Impulse overlay (Charging + Active):** the joystick is hidden and replaced with a charging progress bar, a `CANCEL IMPULSE` button, and a status readout (`x.x / y.y s` while charging, `ENGAGED` while active). See [Impulse drive](#impulse-drive).
 - **Boost button:** toggles the boost drive when `[helm_console.boost]` is present. While active, boost multiplies speed/acceleration by `multiplier` and yaw rate by `steering_multiplier`.
+- **Arc-bearing popup:** when Tactical's weapons target is in weapons range but outside all phaser bank firing arcs, `tick_weapons_arc_request` emits a `CoordinationPayload::ArcBearingRequest` through the channel-3 coordination bus. Human Helm receives a "Tactical: come about — bring phasers to bear" popup; AI Helm consumes it silently and biases steering toward the target via `PendingArcBearingRequest` + `steer_toward`.
 
 ## Impulse drive
 

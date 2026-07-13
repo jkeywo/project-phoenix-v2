@@ -66,7 +66,9 @@ Under #514, the coarse `shields` `[[system]]` block was **deleted** from `player
 
 - `src/ship/system_registry.rs` — All `*_SYSTEM_ID`, `*_KIND`, `*_AI_CONTROLLER` constants and `*_system_id()` helpers.
 - `src/ship/control_source.rs` — `ControlSourceResolver` and `policy_for`.
-- `src/ship_plugin.rs` — `process_coordination_lag` delivers channel-3 messages.
+- `src/ship/coordination.rs` — `process_coordination_lag` delivers channel-3 messages to `PendingArcBearingRequest` (`coordination.rs:1495`)
+- `src/ship_plugin.rs` — `PendingArcBearingRequest` component set when AI Helm consumes `ArcBearingRequest` (`ship_plugin.rs:69`); `operate_helm_ai` reads pending bearing and biases steering via `steer_toward`
+- `src/ai/mod.rs` — `steer_toward(yaw, target_dir, deadband_rad, full_steer_rad)` pure steering helper; `PATROL_DEADBAND_RAD = 0.05`, `PATROL_FULL_STEER_RAD = π/4`.
 
 ## AI ship unification and per-kind AI plugins (PRD #520)
 

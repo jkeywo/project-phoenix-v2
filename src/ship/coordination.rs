@@ -1,6 +1,8 @@
 pub use crate::messages::CoordinationPayload;
 use crate::messages::SystemId;
 use crate::ship::control_source::ControlSource;
+#[cfg(test)]
+use crate::ship::control_source::ControlSourceResolver;
 
 /// What to do with a delivered coordination message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,6 +122,35 @@ mod tests {
             route_coordination(ControlSource::Ai, ControlSource::Human),
             DeliverAction::Popup
         );
+    }
+
+    /// #673: a Channel-3 message targeting a damage-disabled human console
+    /// must resolve via `policy_for` (which honours `offline_systems`), not
+    /// the raw `source_for`. A damage-disabled console can neither operate
+    /// AI nor accept human input, so delivery must be treated as Consume,
+    /// never Popup — mirroring the resolution logic in
+    /// `process_coordination_lag` (src/ship_plugin.rs).
+    #[test]
+    fn target_damage_disabled_human_console_is_not_a_popup_candidate() {
+        let mut resolver = ControlSourceResolver::new();
+        let helm = SystemId("helm".into());
+
+        // Station rating says Human, but damage has taken the console offline.
+        resolver.set(helm.clone(), ControlSource::Human);
+        resolver.offline_systems.insert(helm.clone());
+
+        let target_policy = resolver.policy_for(&helm);
+        assert!(!target_policy.operate_ai && !target_policy.accept_human_input);
+
+        // The caller must treat this as Consume rather than routing through
+        // route_coordination with the raw (stale) ControlSource::Human, which
+        // would incorrectly produce a Popup.
+        let action = if !target_policy.operate_ai && !target_policy.accept_human_input {
+            DeliverAction::Consume
+        } else {
+            route_coordination(ControlSource::Ai, resolver.source_for(&helm))
+        };
+        assert_eq!(action, DeliverAction::Consume);
     }
 
     // ── Lag queue ─────────────────────────────────────────────────────────

@@ -1301,8 +1301,17 @@ pub fn process_coordination_lag(
     for (ship_config, control_sources, mut queue, is_local) in ship_components.iter_mut() {
         let due = queue.0.due_messages(now);
         for msg in due {
-            let target_control = control_sources.0.source_for(&msg.target);
-            let action = coordination::route_coordination(msg.sender_origin, target_control);
+            // Resolve the target through the full policy (which honours
+            // damage-driven `offline_systems`), not just the raw control
+            // source. A damage-disabled console can neither operate AI nor
+            // accept human input, so it must never receive a popup.
+            let target_policy = control_sources.0.policy_for(&msg.target);
+            let action = if !target_policy.operate_ai && !target_policy.accept_human_input {
+                coordination::DeliverAction::Consume
+            } else {
+                let target_control = control_sources.0.source_for(&msg.target);
+                coordination::route_coordination(msg.sender_origin, target_control)
+            };
 
             match action {
                 coordination::DeliverAction::Consume => {

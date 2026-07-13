@@ -331,6 +331,17 @@ export const ACTION_MAP = Object.freeze({
   show_on_screen: (a, send) => {
     if (a.message_id) send('ShowOnScreen', { message_id: a.message_id });
   },
+
+  /** Set lateral thrust via analog joystick (ph-lateral-thrust-joystick component). */
+  set_lateral_thrust: (a, send) => {
+    send('ControlSystem', {
+      target: 'helm-lateral-thrust',
+      payload: {
+        type: 'LateralThrustInput',
+        data: { lateral: a.lateral || 0 },
+      },
+    });
+  },
 });
 
 /**

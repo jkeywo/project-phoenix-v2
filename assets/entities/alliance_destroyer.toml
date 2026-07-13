@@ -65,6 +65,14 @@ disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
+system_id = "helm-lateral-thrust"
+display_name = "Lateral Thrusters"
+max_hp = 10
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
 system_id = "tactical-radar"
 display_name = "Tactical Radar"
 max_hp = 15
@@ -229,6 +237,10 @@ markers = [ "engine_port", "engine_starboard" ]
 trail_lifetime_secs = 0.45
 trail_spawn_interval_secs = 0.05
 
+[helm_console.lateral_thrust]
+max_lateral_speed = 18
+lateral_acceleration = 12
+
 [helm_console.boost]
 multiplier = 3.0
 steering_multiplier = 2.0
@@ -250,11 +262,13 @@ selects = [ "station", "planet", "star", "region" ]
 range = 1000
 
 [shields_console]
-focus_bonus_max_hp = 40
+focus_bonus_max_hp = 0
 focus_bonus_regen = 4
-focus_penalty_max_hp = 20
+focus_penalty_max_hp = 0
 focus_penalty_regen = 1.0
 focus_decay_rate = 10
+focus_focused_damage_multiplier = 0.5
+focus_unfocused_damage_multiplier = 1.25
 
 [shields_console.base]
 max_hp = 80
@@ -346,6 +360,10 @@ console = "gui/destroyer/helm.html"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["helm-lateral-thrust"]
 
 [[station]]
 id = "tactical"
@@ -448,6 +466,12 @@ power_group = "weapons"
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
 station = "helm"
 power_group = "helm"
 

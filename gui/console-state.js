@@ -549,6 +549,7 @@ export function buildWeaponsConsoleState(state) {
     blasters,
     own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
     tactical_auto: tacticalAuto,
+    station_rating: state.stationRatings?.['tactical'] || 'Std',
   });
 }
 
@@ -674,6 +675,11 @@ export function buildHelmConsoleState(state) {
     engine_stbd_thrust:  (state.blackboards?.['helm-engine-starboard']?.thrust_fraction) ?? 0,
     engine_port_auto:    state.stationRatings?.['helm'] === 'Backfill',
     engine_stbd_auto:    state.stationRatings?.['helm'] === 'Backfill',
+    // Lateral thrust state from per-system blackboard.
+    lateral_speed:       bb.lateral_speed ?? 0,
+    lateral_input:       (state.blackboards?.['helm-lateral-thrust']?.lateral_input) ?? 0,
+    lateral_auto:        (state.blackboards?.['helm-lateral-thrust']?.auto) ?? false,
+    lateral_is_online:   (state.blackboards?.['helm-lateral-thrust']?.is_online) ?? true,
   });
 }
 
@@ -845,6 +851,7 @@ export function buildPowerConsoleState(state) {
       battery_online: batteryOnline,
       own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
       power_auto:     state.stationRatings?.['power'] === 'Backfill',
+      station_rating: state.stationRatings?.['power'] || 'Std',
     });
   }
   // Legacy fallback: PowerState message fields.
@@ -858,6 +865,7 @@ export function buildPowerConsoleState(state) {
     battery_online: batteryOnline,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
     power_auto:     state.stationRatings?.['power'] === 'Backfill',
+    station_rating: state.stationRatings?.['power'] || 'Std',
   });
 }
 

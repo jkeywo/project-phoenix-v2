@@ -44,6 +44,8 @@
   <script type="module" src="gui/comms-state.js"></script>
   <!-- Connection manager: PeerJS lifecycle extracted into a tested module (issue #603) -->
   <script type="module" src="gui/connection-manager.js"></script>
+  <!-- Settings panel: gear button + overlay with Rating, Volume, QR toggle, Leave Station -->
+  <script type="module" src="gui/settings-panel.js"></script>
   <style>
     /* -- CSS variables (lobby + shared) -------------------------------- */
     :root {
@@ -597,6 +599,120 @@
       50%       { box-shadow: 0 0 18px rgba(95,216,232,0.7); }
     }
     #ready-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
+
+    /* ── Settings panel ──────────────────────────────────────────
+       Gear button fixed at bottom-left, overlay modal centered.
+       Mounted by gui/settings-panel.js. */
+    .settings-btn {
+      position: fixed;
+      bottom: 0.5rem;
+      left: 0.75rem;
+      z-index: 60;
+      width: 2rem;
+      height: 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 1.15rem;
+      line-height: 1;
+      color: var(--dim);
+      background: rgba(14, 17, 23, 0.7);
+      border: 1px solid var(--edge);
+      border-radius: 3px;
+      cursor: pointer;
+      user-select: none;
+      touch-action: manipulation;
+      padding: 0;
+    }
+    .settings-btn:hover { color: #cce; border-color: #6a8; }
+    .settings-btn:active { background: rgba(30, 40, 60, 0.85); }
+    .settings-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(5, 8, 24, 0.88);
+      cursor: pointer;
+    }
+    .settings-overlay[hidden] { display: none; }
+    .settings-overlay .settings-popup {
+      cursor: auto;
+      background: var(--surface);
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      padding: 1.25rem 1.5rem;
+      min-width: 260px;
+      max-width: 340px;
+      width: 90%;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .settings-section { display: flex; flex-direction: column; gap: 0.4rem; }
+    .settings-section-heading {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.75rem; font-weight: 600;
+      letter-spacing: 0.12em;
+      color: var(--signal-cyan);
+      text-transform: uppercase;
+    }
+    .settings-rating-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .settings-rating-btn {
+      display: block; width: auto; margin: 0;
+      padding: 0.35rem 0.7rem;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.7rem; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      cursor: pointer;
+      border: 1px solid var(--edge); border-radius: 3px;
+      background: var(--surface2); color: var(--dim);
+      touch-action: manipulation;
+    }
+    .settings-rating-btn.active {
+      background: #0a2830; border-color: var(--signal-cyan);
+      color: var(--signal-cyan);
+    }
+    .settings-rating-btn:active { background: #1a3848; }
+    .settings-vol-row {
+      display: flex; align-items: center; gap: 0.6rem;
+    }
+    .settings-vol-row input[type="range"] {
+      flex: 1; height: 4px;
+      -webkit-appearance: none; appearance: none;
+      background: var(--edge); border-radius: 2px;
+      outline: none; margin: 0;
+    }
+    .settings-vol-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 1rem; height: 1rem; border-radius: 50%;
+      background: var(--signal-cyan); cursor: pointer; border: none;
+    }
+    .settings-vol-row input[type="range"]::-moz-range-thumb {
+      width: 1rem; height: 1rem; border-radius: 50%;
+      background: var(--signal-cyan); cursor: pointer; border: none;
+    }
+    .settings-vol-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem; color: var(--dim);
+      min-width: 2.5rem; text-align: right;
+    }
+    .settings-action-btn {
+      display: block; width: 100%; margin: 0;
+      padding: 0.5rem 0.75rem;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.75rem; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      cursor: pointer;
+      border: 1px solid var(--edge); border-radius: 3px;
+      background: var(--surface2); color: #cce;
+      text-align: center;
+      touch-action: manipulation;
+    }
+    .settings-action-btn:active { background: #1a3848; }
+    .settings-leave-btn {
+      border-color: var(--alert-red); color: var(--alert-red);
+    }
+    .settings-leave-btn:active { background: rgba(255,51,68,0.1); }
   </style>
 </head>
 <body>
@@ -2287,7 +2403,14 @@
         default:
           return; // unknown � skip re-render
       }
-      scheduleRender();
+      // Don't re-render the full lobby at high frequency during mid-game
+      // spectating/claiming — renderLobby does list.innerHTML = '' which
+      // destroys all button event listeners, so a click between DOM teardown
+      // and rebuild lands on a stale/deleted node and never fires.
+      // Lobby-mutating handlers (StationAssigned, ReadyChanged, etc.) all
+      // call rebuildStations() which calls scheduleRender() internally, so
+      // this guard is safe for them too.
+      if (!showingLobbyDuringGame(state)) { scheduleRender(); }
     }
 
     // -- PeerJS connection (extracted to gui/connection-manager.js, issue #603) --
@@ -2322,6 +2445,17 @@
               return t;
             })();
         console.log(`[client] session token ${myToken.slice(0, 8)}`);
+
+        // Mount the settings panel (gear button + overlay) once state is ready.
+        // Provide send, a getState closure, and the UI click audio element.
+        if (typeof window.mountSettings === 'function') {
+          window.mountSettings({
+            send: (type, data) => send(type, data),
+            getState: () => state,
+            audioEl: document.getElementById('ui-click'),
+            myToken: myToken,
+          });
+        }
 
         console.log('[PeerJS] fetching ICE servers');
         const iceServers = await window.fetchIceServers();

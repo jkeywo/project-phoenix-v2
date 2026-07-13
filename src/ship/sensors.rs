@@ -243,7 +243,10 @@ mod tests {
         }
     }
 
-    fn collect_enqueues(mut reader: MessageReader<CoordinationEnqueue>, mut log: ResMut<EnqueueLog>) {
+    fn collect_enqueues(
+        mut reader: MessageReader<CoordinationEnqueue>,
+        mut log: ResMut<EnqueueLog>,
+    ) {
         for m in reader.read() {
             log.0.push(m.clone());
         }

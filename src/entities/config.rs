@@ -1058,6 +1058,43 @@ pub struct PowerConfigSection {
     pub ai: Option<PowerAiConfigToml>,
 }
 
+/// AI tuning parameters for the shields focus controller.
+///
+/// Loaded from `[shields_console.ai]` in the ship entity TOML.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShieldsAiConfigToml {
+    /// Maximum time window (seconds) for tracking incoming damage per arc.
+    /// Damage older than this is pruned.
+    #[serde(default = "default_shields_ai_damage_window_secs")]
+    pub damage_window_secs: f32,
+    /// Minimum time window (seconds) before the AI acts on damage concentration.
+    /// Damage newer than this is not yet considered.
+    #[serde(default = "default_shields_ai_min_damage_window_secs")]
+    pub min_damage_window_secs: f32,
+    /// Percentage of total damage in the window that must hit the same arc
+    /// before the AI focuses it (0–100).
+    #[serde(default = "default_shields_ai_damage_pct_threshold")]
+    pub damage_pct_threshold: f32,
+    /// Percentage threshold: if the lowest-arc normalized health is below this
+    /// fraction of the next-lowest arc, focus the weakest arc (0–100).
+    #[serde(default = "default_shields_ai_health_ratio_threshold")]
+    pub health_ratio_threshold: f32,
+}
+
+fn default_shields_ai_damage_window_secs() -> f32 {
+    4.0
+}
+fn default_shields_ai_min_damage_window_secs() -> f32 {
+    1.0
+}
+fn default_shields_ai_damage_pct_threshold() -> f32 {
+    50.0
+}
+fn default_shields_ai_health_ratio_threshold() -> f32 {
+    50.0
+}
+
 /// Config block for the Shields console focus bonuses/penalties.
 ///
 /// Loaded from `[shields_console]` in the ship entity TOML. The nested
@@ -1099,6 +1136,9 @@ pub struct ShieldsConsoleConfig {
     /// from `ShieldConfig::default()` are used.
     #[serde(default)]
     pub base: Option<ShieldsBaseConfig>,
+    /// AI tuning parameters for the shields focus controller.
+    #[serde(default)]
+    pub ai: Option<ShieldsAiConfigToml>,
 }
 
 fn default_focus_bonus_max_hp() -> i32 {
@@ -1134,6 +1174,7 @@ impl Default for ShieldsConsoleConfig {
             focus_focused_damage_multiplier: default_focus_focused_damage_multiplier(),
             focus_unfocused_damage_multiplier: default_focus_unfocused_damage_multiplier(),
             base: None,
+            ai: None,
         }
     }
 }

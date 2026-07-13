@@ -609,6 +609,25 @@ pub fn spawn_entity(
         entity_commands.insert(crate::ship::shields::ShipShields(shield_system));
     }
 
+    // Shields AI config — loaded from [shields_console.ai] for NPC ships if
+    // present, otherwise defaults. Inserted as per-entity Component so
+    // operate_shields_ai reads it via the Component query (NPCs have no
+    // global Resource override).
+    if let Some(sc) = &config.shields_console {
+        if let Some(ai) = &sc.ai {
+            entity_commands.insert(crate::ship::shields::ShieldsAiConfigResource {
+                restored_notify_pct: 0.5,
+                damage_window_secs: ai.damage_window_secs,
+                min_damage_window_secs: ai.min_damage_window_secs,
+                damage_pct_threshold: ai.damage_pct_threshold,
+                health_ratio_threshold: ai.health_ratio_threshold,
+            });
+        }
+    }
+    // Shields damage history — per-ship Component tracking HP deltas for the
+    // AI damage-concentration algorithm. Initialised empty; resized lazily.
+    entity_commands.insert(crate::ship::shields::ShieldsDamageHistory::default());
+
     // Per-arc hull HP (issue #514) — populated from `[[shield_arc]].hull_max_hp`
     // and companion threshold/debuff fields. Attaches `EntityShipArcHull`
     // alongside the shield system so `sync_console_damage_tiers` can route arc

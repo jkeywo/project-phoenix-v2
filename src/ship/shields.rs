@@ -21,10 +21,53 @@ pub struct ShipShields(pub crate::shield::ShieldSystem);
 
 // ── Resources ──────────────────────────────────────────────────────────────────
 
+/// A single damage event recorded for the shields AI damage-tracking window.
+#[derive(Clone, Debug)]
+pub struct DamageRecord {
+    /// Absolute time (seconds) at which damage was recorded.
+    pub timestamp: f32,
+    /// Amount of HP lost in this damage event.
+    pub amount: i32,
+}
+
+/// Per-arc damage history for the shields AI controller.
+///
+/// Indexed by facing index (`Vec<Vec<DamageRecord>>`). Each record is
+/// stamped with an absolute time and pruned when older than
+/// `ShieldsAiConfigResource::damage_window_secs`.
+///
+/// Per-ship `Component` so each ship (player + NPC) maintains independent
+/// tracking. Initialised lazily to match the ship's actual arc count.
+#[derive(Component, Default, Clone)]
+pub struct ShieldsDamageHistory {
+    pub arcs: Vec<Vec<DamageRecord>>,
+}
+
+impl ShieldsDamageHistory {
+    fn ensure_len(&mut self, n: usize) {
+        if self.arcs.len() < n {
+            self.arcs.resize(n, Vec::new());
+        }
+    }
+
+    fn record_damage(&mut self, facing_idx: usize, timestamp: f32, amount: i32) {
+        if facing_idx < self.arcs.len() {
+            self.arcs[facing_idx].push(DamageRecord { timestamp, amount });
+        }
+    }
+
+    fn prune_old(&mut self, current_time: f32, window_secs: f32) {
+        let cutoff = current_time - window_secs;
+        for arc in &mut self.arcs {
+            arc.retain(|r| r.timestamp > cutoff);
+        }
+    }
+}
+
 /// TOML-loaded configuration for the shields AI controller.
 ///
-/// Loaded from `[shields.ai]` in the ship entity TOML. Defaults are used
-/// when the section is absent.
+/// Loaded from `[shields_console.ai]` in the ship entity TOML. Defaults are
+/// used when the section is absent.
 ///
 /// Dual `Resource + Component` post ship-parity audit: production reads
 /// use the Resource form (single ship-wide AI tuning), but the Component
@@ -34,12 +77,26 @@ pub struct ShieldsAiConfigResource {
     /// HP fraction (0.0–1.0) at or above which a restored facing fires the
     /// `ShieldFacingRestored` coordination message to Helm.
     pub restored_notify_pct: f32,
+    /// Maximum time window (seconds) for tracking incoming damage per arc.
+    pub damage_window_secs: f32,
+    /// Minimum time window (seconds) before the AI acts on damage concentration.
+    pub min_damage_window_secs: f32,
+    /// Percentage of total damage in the window that must hit the same arc
+    /// before the AI focuses it (0.0–100.0).
+    pub damage_pct_threshold: f32,
+    /// Percentage threshold: if the lowest-arc normalized health is below this
+    /// fraction of the next-lowest arc, focus the weakest arc (0.0–100.0).
+    pub health_ratio_threshold: f32,
 }
 
 impl Default for ShieldsAiConfigResource {
     fn default() -> Self {
         Self {
             restored_notify_pct: 0.5,
+            damage_window_secs: 4.0,
+            min_damage_window_secs: 1.0,
+            damage_pct_threshold: 50.0,
+            health_ratio_threshold: 50.0,
         }
     }
 }
@@ -455,22 +512,119 @@ fn publish_shields_blackboard(
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
-// ── AI controller stub ─────────────────────────────────────────────────────────
+// ── AI controller ────────────────────────────────────────────────────────────────
 
 /// Per-kind AI plugin for shields.
 ///
-/// Gated on policy.operate_ai for the Shields system. No behaviour is
-/// implemented yet — this is a compile-verified stub that will be filled in
-/// when the Shields AI controller is designed.
-fn operate_shields_ai(ships: Query<&crate::ship_plugin::ShipSystemControlSources>) {
-    for sources in &ships {
-        let policy = sources
+/// Gated on policy.operate_ai for the Shields system. Runs damage tracking,
+/// health monitoring, and focus decisions for all AI-controlled shield systems
+/// on player and NPC ships.
+///
+/// # Damage Tracking
+/// Damage is detected by comparing each arc's current HP against the last
+/// recorded HP stored in `ShieldsDamageHistory`. When HP decreases (and the
+/// arc is not offline), the delta is recorded as a `DamageRecord` with the
+/// current timestamp.
+///
+/// # Focus Decision (`tick_shield_focus_ai`)
+/// 1. **Damage concentration** — in the configurable time window, if any arc
+///    receives ≥ `damage_pct_threshold` % of total damage, focus it.
+/// 2. **Health imbalance** — if no arc met the damage threshold, compare
+///    normalized HP fractions; focus the weakest arc if it is below
+///    `health_ratio_threshold` % of the second-weakest arc.
+/// 3. **Otherwise clear focus.**
+///
+/// Ships with fewer than 2 arcs exit early (nothing to focus).
+fn operate_shields_ai(
+    time: Res<Time>,
+    global_ai_config: Res<ShieldsAiConfigResource>,
+    mut ships: Query<
+        (
+            &crate::ship_plugin::ShipSystemControlSources,
+            &mut ShipShields,
+            &mut ShieldsDamageHistory,
+            Option<&ShieldsAiConfigResource>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    let current_time = time.elapsed_secs();
+
+    for (control_sources, mut shields, mut damage_history, ai_config_comp) in ships.iter_mut() {
+        let policy = control_sources
             .0
             .policy_for(&crate::system_registry::shields_system_id());
         if !policy.operate_ai {
             continue;
         }
-        // TODO: implement shields AI logic
+
+        let ai_cfg: &ShieldsAiConfigResource = ai_config_comp.unwrap_or(&*global_ai_config);
+        let facings = &shields.0.facings;
+
+        // Single-arc ships have nothing to focus.
+        if facings.len() < 2 {
+            continue;
+        }
+
+        // Lazily resize damage history to match arc count.
+        damage_history.ensure_len(facings.len());
+
+        // ── Detect damage: compare current HP vs last recorded ──────────────
+        for (idx, facing) in facings.iter().enumerate() {
+            // Use the last record's HP as previous, or current HP if no records.
+            let prev_hp = damage_history
+                .arcs
+                .get(idx)
+                .and_then(|records| records.last())
+                .map(|r| r.amount)
+                .unwrap_or(facing.hp);
+
+            // Detect a decrease in HP (damage taken) while the arc was online.
+            // If the arc went offline the HP dropped to 0 but offline_remaining
+            // is set, which shows as a big jump in offline_remaining — we still
+            // want to record that as damage to the arc.
+            if facing.hp < prev_hp {
+                let delta = prev_hp - facing.hp;
+                damage_history.record_damage(idx, current_time, delta);
+            }
+        }
+
+        // Prune records outside the damage window.
+        damage_history.prune_old(current_time, ai_cfg.damage_window_secs);
+
+        // ── Build AI input ──────────────────────────────────────────────────
+        let facings_snapshot: Vec<_> = facings.iter().map(|f| f.snapshot()).collect();
+        let shields_is_low = true; // Rating gate deferred to per-ship AiTuning
+
+        let input = crate::console_ai::ShieldFocusAiInput {
+            facings: facings_snapshot,
+            shields_is_low,
+            damage_history: damage_history.arcs.clone(),
+            damage_window_secs: ai_cfg.damage_window_secs,
+            min_damage_window_secs: ai_cfg.min_damage_window_secs,
+            damage_pct_threshold: ai_cfg.damage_pct_threshold,
+            health_ratio_threshold: ai_cfg.health_ratio_threshold,
+            current_time_secs: current_time,
+        };
+
+        let decision = crate::console_ai::tick_shield_focus_ai(&input);
+
+        // Apply the focus decision.
+        let new_focus = match decision {
+            crate::console_ai::ShieldFocusAiOutput::Focus { facing_index } => {
+                if facing_index < facings.len() {
+                    Some(Some(facing_index))
+                } else {
+                    None
+                }
+            }
+            crate::console_ai::ShieldFocusAiOutput::ClearFocus => Some(None),
+            crate::console_ai::ShieldFocusAiOutput::None => None,
+        };
+
+        if let Some(focus) = new_focus {
+            shields.0.set_focused_facing(focus);
+        }
     }
 }
 

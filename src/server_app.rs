@@ -2168,6 +2168,32 @@ fn spawn_game_start_entities(
                     .insert(ShipShields(ShieldSystem::default()));
             }
 
+            // Shields AI config — loaded from [shields_console.ai] if present,
+            // otherwise falls back to ShieldsAiConfigResource defaults. Inserted
+            // as both per-entity Component and global Resource (dual-write
+            // migration; the per-entity Component is queried by operate_shields_ai).
+            let ai_cfg = config
+                .shields_console
+                .as_ref()
+                .and_then(|sc| sc.ai.as_ref())
+                .map(|ai| crate::ship::shields::ShieldsAiConfigResource {
+                    restored_notify_pct: 0.5,
+                    damage_window_secs: ai.damage_window_secs,
+                    min_damage_window_secs: ai.min_damage_window_secs,
+                    damage_pct_threshold: ai.damage_pct_threshold,
+                    health_ratio_threshold: ai.health_ratio_threshold,
+                })
+                .unwrap_or_default();
+            commands.entity(spawned).insert(ai_cfg.clone());
+            commands.insert_resource(ai_cfg);
+
+            // Shields damage history — per-ship Component tracking HP deltas
+            // for the AI damage-concentration algorithm. Initialised empty; resized
+            // lazily by operate_shields_ai to match the ship's arc count.
+            commands
+                .entity(spawned)
+                .insert(crate::ship::shields::ShieldsDamageHistory::default());
+
             // Per-arc hull HP (issue #514). Attach `EntityShipArcHull`
             // alongside the shield system so `sync_console_damage_tiers`
             // can flip the fine `shield-arc-<id>` SystemIds into

@@ -7,6 +7,7 @@
 //! The Bevy orchestrator lives in `console_ai_plugin`.
 
 use crate::shield::ShieldFacingSnapshot;
+use crate::ship::shields::DamageRecord;
 use crate::torpedo::TorpedoTubeId;
 
 // ── Frequency hint state ───────────────────────────────────────────────────
@@ -426,6 +427,21 @@ pub struct ShieldFocusAiInput {
     /// Whether the Shields console is at Low complexity.
     /// When false, no AI action is taken.
     pub shields_is_low: bool,
+    /// Per-arc damage history, indexed by facing index.
+    /// Records older than `damage_window_secs` should be pruned by the caller.
+    pub damage_history: Vec<Vec<DamageRecord>>,
+    /// Maximum time window (seconds) for damage tracking.
+    pub damage_window_secs: f32,
+    /// Minimum time window (seconds) before the AI reacts to damage concentration.
+    pub min_damage_window_secs: f32,
+    /// Percentage threshold (0.0–100.0): if an arc receives this fraction of
+    /// total damage in the active window, focus it.
+    pub damage_pct_threshold: f32,
+    /// Percentage threshold (0.0–100.0): if the lowest-arc normalized health
+    /// is below this fraction of the second-lowest, focus the weakest arc.
+    pub health_ratio_threshold: f32,
+    /// Current absolute time in seconds (used to compute the active window).
+    pub current_time_secs: f32,
 }
 
 /// Outcome of a single `tick_shield_focus_ai` call.
@@ -441,53 +457,99 @@ pub enum ShieldFocusAiOutput {
 
 /// Decide which shield facing to focus based on current shield state.
 ///
-/// Rules:
-/// - If `shields_is_low` is false, return `None` (no AI involvement).
-/// - If no facings are present, return `None`.
-/// - If there is already a focused facing and its HP fraction is above 0.5,
-///   return `None` (keep current focus).
-/// - Focus the facing with the lowest HP fraction (it needs the bonus most).
-/// - If all facings are at full HP and no focus is set, return `ClearFocus`.
-/// - If the least-healthy facing is already focused, return `None`.
+/// Rules (evaluated in order):
+/// 1. If `shields_is_low` is false or there are fewer than 2 facings, return
+///    `None` (no AI involvement; single-arc ships have nothing to focus).
+/// 2. Damage concentration check — prune history outside `damage_window_secs`,
+///    then in the sub-window `[damage_window_secs - min_damage_window_secs,
+///    damage_window_secs]` count damage per arc. If any arc accounts for
+///    `damage_pct_threshold` % or more of total window damage, focus it.
+/// 3. Health imbalance check — if no arc met the damage threshold, compare
+///    normalized health fractions (hp/max_hp). Sort ascending; if the lowest
+///    is below `(health_ratio_threshold/100) × second_lowest`, focus it.
+/// 4. Otherwise return `ClearFocus`.
 pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
-    if !input.shields_is_low || input.facings.is_empty() {
+    if !input.shields_is_low || input.facings.len() < 2 {
         return ShieldFocusAiOutput::None;
     }
 
-    // Find the facing with the lowest HP fraction.
-    let worst = input.facings.iter().enumerate().min_by(|(_, a), (_, b)| {
-        let fa = if a.max_hp > 0 {
-            a.hp as f32 / a.max_hp as f32
-        } else {
-            0.0
-        };
-        let fb = if b.max_hp > 0 {
-            b.hp as f32 / b.max_hp as f32
-        } else {
-            0.0
-        };
-        fa.partial_cmp(&fb).unwrap()
-    });
+    let n = input.facings.len();
 
-    match worst {
-        None => ShieldFocusAiOutput::None,
-        Some((idx, facing)) => {
-            if facing.is_focused {
-                return ShieldFocusAiOutput::None;
-            }
-            let fraction = if facing.max_hp > 0 {
-                facing.hp as f32 / facing.max_hp as f32
-            } else {
-                0.0
-            };
-            // Only auto-focus if the facing is actually below full HP
-            if fraction < 1.0 {
-                ShieldFocusAiOutput::Focus { facing_index: idx }
-            } else {
-                ShieldFocusAiOutput::ClearFocus
+    // ── 1. Damage concentration check ────────────────────────────────────────
+    // Prune is done by the caller (operate_shields_ai prunes before building input).
+    let effective_start = input.current_time_secs - input.min_damage_window_secs;
+
+    let mut damage_per_arc: Vec<i32> = vec![0; n];
+    let mut total_window_damage: i32 = 0;
+
+    for (idx, records) in input.damage_history.iter().enumerate() {
+        if idx >= n {
+            break;
+        }
+        for record in records {
+            if record.timestamp >= effective_start && record.timestamp <= input.current_time_secs {
+                damage_per_arc[idx] += record.amount;
+                total_window_damage += record.amount;
             }
         }
     }
+
+    if total_window_damage > 0 {
+        let threshold = input.damage_pct_threshold / 100.0;
+        for (idx, &dmg) in damage_per_arc.iter().enumerate() {
+            let fraction = dmg as f32 / total_window_damage as f32;
+            if fraction >= threshold {
+                // Don't re-focus the already-focused arc
+                if !input.facings[idx].is_focused {
+                    return ShieldFocusAiOutput::Focus { facing_index: idx };
+                }
+                return ShieldFocusAiOutput::None;
+            }
+        }
+    }
+
+    // ── 2. Health imbalance check ────────────────────────────────────────────
+    #[derive(Clone)]
+    struct HealthEntry {
+        index: usize,
+        normalized: f32,
+    }
+
+    let mut healths: Vec<HealthEntry> = input
+        .facings
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let normalized = if f.max_hp > 0 {
+                f.hp as f32 / f.max_hp as f32
+            } else {
+                0.0
+            };
+            HealthEntry {
+                index: i,
+                normalized,
+            }
+        })
+        .collect();
+
+    healths.sort_by(|a, b| a.normalized.partial_cmp(&b.normalized).unwrap());
+
+    if healths.len() >= 2 {
+        let lowest = &healths[0];
+        let second_lowest = &healths[1];
+
+        let ratio_threshold = input.health_ratio_threshold / 100.0;
+        if lowest.normalized < ratio_threshold * second_lowest.normalized {
+            if !input.facings[lowest.index].is_focused {
+                return ShieldFocusAiOutput::Focus {
+                    facing_index: lowest.index,
+                };
+            }
+            return ShieldFocusAiOutput::None;
+        }
+    }
+
+    ShieldFocusAiOutput::ClearFocus
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -1110,35 +1172,77 @@ mod tests {
         }
     }
 
+    fn empty_history(len: usize) -> Vec<Vec<DamageRecord>> {
+        vec![Vec::new(); len]
+    }
+
+    fn make_input(
+        facings: Vec<ShieldFacingSnapshot>,
+        shields_is_low: bool,
+        damage_history: Vec<Vec<DamageRecord>>,
+        current_time_secs: f32,
+    ) -> ShieldFocusAiInput {
+        ShieldFocusAiInput {
+            facings,
+            shields_is_low,
+            damage_history,
+            damage_window_secs: 4.0,
+            min_damage_window_secs: 1.0,
+            damage_pct_threshold: 50.0,
+            health_ratio_threshold: 50.0,
+            current_time_secs,
+        }
+    }
+
     #[test]
     fn shield_ai_not_low_returns_none() {
-        let input = ShieldFocusAiInput {
-            facings: vec![make_snap("Fore", 50, 100, false)],
-            shields_is_low: false,
-        };
+        let input = make_input(
+            vec![make_snap("Fore", 50, 100, false)],
+            false,
+            empty_history(1),
+            0.0,
+        );
         assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
     }
 
     #[test]
-    fn shield_ai_empty_facings_returns_none() {
-        let input = ShieldFocusAiInput {
-            facings: vec![],
-            shields_is_low: true,
-        };
+    fn shield_ai_single_arc_returns_none() {
+        let input = make_input(
+            vec![make_snap("All", 50, 100, false)],
+            true,
+            empty_history(1),
+            0.0,
+        );
         assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
     }
 
     #[test]
-    fn shield_ai_focuses_most_damaged_facing() {
-        let input = ShieldFocusAiInput {
-            facings: vec![
-                make_snap("Fore", 100, 100, false),
-                make_snap("Port", 30, 100, false),
-                make_snap("Aft", 80, 100, false),
-                make_snap("Starboard", 100, 100, false),
-            ],
-            shields_is_low: true,
-        };
+    fn shield_ai_damage_concentration_focuses_arc() {
+        // Arc at index 1 (Port) takes 80% of damage in the active window
+        // → should be focused even though its health is not the worst.
+        // effective window = [current_time - min_window, current_time] = [3.0, 4.0]
+        let mut history = empty_history(4);
+        // Damage to Port at t=3.5s (within active window)
+        history[1].push(DamageRecord {
+            timestamp: 3.5,
+            amount: 80,
+        });
+        // Scattered damage to other arcs
+        history[0].push(DamageRecord {
+            timestamp: 3.5,
+            amount: 10,
+        });
+        history[2].push(DamageRecord {
+            timestamp: 3.5,
+            amount: 10,
+        });
+        let facings = vec![
+            make_snap("Fore", 90, 100, false),
+            make_snap("Port", 20, 100, false),
+            make_snap("Aft", 90, 100, false),
+            make_snap("Starboard", 90, 100, false),
+        ];
+        let input = make_input(facings, true, history, 4.0);
         assert_eq!(
             tick_shield_focus_ai(&input),
             ShieldFocusAiOutput::Focus { facing_index: 1 }
@@ -1146,33 +1250,122 @@ mod tests {
     }
 
     #[test]
-    fn shield_ai_no_focus_if_least_healthy_already_focused() {
-        let input = ShieldFocusAiInput {
-            facings: vec![
-                make_snap("Fore", 100, 100, false),
-                make_snap("Port", 30, 100, true),
-                make_snap("Aft", 80, 100, false),
-                make_snap("Starboard", 100, 100, false),
-            ],
-            shields_is_low: true,
-        };
+    fn shield_ai_damage_below_threshold_does_not_focus() {
+        // Damage is spread evenly, no arc reaches 50% threshold.
+        let mut history = empty_history(4);
+        // Each arc gets 25 damage → no arc has ≥ 50% of total (100)
+        for i in 0..4 {
+            history[i].push(DamageRecord {
+                timestamp: 3.5,
+                amount: 25,
+            });
+        }
+        let facings = vec![
+            make_snap("Fore", 75, 100, false),
+            make_snap("Port", 75, 100, false),
+            make_snap("Aft", 75, 100, false),
+            make_snap("Starboard", 75, 100, false),
+        ];
+        let input = make_input(facings, true, history, 4.0);
+        // Falls through to health check: worst normalized = 0.75,
+        // second_worst = 0.75, ratio = 1.0, not < 0.5 → ClearFocus
+        assert_eq!(
+            tick_shield_focus_ai(&input),
+            ShieldFocusAiOutput::ClearFocus
+        );
+    }
+
+    #[test]
+    fn shield_ai_health_imbalance_focuses_weakest() {
+        // No damage in window. Port (idx 1) at 30/100 = 0.3, others at 0.8+.
+        // health_ratio_threshold=50%, so need lowest < 0.5 * second_lowest.
+        // worst=0.3, second=0.8, 0.5*0.8=0.4, 0.3<0.4 → focus idx 1.
+        let facings = vec![
+            make_snap("Fore", 80, 100, false),
+            make_snap("Port", 30, 100, false),
+            make_snap("Aft", 80, 100, false),
+            make_snap("Starboard", 80, 100, false),
+        ];
+        let input = make_input(facings, true, empty_history(4), 5.0);
+        assert_eq!(
+            tick_shield_focus_ai(&input),
+            ShieldFocusAiOutput::Focus { facing_index: 1 }
+        );
+    }
+
+    #[test]
+    fn shield_ai_health_imbalance_no_op_if_already_focused() {
+        // Same health imbalance but the worst arc is already focused.
+        let facings = vec![
+            make_snap("Fore", 80, 100, false),
+            make_snap("Port", 30, 100, true),
+            make_snap("Aft", 80, 100, false),
+            make_snap("Starboard", 80, 100, false),
+        ];
+        let input = make_input(facings, true, empty_history(4), 5.0);
         assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
     }
 
     #[test]
-    fn shield_ai_all_full_clears_focus() {
-        let input = ShieldFocusAiInput {
-            facings: vec![
-                make_snap("Fore", 100, 100, false),
-                make_snap("Port", 100, 100, false),
-                make_snap("Aft", 100, 100, false),
-                make_snap("Starboard", 100, 100, false),
-            ],
-            shields_is_low: true,
-        };
+    fn shield_ai_no_damage_and_balanced_health_clears() {
+        // All arcs at full HP, no damage → clear focus.
+        let facings = vec![
+            make_snap("Fore", 100, 100, false),
+            make_snap("Port", 100, 100, false),
+            make_snap("Aft", 100, 100, false),
+            make_snap("Starboard", 100, 100, false),
+        ];
+        let input = make_input(facings, true, empty_history(4), 5.0);
         assert_eq!(
             tick_shield_focus_ai(&input),
             ShieldFocusAiOutput::ClearFocus
+        );
+    }
+
+    #[test]
+    fn shield_ai_damage_outside_active_window_ignored() {
+        // Damage at t=1.0s is older than min_window=1.0s when current_time=4.0.
+        // Window is [3.0, 4.0], so t=1.0 is outside → no arc sees concentration.
+        let mut history = empty_history(4);
+        history[1].push(DamageRecord {
+            timestamp: 1.0, // older than 3.0s window start
+            amount: 80,
+        });
+        let facings = vec![
+            make_snap("Fore", 90, 100, false),
+            make_snap("Port", 20, 100, false),
+            make_snap("Aft", 90, 100, false),
+            make_snap("Starboard", 90, 100, false),
+        ];
+        let input = make_input(facings, true, history, 4.0);
+        // No damage in active window → falls to health check.
+        // worst normalized = 0.2 (Port), second = 0.9, 0.5*0.9=0.45, 0.2<0.45 → focus Port
+        assert_eq!(
+            tick_shield_focus_ai(&input),
+            ShieldFocusAiOutput::Focus { facing_index: 1 }
+        );
+    }
+
+    #[test]
+    fn shield_ai_damage_in_future_window_ignored() {
+        // Damage at t=5.0s is in the future relative to current_time=4.0
+        // (active window is [3.0, 4.0]). Should be ignored.
+        let mut history = empty_history(4);
+        history[1].push(DamageRecord {
+            timestamp: 5.0,
+            amount: 80,
+        });
+        let facings = vec![
+            make_snap("Fore", 90, 100, false),
+            make_snap("Port", 20, 100, false),
+            make_snap("Aft", 90, 100, false),
+            make_snap("Starboard", 90, 100, false),
+        ];
+        let input = make_input(facings, true, history, 4.0);
+        // No damage in active window → health check: worst=0.2, second=0.9 → focus Port
+        assert_eq!(
+            tick_shield_focus_ai(&input),
+            ShieldFocusAiOutput::Focus { facing_index: 1 }
         );
     }
 }

@@ -1254,8 +1254,8 @@ mod tests {
         // Damage is spread evenly, no arc reaches 50% threshold.
         let mut history = empty_history(4);
         // Each arc gets 25 damage → no arc has ≥ 50% of total (100)
-        for i in 0..4 {
-            history[i].push(DamageRecord {
+        for arc in &mut history {
+            arc.push(DamageRecord {
                 timestamp: 3.5,
                 amount: 25,
             });

@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 32 expected action keys', () => {
+  it('contains exactly the 33 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -29,6 +29,7 @@ describe('ACTION_MAP', () => {
       'set_lateral_thrust',
       'set_navigation_chart',
       'set_navigation_waypoint',
+      'set_objective_priority',
       'set_phaser_mode',
       'set_power',
       'set_radar_view',
@@ -563,6 +564,25 @@ describe('clear_navigation_waypoint', () => {
     const send = mkSend();
     ACTION_MAP.clear_navigation_waypoint({}, send);
     expect(send).toHaveBeenCalledWith('ClearNavigationWaypoint');
+  });
+});
+
+// ── set_objective_priority (issue #675) ───────────────────────────────────────
+
+describe('set_objective_priority', () => {
+  it('sends ControlSystem SetObjectivePriority with id', () => {
+    const send = mkSend();
+    ACTION_MAP.set_objective_priority({ action: 'set_objective_priority', id: 'obj-1' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'captain',
+      payload: { type: 'SetObjectivePriority', data: { id: 'obj-1' } },
+    });
+  });
+
+  it('does nothing when id is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.set_objective_priority({ action: 'set_objective_priority' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

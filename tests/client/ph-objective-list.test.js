@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-objective-list.js';
 
-function setup(html) {
-  document.body.innerHTML = html || '<ph-objective-list id="test-panel"></ph-objective-list>';
+function setup(opts) {
+  const sendAction = opts && opts.sendAction;
+  if (sendAction) {
+    window.sendAction = sendAction;
+  }
+  document.body.innerHTML = '<ph-objective-list id="test-panel"></ph-objective-list>';
   const el = document.getElementById('test-panel');
   return { el };
 }
@@ -16,10 +20,12 @@ function queryText(host, sel) {
 describe('PhObjectiveList', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+    delete window.sendAction;
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
+    delete window.sendAction;
   });
 
   it('is defined and registered as a custom element', () => {
@@ -124,5 +130,70 @@ describe('PhObjectiveList', () => {
     expect(rows.length).toBe(2);
     expect(rows[0].classList.contains('done')).toBe(true);
     expect(queryText(el, '.empty')).toBeNull();
+  });
+
+  it('clicking an objective row calls sendAction with set_objective_priority', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = {
+      objectives: [
+        { id: 'obj-1', text: 'Scan the anomaly', done: false },
+        { id: 'obj-2', text: 'Hail the vessel', done: false },
+      ],
+    };
+    const rows = el.shadowRoot.querySelectorAll('.row');
+    rows[1].click();
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledWith('set_objective_priority', { id: 'obj-2' });
+  });
+
+  it('does not throw when sendAction is not set and row is clicked', () => {
+    const { el } = setup();
+    el.state = {
+      objectives: [{ id: 'obj-1', text: 'Scan the anomaly', done: false }],
+    };
+    const row = el.shadowRoot.querySelector('.row');
+    expect(() => row.click()).not.toThrow();
+  });
+
+  it('marks the row matching boosted_objective_id with the boosted class', () => {
+    const { el } = setup();
+    el.state = {
+      objectives: [
+        { id: 'obj-1', text: 'Scan the anomaly', done: false },
+        { id: 'obj-2', text: 'Hail the vessel', done: false },
+        { id: 'obj-3', text: 'Report to command', done: false },
+      ],
+      boosted_objective_id: 'obj-2',
+    };
+    const rows = el.shadowRoot.querySelectorAll('.row');
+    expect(rows[0].classList.contains('boosted')).toBe(false);
+    expect(rows[1].classList.contains('boosted')).toBe(true);
+    expect(rows[2].classList.contains('boosted')).toBe(false);
+  });
+
+  it('marks no row as boosted when boosted_objective_id is null', () => {
+    const { el } = setup();
+    el.state = {
+      objectives: [
+        { id: 'obj-1', text: 'Scan the anomaly', done: false },
+        { id: 'obj-2', text: 'Hail the vessel', done: false },
+      ],
+      boosted_objective_id: null,
+    };
+    const rows = el.shadowRoot.querySelectorAll('.row');
+    expect(rows[0].classList.contains('boosted')).toBe(false);
+    expect(rows[1].classList.contains('boosted')).toBe(false);
+  });
+
+  it('marks no row as boosted when boosted_objective_id is absent', () => {
+    const { el } = setup();
+    el.state = {
+      objectives: [
+        { id: 'obj-1', text: 'Scan the anomaly', done: false },
+      ],
+    };
+    const rows = el.shadowRoot.querySelectorAll('.row');
+    expect(rows[0].classList.contains('boosted')).toBe(false);
   });
 });

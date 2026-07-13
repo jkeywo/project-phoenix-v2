@@ -571,6 +571,7 @@ export function buildCaptainConsoleState(state) {
       view_mode:             'Camera',
       camera_views:          bb.camera_views           ?? [],
       objectives:            bb.objectives             ?? [],
+      boosted_objective_id:  bb.boosted_objective_id   ?? null,
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
@@ -593,6 +594,7 @@ export function buildCaptainConsoleState(state) {
     view_mode:             'Camera',
     camera_views:          state.cameraViews || [],
     objectives:            state.objectives  || [],
+    boosted_objective_id:  null,
     hull_integrity_pct:    state.hullPct     || 100,
     game_status:           state.redAlert
                              ? 'RED ALERT — All hands to battlestations.'

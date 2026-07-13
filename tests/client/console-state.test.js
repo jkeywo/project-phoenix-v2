@@ -541,6 +541,33 @@ describe('buildCaptainConsoleState', () => {
   it('passes currentView as view_direction for all views', () => {
     expect(parse(buildCaptainConsoleState({ currentView: 'Radar' })).view_direction).toBe('Radar');
   });
+
+  it('boosted_objective_id defaults to null when blackboard and legacy state are absent', () => {
+    expect(parse(buildCaptainConsoleState(EMPTY)).boosted_objective_id).toBeNull();
+  });
+
+  it('forwards boosted_objective_id from the captain blackboard when present', () => {
+    const state = {
+      blackboards: {
+        captain: { objectives: [{ id: 'obj-1' }], boosted_objective_id: 'obj-1' },
+      },
+    };
+    expect(parse(buildCaptainConsoleState(state)).boosted_objective_id).toBe('obj-1');
+  });
+
+  it('boosted_objective_id is null when blackboard present but value absent', () => {
+    const state = {
+      blackboards: {
+        captain: { objectives: [{ id: 'obj-1' }] },
+      },
+    };
+    expect(parse(buildCaptainConsoleState(state)).boosted_objective_id).toBeNull();
+  });
+
+  it('boosted_objective_id is null in legacy fallback (no blackboard)', () => {
+    const state = { objectives: ['obj-A'] };
+    expect(parse(buildCaptainConsoleState(state)).boosted_objective_id).toBeNull();
+  });
 });
 
 describe('buildHelmConsoleState', () => {

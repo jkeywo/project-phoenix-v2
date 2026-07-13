@@ -86,6 +86,49 @@ export function aggregateStationHull(stationId, consoleHull, stationSystems) {
   return { entries, totalCurrent, totalMax, pct, damagePct: 1 - pct };
 }
 
+/**
+ * Split the damageable-system list into ownerless "core" systems (which remain
+ * on the repair console) and a list of dispatchable repair targets — one per
+ * station that owns any damageable system (regardless of current damage),
+ * plus a `core` bucket whenever any ownerless system exists. Every damageable
+ * station always gets a target/dispatch entry so repair teams can be sent
+ * proactively, not just once damage has occurred. Used by the repair console
+ * (issue #12).
+ *
+ * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
+ * @param {Object<string,string[]>} stationSystems  station id → system ids
+ */
+export function repairCoreAndTargets(systemHull, stationSystems) {
+  const hull = Array.isArray(systemHull) ? systemHull : [];
+  const stations = stationSystems || {};
+
+  const owned = new Set();
+  Object.keys(stations).forEach(st => (stations[st] || []).forEach(id => owned.add(id)));
+
+  const coreSystems = hull.filter(h => !owned.has(h.system_id));
+
+  const titleCase = (id) => String(id)
+    .split(/[-_]/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+
+  const targets = [];
+  Object.keys(stations).forEach(st => {
+    const agg = aggregateStationHull(st, hull, stations);
+    if (agg.totalMax > 0) {
+      targets.push({ id: st, label: titleCase(st), damage_pct: agg.damagePct });
+    }
+  });
+
+  const coreMax = coreSystems.reduce((s, h) => s + (h.max_hp || 0), 0);
+  if (coreMax > 0) {
+    const coreCur = coreSystems.reduce((s, h) => s + (h.current || 0), 0);
+    targets.push({ id: 'core', label: 'Core', damage_pct: 1 - coreCur / coreMax });
+  }
+
+  return { coreSystems, targets };
+}
+
 function withObjectiveTargets(entities, objectives) {
   const targets = activeObjectiveTargetNames(objectives);
   if (targets.size === 0) return entities || [];
@@ -438,6 +481,15 @@ export function buildWeaponsConsoleState(state) {
   const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
   const blasters     = bb.blasters      ?? state.blasterBanks        ?? [];
 
+  // AUTO gate: per-system, not whole-station — a "Simplified" rating only
+  // automates the phaser bank(s), leaving torpedoes/blasters human. Derive
+  // from the generic per-system control-source map intersected with this
+  // ship's actual phaser system ids (data-driven; works for the destroyer's
+  // single bank and the battleship/cruiser's two banks alike).
+  const phaserSystemIds = (state.stationSystems?.['tactical'] || []).filter(id => id.startsWith('phaser-'));
+  const controlSources = state.controlSources || {};
+  const tacticalAuto = phaserSystemIds.length > 0 && phaserSystemIds.every(id => controlSources[id] === 'Ai');
+
   const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
   const mappedPhaserArcs = phaserArcs.map(a => ({
     ...a,
@@ -488,11 +540,16 @@ export function buildWeaponsConsoleState(state) {
     phaser_mode:   phaserMode,
     blips,
     regions,
+    ship_heading:  (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
+    ship_x:        state.shipX || 0,
+    ship_z:        state.shipZ || 0,
+    ship_speed:    state.forwardSpeed || 0,
     phaser_arcs:   mappedPhaserArcs,
     torpedo_arcs:  torpedoArcs,
     blasters,
     own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
-    tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
+    tactical_auto: tacticalAuto,
+    station_rating: state.stationRatings?.['tactical'] || 'Std',
   });
 }
 
@@ -566,7 +623,9 @@ export function buildHelmConsoleState(state) {
   const boostBattery = bb.boost_battery ?? state.boostBattery ?? 0;
   const boostActive  = bb.boost_active  ?? state.boostActive  ?? false;
 
-  const range = state.helmRadarRange ?? HELM_RADAR_RANGE;
+  // Prefer the live per-tick range (shrinks as the helm-radar system takes
+  // damage — see `apply_radar_damage_modifiers`) over the static ship config.
+  const range = bb.radar_range ?? state.helmRadarRange ?? HELM_RADAR_RANGE;
   // Exclude objective_marker entities — objectives only show on the nav chart.
   const helmEntities = (state.asteroids || []).filter(e => {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
@@ -616,6 +675,11 @@ export function buildHelmConsoleState(state) {
     engine_stbd_thrust:  (state.blackboards?.['helm-engine-starboard']?.thrust_fraction) ?? 0,
     engine_port_auto:    state.stationRatings?.['helm'] === 'Backfill',
     engine_stbd_auto:    state.stationRatings?.['helm'] === 'Backfill',
+    // Lateral thrust state from per-system blackboard.
+    lateral_speed:       bb.lateral_speed ?? 0,
+    lateral_input:       (state.blackboards?.['helm-lateral-thrust']?.lateral_input) ?? 0,
+    lateral_auto:        (state.blackboards?.['helm-lateral-thrust']?.auto) ?? false,
+    lateral_is_online:   (state.blackboards?.['helm-lateral-thrust']?.is_online) ?? true,
   });
 }
 
@@ -691,6 +755,20 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
 }
 
 /**
+ * Aggregate hull health across every damageable system on the ship (all of
+ * `system_hull`, not just one station's slice) — the "overall hull" figure
+ * for the Repair console's hero bar.
+ *
+ * @param {Array<{current,max_hp}>} systemHull
+ */
+export function overallHull(systemHull) {
+  const hull = Array.isArray(systemHull) ? systemHull : [];
+  const current = hull.reduce((s, h) => s + (h.current || 0), 0);
+  const max = hull.reduce((s, h) => s + (h.max_hp || 0), 0);
+  return { current, max, pct: max > 0 ? current / max : 1 };
+}
+
+/**
  * Repair console.
  * @param {{ blackboards, repairTeams, consoleHull }} state
  */
@@ -700,23 +778,42 @@ export function buildRepairConsoleState(state) {
     const rawTeams = bb.teams || [];
     const travelDur = bb.travel_duration_secs ?? 5.0;
     const teams = rawTeams.map((slot, idx) => normalizeTeamSlot(slot, idx, travelDur));
+    const systemHull = bb.system_hull ?? [];
+    const { coreSystems, targets } = repairCoreAndTargets(systemHull, state.stationSystems);
     return JSON.stringify({
       teams,
       // SystemId-keyed fields (post issues #618/#619).
-      system_hull:          bb.system_hull          ?? [],
+      system_hull:          systemHull,
       damageable_systems:   bb.damageable_systems   ?? [],
+      // Overall ship-wide hull aggregate (every damageable system, not just
+      // one station's slice) — feeds the Repair console's hero hull bar.
+      overall_hull:         overallHull(systemHull),
+      // Only ownerless "core" systems stay on the repair console; per-station
+      // system status moved to each console's footer bar (issue #12).
+      core_systems:         coreSystems,
+      // Dispatchable, currently-damaged repair targets (stations + core).
+      dispatch_targets:     targets,
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
-      repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
+      // Per-system, not whole-station: the repair *system* id is always the
+      // literal "repair" regardless of which station owns it (battleship's
+      // dedicated Repair station vs. cruiser/destroyer's Engineering), so
+      // this works uniformly across all ship classes.
+      repair_auto:          state.controlSources?.['repair'] === 'Ai',
     });
   }
   // Legacy fallback: derive damageable_systems from consoleHull (SystemId-keyed
   // after issue #618) so the repair panel renders even without the blackboard.
+  const legacyHull = state.consoleHull || [];
+  const legacy = repairCoreAndTargets(legacyHull, state.stationSystems);
   return JSON.stringify({
     teams:                state.repairTeams || [],
-    system_hull:          state.consoleHull || [],
-    damageable_systems:   (state.consoleHull || []).map(h => h.system_id),
+    system_hull:          legacyHull,
+    damageable_systems:   legacyHull.map(h => h.system_id),
+    overall_hull:         overallHull(legacyHull),
+    core_systems:         legacy.coreSystems,
+    dispatch_targets:     legacy.targets,
     travel_duration_secs: 5.0,
-    repair_auto:          state.stationRatings?.['repair'] === 'Backfill',
+    repair_auto:          state.controlSources?.['repair'] === 'Ai',
   });
 }
 
@@ -754,6 +851,7 @@ export function buildPowerConsoleState(state) {
       battery_online: batteryOnline,
       own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
       power_auto:     state.stationRatings?.['power'] === 'Backfill',
+      station_rating: state.stationRatings?.['power'] || 'Std',
     });
   }
   // Legacy fallback: PowerState message fields.
@@ -767,6 +865,7 @@ export function buildPowerConsoleState(state) {
     battery_online: batteryOnline,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
     power_auto:     state.stationRatings?.['power'] === 'Backfill',
+    station_rating: state.stationRatings?.['power'] || 'Std',
   });
 }
 
@@ -892,7 +991,10 @@ export function buildSensorsConsoleState(state) {
 
   return JSON.stringify({
     scan_range:              range,
+    ship_x:                  state.shipX || 0,
+    ship_z:                  state.shipZ || 0,
     ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
+    ship_speed:              state.forwardSpeed || 0,
     complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
@@ -1141,7 +1243,7 @@ export function buildDestroyerTacticalConsoleState(state) {
     weapons,
     navigation,
     comms,
-    tactical_auto: state.stationRatings?.['tactical'] === 'Backfill',
+    tactical_auto: weapons.tactical_auto,
   });
 }
 
@@ -1173,8 +1275,27 @@ export function buildDestroyerEngineeringConsoleState(state) {
 
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
+/**
+ * Compute the per-station footer damage aggregate for `consoleName` and merge
+ * it into the built console JSON as `own_hull`. `consoleName` is the station id
+ * (issue #12), so `aggregateStationHull` gives the console operator's own
+ * systems — the footer `ph-station-damage` bar reads this.
+ */
+function withStationDamage(consoleName, state, json) {
+  try {
+    const obj = JSON.parse(json);
+    obj.own_hull = aggregateStationHull(consoleName, state.consoleHull, state.stationSystems);
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
+}
+
 if (typeof window !== 'undefined') {
   window.buildConsoleState = function buildConsoleState(consoleName, state) {
+    return withStationDamage(consoleName, state, buildConsoleStateInner(consoleName, state));
+  };
+  window.buildConsoleStateInner = function buildConsoleStateInner(consoleName, state) {
     // Post issue #618: `consoleName` is a lowercase station id (from each
     // per-console iframe's `initConsole({ name: '...' })` and from
     // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase
@@ -1207,8 +1328,10 @@ if (typeof window !== 'undefined') {
       case 'navigation':  return buildNavigationConsoleState(state);
       case 'science':     return buildScienceConsoleState(state);
       case 'engineering':
-        // Destroyer engineering = shields + power + repair.
-        if (state.stationSystems?.engineering?.includes('shields')) {
+        // Destroyer engineering = shields + power + repair. The shields
+        // system's TOML id is "shields-system" (its `kind` is "shields"),
+        // not "shields" — station_systems lists are built from system ids.
+        if (state.stationSystems?.engineering?.includes('shields-system')) {
           return buildDestroyerEngineeringConsoleState(state);
         }
         return buildEngineeringConsoleState(state);

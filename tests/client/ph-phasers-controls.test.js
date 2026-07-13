@@ -2,6 +2,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-phasers-controls.js';
 
+// The component consumes the server wire type `PhaserBankState`
+// (core/messages.rs): { id, fire_ready, on_cooldown, cooldown_remaining }.
+// Auto/Manual is a ship-level `phaser_mode` surfaced through the header
+// toggle, not a per-bank field.
+
 function setup(opts) {
   const sendAction = opts && opts.sendAction;
   if (sendAction) {
@@ -52,92 +57,108 @@ describe('PhPhasersControls', () => {
   it('renders a phaser bank with label text', () => {
     const { el } = setup();
     el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: false }],
+      banks: [{ id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: false }],
       target_valid: true,
+      mode: 'Manual',
     };
     expect(queryText(el, '.lbl')).toBe('Fore');
   });
 
-  it('renders cooldown bar at correct width', () => {
+  it('marks the cooldown bar as cooling while on cooldown', () => {
     const { el } = setup();
     el.state = {
-      banks: [{ id: 'aft', label: 'Aft', state: 'cooling', cooldown_pct: 0.5, auto: false }],
+      banks: [{ id: 'aft', label: 'Aft', fire_ready: false, on_cooldown: true }],
       target_valid: true,
+      mode: 'Manual',
     };
     const fill = el.shadowRoot.querySelector('.cooldown-fill');
-    expect(fill.style.width).toBe('50%');
     expect(fill.classList.contains('cooling')).toBe(true);
   });
 
-  it('fire button is disabled when cooldown > 0', () => {
+  it('fire button is disabled while on cooldown', () => {
     const { el } = setup();
     el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'cooling', cooldown_pct: 0.3, auto: false }],
+      banks: [{ id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: true }],
       target_valid: true,
+      mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
   it('fire button is disabled when target is invalid', () => {
     const { el } = setup();
     el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: false }],
+      banks: [{ id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: false }],
       target_valid: false,
+      mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
-  it('fire button is disabled when bank is auto', () => {
+  it('fire button is disabled when the bank is not fire-ready', () => {
     const { el } = setup();
     el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: true }],
+      banks: [{ id: 'fore', label: 'Fore', fire_ready: false, on_cooldown: false }],
       target_valid: true,
+      mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
-  it('fire button is enabled when ready, target valid, not auto', () => {
+  it('fire button is disabled in Auto mode', () => {
     const { el } = setup();
     el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: false }],
+      banks: [{ id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: false }],
       target_valid: true,
+      mode: 'Auto',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('fire button is enabled when ready, target valid, cooldown clear, and Manual', () => {
+    const { el } = setup();
+    el.state = {
+      banks: [{ id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: false }],
+      target_valid: true,
+      mode: 'Manual',
+    };
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(false);
   });
 
-  it('shows AUTO badge when bank is auto', () => {
+  it('mode toggle shows AUTO in Auto mode and MANUAL in Manual mode', () => {
     const { el } = setup();
-    el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: true }],
-      target_valid: true,
-    };
-    const badge = el.shadowRoot.querySelector('.auto-badge');
-    expect(badge.style.display).not.toBe('none');
-    expect(badge.textContent.trim()).toBe('AUTO');
+    el.state = { banks: [], mode: 'Auto' };
+    expect(queryText(el, '#mode-toggle')).toBe('AUTO');
+    el.state = { banks: [], mode: 'Manual' };
+    expect(queryText(el, '#mode-toggle')).toBe('MANUAL');
   });
 
-  it('hides AUTO badge when bank is not auto', () => {
-    const { el } = setup();
-    el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: false }],
-      target_valid: true,
-    };
-    const badge = el.shadowRoot.querySelector('.auto-badge');
-    expect(badge.style.display).toBe('none');
+  it('clicking the mode toggle dispatches set_phaser_mode with the flipped mode', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = { banks: [], mode: 'Auto' };
+    el.shadowRoot.querySelector('#mode-toggle').click();
+    expect(sendAction).toHaveBeenCalledWith('set_phaser_mode', { mode: 'Manual' });
+
+    el.state = { banks: [], mode: 'Manual' };
+    el.shadowRoot.querySelector('#mode-toggle').click();
+    expect(sendAction).toHaveBeenCalledWith('set_phaser_mode', { mode: 'Auto' });
   });
 
   it('clicking fire button dispatches fire_phaser action', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: false }],
+      banks: [{ id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: false }],
       target_valid: true,
+      mode: 'Manual',
     };
-    const btn = el.shadowRoot.querySelector('.fire-btn');
+    const btn = el.shadowRoot.querySelector('.btn');
     btn.click();
     expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith('fire_phaser', { bank: 'fore' });
@@ -147,10 +168,11 @@ describe('PhPhasersControls', () => {
     const { el } = setup();
     el.state = {
       banks: [
-        { id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: false },
-        { id: 'aft', label: 'Aft', state: 'cooling', cooldown_pct: 0.5, auto: false },
+        { id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: false },
+        { id: 'aft', label: 'Aft', fire_ready: false, on_cooldown: true },
       ],
       target_valid: true,
+      mode: 'Manual',
     };
     const rows1 = el.shadowRoot.querySelectorAll('.bank-row');
     expect(rows1.length).toBe(2);
@@ -159,9 +181,10 @@ describe('PhPhasersControls', () => {
 
     el.state = {
       banks: [
-        { id: 'aft', label: 'Aft', state: 'cooling', cooldown_pct: 0.2, auto: false },
+        { id: 'aft', label: 'Aft', fire_ready: false, on_cooldown: true },
       ],
       target_valid: true,
+      mode: 'Manual',
     };
     const rows2 = el.shadowRoot.querySelectorAll('.bank-row');
     expect(rows2.length).toBe(1);
@@ -172,16 +195,18 @@ describe('PhPhasersControls', () => {
     const { el } = setup();
     el.state = {
       banks: [
-        { id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: false },
-        { id: 'aft', label: 'Aft', state: 'cooling', cooldown_pct: 0.5, auto: false },
+        { id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: false },
+        { id: 'aft', label: 'Aft', fire_ready: false, on_cooldown: true },
       ],
       target_valid: true,
+      mode: 'Manual',
     };
     expect(el.shadowRoot.querySelectorAll('.bank-row').length).toBe(2);
 
     el.state = {
-      banks: [{ id: 'fore', label: 'Fore', state: 'ready', cooldown_pct: 0, auto: false }],
+      banks: [{ id: 'fore', label: 'Fore', fire_ready: true, on_cooldown: false }],
       target_valid: true,
+      mode: 'Manual',
     };
     expect(el.shadowRoot.querySelectorAll('.bank-row').length).toBe(1);
   });

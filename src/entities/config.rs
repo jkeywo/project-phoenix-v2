@@ -55,6 +55,20 @@ pub struct DoctrineObjective {
     /// The helm stops thrusting when closer than this.
     #[serde(default = "default_maintain_range")]
     pub maintain_range: f32,
+    /// Whether the AI may engage impulse drive while executing this objective.
+    /// When absent, defaults to `true` for Reach and Destroy, `false` for Patrol.
+    #[serde(default)]
+    pub use_impulse: Option<bool>,
+}
+
+impl DoctrineObjective {
+    /// Resolved effective `use_impulse` value.
+    /// Returns `self.use_impulse` if set; otherwise defaults to `true` for
+    /// Reach and Destroy directives, `false` for Patrol.
+    pub fn effective_use_impulse(&self) -> bool {
+        self.use_impulse
+            .unwrap_or(!matches!(self.directive_kind.as_deref(), Some("Patrol")))
+    }
 }
 
 fn default_doctrine_target_speed() -> f32 {
@@ -159,10 +173,140 @@ pub struct MeshConfig {
     /// Affects both GLB models and procedural shapes.
     #[serde(default)]
     pub rotation: [f32; 3],
+    /// Optional distance-based level-of-detail bands, ordered near→far.
+    ///
+    /// When non-empty, the renderer does **not** render the flat fields above
+    /// directly; instead it selects a [`LodLevel`] each frame based on the
+    /// entity's distance to the camera (see [`select_lod`]) and renders that
+    /// level. Fields the chosen level omits fall back to the flat `MeshConfig`
+    /// fields (`colour`/`radius`/`emissive`/`size`/`minor_radius`/`variant`).
+    /// The flat fields therefore stay meaningful as shared defaults even when
+    /// `lod` is present. Empty (the default) preserves today's single-level
+    /// behaviour.
+    #[serde(default)]
+    pub lod: Vec<LodLevel>,
 }
 
 fn default_mesh_scale() -> f32 {
     1.0
+}
+
+/// Hysteresis margin (world units) applied by [`select_lod`]. Once an entity is
+/// showing a given level, the camera distance must move past the band boundary
+/// by more than this margin before the level switches. This prevents rapid
+/// flip-flopping when the camera hovers exactly on a boundary.
+pub const LOD_HYSTERESIS_MARGIN: f32 = 5.0;
+
+/// One distance band in a [`MeshConfig::lod`] list.
+///
+/// Levels are declared near→far in ascending `max_distance` order. Each level
+/// self-describes as either a GLB level (`model` set) or a procedural level
+/// (`shape` set); a level with neither is invalid and is skipped by the
+/// renderer. Every visual field is optional — when omitted, the renderer falls
+/// back to the corresponding flat [`MeshConfig`] field, so a level only needs
+/// to declare what differs from the shared defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct LodLevel {
+    /// Upper bound (exclusive) of this level's camera-distance band. Level `i`
+    /// covers `[bound(i-1), max_distance)`. The final (fallback) level omits
+    /// `max_distance`, which is treated as `f32::INFINITY`.
+    #[serde(default)]
+    pub max_distance: Option<f32>,
+    /// Path to a `.glb` file. When set, this is a GLB level and the procedural
+    /// fields are ignored for this band.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Optional rig-sidecar variant name for the GLB (see [`MeshConfig::variant`]).
+    #[serde(default)]
+    pub variant: Option<String>,
+    /// Procedural shape for this band. Used only when `model` is `None`.
+    #[serde(default)]
+    pub shape: Option<MeshShape>,
+    /// RGB colour `[r, g, b]` (linear 0–1). Falls back to `MeshConfig::colour`.
+    #[serde(default)]
+    pub colour: Option<Vec<f32>>,
+    /// Sphere radius / torus major radius. Falls back to `MeshConfig::radius`.
+    #[serde(default)]
+    pub radius: Option<f32>,
+    /// Cuboid full XYZ dimensions. Falls back to `MeshConfig::size`.
+    #[serde(default)]
+    pub size: Option<[f32; 3]>,
+    /// Torus tube radius. Falls back to `MeshConfig::minor_radius`.
+    #[serde(default)]
+    pub minor_radius: Option<f32>,
+    /// Emissive multiplier. Falls back to `MeshConfig::emissive`.
+    #[serde(default)]
+    pub emissive: Option<f32>,
+}
+
+/// Upper bound (exclusive) of level `i`'s distance band. A missing
+/// `max_distance` means the band extends to infinity (the fallback level).
+fn lod_upper_bound(levels: &[LodLevel], i: usize) -> f32 {
+    levels[i].max_distance.unwrap_or(f32::INFINITY)
+}
+
+/// The naive (hysteresis-free) level for `distance`: the first level whose
+/// upper bound exceeds `distance`, or the last level when `distance` is beyond
+/// every bound. `levels` must be non-empty.
+fn naive_lod_level(levels: &[LodLevel], distance: f32) -> usize {
+    for i in 0..levels.len() {
+        if distance < lod_upper_bound(levels, i) {
+            return i;
+        }
+    }
+    levels.len() - 1
+}
+
+/// Select which LOD level to display for a given camera `distance`, applying
+/// hysteresis around band boundaries.
+///
+/// `levels` are ordered near→far; level `i` nominally covers
+/// `[bound(i-1), bound(i))` where `bound(i)` is `levels[i].max_distance`
+/// (missing = `f32::INFINITY`). `current` is the level shown last frame, or
+/// `None` on the first evaluation.
+///
+/// Boundary behaviour: when already at `current`, the result only changes once
+/// `distance` crosses the relevant boundary by more than
+/// [`LOD_HYSTERESIS_MARGIN`]. Crossing outward (to a farther level) requires
+/// `distance > upper_bound(current) + margin`; crossing inward (to a nearer
+/// level) requires `distance < lower_bound(current) - margin`. Within the
+/// margin the level holds. `current == None` uses the naive selection with no
+/// hysteresis. Empty `levels` returns `0` (the caller handles the no-LOD case).
+pub fn select_lod(levels: &[LodLevel], distance: f32, current: Option<usize>) -> usize {
+    if levels.is_empty() {
+        return 0;
+    }
+    let naive = naive_lod_level(levels, distance);
+    let Some(cur) = current else {
+        return naive;
+    };
+    // Clamp a possibly-stale index into range, then hold unless the distance has
+    // cleared the boundary in the direction of travel by more than the margin.
+    let cur = cur.min(levels.len() - 1);
+    if naive == cur {
+        return cur;
+    }
+    if naive > cur {
+        // Moving outward: only switch once past this level's upper bound + margin.
+        if distance > lod_upper_bound(levels, cur) + LOD_HYSTERESIS_MARGIN {
+            naive
+        } else {
+            cur
+        }
+    } else {
+        // Moving inward: only switch once below this level's lower bound - margin.
+        let lower_bound = if cur == 0 {
+            0.0
+        } else {
+            lod_upper_bound(levels, cur - 1)
+        };
+        if distance < lower_bound - LOD_HYSTERESIS_MARGIN {
+            naive
+        } else {
+            cur
+        }
+    }
 }
 
 fn default_star_radius() -> f32 {
@@ -400,6 +544,14 @@ pub struct HelmConsoleConfig {
     /// Defaults to `IMPULSE_ACCELERATION_MULTIPLIER` (5.0) when absent.
     #[serde(default = "default_impulse_acceleration_multiplier")]
     pub impulse_acceleration_multiplier: f32,
+    /// Minimum distance from target at which AI may engage impulse (world units).
+    /// Defaults to 200.0 when absent.
+    #[serde(default = "default_impulse_engage_distance")]
+    pub impulse_engage_distance: f32,
+    /// Distance from target at which AI cancels impulse (world units).
+    /// Defaults to 40.0 when absent.
+    #[serde(default = "default_impulse_cancel_distance")]
+    pub impulse_cancel_distance: f32,
     /// Maximum visual banking (roll) angle in degrees when steering at full
     /// deflection. The ship leans into turns, lerped from 0 toward ±max_bank_deg
     /// based on steering input percentage. 0 = no banking.
@@ -418,6 +570,10 @@ pub struct HelmConsoleConfig {
     /// Rendering code supplies defaults for omitted fields.
     #[serde(default)]
     pub engine_pfx: Option<EnginePfxConfig>,
+    /// Optional lateral thrust tuning, from `[helm_console.lateral_thrust]`.
+    /// When absent, ShipPhysicsConfig defaults are used.
+    #[serde(default)]
+    pub lateral_thrust: Option<LateralThrustConfig>,
 }
 
 /// Procedural engine trail tuning, from `[helm_console.engine_pfx]`.
@@ -436,6 +592,36 @@ pub struct EnginePfxConfig {
     /// Seconds between spawned trail segments. When omitted, renderer defaults are used.
     #[serde(default)]
     pub trail_spawn_interval_secs: Option<f32>,
+}
+
+/// Lateral thrust tuning, from `[helm_console.lateral_thrust]`.
+/// When absent, the feature uses ShipPhysicsConfig defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LateralThrustConfig {
+    /// Maximum lateral speed in world units per second.
+    #[serde(default = "default_lateral_thrust_max_speed")]
+    pub max_lateral_speed: f32,
+    /// Lateral acceleration in world units per second squared.
+    #[serde(default = "default_lateral_thrust_acceleration")]
+    pub lateral_acceleration: f32,
+}
+
+fn default_lateral_thrust_max_speed() -> f32 {
+    15.0
+}
+
+fn default_lateral_thrust_acceleration() -> f32 {
+    15.0
+}
+
+impl Default for LateralThrustConfig {
+    fn default() -> Self {
+        Self {
+            max_lateral_speed: default_lateral_thrust_max_speed(),
+            lateral_acceleration: default_lateral_thrust_acceleration(),
+        }
+    }
 }
 
 /// Boost drive tuning, from `[helm_console.boost]`. Presence of this table is
@@ -472,6 +658,14 @@ fn default_impulse_charge_duration() -> f32 {
 
 fn default_impulse_speed_multiplier() -> f32 {
     crate::impulse::IMPULSE_SPEED_MULTIPLIER
+}
+
+fn default_impulse_engage_distance() -> f32 {
+    200.0
+}
+
+fn default_impulse_cancel_distance() -> f32 {
+    40.0
 }
 
 fn default_impulse_acceleration_multiplier() -> f32 {
@@ -799,6 +993,12 @@ pub struct CinematicCameraConfig {
     /// Minimum seconds between target re-evaluations (hysteresis).
     #[serde(default = "default_cinematic_hysteresis")]
     pub hysteresis_secs: f32,
+    /// How fast (degrees/second) the chase camera's yaw catches up to the
+    /// ship's actual heading. A rigid 1:1 lock makes the ship look frozen in
+    /// frame during turns (camera and hull rotate identically), so the
+    /// camera intentionally lags behind and lets the ship's turn be visible.
+    #[serde(default = "default_cinematic_yaw_follow_rate")]
+    pub yaw_follow_deg_per_sec: f32,
 }
 
 fn default_cinematic_pitch() -> f32 {
@@ -812,6 +1012,9 @@ fn default_cinematic_look_ahead() -> f32 {
 }
 fn default_cinematic_hysteresis() -> f32 {
     3.0
+}
+fn default_cinematic_yaw_follow_rate() -> f32 {
+    45.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3956,6 +4159,172 @@ range = 8000.0
     fn comms_config_is_none_when_section_absent() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.comms.is_none(), "no [comms] → field is None");
+    }
+
+    // â"€â"€ LOD selection â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+
+    /// Two levels: GLB near (< 50), sphere fallback beyond.
+    fn two_level_lods() -> Vec<LodLevel> {
+        vec![
+            LodLevel {
+                max_distance: Some(50.0),
+                model: Some("assets/models/rock.glb".into()),
+                ..Default::default()
+            },
+            LodLevel {
+                max_distance: None,
+                shape: Some(MeshShape::Sphere),
+                ..Default::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn select_lod_empty_returns_zero() {
+        assert_eq!(select_lod(&[], 123.0, None), 0);
+        assert_eq!(select_lod(&[], 0.0, Some(3)), 0);
+    }
+
+    #[test]
+    fn select_lod_single_level_always_zero() {
+        let levels = vec![LodLevel {
+            max_distance: None,
+            shape: Some(MeshShape::Sphere),
+            ..Default::default()
+        }];
+        assert_eq!(select_lod(&levels, 0.0, None), 0);
+        assert_eq!(select_lod(&levels, 9999.0, None), 0);
+        assert_eq!(select_lod(&levels, 9999.0, Some(0)), 0);
+    }
+
+    #[test]
+    fn select_lod_basic_band_selection() {
+        let levels = two_level_lods();
+        // Near band → level 0.
+        assert_eq!(select_lod(&levels, 0.0, None), 0);
+        assert_eq!(select_lod(&levels, 49.0, None), 0);
+        // Far band → level 1.
+        assert_eq!(select_lod(&levels, 60.0, None), 1);
+        assert_eq!(select_lod(&levels, 100_000.0, None), 1);
+    }
+
+    #[test]
+    fn select_lod_boundary_is_exclusive_upper() {
+        let levels = two_level_lods();
+        // Exactly at the boundary belongs to the far band (upper bound exclusive).
+        assert_eq!(select_lod(&levels, 50.0, None), 1);
+        // Just below stays near.
+        assert_eq!(select_lod(&levels, 49.999, None), 0);
+    }
+
+    #[test]
+    fn select_lod_hysteresis_holds_when_moving_outward() {
+        let levels = two_level_lods();
+        // Currently at near level 0; distance crept just past the boundary but
+        // within the margin → hold at 0.
+        assert_eq!(select_lod(&levels, 52.0, Some(0)), 0);
+        assert_eq!(
+            select_lod(&levels, 50.0 + LOD_HYSTERESIS_MARGIN, Some(0)),
+            0,
+            "exactly boundary + margin still holds (strict >)"
+        );
+        // Clear of the margin → switch outward to level 1.
+        assert_eq!(
+            select_lod(&levels, 50.0 + LOD_HYSTERESIS_MARGIN + 0.1, Some(0)),
+            1
+        );
+    }
+
+    #[test]
+    fn select_lod_hysteresis_holds_when_moving_inward() {
+        let levels = two_level_lods();
+        // Currently at far level 1; distance dropped just below the boundary but
+        // within the margin → hold at 1.
+        assert_eq!(select_lod(&levels, 48.0, Some(1)), 1);
+        assert_eq!(
+            select_lod(&levels, 50.0 - LOD_HYSTERESIS_MARGIN, Some(1)),
+            1,
+            "exactly boundary - margin still holds (strict <)"
+        );
+        // Clear of the margin → switch inward to level 0.
+        assert_eq!(
+            select_lod(&levels, 50.0 - LOD_HYSTERESIS_MARGIN - 0.1, Some(1)),
+            0
+        );
+    }
+
+    #[test]
+    fn select_lod_no_thrash_across_repeated_calls_at_boundary() {
+        let levels = two_level_lods();
+        // Sit right on the boundary and re-evaluate repeatedly: whatever level we
+        // start at, we should stay there (no oscillation).
+        let mut level = 0usize;
+        for _ in 0..10 {
+            level = select_lod(&levels, 50.0, Some(level));
+        }
+        assert_eq!(level, 0, "started near, stays near at the boundary");
+
+        let mut level = 1usize;
+        for _ in 0..10 {
+            level = select_lod(&levels, 50.0, Some(level));
+        }
+        assert_eq!(level, 1, "started far, stays far at the boundary");
+    }
+
+    #[test]
+    fn select_lod_three_levels_and_out_of_range() {
+        let levels = vec![
+            LodLevel {
+                max_distance: Some(30.0),
+                model: Some("a.glb".into()),
+                ..Default::default()
+            },
+            LodLevel {
+                max_distance: Some(80.0),
+                shape: Some(MeshShape::Sphere),
+                ..Default::default()
+            },
+            LodLevel {
+                max_distance: None,
+                shape: Some(MeshShape::Sphere),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(select_lod(&levels, 10.0, None), 0);
+        assert_eq!(select_lod(&levels, 50.0, None), 1);
+        assert_eq!(select_lod(&levels, 500.0, None), 2);
+        // Negative / zero distances clamp to the nearest band.
+        assert_eq!(select_lod(&levels, -5.0, None), 0);
+        // A stale current index beyond the list is clamped and re-resolved.
+        assert_eq!(select_lod(&levels, 500.0, Some(99)), 2);
+    }
+
+    #[test]
+    fn lod_level_parses_from_mesh_toml() {
+        let toml_str = r##"
+[mesh]
+shape = "sphere"
+colour = [0.5, 0.5, 0.5]
+radius = 2.0
+
+[[mesh.lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+variant = "small"
+
+[[mesh.lod]]
+shape = "sphere"
+radius = 2.0
+colour = [0.5, 0.5, 0.5]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let mesh = config.mesh.expect("mesh section present");
+        assert_eq!(mesh.lod.len(), 2);
+        assert_eq!(mesh.lod[0].max_distance, Some(50.0));
+        assert_eq!(mesh.lod[0].model.as_deref(), Some("assets/models/rock.glb"));
+        assert_eq!(mesh.lod[0].variant.as_deref(), Some("small"));
+        assert_eq!(mesh.lod[1].max_distance, None);
+        assert_eq!(mesh.lod[1].shape, Some(MeshShape::Sphere));
     }
 }
 

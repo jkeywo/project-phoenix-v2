@@ -17,22 +17,6 @@ radius = 1.5
 length = 4
 
 [[hull.system_hull]]
-system_id = "helm"
-display_name = "Helm"
-max_hp = 25
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "tactical"
-display_name = "Tactical"
-max_hp = 25
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
 system_id = "science"
 display_name = "Science"
 max_hp = 20
@@ -81,6 +65,38 @@ disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
+system_id = "helm-radar"
+display_name = "Helm Radar"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-lateral-thrust"
+display_name = "Lateral Thrusters"
+max_hp = 10
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "tactical-radar"
+display_name = "Tactical Radar"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "sensor-radar"
+display_name = "Sensor Radar"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
 system_id = "phaser-fore"
 display_name = "Phaser Bank (Fore)"
 max_hp = 15
@@ -116,14 +132,6 @@ debuff_magnitude = 0.20
 system_id = "torpedo-tube-aft"
 display_name = "Torpedo Tube (Aft)"
 max_hp = 12
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "torpedo-magazine"
-display_name = "Torpedo Magazine"
-max_hp = 20
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
@@ -222,6 +230,10 @@ color = [ 0.25, 0.75, 1, 0.72 ]
 markers = [ "engine_port", "engine_starboard" ]
 trail_lifetime_secs = 0.55
 trail_spawn_interval_secs = 0.06
+
+[helm_console.lateral_thrust]
+max_lateral_speed = 12
+lateral_acceleration = 8
 
 [helm_console.boost]
 multiplier = 2.5
@@ -339,6 +351,10 @@ console = "gui/cruiser/captain.html"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["red-alert"]
+
 [[station]]
 id = "helm"
 name = "Helm"
@@ -351,6 +367,10 @@ console = "gui/cruiser/helm.html"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["helm-lateral-thrust"]
+
 [[station]]
 id = "tactical"
 name = "Tactical"
@@ -362,6 +382,10 @@ console = "gui/cruiser/tactical.html"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["phaser-fore", "phaser-aft"]
 
 [[station]]
 id = "science"
@@ -386,6 +410,10 @@ console = "gui/cruiser/engineering.html"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["repair"]
 
 [[station]]
 id = "comms"
@@ -442,8 +470,20 @@ station = "helm"
 power_group = "helm"
 
 [[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
 station = "helm"
 power_group = "helm"
 
@@ -486,6 +526,12 @@ power_group = "weapons"
 [[system]]
 id = "sensors"
 kind = "sensors"
+station = "science"
+power_group = "sensors"
+
+[[system]]
+id = "sensor-radar"
+kind = "sensor_radar"
 station = "science"
 power_group = "sensors"
 
@@ -538,3 +584,4 @@ default_pitch_deg = 15
 entity_look_range = 60
 look_ahead_distance = 100
 hysteresis_secs = 3
+yaw_follow_deg_per_sec = 45

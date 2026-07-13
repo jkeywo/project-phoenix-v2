@@ -50,6 +50,7 @@
         <span class="sep">·</span>
         <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
         <span class="spacer"></span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
@@ -59,6 +60,7 @@
     import '../components/ph-sensor-panel.js';
     import '../components/ph-shield-panel.js';
     import '../components/ph-shield-facings.js';
+    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
@@ -81,6 +83,7 @@
         document.getElementById('footer-target').textContent = tn ? '\u25C9 ' + tn : 'NO TARGET';
         document.getElementById('footer-target').style.color = tn ? 'var(--tactical)' : 'var(--ink-faint)';
         setAutoState(null, document.getElementById('science-auto-badge'), !!s.science_auto);
+        document.getElementById('station-damage').state = s.own_hull || null;
       }
     });
   </script>

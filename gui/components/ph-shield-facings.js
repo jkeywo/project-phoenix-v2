@@ -11,19 +11,20 @@ export class PhShieldFacings extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
-    .auto-badge { font-size: 0.55rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
     .arc-container { display: flex; justify-content: center; align-items: center; padding: 0.5rem 0; }
     svg { width: 100%; max-width: 200px; height: auto; overflow: visible; }
     .arc-path { cursor: pointer; transition: opacity 0.2s, filter 0.2s; }
     .arc-path:hover { filter: brightness(1.3); }
-    .arc-path.focused { filter: brightness(1.5) drop-shadow(0 0 4px #4ec870); }
+    .arc-path.focused { filter: brightness(1.5) drop-shadow(0 0 4px var(--loaded)); }
     .arc-path.down { opacity: 0.3; cursor: default; }
-    .facing-label { font-size: 0.55rem; fill: #6a7178; text-anchor: middle; pointer-events: none; }
-    .facing-label.focused-label { fill: #cce; font-weight: 600; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .hp-fill, .hp-text { pointer-events: none; }
+    .facing-label { font-size: 0.55rem; fill: var(--ink-dim); text-anchor: middle; pointer-events: none; }
+    .facing-label.focused-label { fill: var(--ink); font-weight: 600; }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
     <span>SHIELD FACINGS</span>
@@ -74,13 +75,13 @@ export class PhShieldFacings extends HTMLElement {
     const startAngle = -Math.PI / 2 - angleStep / 2;
 
     const NS = 'http://www.w3.org/2000/svg';
-    const live = new Set(facings.map(f => f.id));
+    const live = new Set(facings.map(f => f.arc_id));
     for (const [key, g] of this.#facingGs) {
       if (!live.has(key)) { g.remove(); this.#facingGs.delete(key); }
     }
 
     facings.forEach((f, i) => {
-      const id = f.id;
+      const id = f.arc_id;
       const a0 = startAngle + i * angleStep;
       const a1 = a0 + angleStep;
       const pct = f.max_hp > 0 ? Math.min(1, Math.max(0, f.hp / f.max_hp)) : 0;
@@ -101,9 +102,11 @@ export class PhShieldFacings extends HTMLElement {
         g = document.createElementNS(NS, 'g');
         g.innerHTML = '<path class="arc-path"/><path class="hp-fill" stroke="none"/><text class="facing-label"/><text class="hp-text" text-anchor="middle" font-size="0.5rem"/>';
         g.querySelector('.arc-path').addEventListener('click', () => {
-          if (auto) return;
+          const cur = this.#state || {};
+          if (cur.auto) return;
           if (this.sendAction && id) {
-            this.sendAction('set_shield_focus', { arc_id: id });
+            const isFocusedNow = cur.focused_facing === id || cur.focused_facing === f.label;
+            this.sendAction('set_shield_focus', { arc_id: id, focused: !isFocusedNow });
           }
         });
         this.#facingGs.set(id, g);
@@ -123,15 +126,15 @@ export class PhShieldFacings extends HTMLElement {
       outline.setAttribute('data-facing-id', id);
       outline.setAttribute('class', 'arc-path' + (isFocused ? ' focused' : '') + (!online ? ' down' : ''));
 
-      // HP fill arc
+      // HP fill arc — fills/drains radially from the inner edge outward
       const hpFill = g.children[1];
       if (online && pct > 0) {
         const fillPct = Math.min(1, Math.max(0, pct));
-        const a0p = a0 + (1 - fillPct) * angleStep;
-        const x0p = cx + ir * Math.cos(a0p), y0p = cy + ir * Math.sin(a0p);
-        const x1p = cx + r * Math.cos(a0p), y1p = cy + r * Math.sin(a0p);
+        const ro = ir + fillPct * (r - ir);
+        const xo0 = cx + ro * Math.cos(a0), yo0 = cy + ro * Math.sin(a0);
+        const xo1 = cx + ro * Math.cos(a1), yo1 = cy + ro * Math.sin(a1);
 
-        const fillOuter = `M ${x0p} ${y0p} L ${x1p} ${y1p} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1} L ${xi1} ${yi1} A ${ir} ${ir} 0 ${largeArc} 0 ${xi0} ${yi0} A ${ir} ${ir} 0 ${largeArc} 1 ${x0p} ${y0p} Z`;
+        const fillOuter = `M ${xi0} ${yi0} L ${xo0} ${yo0} A ${ro} ${ro} 0 ${largeArc} 1 ${xo1} ${yo1} L ${xi1} ${yi1} A ${ir} ${ir} 0 ${largeArc} 0 ${xi0} ${yi0} Z`;
         const hpColor = pct > 0.6 ? '#4ec870' : pct > 0.25 ? '#d8a040' : '#e0402c';
         hpFill.setAttribute('d', fillOuter);
         hpFill.setAttribute('fill', hpColor);
@@ -145,7 +148,7 @@ export class PhShieldFacings extends HTMLElement {
       const lr = r + 16;
       const lx = cx + lr * Math.cos(midAngle);
       const ly = cy + lr * Math.sin(midAngle);
-      const label = (f.label || f.id || '').substring(0, 5).toUpperCase();
+      const label = (f.label || f.arc_id || '').substring(0, 5).toUpperCase();
       const labelEl = g.children[2];
       labelEl.setAttribute('x', lx);
       labelEl.setAttribute('y', ly);

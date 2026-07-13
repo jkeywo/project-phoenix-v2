@@ -7,7 +7,7 @@ tags = [ "player", "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [mesh]
-model = "assets/models/alliance_cruiser.glb"
+model = "assets/models/alliance_battleship.glb"
 shape = "sphere"
 colour = []
 
@@ -17,22 +17,6 @@ radius = 1.5
 length = 4
 
 # ── System hull HP — Cruiser baseline × 1.4 (rounded) ───────────────────────
-
-[[hull.system_hull]]
-system_id = "helm"
-display_name = "Helm"
-max_hp = 35
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "tactical"
-display_name = "Tactical"
-max_hp = 35
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "power-reactor"
@@ -69,6 +53,30 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
 display_name = "Engine (Starboard)"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-radar"
+display_name = "Helm Radar"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "tactical-radar"
+display_name = "Tactical Radar"
+max_hp = 21
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "sensor-radar"
+display_name = "Sensor Radar"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -138,14 +146,6 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
-[[hull.system_hull]]
-system_id = "torpedo-magazine"
-display_name = "Torpedo Magazine"
-max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
@@ -188,6 +188,7 @@ marker = "phasers_aft"
 # Heavy blaster bank: hold-to-fire, 2-shot volley, heavy sphere projectile, recoil + screenshake.
 [[weapons_console.blaster_banks]]
 id = "heavy-fore"
+marker = "blaster_fore"
 facing_deg = 0
 fire_arc_deg = 22.5
 charge_time_secs = 3.0
@@ -403,11 +404,15 @@ name = "Captain"
 description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
-console = "gui/captain-console.html"
+console = "gui/battleship/captain.html"
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["red-alert"]
 
 [[station]]
 id = "helm"
@@ -415,7 +420,7 @@ name = "Helm"
 description = "Pilot the ship."
 rank = "Ltn."
 short_code = "HLM"
-console = "gui/helm-console.html"
+console = "gui/battleship/helm.html"
 
 [[station.rating]]
 name = "Std"
@@ -427,11 +432,15 @@ name = "Tactical"
 description = "Manage weapons systems."
 rank = "Ltn."
 short_code = "TAC"
-console = "gui/tactical-console.html"
+console = "gui/battleship/tactical.html"
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["phaser-fore", "phaser-aft"]
 
 [[station]]
 id = "repair"
@@ -439,7 +448,7 @@ name = "Repair"
 description = "Maintain and repair ship systems."
 rank = "Ltn."
 short_code = "ENG"
-console = "gui/repair-console.html"
+console = "gui/battleship/repair.html"
 
 [[station.rating]]
 name = "Std"
@@ -451,7 +460,7 @@ name = "Sensors"
 description = "Monitor long-range sensors."
 rank = "Ens."
 short_code = "SCI"
-console = "gui/sensors-console.html"
+console = "gui/battleship/sensors.html"
 
 [[station.rating]]
 name = "Std"
@@ -463,7 +472,7 @@ name = "Shields"
 description = "Manage shield systems."
 rank = "Ens."
 short_code = "SHD"
-console = "gui/shields-console.html"
+console = "gui/battleship/shields.html"
 
 [[station.rating]]
 name = "Std"
@@ -475,7 +484,7 @@ name = "Navigation"
 description = "Plot course and navigate."
 rank = "Ens."
 short_code = "NAV"
-console = "gui/navigation-console.html"
+console = "gui/battleship/navigation.html"
 
 [[station.rating]]
 name = "Std"
@@ -487,7 +496,7 @@ name = "Power"
 description = "Manage ship power systems."
 rank = "Ltn."
 short_code = "PWR"
-console = "gui/power-console.html"
+console = "gui/battleship/power.html"
 
 [[station.rating]]
 name = "Std"
@@ -499,7 +508,7 @@ name = "Comms"
 description = "Hail stations and relay intelligence."
 rank = "Ens."
 short_code = "COM"
-console = "gui/comms-console.html"
+console = "gui/battleship/comms.html"
 
 [[station.rating]]
 name = "Std"
@@ -554,6 +563,12 @@ id = "helm-radar"
 kind = "helm_radar"
 station = "helm"
 power_group = "helm"
+
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "helm-impulse"
@@ -627,6 +642,12 @@ kind = "sensors"
 station = "sensors"
 power_group = "sensors"
 
+[[system]]
+id = "sensor-radar"
+kind = "sensor_radar"
+station = "sensors"
+power_group = "sensors"
+
 # shields-system auto-generates shield-arc-* systems from [[shield_arc]] blocks above
 [[system]]
 id = "shields-system"
@@ -665,3 +686,4 @@ default_pitch_deg = 18
 entity_look_range = 80
 look_ahead_distance = 150
 hysteresis_secs = 3
+yaw_follow_deg_per_sec = 45

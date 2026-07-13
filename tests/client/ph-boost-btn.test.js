@@ -50,6 +50,15 @@ describe('PhBoostBtn', () => {
     expect(btn.disabled).toBe(false);
   });
 
+  it('renders active state with percentage when battery partially drained', () => {
+    const { el } = setup();
+    el.state = { available: true, active: true, recharge_pct: 65, system_id: '', auto: false };
+    const btn = el.shadowRoot.getElementById('btn');
+    expect(btn.textContent.trim()).toBe('BOOSTING 65%');
+    expect(btn.className).toContain('active');
+    expect(btn.disabled).toBe(false);
+  });
+
   it('renders recharging state with percentage text and disabled button', () => {
     const { el } = setup();
     el.state = { available: true, active: false, recharge_pct: 45, system_id: '', auto: false };
@@ -59,13 +68,24 @@ describe('PhBoostBtn', () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it('renders recharging state and shows recharge bar at correct width', () => {
+  it('shows battery bar at correct width when recharging', () => {
     const { el } = setup();
     el.state = { available: true, active: false, recharge_pct: 30, system_id: '', auto: false };
     const rechargeWrap = el.shadowRoot.getElementById('recharge-wrap');
     const rechargeFill = el.shadowRoot.getElementById('recharge-fill');
     expect(rechargeWrap.style.display).not.toBe('none');
     expect(rechargeFill.style.width).toBe('30%');
+    expect(rechargeFill.className).not.toContain('draining');
+  });
+
+  it('shows battery bar at correct width when draining (active)', () => {
+    const { el } = setup();
+    el.state = { available: true, active: true, recharge_pct: 55, system_id: '', auto: false };
+    const rechargeWrap = el.shadowRoot.getElementById('recharge-wrap');
+    const rechargeFill = el.shadowRoot.getElementById('recharge-fill');
+    expect(rechargeWrap.style.display).not.toBe('none');
+    expect(rechargeFill.style.width).toBe('55%');
+    expect(rechargeFill.className).toContain('draining');
   });
 
   it('shows AUTO badge and disables button when auto=true', () => {
@@ -78,33 +98,43 @@ describe('PhBoostBtn', () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it('clicking button when available calls sendAction with toggle_boost', () => {
+  it('holding button when available calls sendAction with set_boost active on pointerdown and inactive on pointerup', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = { available: true, active: false, recharge_pct: 100, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    btn.click();
+    btn.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1 }));
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('toggle_boost', {});
+    expect(sendAction).toHaveBeenCalledWith('set_boost', { active: true });
+    btn.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+    expect(sendAction).toHaveBeenCalledTimes(2);
+    expect(sendAction).toHaveBeenCalledWith('set_boost', { active: false });
   });
 
-  it('clicking button when recharging does not dispatch action', () => {
+  it('holding button when recharging does not dispatch action', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = { available: true, active: false, recharge_pct: 30, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    btn.click();
+    btn.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1 }));
     expect(sendAction).not.toHaveBeenCalled();
   });
 
-  it('hides recharge bar when not recharging', () => {
+  it('hides battery bar when fully charged and not active', () => {
     const { el } = setup();
     el.state = { available: true, active: false, recharge_pct: 100, system_id: '', auto: false };
     const rechargeWrap = el.shadowRoot.getElementById('recharge-wrap');
     expect(rechargeWrap.style.display).toBe('none');
   });
 
-  it('available=false with full recharge_pct still shows recharging state (disabled)', () => {
+  it('hides battery bar when fully charged and active (full boost)', () => {
+    const { el } = setup();
+    el.state = { available: true, active: true, recharge_pct: 100, system_id: '', auto: false };
+    const rechargeWrap = el.shadowRoot.getElementById('recharge-wrap');
+    expect(rechargeWrap.style.display).toBe('none');
+  });
+
+  it('available=false with full recharge_pct still shows ready state', () => {
     const { el } = setup();
     el.state = { available: false, active: false, recharge_pct: 100, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');

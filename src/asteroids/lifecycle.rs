@@ -252,7 +252,7 @@ pub fn check_destroyed_asteroids(
                 uuid: uuid.0.clone(),
             },
         ));
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
 }
 
@@ -451,7 +451,7 @@ fn full_rebuild(
         .collect();
     for uuid in &owned_uuids {
         if let Some(&entity) = entity_map.0.get(uuid) {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
         entity_map.0.remove(uuid);
         world.0.entities.retain(|e| &e.uuid != uuid);
@@ -464,14 +464,14 @@ fn full_rebuild(
     for row in &window.cosmetic_upper_slots {
         for slot in row {
             if let Some(&entity) = slot.as_ref() {
-                commands.entity(entity).despawn();
+                commands.entity(entity).try_despawn();
             }
         }
     }
     for row in &window.cosmetic_lower_slots {
         for slot in row {
             if let Some(&entity) = slot.as_ref() {
-                commands.entity(entity).despawn();
+                commands.entity(entity).try_despawn();
             }
         }
     }
@@ -759,7 +759,7 @@ fn clear_slot(
     {
         if let Some(data) = slot.take() {
             if let Some(&entity) = entity_map.0.get(&data.uuid) {
-                commands.entity(entity).despawn();
+                commands.entity(entity).try_despawn();
             }
             entity_map.0.remove(&data.uuid);
             world.0.entities.retain(|e| e.uuid != data.uuid);
@@ -776,7 +776,7 @@ fn clear_slot(
         .and_then(|row| row.get_mut(slot_x))
         .and_then(|s| s.take())
     {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
     if let Some(entity) = window
         .cosmetic_lower_slots
@@ -784,7 +784,7 @@ fn clear_slot(
         .and_then(|row| row.get_mut(slot_x))
         .and_then(|s| s.take())
     {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
 }
 

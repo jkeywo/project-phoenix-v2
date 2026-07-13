@@ -8,6 +8,7 @@ import {
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
   NAVIGATION_RADAR_RANGE,
   aggregateStationHull,
+  repairCoreAndTargets,
   torpSlotStates,
   buildWeaponsConsoleState,
   buildCaptainConsoleState,
@@ -1441,29 +1442,38 @@ describe('auto fields', () => {
     expect(parse(buildHelmConsoleState(EMPTY)).helm_auto).toBe(false);
   });
 
-  // tactical_auto
-  it('tactical_auto is true when stationRatings.tactical === Backfill', () => {
-    expect(parse(buildWeaponsConsoleState({ stationRatings: { tactical: 'Backfill' } })).tactical_auto).toBe(true);
+  // tactical_auto — per-system: every phaser system id (from stationSystems.tactical)
+  // must be controlled by 'Ai' in controlSources.
+  it('tactical_auto is true when every phaser system is Ai-controlled', () => {
+    const state = {
+      stationSystems: { tactical: ['phaser-fore', 'phaser-aft'] },
+      controlSources: { 'phaser-fore': 'Ai', 'phaser-aft': 'Ai' },
+    };
+    expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(true);
   });
 
-  it('tactical_auto is false when stationRatings.tactical is a different rating', () => {
-    expect(parse(buildWeaponsConsoleState({ stationRatings: { tactical: 'Full' } })).tactical_auto).toBe(false);
+  it('tactical_auto is false when only some phaser systems are Ai-controlled', () => {
+    const state = {
+      stationSystems: { tactical: ['phaser-fore', 'phaser-aft'] },
+      controlSources: { 'phaser-fore': 'Ai', 'phaser-aft': 'Human' },
+    };
+    expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(false);
   });
 
-  it('tactical_auto is false when stationRatings is absent', () => {
+  it('tactical_auto is false when stationSystems/controlSources are absent', () => {
     expect(parse(buildWeaponsConsoleState(EMPTY)).tactical_auto).toBe(false);
   });
 
-  // repair_auto
-  it('repair_auto is true when stationRatings.repair === Backfill', () => {
-    expect(parse(buildRepairConsoleState({ stationRatings: { repair: 'Backfill' } })).repair_auto).toBe(true);
+  // repair_auto — per-system: the literal 'repair' system id must be Ai-controlled.
+  it('repair_auto is true when controlSources.repair === Ai', () => {
+    expect(parse(buildRepairConsoleState({ controlSources: { repair: 'Ai' } })).repair_auto).toBe(true);
   });
 
-  it('repair_auto is false when stationRatings.repair is a different rating', () => {
-    expect(parse(buildRepairConsoleState({ stationRatings: { repair: 'Full' } })).repair_auto).toBe(false);
+  it('repair_auto is false when controlSources.repair is a different value', () => {
+    expect(parse(buildRepairConsoleState({ controlSources: { repair: 'Human' } })).repair_auto).toBe(false);
   });
 
-  it('repair_auto is false when stationRatings is absent', () => {
+  it('repair_auto is false when controlSources is absent', () => {
     expect(parse(buildRepairConsoleState(EMPTY)).repair_auto).toBe(false);
   });
 
@@ -1847,13 +1857,19 @@ describe('buildDestroyerTacticalConsoleState', () => {
     expect(Array.isArray(s.comms.contacts)).toBe(true);
   });
 
-  it('tactical_auto is true when stationRatings.tactical === Backfill', () => {
-    const s = parse(buildDestroyerTacticalConsoleState({ stationRatings: { tactical: 'Backfill' } }));
+  it('tactical_auto is true when the phaser system is Ai-controlled', () => {
+    const s = parse(buildDestroyerTacticalConsoleState({
+      stationSystems: { tactical: ['phaser-omni'] },
+      controlSources: { 'phaser-omni': 'Ai' },
+    }));
     expect(s.tactical_auto).toBe(true);
   });
 
-  it('tactical_auto is false when stationRatings.tactical is a different rating', () => {
-    const s = parse(buildDestroyerTacticalConsoleState({ stationRatings: { tactical: 'Full' } }));
+  it('tactical_auto is false when the phaser system is not Ai-controlled', () => {
+    const s = parse(buildDestroyerTacticalConsoleState({
+      stationSystems: { tactical: ['phaser-omni'] },
+      controlSources: { 'phaser-omni': 'Human' },
+    }));
     expect(s.tactical_auto).toBe(false);
   });
 
@@ -2116,5 +2132,64 @@ describe('torpSlotStates', () => {
   it('uses loaded boolean as fallback for loaded_count when field absent', () => {
     const slots = torpSlotStates({ volley_max: 1, loaded: true, target_count: 1 });
     expect(slots[0].state).toBe('filled');
+  });
+});
+
+describe('repairCoreAndTargets', () => {
+  const stationSystems = {
+    helm: ['helm', 'helm-engine-port'],
+    tactical: ['tactical', 'phaser-omni'],
+    engineering: ['power-reactor', 'repair'],
+  };
+
+  it('classifies ownerless systems as core', () => {
+    const hull = [
+      { system_id: 'helm', display_name: 'Helm', current: 10, max_hp: 10 },
+      { system_id: 'core', display_name: 'Core', current: 3, max_hp: 10 },
+    ];
+    const { coreSystems } = repairCoreAndTargets(hull, stationSystems);
+    expect(coreSystems.map(s => s.system_id)).toEqual(['core']);
+  });
+
+  it('lists a dispatch target for every damageable station, with a damage fraction', () => {
+    const hull = [
+      { system_id: 'helm', display_name: 'Helm', current: 4, max_hp: 10 },        // damaged
+      { system_id: 'helm-engine-port', display_name: 'Engine', current: 10, max_hp: 10 },
+      { system_id: 'tactical', display_name: 'Tactical', current: 10, max_hp: 10 }, // healthy
+      { system_id: 'phaser-omni', display_name: 'Phaser', current: 10, max_hp: 10 },
+    ];
+    const { targets } = repairCoreAndTargets(hull, stationSystems);
+    const helm = targets.find(t => t.id === 'helm');
+    expect(helm).toBeTruthy();
+    expect(helm.label).toBe('Helm');
+    expect(helm.damage_pct).toBeCloseTo(0.3, 5); // 6 of 20 hp lost
+
+    // Healthy stations still get a dispatch target — repair teams can be
+    // pre-positioned before damage occurs — just with damage_pct 0.
+    const tactical = targets.find(t => t.id === 'tactical');
+    expect(tactical).toBeTruthy();
+    expect(tactical.damage_pct).toBe(0);
+  });
+
+  it('adds a core bucket when a core system is damaged', () => {
+    const hull = [
+      { system_id: 'core', display_name: 'Core', current: 5, max_hp: 10 },
+    ];
+    const { targets } = repairCoreAndTargets(hull, stationSystems);
+    expect(targets.map(t => t.id)).toContain('core');
+  });
+
+  it('still lists every damageable station when nothing is damaged', () => {
+    const hull = [
+      { system_id: 'helm', display_name: 'Helm', current: 10, max_hp: 10 },
+      { system_id: 'helm-engine-port', display_name: 'Engine', current: 10, max_hp: 10 },
+      { system_id: 'tactical', display_name: 'Tactical', current: 10, max_hp: 10 },
+      { system_id: 'phaser-omni', display_name: 'Phaser', current: 10, max_hp: 10 },
+      { system_id: 'power-reactor', display_name: 'Reactor', current: 10, max_hp: 10 },
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
+    ];
+    const { targets } = repairCoreAndTargets(hull, stationSystems);
+    expect(targets.map(t => t.id).sort()).toEqual(['engineering', 'helm', 'tactical']);
+    expect(targets.every(t => t.damage_pct === 0)).toBe(true);
   });
 });

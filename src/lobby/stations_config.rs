@@ -20,6 +20,14 @@ pub struct StationDef {
     /// generic fallback panel.
     #[serde(default)]
     pub console: Option<String>,
+    /// Selectable rating names for this station, excluding the implicit
+    /// `Backfill` rating (a runtime-only disconnect/unmanned state, never a
+    /// lobby-selectable choice). Mirrors `StationConfig.ratings`' names, in
+    /// TOML declaration order. Every station has at least `"Std"`; a length
+    /// greater than 1 is the client's sole signal to render the lobby
+    /// complexity toggle — never hardcode station ids for this.
+    #[serde(default)]
+    pub ratings: Vec<String>,
 }
 
 /// Fixed-roster station configuration. Populated from `ShipConfigResource`
@@ -44,6 +52,7 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
             rank: sc.rank.clone(),
             short_code: sc.short_code.clone(),
             console: sc.console.clone(),
+            ratings: sc.ratings.iter().map(|r| r.name.clone()).collect(),
         })
         .collect();
     ShipStations { stations }

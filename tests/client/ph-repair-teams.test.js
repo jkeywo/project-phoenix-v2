@@ -48,12 +48,30 @@ describe('PhRepairTeams', () => {
     expect(el.shadowRoot.textContent).toContain('NO REPAIR TEAMS');
   });
 
-  it('renders idle team with standing by text', () => {
+  it('renders an idle team with no targets as "No repair targets"', () => {
     const { el } = setup();
     el.state = {
       teams: [{ id: 0, label: 'Team 1', status: 'idle', target: null, progress_pct: 0, eta_secs: 0 }],
+      targets: [],
     };
-    expect(el.shadowRoot.textContent).toContain('Standing by');
+    expect(el.shadowRoot.textContent).toContain('No repair targets');
+  });
+
+  it('offers one dispatch button per damageable station for an idle team', () => {
+    const { el } = setup();
+    el.state = {
+      teams: [{ id: 0, label: 'Team 1', status: 'idle' }],
+      targets: [
+        { id: 'helm', label: 'Helm', damage_pct: 0.4 },
+        { id: 'tactical', label: 'Tactical', damage_pct: 0 },
+      ],
+    };
+    const drow = el.shadowRoot.querySelector('.dispatch-row');
+    expect(drow.style.display).not.toBe('none');
+    const btns = drow.querySelectorAll('.btn');
+    expect(btns.length).toBe(2);
+    expect(btns[0].dataset.target).toBe('helm');
+    expect(btns[1].dataset.target).toBe('tactical');
   });
 
   it('renders repairing team with target name', () => {
@@ -111,33 +129,49 @@ describe('PhRepairTeams', () => {
     expect(badge.style.display).toBe('none');
   });
 
-  it('dispatch button is disabled for idle team', () => {
+  it('no dispatch buttons render for an idle team with no damageable stations', () => {
     const { el } = setup();
     el.state = {
       teams: [{ id: 0, label: 'T1', status: 'idle' }],
+      targets: [],
     };
-    const btn = el.shadowRoot.querySelector('.dispatch-btn');
+    const btns = el.shadowRoot.querySelectorAll('.btn');
+    expect(btns.length).toBe(0);
+  });
+
+  it('dispatch buttons are disabled when auto is on', () => {
+    const { el } = setup();
+    el.state = {
+      teams: [{ id: 0, label: 'T1', status: 'idle' }],
+      targets: [{ id: 'helm', label: 'Helm', damage_pct: 0.4 }],
+      auto: true,
+    };
+    const btn = el.shadowRoot.querySelector('.btn');
     expect(btn.disabled).toBe(true);
   });
 
-  it('dispatch button is enabled for non-idle team', () => {
+  it('hides the dispatch row for a busy team', () => {
     const { el } = setup();
     el.state = {
       teams: [{ id: 0, label: 'T1', status: 'repairing', target: 'Helm', progress_pct: 0.3 }],
     };
-    const btn = el.shadowRoot.querySelector('.dispatch-btn');
-    expect(btn.disabled).toBe(false);
+    const drow = el.shadowRoot.querySelector('.dispatch-row');
+    expect(drow.style.display).toBe('none');
   });
 
-  it('dispatch button dispatches repair_repair action with team_id', () => {
+  it('dispatches dispatch_repair_team with the clicked target for an idle team', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      teams: [{ id: 0, label: 'T1', status: 'travelling', target: 'Helm', progress_pct: 0.5 }],
+      teams: [{ id: 0, label: 'T1', status: 'idle' }],
+      targets: [
+        { id: 'helm', label: 'Helm', damage_pct: 0.4 },
+        { id: 'core', label: 'Core', damage_pct: 0.2 },
+      ],
     };
-    const btn = el.shadowRoot.querySelector('.dispatch-btn');
+    const btn = el.shadowRoot.querySelector('.btn[data-target="core"]');
     btn.click();
-    expect(sendAction).toHaveBeenCalledWith('dispatch_repair_team', { team_idx: 0, target: 'Helm' });
+    expect(sendAction).toHaveBeenCalledWith('dispatch_repair_team', { team_idx: 0, target: 'core' });
   });
 
   it('updates when state changes', () => {

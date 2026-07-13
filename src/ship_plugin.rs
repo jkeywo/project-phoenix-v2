@@ -34,6 +34,7 @@ const HELM_AI_MAX_DT_SECS: f32 = 1.0 / 30.0;
 pub struct LastHelmInput {
     pub thrust: f32,
     pub steering: f32,
+    pub lateral: f32,
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
@@ -123,6 +124,8 @@ pub struct ImpulseConfigResource {
     pub charge_duration: f32,
     pub speed_multiplier: f32,
     pub acceleration_multiplier: f32,
+    pub engage_distance: f32,
+    pub cancel_distance: f32,
 }
 
 impl Default for ImpulseConfigResource {
@@ -131,6 +134,8 @@ impl Default for ImpulseConfigResource {
             charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
             speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
             acceleration_multiplier: crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER,
+            engage_distance: 200.0,
+            cancel_distance: 40.0,
         }
     }
 }
@@ -380,12 +385,19 @@ fn process_helm_inputs(
             last_input.steering = *steering;
         }
     }
+
+    for cmd in admitted.for_target(&crate::system_registry::lateral_thrust_system_id().0) {
+        if let SystemControlPayload::LateralThrustInput { lateral } = &cmd.payload {
+            last_input.lateral = *lateral;
+        }
+    }
     let dt = timer.0.duration().as_secs_f32();
     let state = ShipPhysicsState {
         x: physics.x,
         z: physics.z,
         yaw: physics.yaw,
         forward_speed: physics.forward_speed,
+        lateral_speed: physics.lateral_speed,
     };
     let impulse_active = drive
         .impulse_q
@@ -398,11 +410,13 @@ fn process_helm_inputs(
         ShipPhysicsInput {
             thrust: 1.0,
             steering: 0.0,
+            lateral: 0.0,
         }
     } else {
         ShipPhysicsInput {
             thrust: last_input.thrust,
             steering: last_input.steering,
+            lateral: last_input.lateral,
         }
     };
 
@@ -431,6 +445,7 @@ fn process_helm_inputs(
     let scaled_input = ShipPhysicsInput {
         thrust: input.thrust * engine_thrust_scale,
         steering: input.steering,
+        lateral: input.lateral,
     };
 
     let mut config = match physics_cfg {
@@ -472,6 +487,7 @@ fn process_helm_inputs(
     physics.z = result.z;
     physics.yaw = result.yaw;
     physics.forward_speed = result.forward_speed;
+    physics.lateral_speed = result.lateral_speed;
 
     // Visual banking: lerp roll toward target based on steering (use the unscaled
     // input.steering so roll reflects intent, not engine count).
@@ -534,6 +550,8 @@ fn operate_helm_ai(
         Option<&crate::entities::spawner::HelmConsoleSection>,
         Option<&crate::entities::spawner::BehaviourSection>,
         Has<crate::server_app::LocalShip>,
+        Option<&mut ShipImpulse>,
+        Option<&ImpulseConfigResource>,
     )>,
 ) {
     let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
@@ -592,6 +610,8 @@ fn operate_helm_ai(
         helm_section,
         behaviour_section,
         is_local,
+        impulse_comp,
+        impulse_cfg,
     ) in ships.iter_mut()
     {
         let policy = helm_control_policy(sources);
@@ -658,14 +678,28 @@ fn operate_helm_ai(
                 .unwrap_or(&crate::faction::FactionRegistry::default()),
         );
 
+        // ── Compute lateral thrust for obstacle avoidance (AI only) ──────────
+        let lateral = crate::ai::operate_lateral_thrust(
+            &world_view,
+            &scored,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            physics.forward_speed,
+        );
+
         // ── Apply physics ────────────────────────────────────────────────────
         let physics_config = helm_section
-            .map(|hc| ShipPhysicsConfig {
-                max_speed: hc.0.max_speed,
-                max_reverse_speed: hc.0.max_reverse_speed,
-                acceleration: hc.0.acceleration,
-                deceleration: hc.0.deceleration,
-                max_yaw_rate: hc.0.max_yaw_rate,
+            .map(|hc| {
+                let lt = hc.0.lateral_thrust.clone().unwrap_or_default();
+                ShipPhysicsConfig {
+                    max_speed: hc.0.max_speed,
+                    max_reverse_speed: hc.0.max_reverse_speed,
+                    acceleration: hc.0.acceleration,
+                    deceleration: hc.0.deceleration,
+                    max_yaw_rate: hc.0.max_yaw_rate,
+                    max_lateral_speed: lt.max_lateral_speed,
+                    lateral_acceleration: lt.lateral_acceleration,
+                }
             })
             .unwrap_or_else(ShipPhysicsConfig::new);
 
@@ -675,8 +709,13 @@ fn operate_helm_ai(
                 z: physics.z,
                 yaw: physics.yaw,
                 forward_speed: physics.forward_speed,
+                lateral_speed: physics.lateral_speed,
             },
-            ShipPhysicsInput { thrust, steering },
+            ShipPhysicsInput {
+                thrust,
+                steering,
+                lateral,
+            },
             dt,
             &physics_config,
         );
@@ -685,14 +724,91 @@ fn operate_helm_ai(
         physics.z = result.z;
         physics.yaw = result.yaw;
         physics.forward_speed = result.forward_speed;
+        physics.lateral_speed = result.lateral_speed;
+
+        // ── AI Impulse decision ──────────────────────────────────────────────
+        if let (Some(mut impulse), Some(cfg)) = (impulse_comp, impulse_cfg) {
+            let target_pos =
+                resolve_helm_target_position(&scored, &world_view, &anchors, &ai_memory.0);
+            if let Some(tp) = target_pos {
+                // Find the matching doctrine to check use_impulse flag.
+                let top_obj = scored.iter().find(|o| {
+                    o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+                });
+                let use_impulse = top_obj
+                    .and_then(|obj| {
+                        behaviour_section.and_then(|b| b.0.doctrine.iter().find(|d| d.id == obj.id))
+                    })
+                    .map(|d| d.effective_use_impulse())
+                    .unwrap_or(false);
+                if use_impulse {
+                    let decision = crate::ai::decide_impulse(&crate::ai::ImpulseDecisionInput {
+                        pos: [physics.x, physics.z],
+                        yaw: physics.yaw,
+                        target_pos: tp,
+                        phase: impulse.0.phase,
+                        engage_distance: cfg.engage_distance,
+                        cancel_distance: cfg.cancel_distance,
+                        angle_tolerance: crate::ai::IMPULSE_ANGLE_TOLERANCE_RAD,
+                    });
+                    match decision {
+                        crate::ai::ImpulseDecision::Engage => {
+                            impulse.0.start_charge();
+                        }
+                        crate::ai::ImpulseDecision::Cancel => {
+                            impulse.0.cancel_charge();
+                        }
+                        crate::ai::ImpulseDecision::NoChange => {}
+                    }
+                }
+            }
+        }
 
         // For the player ship: also write LastHelmInput so process_helm_inputs
         // sees the AI-driven intent (though it will re-apply physics anyway).
         if is_local {
             if let Some(mut li) = local_ship_input.iter_mut().next() {
-                *li = LastHelmInput { thrust, steering };
+                *li = LastHelmInput {
+                    thrust,
+                    steering,
+                    lateral,
+                };
             }
         }
+    }
+}
+
+/// Resolve the target position from the highest-scored Helm objective.
+fn resolve_helm_target_position(
+    scored: &[crate::messages::ScoredObjective],
+    world_view: &crate::ai::WorldView,
+    anchors: &std::collections::HashMap<String, [f32; 3]>,
+    memory: &crate::ai::AiMemory,
+) -> Option<[f32; 3]> {
+    use crate::messages::{AiDirective, SystemAffinity};
+    let top = scored
+        .iter()
+        .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm))?;
+    match &top.directive {
+        AiDirective::Reach { anchor } => anchors.get(anchor.as_str()).copied(),
+        AiDirective::Destroy { target } => {
+            let uuid = uuid::Uuid::parse_str(target).ok()?;
+            world_view
+                .entities
+                .iter()
+                .find(|e| e.uuid == uuid)
+                .map(|e| e.position)
+        }
+        AiDirective::Patrol {
+            anchors: waypoints, ..
+        } => {
+            let idx = memory.waypoint_index;
+            waypoints
+                .get(idx)
+                .and_then(|wp| anchors.get(wp.as_str()))
+                .copied()
+        }
+        _ => None,
     }
 }
 
@@ -853,7 +969,7 @@ fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     for (physics, mut transform) in ship_query.iter_mut() {
         transform.translation.x = physics.x;
         transform.translation.z = physics.z;
-        transform.rotation = Quat::from_euler(EulerRot::YXZ, physics.yaw, 0.0, physics.roll);
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, -physics.yaw, 0.0, physics.roll);
     }
 }
 
@@ -1565,7 +1681,8 @@ mod tests {
             get_last_helm_input(&mut app),
             LastHelmInput {
                 thrust: 1.0,
-                steering: 0.25
+                steering: 0.25,
+                lateral: 0.0,
             }
         );
         assert!(get_ship_physics(&mut app).forward_speed > 0.0);
@@ -1582,7 +1699,8 @@ mod tests {
             get_last_helm_input(&mut app),
             LastHelmInput {
                 thrust: 0.0,
-                steering: 0.0
+                steering: 0.0,
+                lateral: 0.0,
             }
         );
         assert_eq!(get_ship_physics(&mut app).forward_speed, 0.0);
@@ -1934,6 +2052,8 @@ mod tests {
                 charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
                 speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 5.0,
+                engage_distance: 200.0,
+                cancel_distance: 40.0,
             });
         start_game_with_helm_and_science(&mut app);
 
@@ -1989,6 +2109,8 @@ mod tests {
                 charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
                 speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 5.0,
+                engage_distance: 200.0,
+                cancel_distance: 40.0,
             });
         start_game_with_helm_and_science(&mut app);
 
@@ -2031,6 +2153,8 @@ mod tests {
                 charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
                 speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 0.0,
+                engage_distance: 200.0,
+                cancel_distance: 40.0,
             });
         start_game_with_helm_and_science(&mut app);
 
@@ -2182,6 +2306,7 @@ mod tests {
                 LastHelmInput {
                     thrust: 1.0,
                     steering: 1.0,
+                    lateral: 0.0,
                 },
             );
         }
@@ -3306,6 +3431,7 @@ station = "helm"
             LastHelmInput {
                 thrust: 1.0,
                 steering: 0.0,
+                lateral: 0.0,
             },
         );
 
@@ -3410,6 +3536,7 @@ station = "helm"
             LastHelmInput {
                 thrust: 0.75,
                 steering: 0.25,
+                lateral: 0.0,
             },
         );
 
@@ -3577,6 +3704,7 @@ station = "helm"
             LastHelmInput {
                 thrust: 1.0,
                 steering: 0.0,
+                lateral: 0.0,
             },
         );
         for _ in 0..TICKS {
@@ -3604,6 +3732,7 @@ station = "helm"
             LastHelmInput {
                 thrust: 1.0,
                 steering: 0.0,
+                lateral: 0.0,
             },
         );
         for _ in 0..TICKS {

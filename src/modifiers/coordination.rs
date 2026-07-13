@@ -111,6 +111,69 @@ pub fn translate_power_modifiers(
     }
 }
 
+/// Bonus applied to a radar's dedicated `ModifierSlot` when its backing
+/// system is fully `Destroyed`. `debuff_magnitude_for` returns `0.0` for the
+/// `Destroyed` tier (that field is reserved for the graded Damaged/Disabled
+/// debuff — see `SystemHull::debuff_magnitude_for`), so a destroyed radar
+/// needs its own, much larger, penalty here. With the cache's
+/// `1.0 / (1.0 + |bonus|)` formula this yields a multiplier of ~0.001 — for
+/// gameplay purposes, dark.
+const RADAR_DESTROYED_BONUS: f32 = -999.0;
+
+/// Damage → radar-range modifier translator system.
+///
+/// Iterates every ship (player + NPC) and keeps each of the three radar
+/// systems' (`helm-radar`, `tactical-radar`, `sensor-radar`) contribution to
+/// its dedicated `ModifierSlot` in sync with the system's current
+/// `DamageTier`:
+/// - `Operational` → no penalty (bonus `0.0`).
+/// - `Damaged` / `Disabled` → bonus is the system's own `debuff_magnitude`
+///   (graded reduction, consistent with every other damageable system).
+/// - `Destroyed` → `RADAR_DESTROYED_BONUS` (near-total blackout).
+///
+/// `tactical-radar` reuses the existing, shared `ModifierSlot::RadarRange`
+/// slot (already driven by the Sensors power group and region dampening —
+/// see `apply_power_modifiers_from_read_state` / `apply_region_effects`)
+/// since that slot already gates the tactical console's live radar blips and
+/// weapon engagement range. `helm-radar` and `sensor-radar` get their own
+/// dedicated slots so damaging one radar system cannot bleed into another
+/// console's radar.
+///
+/// Registered by `SimulationPlugin` in `SimSet::Modifiers`, after
+/// `SimSet::Damage` (so hull tiers reflect this tick's damage) and before
+/// `SimSet::Publish` (so the Helm/Weapons/Sensors blackboard publishers read
+/// the fresh multiplier the same tick).
+pub fn apply_radar_damage_modifiers(
+    mut ships_q: Query<
+        (&crate::entity_spawner::EntitySystemHull, &mut ShipModifiers),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    use crate::damage::DamageTier;
+    use crate::system_registry::{
+        helm_radar_system_id, sensor_radar_system_id, tactical_radar_system_id,
+    };
+
+    for (hull, mut mods) in ships_q.iter_mut() {
+        for (sid, slot) in [
+            (helm_radar_system_id(), ModifierSlot::HelmRadarRange),
+            (tactical_radar_system_id(), ModifierSlot::RadarRange),
+            (sensor_radar_system_id(), ModifierSlot::SensorRadarRange),
+        ] {
+            let bonus = match hull.0.tier_for(&sid) {
+                DamageTier::Operational => 0.0,
+                DamageTier::Damaged | DamageTier::Disabled => -hull.0.debuff_magnitude_for(&sid),
+                DamageTier::Destroyed => RADAR_DESTROYED_BONUS,
+            };
+            mods.add_or_update(Modifier {
+                source: ModifierSource::SystemDamage(sid),
+                slot,
+                bonus,
+            });
+        }
+    }
+}
+
 /// Apply power-level modifiers to `modifiers` based on the current `PowerSystem`
 /// state and per-group multiplier config.
 ///
@@ -660,6 +723,8 @@ mod tests {
                 charge_duration: IMPULSE_CHARGE_DURATION,
                 speed_multiplier: 3.0,
                 acceleration_multiplier: 1.0,
+                engage_distance: 200.0,
+                cancel_distance: 40.0,
             });
 
         app.add_systems(Update, translate_impulse_modifiers);
@@ -721,5 +786,125 @@ mod tests {
             (max_speed - 2.0).abs() < 1e-6,
             "NPC helm=3 should give MaxSpeed multiplier 2.0, got {max_speed}"
         );
+    }
+
+    // ── apply_radar_damage_modifiers ───────────────────────────────────────────
+
+    mod radar_damage {
+        use super::*;
+        use crate::damage::{ConsoleTierConfig, SystemHull};
+        use crate::entity_spawner::EntitySystemHull;
+        use crate::messages::SystemId;
+        use crate::server_app::Ship;
+        use crate::system_registry::{
+            helm_radar_system_id, sensor_radar_system_id, tactical_radar_system_id,
+        };
+
+        fn tier_config() -> ConsoleTierConfig {
+            ConsoleTierConfig {
+                damaged_threshold_pct: 0.75,
+                disabled_threshold_pct: 0.25,
+                debuff_magnitude: 0.20,
+            }
+        }
+
+        fn spawn_ship_with_hull(app: &mut App, hull: SystemHull) -> bevy::prelude::Entity {
+            app.world_mut()
+                .spawn((Ship, EntitySystemHull(hull), ShipModifiers::new()))
+                .id()
+        }
+
+        #[test]
+        fn operational_radars_get_no_penalty() {
+            let mut app = App::new();
+            let hull = SystemHull::from_config_with_tiers(&[
+                (helm_radar_system_id(), 20.0, tier_config()),
+                (tactical_radar_system_id(), 20.0, tier_config()),
+                (sensor_radar_system_id(), 20.0, tier_config()),
+            ]);
+            let ship = spawn_ship_with_hull(&mut app, hull);
+
+            app.add_systems(Update, apply_radar_damage_modifiers);
+            app.update();
+
+            let mods = app.world().get::<ShipModifiers>(ship).unwrap();
+            assert_eq!(mods.get(&ModifierSlot::HelmRadarRange), 1.0);
+            assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
+            assert_eq!(mods.get(&ModifierSlot::SensorRadarRange), 1.0);
+        }
+
+        #[test]
+        fn damaged_tactical_radar_reduces_shared_radar_range_slot_only() {
+            let mut app = App::new();
+            let mut hull = SystemHull::from_config_with_tiers(&[
+                (helm_radar_system_id(), 20.0, tier_config()),
+                (tactical_radar_system_id(), 20.0, tier_config()),
+                (sensor_radar_system_id(), 20.0, tier_config()),
+            ]);
+            // Drop tactical-radar to 50% HP → Damaged tier (below 75% threshold).
+            hull.set_hp(&tactical_radar_system_id(), 10.0);
+            let ship = spawn_ship_with_hull(&mut app, hull);
+
+            app.add_systems(Update, apply_radar_damage_modifiers);
+            app.update();
+
+            let mods = app.world().get::<ShipModifiers>(ship).unwrap();
+            // -0.20 bonus → 1 / (1 + 0.20) ≈ 0.833.
+            let radar_range = mods.get(&ModifierSlot::RadarRange);
+            assert!(
+                (radar_range - (1.0 / 1.20)).abs() < 1e-4,
+                "expected ~0.833 tactical RadarRange multiplier, got {radar_range}"
+            );
+            // Helm/Sensor radar are undamaged and must be unaffected —
+            // damaging one radar system must not bleed into another's slot.
+            assert_eq!(mods.get(&ModifierSlot::HelmRadarRange), 1.0);
+            assert_eq!(mods.get(&ModifierSlot::SensorRadarRange), 1.0);
+        }
+
+        #[test]
+        fn destroyed_sensor_radar_is_near_blackout_and_isolated() {
+            let mut app = App::new();
+            let mut hull = SystemHull::from_config_with_tiers(&[
+                (helm_radar_system_id(), 20.0, tier_config()),
+                (tactical_radar_system_id(), 20.0, tier_config()),
+                (sensor_radar_system_id(), 20.0, tier_config()),
+            ]);
+            hull.set_hp(&sensor_radar_system_id(), 0.0);
+            let ship = spawn_ship_with_hull(&mut app, hull);
+
+            app.add_systems(Update, apply_radar_damage_modifiers);
+            app.update();
+
+            let mods = app.world().get::<ShipModifiers>(ship).unwrap();
+            let sensor_range = mods.get(&ModifierSlot::SensorRadarRange);
+            assert!(
+                sensor_range < 0.01,
+                "destroyed sensor-radar should be near-blackout, got {sensor_range}"
+            );
+            assert_eq!(mods.get(&ModifierSlot::HelmRadarRange), 1.0);
+            assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
+        }
+
+        #[test]
+        fn ship_without_radar_hull_entries_is_unaffected() {
+            let mut app = App::new();
+            // A ship whose hull declares none of the three radar SystemIds —
+            // `tier_for` must fall back to Operational, not panic or default
+            // to some other tier.
+            let hull = SystemHull::from_config_with_tiers(&[(
+                SystemId("helm".into()),
+                20.0,
+                tier_config(),
+            )]);
+            let ship = spawn_ship_with_hull(&mut app, hull);
+
+            app.add_systems(Update, apply_radar_damage_modifiers);
+            app.update();
+
+            let mods = app.world().get::<ShipModifiers>(ship).unwrap();
+            assert_eq!(mods.get(&ModifierSlot::HelmRadarRange), 1.0);
+            assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
+            assert_eq!(mods.get(&ModifierSlot::SensorRadarRange), 1.0);
+        }
     }
 }

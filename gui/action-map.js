@@ -89,12 +89,14 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /** Lock the weapon / sensor target to a specific entity UUID. */
-  set_target: (a, send) => {
-    if (a.uuid)
+  set_target: (a, send, mutate) => {
+    if (a.uuid) {
+      mutate({ weaponsTarget: a.uuid });
       send('ControlSystem', {
         target: 'tactical',
         payload: { type: 'SetTarget', data: { uuid: a.uuid } },
       });
+    }
   },
 
   /** Switch phaser firing mode (Auto / Manual / etc.). */
@@ -110,7 +112,7 @@ export const ACTION_MAP = Object.freeze({
   set_view: (a, send) => {
     if (!a.direction) return;
     var mode;
-    if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction) || a.direction.startsWith('camera_')) {
+    if (['Fore', 'Port', 'Starboard', 'Aft'].includes(a.direction) || a.direction.startsWith('camera_') || a.direction === 'cinematic') {
       mode = { kind: 'Camera', data: a.direction };
     } else {
       mode = { kind: a.direction };
@@ -328,6 +330,17 @@ export const ACTION_MAP = Object.freeze({
   /** Send the selected comms message to the view screen. */
   show_on_screen: (a, send) => {
     if (a.message_id) send('ShowOnScreen', { message_id: a.message_id });
+  },
+
+  /** Set lateral thrust via analog joystick (ph-lateral-thrust-joystick component). */
+  set_lateral_thrust: (a, send) => {
+    send('ControlSystem', {
+      target: 'helm-lateral-thrust',
+      payload: {
+        type: 'LateralThrustInput',
+        data: { lateral: a.lateral || 0 },
+      },
+    });
   },
 });
 

@@ -2,14 +2,15 @@ use bevy::prelude::*;
 
 use crate::damage::DamageTier;
 use crate::messages::{
-    HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue, SystemBlackboard,
-    SystemId,
+    HelmBlackboard, HelmEngineBlackboard, HelmLateralThrustBlackboard, InterSystemPayload,
+    InterSystemQueue, ModifierSlot, SystemBlackboard, SystemId,
 };
 use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship_plugin::BoostConfigResource;
 use crate::ship_state::ShipPhysics;
 use crate::system_registry::{
-    helm_engine_port_system_id, helm_engine_starboard_system_id, HELM_SYSTEM_ID,
+    helm_engine_port_system_id, helm_engine_starboard_system_id, lateral_thrust_system_id,
+    HELM_SYSTEM_ID,
 };
 
 pub struct HelmPlugin;
@@ -38,9 +39,15 @@ fn publish_helm_blackboard(
     boost_q: Query<&ShipBoost, With<crate::simulation::LocalShip>>,
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
+    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>,
+    ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     queue: Res<InterSystemQueue>,
     mut ship_q: Query<
         &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::simulation::LocalShip>,
+    >,
+    sources_q: Query<
+        &crate::ship_plugin::ShipSystemControlSources,
         With<crate::simulation::LocalShip>,
     >,
 ) {
@@ -61,6 +68,15 @@ fn publish_helm_blackboard(
     let boost_active = boost_state.as_ref().map(|b| b.is_active()).unwrap_or(false);
     // view_mode is not raw sim truth; helm blackboard omits it
 
+    // Live helm radar range: base config range scaled by the dedicated
+    // `HelmRadarRange` modifier, which `apply_radar_damage_modifiers` keeps
+    // in sync with the `helm-radar` system's damage tier each tick.
+    let radar_mult = modifiers_q
+        .single()
+        .map(|m| m.get(&ModifierSlot::HelmRadarRange))
+        .unwrap_or(1.0);
+    let radar_range = ship_client_config.0.helm_radar_range * radar_mult;
+
     let bb = HelmBlackboard {
         yaw: physics.yaw,
         forward_speed: physics.forward_speed,
@@ -70,6 +86,8 @@ fn publish_helm_blackboard(
         boost_battery,
         boost_active,
         boost_enabled,
+        radar_range,
+        lateral_speed: physics.lateral_speed,
     };
 
     // Read last helm input for engine thrust fraction.
@@ -132,6 +150,27 @@ fn publish_helm_blackboard(
                 }),
             );
         }
+
+        // ── Lateral thrust blackboard ───────────────────────────────────────
+        let lt_sid = lateral_thrust_system_id();
+        let lt_tier = hull
+            .as_ref()
+            .map(|h| h.0.tier_for(&SystemId(lt_sid.0.clone())))
+            .unwrap_or(DamageTier::Operational);
+        let lt_is_online = !matches!(lt_tier, DamageTier::Disabled | DamageTier::Destroyed);
+        let lt_auto = sources_q
+            .iter()
+            .next()
+            .map(|s| s.0.policy_for(&lt_sid).operate_ai)
+            .unwrap_or(false);
+        bbs.0.insert(
+            lt_sid,
+            SystemBlackboard::HelmLateralThrust(HelmLateralThrustBlackboard {
+                lateral_input: last_input.lateral,
+                is_online: lt_is_online,
+                auto: lt_auto,
+            }),
+        );
     }
 }
 
@@ -147,6 +186,7 @@ mod tests {
         app.add_systems(Update, publish_helm_blackboard);
         // Initialise InterSystemQueue so the system parameter is satisfied.
         app.init_resource::<InterSystemQueue>();
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource::default());
         // Spawn a LocalShip entity with components so the system can query it.
         app.world_mut().spawn((
             crate::simulation::LocalShip,
@@ -357,6 +397,7 @@ mod tests {
                 .insert(crate::ship_plugin::LastHelmInput {
                     thrust: 0.8,
                     steering: 0.0,
+                    lateral: 0.0,
                 });
         }
         app.update();

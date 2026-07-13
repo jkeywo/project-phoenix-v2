@@ -42,6 +42,15 @@ pub enum RegisterError {
 /// pruning, so this module deliberately does not prune session records.
 pub struct SessionManager {
     players: Vec<Player>,
+    /// Rating a player has chosen for a station while still in the Lobby
+    /// (before the Ship entity — and thus `ActiveStationRatings` — exists).
+    /// Keyed by station, not token: the choice belongs to whoever currently
+    /// holds the seat. Consumed by `spawn_game_start_entities` at game start
+    /// and cleared on station release / `ReturnToLobby`. Distinct from
+    /// `Player.last_rating`, which is per-token and only matters for a
+    /// mid-game (`InProgress`) disconnect/reconnect — the two never overlap
+    /// in lifetime.
+    pending_ratings: std::collections::HashMap<StationId, String>,
 }
 
 impl Default for SessionManager {
@@ -54,6 +63,7 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             players: Vec::new(),
+            pending_ratings: std::collections::HashMap::new(),
         }
     }
 
@@ -116,6 +126,31 @@ impl SessionManager {
         if let Some(idx) = self.idx(token) {
             self.players[idx].last_rating = rating;
         }
+    }
+
+    /// Record a station's chosen rating while still in the Lobby (pre-spawn).
+    pub fn set_pending_rating(&mut self, station: &StationId, rating: String) {
+        self.pending_ratings.insert(station.clone(), rating);
+    }
+
+    /// The pending (lobby-chosen) rating for a station, if any.
+    pub fn pending_rating_for(&self, station: &StationId) -> Option<&String> {
+        self.pending_ratings.get(station)
+    }
+
+    /// Clear a single station's pending rating (e.g. on release/reassignment).
+    pub fn clear_pending_rating(&mut self, station: &StationId) {
+        self.pending_ratings.remove(station);
+    }
+
+    /// All pending (lobby-chosen) ratings, keyed by station.
+    pub fn pending_ratings(&self) -> &std::collections::HashMap<StationId, String> {
+        &self.pending_ratings
+    }
+
+    /// Clear every pending rating (e.g. on `ReturnToLobby` for a fresh round).
+    pub fn clear_all_pending_ratings(&mut self) {
+        self.pending_ratings.clear();
     }
 
     /// Station IDs not held by any connected player, in ship-config declaration
@@ -201,6 +236,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("helm".into()),
@@ -209,6 +245,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("tactical".into()),
@@ -217,6 +254,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("repair".into()),
@@ -225,6 +263,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("sensors".into()),
@@ -233,6 +272,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("shields".into()),
@@ -241,6 +281,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("navigation".into()),
@@ -249,6 +290,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("power".into()),
@@ -257,6 +299,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
                 StationDef {
                     id: StationId("comms".into()),
@@ -265,6 +308,7 @@ mod tests {
                     rank: "".into(),
                     short_code: "".into(),
                     console: None,
+                    ratings: vec![],
                 },
             ],
         }
@@ -500,6 +544,35 @@ mod tests {
         assert_eq!(sm.players()[0].last_rating.as_deref(), Some("Assisted"));
         sm.set_last_rating("t1", None);
         assert!(sm.players()[0].last_rating.is_none());
+    }
+
+    #[test]
+    fn pending_rating_set_get_and_clear() {
+        let mut sm = sm();
+        let captain = StationId("captain".into());
+        assert!(sm.pending_rating_for(&captain).is_none());
+
+        sm.set_pending_rating(&captain, "Simplified".into());
+        assert_eq!(
+            sm.pending_rating_for(&captain),
+            Some(&"Simplified".to_string())
+        );
+        assert_eq!(sm.pending_ratings().len(), 1);
+
+        sm.clear_pending_rating(&captain);
+        assert!(sm.pending_rating_for(&captain).is_none());
+        assert!(sm.pending_ratings().is_empty());
+    }
+
+    #[test]
+    fn clear_all_pending_ratings_empties_the_map() {
+        let mut sm = sm();
+        sm.set_pending_rating(&StationId("captain".into()), "Simplified".into());
+        sm.set_pending_rating(&StationId("tactical".into()), "Simplified".into());
+        assert_eq!(sm.pending_ratings().len(), 2);
+
+        sm.clear_all_pending_ratings();
+        assert!(sm.pending_ratings().is_empty());
     }
 
     // ── Ready state ──────────────────────────────────────────────────

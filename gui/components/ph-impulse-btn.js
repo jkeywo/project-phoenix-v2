@@ -7,25 +7,20 @@ export class PhImpulseBtn extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: block; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; margin-bottom: 0.4rem; }
-    .auto-badge { font-size: 0.6rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
-    .btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.9rem; font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: all 0.15s ease; }
-    .btn.ready { background: #0e1117; border-color: #4ec870; color: #4ec870; }
-    .btn.ready:hover:not(:disabled) { background: #16281d; }
-    .btn.charging { background: #0e1117; border-color: #d8a040; color: #d8a040; }
-    .btn.cooldown { background: #0e1117; border-color: #6a7178; color: #6a7178; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
+    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .btn { --charge: 0; width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.9rem; font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: background 0.3s ease; }
+    .btn.ready { background: var(--bg-card); border-color: var(--loaded); color: var(--loaded); }
+    .btn.ready:hover:not(:disabled) { background: var(--loaded-dim); }
+    .btn.charging { background: linear-gradient(90deg, var(--reloading) calc(var(--charge) * 100%), var(--bg-card) calc(var(--charge) * 100%)); border-color: var(--reloading); color: var(--reloading); }
+    .btn.cooldown { background: var(--bg-card); border-color: var(--ink-dim); color: var(--ink-dim); }
     .btn:disabled { opacity: 0.4; cursor: default; }
-    .progress-wrap { width: 100%; height: 0.4rem; background: #05080e; border: 1px solid #282c38; overflow: hidden; margin-bottom: 0.3rem; }
-    .progress-fill { height: 100%; background: linear-gradient(90deg, #d8a040, #f0c040); transition: width 0.3s ease; }
   </style>
   <div class="header">
     <span>IMPULSE DRIVE</span>
     <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
-  </div>
-  <div class="progress-wrap" id="progress-wrap" style="display:none">
-    <div class="progress-fill" id="progress-fill" style="width:0%"></div>
   </div>
   <button class="btn ready" id="btn">IMPULSE</button>
 `;
@@ -36,7 +31,13 @@ export class PhImpulseBtn extends HTMLElement {
     this.sendAction ??= window.sendAction;
     const btn = this.shadowRoot.getElementById('btn');
     btn.addEventListener('click', () => {
-      if (this.sendAction && !btn.disabled) {
+      if (!this.sendAction || btn.disabled) return;
+      const s = this.#state || {};
+      const st = s.state || 'ready';
+      // Pressing IMPULSE again while it is charging cancels the charge.
+      if (st === 'charging') {
+        this.sendAction('cancel_impulse', {});
+      } else if (st === 'ready') {
         this.sendAction('start_impulse_charge', {});
       }
     });
@@ -57,8 +58,6 @@ export class PhImpulseBtn extends HTMLElement {
 
     const root = this.shadowRoot;
     const btn = root.getElementById('btn');
-    const progressWrap = root.getElementById('progress-wrap');
-    const progressFill = root.getElementById('progress-fill');
     const badge = root.getElementById('auto-badge');
 
     // Button text and classes
@@ -67,22 +66,19 @@ export class PhImpulseBtn extends HTMLElement {
       btn.className = 'btn ready';
       btn.disabled = auto;
     } else if (st === 'charging') {
-      btn.textContent = 'CHARGING ' + Math.round(chargePct) + '%';
+      // Keep the button enabled during charging so a second press cancels it
+      // (disabled only under AUTO, where the operator has no manual control).
+      btn.textContent = 'CANCEL ' + Math.round(chargePct) + '%';
       btn.className = 'btn charging';
-      btn.disabled = true;
+      btn.disabled = auto;
     } else if (st === 'cooldown') {
       btn.textContent = 'COOLDOWN';
       btn.className = 'btn cooldown';
       btn.disabled = true;
     }
 
-    // Progress bar: visible during charging
-    if (st === 'charging') {
-      progressWrap.style.display = 'block';
-      progressFill.style.width = chargePct + '%';
-    } else {
-      progressWrap.style.display = 'none';
-    }
+    // Fill the button itself left-to-right as it charges.
+    btn.style.setProperty('--charge', chargePct / 100);
 
     badge.style.display = auto ? 'inline' : 'none';
   }

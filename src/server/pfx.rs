@@ -344,8 +344,8 @@ fn sync_phaser_beams(
     for key in dead {
         if let Some(entities) = state.active.remove(&key) {
             state.target_point_choices.remove(&key);
-            commands.entity(entities.body).despawn();
-            commands.entity(entities.glow).despawn();
+            commands.entity(entities.body).try_despawn();
+            commands.entity(entities.glow).try_despawn();
         }
     }
 }
@@ -433,7 +433,7 @@ fn sync_torpedo_pfx(
 
     for uuid in to_despawn {
         if let Some(entities) = state.active.remove(&uuid) {
-            commands.entity(entities.body).despawn();
+            commands.entity(entities.body).try_despawn();
             spawn_torpedo_burst(
                 entities.last_pos,
                 &mut commands,
@@ -528,7 +528,7 @@ fn sync_blaster_pfx(
 
     for uuid in to_despawn {
         if let Some(entities) = state.active.remove(&uuid) {
-            commands.entity(entities.body).despawn();
+            commands.entity(entities.body).try_despawn();
         }
     }
 
@@ -661,7 +661,7 @@ fn spawn_engine_trails(
         .collect();
     for key in dead_keys {
         if let Some(trail) = state.emitters.remove(&key) {
-            commands.entity(trail.entity).despawn();
+            commands.entity(trail.entity).try_despawn();
         }
     }
 }
@@ -960,7 +960,7 @@ fn tick_lifetime_pfx(
             }
         }
         if lifetime.age >= lifetime.lifetime {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }
@@ -983,7 +983,7 @@ fn cleanup_pfx(
     mut engine_state: ResMut<EngineTrailState>,
 ) {
     for entity in query.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
     beam_state.active.clear();
     beam_state.target_point_choices.clear();
@@ -1118,8 +1118,10 @@ fn marker_origin(
     markers: Option<&ModelMarkers>,
     marker_name: Option<&str>,
 ) -> Option<Vec3> {
-    let marker = markers?.get(marker_name?)?;
-    Some(transform.transform_point(Vec3::from_array(marker.position)))
+    // Composes `entityTransform ∘ baseRig ∘ marker`: marker positions are
+    // authored in the raw-GLB frame, so the base rig must be applied to place
+    // the emitter on the correct (fore) end of the ship rather than the rear.
+    markers?.resolve_world_position(transform, marker_name?)
 }
 
 fn marker_emitter(

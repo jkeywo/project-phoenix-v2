@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use bevy::math::{EulerRot, Quat, Vec3};
-use bevy::prelude::Component;
+use bevy::prelude::{Component, Transform};
 
 fn zeros() -> [f32; 3] {
     [0.0, 0.0, 0.0]
@@ -158,6 +158,11 @@ impl BaseTransform {
 pub struct ModelMarkers {
     markers: HashMap<String, Marker>,
     target_points: Vec<TargetPoint>,
+    /// The base rig (`entityTransform ∘ baseRig ∘ model`). Marker positions
+    /// are authored in the raw-GLB frame, so resolving one to ship-local space
+    /// means applying `baseRig` first, then the entity transform. Defaults to
+    /// identity for `from_markers` (test fixtures already in ship space).
+    base: Transform,
 }
 
 impl ModelMarkers {
@@ -165,6 +170,7 @@ impl ModelMarkers {
         Self {
             markers: rig.markers.clone(),
             target_points: rig.target_points.clone(),
+            base: rig.base_bevy_transform(),
         }
     }
 
@@ -172,12 +178,30 @@ impl ModelMarkers {
         Self {
             markers,
             target_points: Vec::new(),
+            base: Transform::IDENTITY,
         }
+    }
+
+    /// The base rig transform for this model (`baseRig`). Callers that resolve
+    /// marker positions or directions manually (e.g. the camera rig) apply this
+    /// inner to the entity transform.
+    pub fn base(&self) -> Transform {
+        self.base
     }
 
     /// Resolve a marker by name (None when missing -> caller falls back).
     pub fn get(&self, name: &str) -> Option<&Marker> {
         self.markers.get(name)
+    }
+
+    /// Resolve a marker by name to a world-space position, composing the
+    /// entity's live `Transform` with the base rig and the marker's raw-GLB
+    /// position (`entityTransform ∘ baseRig ∘ marker`). Returns `None` when the
+    /// marker is missing so callers fall back to their default origin.
+    pub fn resolve_world_position(&self, transform: &Transform, name: &str) -> Option<Vec3> {
+        let marker = self.get(name)?;
+        let local = self.base.transform_point(Vec3::from_array(marker.position));
+        Some(transform.transform_point(local))
     }
 
     /// Iterate over all marker names in this model rig.

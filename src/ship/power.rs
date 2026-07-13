@@ -1255,6 +1255,7 @@ mod tests {
         app.world_mut().entity_mut(ship).insert(LastHelmInput {
             thrust: 0.9,
             steering: 0.0,
+            lateral: 0.0,
         });
         // battery_pct = 100/100 = 1.0 >= 0.75 floor
         app.update();

@@ -1,0 +1,49 @@
+[base]
+offset = [ 0, -0.275545, 0.08703 ]
+rotation = [ 0, 3.14, 0 ]
+scale = [ 0.75, 0.75, 0.75 ]
+
+[extents]
+min = [ -3.1179087073574334, -0.35508360949868145, -2.8157587301885227 ]
+max = [ 3.1179087073574334, 0.17477469249248506, 2.9898187301885226 ]
+size = [ 6.235817414714867, 0.5298583019911665, 5.805577460377045 ]
+
+[markers.engine_port]
+position = [ -0.7513202300376012, 0.137773, -0.8465254706038934 ]
+direction = [ 0, 0, -1 ]
+
+[markers.engine_starboard]
+position = [ 0.7446395397442829, 0.137773, -0.8327737814172427 ]
+direction = [ 0, 0, -1 ]
+
+[markers.camera_fore]
+position = [ 0, 0.1302065880975193, 0.870299 ]
+direction = [ 0, 0, 1 ]
+
+[markers.camera_aft]
+position = [ 0, 0, -0.870299 ]
+direction = [ 0, 0, -1 ]
+
+[markers.camera_port]
+position = [ 1.157126, 0, 0 ]
+direction = [ 1, 0, 0 ]
+
+[markers.camera_starboard]
+position = [ -1.157126, 0, 0 ]
+direction = [ -1, 0, 0 ]
+
+[markers.torpedo_fore]
+position = [ 0, -0.006051477841459152, 0.7149858947779015 ]
+direction = [ 0, 0, 1 ]
+
+[markers.blaster_port]
+position = [ 0.5569429665341249, 0.07059210687991054, 0.00022556780991636605 ]
+direction = [ 0, 0, 1 ]
+
+[markers.blaster_starboard]
+position = [ -0.5433494862301935, 0.09845132712045346, 0.009012524646963116 ]
+direction = [ 0, 0, 1 ]
+
+[markers.phaser_omni]
+position = [ -0.0008642971880697476, 0.4707843831481353, -0.5426769906728605 ]
+direction = [ 0, 0, 1 ]

@@ -98,28 +98,26 @@ describe('PhHelmJoystick', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
-  it('sends set_helm action with normalized thrust and yaw on simulated drag', () => {
-    vi.useFakeTimers();
+  it('sends normalized set_helm action on pointer release after drag', () => {
+    mockRAF();
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = { auto: false };
     stubWellRect(el, 240, 240);
     const well = el.shadowRoot.getElementById('well');
 
-    well.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 200, clientY: 50 }));
-    // heartbeat fires at 100ms
-    vi.advanceTimersByTime(100);
+    // Drag far out — the clamp in #setFromPointer keeps dx,dy in [-1,1]
+    well.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 500, clientY: -200 }));
+    tickRaf(); // scheduleApply rAF (nub visual)
 
-    expect(sendAction).toHaveBeenCalled();
+    // Release sends the final action synchronously
+    well.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+
+    expect(sendAction).toHaveBeenCalledTimes(1);
     const call = sendAction.mock.calls[0];
     expect(call[0]).toBe('set_helm');
-    expect(typeof call[1].thrust).toBe('number');
-    expect(typeof call[1].yaw).toBe('number');
     expect(Math.abs(call[1].thrust)).toBeLessThanOrEqual(1);
     expect(Math.abs(call[1].yaw)).toBeLessThanOrEqual(1);
-
-    well.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
-    vi.useRealTimers();
   });
 
   it('snaps nub to center and sends zero thrust/yaw on release', () => {

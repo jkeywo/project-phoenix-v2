@@ -1,5 +1,19 @@
+// Torpedo tube controls: per-tube volley-target UI (issue #632/#637 model).
+//
+// Each tube shows one slot icon per possible round (up to volley_max). Slots
+// are grey when empty, fill green as a round loads, solid green when loaded,
+// and drain back to grey as a round unloads. A "-" button lowers the target
+// load count, "+" raises it (the tube auto-loads/unloads toward the target
+// one round at a time), and "FIRE" launches whatever is currently loaded.
+//
+// This mirrors gui/weapons-console.html's tube UI but is a standalone custom
+// element so it can be embedded in the per-hull tactical consoles
+// (destroyer/tactical.html, cruiser/tactical.html).
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
+
 export class PhTorpedoControls extends HTMLElement {
   #state = null;
+  #tubeEls = {};
 
   constructor() {
     super();
@@ -7,25 +21,34 @@ export class PhTorpedoControls extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
-    .magazine { font-size: 0.9rem; color: #f08438; font-weight: 600; font-family: 'Chakra Petch', sans-serif; }
-    .tube-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; padding: 0.3rem 0; }
-    .tube-row .lbl { min-width: 4rem; color: #6a7178; }
-    .load-progress-wrap { flex: 1; height: 0.5rem; background: #05080e; border: 1px solid #282c38; overflow: hidden; }
-    .load-progress-fill { height: 100%; background: linear-gradient(90deg, #805818, #f0c040); transition: width 0.3s ease; }
-    .tube-btn { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.2rem 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; border: 2px solid #282c38; color: #cce; background: #0e1117; transition: all 0.15s ease; }
-    .tube-btn:hover:not(:disabled) { background: #161b24; border-color: #4a5060; }
-    .tube-btn:disabled { opacity: 0.35; cursor: default; }
-    .tube-btn.fire { border-color: #4ec870; color: #4ec870; }
-    .tube-btn.fire:hover:not(:disabled) { background: #16281d; }
-    .tube-btn.load { border-color: #f0c040; color: #f0c040; }
-    .tube-btn.load:hover:not(:disabled) { background: #1a1a0a; }
-    .tube-btn.unload { border-color: #e05555; color: #e05555; }
-    .tube-btn.unload:hover:not(:disabled) { background: #1a0a0a; }
-    .auto-badge { font-size: 0.55rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .magazine { font-size: 0.9rem; color: var(--tactical); font-weight: 600; font-family: 'Chakra Petch', sans-serif; }
+    .tube-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.65rem; padding: 0.3rem 0; }
+    .tube-row + .tube-row { border-top: 1px solid var(--line-faint); }
+    .tube-row .lbl { min-width: 4rem; color: var(--ink-dim); flex-shrink: 0; }
+    .tube-controls { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+    .torp-slots { display: flex; gap: 0.2rem; align-items: center; }
+    .torp-slot {
+      position: relative; width: 0.85rem; height: 1.4rem; border-radius: 2px; overflow: hidden; flex-shrink: 0;
+      background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.20);
+    }
+    .torp-slot[data-state="queued-to-fill"], .torp-slot[data-state="loading"] {
+      border-color: rgba(78,200,112,0.55); border-style: dashed;
+    }
+    .torp-slot[data-state="filled"] {
+      border-color: var(--loaded); box-shadow: 0 0 4px rgba(78,200,112,0.5);
+    }
+    .torp-slot[data-state="queued-to-empty"] {
+      border-color: rgba(255,255,255,0.45); border-style: dashed;
+    }
+    .torp-slot .fill {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 0%;
+      background: linear-gradient(0deg, var(--loaded) 0%, #7ee29a 100%);
+      transition: height 0.15s linear;
+    }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
     <span>TORPEDOES</span>
@@ -34,6 +57,7 @@ export class PhTorpedoControls extends HTMLElement {
   <div id="tubes"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
+    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
@@ -46,6 +70,112 @@ export class PhTorpedoControls extends HTMLElement {
   }
 
   get state() { return this.#state; }
+
+  #buildTubeRow(tubeId) {
+    const row = document.createElement('div');
+    row.className = 'tube-row';
+    row.dataset.id = tubeId;
+
+    const lbl = document.createElement('span');
+    lbl.className = 'lbl';
+    row.appendChild(lbl);
+
+    const slotsEl = document.createElement('div');
+    slotsEl.className = 'torp-slots';
+
+    const minusBtn = document.createElement('button');
+    minusBtn.type = 'button';
+    minusBtn.className = 'mini-btn';
+    minusBtn.innerHTML = '<span class="mini-bg"></span><span class="lbl">−</span>';
+    minusBtn.addEventListener('click', () => {
+      const tube = (this.#state && this.#state.tubes || []).find((x) => x.id === tubeId);
+      const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
+      if (cur > 0 && this.sendAction) this.sendAction('set_torpedo_volley_target', { tube: tubeId, count: cur - 1 });
+    });
+
+    const plusBtn = document.createElement('button');
+    plusBtn.type = 'button';
+    plusBtn.className = 'mini-btn';
+    plusBtn.innerHTML = '<span class="mini-bg"></span><span class="lbl">+</span>';
+    plusBtn.addEventListener('click', () => {
+      const tube = (this.#state && this.#state.tubes || []).find((x) => x.id === tubeId);
+      const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
+      const max = tube && typeof tube.volley_max === 'number' ? tube.volley_max : 1;
+      if (cur < max && this.sendAction) this.sendAction('set_torpedo_volley_target', { tube: tubeId, count: cur + 1 });
+    });
+
+    const fireBtn = document.createElement('button');
+    fireBtn.type = 'button';
+    fireBtn.className = 'btn';
+    fireBtn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">FIRE</span>';
+    fireBtn.addEventListener('click', () => {
+      if (fireBtn.disabled || !this.sendAction) return;
+      const targetUuid = this.#state && this.#state.target_uuid ? this.#state.target_uuid : null;
+      this.sendAction('fire_torpedo', { tube: tubeId, target_uuid: targetUuid });
+    });
+
+    const controls = document.createElement('div');
+    controls.className = 'tube-controls';
+    controls.appendChild(minusBtn);
+    controls.appendChild(slotsEl);
+    controls.appendChild(plusBtn);
+    controls.appendChild(fireBtn);
+    row.appendChild(controls);
+
+    return { row, lbl, slotsEl, minusBtn, plusBtn, fireBtn, slotEls: [] };
+  }
+
+  // Rebuild slot <div> elements when volley_max changes.
+  #ensureSlotEls(els, vollMax) {
+    if (els.slotEls.length === vollMax) return els.slotEls;
+    while (els.slotsEl.firstChild) els.slotsEl.removeChild(els.slotsEl.firstChild);
+    els.slotEls = [];
+    for (let i = 0; i < vollMax; i++) {
+      const slotEl = document.createElement('div');
+      slotEl.className = 'torp-slot';
+      slotEl.dataset.state = 'empty';
+      const fillEl = document.createElement('div');
+      fillEl.className = 'fill';
+      slotEl.appendChild(fillEl);
+      els.slotsEl.appendChild(slotEl);
+      els.slotEls.push(slotEl);
+    }
+    return els.slotEls;
+  }
+
+  // Per-slot state: 'empty' | 'queued-to-fill' | 'loading' | 'filled' |
+  // 'queued-to-empty' | 'unloading', with a 0..1 green-fill fraction.
+  #computeSlots(tube) {
+    const loadedCount = typeof tube.loaded_count === 'number' ? tube.loaded_count : (tube.loaded ? 1 : 0);
+    const targetCount = typeof tube.target_count === 'number' ? tube.target_count : 0;
+    const vollMax = typeof tube.volley_max === 'number' ? tube.volley_max : 1;
+    const loadProg = typeof tube.load_progress === 'number' ? tube.load_progress : 0;
+    const tubeState = tube.state || (tube.loaded ? 'loaded' : 'unloaded');
+    const activeIdx = tubeState === 'loading' ? loadedCount : (tubeState === 'unloading' ? loadedCount - 1 : -1);
+
+    const slots = [];
+    for (let i = 0; i < vollMax; i++) {
+      let state;
+      let fill;
+      if (i < loadedCount) {
+        if (i === activeIdx && tubeState === 'unloading') {
+          state = 'unloading';
+          fill = 1 - loadProg;
+        } else {
+          state = i >= targetCount ? 'queued-to-empty' : 'filled';
+          fill = 1;
+        }
+      } else if (i === activeIdx && tubeState === 'loading') {
+        state = 'loading';
+        fill = loadProg;
+      } else {
+        state = i < targetCount ? 'queued-to-fill' : 'empty';
+        fill = 0;
+      }
+      slots.push({ state, fill });
+    }
+    return slots;
+  }
 
   #render() {
     const s = this.#state || {};
@@ -60,103 +190,48 @@ export class PhTorpedoControls extends HTMLElement {
 
     if (tubes.length === 0) {
       container.innerHTML = '<div class="empty">NO TORPEDO TUBES</div>';
+      this.#tubeEls = {};
       return;
     }
+    if (container.querySelector('.empty')) container.innerHTML = '';
 
-    const newIds = new Set(tubes.map(t => t.id));
-    Array.from(container.children).forEach(child => {
-      if (!newIds.has(child.dataset.id)) {
-        child.remove();
+    const seenIds = {};
+    tubes.forEach((t) => { seenIds[t.id] = true; });
+    Object.keys(this.#tubeEls).forEach((id) => {
+      if (!seenIds[id]) {
+        this.#tubeEls[id].row.remove();
+        delete this.#tubeEls[id];
       }
     });
 
-    tubes.forEach((tube, idx) => {
-      let row = container.querySelector(`[data-id="${tube.id}"]`);
-      if (!row) {
-        row = document.createElement('div');
-        row.className = 'tube-row';
-        row.dataset.id = tube.id;
-
-        const lbl = document.createElement('span');
-        lbl.className = 'lbl';
-        row.appendChild(lbl);
-
-        const progressWrap = document.createElement('div');
-        progressWrap.className = 'load-progress-wrap';
-        const progressFill = document.createElement('div');
-        progressFill.className = 'load-progress-fill';
-        progressWrap.appendChild(progressFill);
-        row.appendChild(progressWrap);
-
-        const badge = document.createElement('span');
-        badge.className = 'auto-badge';
-        badge.textContent = 'AUTO';
-        row.appendChild(badge);
-
-        const loadBtn = document.createElement('button');
-        loadBtn.className = 'tube-btn load';
-        loadBtn.textContent = 'LOAD';
-        loadBtn.addEventListener('click', () => {
-          if (this.sendAction && !loadBtn.disabled) {
-            this.sendAction('load_tube', { tube: tube.id });
-          }
-        });
-        row.appendChild(loadBtn);
-
-        const unloadBtn = document.createElement('button');
-        unloadBtn.className = 'tube-btn unload';
-        unloadBtn.textContent = 'UNLOAD';
-        unloadBtn.addEventListener('click', () => {
-          if (this.sendAction && !unloadBtn.disabled) {
-            this.sendAction('unload_tube', { tube: tube.id });
-          }
-        });
-        row.appendChild(unloadBtn);
-
-        const fireBtn = document.createElement('button');
-        fireBtn.className = 'tube-btn fire';
-        fireBtn.textContent = 'FIRE';
-        fireBtn.addEventListener('click', () => {
-          if (this.sendAction && !fireBtn.disabled) {
-            this.sendAction('fire_torpedo', { tube: tube.id });
-          }
-        });
-        row.appendChild(fireBtn);
-
-        if (idx < container.children.length) {
-          container.insertBefore(row, container.children[idx]);
-        } else {
-          container.appendChild(row);
-        }
+    tubes.forEach((tube) => {
+      let els = this.#tubeEls[tube.id];
+      if (!els) {
+        els = this.#buildTubeRow(tube.id);
+        this.#tubeEls[tube.id] = els;
+        container.appendChild(els.row);
       }
 
-      row.querySelector('.lbl').textContent = tube.label || tube.id;
+      els.lbl.textContent = String(tube.label || tube.id).replace(/_/g, ' ').toUpperCase();
 
-      const isLoaded = !!tube.is_loaded;
-      const isBusy = tube.state === 'loading' || tube.state === 'unloading';
-      const auto = !!tube.auto;
-      const progressPct = Math.max(0, Math.min(100, (tube.load_progress_pct || 0) * 100));
+      const vollMax = typeof tube.volley_max === 'number' ? tube.volley_max : 1;
+      const slotEls = this.#ensureSlotEls(els, vollMax);
+      const slots = this.#computeSlots(tube);
+      slots.forEach((slot, i) => {
+        const slotEl = slotEls[i];
+        slotEl.dataset.state = slot.state;
+        slotEl.firstChild.style.height = Math.round(slot.fill * 100) + '%';
+      });
 
-      const progressWrap = row.querySelector('.load-progress-wrap');
-      const progressFill = row.querySelector('.load-progress-fill');
-      if (isBusy) {
-        progressWrap.style.display = 'block';
-        progressFill.style.width = progressPct + '%';
-      } else {
-        progressWrap.style.display = 'none';
-      }
+      const loadedCount = typeof tube.loaded_count === 'number' ? tube.loaded_count : (tube.loaded ? 1 : 0);
+      const targetCount = typeof tube.target_count === 'number' ? tube.target_count : 0;
+      const canFire = loadedCount > 0;
 
-      const badge = row.querySelector('.auto-badge');
-      badge.style.display = auto ? 'inline' : 'none';
-
-      const loadBtn = row.querySelector('.load');
-      loadBtn.disabled = auto || isLoaded || magCurrent <= 0;
-
-      const unloadBtn = row.querySelector('.unload');
-      unloadBtn.disabled = auto || !isLoaded;
-
-      const fireBtn = row.querySelector('.fire');
-      fireBtn.disabled = auto || !isLoaded;
+      els.minusBtn.disabled = targetCount <= 0;
+      els.plusBtn.disabled = targetCount >= vollMax;
+      els.fireBtn.disabled = !canFire;
+      els.fireBtn.className = canFire ? 'btn armed' : 'btn disabled';
+      els.fireBtn.querySelector('.led').className = 'led' + (canFire ? ' on' : '');
     });
   }
 }

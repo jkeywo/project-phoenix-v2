@@ -229,6 +229,11 @@ fn apply_damage_zone_damage(
                     }
                 }
 
+                // God mode: local ship takes no damage.
+                if is_local && crate::bridge::is_god_mode() {
+                    hull_amount = 0.0;
+                }
+
                 let mut rng = rand::rngs::SmallRng::from_os_rng();
                 let (hull_applied, ship_destroyed) = if hull_amount > 0.0 {
                     let result =

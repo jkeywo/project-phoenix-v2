@@ -16,6 +16,13 @@ pub enum ModifierSlot {
     PhaserDamage,
     HullDamageTaken,
     RepairRate,
+    /// Helm console's short-range radar detection range (dedicated slot —
+    /// distinct from the tactical/weapons `RadarRange` slot so damaging one
+    /// radar system doesn't bleed into another).
+    HelmRadarRange,
+    /// Sensors console's long-range radar detection range (dedicated slot —
+    /// see `HelmRadarRange`).
+    SensorRadarRange,
 }
 
 /// Who or what applied a modifier.
@@ -35,6 +42,11 @@ pub enum ModifierSource {
     /// A modifier attributed to a power group (issue #617). The
     /// SystemId-keyed successor of the retired `Console` variant.
     PowerGroup(PowerGroupId),
+    /// A modifier derived from a damaged/disabled/destroyed system's
+    /// `debuff_magnitude` (e.g. a radar system's detection range shrinking
+    /// as it takes damage). Keyed by the system's own `SystemId` so each
+    /// damaged system's contribution can be independently added/removed.
+    SystemDamage(SystemId),
 }
 
 impl Eq for ModifierSource {}
@@ -57,6 +69,10 @@ impl std::hash::Hash for ModifierSource {
             ModifierSource::PowerGroup(g) => {
                 4u8.hash(state);
                 g.hash(state);
+            }
+            ModifierSource::SystemDamage(sid) => {
+                5u8.hash(state);
+                sid.hash(state);
             }
         }
     }
@@ -351,10 +367,18 @@ pub enum TeamSlot {
 ///
 /// Serialises as a plain string (`#[serde(transparent)]`) — wire-compatible
 /// with the old `ViewDirection` string serialization.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct CameraView {
     pub marker_name: String,
+}
+
+impl Default for CameraView {
+    fn default() -> Self {
+        Self {
+            marker_name: "camera_fore".into(),
+        }
+    }
 }
 
 impl CameraView {
@@ -1023,6 +1047,9 @@ pub enum SystemControlPayload {
         source_uuid: Option<String>,
     },
     ClearNavigationWaypoint,
+    LateralThrustInput {
+        lateral: f32,
+    },
     SetScienceTarget {
         uuid: String,
     },
@@ -1105,6 +1132,14 @@ pub enum ClientMessage {
         target: SystemId,
         payload: CoordinationPayload,
     },
+    /// Sent from the GameOver screen to return everyone to the Lobby for
+    /// another round. Only honoured while `GamePhase::GameOver` is active;
+    /// ignored otherwise. Any connected player may trigger it.
+    ReturnToLobby,
+    /// Sent from the server UI when the host selects a scenario after
+    /// returning to scenario selection from GameOver. Tells the server
+    /// to finalize the selection and broadcast lobby state to clients.
+    ConfirmScenario,
 }
 
 /// Typed payload for a channel-3 coordination message (issue #494).
@@ -1382,6 +1417,12 @@ pub enum ServerMessage {
     GameOver {
         reason: String,
     },
+    /// Broadcast when all players return to the lobby from the GameOver screen.
+    /// Clients should switch back to the lobby panel.
+    ReturnedToLobby,
+    /// Broadcast when the host selects a scenario from the scenario selection
+    /// screen. Clients should transition from waiting to the lobby view.
+    ScenarioLoaded,
     /// Broadcast to all when a station's active rating changes.
     /// Clients use this to update AUTO/read-only badges for system fragments
     /// belonging to the affected station.
@@ -1623,6 +1664,28 @@ pub struct HelmBlackboard {
     pub boost_active: bool,
     /// True when this ship's TOML includes a boost drive config.
     pub boost_enabled: bool,
+    /// Live detection range for the helm radar widget, in world units —
+    /// the configured `helm_radar_range` scaled by the `helm-radar` system's
+    /// current damage tier (shrinks when Damaged/Disabled, near-zero when
+    /// Destroyed). `0.0` (the derived `Default`) means "no live value yet";
+    /// callers should fall back to the static `ShipClientConfig` range.
+    #[serde(default)]
+    pub radar_range: f32,
+    /// Current lateral (sideways) speed. Positive = starboard (+X), negative = port (-X).
+    pub lateral_speed: f32,
+}
+
+/// Raw sim truth for the Helm Lateral Thrust fine system,
+/// published each tick into the ship blackboard.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct HelmLateralThrustBlackboard {
+    /// Current lateral thrust input fraction (-1.0 .. 1.0).
+    pub lateral_input: f32,
+    /// Whether the lateral thrust system is operational (not disabled or destroyed).
+    pub is_online: bool,
+    /// Whether the lateral thrust system is under AI control.
+    #[serde(default)]
+    pub auto: bool,
 }
 
 /// Raw sim truth for a single Helm Engine fine system (port or starboard),
@@ -1836,6 +1899,8 @@ pub enum SystemBlackboard {
     /// instance under `SystemId("shield-arc-<arc_id>")`. Coexists with the
     /// aggregate `Shields` blackboard under `SystemId("shields")`.
     ShieldArc(ShieldArcBlackboard),
+    /// Helm Lateral Thrust fine-system blackboard.
+    HelmLateralThrust(HelmLateralThrustBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -2193,6 +2258,19 @@ pub enum UiAction {
     ///
     /// The HTML navigation panel sends `{ action: "clear_navigation_waypoint", console: "Navigation" }`.
     ClearNavigationWaypoint,
+    /// Set lateral thrust input (helm lateral thrust joystick).
+    SetLateralThrust {
+        lateral: f32,
+    },
+    /// Return to the Lobby from the GameOver screen.
+    ///
+    /// The HTML game-over overlay sends `{ action: "return_to_lobby" }`.
+    ReturnToLobby,
+    /// Confirm scenario selection after returning from GameOver.
+    ///
+    /// The host clicks a scenario button on the server HTML page,
+    /// which sends `{ action: "confirm_scenario" }`.
+    ConfirmScenario,
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
@@ -2295,6 +2373,12 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             target: crate::system_registry::navigation_system_id(),
             payload: SystemControlPayload::ClearNavigationWaypoint,
         },
+        UiAction::SetLateralThrust { lateral } => ClientMessage::ControlSystem {
+            target: crate::system_registry::lateral_thrust_system_id(),
+            payload: SystemControlPayload::LateralThrustInput { lateral: *lateral },
+        },
+        UiAction::ReturnToLobby => ClientMessage::ReturnToLobby,
+        UiAction::ConfirmScenario => ClientMessage::ConfirmScenario,
     }
 }
 

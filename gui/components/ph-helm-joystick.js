@@ -4,7 +4,8 @@ export class PhHelmJoystick extends HTMLElement {
   #py = 0;
   #pointerId = null;
   #rafId = null;
-  #hbId = null;
+  #hbRaf = null;
+  #lastHbSend = 0;
   #keys = {};
   #inputRaf = null;
   #lastKbSend = 0;
@@ -15,14 +16,14 @@ export class PhHelmJoystick extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; margin-bottom: 0.5rem; }
-    .auto-badge { font-size: 0.6rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.5rem; }
+    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
     .well {
       position: relative; width: 240px; height: 240px; border-radius: 50%;
       background: radial-gradient(circle at center, #0a0d11 0%, #14171c 75%, #050608 100%);
-      border: 1px solid #282c38; box-shadow: inset 0 0 0 4px #0a0d11, inset 0 0 0 5px rgba(108,182,208,0.35);
+      border: 1px solid var(--line-faint); box-shadow: inset 0 0 0 4px #0a0d11, inset 0 0 0 5px rgba(108,182,208,0.35);
       cursor: grab; touch-action: none; flex-shrink: 0;
     }
     .well:active { cursor: grabbing; }
@@ -38,7 +39,7 @@ export class PhHelmJoystick extends HTMLElement {
     .arrow.rev { bottom: 8px; left: 50%; transform: translateX(-50%); border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid rgba(108,182,208,0.5); }
     .arrow.port { left: 8px; top: 50%; transform: translateY(-50%); border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-right: 8px solid rgba(108,182,208,0.5); }
     .arrow.stbd { right: 8px; top: 50%; transform: translateY(-50%); border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 8px solid rgba(108,182,208,0.5); }
-    .ax-label { position: absolute; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 10px; color: #6a7178; letter-spacing: 0.22em; pointer-events: none; }
+    .ax-label { position: absolute; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 10px; color: var(--ink-dim); letter-spacing: 0.22em; pointer-events: none; }
     .ax-label.fwd { top: 20px; left: 50%; transform: translateX(-50%); }
     .ax-label.rev { bottom: 20px; left: 50%; transform: translateX(-50%); }
     .ax-label.port { left: 18px; top: 50%; transform: translateY(-50%) rotate(-90deg); }
@@ -52,7 +53,7 @@ export class PhHelmJoystick extends HTMLElement {
     }
     .nub::after { content: ''; position: absolute; inset: 18px; border-radius: 50%; background: #14171c; border: 1px solid rgba(108,182,208,0.3); }
     .readout { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.8rem; color: rgba(108,182,208,0.8); letter-spacing: 0.1em; }
-    .readout .sep { color: #6a7178; }
+    .readout .sep { color: var(--ink-dim); }
   </style>
   <div class="header">
     <span>HELM</span>
@@ -112,7 +113,7 @@ export class PhHelmJoystick extends HTMLElement {
       window.removeEventListener('gamepadconnected', this.#onGamepadConnected);
     }
     if (this.#inputRaf) { cancelAnimationFrame(this.#inputRaf); this.#inputRaf = null; }
-    if (this.#hbId) { clearInterval(this.#hbId); this.#hbId = null; }
+    if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
   }
 
@@ -144,6 +145,10 @@ export class PhHelmJoystick extends HTMLElement {
     well.addEventListener('pointermove', this.#onMove);
     well.addEventListener('pointerup', this.#onUp);
     well.addEventListener('pointercancel', this.#onUp);
+    // Safety net: if the browser silently revokes pointer capture (e.g. the
+    // finger slides off a scrolling container on mobile), treat it as a
+    // release so the stick zeroes instead of latching the last input.
+    well.addEventListener('lostpointercapture', this.#onUp);
   }
 
   #onDown = (e) => {
@@ -154,11 +159,27 @@ export class PhHelmJoystick extends HTMLElement {
     const well = this.shadowRoot.getElementById('well');
     if (well.setPointerCapture) well.setPointerCapture(e.pointerId);
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
-    if (!this.#hbId) {
-      this.#hbId = setInterval(() => this.#sendAction(), 100);
+    if (!this.#hbRaf) {
+      this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
     }
     this.#setFromPointer(e.clientX, e.clientY);
     e.preventDefault();
+  };
+
+  // Frame-driven heartbeat: samples the current stick position and sends it
+  // at a throttled rate while dragging. Replaces a bare setInterval, which
+  // drifts and bunches under main-thread load (rAF here is scheduling next
+  // to the paint step so the send cadence stays even). Mirrors the keyboard
+  // input loop's throttling approach.
+  #heartbeatLoop = () => {
+    this.#hbRaf = null;
+    if (this.#pointerId === null) return;
+    const now = performance.now();
+    if (now - this.#lastHbSend >= 100) {
+      this.#sendAction();
+      this.#lastHbSend = now;
+    }
+    this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
   };
 
   #onMove = (e) => {
@@ -171,10 +192,12 @@ export class PhHelmJoystick extends HTMLElement {
     this.#pointerId = null;
     const well = this.shadowRoot.getElementById('well');
     try { if (well.releasePointerCapture) well.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
-    if (this.#hbId) { clearInterval(this.#hbId); this.#hbId = null; }
+    if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
+    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
     this.#px = 0;
     this.#py = 0;
-    this.#scheduleApply();
+    this.#applyNubPosition();
+    this.#updateReadout();
     this.#sendAction();
   };
 

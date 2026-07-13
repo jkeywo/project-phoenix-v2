@@ -7,7 +7,7 @@ tags = [ "player", "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [mesh]
-model = "assets/models/alliance_cruiser.glb"
+model = "assets/models/alliance_destroyer.glb"
 shape = "sphere"
 colour = []
 
@@ -15,22 +15,6 @@ colour = []
 shape = "Capsule"
 radius = 1.2
 length = 3
-
-[[hull.system_hull]]
-system_id = "helm"
-display_name = "Helm"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "tactical"
-display_name = "Tactical"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "power-reactor"
@@ -67,6 +51,38 @@ debuff_magnitude = 0.20
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
 display_name = "Engine (Starboard)"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-radar"
+display_name = "Helm Radar"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-lateral-thrust"
+display_name = "Lateral Thrusters"
+max_hp = 10
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "tactical-radar"
+display_name = "Tactical Radar"
+max_hp = 15
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "sensor-radar"
+display_name = "Sensor Radar"
 max_hp = 15
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -112,14 +128,6 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
-[[hull.system_hull]]
-system_id = "torpedo-magazine"
-display_name = "Torpedo Magazine"
-max_hp = 15
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
@@ -144,10 +152,12 @@ beam_range = 30
 beam_damage_per_sec = 3
 beam_duration_secs = 4
 cooldown_secs = 4
+marker = "phasers_omni"
 
 # Forward blaster banks (issue #639): 45° forward blasters, port and starboard.
 [[weapons_console.blaster_banks]]
 id = "port"
+marker = "blaster_port"
 facing_deg = 0
 fire_arc_deg = 45
 volley_count = 3
@@ -162,6 +172,7 @@ range = 35
 
 [[weapons_console.blaster_banks]]
 id = "starboard"
+marker = "blaster_starboard"
 facing_deg = 0
 fire_arc_deg = 45
 volley_count = 3
@@ -225,6 +236,10 @@ color = [ 0.25, 0.75, 1, 0.72 ]
 markers = [ "engine_port", "engine_starboard" ]
 trail_lifetime_secs = 0.45
 trail_spawn_interval_secs = 0.05
+
+[helm_console.lateral_thrust]
+max_lateral_speed = 18
+lateral_acceleration = 12
 
 [helm_console.boost]
 multiplier = 3.0
@@ -328,6 +343,10 @@ console = "gui/destroyer/captain.html"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["red-alert"]
+
 [[station]]
 id = "helm"
 name = "Helm"
@@ -339,6 +358,10 @@ console = "gui/destroyer/helm.html"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["helm-lateral-thrust"]
 
 [[station]]
 id = "tactical"
@@ -352,6 +375,10 @@ console = "gui/destroyer/tactical.html"
 name = "Std"
 automated_systems = []
 
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["phaser-omni"]
+
 [[station]]
 id = "engineering"
 name = "Engineering"
@@ -363,6 +390,10 @@ console = "gui/destroyer/engineering.html"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["repair"]
 
 [[system]]
 id = "captain"
@@ -385,6 +416,12 @@ power_group = "ops"
 [[system]]
 id = "sensors"
 kind = "sensors"
+station = "captain"
+power_group = "sensors"
+
+[[system]]
+id = "sensor-radar"
+kind = "sensor_radar"
 station = "captain"
 power_group = "sensors"
 
@@ -419,8 +456,20 @@ station = "helm"
 power_group = "helm"
 
 [[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
+power_group = "weapons"
+
+[[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
 station = "helm"
 power_group = "helm"
 
@@ -503,3 +552,4 @@ default_pitch_deg = 12
 entity_look_range = 50
 look_ahead_distance = 80
 hysteresis_secs = 3
+yaw_follow_deg_per_sec = 45

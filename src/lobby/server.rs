@@ -387,8 +387,9 @@ pub fn process_lobby(
     // can claim vacated stations mid-game and press Ready to hand control back
     // from Backfill AI — `SetReady`'s InProgress branch in
     // `lobby_handler::process_message` is unreachable without this, since it's
-    // the only place that handles that message. All other message types are
-    // left for the in-game systems.
+    // the only place that handles that message. `ReturnToLobby` is allowed so
+    // the GameOver screen's button works even though GameOver isn't `accepts_all`.
+    // All other message types are left for the in-game systems.
     // (Bevy `MessageReader`s have independent cursors, so reading here never
     // hides messages from those systems.)
     //
@@ -435,6 +436,7 @@ pub fn process_lobby(
                 || matches!(ev.msg, ClientMessage::SelectStation { .. })
                 || matches!(ev.msg, ClientMessage::ReleaseStation)
                 || matches!(ev.msg, ClientMessage::SetReady { .. })
+                || matches!(ev.msg, ClientMessage::ReturnToLobby)
         })
         .cloned()
         .collect();
@@ -463,7 +465,10 @@ pub fn process_lobby(
                 countdown.as_deref_mut(),
             );
         } else {
-            let empty_ratings = std::collections::HashMap::new();
+            // No Ship entity yet (Lobby/Loading) — fall back to whatever
+            // ratings players have picked in the lobby so far, so (re)joining
+            // clients' Welcome reflects current toggle state.
+            let pending_ratings = sessions.0.pending_ratings().clone();
             let result = lobby_handler::process_message(
                 &ev.token,
                 &ev.msg,
@@ -473,7 +478,7 @@ pub fn process_lobby(
                 stations,
                 &ship_client_config.0,
                 preload_complete,
-                &empty_ratings,
+                &pending_ratings,
             );
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(

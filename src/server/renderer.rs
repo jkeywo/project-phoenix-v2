@@ -103,8 +103,12 @@ impl Plugin for RendererPlugin {
                     update_view_screen_text,
                     update_view_direction_label,
                     toggle_ship_model_visibility,
-                    hull_camera.run_if(in_state(GamePhase::InProgress)),
-                    cinematic_camera.run_if(in_state(GamePhase::InProgress)),
+                    hull_camera
+                        .run_if(in_state(GamePhase::InProgress))
+                        .after(crate::sim_sets::SimSet::Physics),
+                    cinematic_camera
+                        .run_if(in_state(GamePhase::InProgress))
+                        .after(crate::sim_sets::SimSet::Physics),
                     sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
                 ),
             )
@@ -469,6 +473,11 @@ fn hull_camera(
         .map(|vm| vm.view_mode.clone())
         .unwrap_or(ViewMode::Camera(CameraView::default()));
 
+    // Cinematic mode has its own dedicated camera system; don't overwrite it.
+    if view_mode == ViewMode::Cinematic {
+        return;
+    }
+
     // For non-camera overlay modes (Radar, Comms, etc.) keep the last camera
     // view so the viewscreen doesn't jump when the overlay is dismissed.
     let marker_name = match &view_mode {
@@ -478,21 +487,30 @@ fn hull_camera(
 
     const LOOK_DIST: f32 = 100.0;
 
-    // Rotate marker offset/direction from model-local to world space.
-    let yaw_rot = Quat::from_rotation_y(physics.yaw);
+    // Physics heading uses positive-yaw = CW from above, but
+    // Quat::from_rotation_y uses CCW (right-hand rule). Negate to match.
+    let yaw_rot = Quat::from_rotation_y(-physics.yaw);
     let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
+
+    // All current models apply Ry(π) as their base rotation (see
+    // base rotation in each model's .toml). Camera markers are authored
+    // in the raw-GLB frame (+Z = forward); the base rotation brings them
+    // into the game frame (-Z = forward).
+    let base_rot = Quat::from_rotation_y(std::f32::consts::PI);
 
     let (pos_offset, dir_offset) = markers_q
         .single()
         .ok()
         .and_then(|mm| mm.get(marker_name))
-        .map(|m| (Vec3::from_array(m.position), Vec3::from_array(m.direction)))
-        .unwrap_or_else(|| {
-            // Fallback: ship centre looking forward.
+        .map(|m| {
             (
-                Vec3::ZERO,
-                Vec3::new(physics.yaw.sin(), 0.0, -physics.yaw.cos()),
+                base_rot * Vec3::from_array(m.position),
+                base_rot * Vec3::from_array(m.direction),
             )
+        })
+        .unwrap_or_else(|| {
+            // Fallback: ship centre, game-forward direction.
+            (Vec3::ZERO, Vec3::NEG_Z)
         });
 
     let camera_pos = ship_origin + yaw_rot * pos_offset;
@@ -511,7 +529,7 @@ fn cinematic_camera(
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     cinematic_q: Query<&CinematicCameraSection, With<crate::simulation::LocalShip>>,
     local_q: Query<&EntityUuid, With<crate::simulation::LocalShip>>,
-    all_entities: Query<(&EntityUuid, &Transform, Option<&FactionComponent>)>,
+    all_entities: Query<(&EntityUuid, &Transform, Option<&FactionComponent>), Without<GameCamera>>,
     faction_registry: Option<Res<FactionRegistryResource>>,
     time: Res<Time>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
@@ -538,7 +556,18 @@ fn cinematic_camera(
     }
 
     let ship_origin = Vec3::new(physics.x, 0.0, physics.z);
-    let yaw_rot = Quat::from_rotation_y(physics.yaw);
+
+    // Lag the camera's yaw toward the ship's actual heading instead of
+    // locking to it exactly — a rigid lock keeps the ship at an identical
+    // angle in frame at all times, which reads as "the ship never turns".
+    let current_yaw = state.camera_yaw.unwrap_or(physics.yaw);
+    let target_delta = (physics.yaw - current_yaw + std::f32::consts::PI)
+        .rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
+    let max_step = cfg.yaw_follow_deg_per_sec.to_radians() * time.delta_secs();
+    let smoothed_yaw = current_yaw + target_delta.clamp(-max_step, max_step);
+    state.camera_yaw = Some(smoothed_yaw);
+    let yaw_rot = Quat::from_rotation_y(-smoothed_yaw);
 
     // Camera position: fixed offset from ship centre (above and behind).
     let offset = Vec3::from_array(cfg.position);
@@ -611,7 +640,7 @@ fn cinematic_camera(
             if dir_to_mid.length_squared() > 1e-6 {
                 // Yaw the camera around the ship centre.
                 let target_yaw = f32::atan2(dir_to_mid.x, -dir_to_mid.z);
-                let yawed_offset = Quat::from_rotation_y(target_yaw) * offset;
+                let yawed_offset = Quat::from_rotation_y(-target_yaw) * offset;
                 let yawed_pos = ship_origin + yawed_offset;
 
                 // Pitch from camera position toward midpoint.
@@ -738,7 +767,7 @@ fn sync_comms_overlay(
 
     // Always despawn any existing overlay first.
     for entity in overlay_q.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
 
     let Some(ref msg) = on_screen.0 else { return };
@@ -870,7 +899,7 @@ fn tick_ripples(
     for (entity, mut ripple) in query.iter_mut() {
         ripple.elapsed += dt;
         if ripple.elapsed >= RIPPLE_DURATION {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             continue;
         }
 
@@ -941,6 +970,10 @@ impl Default for NebulaFogState {
 pub struct CinematicCameraState {
     pub current_target: Option<uuid::Uuid>,
     pub last_re_eval: f64,
+    /// Smoothed camera yaw, lagging behind `ShipPhysics.yaw` so the ship's
+    /// turning is visible on screen instead of being masked by a camera that
+    /// rotates in perfect lockstep with the hull. `None` until the first tick.
+    pub camera_yaw: Option<f32>,
 }
 
 /// How fast the fog intensity approaches its target (per second).
@@ -1052,7 +1085,7 @@ fn spawn_nebula_cloud_particles(
     for region in dead {
         if let Some(particles) = state.entities.remove(&region) {
             for p in particles {
-                commands.entity(p).despawn();
+                commands.entity(p).try_despawn();
             }
         }
     }

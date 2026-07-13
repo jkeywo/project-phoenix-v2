@@ -60,11 +60,18 @@ describe('PhSensorRadar', () => {
     expect(customElements.get('ph-sensor-radar')).toBeDefined();
   });
 
-  it('creates a shadow root with inner ph-radar and DESIGNATE button', () => {
+  it('creates a shadow root with inner ph-radar and on-screen button', () => {
     const { el } = setup();
     expect(el.shadowRoot).toBeDefined();
     expect(el.shadowRoot.getElementById('inner-radar')).toBeDefined();
-    expect(el.shadowRoot.getElementById('designate-btn')).toBeDefined();
+    expect(el.shadowRoot.getElementById('on-screen-btn')).toBeDefined();
+  });
+
+  it('on-screen button click calls sendAction with SensorsRadar view request', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.shadowRoot.getElementById('on-screen-btn').click();
+    expect(sendAction).toHaveBeenCalledWith('set_view', { direction: 'SensorsRadar' });
   });
 
   it('passes base state through to inner ph-radar', () => {
@@ -80,63 +87,40 @@ describe('PhSensorRadar', () => {
       range: 1000,
       ship_heading: 90,
       config: { max_range: 5000 },
+      selected_target_uuid: null,
+      target_uuid: null,
     });
   });
 
-  it('DESIGNATE button is disabled when no target is selected', () => {
-    const { el } = setup();
-    el.state = { blips: [{ uuid: 'abc' }], science_target_uuid: null };
-    const btn = el.shadowRoot.getElementById('designate-btn');
-    expect(btn.disabled).toBe(true);
-  });
-
-  it('DESIGNATE button is enabled when target selected and differs from science target', () => {
-    const { el } = setup();
+  it('passes science_target_uuid as selected_target_uuid and target_uuid to inner radar', () => {
+    const { el, innerRadar } = setup();
     el.state = {
-      blips: [{ uuid: 'abc' }],
-      selected_target_uuid: 'abc',
-      science_target_uuid: 'def',
+      blips: [{ uuid: 'abc', bearing_deg: 45, range: 300 }],
+      scan_range: 2000,
+      target_uuid: 'abc',
     };
-    const btn = el.shadowRoot.getElementById('designate-btn');
-    expect(btn.disabled).toBe(false);
+    expect(innerRadar.state.selected_target_uuid).toBe('abc');
+    expect(innerRadar.state.target_uuid).toBe('abc');
   });
 
-  it('DESIGNATE button is disabled when selected target is already the science target', () => {
-    const { el } = setup();
-    el.state = {
-      blips: [{ uuid: 'abc' }],
-      selected_target_uuid: 'abc',
-      science_target_uuid: 'abc',
-    };
-    const btn = el.shadowRoot.getElementById('designate-btn');
-    expect(btn.disabled).toBe(true);
-  });
-
-  it('clicking DESIGNATE dispatches sendAction with set_sensors_target', () => {
-    const sendAction = vi.fn();
-    const { el } = setup({ sendAction });
-    el.state = {
-      selected_target_uuid: 'abc-123',
-      science_target_uuid: null,
-    };
-    const btn = el.shadowRoot.getElementById('designate-btn');
-    btn.click();
-    expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('set_sensors_target', { uuid: 'abc-123' });
-  });
-
-  it('blip click on inner radar updates selected_target_uuid and enables button', () => {
+  it('blip click on inner radar dispatches set_sensors_target directly', () => {
     const sendAction = vi.fn();
     const { el, innerRadar } = setup({ sendAction });
     el.state = {
       blips: [{ uuid: 'abc' }],
       science_target_uuid: 'def',
     };
-    const btn = el.shadowRoot.getElementById('designate-btn');
-    expect(btn.disabled).toBe(true);
 
     innerRadar.sendAction('set_target', { uuid: 'abc' });
-    expect(btn.disabled).toBe(false);
-    expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledWith('set_sensors_target', { uuid: 'abc' });
+  });
+
+  it('does not forward set_target upstream', () => {
+    const sendAction = vi.fn();
+    const { el, innerRadar } = setup({ sendAction });
+
+    innerRadar.sendAction('set_target', { uuid: 'abc' });
+    expect(sendAction).not.toHaveBeenCalledWith('set_target', expect.anything());
   });
 });

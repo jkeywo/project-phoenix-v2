@@ -17,6 +17,26 @@ function queryText(host, sel) {
   return el ? el.textContent.trim() : null;
 }
 
+function tubeRow(host, tubeId) {
+  return host.shadowRoot.querySelector(`.tube-row[data-id="${tubeId}"]`);
+}
+
+function slots(host, tubeId) {
+  return Array.from(tubeRow(host, tubeId).querySelectorAll('.torp-slot'));
+}
+
+function minusBtn(host, tubeId) {
+  return tubeRow(host, tubeId).querySelectorAll('.mini-btn')[0];
+}
+
+function plusBtn(host, tubeId) {
+  return tubeRow(host, tubeId).querySelectorAll('.mini-btn')[1];
+}
+
+function fireBtn(host, tubeId) {
+  return tubeRow(host, tubeId).querySelector('.btn');
+}
+
 describe('PhTorpedoControls', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -51,171 +71,153 @@ describe('PhTorpedoControls', () => {
 
   it('displays magazine count', () => {
     const { el } = setup();
-    el.state = {
-      tubes: [],
-      magazine: { current: 6, max: 20 },
-    };
+    el.state = { tubes: [], magazine: { current: 6, max: 20 } };
     expect(queryText(el, '#magazine')).toBe('6 / 20');
   });
 
-  it('renders a loaded tube with label and enabled fire button', () => {
+  it('renders a tube with its label and one slot per volley_max', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', label: 'Fore Port', volley_max: 4, loaded_count: 0, target_count: 0 }],
       magazine: { current: 6, max: 20 },
     };
-    expect(queryText(el, '.lbl')).toBe('Fore Port');
-    const fireBtn = el.shadowRoot.querySelector('.fire');
-    expect(fireBtn.disabled).toBe(false);
-    expect(fireBtn.textContent.trim()).toBe('FIRE');
+    expect(queryText(el, '.lbl')).toBe('FORE PORT');
+    expect(slots(el, 'fore_port').length).toBe(4);
   });
 
-  it('disables fire button when tube is not loaded', () => {
+  it('marks loaded slots filled and leaves the rest empty', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 4, loaded_count: 2, target_count: 2, state: 'unloaded' }],
       magazine: { current: 6, max: 20 },
     };
-    const fireBtn = el.shadowRoot.querySelector('.fire');
-    expect(fireBtn.disabled).toBe(true);
+    const s = slots(el, 'fore_port');
+    expect(s[0].dataset.state).toBe('filled');
+    expect(s[1].dataset.state).toBe('filled');
+    expect(s[2].dataset.state).toBe('empty');
+    expect(s[3].dataset.state).toBe('empty');
   });
 
-  it('disables load button when tube is already loaded', () => {
+  it('shows the loading slot filling green toward the target', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 2, loaded_count: 0, target_count: 1, state: 'loading', load_progress: 0.4 }],
       magazine: { current: 6, max: 20 },
     };
-    const loadBtn = el.shadowRoot.querySelector('.load');
-    expect(loadBtn.disabled).toBe(true);
+    const s = slots(el, 'fore_port');
+    expect(s[0].dataset.state).toBe('loading');
+    expect(s[0].querySelector('.fill').style.height).toBe('40%');
   });
 
-  it('disables load button when magazine is empty', () => {
+  it('shows the unloading slot draining back to grey', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
-      magazine: { current: 0, max: 20 },
-    };
-    const loadBtn = el.shadowRoot.querySelector('.load');
-    expect(loadBtn.disabled).toBe(true);
-  });
-
-  it('enables load button when tube is unloaded and magazine has ammo', () => {
-    const { el } = setup();
-    el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 2, loaded_count: 1, target_count: 0, state: 'unloading', load_progress: 0.25 }],
       magazine: { current: 6, max: 20 },
     };
-    const loadBtn = el.shadowRoot.querySelector('.load');
-    expect(loadBtn.disabled).toBe(false);
+    const s = slots(el, 'fore_port');
+    expect(s[0].dataset.state).toBe('unloading');
+    // fill = 1 - load_progress: drains from full toward empty as unload completes.
+    expect(s[0].querySelector('.fill').style.height).toBe('75%');
   });
 
-  it('disables unload button when tube is not loaded', () => {
+  it('enables the fire button once at least one round is loaded', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 2, loaded_count: 1, target_count: 1 }],
       magazine: { current: 6, max: 20 },
     };
-    const unloadBtn = el.shadowRoot.querySelector('.unload');
-    expect(unloadBtn.disabled).toBe(true);
+    expect(fireBtn(el, 'fore_port').disabled).toBe(false);
   });
 
-  it('enables unload button when tube is loaded', () => {
+  it('disables the fire button when nothing is loaded', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 2, loaded_count: 0, target_count: 0 }],
       magazine: { current: 6, max: 20 },
     };
-    const unloadBtn = el.shadowRoot.querySelector('.unload');
-    expect(unloadBtn.disabled).toBe(false);
+    expect(fireBtn(el, 'fore_port').disabled).toBe(true);
   });
 
-  it('shows load progress bar when tube state is loading', () => {
+  it('disables minus at target_count 0 and plus at volley_max', () => {
     const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', state: 'loading', is_loaded: false, load_progress_pct: 0.4, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 2, loaded_count: 0, target_count: 0 }],
       magazine: { current: 6, max: 20 },
     };
-    const wrap = el.shadowRoot.querySelector('.load-progress-wrap');
-    const fill = el.shadowRoot.querySelector('.load-progress-fill');
-    expect(wrap.style.display).not.toBe('none');
-    expect(fill.style.width).toBe('40%');
-  });
+    expect(minusBtn(el, 'fore_port').disabled).toBe(true);
+    expect(plusBtn(el, 'fore_port').disabled).toBe(false);
 
-  it('hides load progress bar when tube is idle', () => {
-    const { el } = setup();
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 2, loaded_count: 2, target_count: 2 }],
       magazine: { current: 6, max: 20 },
     };
-    const wrap = el.shadowRoot.querySelector('.load-progress-wrap');
-    expect(wrap.style.display).toBe('none');
+    expect(minusBtn(el, 'fore_port').disabled).toBe(false);
+    expect(plusBtn(el, 'fore_port').disabled).toBe(true);
   });
 
-  it('shows AUTO badge and disables all buttons when auto is true', () => {
-    const { el } = setup();
-    el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: true }],
-      magazine: { current: 6, max: 20 },
-    };
-    const badge = el.shadowRoot.querySelector('.auto-badge');
-    expect(badge.style.display).not.toBe('none');
-
-    const buttons = el.shadowRoot.querySelectorAll('.tube-btn');
-    buttons.forEach(btn => {
-      expect(btn.disabled).toBe(true);
-    });
-  });
-
-  it('dispatches load_tube on load button click', () => {
+  it('dispatches set_torpedo_volley_target with count+1 on plus click', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: false, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 4, loaded_count: 1, target_count: 1 }],
       magazine: { current: 6, max: 20 },
     };
-    const loadBtn = el.shadowRoot.querySelector('.load');
-    loadBtn.click();
-    expect(sendAction).toHaveBeenCalledWith('load_tube', { tube: 'fore_port' });
+    plusBtn(el, 'fore_port').click();
+    expect(sendAction).toHaveBeenCalledWith('set_torpedo_volley_target', { tube: 'fore_port', count: 2 });
   });
 
-  it('dispatches unload_tube on unload button click', () => {
+  it('dispatches set_torpedo_volley_target with count-1 on minus click', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 4, loaded_count: 2, target_count: 2 }],
       magazine: { current: 6, max: 20 },
     };
-    const unloadBtn = el.shadowRoot.querySelector('.unload');
-    unloadBtn.click();
-    expect(sendAction).toHaveBeenCalledWith('unload_tube', { tube: 'fore_port' });
+    minusBtn(el, 'fore_port').click();
+    expect(sendAction).toHaveBeenCalledWith('set_torpedo_volley_target', { tube: 'fore_port', count: 1 });
   });
 
-  it('dispatches fire_torpedo on fire button click', () => {
+  it('dispatches fire_torpedo with the current target_uuid on fire click', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 2, loaded_count: 1, target_count: 1 }],
+      magazine: { current: 6, max: 20 },
+      target_uuid: 'enemy-1',
+    };
+    fireBtn(el, 'fore_port').click();
+    expect(sendAction).toHaveBeenCalledWith('fire_torpedo', { tube: 'fore_port', target_uuid: 'enemy-1' });
+  });
+
+  it('rebuilds slots when volley_max changes', () => {
+    const { el } = setup();
+    el.state = {
+      tubes: [{ id: 'fore_port', volley_max: 2, loaded_count: 0, target_count: 0 }],
       magazine: { current: 6, max: 20 },
     };
-    const fireBtn = el.shadowRoot.querySelector('.fire');
-    fireBtn.click();
-    expect(sendAction).toHaveBeenCalledWith('fire_torpedo', { tube: 'fore_port' });
+    expect(slots(el, 'fore_port').length).toBe(2);
+
+    el.state = {
+      tubes: [{ id: 'fore_port', volley_max: 4, loaded_count: 0, target_count: 0 }],
+      magazine: { current: 6, max: 20 },
+    };
+    expect(slots(el, 'fore_port').length).toBe(4);
   });
 
   it('reconciles tube rows by id', () => {
     const { el } = setup();
     el.state = {
       tubes: [
-        { id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false },
-        { id: 'fore_starboard', label: 'Fore Starboard', is_loaded: false, load_progress_pct: 0, auto: false },
+        { id: 'fore_port', volley_max: 1, loaded_count: 1, target_count: 1 },
+        { id: 'fore_starboard', volley_max: 1, loaded_count: 0, target_count: 0 },
       ],
       magazine: { current: 6, max: 20 },
     };
     expect(el.shadowRoot.querySelectorAll('.tube-row').length).toBe(2);
 
     el.state = {
-      tubes: [{ id: 'fore_port', label: 'Fore Port', is_loaded: true, load_progress_pct: 0, auto: false }],
+      tubes: [{ id: 'fore_port', volley_max: 1, loaded_count: 1, target_count: 1 }],
       magazine: { current: 6, max: 20 },
     };
     expect(el.shadowRoot.querySelectorAll('.tube-row').length).toBe(1);

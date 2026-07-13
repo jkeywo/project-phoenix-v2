@@ -197,6 +197,66 @@ thread_local! {
     /// to `"assets/entities/alliance_cruiser.toml"`.
     static SELECTED_SHIP_TEMPLATE_PATH: RefCell<Option<String>> =
         const { RefCell::new(None) };
+
+    /// God mode: local ship takes no damage.
+    static GOD_MODE: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Instagib: local ship deals 100× damage.
+    static INSTAGIB: RefCell<bool> = const { RefCell::new(false) };
+}
+
+// ── God mode / Instagib helpers ────────────────────────────────────────────
+
+pub fn is_god_mode() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        GOD_MODE.with(|v| *v.borrow())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
+pub fn is_instagib() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        INSTAGIB.with(|v| *v.borrow())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_god_mode() {
+    GOD_MODE.with(|v| {
+        let current = *v.borrow();
+        *v.borrow_mut() = !current;
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_god_mode() -> bool {
+    GOD_MODE.with(|v| *v.borrow())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_instagib() {
+    INSTAGIB.with(|v| {
+        let current = *v.borrow();
+        *v.borrow_mut() = !current;
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_instagib() -> bool {
+    INSTAGIB.with(|v| *v.borrow())
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────

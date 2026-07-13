@@ -350,6 +350,14 @@ mod tests {
                     payload: CoordinationPayload::FrequencyHint { frequency: 0.33 },
                 },
             ),
+            (
+                ClientMessageDiscriminants::ReturnToLobby,
+                ClientMessage::ReturnToLobby,
+            ),
+            (
+                ClientMessageDiscriminants::ConfirmScenario,
+                ClientMessage::ConfirmScenario,
+            ),
         ]
     }
 
@@ -709,6 +717,14 @@ mod tests {
                 },
             ),
             (
+                ServerMessageDiscriminants::ReturnedToLobby,
+                ServerMessage::ReturnedToLobby,
+            ),
+            (
+                ServerMessageDiscriminants::ScenarioLoaded,
+                ServerMessage::ScenarioLoaded,
+            ),
+            (
                 ServerMessageDiscriminants::RatingChanged,
                 ServerMessage::RatingChanged {
                     station_id: StationId("captain".into()),
@@ -760,6 +776,8 @@ mod tests {
                             boost_battery: 0.5,
                             boost_active: true,
                             boost_enabled: true,
+                            radar_range: 0.0,
+                            lateral_speed: 0.0,
                         }),
                     )],
                 },
@@ -1665,6 +1683,8 @@ mod tests {
             boost_battery: 0.8,
             boost_active: false,
             boost_enabled: true,
+            radar_range: 0.0,
+            lateral_speed: 0.0,
         });
         let json = serde_json::to_string(&bb).unwrap();
         assert!(json.contains("\"kind\":\"Helm\""), "got: {json}");

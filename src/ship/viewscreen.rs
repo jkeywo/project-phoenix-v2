@@ -22,6 +22,7 @@ struct ActiveView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViewscreenArbiter {
     captain_view: CameraView,
+    cinematic: bool,
     active: Option<ActiveView>,
     sequence: u64,
 }
@@ -36,6 +37,7 @@ impl ViewscreenArbiter {
     pub fn new() -> Self {
         Self {
             captain_view: CameraView::default(),
+            cinematic: false,
             active: None,
             sequence: 0,
         }
@@ -47,6 +49,11 @@ impl ViewscreenArbiter {
                 owner: active.requester.clone(),
                 mode: active.mode.clone(),
             }
+        } else if self.cinematic {
+            ViewscreenResolution {
+                owner: crate::system_registry::captain_system_id(),
+                mode: ViewMode::Cinematic,
+            }
         } else {
             self.captain_resolution()
         }
@@ -56,10 +63,12 @@ impl ViewscreenArbiter {
         self.sequence += 1;
         match request.mode {
             ViewMode::Camera(view) => {
+                self.cinematic = false;
                 self.captain_view = view;
                 self.active = None;
             }
             ViewMode::Cinematic => {
+                self.cinematic = true;
                 self.active = None;
             }
             mode => {
@@ -93,10 +102,12 @@ impl ViewscreenArbiter {
         self.sequence += 1;
         match request.mode {
             ViewMode::Camera(view) => {
+                self.cinematic = false;
                 self.captain_view = view;
                 self.active = None;
             }
             ViewMode::Cinematic => {
+                self.cinematic = true;
                 self.active = None;
             }
             mode => {
@@ -111,6 +122,7 @@ impl ViewscreenArbiter {
     }
 
     pub fn restore_captain_view(&mut self) -> ViewscreenResolution {
+        self.cinematic = false;
         self.active = None;
         self.captain_resolution()
     }
@@ -226,6 +238,63 @@ mod tests {
 
         assert_eq!(resolved.owner, crate::system_registry::comms_system_id());
         assert_eq!(resolved.mode, ViewMode::Comms);
+    }
+
+    #[test]
+    fn cinematic_mode_resolved_and_survives_overlay() {
+        let mut arbiter = ViewscreenArbiter::new();
+
+        // Activate cinematic.
+        let resolved = arbiter.request_channel_2(ViewscreenRequest {
+            requester: crate::system_registry::captain_system_id(),
+            mode: ViewMode::Cinematic,
+        });
+        assert_eq!(resolved.mode, ViewMode::Cinematic);
+
+        // Overlay on top of cinematic.
+        let overlay = arbiter.request_channel_2(ViewscreenRequest {
+            requester: crate::system_registry::helm_system_id(),
+            mode: ViewMode::Radar,
+        });
+        assert_eq!(overlay.mode, ViewMode::Radar);
+
+        // Dismiss overlay → back to Cinematic.
+        let dismiss = arbiter.request_channel_2(ViewscreenRequest {
+            requester: crate::system_registry::helm_system_id(),
+            mode: ViewMode::Radar,
+        });
+        assert_eq!(dismiss.mode, ViewMode::Cinematic);
+    }
+
+    #[test]
+    fn camera_view_clears_cinematic() {
+        let mut arbiter = ViewscreenArbiter::new();
+
+        arbiter.request_channel_2(ViewscreenRequest {
+            requester: crate::system_registry::captain_system_id(),
+            mode: ViewMode::Cinematic,
+        });
+        assert_eq!(arbiter.resolved().mode, ViewMode::Cinematic);
+
+        // Switch to a camera view → cinematic cleared.
+        let cam = arbiter.request_channel_2(ViewscreenRequest {
+            requester: crate::system_registry::captain_system_id(),
+            mode: ViewMode::Camera(CameraView::new("camera_fore")),
+        });
+        assert_eq!(cam.mode, ViewMode::Camera(CameraView::new("camera_fore")));
+    }
+
+    #[test]
+    fn restore_captain_view_clears_cinematic() {
+        let mut arbiter = ViewscreenArbiter::new();
+
+        arbiter.request_channel_2(ViewscreenRequest {
+            requester: crate::system_registry::captain_system_id(),
+            mode: ViewMode::Cinematic,
+        });
+
+        let restored = arbiter.restore_captain_view();
+        assert_eq!(restored.mode, ViewMode::Camera(CameraView::default()));
     }
 
     #[test]

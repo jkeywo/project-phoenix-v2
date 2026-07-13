@@ -102,13 +102,29 @@
 
 
   <style>
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000 url('assets/logo.png') center center / contain no-repeat; overflow: hidden; }
-    #canvas { display: block; width: 100vw; height: 100vh; background: #000; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    body { font-family: monospace; }
+    #server-shell {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      overflow: hidden;
+    }
+    #viewscreen-shell {
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 0;
+      height: 100%;
+      background: #000 url('assets/logo.png') center center / contain no-repeat;
+      overflow: hidden;
+    }
+    #canvas { display: block; width: 100%; height: 100%; background: #000; }
     #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; display: none; }
-    #qr-toggle-btn { position: fixed; bottom: 0; left: 0; width: 80px; height: 80px; z-index: 200; opacity: 0.01; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    #qr-toggle-btn { position: absolute; bottom: 0; left: 0; width: 80px; height: 80px; z-index: 200; opacity: 0.01; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     #qr { display: none; }
     #top-bar {
-      position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
+      position: absolute; top: 0.75rem; right: 0.75rem; z-index: 20;
       display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; font-family: monospace;
     }
     #top-bar-row { display: flex; align-items: center; gap: 0.5rem; }
@@ -119,7 +135,7 @@
       cursor: pointer; padding: 0; line-height: 1;
     }
     #wasm-spinner {
-      position: fixed; inset: 0; z-index: 100;
+      position: absolute; inset: 0; z-index: 100;
       background: #000 url('assets/logo.png') center 40% / min(55vw, 55vh) auto no-repeat;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
@@ -640,6 +656,136 @@
       margin-top: 2px; letter-spacing: 0.06em;
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
+
+    /* ── Debug panel ─────────────────────────────────────────── */
+    #debug-toggle-btn {
+      width: 100%;
+      height: 42px;
+      z-index: 2;
+      opacity: 1;
+      cursor: pointer;
+      background: #0f141b;
+      border: 0;
+      border-bottom: 1px solid #223246;
+      color: #8ca4c2;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.2s, color 0.2s;
+    }
+    #debug-toggle-btn:hover { background: #162131; color: #c9d8ea; }
+    #debug-dock {
+      display: flex;
+      flex-direction: column;
+      flex: 0 0 52px;
+      width: 52px;
+      height: 100%;
+      min-width: 52px;
+      background: #05080d;
+      border-left: 1px solid #1e2a39;
+      overflow: hidden;
+      transition: flex-basis 0.2s ease, width 0.2s ease;
+    }
+    #debug-dock.open {
+      flex-basis: min(28vw, 420px);
+      width: min(28vw, 420px);
+    }
+    #debug-panel {
+      position: relative;
+      width: 100%;
+      height: calc(100% - 42px);
+      z-index: 1;
+      background: rgba(0,0,0,0.88);
+      border-left: 0;
+      display: none;
+      flex-direction: column;
+      font-family: monospace;
+      color: #0f0;
+      font-size: 11px;
+      touch-action: pan-y;
+    }
+    #debug-panel.open { display: flex; }
+    #debug-toolbar {
+      display: flex; flex-direction: row;
+      border-bottom: 1px solid #334;
+      flex-shrink: 0;
+    }
+    /* Action buttons (left column) */
+    #debug-actions {
+      display: flex; flex-direction: column;
+      gap: 1px; padding: 3px;
+      background: #111;
+      border-right: 1px solid #334;
+      flex-shrink: 0;
+    }
+    .debug-action {
+      width: 28px; height: 28px;
+      padding: 0; margin: 0;
+      background: #1a1a1a; border: 1px solid #333;
+      color: #666; cursor: pointer;
+      font-family: monospace; font-size: 14px;
+      line-height: 28px; text-align: center;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .debug-action:hover { background: #223; border-color: #558; }
+    .debug-action.active { background: #224; border-color: #66c; color: #ccf; }
+    /* Tab bar (right of actions) */
+    #debug-tabs {
+      display: flex; flex-direction: row;
+      gap: 2px; padding: 3px; flex: 1;
+      background: #111;
+    }
+    .debug-tab {
+      flex: 1; padding: 5px 2px;
+      background: #1a1a1a; border: 1px solid #333;
+      color: #666; cursor: pointer;
+      font-family: monospace; font-size: 10px;
+      text-align: center;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .debug-tab:hover { background: #223; border-color: #558; }
+    .debug-tab.active { background: #224; border-color: #66c; color: #ccf; }
+    #debug-content {
+      flex: 1; overflow-y: auto;
+      padding: 6px 10px;
+      white-space: pre;
+      font-size: 10px;
+      line-height: 1.35;
+      color: #0f0;
+    }
+    /* Portrait: keep the panel inline by docking it below the viewscreen. */
+    @media (orientation: portrait) {
+      #server-shell {
+        flex-direction: column;
+      }
+      #viewscreen-shell {
+        min-height: 0;
+      }
+      #debug-dock {
+        width: 100%;
+        min-width: 0;
+        height: 42px;
+        border-left: none;
+        border-top: 1px solid #1e2a39;
+      }
+      #debug-dock.open {
+        width: 100%;
+        flex-basis: 28vh;
+        height: 28vh;
+      }
+      #debug-panel {
+        width: 100%;
+        height: calc(100% - 42px);
+        border-bottom: 0;
+      }
+      #debug-actions { flex-direction: row; }
+      .debug-action { width: 32px; height: 24px; line-height: 24px; }
+    }
   </style>
 </head>
 <body>
@@ -761,96 +907,112 @@
     </div>
   </div>
 
-  <!-- Loading spinner shown until WASM is ready -->
-  <div id="wasm-spinner">
-    <div class="spinner-ring"></div>
-    <span>Loading…</span>
-  </div>
+  <div id="server-shell">
+    <div id="viewscreen-shell">
+      <!-- Loading spinner shown until WASM is ready -->
+      <div id="wasm-spinner">
+        <div class="spinner-ring"></div>
+        <span>Loading…</span>
+      </div>
 
-  <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
-  <div id="asset-loading" style="display:none;position:fixed;inset:0;z-index:90;background:#000 url('assets/logo.png') center 40% / min(55vw,55vh) auto no-repeat;flex-direction:column;align-items:center;justify-content:center;color:#aae;font-family:monospace;font-size:0.9rem;gap:1rem;padding-bottom:15vh;">
-    <div class="spinner-ring"></div>
-    <span>Preparing scenario&hellip; <span id="asset-loading-pct">0</span>%</span>
-  </div>
+      <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
+      <div id="asset-loading" style="display:none;position:absolute;inset:0;z-index:90;background:#000 url('assets/logo.png') center 40% / min(55vw,55vh) auto no-repeat;flex-direction:column;align-items:center;justify-content:center;color:#aae;font-family:monospace;font-size:0.9rem;gap:1rem;padding-bottom:15vh;">
+        <div class="spinner-ring"></div>
+        <span>Preparing scenario&hellip; <span id="asset-loading-pct">0</span>%</span>
+      </div>
 
-  <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
-  <canvas id="canvas"></canvas>
+      <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
+      <canvas id="canvas"></canvas>
 
-  <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
-  <div id="game-over-overlay" style="display:none;position:fixed;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
-    <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
-  </div>
+      <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
+      <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
+        <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
+        <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;">Return to Lobby</button>
+      </div>
 
-  <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
-       z-index; pointer-events:none so it never intercepts canvas input.
-       Driven by window.__updateHud(stateJson).
-       Also hosts the viewscreen border frame (corners/edges/caps/status-strip)
-       from raw/gui/borders/demo.html — assets served from gui/borders/. -->
-  <div id="hud-overlay">
-    <div id="hud-vignette"></div>
+      <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
+           z-index; pointer-events:none so it never intercepts canvas input.
+           Driven by window.__updateHud(stateJson).
+           Also hosts the viewscreen border frame (corners/edges/caps/status-strip)
+           from raw/gui/borders/demo.html — assets served from gui/borders/. -->
+      <div id="hud-overlay">
+        <div id="hud-vignette"></div>
 
-    <!-- Hidden backward-compat elements (smoke-test targets: #hud-heading etc.) -->
-    <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
-      <span id="hud-heading">000</span>
-      <span id="hud-hull">100</span>
-      <span id="hud-condition">NOMINAL</span>
+        <!-- Hidden backward-compat elements (smoke-test targets: #hud-heading etc.) -->
+        <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
+          <span id="hud-heading">000</span>
+          <span id="hud-hull">100</span>
+          <span id="hud-condition">NOMINAL</span>
+        </div>
+
+        <!-- Viewscreen border frame (tiled edges) -->
+        <div class="vs-edge top"></div>
+        <div class="vs-edge bottom"></div>
+        <div class="vs-edge left"></div>
+        <div class="vs-edge right"></div>
+        <!-- Corners -->
+        <div class="vs-piece vs-corner tl"></div>
+        <div class="vs-piece vs-corner tr"></div>
+        <div class="vs-piece vs-corner bl"></div>
+        <div class="vs-piece vs-corner br"></div>
+        <!-- Caps (centred top/bottom) -->
+        <div class="vs-piece vs-cap top"></div>
+        <div class="vs-piece vs-cap bottom"></div>
+        <!-- Ship designation (top-centre, above cap) -->
+        <div class="vs-designation" id="hud-designation">PHOENIX</div>
+        <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
+        <div class="vs-status-strip">
+          <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
+        </div>
+      </div>
+
+      <!-- QR code shown over the canvas during lobby phase (or toggled mid-game) -->
+      <div id="overlay">
+        <a id="qr-link" target="_blank" style="cursor:pointer">
+          <canvas id="qr"></canvas>
+        </a>
+        <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
+          Preparing scenario&hellip; <span id="loading-progress-pct">0</span>%
+        </div>
+      </div>
+
+      <!-- Invisible click-target in bottom-left corner to toggle QR mid-game -->
+      <button id="qr-toggle-btn" title="Toggle QR code"></button>
+
+      <div id="top-bar">
+        <div id="top-bar-row">
+          <span id="conn-label"></span>
+          <span id="conn-dot"></span>
+          <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+        </div>
+      </div>
     </div>
 
-    <!-- Viewscreen border frame (tiled edges) -->
-    <div class="vs-edge top"></div>
-    <div class="vs-edge bottom"></div>
-    <div class="vs-edge left"></div>
-    <div class="vs-edge right"></div>
-    <!-- Corners -->
-    <div class="vs-piece vs-corner tl"></div>
-    <div class="vs-piece vs-corner tr"></div>
-    <div class="vs-piece vs-corner bl"></div>
-    <div class="vs-piece vs-corner br"></div>
-    <!-- Caps (centred top/bottom) -->
-    <div class="vs-piece vs-cap top"></div>
-    <div class="vs-piece vs-cap bottom"></div>
-    <!-- Ship designation (top-centre, above cap) -->
-    <div class="vs-designation" id="hud-designation">PHOENIX</div>
-    <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
-    <div class="vs-status-strip">
-      <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
-      <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
-    </div>
-  </div>
+    <aside id="debug-dock">
+      <button id="debug-toggle-btn" title="Toggle debug panel">Debug</button>
 
-  <!-- QR code shown over the canvas during lobby phase (or toggled mid-game) -->
-  <div id="overlay">
-    <a id="qr-link" target="_blank" style="cursor:pointer">
-      <canvas id="qr"></canvas>
-    </a>
-    <div id="loading-progress-text" style="display:none;margin-top:24px;font-family:monospace;color:#8af;font-size:16px;text-align:center;">
-      Preparing scenario&hellip; <span id="loading-progress-pct">0</span>%
-    </div>
-  </div>
-
-  <!-- Invisible click-target in bottom-left corner to toggle QR mid-game -->
-  <button id="qr-toggle-btn" title="Toggle QR code"></button>
-
-  <!-- Modifier debug overlay (F3) -->
-  <div id="debug-overlay" style="display:none;position:fixed;top:0;left:0;z-index:9999;background:rgba(0,0,0,0.8);color:#0f0;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:50vw;max-height:100vh;overflow-y:auto;"></div>
-
-  <!-- Damage debug overlay (F8) -->
-  <div id="damage-log-overlay" style="display:none;position:fixed;top:0;right:0;z-index:9999;background:rgba(0,0,0,0.8);color:#f80;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:50vw;max-height:100vh;overflow-y:auto;"></div>
-
-  <!-- Entity behavior debug overlay (F7) -->
-  <div id="entity-debug-overlay" style="display:none;position:fixed;bottom:0;left:0;z-index:9999;background:rgba(0,0,0,0.8);color:#0ff;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:60vw;max-height:50vh;overflow-y:auto;"></div>
-
-  <!-- Entity inspector overlay (F6) -->
-  <div id="entity-inspector-overlay" style="display:none;position:fixed;bottom:0;right:0;z-index:9999;background:rgba(0,0,0,0.8);color:#ff0;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:60vw;max-height:70vh;overflow-y:auto;"></div>
-
-  <div id="top-bar">
-    <div id="top-bar-row">
-      <span id="conn-label"></span>
-      <span id="conn-dot"></span>
-      <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
-    </div>
+      <!-- Debug panel -->
+      <div id="debug-panel">
+        <div id="debug-toolbar">
+          <div id="debug-actions">
+            <button class="debug-action" data-action="pause" title="Pause simulation">⏸</button>
+            <button class="debug-action" data-action="wireframes" title="Toggle region wireframes">🌐</button>
+            <button class="debug-action" data-action="godmode" title="God mode (no damage)">🛡</button>
+            <button class="debug-action" data-action="instagib" title="Instagib (100x damage)">⚡</button>
+          </div>
+          <div id="debug-tabs">
+            <button class="debug-tab active" data-tab="0">Mod</button>
+            <button class="debug-tab" data-tab="1">Dmg</button>
+            <button class="debug-tab" data-tab="2">Ent</button>
+            <button class="debug-tab" data-tab="3">Insp</button>
+          </div>
+        </div>
+        <pre id="debug-content">(panel closed)</pre>
+      </div>
+    </aside>
   </div>
 
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
@@ -895,12 +1057,14 @@
   // overlay + border) shakes together. When offset is (0, 0) the transform
   // is removed.
   window.__applyShake = function(x, y) {
+    const shell = document.getElementById('viewscreen-shell');
+    if (!shell) return;
     if (x === 0 && y === 0) {
-      document.body.style.transform = '';
-      document.body.style.willChange = '';
+      shell.style.transform = '';
+      shell.style.willChange = '';
     } else {
-      document.body.style.transform = 'translate(' + x + 'px,' + y + 'px)';
-      document.body.style.willChange = 'transform';
+      shell.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+      shell.style.willChange = 'transform';
     }
   };
 
@@ -1016,8 +1180,20 @@
     // the smoke tests. The canvas must stay in the render tree at all times.
     if (qrOverlay) {
       if (isLobby) { qrVisible = true; qrOverlay.style.display = 'block'; }
-      else if (s.phase === 'Loading') { qrVisible = false; qrOverlay.style.display = 'none'; }
-      // During InProgress/GameOver the toggle button is the sole controller
+      else if (s.phase === 'Loading' || s.phase === 'GameOver') { qrVisible = false; qrOverlay.style.display = 'none'; }
+      // During InProgress the toggle button is the sole controller
+    }
+    // The GameOver screen never shows the QR code (issue: no mid-game join
+    // prompt over the end-of-scenario summary), so hide its toggle target too.
+    const qrToggleBtn = document.getElementById('qr-toggle-btn');
+    if (qrToggleBtn) qrToggleBtn.style.display = s.phase === 'GameOver' ? 'none' : '';
+
+    // ── Game-over overlay: force-hidden once the phase leaves GameOver ──
+    // (the HUD push that normally drives this overlay only fires while
+    // InProgress, so returning to Lobby needs its own hide here.)
+    if (s.phase !== 'GameOver') {
+      const goOverlay = document.getElementById('game-over-overlay');
+      if (goOverlay) goOverlay.style.display = 'none';
     }
 
     // ── Title / subtitle ──────────────────────────────────────────────
@@ -1438,7 +1614,19 @@
             } catch (_) { return; }
           }
 
-          if (token) dispatchToWasm(token, json);
+          if (token) {
+            // Intercept ToggleQrCode — purely visual server-side toggle, no Rust message needed.
+            try {
+              const parsed = JSON.parse(json);
+              if (parsed.type === 'ToggleQrCode') {
+                qrVisible = !qrVisible;
+                const qrOverlay = document.getElementById('overlay');
+                if (qrOverlay) qrOverlay.style.display = qrVisible ? 'block' : 'none';
+                return;
+              }
+            } catch (_) {}
+            dispatchToWasm(token, json);
+          }
         });
 
         conn.on('close', () => {
@@ -1478,6 +1666,10 @@
 
     let selectedScenario = null;
     let wasmReady = false;
+    /** True after ReturnToLobby from GameOver shows the scenario panel
+     *  for re-selection. Scenario button clicks re-confirm instead of
+     *  starting a new server. */
+    let _returnedToSelection = false;
 
     function showLobbyPanel() {
       const panel = document.getElementById('lobby-panel');
@@ -1489,9 +1681,16 @@
         selectedScenario = this.dataset.path;
         document.getElementById('scenario-panel').style.display = 'none';
         showLobbyPanel();
-        initPeerJS();
-        acquireWakeLock();
-        if (wasmReady) startPhoenix();
+        if (_returnedToSelection) {
+          // Re-selection flow: server is already running, confirm the scenario.
+          _returnedToSelection = false;
+          window.__sendAction(JSON.stringify({ action: 'confirm_scenario' }));
+        } else {
+          // Initial selection flow: start everything fresh.
+          initPeerJS();
+          acquireWakeLock();
+          if (wasmReady) startPhoenix();
+        }
       });
     });
 
@@ -1683,12 +1882,26 @@ function finishInit() {
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;
   window.wasm_toggle_entity_inspector = wasmBindings.wasm_toggle_entity_inspector;
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
+  window.wasm_toggle_god_mode = wasmBindings.wasm_toggle_god_mode;
+  window.wasm_get_god_mode = wasmBindings.wasm_get_god_mode;
+  window.wasm_toggle_instagib = wasmBindings.wasm_toggle_instagib;
+  window.wasm_get_instagib = wasmBindings.wasm_get_instagib;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
   document.getElementById('qr-toggle-btn').addEventListener('click', function() {
     const qrOverlay = document.getElementById('overlay');
     qrVisible = !qrVisible;
     qrOverlay.style.display = qrVisible ? 'block' : 'none';
+  });
+
+  // ── Return to Lobby (GameOver overlay button) ─────────────────────────
+  document.getElementById('return-to-lobby-btn').addEventListener('click', function() {
+    window.__sendAction(JSON.stringify({ action: 'return_to_lobby' }));
+    // Show the scenario selection panel so the host can pick a new (or same)
+    // scenario. The lobby panel stays hidden until the host confirms.
+    document.getElementById('scenario-panel').style.display = '';
+    document.getElementById('lobby-panel').style.display = 'none';
+    _returnedToSelection = true;
   });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
@@ -1890,131 +2103,133 @@ window.addEventListener('TrunkApplicationStarted', () => {
   if (selectedScenario) startPhoenix();
 });
 
-    // ── F4 — toggle region wireframes ────────────────────────────────────
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'F4') {
-        e.preventDefault();
-        if (typeof wasm_toggle_debug_regions === 'function') {
-          wasm_toggle_debug_regions();
+    // ── Debug panel (replaces old F-key overlays) ──────────────────────────
+    (function() {
+      var dock = document.getElementById('debug-dock');
+      var panel = document.getElementById('debug-panel');
+      var toggleBtn = document.getElementById('debug-toggle-btn');
+      var content = document.getElementById('debug-content');
+      var tabs = document.querySelectorAll('.debug-tab');
+      var actions = document.querySelectorAll('.debug-action');
+      var panelOpen = false;
+      var activeTab = 0;
+      // Track resource ON/OFF state (all 4 are toggled together)
+      var debugResourcesOn = false;
+
+      // Tab data-getter functions (must be available on window)
+      var dataGetters = [
+        function() { return typeof wasm_get_debug_state === 'function' ? wasm_get_debug_state() : '(waiting for WASM)'; },
+        function() { return typeof wasm_get_damage_log === 'function' ? wasm_get_damage_log() : '(waiting for WASM)'; },
+        function() { return typeof wasm_get_entity_debug_state === 'function' ? wasm_get_entity_debug_state() : '(waiting for WASM)'; },
+        function() { return typeof wasm_get_entity_inspector === 'function' ? wasm_get_entity_inspector() : '(waiting for WASM)'; }
+      ];
+
+      function setActiveTab(index) {
+        activeTab = index;
+        tabs.forEach(function(t, i) { t.classList.toggle('active', i === index); });
+        // Force immediate content refresh
+        if (panelOpen) {
+          content.textContent = dataGetters[index]();
         }
       }
-    });
 
-    // ── F3 — toggle modifier debug overlay ───────────────────────────────
-    (function() {
-      var overlayEl = document.getElementById('debug-overlay');
-      var overlayVisible = false;
-
-      document.addEventListener('keydown', function(e) {
-        if (e.key === 'F3') {
-          e.preventDefault();
-          overlayVisible = !overlayVisible;
-          overlayEl.style.display = overlayVisible ? 'block' : 'none';
-          if (typeof wasm_toggle_debug_overlay === 'function') {
-            wasm_toggle_debug_overlay();
-          }
+      function openPanel() {
+        panelOpen = true;
+        dock.classList.add('open');
+        panel.classList.add('open');
+        toggleBtn.textContent = 'Close';
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        // Enable all 4 debug Bevy resources (each toggle flips once)
+        if (!debugResourcesOn) {
+          debugResourcesOn = true;
+          if (typeof wasm_toggle_debug_overlay === 'function') wasm_toggle_debug_overlay();
+          if (typeof wasm_toggle_debug_damage === 'function') wasm_toggle_debug_damage();
+          if (typeof wasm_toggle_debug_entities === 'function') wasm_toggle_debug_entities();
+          if (typeof wasm_toggle_entity_inspector === 'function') wasm_toggle_entity_inspector();
         }
+        // Read active tab immediately
+        content.textContent = dataGetters[activeTab]();
+      }
+
+      function closePanel() {
+        panelOpen = false;
+        dock.classList.remove('open');
+        panel.classList.remove('open');
+        toggleBtn.textContent = 'Debug';
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        // Disable all 4 debug Bevy resources
+        if (debugResourcesOn) {
+          debugResourcesOn = false;
+          if (typeof wasm_toggle_debug_overlay === 'function') wasm_toggle_debug_overlay();
+          if (typeof wasm_toggle_debug_damage === 'function') wasm_toggle_debug_damage();
+          if (typeof wasm_toggle_debug_entities === 'function') wasm_toggle_debug_entities();
+          if (typeof wasm_toggle_entity_inspector === 'function') wasm_toggle_entity_inspector();
+        }
+      }
+
+      // Toggle button
+      toggleBtn.addEventListener('click', function() {
+        if (panelOpen) closePanel(); else openPanel();
       });
 
-      // Refresh overlay text every animation frame while visible.
-      function rafLoop() {
-        if (overlayVisible && typeof wasm_get_debug_state === 'function') {
-          overlayEl.textContent = wasm_get_debug_state();
-        }
-        requestAnimationFrame(rafLoop);
-      }
-      requestAnimationFrame(rafLoop);
-    })();
-
-    // ── F9 — debug pause simulation ──────────────────────────────────────
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'F9') {
-        e.preventDefault();
-        if (typeof wasm_toggle_debug_pause === 'function') {
-          wasm_toggle_debug_pause();
-        }
-      }
-    });
-
-    // ── F8 — toggle damage debug log ─────────────────────────────────────
-    (function() {
-      var damageEl = document.getElementById('damage-log-overlay');
-      var damageVisible = false;
-
-      document.addEventListener('keydown', function(e) {
-        if (e.key === 'F8') {
-          e.preventDefault();
-          damageVisible = !damageVisible;
-          damageEl.style.display = damageVisible ? 'block' : 'none';
-          if (typeof wasm_toggle_debug_damage === 'function') {
-            wasm_toggle_debug_damage();
-          }
-        }
+      // Tab clicks
+      tabs.forEach(function(tab) {
+        tab.addEventListener('click', function() {
+          var idx = parseInt(tab.getAttribute('data-tab'), 10);
+          setActiveTab(idx);
+        });
       });
 
-      function rafLoop() {
-        if (damageVisible && typeof wasm_get_damage_log === 'function') {
-          damageEl.textContent = wasm_get_damage_log();
-        }
-        requestAnimationFrame(rafLoop);
-      }
-      requestAnimationFrame(rafLoop);
-    })();
-
-    // ── F7 — toggle entity behavior overlay ─────────────────────────────
-    (function() {
-      var entityEl = document.getElementById('entity-debug-overlay');
-      var entityVisible = false;
-
-      document.addEventListener('keydown', function(e) {
-        if (e.key === 'F7') {
-          e.preventDefault();
-          entityVisible = !entityVisible;
-          entityEl.style.display = entityVisible ? 'block' : 'none';
-          if (typeof wasm_toggle_debug_entities === 'function') {
-            wasm_toggle_debug_entities();
-          } else if (entityVisible) {
-            entityEl.textContent = '(entity overlay: WASM not ready — hard-reload the page)';
+      // Action buttons
+      actions.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var action = btn.getAttribute('data-action');
+          switch (action) {
+            case 'pause':
+              if (typeof wasm_toggle_debug_pause === 'function') wasm_toggle_debug_pause();
+              break;
+            case 'wireframes':
+              if (typeof wasm_toggle_debug_regions === 'function') wasm_toggle_debug_regions();
+              break;
+            case 'godmode':
+              if (typeof wasm_toggle_god_mode === 'function') wasm_toggle_god_mode();
+              // Read state after toggle and update visual
+              if (typeof wasm_get_god_mode === 'function') {
+                btn.classList.toggle('active', wasm_get_god_mode());
+              }
+              break;
+            case 'instagib':
+              if (typeof wasm_toggle_instagib === 'function') wasm_toggle_instagib();
+              if (typeof wasm_get_instagib === 'function') {
+                btn.classList.toggle('active', wasm_get_instagib());
+              }
+              break;
           }
-        }
+        });
       });
 
-      function rafLoop() {
-        if (entityVisible) {
-          if (typeof wasm_get_entity_debug_state === 'function') {
-            var txt = wasm_get_entity_debug_state();
-            entityEl.textContent = txt.length > 0 ? txt : '(entity overlay active — waiting for Bevy)';
-          }
+      // Touch swipe on the panel to switch tabs (mobile)
+      var touchStartX = null, touchStartY = null;
+      panel.addEventListener('touchstart', function(e) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+      });
+      panel.addEventListener('touchend', function(e) {
+        if (touchStartX === null) return;
+        var dx = e.changedTouches[0].clientX - touchStartX;
+        var dy = e.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+          var next = dx > 0 ? activeTab - 1 : activeTab + 1;
+          if (next >= 0 && next < tabs.length) setActiveTab(next);
         }
-        requestAnimationFrame(rafLoop);
-      }
-      requestAnimationFrame(rafLoop);
-    })();
-
-    // ── F2 — toggle entity inspector overlay ────────────────────────────
-    (function() {
-      var inspectorEl = document.getElementById('entity-inspector-overlay');
-      var inspectorVisible = false;
-
-      document.addEventListener('keydown', function(e) {
-        if (e.key === 'F2') {
-          e.preventDefault();
-          inspectorVisible = !inspectorVisible;
-          inspectorEl.style.display = inspectorVisible ? 'block' : 'none';
-          if (typeof wasm_toggle_entity_inspector === 'function') {
-            wasm_toggle_entity_inspector();
-          } else if (inspectorVisible) {
-            inspectorEl.textContent = '(entity inspector: WASM not ready — hard-reload the page)';
-          }
-        }
+        touchStartX = null;
+        touchStartY = null;
       });
 
+      // Unified rAF loop: reads active tab data while panel is open
       function rafLoop() {
-        if (inspectorVisible) {
-          if (typeof wasm_get_entity_inspector === 'function') {
-            var txt = wasm_get_entity_inspector();
-            inspectorEl.textContent = txt.length > 0 ? txt : '(entity inspector active — waiting for Bevy)';
-          }
+        if (panelOpen && typeof dataGetters[activeTab] === 'function') {
+          content.textContent = dataGetters[activeTab]();
         }
         requestAnimationFrame(rafLoop);
       }

@@ -14,6 +14,14 @@ export class PhTacticalRadar extends HTMLElement {
       '.container { position: relative; width: 100%; height: 100%; }',
       'ph-radar { display: block; width: 100%; height: 100%; }',
       '.overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
+      '.corner-label {',
+      '  position: absolute; pointer-events: none; z-index: 10;',
+      '  font-family: \'JetBrains Mono\', monospace; font-size: 0.6rem;',
+      '  letter-spacing: 0.1em; color: #5a6a7e;',
+      '}',
+      '.corner-label.top-left { top: 4%; left: 6%; }',
+      '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
+      '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
       '</style>',
       '<div class="container">',
       '  <ph-radar id="inner-radar"></ph-radar>',
@@ -22,6 +30,9 @@ export class PhTacticalRadar extends HTMLElement {
       '    <g id="torpedo-arcs"></g>',
       '    <g id="selected-highlight"></g>',
       '  </svg>',
+      '  <div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
+      '  <div class="corner-label top-right" id="label-bearing">000°</div>',
+      '  <div class="corner-label bottom-left" id="label-speed">0.0 km/s</div>',
       '</div>',
     ].join('\n');
     this.shadowRoot.appendChild(t.content.cloneNode(true));
@@ -52,9 +63,30 @@ export class PhTacticalRadar extends HTMLElement {
         range: s.range,
         ship_heading: s.ship_heading,
         config: s.config || {},
+        target_uuid: s.target_uuid || null,
       };
     }
     this.#renderOverlays(s);
+
+    const posLabel = this.shadowRoot.getElementById('label-pos');
+    if (posLabel) {
+      const x = s.x != null ? s.x : 0;
+      const z = s.z != null ? s.z : 0;
+      posLabel.textContent = 'X: ' + x.toFixed(0) + '  Z: ' + z.toFixed(0);
+    }
+
+    const bearingLabel = this.shadowRoot.getElementById('label-bearing');
+    if (bearingLabel) {
+      const h = s.ship_heading != null ? ((s.ship_heading % 360) + 360) % 360 : 0;
+      bearingLabel.textContent = String(h.toFixed(0)).padStart(3, '0') + '\u00B0';
+    }
+
+    const speedLabel = this.shadowRoot.getElementById('label-speed');
+    if (speedLabel) {
+      const spd = s.speed != null ? s.speed : 0;
+      speedLabel.textContent = (spd * 3.6).toFixed(1) + ' km/s';
+    }
+
   }
 
   #renderOverlays(s) {

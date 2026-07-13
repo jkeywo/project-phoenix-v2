@@ -134,24 +134,39 @@ export class PhRadar extends HTMLElement {
       const dotR = Math.max(6, (b.scaled_radius || 0) * R * 0.6);
       const color = b.color || '#a8b0c0';
 
-      const iconName = b.icon;
-      const icon = iconName ? this.#getIconImage(iconName) : null;
-      const iconLoaded = icon && icon.complete && icon.naturalWidth > 0;
-
-      if (iconLoaded) {
-        const size = dotR * 2;
-        octx.drawImage(icon, bx - dotR, by - dotR, size, size);
+      if (b.kind === 'waypoint') {
+        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, '#d4a820');
+      } else if (b.kind === 'tactical-target') {
+        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, '#ff3344');
+      } else if (b.kind === 'science-target') {
+        this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, '#3399ff');
       } else {
-        octx.beginPath();
-        octx.arc(bx, by, dotR, 0, Math.PI * 2);
-        octx.fillStyle = color;
-        octx.fill();
+        const iconName = b.icon;
+        const icon = iconName ? this.#getIconImage(iconName) : null;
+        const iconLoaded = icon && icon.complete && icon.naturalWidth > 0;
+
+        if (iconLoaded) {
+          const size = dotR * 2;
+          octx.drawImage(icon, bx - dotR, by - dotR, size, size);
+        } else {
+          octx.beginPath();
+          octx.arc(bx, by, dotR, 0, Math.PI * 2);
+          octx.fillStyle = color;
+          octx.fill();
+        }
       }
 
       if (b.label) {
         octx.font = '11px "JetBrains Mono", monospace';
         octx.fillStyle = 'rgba(153,255,217,0.9)';
         octx.fillText(b.label, bx + dotR + 4, by + 4);
+      }
+
+      if (state.selected_target_uuid && state.selected_target_uuid === b.uuid) {
+        this.#drawRing(octx, bx, by, dotR + 6, 2, '#5fd8e8');
+      }
+      if (state.target_uuid && state.target_uuid === b.uuid) {
+        this.#drawRing(octx, bx, by, dotR + 8, 2, '#ff3344');
       }
 
       this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
@@ -162,6 +177,49 @@ export class PhRadar extends HTMLElement {
     }
 
     this.#needsRender = false;
+  }
+
+  #drawRing(ctx, x, y, r, lineWidth, color) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  }
+
+  #drawTargetBlip(ctx, bx, by, dotR, edge, color) {
+    const r = Math.max(7, dotR + 3);
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = edge ? 2.5 : 2;
+
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r, 0);
+    ctx.lineTo(0, r);
+    ctx.lineTo(-r, 0);
+    ctx.closePath();
+    ctx.globalAlpha = edge ? 0.15 : 0.26;
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (edge) {
+      ctx.beginPath();
+      ctx.moveTo(0, -r - 8);
+      ctx.lineTo(4, -r - 1);
+      ctx.lineTo(-4, -r - 1);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   #getBlipAt(canvasX, canvasY) {

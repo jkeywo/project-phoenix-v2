@@ -117,6 +117,7 @@ describe('PhTacticalRadar', () => {
       blips: [{ uuid: 'a', radar_x: 0, radar_y: 0.5 }],
       ship_heading: 90,
       config: { max_range: 5000 },
+      target_uuid: null,
     });
   });
 

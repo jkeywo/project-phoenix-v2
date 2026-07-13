@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix - Repair Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .hero h1 { margin: 0; font-size: 26px; letter-spacing: 0.22em; color: var(--ink); }
+    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+    .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
+    ph-hull-integrity { flex-shrink: 0; }
+    ph-station-damage { align-self: flex-start; }
+    ph-repair-teams { flex: 1; min-height: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { padding: 8px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Repair Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>REPAIR<span class="sub">HULL &amp; SYSTEM MAINTENANCE</span></h1>
+        <span class="auto-badge" id="repair-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
+        <ph-station-damage id="core-damage" label="Core"></ph-station-damage>
+        <ph-repair-teams id="repair-teams"></ph-repair-teams>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span>REPAIR STATION</span>
+        <span class="spacer"></span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
+        <span id="footer-right">—</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-hull-integrity.js';
+    import '../components/ph-station-damage.js';
+    import '../components/ph-repair-teams.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'repair',
+      render: function(s) {
+        var oh = s.overall_hull || {};
+        document.getElementById('hull-integrity').state = { total_pct: oh.pct != null ? oh.pct : 1 };
+        document.getElementById('core-damage').state = { entries: s.core_systems || [] };
+        document.getElementById('repair-teams').state = { teams: s.teams || [], auto: !!s.repair_auto, targets: s.dispatch_targets || [] };
+        document.getElementById('station-damage').state = s.own_hull || null;
+        var active = (s.teams || []).filter(function(t) { return t && t.status && t.status !== 'idle'; }).length;
+        var total = (s.teams || []).length;
+        document.getElementById('footer-right').textContent = Math.round((oh.pct != null ? oh.pct : 1) * 100) + '% HULL · ' + active + '/' + total + ' ACTIVE';
+        setAutoState(null, document.getElementById('repair-auto-badge'), !!s.repair_auto);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,3 +1,5 @@
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
+
 export class PhPowerControls extends HTMLElement {
   #state = null;
   #pipCache = new Map();
@@ -9,25 +11,22 @@ export class PhPowerControls extends HTMLElement {
     const t = document.createElement('template');
     t.innerHTML = `
   <style>
-    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: #cce; }
+    :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: #6a7178; text-transform: uppercase; }
-    .auto-badge { font-size: 0.55rem; color: #f0c040; border: 1px solid #f0c040; padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
-    .group { border: 1px solid #282c38; background: #0e1117; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
+    .group { border: 1px solid var(--line-faint); background: var(--bg-card); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
     .group-top { display: flex; justify-content: space-between; align-items: center; }
-    .group-label { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.2em; color: #cce; }
+    .group-label { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.2em; color: var(--ink); }
     .pip-row { display: flex; align-items: center; gap: 0.4rem; justify-content: center; }
-    .pip { width: 1.2rem; height: 1.2rem; border-radius: 50%; border: 2px solid #282c38; background: #05080e; cursor: pointer; transition: all 0.15s ease; }
-    .pip:hover:not(.disabled) { border-color: #6a7178; }
-    .pip.active { background: #4ec870; border-color: #4ec870; box-shadow: 0 0 6px rgba(78,200,112,0.5); }
-    .pip.inactive { background: transparent; border-color: #282c38; }
+    .pip { width: 1.2rem; height: 1.2rem; border-radius: 50%; border: 2px solid var(--line-faint); background: var(--bg-deep); cursor: pointer; transition: all 0.15s ease; }
+    .pip:hover:not(.disabled) { border-color: var(--ink-dim); }
+    .pip.active { background: var(--loaded); border-color: var(--loaded); box-shadow: 0 0 6px rgba(78,200,112,0.5); }
+    .pip.inactive { background: transparent; border-color: var(--line-faint); }
     .pip.disabled { cursor: default; opacity: 0.3; }
     .pip-btn-row { display: flex; align-items: center; gap: 0.5rem; justify-content: center; }
-    .step-btn { font-family: 'Chakra Petch', sans-serif; font-size: 0.8rem; font-weight: 700; padding: 0.15rem 0.6rem; cursor: pointer; border: 2px solid #4ec870; color: #4ec870; background: #0e1117; transition: all 0.15s ease; }
-    .step-btn:hover:not(:disabled) { background: #16281d; }
-    .step-btn:disabled { opacity: 0.3; border-color: #6a7178; color: #6a7178; cursor: default; }
-    .level-text { font-size: 0.6rem; color: #6a7178; letter-spacing: 0.1em; min-width: 1.5rem; text-align: center; }
-    .empty { font-size: 0.65rem; color: #6a7178; text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .level-text { font-size: 0.6rem; color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.5rem; text-align: center; }
+    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
     <span>POWER ALLOCATION</span>
@@ -36,6 +35,7 @@ export class PhPowerControls extends HTMLElement {
   <div id="groups-container"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
+    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
@@ -88,8 +88,8 @@ export class PhPowerControls extends HTMLElement {
           </div>
           <div class="pip-row"></div>
           <div class="pip-btn-row">
-            <button class="step-btn" data-action="decr">−</button>
-            <button class="step-btn" data-action="incr">+</button>
+            <button type="button" class="mini-btn" data-action="decr"><span class="mini-bg"></span><span class="lbl">−</span></button>
+            <button type="button" class="mini-btn" data-action="incr"><span class="mini-bg"></span><span class="lbl">+</span></button>
           </div>
         `;
         const pipRow = el.querySelector('.pip-row');
@@ -101,8 +101,8 @@ export class PhPowerControls extends HTMLElement {
             this.sendAction('set_power', { target: gid, level });
           }
         });
-        const incrBtn = el.querySelector('.step-btn[data-action="incr"]');
-        const decrBtn = el.querySelector('.step-btn[data-action="decr"]');
+        const incrBtn = el.querySelector('.mini-btn[data-action="incr"]');
+        const decrBtn = el.querySelector('.mini-btn[data-action="decr"]');
         incrBtn.addEventListener('click', () => {
           if (auto) return;
           const cur = this.#currentLevel(gid);
@@ -153,8 +153,8 @@ export class PhPowerControls extends HTMLElement {
         if (key.startsWith(gid + ':') && !livePips.has(key)) { pip.remove(); this.#pipCache.delete(key); }
       }
 
-      const incrBtn = el.querySelector('.step-btn[data-action="incr"]');
-      const decrBtn = el.querySelector('.step-btn[data-action="decr"]');
+      const incrBtn = el.querySelector('.mini-btn[data-action="incr"]');
+      const decrBtn = el.querySelector('.mini-btn[data-action="decr"]');
       incrBtn.disabled = auto || level >= maxLevel;
       decrBtn.disabled = auto || level <= minLevel;
     });

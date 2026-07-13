@@ -111,6 +111,11 @@ pub const HELM_IMPULSE_KIND: &str = "helm_impulse";
 pub const HELM_IMPULSE_SYSTEM_ID: &str = "helm-impulse";
 pub const HELM_IMPULSE_AI_CONTROLLER: &str = "helm_impulse_ai";
 
+/// Wire `SystemId` for the Helm Lateral Thrust fine system.
+pub const LATERAL_THRUST_KIND: &str = "lateral_thrust";
+pub const LATERAL_THRUST_SYSTEM_ID: &str = "helm-lateral-thrust";
+pub const LATERAL_THRUST_AI_CONTROLLER: &str = "lateral_thrust_ai";
+
 // ── Fine-grained Tactical systems (issue #512) ────────────────────────────────
 //
 // The coarse `tactical` kind is DELETED from the runtime registry in favour of
@@ -144,6 +149,24 @@ pub const TORPEDO_TUBE_AI_CONTROLLER: &str = "torpedo_tube_ai";
 /// A blaster bank fires straight-flying projectiles in data-driven volleys.
 pub const BLASTER_BANK_KIND: &str = "blaster_bank";
 pub const BLASTER_BANK_AI_CONTROLLER: &str = "blaster_bank_ai";
+
+/// Wire `SystemId` for the Tactical Radar fine system.
+///
+/// Mirrors `HELM_RADAR_KIND`/`HELM_RADAR_SYSTEM_ID` — the tactical station's
+/// short-range weapons radar, made damageable/repairable like every other
+/// fine system.
+pub const TACTICAL_RADAR_KIND: &str = "tactical_radar";
+pub const TACTICAL_RADAR_SYSTEM_ID: &str = "tactical-radar";
+pub const TACTICAL_RADAR_AI_CONTROLLER: &str = "tactical_radar_ai";
+
+/// Wire `SystemId` for the Sensor Radar fine system.
+///
+/// Mirrors `HELM_RADAR_KIND`/`HELM_RADAR_SYSTEM_ID` — the sensors/science
+/// station's long-range radar, made damageable/repairable like every other
+/// fine system.
+pub const SENSOR_RADAR_KIND: &str = "sensor_radar";
+pub const SENSOR_RADAR_SYSTEM_ID: &str = "sensor-radar";
+pub const SENSOR_RADAR_AI_CONTROLLER: &str = "sensor_radar_ai";
 
 /// Wire `SystemId` for the Torpedo Magazine fine system (single instance).
 ///
@@ -329,6 +352,10 @@ impl SystemKindRegistry {
             HELM_IMPULSE_KIND,
             AiControllerRegistration::new(HELM_IMPULSE_AI_CONTROLLER)?,
         )?;
+        registry.register(
+            LATERAL_THRUST_KIND,
+            AiControllerRegistration::new(LATERAL_THRUST_AI_CONTROLLER)?,
+        )?;
         // Fine-grained Tactical systems (issue #512)
         registry.register(
             PHASER_BANK_KIND,
@@ -346,6 +373,15 @@ impl SystemKindRegistry {
         registry.register(
             BLASTER_BANK_KIND,
             AiControllerRegistration::new(BLASTER_BANK_AI_CONTROLLER)?,
+        )?;
+        // Tactical / sensor radar fine systems
+        registry.register(
+            TACTICAL_RADAR_KIND,
+            AiControllerRegistration::new(TACTICAL_RADAR_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            SENSOR_RADAR_KIND,
+            AiControllerRegistration::new(SENSOR_RADAR_AI_CONTROLLER)?,
         )?;
         // Fine-grained Power systems (issue #513)
         registry.register(
@@ -473,8 +509,20 @@ pub fn helm_radar_system_id() -> SystemId {
     SystemId(HELM_RADAR_SYSTEM_ID.to_string())
 }
 
+pub fn tactical_radar_system_id() -> SystemId {
+    SystemId(TACTICAL_RADAR_SYSTEM_ID.to_string())
+}
+
+pub fn sensor_radar_system_id() -> SystemId {
+    SystemId(SENSOR_RADAR_SYSTEM_ID.to_string())
+}
+
 pub fn helm_impulse_system_id() -> SystemId {
     SystemId(HELM_IMPULSE_SYSTEM_ID.to_string())
+}
+
+pub fn lateral_thrust_system_id() -> SystemId {
+    SystemId(LATERAL_THRUST_SYSTEM_ID.to_string())
 }
 
 // ── Fine Tactical system id helpers (issue #512) ──────────────────────────────
@@ -888,6 +936,10 @@ mod tests {
             registry.contains(HELM_IMPULSE_KIND),
             "helm_impulse not registered"
         );
+        assert!(
+            registry.contains(LATERAL_THRUST_KIND),
+            "lateral_thrust not registered"
+        );
 
         assert_eq!(
             registry
@@ -921,6 +973,14 @@ mod tests {
                 .name(),
             HELM_IMPULSE_AI_CONTROLLER
         );
+        assert_eq!(
+            registry
+                .registration(LATERAL_THRUST_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            LATERAL_THRUST_AI_CONTROLLER
+        );
     }
 
     #[test]
@@ -931,6 +991,7 @@ mod tests {
             HELM_ENGINE_STARBOARD_SYSTEM_ID,
             HELM_RADAR_SYSTEM_ID,
             HELM_IMPULSE_SYSTEM_ID,
+            LATERAL_THRUST_SYSTEM_ID,
         ];
         for id in ids {
             assert_eq!(
@@ -949,6 +1010,7 @@ mod tests {
         assert_eq!(HELM_ENGINE_STARBOARD_SYSTEM_ID, "helm-engine-starboard");
         assert_eq!(HELM_RADAR_SYSTEM_ID, "helm-radar");
         assert_eq!(HELM_IMPULSE_SYSTEM_ID, "helm-impulse");
+        assert_eq!(LATERAL_THRUST_SYSTEM_ID, "helm-lateral-thrust");
     }
 
     #[test]
@@ -961,6 +1023,7 @@ mod tests {
         );
         assert_eq!(helm_radar_system_id().0, HELM_RADAR_SYSTEM_ID);
         assert_eq!(helm_impulse_system_id().0, HELM_IMPULSE_SYSTEM_ID);
+        assert_eq!(lateral_thrust_system_id().0, LATERAL_THRUST_SYSTEM_ID);
     }
 
     // ── Fine Tactical system tests (issue #512) ───────────────────────────────
@@ -1158,6 +1221,64 @@ mod tests {
                 "SystemId {sid:?} must start with blaster-"
             );
         }
+    }
+
+    // ── Fine Tactical/Sensor Radar system tests ───────────────────────────────
+
+    #[test]
+    fn radar_kinds_are_registered() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(
+            registry.contains(TACTICAL_RADAR_KIND),
+            "tactical_radar not registered"
+        );
+        assert!(
+            registry.contains(SENSOR_RADAR_KIND),
+            "sensor_radar not registered"
+        );
+
+        assert_eq!(
+            registry
+                .registration(TACTICAL_RADAR_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            TACTICAL_RADAR_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry
+                .registration(SENSOR_RADAR_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            SENSOR_RADAR_AI_CONTROLLER
+        );
+    }
+
+    #[test]
+    fn radar_system_ids_are_lowercase_kebab() {
+        let ids = [TACTICAL_RADAR_SYSTEM_ID, SENSOR_RADAR_SYSTEM_ID];
+        for id in ids {
+            assert_eq!(
+                id,
+                id.to_lowercase(),
+                "Radar SystemId {id:?} is not lowercase"
+            );
+            assert!(
+                !id.contains('_'),
+                "Radar SystemId {id:?} contains underscore (use hyphen)"
+            );
+            assert!(!id.is_empty(), "Radar SystemId must not be empty");
+        }
+        assert_eq!(TACTICAL_RADAR_SYSTEM_ID, "tactical-radar");
+        assert_eq!(SENSOR_RADAR_SYSTEM_ID, "sensor-radar");
+    }
+
+    #[test]
+    fn radar_system_id_helpers_return_expected_values() {
+        assert_eq!(tactical_radar_system_id().0, TACTICAL_RADAR_SYSTEM_ID);
+        assert_eq!(sensor_radar_system_id().0, SENSOR_RADAR_SYSTEM_ID);
     }
 
     // ── Fine Power system tests (issue #513) ──────────────────────────────────

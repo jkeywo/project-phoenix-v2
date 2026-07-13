@@ -11,6 +11,7 @@ use crate::messages::{
     SystemBlackboard, SystemControlPayload, SystemId, TorpedoTubeClientConfig, TorpedoTubeState,
     WeaponsBlackboard,
 };
+use crate::model_rig::ModelMarkers;
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
@@ -1397,6 +1398,11 @@ fn tick_beams(
             continue;
         }
 
+        // Instagib: local ship deals 100x damage.
+        if state.is_local_shooter && crate::bridge::is_instagib() {
+            state.damage_to_apply = state.damage_to_apply.saturating_mul(100);
+        }
+
         // Always mark the effective target ship as attacked, even when
         // damage_to_apply == 0 (mirrors the historical NPC path which tagged
         // the target every tick the beam was live). Skip for asteroid targets.
@@ -1433,7 +1439,7 @@ fn tick_beams(
                     if let Ok(parsed) = uuid::Uuid::parse_str(&state.shooter_uuid) {
                         commands
                             .entity(te)
-                            .insert(crate::ai_plugin::AttackerThisTick(parsed));
+                            .try_insert(crate::ai_plugin::AttackerThisTick(parsed));
                     }
                 }
             }
@@ -1469,6 +1475,20 @@ fn tick_beams(
             }
             damage_applied = true;
             let is_asteroid = ast_uuid.is_some();
+
+            // God mode: local ship takes no damage.
+            if target_is_local && crate::bridge::is_god_mode() {
+                if let Some(ref mut ob) = outbox {
+                    ob.0.push((
+                        Target::All,
+                        ServerMessage::DamageTaken {
+                            hull: 0.0,
+                            shield: 0.0,
+                        },
+                    ));
+                }
+                break;
+            }
 
             // Route damage through shields if present and any facing online.
             let (damage_to_hull, shield_amount) = if let Some(ref mut shields) = ship_shields_comp {
@@ -2242,6 +2262,18 @@ fn tick_blaster_auto_fire(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
+    let ship_count = ship_q.iter().len();
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+        "[DEBUG] tick_blaster_auto_fire: {} ship(s) in query",
+        ship_count
+    )));
+    #[cfg(not(target_arch = "wasm32"))]
+    eprintln!(
+        "[DEBUG] tick_blaster_auto_fire: {} ship(s) in query",
+        ship_count
+    );
+
     for (
         control_sources,
         ship_config_opt,
@@ -2262,8 +2294,20 @@ fn tick_blaster_auto_fire(
             }
         };
         if !ai_controlled {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                "[DEBUG] tick_blaster_auto_fire: skipped — not AI controlled",
+            ));
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!("[DEBUG] tick_blaster_auto_fire: skipped — not AI controlled");
             continue;
         }
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+            "[DEBUG] tick_blaster_auto_fire: AI gate passed",
+        ));
+        #[cfg(not(target_arch = "wasm32"))]
+        eprintln!("[DEBUG] tick_blaster_auto_fire: AI gate passed");
 
         // Target selection: WeaponsTarget first, ShipAiMemory fallback for NPCs.
         let target_uuid: Option<String> =
@@ -2273,22 +2317,79 @@ fn tick_blaster_auto_fire(
                     .map(|u| u.to_string())
             });
         let Some(target_uuid) = target_uuid else {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                "[DEBUG] tick_blaster_auto_fire: skipped — no target UUID",
+            ));
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!("[DEBUG] tick_blaster_auto_fire: skipped — no target UUID");
             continue;
         };
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+            "[DEBUG] tick_blaster_auto_fire: target UUID = {}",
+            target_uuid
+        )));
+        #[cfg(not(target_arch = "wasm32"))]
+        eprintln!(
+            "[DEBUG] tick_blaster_auto_fire: target UUID = {}",
+            target_uuid
+        );
+
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+                "[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive",
+                target_uuid
+            )));
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!(
+                "[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive",
+                target_uuid
+            );
             continue;
         };
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+            "[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})",
+            tx, tz
+        )));
+        #[cfg(not(target_arch = "wasm32"))]
+        eprintln!(
+            "[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})",
+            tx, tz
+        );
 
         for bank in blaster_res.0.iter_mut() {
             // Skip banks that are not ready to accept a new fire command.
             if !bank.is_fire_ready() {
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                    "[DEBUG] tick_blaster_auto_fire: bank not fire-ready, skipping",
+                ));
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("[DEBUG] tick_blaster_auto_fire: bank not fire-ready, skipping");
                 continue;
             }
 
             // Range check.
             let dx = tx - physics.x;
             let dz = tz - physics.z;
-            if dx * dx + dz * dz > bank.config.range * bank.config.range {
+            let dist_sq = dx * dx + dz * dz;
+            let range_sq = bank.config.range * bank.config.range;
+            if dist_sq > range_sq {
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+                    "[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})",
+                    dist_sq.sqrt(),
+                    range_sq.sqrt()
+                )));
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!(
+                    "[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})",
+                    dist_sq.sqrt(),
+                    range_sq.sqrt()
+                );
                 continue;
             }
 
@@ -2301,9 +2402,21 @@ fn tick_blaster_auto_fire(
                 bank.config.facing_deg,
                 bank.config.fire_arc_deg,
             ) {
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                    &format!("[DEBUG] tick_blaster_auto_fire: bank out of arc (local=({:.1},{:.1}), facing={}, arc={})", rx, ry, bank.config.facing_deg, bank.config.fire_arc_deg),
+                ));
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("[DEBUG] tick_blaster_auto_fire: bank out of arc (local=({:.1},{:.1}), facing={}, arc={})", rx, ry, bank.config.facing_deg, bank.config.fire_arc_deg);
                 continue;
             }
 
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
+                "[DEBUG] tick_blaster_auto_fire: FIRING!",
+            ));
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!("[DEBUG] tick_blaster_auto_fire: FIRING!");
             bank.request_charge_start();
         }
     }
@@ -2317,6 +2430,8 @@ fn tick_blaster_system(
     mut ship_q: Query<
         (
             Option<&crate::entity_spawner::EntityUuid>,
+            &Transform,
+            Option<&ModelMarkers>,
             &mut ShipPhysics,
             Option<&WeaponsTarget>,
             &mut BlasterSystemResource,
@@ -2339,7 +2454,7 @@ fn tick_blaster_system(
     // main loop uses `ship_q.iter_mut()`, avoiding a Bevy SystemParam conflict.
     let ship_velocities: std::collections::HashMap<String, (f32, f32)> = {
         let mut map = std::collections::HashMap::new();
-        for (uuid_opt, physics, _, _) in ship_q.iter() {
+        for (uuid_opt, _, _, physics, _, _) in ship_q.iter() {
             if let Some(uuid) = uuid_opt {
                 let vx = physics.forward_speed * physics.yaw.sin();
                 let vz = -physics.forward_speed * physics.yaw.cos();
@@ -2349,7 +2464,15 @@ fn tick_blaster_system(
         map
     };
 
-    for (source_uuid_opt, mut physics, weapons_target_opt, mut blaster_res) in ship_q.iter_mut() {
+    for (
+        source_uuid_opt,
+        transform,
+        markers_opt,
+        mut physics,
+        weapons_target_opt,
+        mut blaster_res,
+    ) in ship_q.iter_mut()
+    {
         let source_uuid = source_uuid_opt
             .map(|u| u.0.as_str())
             .unwrap_or("")
@@ -2381,10 +2504,24 @@ fn tick_blaster_system(
             let visual_scale = bank.config.visual_scale;
             let recoil_impulse = bank.config.recoil_impulse;
             let screenshake_magnitude = bank.config.screenshake_magnitude;
+
+            // Named rig marker takes priority for the projectile's spawn
+            // origin; falls back to ship center when the bank has no marker
+            // or the model's sidecar doesn't define it.
+            let (origin_x, origin_z) = bank
+                .config
+                .marker
+                .as_deref()
+                .and_then(|name| {
+                    markers_opt.and_then(|m| m.resolve_world_position(transform, name))
+                })
+                .map(|pos| (pos.x, pos.z))
+                .unwrap_or((physics.x, physics.z));
+
             let events = bank.tick(
                 dt,
-                physics.x,
-                physics.z,
+                origin_x,
+                origin_z,
                 physics.yaw,
                 target_x,
                 target_z,
@@ -2537,6 +2674,18 @@ fn handle_blaster_hits(
                 || ent_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str());
             if !uuid_matches {
                 continue;
+            }
+
+            // God mode: local ship takes no damage.
+            if is_local && crate::bridge::is_god_mode() {
+                outbox.0.push((
+                    Target::All,
+                    ServerMessage::DamageTaken {
+                        hull: 0.0,
+                        shield: 0.0,
+                    },
+                ));
+                break;
             }
 
             let mut hull_damage = det.damage as f32;
@@ -3135,6 +3284,19 @@ fn operate_tactical_ai(
         };
         if let Some(uuid) = objective_target.or_else(|| last_attacker.0.clone()) {
             weapons_target.0 = Some(uuid);
+        }
+
+        // Stale-target guard: if WeaponsTarget points to an entity that no
+        // longer exists in the world, clear it. This prevents AI from sitting
+        // idle after its last Destroy-objective target is killed — without this
+        // guard, tick_phaser_auto_fire and the torpedo path both skip on the
+        // dead entity UUID and never acquire a fresh target.
+        if let Some(ref current) = weapons_target.0 {
+            let alive = asteroid_q.iter().any(|(u, _)| u.0 == *current)
+                || other_ships_q.iter().any(|(u, _, _)| u.0 == *current);
+            if !alive {
+                weapons_target.0 = None;
+            }
         }
 
         // ── TORPEDO AUTO-FIRE (future: split to torpedo_tube system) ─────
@@ -7570,6 +7732,28 @@ station = "tactical"
     }
 
     #[test]
+    fn tactical_ai_clears_stale_weapons_target_when_objective_target_dead() {
+        let mut app = test_app();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        // Pre-set a stale target UUID — simulates a prior Destroy objective
+        // whose entity was killed.
+        set_weapons_target(&mut app, Some("dead-target-uuid".into()));
+        // No last attacker.
+        // Still have a Destroy objective for a target that is no longer alive.
+        insert_destroy_objective_blackboard(&mut app, "wave_gone", 80.0);
+        // No entity named "wave_gone" exists → resolve returns None.
+
+        tick(&mut app);
+
+        assert!(
+            get_weapons_target(&mut app).is_none(),
+            "Tactical AI must clear WeaponsTarget when the objective target is \
+             dead and no last attacker is available, fixing the stale-target bug \
+             that caused AI to sit idle after killing its last target"
+        );
+    }
+
+    #[test]
     fn tactical_ai_ignores_missing_destroy_objective_target() {
         let mut app = test_app();
         set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
@@ -8762,6 +8946,7 @@ ai_only = true
                 yaw: 0.0,
                 forward_speed: 0.0,
                 roll: 0.0,
+                lateral_speed: 0.0,
             },
             Transform::from_xyz(x, 0.0, z),
             GlobalTransform::default(),

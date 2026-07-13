@@ -13,7 +13,8 @@
     .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
     .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
     .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
-    ph-tactical-radar { flex: 1; min-height: 0; }
+    ph-tactical-radar { width: 100%; aspect-ratio: 1 / 1; }
+    @media (orientation: landscape) { ph-tactical-radar { height: 100%; width: auto; } }
     ph-phasers-controls, ph-torpedo-controls { flex-shrink: 0; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
@@ -41,6 +42,7 @@
         <span class="sep">·</span>
         <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
         <span class="spacer"></span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
@@ -49,6 +51,7 @@
     import '../components/ph-tactical-radar.js';
     import '../components/ph-phasers-controls.js';
     import '../components/ph-torpedo-controls.js';
+    import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
@@ -57,13 +60,14 @@
         var r = document.getElementById('tactical-radar');
         var p = document.getElementById('phasers-controls');
         var t = document.getElementById('torpedo-controls');
-        r.state = { blips: s.blips || [], ship_heading: 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null };
-        p.state = { banks: s.banks || [], target_valid: !!s.target_uuid };
-        t.state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 } };
+        r.state = { blips: s.blips || [], x: s.ship_x || 0, z: s.ship_z || 0, heading: s.ship_heading || 0, speed: s.ship_speed || 0, ship_heading: s.ship_heading || 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null };
+        p.state = { banks: s.banks || [], target_valid: !!s.target_uuid, mode: s.phaser_mode || 'Auto' };
+        t.state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 }, target_uuid: s.target_uuid || null };
         var tn = s.target_name ? s.target_name : (s.target_uuid ? 'LOCKED' : 'NO TARGET');
         document.getElementById('footer-target').textContent = tn;
         document.getElementById('footer-target').style.color = s.target_uuid ? 'var(--fire-bright)' : 'var(--ink-faint)';
         setAutoState(null, document.getElementById('tactical-auto-badge'), !!(s.tactical_auto || false));
+        document.getElementById('station-damage').state = s.own_hull || null;
       }
     });
   </script>

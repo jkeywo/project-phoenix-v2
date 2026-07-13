@@ -164,6 +164,38 @@ describe('apply phase transitions', () => {
     expect(s.phase).toBe('GameOver');
     expect(s.gameOverReason).toBe('Ship destroyed');
   });
+
+  it('ReturnedToLobby sets phase to Lobby and waitingForScenario to true', () => {
+    const s = new LobbyState();
+    s.phase = 'GameOver';
+    s.gameOverReason = 'All consoles destroyed';
+    s.apply({ type: 'ReturnedToLobby' });
+    expect(s.phase).toBe('Lobby');
+    expect(s.gameOverReason).toBeNull();
+    expect(s.waitingForScenario).toBe(true);
+  });
+
+  it('ScenarioLoaded clears waitingForScenario', () => {
+    const s = new LobbyState();
+    s.waitingForScenario = true;
+    s.apply({ type: 'ScenarioLoaded' });
+    expect(s.waitingForScenario).toBe(false);
+    expect(s.phase).toBe('Lobby');
+  });
+
+  it('Welcome clears waitingForScenario via replaceFrom', () => {
+    const s = new LobbyState();
+    s.waitingForScenario = true;
+    s.apply({
+      type: 'Welcome',
+      data: {
+        state: { phase: 'Lobby', players: [], world: null },
+        ship_stations: { stations: [] },
+        ship_config: {},
+      },
+    });
+    expect(s.waitingForScenario).toBe(false);
+  });
 });
 
 describe('ComplexityChanged is ignored (retired message)', () => {

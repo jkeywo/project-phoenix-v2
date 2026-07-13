@@ -521,6 +521,16 @@ pub fn spawn_entity(
                 acceleration: hc.acceleration,
                 deceleration: hc.deceleration,
                 max_yaw_rate: hc.max_yaw_rate,
+                max_lateral_speed: hc
+                    .lateral_thrust
+                    .as_ref()
+                    .map(|lt| lt.max_lateral_speed)
+                    .unwrap_or(15.0),
+                lateral_acceleration: hc
+                    .lateral_thrust
+                    .as_ref()
+                    .map(|lt| lt.lateral_acceleration)
+                    .unwrap_or(15.0),
             },
         ));
         // Impulse config
@@ -528,6 +538,8 @@ pub fn spawn_entity(
             charge_duration: hc.impulse_charge_duration,
             speed_multiplier: hc.impulse_speed_multiplier,
             acceleration_multiplier: hc.impulse_acceleration_multiplier,
+            engage_distance: hc.impulse_engage_distance,
+            cancel_distance: hc.impulse_cancel_distance,
         });
         // Boost config (disabled when [helm_console.boost] is absent)
         let boost_cfg = hc

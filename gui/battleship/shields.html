@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix - Shields Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .hero h1 { margin: 0; font-size: 26px; letter-spacing: 0.22em; color: var(--ink); }
+    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .panel-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; overflow-y: auto; }
+    .metric { display: flex; justify-content: space-between; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); }
+    .metric strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 16px; }
+    #threat-row { visibility: hidden; }
+    #threat-row.active { visibility: visible; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Shields Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>SHIELDS<span class="sub">DEFENSIVE GRID</span></h1>
+        <span class="auto-badge" id="shields-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="panel-col">
+          <div class="metric"><span>Hull</span><strong id="hull-tag">100%</strong></div>
+          <div class="metric"><span>Focus</span><strong id="focus-display">OMNI</strong></div>
+          <div class="metric"><span>Grid</span><strong id="footer-grid">GRID NOMINAL</strong></div>
+          <div class="metric" id="threat-row"><span>Threat Bearing</span><strong id="threat-bearing">—</strong></div>
+          <ph-shield-panel id="shield-panel"></ph-shield-panel>
+        </div>
+        <div class="panel-col">
+          <ph-shield-facings id="shield-facings"></ph-shield-facings>
+          <ph-station-damage id="station-damage"></ph-station-damage>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span>SHIELDS STATION</span>
+        <span class="spacer"></span>
+        <span id="footer-focus">OMNI</span>
+        <span id="hull-val">100%</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-shield-panel.js';
+    import '../components/ph-shield-facings.js';
+    import '../components/ph-station-damage.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+    initConsole({
+      name: 'shields',
+      render: function(s) {
+        var hullPct = Math.round(s.hull_integrity_pct != null ? s.hull_integrity_pct : 100);
+        document.getElementById('shield-panel').state = s;
+        document.getElementById('shield-facings').state = { facings: s.facings || [], focused_facing: s.focused_facing || null, auto: !!s.shields_auto };
+        document.getElementById('station-damage').state = s.own_hull || null;
+        document.getElementById('hull-tag').textContent = hullPct + '%';
+        document.getElementById('hull-val').textContent = hullPct + '%';
+        document.getElementById('focus-display').textContent = s.focused_facing || 'OMNI';
+        document.getElementById('footer-focus').textContent = s.focused_facing || 'OMNI';
+        document.getElementById('footer-grid').textContent = s.grid_status || 'GRID NOMINAL';
+        var threatRow = document.getElementById('threat-row');
+        if (s.target_bearing != null) {
+          threatRow.classList.add('active');
+          document.getElementById('threat-bearing').textContent = Math.round(s.target_bearing) + '°M';
+        } else {
+          threatRow.classList.remove('active');
+          document.getElementById('threat-bearing').textContent = '—';
+        }
+        setAutoState(null, document.getElementById('shields-auto-badge'), !!s.shields_auto);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -21,6 +21,7 @@ export class PhShieldFacings extends HTMLElement {
     .arc-path:hover { filter: brightness(1.3); }
     .arc-path.focused { filter: brightness(1.5) drop-shadow(0 0 4px var(--loaded)); }
     .arc-path.down { opacity: 0.3; cursor: default; }
+    .hp-fill, .hp-text { pointer-events: none; }
     .facing-label { font-size: 0.55rem; fill: var(--ink-dim); text-anchor: middle; pointer-events: none; }
     .facing-label.focused-label { fill: var(--ink); font-weight: 600; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }

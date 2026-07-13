@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix - Navigation Console</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .hero h1 { margin: 0; font-size: 26px; letter-spacing: 0.22em; color: var(--ink); }
+    .hero h1 .sub { display: block; font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+    .console-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+    .map-col { min-height: 0; display: flex; flex-direction: column; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; gap: 10px; }
+    .map-wrap { flex: 1; min-height: 0; }
+    #map-canvas { width: 100%; height: 100%; display: block; min-height: 280px; }
+    .side-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    .side-panel { min-height: 0; display: flex; flex-direction: column; gap: 10px; background: rgba(14,17,23,0.6); border: 1px solid var(--edge); padding: 12px; }
+    .metric { display: flex; justify-content: space-between; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); }
+    .metric strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 16px; }
+    .btn-row { display: flex; gap: 8px; }
+    .btn-row button { flex: 1; margin: 0; }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: 20px; } .hero h1 .sub { font-size: 10px; } .console-body { grid-template-columns: 1fr; gap: 8px; overflow-y: auto; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Navigation Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>NAVIGATION<span class="sub">COURSE &amp; WAYPOINTS</span></h1>
+        <span class="auto-badge" id="navigation-auto-badge" hidden>AUTO</span>
+      </div>
+      <div class="console-body">
+        <div class="map-col">
+          <div class="btn-row">
+            <button class="btn" id="btn-on-screen" type="button"><span class="btn-bg"></span><span class="label">On Screen</span></button>
+            <button class="btn" id="btn-clear-waypoint" type="button"><span class="btn-bg"></span><span class="label">Clear Waypoint</span></button>
+          </div>
+          <div class="map-wrap" id="map-canvas">
+            <ph-navigation-map id="navigation-map"></ph-navigation-map>
+          </div>
+        </div>
+        <div class="side-col">
+          <div class="side-panel">
+            <div class="metric"><span>Selected</span><strong id="ent-name">NONE</strong></div>
+            <div class="metric"><span>Waypoint</span><strong id="waypoint-name">NOT SET</strong></div>
+            <div class="metric"><span>Contacts</span><strong id="nav-contact-count">0</strong></div>
+          </div>
+          <div class="side-panel" style="flex:1">
+            <ph-objective-list id="objective-list"></ph-objective-list>
+          </div>
+        </div>
+      </div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span>NAVIGATION STATION</span>
+        <span class="spacer"></span>
+        <span id="footer-target">NO WAYPOINT</span>
+        <ph-station-damage id="station-damage"></ph-station-damage>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-navigation-map.js';
+    import '../components/ph-objective-list.js';
+    import '../components/ph-station-damage.js';
+    import { initConsole } from '../console-core.js';
+    import { setAutoState } from '../console-ui.js';
+
+    var currentState = {};
+    var consoleApi = initConsole({
+      name: 'navigation',
+      render: function(s) {
+        currentState = s || {};
+        document.getElementById('navigation-map').state = { blips: s.blips || [], range: s.radar_range || 5000, ship_pos: { x: s.ship_x || 0, z: s.ship_z || 0 }, ship_heading: s.ship_heading || 0, waypoint: s.waypoint || null };
+        document.getElementById('objective-list').state = { objectives: s.objectives || [] };
+        document.getElementById('station-damage').state = s.own_hull || null;
+        document.getElementById('nav-contact-count').textContent = String((s.blips || []).length);
+        var wpName = s.waypoint && s.waypoint.name ? s.waypoint.name : (s.waypoint ? 'WAYPOINT' : 'NOT SET');
+        document.getElementById('waypoint-name').textContent = wpName;
+        document.getElementById('footer-target').textContent = wpName;
+        setAutoState(document.getElementById('btn-on-screen'), document.getElementById('navigation-auto-badge'), !!s.navigation_auto);
+      }
+    });
+
+    var navMap = document.getElementById('navigation-map');
+    var originalSendAction = navMap.sendAction;
+    navMap.sendAction = function(action, payload) {
+      if (action === 'set_navigation_waypoint' && payload && payload.source_uuid) {
+        var match = (currentState.blips || []).find(function(b) { return b.uuid === payload.source_uuid; });
+        document.getElementById('ent-name').textContent = match && match.name ? match.name : payload.source_uuid;
+      } else if (action === 'set_navigation_waypoint') {
+        document.getElementById('ent-name').textContent = 'CUSTOM';
+      }
+      return originalSendAction.call(this, action, payload);
+    };
+
+    document.getElementById('btn-clear-waypoint').addEventListener('click', function() {
+      consoleApi.sendAction('clear_navigation_waypoint', {});
+      document.getElementById('ent-name').textContent = 'NONE';
+    });
+    document.getElementById('btn-on-screen').addEventListener('click', function() {
+      consoleApi.sendAction('set_navigation_chart', {});
+    });
+  </script>
+</body>
+</html>

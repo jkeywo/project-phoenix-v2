@@ -31,6 +31,9 @@ struct HelmInputTimer(Timer);
 
 const HELM_AI_MAX_DT_SECS: f32 = 1.0 / 30.0;
 
+#[derive(Resource)]
+struct AiLateralThrustTimer(Timer);
+
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct LastHelmInput {
     pub thrust: f32,
@@ -276,12 +279,20 @@ impl Plugin for ShipPlugin {
         .init_resource::<BankConfigResource>()
         .add_message::<CoordinationEnqueue>()
         .add_message::<AiChatterEvent>()
+        .insert_resource(AiLateralThrustTimer(Timer::from_seconds(
+            1.0 / 30.0,
+            TimerMode::Repeating,
+        )))
         .add_systems(
             Update,
             (
                 operate_helm_ai
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel),
+                operate_lateral_thrust_ai
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(operate_helm_ai)
+                    .before(process_helm_inputs),
                 process_helm_inputs
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(operate_helm_ai)
@@ -899,6 +910,117 @@ fn detect_reached_objective_completion(
             let dz = target[2] - physics.z;
             if (dx * dx + dz * dz).sqrt() < crate::ai::WAYPOINT_ARRIVAL_RADIUS {
                 objectives.0.complete(&obj.snapshot.id);
+            }
+        }
+    }
+}
+
+// ── Dedicated AI lateral thrust (issue #697) ──────────────────────────────────
+// Runs when the lateral thrust system is under AI control (e.g. "Simplified"
+// rating) but the main helm is human-controlled. In the "Backfill" or full-AI
+// case, `operate_helm_ai` already handles lateral thrust — this system fills
+// the gap for partial automation where only lateral thrust is AI-driven.
+
+/// Runs AI lateral thrust for ships where the lateral thrust system is
+/// under AI control but the main helm is human-controlled.
+///
+/// When the main helm is also AI-controlled, `operate_helm_ai` already
+/// handles lateral thrust for obstacle avoidance. This system fills the
+/// gap for the "Simplified" rating pattern where only the lateral thrust
+/// system is automated.
+fn operate_lateral_thrust_ai(
+    time: Res<Time>,
+    mut timer: ResMut<AiLateralThrustTimer>,
+    mut local_ship_input: Query<&mut LastHelmInput, With<crate::server_app::LocalShip>>,
+    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
+    ships: Query<(
+        &ShipSystemControlSources,
+        &crate::server_app::ShipSystemBlackboards,
+        &ShipPhysics,
+        Option<&crate::entities::spawner::ColliderSection>,
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&crate::entities::spawner::FactionComponent>,
+        Has<crate::server_app::LocalShip>,
+    )>,
+) {
+    let Some(ref snapshot) = world_snapshot else {
+        return;
+    };
+    if !timer.0.tick(time.delta()).just_finished() {
+        return;
+    }
+
+    let snapshot_entities: Vec<crate::ai::AiWorldEntity> = snapshot.entities.clone();
+
+    for (
+        sources,
+        blackboards,
+        physics,
+        collider,
+        entity_uuid,
+        faction,
+        is_local,
+    ) in ships.iter() {
+        // Only run when lateral thrust is AI-controlled but the main helm is not
+        // (if helm is also AI, operate_helm_ai already handles it).
+        let lt_policy = sources
+            .0
+            .policy_for(&crate::system_registry::lateral_thrust_system_id());
+        if !lt_policy.operate_ai {
+            continue;
+        }
+        if helm_control_policy(sources).operate_ai {
+            continue;
+        }
+
+        use crate::messages::{ScoredObjective, SystemAffinity, SystemBlackboard};
+
+        // Get scored objectives from the viewscreen blackboard.
+        let scored: Vec<ScoredObjective> =
+            match blackboards.0.get(&crate::system_registry::viewscreen_system_id()) {
+                Some(SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+                _ => Vec::new(),
+            };
+
+        let has_helm_objective = scored
+            .iter()
+            .any(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm));
+        if !has_helm_objective {
+            continue;
+        }
+
+        // Build a world view from the snapshot, filtering out self.
+        let self_pos = [physics.x, 0.0, physics.z];
+        let self_uuid_str = entity_uuid.map(|u| u.0.as_str()).unwrap_or("");
+        let self_filtered: Vec<crate::ai::AiWorldEntity> = snapshot_entities
+            .iter()
+            .filter(|e| e.uuid.to_string() != self_uuid_str)
+            .cloned()
+            .collect();
+
+        let entities = crate::ai::visible_entities(self_pos, 0.0, &self_filtered);
+        let world_view = crate::ai::WorldView {
+            entity_pos: self_pos,
+            entity_yaw: physics.yaw,
+            entities,
+            self_faction: faction.map(|f| f.0),
+            self_radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+            ..Default::default()
+        };
+
+        let lateral = crate::ai::operate_lateral_thrust(
+            &world_view,
+            &scored,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            physics.forward_speed,
+        );
+
+        // For the player ship: write to LastHelmInput so process_helm_inputs
+        // picks up the AI-driven lateral intent.
+        if is_local {
+            if let Some(mut li) = local_ship_input.iter_mut().next() {
+                li.lateral = lateral;
             }
         }
     }

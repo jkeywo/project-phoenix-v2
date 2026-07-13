@@ -843,7 +843,7 @@
     // -- Click sound --------------------------------------------------------
     // Message types that should NOT trigger a click (continuous / connection
     // setup messages that are not the result of a deliberate button press).
-    const NO_CLICK = new Set(['HelmInput', 'Identify', 'SetName']);
+    const NO_CLICK = new Set(['HelmInput', 'LateralThrustInput', 'Identify', 'SetName']);
 
     function playClick() {
       const el = document.getElementById('ui-click');

@@ -616,7 +616,10 @@ impl TorpedoSystem {
         for i in 0..n_tubes {
             let tube = &self.tubes[i];
             if tube.target_count > 0
-                && !matches!(tube.load_state, TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. })
+                && !matches!(
+                    tube.load_state,
+                    TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. }
+                )
                 && tube.loaded_count < tube.target_count
                 && tube.loaded_count < tube.volley_max
                 && self.torpedoes_remaining > 0
@@ -631,8 +634,10 @@ impl TorpedoSystem {
         // Ã¢â€â‚¬Ã¢â€â‚¬ Auto-unload toward target_count Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         for i in 0..n_tubes {
             let tube = &self.tubes[i];
-            if !matches!(tube.load_state, TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. })
-                && tube.loaded_count > tube.target_count
+            if !matches!(
+                tube.load_state,
+                TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. }
+            ) && tube.loaded_count > tube.target_count
             {
                 let lt = tube.load_time;
                 self.tubes[i].load_state = TubeLoadState::Unloading {

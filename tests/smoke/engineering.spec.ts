@@ -78,7 +78,8 @@ test('total hull starts at 206 in first SystemHullUpdate', async ({ context }) =
   // + 20 (alliance_battleship/destroyer hull added in #639/#640/#641) = 231.
   // - 25 (coarse Helm/Tactical/Torpedo-Magazine entries replaced by the
   // smaller helm-radar/tactical-radar/sensor-radar entries) = 206.
-  expect(total).toBe(206);
+  // + 10 (Lateral Thrusters hull system added to cruiser/destroyer) = 216.
+  expect(total).toBe(216);
 
   await captain.close();
   await engineer.close();

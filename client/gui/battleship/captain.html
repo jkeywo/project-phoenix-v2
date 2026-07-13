@@ -72,7 +72,7 @@
         // captain+sensors console). Read flat, matching gui/cruiser/captain.html.
         document.getElementById('camera-select').state = { views: s.camera_views || [], current_view: s.view_direction || '', auto: !!s.viewscreen_auto };
         document.getElementById('red-alert').state = { active: !!s.red_alert, auto: !!s.red_alert_auto };
-        document.getElementById('objective-list').state = { objectives: s.objectives || [] };
+        document.getElementById('objective-list').state = { objectives: s.objectives || [], boosted_objective_id: s.boosted_objective_id ?? null };
         document.getElementById('station-damage').state = s.own_hull || null;
         var contacts = (s.blips && s.blips.length) || 0;
         document.getElementById('footer-target').textContent = contacts > 0 ? contacts + ' CONTACTS' : 'NO TARGET';

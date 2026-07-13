@@ -131,6 +131,15 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /** Toggle Captain priority boost on an objective (issue #675). */
+  set_objective_priority: (a, send) => {
+    if (!a.id) return;
+    send('ControlSystem', {
+      target: 'captain',
+      payload: { type: 'SetObjectivePriority', data: { id: a.id } },
+    });
+  },
+
   /** Send helm thrust / steering inputs. */
   helm_input: (a, send) => {
     send('ControlSystem', {

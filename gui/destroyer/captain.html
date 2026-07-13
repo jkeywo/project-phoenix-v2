@@ -95,7 +95,7 @@
           var cap = s.captain;
           cameraEl.state = { views: cap.camera_views || [], current_view: cap.view_direction || '', auto: cap.viewscreen_auto || false };
           redAlertEl.state = { active: !!cap.red_alert, auto: cap.red_alert_auto || false };
-          objectiveEl.state = { objectives: cap.objectives || [] };
+          objectiveEl.state = { objectives: cap.objectives || [], boosted_objective_id: cap.boosted_objective_id ?? null };
         }
         if (s.sensors) {
           sensorRadarEl.state = s.sensors;

@@ -78,7 +78,6 @@ export class ClientSimState {
     this.phaserMode = 'Auto';
     this.lastPhaserTarget = null;
     this.scienceTargetSuggestion = null;
-    this.sensorsTargetSuggestion = null;
     /** Latest ShieldFacingStatus list. */
     this.shieldFacings = [];
     this.torpedoCount = 10;
@@ -217,9 +216,6 @@ export class ClientSimState {
         this.torpedoCount = typeof d.torpedo_count === 'number' ? d.torpedo_count : 0;
         this.phaserMode = d.phaser_mode || 'Auto';
         if (d.blasters != null) this.blasterBanks = d.blasters;
-        break;
-      case 'SensorsTargetSuggestion':
-        this.sensorsTargetSuggestion = d.uuid;
         break;
       case 'ShieldStatus':
         this.shieldFacings = d.facings || [];

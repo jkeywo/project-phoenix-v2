@@ -20,13 +20,17 @@ export class PhObjectiveList extends HTMLElement {
     .row .indicator.pending { background: transparent; border-color: #4a5060; }
     .row .text { flex: 1; min-width: 0; }
     .row.done .text { text-decoration: line-through; color: var(--ink-dim); }
+    .row { cursor: pointer; border-radius: 2px; padding: 0.1rem 0.2rem; }
+    .row.boosted { background: #1a2a3a; border-left: 2px solid var(--cyan); }
   </style>
   <div class="list" id="list"></div>
 `;
     this.shadowRoot.appendChild(t.content.cloneNode(true));
   }
 
-  connectedCallback() {}
+  connectedCallback() {
+    this.sendAction ??= window.sendAction;
+  }
 
   set state(val) {
     this.#state = val;
@@ -51,18 +55,26 @@ export class PhObjectiveList extends HTMLElement {
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
 
+    const boostedId = s.boosted_objective_id ?? null;
+
     raw.forEach(o => {
       const key = o.id || o.text || '';
       const done = o.done != null ? o.done : (o.status === 'Completed');
       const text = o.text || '';
+      const boosted = key !== '' && boostedId === key;
       let el = this.#rowCache.get(key);
       if (!el) {
         el = document.createElement('div');
         el.innerHTML = '<span class="indicator"></span><span class="text"></span>';
+        el.addEventListener('click', () => {
+          if (this.sendAction && key) {
+            this.sendAction('set_objective_priority', { id: key });
+          }
+        });
         this.#rowCache.set(key, el);
         list.appendChild(el);
       }
-      el.className = done ? 'row done' : 'row';
+      el.className = ['row', done && 'done', boosted && 'boosted'].filter(Boolean).join(' ');
       el.firstChild.className = done ? 'indicator done' : 'indicator pending';
       el.lastChild.textContent = text;
     });

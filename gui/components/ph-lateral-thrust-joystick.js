@@ -124,6 +124,7 @@ export class PhLateralThrustJoystick extends HTMLElement {
       this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
     }
     this.#setFromPointer(e.clientX);
+    this.#sendAction();
     e.preventDefault();
   };
 
@@ -141,6 +142,7 @@ export class PhLateralThrustJoystick extends HTMLElement {
   #onMove = (e) => {
     if (e.pointerId !== this.#pointerId) return;
     this.#setFromPointer(e.clientX);
+    this.#sendAction();
   };
 
   #onUp = (e) => {

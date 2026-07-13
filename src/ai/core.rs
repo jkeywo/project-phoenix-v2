@@ -817,6 +817,90 @@ impl CaptainAi {
     pub fn coordinate(&self) {}
 }
 
+// ── operate_lateral_thrust ────────────────────────────────────────────────────
+
+/// Per-system operate function for the Helm Lateral Thrust system.
+///
+/// Returns a lateral input value in `[-1.0, 1.0]` for obstacle avoidance.
+/// A positive value pushes the ship to starboard; a negative value pushes to port.
+/// The AI checks all visible entities in `world_view` for potential collisions
+/// and applies lateral thrust to dodge the nearest threat.
+///
+/// Returns `0.0` when no avoidance is needed or no suitable objective is active.
+pub fn operate_lateral_thrust(
+    world_view: &WorldView,
+    scored_pool: &[crate::messages::ScoredObjective],
+    avoidance_buffer: f32,
+    avoidance_look_ahead_secs: f32,
+    forward_speed: f32,
+) -> f32 {
+    use crate::messages::SystemAffinity;
+
+    // Only dodge when a helm-relevant objective is active.
+    let has_helm_objective = scored_pool
+        .iter()
+        .any(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm));
+    if !has_helm_objective {
+        return 0.0;
+    }
+
+    if world_view.entities.is_empty() {
+        return 0.0;
+    }
+
+    let self_pos = world_view.entity_pos;
+    let self_yaw = world_view.entity_yaw;
+    let self_radius = world_view.self_radius;
+
+    // Find the nearest threat within avoidance range.
+    // A "threat" is any entity with a nonzero radius that could collide.
+    let fwd_x = self_yaw.sin();
+    let fwd_z = -self_yaw.cos();
+
+    let mut best_threat = 0.0_f32;
+    let mut best_sign = 0.0_f32;
+
+    for entity in &world_view.entities {
+        let avoidance_radius = self_radius + entity.radius + avoidance_buffer;
+
+        // Project both entities forward.
+        let proj_self_x = self_pos[0] + fwd_x * forward_speed * avoidance_look_ahead_secs;
+        let proj_self_z = self_pos[2] + fwd_z * forward_speed * avoidance_look_ahead_secs;
+
+        let (ent_proj_x, ent_proj_z) = if let Some(ent_yaw) = entity.yaw {
+            let ent_fwd_x = ent_yaw.sin();
+            let ent_fwd_z = -ent_yaw.cos();
+            (
+                entity.position[0] + ent_fwd_x * entity.forward_speed * avoidance_look_ahead_secs,
+                entity.position[2] + ent_fwd_z * entity.forward_speed * avoidance_look_ahead_secs,
+            )
+        } else {
+            (entity.position[0], entity.position[2])
+        };
+
+        let ddx = proj_self_x - ent_proj_x;
+        let ddz = proj_self_z - ent_proj_z;
+        let proj_dist = (ddx * ddx + ddz * ddz).sqrt();
+
+        if proj_dist < avoidance_radius && proj_dist > 0.01 {
+            let threat_fraction = 1.0 - (proj_dist / avoidance_radius);
+            let to_x = ent_proj_x - proj_self_x;
+            let to_z = ent_proj_z - proj_self_z;
+            let cross = fwd_x * to_z - fwd_z * to_x;
+
+            // Cross product sign: positive = threat is to the left → dodge right (+).
+            let sign = if cross >= 0.0 { 1.0 } else { -1.0 };
+
+            if threat_fraction > best_threat {
+                best_threat = threat_fraction;
+                best_sign = sign;
+            }
+        }
+    }
+
+    best_sign * best_threat
+}
+
 // ── Unit Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

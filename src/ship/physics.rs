@@ -13,6 +13,8 @@ pub struct ShipPhysicsState {
     pub yaw: f32,
     /// Current forward speed (always >= 0)
     pub forward_speed: f32,
+    /// Current lateral (sideways) speed. Positive = starboard (+X), negative = port (-X).
+    pub lateral_speed: f32,
 }
 
 /// Helm input values.
@@ -22,6 +24,8 @@ pub struct ShipPhysicsInput {
     pub thrust: f32,
     /// Steering: -1.0 (full left) to 1.0 (full right)
     pub steering: f32,
+    /// Lateral thrust: -1.0 (full port) to 1.0 (full starboard). 0.0 coasts.
+    pub lateral: f32,
 }
 
 /// Result of physics computation.
@@ -35,6 +39,8 @@ pub struct ShipPhysicsResult {
     pub yaw: f32,
     /// New forward speed
     pub forward_speed: f32,
+    /// New lateral speed
+    pub lateral_speed: f32,
 }
 
 /// Physics tuning constants.
@@ -45,6 +51,8 @@ pub struct ShipPhysicsConfig {
     pub acceleration: f32,
     pub deceleration: f32,
     pub max_yaw_rate: f32,
+    pub max_lateral_speed: f32,
+    pub lateral_acceleration: f32,
 }
 
 impl Default for ShipPhysicsConfig {
@@ -61,6 +69,8 @@ impl ShipPhysicsConfig {
             acceleration: 25.0 / 3.0,
             deceleration: 25.0,
             max_yaw_rate: std::f32::consts::PI / 16.0,
+            max_lateral_speed: 15.0,
+            lateral_acceleration: 15.0,
         }
     }
 }
@@ -83,6 +93,7 @@ pub fn compute_physics(
     // Clamp inputs
     let thrust = input.thrust.clamp(-1.0, 1.0);
     let steering = input.steering.clamp(-1.0, 1.0);
+    let lateral_input = input.lateral.clamp(-1.0, 1.0);
 
     // Compute new forward speed (signed: positive = forward, negative = reverse).
     // - Non-zero thrust: drive speed toward (thrust * max_speed forward or max_reverse_speed reverse)
@@ -118,18 +129,33 @@ pub fn compute_physics(
     let yaw_change = steering * config.max_yaw_rate * dt;
     let new_yaw = state.yaw + yaw_change;
 
-    // Compute displacement based on new yaw and signed speed
+    // Compute lateral speed
+    let new_lateral_speed = crate::ship::lateral_thrust::compute_lateral_speed(
+        state.lateral_speed,
+        lateral_input,
+        dt,
+        &crate::ship::lateral_thrust::LateralThrustConfig {
+            max_lateral_speed: config.max_lateral_speed,
+            lateral_acceleration: config.lateral_acceleration,
+        },
+    );
+
+    // Compute displacement based on new yaw, signed speed, and lateral speed
     let fwd_x = new_yaw.sin();
     let fwd_z = -new_yaw.cos();
 
-    let new_x = state.x + fwd_x * new_speed * dt;
-    let new_z = state.z + fwd_z * new_speed * dt;
+    let (lat_dx, lat_dz) =
+        crate::ship::lateral_thrust::lateral_displacement(new_yaw, new_lateral_speed, dt);
+
+    let new_x = state.x + fwd_x * new_speed * dt + lat_dx;
+    let new_z = state.z + fwd_z * new_speed * dt + lat_dz;
 
     ShipPhysicsResult {
         x: new_x,
         z: new_z,
         yaw: new_yaw,
         forward_speed: new_speed,
+        lateral_speed: new_lateral_speed,
     }
 }
 
@@ -143,6 +169,7 @@ mod tests {
             z: 0.0,
             yaw: 0.0,
             forward_speed: 0.0,
+            lateral_speed: 0.0,
         }
     }
 
@@ -150,6 +177,7 @@ mod tests {
         ShipPhysicsInput {
             thrust: 0.0,
             steering: 0.0,
+            lateral: 0.0,
         }
     }
 
@@ -173,6 +201,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: 1.0,
             steering: 0.0,
+            lateral: 0.0,
         };
         // After 5 seconds of full thrust
         let result = compute_physics(state, input, 5.0, &config());
@@ -197,6 +226,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: 0.0,
             steering: 1.0,
+            lateral: 0.0,
         };
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.yaw > 0.0);
@@ -210,6 +240,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: 0.0,
             steering: -1.0,
+            lateral: 0.0,
         };
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.yaw < 0.0);
@@ -233,6 +264,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: 1.0,
             steering: 0.0,
+            lateral: 0.0,
         };
         let result = compute_physics(state, input, 0.016, &config());
         // Facing -Z direction, should move in -Z
@@ -246,6 +278,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: 1.0,
             steering: 1.0,
+            lateral: 0.0,
         };
         let result = compute_physics(state, input, 1.0, &config());
         // Should have both X and Z displacement
@@ -259,6 +292,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: 0.5,
             steering: 0.0,
+            lateral: 0.0,
         };
         let config = config();
         let dt_1 = compute_physics(state, input, 0.016, &config);
@@ -276,6 +310,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: 1.0,
             steering: 0.0,
+            lateral: 0.0,
         };
         // Long enough time to exceed max speed if not capped
         let result = compute_physics(state, input, 10.0, &config());
@@ -288,6 +323,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: -1.0,
             steering: 0.0,
+            lateral: 0.0,
         };
         let result = compute_physics(state, input, 5.0, &config());
         assert!(result.forward_speed <= -config().max_reverse_speed + 0.1);
@@ -304,6 +340,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: -1.0,
             steering: 0.0,
+            lateral: 0.0,
         };
         let result = compute_physics(state, input, 0.1, &config());
         assert!(result.forward_speed >= -config().max_reverse_speed - f32::EPSILON);
@@ -339,6 +376,7 @@ mod tests {
         let input = ShipPhysicsInput {
             thrust: 0.2,
             steering: 0.0,
+            lateral: 0.0,
         };
         let cfg = config();
         let target = 0.2 * cfg.max_speed;
@@ -350,6 +388,7 @@ mod tests {
             s.z = r.z;
             s.yaw = r.yaw;
             s.forward_speed = r.forward_speed;
+            s.lateral_speed = r.lateral_speed;
         }
         assert!(
             (s.forward_speed - target).abs() < 1.0,

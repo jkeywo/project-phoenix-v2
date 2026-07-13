@@ -521,6 +521,8 @@ pub fn spawn_entity(
                 acceleration: hc.acceleration,
                 deceleration: hc.deceleration,
                 max_yaw_rate: hc.max_yaw_rate,
+                max_lateral_speed: hc.lateral_thrust.as_ref().map(|lt| lt.max_lateral_speed).unwrap_or(15.0),
+                lateral_acceleration: hc.lateral_thrust.as_ref().map(|lt| lt.lateral_acceleration).unwrap_or(15.0),
             },
         ));
         // Impulse config

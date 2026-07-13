@@ -5,6 +5,7 @@ pub mod control_source;
 pub mod coordination;
 pub mod damage;
 pub mod impulse;
+pub mod lateral_thrust;
 pub mod physics;
 pub mod power;
 pub mod rating;

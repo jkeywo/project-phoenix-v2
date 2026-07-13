@@ -111,6 +111,11 @@ pub const HELM_IMPULSE_KIND: &str = "helm_impulse";
 pub const HELM_IMPULSE_SYSTEM_ID: &str = "helm-impulse";
 pub const HELM_IMPULSE_AI_CONTROLLER: &str = "helm_impulse_ai";
 
+/// Wire `SystemId` for the Helm Lateral Thrust fine system.
+pub const LATERAL_THRUST_KIND: &str = "lateral_thrust";
+pub const LATERAL_THRUST_SYSTEM_ID: &str = "helm-lateral-thrust";
+pub const LATERAL_THRUST_AI_CONTROLLER: &str = "lateral_thrust_ai";
+
 // ── Fine-grained Tactical systems (issue #512) ────────────────────────────────
 //
 // The coarse `tactical` kind is DELETED from the runtime registry in favour of
@@ -347,6 +352,10 @@ impl SystemKindRegistry {
             HELM_IMPULSE_KIND,
             AiControllerRegistration::new(HELM_IMPULSE_AI_CONTROLLER)?,
         )?;
+        registry.register(
+            LATERAL_THRUST_KIND,
+            AiControllerRegistration::new(LATERAL_THRUST_AI_CONTROLLER)?,
+        )?;
         // Fine-grained Tactical systems (issue #512)
         registry.register(
             PHASER_BANK_KIND,
@@ -510,6 +519,10 @@ pub fn sensor_radar_system_id() -> SystemId {
 
 pub fn helm_impulse_system_id() -> SystemId {
     SystemId(HELM_IMPULSE_SYSTEM_ID.to_string())
+}
+
+pub fn lateral_thrust_system_id() -> SystemId {
+    SystemId(LATERAL_THRUST_SYSTEM_ID.to_string())
 }
 
 // ── Fine Tactical system id helpers (issue #512) ──────────────────────────────
@@ -923,6 +936,10 @@ mod tests {
             registry.contains(HELM_IMPULSE_KIND),
             "helm_impulse not registered"
         );
+        assert!(
+            registry.contains(LATERAL_THRUST_KIND),
+            "lateral_thrust not registered"
+        );
 
         assert_eq!(
             registry
@@ -956,6 +973,14 @@ mod tests {
                 .name(),
             HELM_IMPULSE_AI_CONTROLLER
         );
+        assert_eq!(
+            registry
+                .registration(LATERAL_THRUST_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            LATERAL_THRUST_AI_CONTROLLER
+        );
     }
 
     #[test]
@@ -966,6 +991,7 @@ mod tests {
             HELM_ENGINE_STARBOARD_SYSTEM_ID,
             HELM_RADAR_SYSTEM_ID,
             HELM_IMPULSE_SYSTEM_ID,
+            LATERAL_THRUST_SYSTEM_ID,
         ];
         for id in ids {
             assert_eq!(
@@ -984,6 +1010,7 @@ mod tests {
         assert_eq!(HELM_ENGINE_STARBOARD_SYSTEM_ID, "helm-engine-starboard");
         assert_eq!(HELM_RADAR_SYSTEM_ID, "helm-radar");
         assert_eq!(HELM_IMPULSE_SYSTEM_ID, "helm-impulse");
+        assert_eq!(LATERAL_THRUST_SYSTEM_ID, "helm-lateral-thrust");
     }
 
     #[test]
@@ -996,6 +1023,7 @@ mod tests {
         );
         assert_eq!(helm_radar_system_id().0, HELM_RADAR_SYSTEM_ID);
         assert_eq!(helm_impulse_system_id().0, HELM_IMPULSE_SYSTEM_ID);
+        assert_eq!(lateral_thrust_system_id().0, LATERAL_THRUST_SYSTEM_ID);
     }
 
     // ── Fine Tactical system tests (issue #512) ───────────────────────────────

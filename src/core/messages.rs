@@ -1047,6 +1047,9 @@ pub enum SystemControlPayload {
         source_uuid: Option<String>,
     },
     ClearNavigationWaypoint,
+    LateralThrustInput {
+        lateral: f32,
+    },
     SetScienceTarget {
         uuid: String,
     },
@@ -1668,6 +1671,21 @@ pub struct HelmBlackboard {
     /// callers should fall back to the static `ShipClientConfig` range.
     #[serde(default)]
     pub radar_range: f32,
+    /// Current lateral (sideways) speed. Positive = starboard (+X), negative = port (-X).
+    pub lateral_speed: f32,
+}
+
+/// Raw sim truth for the Helm Lateral Thrust fine system,
+/// published each tick into the ship blackboard.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct HelmLateralThrustBlackboard {
+    /// Current lateral thrust input fraction (-1.0 .. 1.0).
+    pub lateral_input: f32,
+    /// Whether the lateral thrust system is operational (not disabled or destroyed).
+    pub is_online: bool,
+    /// Whether the lateral thrust system is under AI control.
+    #[serde(default)]
+    pub auto: bool,
 }
 
 /// Raw sim truth for a single Helm Engine fine system (port or starboard),
@@ -1881,6 +1899,8 @@ pub enum SystemBlackboard {
     /// instance under `SystemId("shield-arc-<arc_id>")`. Coexists with the
     /// aggregate `Shields` blackboard under `SystemId("shields")`.
     ShieldArc(ShieldArcBlackboard),
+    /// Helm Lateral Thrust fine-system blackboard.
+    HelmLateralThrust(HelmLateralThrustBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -2238,6 +2258,10 @@ pub enum UiAction {
     ///
     /// The HTML navigation panel sends `{ action: "clear_navigation_waypoint", console: "Navigation" }`.
     ClearNavigationWaypoint,
+    /// Set lateral thrust input (helm lateral thrust joystick).
+    SetLateralThrust {
+        lateral: f32,
+    },
     /// Return to the Lobby from the GameOver screen.
     ///
     /// The HTML game-over overlay sends `{ action: "return_to_lobby" }`.
@@ -2348,6 +2372,12 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::ClearNavigationWaypoint => ClientMessage::ControlSystem {
             target: crate::system_registry::navigation_system_id(),
             payload: SystemControlPayload::ClearNavigationWaypoint,
+        },
+        UiAction::SetLateralThrust { lateral } => ClientMessage::ControlSystem {
+            target: crate::system_registry::lateral_thrust_system_id(),
+            payload: SystemControlPayload::LateralThrustInput {
+                lateral: *lateral,
+            },
         },
         UiAction::ReturnToLobby => ClientMessage::ReturnToLobby,
         UiAction::ConfirmScenario => ClientMessage::ConfirmScenario,

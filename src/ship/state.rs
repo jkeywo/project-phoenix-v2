@@ -23,6 +23,8 @@ pub struct ShipPhysics {
     pub forward_speed: f32,
     /// Current visual banking roll angle in radians (leans into turns).
     pub roll: f32,
+    /// Current lateral (sideways) speed. Positive = starboard (+X), negative = port (-X).
+    pub lateral_speed: f32,
 }
 
 /// Per-entity red-alert state for every ship entity (player and NPC).

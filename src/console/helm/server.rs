@@ -2,14 +2,15 @@ use bevy::prelude::*;
 
 use crate::damage::DamageTier;
 use crate::messages::{
-    HelmBlackboard, HelmEngineBlackboard, InterSystemPayload, InterSystemQueue, ModifierSlot,
-    SystemBlackboard, SystemId,
+    HelmBlackboard, HelmEngineBlackboard, HelmLateralThrustBlackboard, InterSystemPayload,
+    InterSystemQueue, ModifierSlot, SystemBlackboard, SystemId,
 };
 use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship_plugin::BoostConfigResource;
 use crate::ship_state::ShipPhysics;
 use crate::system_registry::{
-    helm_engine_port_system_id, helm_engine_starboard_system_id, HELM_SYSTEM_ID,
+    helm_engine_port_system_id, helm_engine_starboard_system_id, lateral_thrust_system_id,
+    HELM_SYSTEM_ID,
 };
 
 pub struct HelmPlugin;
@@ -43,6 +44,10 @@ fn publish_helm_blackboard(
     queue: Res<InterSystemQueue>,
     mut ship_q: Query<
         &mut crate::server_app::ShipSystemBlackboards,
+        With<crate::simulation::LocalShip>,
+    >,
+    sources_q: Query<
+        &crate::ship_plugin::ShipSystemControlSources,
         With<crate::simulation::LocalShip>,
     >,
 ) {
@@ -82,6 +87,7 @@ fn publish_helm_blackboard(
         boost_active,
         boost_enabled,
         radar_range,
+        lateral_speed: physics.lateral_speed,
     };
 
     // Read last helm input for engine thrust fraction.
@@ -144,6 +150,30 @@ fn publish_helm_blackboard(
                 }),
             );
         }
+
+        // ── Lateral thrust blackboard ───────────────────────────────────────
+        let lt_sid = lateral_thrust_system_id();
+        let lt_tier = hull
+            .as_ref()
+            .map(|h| h.0.tier_for(&SystemId(lt_sid.0.clone())))
+            .unwrap_or(DamageTier::Operational);
+        let lt_is_online = !matches!(lt_tier, DamageTier::Disabled | DamageTier::Destroyed);
+        let lt_auto = sources_q
+            .iter()
+            .next()
+            .map(|s| {
+                s.0.policy_for(&lt_sid)
+                    .operate_ai
+            })
+            .unwrap_or(false);
+        bbs.0.insert(
+            lt_sid,
+            SystemBlackboard::HelmLateralThrust(HelmLateralThrustBlackboard {
+                lateral_input: last_input.lateral,
+                is_online: lt_is_online,
+                auto: lt_auto,
+            }),
+        );
     }
 }
 
@@ -370,6 +400,7 @@ mod tests {
                 .insert(crate::ship_plugin::LastHelmInput {
                     thrust: 0.8,
                     steering: 0.0,
+                    lateral: 0.0,
                 });
         }
         app.update();

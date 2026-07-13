@@ -41,6 +41,7 @@
         </div>
         <div class="ctrl-col">
           <ph-helm-joystick id="helm-joystick"></ph-helm-joystick>
+          <ph-lateral-thrust-joystick id="lateral-thrust-joystick"></ph-lateral-thrust-joystick>
           <div class="btn-row">
             <ph-impulse-btn id="impulse-btn"></ph-impulse-btn>
             <ph-boost-btn id="boost-btn"></ph-boost-btn>
@@ -61,6 +62,7 @@
   <script type="module">
     import '../components/ph-helm-radar.js';
     import '../components/ph-helm-joystick.js';
+    import '../components/ph-lateral-thrust-joystick.js';
     import '../components/ph-impulse-btn.js';
     import '../components/ph-boost-btn.js';
     import '../components/ph-station-damage.js';
@@ -71,10 +73,12 @@
       render: function(s) {
         var r = document.getElementById('helm-radar');
         var j = document.getElementById('helm-joystick');
+        var l = document.getElementById('lateral-thrust-joystick');
         var i = document.getElementById('impulse-btn');
         var b = document.getElementById('boost-btn');
         r.state = { blips: s.blips || [], range: s.range || 500, x: s.x || 0, z: s.z || 0, heading: s.heading || 0, speed: s.speed || 0, ship_heading: s.heading || 0, on_screen_active: !!s.on_screen, config: {}, engine_port_thrust: s.engine_port_thrust || 0, engine_stbd_thrust: s.engine_stbd_thrust || 0 };
         j.state = { auto: !!s.helm_auto };
+        l.state = { auto: !!s.lateral_auto };
         i.state = { state: s.impulse_charge_progress > 0 ? 'charging' : 'ready', charge_pct: (s.impulse_charge_progress || 0) * 100, auto: !!s.helm_auto };
         b.state = { available: !!s.boost_enabled, active: !!s.boost_active, recharge_pct: s.boost_battery != null ? s.boost_battery * 100 : 100, auto: !!s.helm_auto };
         setAutoState(null, document.getElementById('helm-auto-badge'), !!s.helm_auto);

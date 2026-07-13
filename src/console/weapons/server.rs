@@ -8946,6 +8946,7 @@ ai_only = true
                 yaw: 0.0,
                 forward_speed: 0.0,
                 roll: 0.0,
+                lateral_speed: 0.0,
             },
             Transform::from_xyz(x, 0.0, z),
             GlobalTransform::default(),

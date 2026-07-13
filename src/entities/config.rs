@@ -571,6 +571,10 @@ pub struct HelmConsoleConfig {
     /// Rendering code supplies defaults for omitted fields.
     #[serde(default)]
     pub engine_pfx: Option<EnginePfxConfig>,
+    /// Optional lateral thrust tuning, from `[helm_console.lateral_thrust]`.
+    /// When absent, ShipPhysicsConfig defaults are used.
+    #[serde(default)]
+    pub lateral_thrust: Option<LateralThrustConfig>,
 }
 
 /// Procedural engine trail tuning, from `[helm_console.engine_pfx]`.
@@ -589,6 +593,36 @@ pub struct EnginePfxConfig {
     /// Seconds between spawned trail segments. When omitted, renderer defaults are used.
     #[serde(default)]
     pub trail_spawn_interval_secs: Option<f32>,
+}
+
+/// Lateral thrust tuning, from `[helm_console.lateral_thrust]`.
+/// When absent, the feature uses ShipPhysicsConfig defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LateralThrustConfig {
+    /// Maximum lateral speed in world units per second.
+    #[serde(default = "default_lateral_thrust_max_speed")]
+    pub max_lateral_speed: f32,
+    /// Lateral acceleration in world units per second squared.
+    #[serde(default = "default_lateral_thrust_acceleration")]
+    pub lateral_acceleration: f32,
+}
+
+fn default_lateral_thrust_max_speed() -> f32 {
+    15.0
+}
+
+fn default_lateral_thrust_acceleration() -> f32 {
+    15.0
+}
+
+impl Default for LateralThrustConfig {
+    fn default() -> Self {
+        Self {
+            max_lateral_speed: default_lateral_thrust_max_speed(),
+            lateral_acceleration: default_lateral_thrust_acceleration(),
+        }
+    }
 }
 
 /// Boost drive tuning, from `[helm_console.boost]`. Presence of this table is

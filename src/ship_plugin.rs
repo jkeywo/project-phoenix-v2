@@ -34,6 +34,7 @@ const HELM_AI_MAX_DT_SECS: f32 = 1.0 / 30.0;
 pub struct LastHelmInput {
     pub thrust: f32,
     pub steering: f32,
+    pub lateral: f32,
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
@@ -384,12 +385,19 @@ fn process_helm_inputs(
             last_input.steering = *steering;
         }
     }
+
+    for cmd in admitted.for_target(&crate::system_registry::lateral_thrust_system_id().0) {
+        if let SystemControlPayload::LateralThrustInput { lateral } = &cmd.payload {
+            last_input.lateral = *lateral;
+        }
+    }
     let dt = timer.0.duration().as_secs_f32();
     let state = ShipPhysicsState {
         x: physics.x,
         z: physics.z,
         yaw: physics.yaw,
         forward_speed: physics.forward_speed,
+        lateral_speed: physics.lateral_speed,
     };
     let impulse_active = drive
         .impulse_q
@@ -402,11 +410,13 @@ fn process_helm_inputs(
         ShipPhysicsInput {
             thrust: 1.0,
             steering: 0.0,
+            lateral: 0.0,
         }
     } else {
         ShipPhysicsInput {
             thrust: last_input.thrust,
             steering: last_input.steering,
+            lateral: last_input.lateral,
         }
     };
 
@@ -435,6 +445,7 @@ fn process_helm_inputs(
     let scaled_input = ShipPhysicsInput {
         thrust: input.thrust * engine_thrust_scale,
         steering: input.steering,
+        lateral: input.lateral,
     };
 
     let mut config = match physics_cfg {
@@ -476,6 +487,7 @@ fn process_helm_inputs(
     physics.z = result.z;
     physics.yaw = result.yaw;
     physics.forward_speed = result.forward_speed;
+    physics.lateral_speed = result.lateral_speed;
 
     // Visual banking: lerp roll toward target based on steering (use the unscaled
     // input.steering so roll reflects intent, not engine count).
@@ -666,14 +678,28 @@ fn operate_helm_ai(
                 .unwrap_or(&crate::faction::FactionRegistry::default()),
         );
 
+        // ── Compute lateral thrust for obstacle avoidance (AI only) ──────────
+        let lateral = crate::ai::operate_lateral_thrust(
+            &world_view,
+            &scored,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            physics.forward_speed,
+        );
+
         // ── Apply physics ────────────────────────────────────────────────────
         let physics_config = helm_section
-            .map(|hc| ShipPhysicsConfig {
-                max_speed: hc.0.max_speed,
-                max_reverse_speed: hc.0.max_reverse_speed,
-                acceleration: hc.0.acceleration,
-                deceleration: hc.0.deceleration,
-                max_yaw_rate: hc.0.max_yaw_rate,
+            .map(|hc| {
+                let lt = hc.0.lateral_thrust.clone().unwrap_or_default();
+                ShipPhysicsConfig {
+                    max_speed: hc.0.max_speed,
+                    max_reverse_speed: hc.0.max_reverse_speed,
+                    acceleration: hc.0.acceleration,
+                    deceleration: hc.0.deceleration,
+                    max_yaw_rate: hc.0.max_yaw_rate,
+                    max_lateral_speed: lt.max_lateral_speed,
+                    lateral_acceleration: lt.lateral_acceleration,
+                }
             })
             .unwrap_or_else(ShipPhysicsConfig::new);
 
@@ -683,8 +709,9 @@ fn operate_helm_ai(
                 z: physics.z,
                 yaw: physics.yaw,
                 forward_speed: physics.forward_speed,
+                lateral_speed: physics.lateral_speed,
             },
-            ShipPhysicsInput { thrust, steering },
+            ShipPhysicsInput { thrust, steering, lateral },
             dt,
             &physics_config,
         );
@@ -693,6 +720,7 @@ fn operate_helm_ai(
         physics.z = result.z;
         physics.yaw = result.yaw;
         physics.forward_speed = result.forward_speed;
+        physics.lateral_speed = result.lateral_speed;
 
         // ── AI Impulse decision ──────────────────────────────────────────────
         if let (Some(mut impulse), Some(cfg)) = (impulse_comp, impulse_cfg) {
@@ -743,7 +771,7 @@ fn operate_helm_ai(
         // sees the AI-driven intent (though it will re-apply physics anyway).
         if is_local {
             if let Some(mut li) = local_ship_input.iter_mut().next() {
-                *li = LastHelmInput { thrust, steering };
+                *li = LastHelmInput { thrust, steering, lateral };
             }
         }
     }
@@ -1649,7 +1677,8 @@ mod tests {
             get_last_helm_input(&mut app),
             LastHelmInput {
                 thrust: 1.0,
-                steering: 0.25
+                steering: 0.25,
+                lateral: 0.0,
             }
         );
         assert!(get_ship_physics(&mut app).forward_speed > 0.0);
@@ -1666,7 +1695,8 @@ mod tests {
             get_last_helm_input(&mut app),
             LastHelmInput {
                 thrust: 0.0,
-                steering: 0.0
+                steering: 0.0,
+                lateral: 0.0,
             }
         );
         assert_eq!(get_ship_physics(&mut app).forward_speed, 0.0);
@@ -2272,6 +2302,7 @@ mod tests {
                 LastHelmInput {
                     thrust: 1.0,
                     steering: 1.0,
+                    lateral: 0.0,
                 },
             );
         }
@@ -3396,6 +3427,7 @@ station = "helm"
             LastHelmInput {
                 thrust: 1.0,
                 steering: 0.0,
+                lateral: 0.0,
             },
         );
 
@@ -3500,6 +3532,7 @@ station = "helm"
             LastHelmInput {
                 thrust: 0.75,
                 steering: 0.25,
+                lateral: 0.0,
             },
         );
 
@@ -3667,6 +3700,7 @@ station = "helm"
             LastHelmInput {
                 thrust: 1.0,
                 steering: 0.0,
+                lateral: 0.0,
             },
         );
         for _ in 0..TICKS {
@@ -3694,6 +3728,7 @@ station = "helm"
             LastHelmInput {
                 thrust: 1.0,
                 steering: 0.0,
+                lateral: 0.0,
             },
         );
         for _ in 0..TICKS {

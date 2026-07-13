@@ -952,15 +952,7 @@ fn operate_lateral_thrust_ai(
 
     let snapshot_entities: Vec<crate::ai::AiWorldEntity> = snapshot.entities.clone();
 
-    for (
-        sources,
-        blackboards,
-        physics,
-        collider,
-        entity_uuid,
-        faction,
-        is_local,
-    ) in ships.iter() {
+    for (sources, blackboards, physics, collider, entity_uuid, faction, is_local) in ships.iter() {
         // Only run when lateral thrust is AI-controlled but the main helm is not
         // (if helm is also AI, operate_helm_ai already handles it).
         let lt_policy = sources
@@ -976,11 +968,13 @@ fn operate_lateral_thrust_ai(
         use crate::messages::{ScoredObjective, SystemAffinity, SystemBlackboard};
 
         // Get scored objectives from the viewscreen blackboard.
-        let scored: Vec<ScoredObjective> =
-            match blackboards.0.get(&crate::system_registry::viewscreen_system_id()) {
-                Some(SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
-                _ => Vec::new(),
-            };
+        let scored: Vec<ScoredObjective> = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+            _ => Vec::new(),
+        };
 
         let has_helm_objective = scored
             .iter()

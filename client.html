@@ -2403,7 +2403,14 @@
         default:
           return; // unknown � skip re-render
       }
-      scheduleRender();
+      // Don't re-render the full lobby at high frequency during mid-game
+      // spectating/claiming — renderLobby does list.innerHTML = '' which
+      // destroys all button event listeners, so a click between DOM teardown
+      // and rebuild lands on a stale/deleted node and never fires.
+      // Lobby-mutating handlers (StationAssigned, ReadyChanged, etc.) all
+      // call rebuildStations() which calls scheduleRender() internally, so
+      // this guard is safe for them too.
+      if (!showingLobbyDuringGame(state)) { scheduleRender(); }
     }
 
     // -- PeerJS connection (extracted to gui/connection-manager.js, issue #603) --

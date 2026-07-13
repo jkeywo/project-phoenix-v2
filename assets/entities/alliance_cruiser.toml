@@ -256,11 +256,13 @@ selects = [ "station", "planet", "star", "region" ]
 range = 1200
 
 [shields_console]
-focus_bonus_max_hp = 50
+focus_bonus_max_hp = 0
 focus_bonus_regen = 5
-focus_penalty_max_hp = 25
+focus_penalty_max_hp = 0
 focus_penalty_regen = 1.0
 focus_decay_rate = 10
+focus_focused_damage_multiplier = 0.5
+focus_unfocused_damage_multiplier = 1.25
 
 [shields_console.base]
 max_hp = 100

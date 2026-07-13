@@ -303,12 +303,12 @@ range = 1000
 # Shields — Cruiser baseline × 1.4
 # max_hp: 100 × 1.4 = 140; regen_per_sec: 2.5 × 1.4 = 3.5
 [shields_console]
-focus_bonus_max_hp = 70
+focus_bonus_max_hp = 0
 focus_bonus_regen = 5
-focus_penalty_max_hp = 35
+focus_penalty_max_hp = 0
 focus_penalty_regen = 1.0
 focus_decay_rate = 10
-focus_focused_damage_multiplier = 0.7
+focus_focused_damage_multiplier = 0.5
 focus_unfocused_damage_multiplier = 1.25
 
 [shields_console.base]

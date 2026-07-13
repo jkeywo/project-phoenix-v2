@@ -508,12 +508,6 @@ mod tests {
                 },
             ),
             (
-                ServerMessageDiscriminants::SensorsTargetSuggestion,
-                ServerMessage::SensorsTargetSuggestion {
-                    uuid: "entity-uuid-456".into(),
-                },
-            ),
-            (
                 ServerMessageDiscriminants::PhaserFired,
                 ServerMessage::PhaserFired {
                     bank: "port".to_string(),
@@ -926,6 +920,33 @@ mod tests {
             r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"ChargeBlasterCancel"}}}"#,
             "ChargeBlasterCancel wire shape must match what action-map.js sends"
         );
+    }
+
+    /// `CoordinationPayload::TargetDesignation` round-trip, embedded in both
+    /// directions of the channel-3 bus (issue #676 — replaces the old direct
+    /// `SensorsTargetSuggestion`).
+    #[test]
+    fn target_designation_coordination_payload_round_trips() {
+        let send_msg = ClientMessage::SendCoordination {
+            target: crate::system_registry::tactical_system_id(),
+            payload: CoordinationPayload::TargetDesignation {
+                uuid: "asteroid-42".into(),
+                label: "Asteroid".into(),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, send_msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+
+        let popup_msg = ServerMessage::CoordinationPopup {
+            target: crate::system_registry::tactical_system_id(),
+            payload: CoordinationPayload::TargetDesignation {
+                uuid: "asteroid-42".into(),
+                label: "Asteroid".into(),
+            },
+            sender_label: "Sensors".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, popup_msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
     }
 
     /// BlasterFired server message round-trip (issue #631, extended #638).

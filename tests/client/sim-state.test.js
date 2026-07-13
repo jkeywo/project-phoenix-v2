@@ -268,12 +268,6 @@ describe('apply weapons / targets / shields', () => {
     expect(s.currentTargetName).toBeNull();
   });
 
-  it('SensorsTargetSuggestion updates sensorsTargetSuggestion', () => {
-    const s = new ClientSimState();
-    s.apply({ type: 'SensorsTargetSuggestion', data: { uuid: 'sen' } });
-    expect(s.sensorsTargetSuggestion).toBe('sen');
-  });
-
   it('ShieldStatus replaces facings', () => {
     const s = new ClientSimState();
     const facings = [{ label: 'Fore', hp: 80, max_hp: 100, online: true, offline_remaining: 0 }];

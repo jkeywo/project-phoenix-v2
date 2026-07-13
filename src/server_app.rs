@@ -314,7 +314,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_systems(
         Update,
         (
-            handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
             broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
             handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
             sim_processing_anchor,
@@ -765,44 +764,6 @@ fn publish_viewscreen_blackboard(
             SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
             SystemBlackboard::Viewscreen(bb),
         );
-    }
-}
-
-fn handle_set_sensors_target(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<(), With<LocalShip>>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    let Some(()) = ship_query.iter().next() else {
-        return;
-    };
-    for ev in reader.read() {
-        let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
-            continue;
-        };
-        if target.0 != crate::system_registry::SENSORS_SYSTEM_ID {
-            continue;
-        }
-        let SystemControlPayload::SetScienceTarget { uuid } = payload else {
-            continue;
-        };
-
-        // Only the Sensors console holder may broadcast a target suggestion.
-        if sessions.0.holder_for_station(&StationId("sensors".into())) != Some(ev.token.as_str()) {
-            continue;
-        }
-
-        // Only broadcast if there is a Tactical console player to receive it.
-        let Some(tactical_token) = sessions.0.holder_for_station(&StationId("tactical".into()))
-        else {
-            continue;
-        };
-
-        outbox.0.push((
-            Target::Token(tactical_token.to_string()),
-            ServerMessage::SensorsTargetSuggestion { uuid: uuid.clone() },
-        ));
     }
 }
 
@@ -3308,7 +3269,6 @@ mod tests {
         .add_systems(
             Update,
             (
-                handle_set_sensors_target,
                 handle_impulse_messages,
                 broadcast_shield_status,
                 reconcile_runtime_entities
@@ -5200,8 +5160,7 @@ mod tests {
         );
     }
 
-    // â"€â"€ SetSensorsTarget / SensorsTargetSuggestion tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-
+    /// Shared setup used by tests that need a Sensors + Tactical(weapons) console pairing.
     fn start_game_with_sensors_and_weapons(app: &mut App) {
         push(
             app,
@@ -5261,107 +5220,6 @@ mod tests {
         fast_forward_countdown(app);
         tick(app);
         tick(app);
-    }
-
-    #[test]
-    fn sensors_set_sensors_target_broadcasts_sensors_target_suggestion_to_tactical() {
-        let mut app = test_app();
-        start_game_with_sensors_and_weapons(&mut app);
-
-        push(
-            &mut app,
-            "sensors",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::sensors_system_id(),
-                payload: SystemControlPayload::SetScienceTarget {
-                    uuid: "asteroid-99".into(),
-                },
-            },
-        );
-        let out = tick(&mut app);
-
-        let suggestion = out
-            .iter()
-            .find_map(|m| match &m.msg {
-                ServerMessage::SensorsTargetSuggestion { uuid } => Some(uuid.clone()),
-                _ => None,
-            })
-            .expect("expected a SensorsTargetSuggestion message");
-        assert_eq!(suggestion, "asteroid-99");
-
-        // Must be targeted to Tactical console player only.
-        let suggestion_msg = out
-            .iter()
-            .find(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. }))
-            .unwrap();
-        assert!(
-            matches!(&suggestion_msg.target, Target::Token(t) if t == "weapons"),
-            "SensorsTargetSuggestion should be sent only to Tactical console"
-        );
-    }
-
-    #[test]
-    fn non_sensors_player_cannot_send_sensors_target() {
-        let mut app = test_app();
-        start_game_with_sensors_and_weapons(&mut app);
-
-        push(
-            &mut app,
-            "captain",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::sensors_system_id(),
-                payload: SystemControlPayload::SetScienceTarget {
-                    uuid: "asteroid-99".into(),
-                },
-            },
-        );
-        let out = tick(&mut app);
-
-        assert!(
-            !out.iter()
-                .any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
-            "non-Sensors player should not be able to send SensorsTargetSuggestion"
-        );
-    }
-
-    #[test]
-    fn set_sensors_target_ignored_in_lobby() {
-        let mut app = test_app();
-        push(
-            &mut app,
-            "sensors",
-            ClientMessage::Identify {
-                token: "sensors".into(),
-                name: "Spock".into(),
-            },
-        );
-        tick(&mut app);
-        push(
-            &mut app,
-            "sensors",
-            ClientMessage::SelectStation {
-                station: "Sensors".into(),
-            },
-        );
-        tick(&mut app);
-
-        push(
-            &mut app,
-            "sensors",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::sensors_system_id(),
-                payload: SystemControlPayload::SetScienceTarget {
-                    uuid: "asteroid-99".into(),
-                },
-            },
-        );
-        let out = tick(&mut app);
-
-        assert!(
-            !out.iter()
-                .any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
-            "SetSensorsTarget should be ignored during Lobby phase"
-        );
     }
 
     // â"€â"€ FireTorpedo tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€

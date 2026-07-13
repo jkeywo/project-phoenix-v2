@@ -1308,6 +1308,9 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
         CoordinationPayload::ShieldFacingRestored { label } => {
             format!("{label} restored")
         }
+        CoordinationPayload::TargetDesignation { label, .. } => {
+            format!("Designating target: {label}")
+        }
     }
 }
 

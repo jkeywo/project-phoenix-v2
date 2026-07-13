@@ -1,9 +1,8 @@
 use bevy::prelude::*;
 
-use crate::lobby::Sessions;
 use crate::messages::{
-    CoordinationPayload, ModifierSlot, SensorsBlackboard, ServerMessage, StationId,
-    SystemBlackboard, SystemControlPayload, SystemId,
+    CoordinationPayload, ModifierSlot, SensorsBlackboard, SystemBlackboard, SystemControlPayload,
+    SystemId,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -56,21 +55,30 @@ impl Plugin for ShipSensorsPlugin {
 ///
 /// Validates: sender holds the Sensors station and `accept_human_input` is
 /// true. Stores the target in [`SensorsTarget`] for blackboard broadcast, and
-/// emits `SensorsTargetSuggestion` directly to the Tactical station holder.
+/// emits a `CoordinationPayload::TargetDesignation` on the channel-3 bus for
+/// Tactical (issue #676 — replaces the old direct `SensorsTargetSuggestion`).
+/// Enqueued unconditionally for every ship (player + NPC), matching how
+/// `tick_sensors_frequency_hint` already handles both.
 pub fn handle_sensors_messages(
-    sessions: Res<Sessions>,
     mut ship_query: Query<
         (
+            Entity,
             &crate::messages::AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
             &mut SensorsTarget,
-            Has<crate::server_app::LocalShip>,
+            &crate::ship_plugin::ShipSystemControlSources,
         ),
         With<crate::server_app::Ship>,
     >,
-    mut outbox: ResMut<crate::simulation::SimOutbox>,
+    entity_name_q: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::entities::spawner::EntityName,
+    )>,
+    mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    for (admitted, _ship_config, mut entity_target, is_local) in ship_query.iter_mut() {
+    for (entity, admitted, _ship_config, mut entity_target, control_sources) in
+        ship_query.iter_mut()
+    {
         for cmd in admitted.for_target(crate::system_registry::SENSORS_SYSTEM_ID) {
             let SystemControlPayload::SetScienceTarget { uuid } = &cmd.payload else {
                 continue;
@@ -79,22 +87,28 @@ pub fn handle_sensors_messages(
             // Write to this ship's own SensorsTarget component (player or NPC).
             entity_target.0 = Some(uuid.clone());
 
-            // Route the suggestion to whoever currently holds the Tactical
-            // console. Only the LocalShip has a browser client, so only the
-            // LocalShip's console-holder gets the WebRTC push. NPC ships'
-            // AI Tactical picks up the target via the coordination bus.
-            if !is_local {
-                continue;
-            }
-            let Some(tactical_token) = sessions.0.holder_for_station(&StationId("tactical".into()))
-            else {
-                continue;
-            };
+            // Resolve a human-readable label for the target, falling back to
+            // the raw uuid if no matching EntityName is found (e.g. asteroids
+            // don't carry EntityName).
+            let label = entity_name_q
+                .iter()
+                .find_map(|(u, n)| (u.0 == *uuid).then(|| n.0.clone()))
+                .unwrap_or_else(|| uuid.clone());
 
-            outbox.0.push((
-                crate::lobby::Target::Token(tactical_token.to_string()),
-                ServerMessage::SensorsTargetSuggestion { uuid: uuid.clone() },
-            ));
+            let sender_origin = control_sources
+                .0
+                .source_for(&crate::system_registry::sensors_system_id());
+
+            writer.write(CoordinationEnqueue {
+                source_entity: entity,
+                sender_origin,
+                target: crate::system_registry::tactical_system_id(),
+                payload: CoordinationPayload::TargetDesignation {
+                    uuid: uuid.clone(),
+                    label,
+                },
+                sender_label: "Sensors".to_string(),
+            });
         }
     }
 }
@@ -213,16 +227,25 @@ pub fn operate_sensors_ai(ships: Query<&crate::ship_plugin::ShipSystemControlSou
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::simulation::{ShipImpulse, SimOutbox};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
+    #[derive(Resource, Default)]
+    struct EnqueueLog(Vec<CoordinationEnqueue>);
+
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
         for m in reader.read() {
             box_.0.push(m.clone());
+        }
+    }
+
+    fn collect_enqueues(mut reader: MessageReader<CoordinationEnqueue>, mut log: ResMut<EnqueueLog>) {
+        for m in reader.read() {
+            log.0.push(m.clone());
         }
     }
 
@@ -236,9 +259,10 @@ mod tests {
             ))
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
+            .init_resource::<EnqueueLog>()
             .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(ShipSensorsPlugin)
-            .add_systems(PostUpdate, collect);
+            .add_systems(PostUpdate, (collect, collect_enqueues));
         app.world_mut().spawn((
             crate::simulation::Ship,
             crate::simulation::LocalShip,
@@ -340,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn sensors_set_science_target_sends_suggestion_to_tactical() {
+    fn sensors_set_science_target_enqueues_target_designation_for_tactical() {
         let mut app = test_app();
         start_game_with_sensors_and_tactical(&mut app);
 
@@ -356,25 +380,29 @@ mod tests {
                 },
             },
         );
-        let out = tick(&mut app);
+        tick(&mut app);
 
-        let suggestion = out
+        let log = app.world().resource::<EnqueueLog>();
+        let enqueued = log
+            .0
             .iter()
-            .find_map(|m| match &m.msg {
-                ServerMessage::SensorsTargetSuggestion { uuid } => Some(uuid.clone()),
-                _ => None,
-            })
-            .expect("expected a SensorsTargetSuggestion message");
-        assert_eq!(suggestion, "asteroid-42");
+            .find(|e| matches!(&e.payload, CoordinationPayload::TargetDesignation { .. }))
+            .expect("expected a TargetDesignation CoordinationEnqueue event");
 
-        let suggestion_msg = out
-            .iter()
-            .find(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. }))
-            .unwrap();
-        assert!(
-            matches!(&suggestion_msg.target, Target::Token(t) if t == "tactical"),
-            "SensorsTargetSuggestion should be sent only to Tactical console"
+        assert_eq!(
+            enqueued.target,
+            crate::system_registry::tactical_system_id(),
+            "TargetDesignation should be enqueued for the Tactical system"
         );
+        match &enqueued.payload {
+            CoordinationPayload::TargetDesignation { uuid, label } => {
+                assert_eq!(uuid, "asteroid-42");
+                // No EntityUuid/EntityName in this test world, so label falls
+                // back to the raw uuid.
+                assert_eq!(label, "asteroid-42");
+            }
+            other => panic!("expected TargetDesignation, got {other:?}"),
+        }
     }
 
     #[test]
@@ -394,12 +422,14 @@ mod tests {
                 },
             },
         );
-        let out = tick(&mut app);
+        tick(&mut app);
 
+        let log = app.world().resource::<EnqueueLog>();
         assert!(
-            !out.iter()
-                .any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
-            "non-Sensors player should not be able to send SensorsTargetSuggestion"
+            !log.0
+                .iter()
+                .any(|e| matches!(&e.payload, CoordinationPayload::TargetDesignation { .. })),
+            "non-Sensors player should not be able to enqueue a TargetDesignation"
         );
     }
 

@@ -1684,6 +1684,9 @@
       } else if (payload.type === 'ShieldFacingRestored') {
         title = (payload.data?.label || payload.label || 'Shield') + ' Restored';
         body = '';
+      } else if (payload.type === 'TargetDesignation') {
+        title = 'Sensors designates: ' + (payload.data?.label || payload.label || '?');
+        body = '';
       } else {
         title = payload.type || 'Advisory';
         body = '';

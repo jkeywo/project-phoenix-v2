@@ -1163,6 +1163,11 @@ pub enum CoordinationPayload {
     /// Sent to Helm when a shield facing recovers to `restored_notify_pct` of max HP;
     /// only fires on red alert, only after the facing has been down this cycle.
     ShieldFacingRestored { label: String },
+    /// Sensors designates a suggested target for Tactical to lock onto.
+    /// Routed via `route_coordination` like any other channel-3 payload:
+    /// AI Tactical consumes it silently, human Tactical gets a popup
+    /// (issue #676 — replaces the old direct `SensorsTargetSuggestion`).
+    TargetDesignation { uuid: String, label: String },
 }
 
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -1267,11 +1272,6 @@ pub enum ServerMessage {
     },
     /// Broadcast when an asteroid's HP reaches 0 and it is despawned.
     AsteroidDestroyed {
-        uuid: String,
-    },
-    /// Sent to the Tactical console holder when the Sensors operator designates
-    /// a suggested target. Advisory only — does not lock the Tactical console.
-    SensorsTargetSuggestion {
         uuid: String,
     },
     /// Sent when a phaser bank fires a shot at a target.

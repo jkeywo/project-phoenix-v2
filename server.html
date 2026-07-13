@@ -1614,7 +1614,19 @@
             } catch (_) { return; }
           }
 
-          if (token) dispatchToWasm(token, json);
+          if (token) {
+            // Intercept ToggleQrCode — purely visual server-side toggle, no Rust message needed.
+            try {
+              const parsed = JSON.parse(json);
+              if (parsed.type === 'ToggleQrCode') {
+                qrVisible = !qrVisible;
+                const qrOverlay = document.getElementById('overlay');
+                if (qrOverlay) qrOverlay.style.display = qrVisible ? 'block' : 'none';
+                return;
+              }
+            } catch (_) {}
+            dispatchToWasm(token, json);
+          }
         });
 
         conn.on('close', () => {

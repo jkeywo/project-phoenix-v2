@@ -549,6 +549,7 @@ export function buildWeaponsConsoleState(state) {
     blasters,
     own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
     tactical_auto: tacticalAuto,
+    station_rating: state.stationRatings?.['tactical'] || 'Std',
   });
 }
 
@@ -845,6 +846,7 @@ export function buildPowerConsoleState(state) {
       battery_online: batteryOnline,
       own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
       power_auto:     state.stationRatings?.['power'] === 'Backfill',
+      station_rating: state.stationRatings?.['power'] || 'Std',
     });
   }
   // Legacy fallback: PowerState message fields.
@@ -858,6 +860,7 @@ export function buildPowerConsoleState(state) {
     battery_online: batteryOnline,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
     power_auto:     state.stationRatings?.['power'] === 'Backfill',
+    station_rating: state.stationRatings?.['power'] || 'Std',
   });
 }
 

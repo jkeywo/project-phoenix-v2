@@ -396,6 +396,13 @@
 
     /* ── Full render ───────────────────────────────────────────── */
     function _render(s) {
+      // Complexity rating: hide elements marked with data-hideable
+      // when the station is at a simplified rating (e.g. "Low").
+      var rating = s.station_rating || 'Std';
+      document.querySelectorAll('[data-hideable]').forEach(function(el) {
+        el.style.display = rating === 'Low' ? 'none' : '';
+      });
+
       var total    = s.total    !== undefined ? s.total    : s.consoles.reduce(function(a,c){return a+c.level;}, 0);
       var totalMax = s.total_max !== undefined ? s.total_max : TOTAL_MAX;
       var locked   = !!s.locked;

@@ -1550,7 +1550,10 @@ mod tests {
     fn default_damage_multiplier_is_one() {
         let s = ShieldSystem::default();
         for f in &s.facings {
-            assert!((f.damage_multiplier - 1.0).abs() < 1e-6, "default multiplier must be 1.0");
+            assert!(
+                (f.damage_multiplier - 1.0).abs() < 1e-6,
+                "default multiplier must be 1.0"
+            );
         }
     }
 
@@ -1559,7 +1562,10 @@ mod tests {
         let mut s = ShieldSystem::default();
         s.focus_config.focused_damage_multiplier = 0.7;
         s.set_focused_facing(Some(0));
-        assert!((s.facings[0].damage_multiplier - 0.7).abs() < 1e-6, "focused arc should get damage reduction");
+        assert!(
+            (s.facings[0].damage_multiplier - 0.7).abs() < 1e-6,
+            "focused arc should get damage reduction"
+        );
     }
 
     #[test]
@@ -1568,7 +1574,10 @@ mod tests {
         s.focus_config.unfocused_damage_multiplier = 1.25;
         s.set_focused_facing(Some(0));
         for i in 1..s.facings.len() {
-            assert!((s.facings[i].damage_multiplier - 1.25).abs() < 1e-6, "non-focused arc should get damage increase");
+            assert!(
+                (s.facings[i].damage_multiplier - 1.25).abs() < 1e-6,
+                "non-focused arc should get damage increase"
+            );
         }
     }
 
@@ -1579,7 +1588,10 @@ mod tests {
         s.set_focused_facing(Some(0));
         s.set_focused_facing(None);
         for f in &s.facings {
-            assert!((f.damage_multiplier - 1.0).abs() < 1e-6, "clearing focus resets multiplier to 1.0");
+            assert!(
+                (f.damage_multiplier - 1.0).abs() < 1e-6,
+                "clearing focus resets multiplier to 1.0"
+            );
         }
     }
 
@@ -1614,7 +1626,10 @@ mod tests {
         let mut s = ShieldSystem::default();
         let leak = s.apply_damage(50, 0.0);
         assert_eq!(leak, 0);
-        assert_eq!(s.facings[0].hp, 50, "no multiplier change: 50 dmg → 50 taken");
+        assert_eq!(
+            s.facings[0].hp, 50,
+            "no multiplier change: 50 dmg → 50 taken"
+        );
     }
 
     #[test]

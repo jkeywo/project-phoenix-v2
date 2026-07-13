@@ -1951,7 +1951,7 @@ mod tests {
         // Ship at (0,0) facing -Z (yaw=0), target at (0, 0, -300)
         let input = impulse_input(
             [0.0, 0.0],
-            0.0,     // yaw = 0 → facing -Z
+            0.0,                // yaw = 0 → facing -Z
             [0.0, 0.0, -300.0], // target 300 units ahead
             crate::impulse::ImpulsePhase::Idle,
             200.0,

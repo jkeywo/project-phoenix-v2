@@ -2375,9 +2375,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         },
         UiAction::SetLateralThrust { lateral } => ClientMessage::ControlSystem {
             target: crate::system_registry::lateral_thrust_system_id(),
-            payload: SystemControlPayload::LateralThrustInput {
-                lateral: *lateral,
-            },
+            payload: SystemControlPayload::LateralThrustInput { lateral: *lateral },
         },
         UiAction::ReturnToLobby => ClientMessage::ReturnToLobby,
         UiAction::ConfirmScenario => ClientMessage::ConfirmScenario,

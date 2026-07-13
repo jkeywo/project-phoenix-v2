@@ -66,9 +66,8 @@ impl DoctrineObjective {
     /// Returns `self.use_impulse` if set; otherwise defaults to `true` for
     /// Reach and Destroy directives, `false` for Patrol.
     pub fn effective_use_impulse(&self) -> bool {
-        self.use_impulse.unwrap_or_else(|| {
-            !matches!(self.directive_kind.as_deref(), Some("Patrol"))
-        })
+        self.use_impulse
+            .unwrap_or_else(|| !matches!(self.directive_kind.as_deref(), Some("Patrol")))
     }
 }
 

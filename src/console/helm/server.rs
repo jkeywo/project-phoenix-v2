@@ -161,10 +161,7 @@ fn publish_helm_blackboard(
         let lt_auto = sources_q
             .iter()
             .next()
-            .map(|s| {
-                s.0.policy_for(&lt_sid)
-                    .operate_ai
-            })
+            .map(|s| s.0.policy_for(&lt_sid).operate_ai)
             .unwrap_or(false);
         bbs.0.insert(
             lt_sid,

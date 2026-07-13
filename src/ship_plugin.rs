@@ -711,7 +711,11 @@ fn operate_helm_ai(
                 forward_speed: physics.forward_speed,
                 lateral_speed: physics.lateral_speed,
             },
-            ShipPhysicsInput { thrust, steering, lateral },
+            ShipPhysicsInput {
+                thrust,
+                steering,
+                lateral,
+            },
             dt,
             &physics_config,
         );
@@ -724,36 +728,29 @@ fn operate_helm_ai(
 
         // ── AI Impulse decision ──────────────────────────────────────────────
         if let (Some(mut impulse), Some(cfg)) = (impulse_comp, impulse_cfg) {
-            let target_pos = resolve_helm_target_position(
-                &scored,
-                &world_view,
-                &anchors,
-                &ai_memory.0,
-            );
+            let target_pos =
+                resolve_helm_target_position(&scored, &world_view, &anchors, &ai_memory.0);
             if let Some(tp) = target_pos {
                 // Find the matching doctrine to check use_impulse flag.
-                let top_obj = scored
-                    .iter()
-                    .find(|o| o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm));
+                let top_obj = scored.iter().find(|o| {
+                    o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+                });
                 let use_impulse = top_obj
                     .and_then(|obj| {
-                        behaviour_section
-                            .and_then(|b| b.0.doctrine.iter().find(|d| d.id == obj.id))
+                        behaviour_section.and_then(|b| b.0.doctrine.iter().find(|d| d.id == obj.id))
                     })
                     .map(|d| d.effective_use_impulse())
                     .unwrap_or(false);
                 if use_impulse {
-                    let decision = crate::ai::decide_impulse(
-                        &crate::ai::ImpulseDecisionInput {
-                            pos: [physics.x, physics.z],
-                            yaw: physics.yaw,
-                            target_pos: tp,
-                            phase: impulse.0.phase,
-                            engage_distance: cfg.engage_distance,
-                            cancel_distance: cfg.cancel_distance,
-                            angle_tolerance: crate::ai::IMPULSE_ANGLE_TOLERANCE_RAD,
-                        },
-                    );
+                    let decision = crate::ai::decide_impulse(&crate::ai::ImpulseDecisionInput {
+                        pos: [physics.x, physics.z],
+                        yaw: physics.yaw,
+                        target_pos: tp,
+                        phase: impulse.0.phase,
+                        engage_distance: cfg.engage_distance,
+                        cancel_distance: cfg.cancel_distance,
+                        angle_tolerance: crate::ai::IMPULSE_ANGLE_TOLERANCE_RAD,
+                    });
                     match decision {
                         crate::ai::ImpulseDecision::Engage => {
                             impulse.0.start_charge();
@@ -771,7 +768,11 @@ fn operate_helm_ai(
         // sees the AI-driven intent (though it will re-apply physics anyway).
         if is_local {
             if let Some(mut li) = local_ship_input.iter_mut().next() {
-                *li = LastHelmInput { thrust, steering, lateral };
+                *li = LastHelmInput {
+                    thrust,
+                    steering,
+                    lateral,
+                };
             }
         }
     }
@@ -802,7 +803,10 @@ fn resolve_helm_target_position(
             anchors: waypoints, ..
         } => {
             let idx = memory.waypoint_index;
-            waypoints.get(idx).and_then(|wp| anchors.get(wp.as_str())).copied()
+            waypoints
+                .get(idx)
+                .and_then(|wp| anchors.get(wp.as_str()))
+                .copied()
         }
         _ => None,
     }

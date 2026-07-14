@@ -1,0 +1,61 @@
+entities:
+  - role: ship-manual-reader
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Ship Manual Reader
+      summary: Player consulting the ship-specific reference manual, organised into tabs for every station on the selected ship.
+    game_design:
+      architecture_links: [client-ship-manual-surface, station-manual-aggregator]
+      responsibilities: [read station role overview, understand vessel-specific systems and rating automation]
+      player_verbs: [open-ship-manual]
+
+  - verb: open-ship-manual
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Open Ship Manual
+      summary: Open a read-only ship manual with a tab for each authored station, including its overview and aggregated system sections.
+    game_design:
+      architecture_links: [client-ship-manual-surface, ship-manual-replica]
+      owner_role: ship-manual-reader
+      inputs: [selected station manual tab]
+      resolution: client-presentation
+      outputs: [station-specific ship manual]
+
+  - information: ship-authored-station-help
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Ship-Authored Station Help
+      summary: Author-written overview text explaining how to play each station on this particular ship.
+    game_design:
+      enforcement_links: [ship-manual-content-builder]
+      visibility: team-visible
+      permitted_viewers: [ship-manual-reader]
+      architectural_enforcement: [ship-authored-station-help-state is included in the aggregated ship manual]
+
+  - information: system-generated-manual-detail
+    core:
+      status: proposed
+      confidence: confirmed
+      title: System-Generated Manual Detail
+      summary: Each configured system supplies explanatory text calculated from the particular vessel's authored capabilities and values, including shield strength and which systems each station rating automates.
+    game_design:
+      enforcement_links: [system-manual-section-provider]
+      visibility: team-visible
+      permitted_viewers: [ship-manual-reader]
+      architectural_enforcement: [system-manual-section-provider derives text from the authoritative ship topology]
+
+  - mechanic: aggregated-ship-station-manual
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Aggregated Ship Station Manual
+      summary: A station manual combines ship-authored role overview text with generated sections from every system owned by that station. Generated sections reflect this vessel's capabilities and its authored rating-to-AI-control mapping.
+    game_design:
+      architecture_links: [ship-manual-content-builder, system-manual-section-provider, station-manual-aggregator, ship-manual-replica]
+      participating_roles: [ship-manual-reader]
+      reads: [ship-authored-station-help, system-generated-manual-detail]
+      resolution: host-derived
+      outputs: [ship-specific station manual]

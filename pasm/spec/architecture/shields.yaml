@@ -1,0 +1,141 @@
+entities:
+  - component: shield-arc-system
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shield Arc System
+      summary: Per-ship variable arc shield system with authored geometry, priority, health, regeneration, offline recovery, and per-arc fine-system availability.
+    architecture:
+      kind: defense-system
+      authority: authoritative
+      owns: [shield-arc-state]
+      reads: [ship-station-system-topology-state, system-control-source-state]
+      produces: [shield-status-blackboard-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/shields.rs, src/weapons/shield.rs, src/entities/config.rs]
+      symbols: [tick_shields, ShieldSystem, ShieldArcConfig]
+      tests: [cargo test, tests/smoke/shields-console.spec.ts]
+
+  - state: shield-arc-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shield Arc State
+      summary: Authoritative current shield arcs including geometry, priority, health, focused state, damage multiplier, offline timer, and availability.
+    architecture:
+      classification: authoritative
+      owner: shield-arc-system
+      writers: [shield-arc-system]
+      replicas: [shield-status-blackboard-state]
+    implementation:
+      status: declared
+      paths: [src/weapons/shield.rs, src/core/messages.rs]
+      symbols: [ShieldSystem]
+
+  - component: shield-focus-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shield Focus Controller
+      summary: Admitted Shields command handler that focuses one authored shield arc or clears the active focus, applying configured protection and trade-off multipliers.
+    architecture:
+      kind: control-handler
+      authority: authoritative
+      reads: [shield-arc-state, system-control-source-state]
+      writes: [shield-arc-state]
+      consumes: [set-shield-arc-focus-command]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/shields.rs, src/core/messages.rs, gui/action-map.js]
+      symbols: [handle_shields_messages]
+      messages: [SetShieldArcFocus]
+      tests: [cargo test, tests/client/ph-shield-facings.test.js]
+
+  - message: set-shield-arc-focus-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Set Shield Arc Focus Command
+      summary: Client-to-host request to set or clear the focused authored shield arc.
+    architecture:
+      authority: request
+      producer: [client-network-interface]
+      consumer: [shield-focus-controller]
+      validator: [system-command-admission-policy]
+      trust_boundary: client-to-host
+      payload: SetShieldArcFocus
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, gui/action-map.js]
+      messages: [SetShieldArcFocus]
+
+  - component: shield-damage-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shield Damage Router
+      summary: Routes incoming collision, weapon, and region damage through matching online arcs by geometry and priority before leaking remaining damage to system hull.
+    architecture:
+      kind: damage-router
+      authority: authoritative
+      reads: [shield-arc-state]
+      writes: [shield-arc-state, authoritative-damage-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/weapons/shield.rs, src/console/weapons/server.rs, src/regions/server.rs, src/server_app.rs]
+      symbols: [ShieldSystem]
+      tests: [cargo test]
+
+  - state: shield-status-blackboard-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shield Status Blackboard State
+      summary: Replicated aggregate and per-arc shield snapshot for the Shields console and other ship systems.
+    architecture:
+      classification: replicated
+      owner: shield-arc-system
+      derived_from: [shield-arc-state]
+    implementation:
+      status: declared
+      paths: [src/ship/shields.rs, src/core/messages.rs, gui/components/ph-shield-panel.js]
+      symbols: [ShieldsBlackboard]
+      tests: [cargo test, tests/client/ph-shield-panel.test.js]
+
+  - component: shields-recent-damage-ai
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Shields Recent Damage AI
+      summary: AI-controlled Shields records recent per-arc damage and focuses concentrated incoming damage, falling back to a configured health imbalance rule; its current prior-health tracking is defective.
+    architecture:
+      kind: ai-operator
+      authority: authoritative
+      owns: [shields-damage-history-state]
+      reads: [shield-arc-state, system-control-source-state]
+      writes: [shield-arc-state, shields-damage-history-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/shields.rs, src/console_ai/core.rs, src/entities/config.rs, src/entities/spawner.rs]
+      symbols: [operate_shields_ai, tick_shield_focus_ai, ShieldsDamageHistory, ShieldsAiConfigToml]
+      tests: [cargo test]
+
+  - state: shields-damage-history-state
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Shields Damage History State
+      summary: Per-ship, per-arc timestamped damage data used by Shields AI over authored time windows; it currently lacks a correct previous-health snapshot.
+    architecture:
+      classification: authoritative
+      owner: shields-recent-damage-ai
+      writers: [shields-recent-damage-ai]
+    implementation:
+      status: declared
+      paths: [src/ship/shields.rs]
+      symbols: [ShieldsDamageHistory, DamageRecord]

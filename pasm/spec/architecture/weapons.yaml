@@ -1,4 +1,55 @@
 entities:
+  - component: tactical-fine-system-operator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Tactical Fine System Operator
+      summary: Applies Tactical authority and availability separately to phaser banks, blaster banks, torpedo tubes, tactical radar, and torpedo magazine rather than treating Tactical as one indestructible system.
+    architecture:
+      kind: system-operator
+      authority: authoritative
+      reads: [ship-station-system-topology-state, system-control-source-state, authoritative-damage-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, src/ship/system_registry.rs]
+      tests: [cargo test]
+
+  - component: torpedo-magazine-round-claim
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Torpedo Magazine Round Claim
+      summary: Shared magazine owns ammunition and accepts same-tick tube claims only while available; disabled magazines block loading and launch.
+    architecture:
+      kind: inter-system-policy
+      authority: authoritative
+      reads: [torpedo-state, inter-system-message-state, authoritative-damage-state]
+      writes: [torpedo-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, src/core/messages.rs]
+      symbols: [handle_torpedo_magazine_inter_system]
+      tests: [cargo test]
+
+  - component: tactical-ai-weapon-operator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Tactical AI Weapon Operator
+      summary: Uses scored Destroy objectives and fine-system availability to select targets, fire eligible weapons, and issue arc-bearing coordination when a usable family lacks arc.
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      reads: [scored-objective-pool-state, weapons-target-state, system-control-source-state, authoritative-damage-state]
+      writes: [weapons-target-state]
+      coordinates: [coordination-lag-router]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, src/ai/core.rs]
+      tests: [cargo test]
   - component: tactical-weapons-controls
     core:
       status: implemented

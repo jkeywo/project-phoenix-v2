@@ -1,0 +1,98 @@
+entities:
+  - component: navigation-waypoint-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Navigation Waypoint Controller
+      summary: Owns each ship's free or entity-anchored navigation waypoint, accepting admitted set and clear commands.
+    architecture:
+      kind: control-handler
+      authority: authoritative
+      owns: [navigation-waypoint-state]
+      reads: [system-control-source-state]
+      writes: [navigation-waypoint-state]
+      consumes: [system-control-command]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/navigation/mod.rs, src/core/messages.rs, gui/components/ph-navigation-map.js]
+      tests: [cargo test, npx vitest run]
+
+  - state: navigation-waypoint-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Navigation Waypoint State
+      summary: "Per-ship current waypoint: a fixed X/Z position or an entity UUID whose live position is followed until that entity despawns."
+    architecture:
+      classification: authoritative
+      owner: navigation-waypoint-controller
+      writers: [navigation-waypoint-controller, navigation-ai-operator]
+      replicas: [ship-system-blackboards-state]
+    implementation:
+      status: declared
+      paths: [src/console/navigation/mod.rs, src/core/messages.rs]
+
+  - component: navigation-anchor-refresher
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Navigation Anchor Refresher
+      summary: Refreshes anchored waypoint coordinates from the live target transform and automatically clears the waypoint when its target no longer exists.
+    architecture:
+      kind: lifecycle-controller
+      authority: authoritative
+      reads: [navigation-waypoint-state, spawned-entity-state]
+      writes: [navigation-waypoint-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/navigation/mod.rs]
+      tests: [cargo test]
+
+  - component: navigation-chart-publisher
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Navigation Chart Publisher
+      summary: Publishes the authored chart range, show/select filters, and current waypoint for the local ship's navigation surface.
+    architecture:
+      kind: blackboard-publisher
+      authority: authoritative
+      reads: [navigation-waypoint-state]
+      writes: [ship-system-blackboards-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/navigation/mod.rs, src/core/messages.rs, gui/components/ph-navigation-map.js]
+
+  - component: navigation-ai-operator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Navigation AI Operator
+      summary: Selects a positive Helm-relevant objective within navigation range, writes the resulting free or anchored waypoint, and sends Helm a NavigateTo coordination message.
+    architecture:
+      kind: ai-operator
+      authority: authoritative
+      reads: [system-control-source-state, scored-objective-pool-state, radar-contact-projection-state]
+      writes: [navigation-waypoint-state]
+      sends: [inter-system-message-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/navigation/mod.rs, src/core/messages.rs]
+      tests: [cargo test]
+
+  - component: helm-shared-waypoint-consumer
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Helm Shared Waypoint Consumer
+      summary: Future Helm AI destination input that reads the authoritative shared waypoint no matter whether a human Navigation operator or Navigation AI wrote it.
+    architecture:
+      kind: ai-input-adapter
+      authority: authoritative
+      reads: [navigation-waypoint-state, system-control-source-state]
+      writes: [desired-motion-state]
+      runs_in: [host-browser-runtime]

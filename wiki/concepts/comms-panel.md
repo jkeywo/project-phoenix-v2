@@ -6,6 +6,22 @@ title: CommsPanelPlugin
 
 Client-side Comms console: two-panel inbox + chat room layout.
 
+## Intended decision contract
+
+Comms owns the ship's shared dialogue channel. A selected response is an
+immediate, irreversible bridge decision; the host remains authoritative for
+acceptance and authored consequences. The intended PASM design adds an optional
+`important: true` response marker for a future clear warning and confirmation
+in the Comms UI before it sends that normal response. It is presentation only:
+it does not introduce a vote, another station's approval, deferred execution,
+or a reversal path.
+
+Physical sender reachability should grey out, rather than remove, response
+buttons. If a stale or otherwise forced attempt reaches the host and is
+rejected, the attempted response must briefly flash red. The current server
+rejects such submissions correctly but does not yet provide that feedback
+signal, so this remains future work.
+
 ## Location
 
 - `gui/comms-console.html` — current pure-HTML phone Comms console iframe.

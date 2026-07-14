@@ -1,0 +1,98 @@
+entities:
+  - role: shields-operator
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shields Operator
+      summary: Bridge role that reads the defensive grid and chooses whether to focus an authored shield arc.
+    game_design:
+      architecture_links: [shield-focus-controller, shield-status-blackboard-state]
+      responsibilities: [monitor shield arc health and availability, focus or clear a shield arc]
+      player_verbs: [set-shield-arc-focus]
+      protected_decisions: [human-shield-focus]
+      visible_information: [shield-grid-information]
+
+  - role: shields-ai-operator-role
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shields AI Operator
+      summary: AI-only role that focuses the arc receiving concentrated recent damage when the Shields system is AI-controlled.
+    game_design:
+      architecture_links: [shields-recent-damage-ai]
+
+  - verb: set-shield-arc-focus
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Set Shield Arc Focus
+      summary: Shields focuses one authored arc or clears the focus, applying that ship's configured defensive trade-offs.
+    game_design:
+      architecture_links: [shield-focus-controller, set-shield-arc-focus-command]
+      owner_role: shields-operator
+      inputs: [authored shield arc, desired focused state]
+      resolution: host-authoritative
+      outputs: [updated focused shield arc]
+
+  - decision: human-shield-focus
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Human Shield Focus
+      summary: A human Shields operator owns focus while the Shields system is human-controlled.
+    game_design:
+      enforcement_links: [shield-focus-controller]
+      owner_role: shields-operator
+      protected: true
+      must_not_be: [overridden by shields AI while human-controlled, driven by Sensors threat advisories]
+
+  - decision: ai-shield-focus
+    core:
+      status: accepted
+      confidence: confirmed
+      title: AI Shield Focus
+      summary: AI Shields focuses the arc receiving concentrated recent incoming damage, with a health-imbalance fallback when damage is not concentrated.
+    game_design:
+      enforcement_links: [shields-recent-damage-ai]
+      owner_role: shields-ai-operator-role
+      protected: true
+      must_not_be: [driven by Sensors threat advisories, active while a human controls Shields]
+
+  - information: shield-grid-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shield Grid Information
+      summary: Shields sees authored arc geometry, health, availability, focus, and defensive grid status.
+    game_design:
+      enforcement_links: [shield-status-blackboard-state]
+      visibility: role-visible
+      permitted_viewers: [shields-operator]
+      architectural_enforcement: [shield-status-blackboard-state replicates the aggregate and per-arc status]
+
+  - mechanic: recent-damage-shield-focus
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Recent Damage Shield Focus
+      summary: AI-controlled Shields uses a ship-authored recent-damage window and concentration threshold to focus the arc taking most incoming damage; health imbalance is only a fallback.
+    game_design:
+      architecture_links: [shields-recent-damage-ai, shields-damage-history-state]
+      participating_roles: [shields-ai-operator-role]
+      reads: [shield-grid-information]
+      resolution: host-authoritative
+      outputs: [updated focused shield arc]
+
+  - failure: shield-ai-damage-history-misread
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shield AI Damage History Misread
+      summary: The current damage-history implementation stores damage deltas but compares them as though they were prior arc health, so the intended recent-damage focus signal is not reliably observed.
+    game_design:
+      causes: [damage record lacks prior arc health snapshot]
+      consequences: [AI Shields can miss or misclassify concentrated incoming damage]
+      affected_roles: [shields-ai-operator-role]
+      visible_to: [shields-ai-operator-role]
+      terminal: false
+      recovery_paths: [store a separate per-arc previous health value before calculating each damage delta]

@@ -1,0 +1,144 @@
+entities:
+  - component: radar-projection-service
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shared Radar Projection Service
+      summary: Builds range-, visibility-, and presentation-filtered radar contact projections for Helm, Tactical, Sensors, navigation, and the viewscreen.
+    architecture:
+      kind: projection-service
+      authority: authoritative
+      owns: [radar-contact-projection-state]
+      reads: [authoritative-ship-motion-state, ship-modifier-state]
+      produces: [radar-contact-projection-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/radar.rs, src/radar_config.rs, src/gui/radar.rs, src/server/radar.rs, gui/radar-widget.js]
+      tests: [cargo test, npx vitest run]
+
+  - state: radar-contact-projection-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Radar Contact Projection State
+      summary: Derived contact positions, appearance, range and selection eligibility for each consuming radar surface; it is not a second authoritative entity store.
+    architecture:
+      classification: replicated
+      owner: radar-projection-service
+      derived_from: [authoritative-ship-motion-state, ship-modifier-state]
+    implementation:
+      status: declared
+      paths: [src/radar.rs, src/radar_config.rs, src/core/messages.rs, gui/radar-widget.js]
+
+  - component: sensors-target-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensors Target Controller
+      summary: Stores a ship's selected Sensors contact and emits a channel-3 target designation for Tactical.
+    architecture:
+      kind: control-handler
+      authority: authoritative
+      owns: [sensors-target-state]
+      reads: [system-control-source-state, radar-contact-projection-state]
+      writes: [sensors-target-state]
+      sends: [sensors-target-designation]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/core/messages.rs, gui/components/ph-sensor-radar.js]
+      tests: [cargo test, npx vitest run]
+
+  - state: sensors-target-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensors Target State
+      summary: Per-ship selected science target UUID, replicated in the Sensors blackboard so radar surfaces can show the advisory marker.
+    architecture:
+      classification: authoritative
+      owner: sensors-target-controller
+      writers: [sensors-target-controller]
+      replicas: [ship-system-blackboards-state]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/core/messages.rs]
+
+  - message: sensors-target-designation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensors Target Designation
+      summary: Channel-3 coordination payload carrying the Sensors-selected contact UUID and label to Tactical; it advises and does not replace Tactical target authority.
+    architecture:
+      authority: request
+      producer: [sensors-target-controller]
+      consumer: [inter-system-message-router]
+      payload: TargetDesignation
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/core/messages.rs, src/ship_plugin.rs]
+
+  - component: sensors-frequency-advisor
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensors Frequency Advisor
+      summary: Observes Tactical's locked target and sends Tactical a shield-frequency hint when the target or observed frequency changes.
+    architecture:
+      kind: coordination-producer
+      authority: authoritative
+      reads: [weapons-target-state, shield-arc-state]
+      sends: [inter-system-message-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/core/messages.rs]
+      tests: [cargo test]
+
+  - component: sensors-radar-publisher
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensors Radar Publisher
+      summary: Publishes the damage-scaled Sensors radar range, authored show/select filters, and selected target into the local ship blackboard.
+    architecture:
+      kind: blackboard-publisher
+      authority: authoritative
+      reads: [sensors-target-state, ship-modifier-state]
+      writes: [ship-system-blackboards-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/core/messages.rs]
+
+  - component: sensors-ai-operator
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Sensors AI Operator
+      summary: Applies per-ship AI control gating and reads the live damage-scaled sensor horizon, but currently makes no scan or target-selection decision.
+    architecture:
+      kind: ai-operator
+      authority: authoritative
+      reads: [system-control-source-state, ship-system-blackboards-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs]
+      tests: [cargo test]
+
+  - component: sensors-target-selection-ai
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Sensors Target Selection AI
+      summary: Future per-ship AI selection policy that chooses an appropriate hostile within the Sensors system's own damage-scaled horizon, writes Sensors target state, and lets existing advisory paths inform Tactical.
+    architecture:
+      kind: ai-operator
+      authority: authoritative
+      reads: [system-control-source-state, radar-contact-projection-state, ship-system-blackboards-state]
+      writes: [sensors-target-state]
+      sends: [sensors-target-designation]
+      runs_in: [host-browser-runtime]

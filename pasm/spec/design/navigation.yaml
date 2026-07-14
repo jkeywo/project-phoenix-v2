@@ -1,0 +1,100 @@
+entities:
+  - role: navigation-operator
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Navigation Operator
+      summary: Bridge role that sets the ship's shared desired destination on the long-range navigation chart.
+    game_design:
+      architecture_links: [navigation-waypoint-controller, navigation-chart-publisher]
+      responsibilities: [inspect the strategic chart, set or clear the shared destination]
+      player_verbs: [set-navigation-destination, clear-navigation-destination]
+      protected_decisions: [ship-navigation-destination]
+      visible_information: [navigation-chart-information, shared-navigation-destination-information]
+      coordination_with: [helm-operator, helm-ai-operator-role]
+
+  - verb: set-navigation-destination
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Set Navigation Destination
+      summary: Navigation sets a fixed point or a live entity-anchored shared destination.
+    game_design:
+      architecture_links: [navigation-waypoint-controller]
+      owner_role: navigation-operator
+      inputs: [world position or selectable entity]
+      resolution: host-authoritative
+      outputs: [shared navigation waypoint]
+
+  - verb: clear-navigation-destination
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Clear Navigation Destination
+      summary: Navigation removes the shared destination.
+    game_design:
+      architecture_links: [navigation-waypoint-controller]
+      owner_role: navigation-operator
+      resolution: host-authoritative
+      outputs: [no shared navigation waypoint]
+
+  - decision: ship-navigation-destination
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Ship Navigation Destination
+      summary: Navigation owns the current shared destination; the destination informs Helm but does not directly command ship motion.
+    game_design:
+      enforcement_links: [navigation-waypoint-controller]
+      owner_role: navigation-operator
+      protected: true
+      must_not_be: [a direct motion command, restricted to Navigation AI-originated waypoints]
+
+  - information: navigation-chart-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Navigation Chart Information
+      summary: Navigation sees the ship-authored strategic chart range and configured shown and selectable objects.
+    game_design:
+      enforcement_links: [navigation-chart-publisher]
+      visibility: role-visible
+      permitted_viewers: [navigation-operator]
+      architectural_enforcement: [navigation-chart-publisher projects the configured chart surface]
+
+  - information: shared-navigation-destination-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shared Navigation Destination Information
+      summary: The current waypoint is visible on the Navigation chart and every radar surface, allowing Helm to use it without a separate normal-path coordination message.
+    game_design:
+      enforcement_links: [navigation-chart-publisher]
+      visibility: team-visible
+      permitted_viewers: [navigation-operator, helm-operator, helm-ai-operator-role]
+      architectural_enforcement: [navigation-chart-publisher and radar projections publish the same authoritative waypoint]
+
+  - mechanic: shared-waypoint-helm-autopilot
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Shared Waypoint Helm Autopilot
+      summary: When Helm is AI-controlled, it reads the shared waypoint as its destination whether a human Navigation operator or Navigation AI created it.
+    game_design:
+      architecture_links: [helm-shared-waypoint-consumer]
+      participating_roles: [navigation-operator, helm-ai-operator-role]
+      reads: [shared-navigation-destination-information]
+      resolution: host-authoritative
+      outputs: [AI Helm movement toward shared destination]
+
+  - coordination: navigation-to-helm-navigate-request
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Navigation To Helm Navigate Request
+      summary: NavigateTo is a level-3 advisory coordination request, reserved for explicit coordination rather than the normal shared-waypoint control path.
+    game_design:
+      participating_roles: [navigation-operator, helm-operator, helm-ai-operator-role]
+      information_exchanged: [shared-navigation-destination-information]
+      actions_required: [set-navigation-destination]
+      intended_player_effect: Navigation can explicitly ask Helm to act without making the message a hidden autopilot command.

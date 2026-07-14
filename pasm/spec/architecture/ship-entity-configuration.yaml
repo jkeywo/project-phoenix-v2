@@ -1,0 +1,190 @@
+entities:
+  - component: entity-template-cache
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Template Cache
+      summary: Host-side cache of parsed entity TOML templates used by world loading and spawning.
+    architecture:
+      kind: configuration-cache
+      authority: authoritative
+      owns: [entity-template-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/config.rs, src/entities/config_cache.rs]
+      symbols: [EntityConfig, ConfigCachePlugin]
+      tests: [cargo test]
+
+  - state: entity-template-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Template State
+      summary: Parsed entity-template configuration for tags, mesh, collider, hull, behaviour, weapons, systems, presentation, and authored capability settings.
+    architecture:
+      classification: authoritative
+      owner: entity-template-cache
+      writers: [entity-template-cache]
+    implementation:
+      status: declared
+      paths: [src/entities/config.rs, assets/entities]
+      symbols: [EntityConfig]
+
+  - component: ship-config-loader
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Configuration Loader
+      summary: Extracts and validates station/system topology, ratings, power groups, and per-system configuration from a ship entity template.
+    architecture:
+      kind: configuration-validator
+      authority: authoritative
+      writes: [ship-station-system-topology-state]
+      reads: [entity-template-state]
+      validates: [ship-station-system-topology-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/config.rs, src/entities/config.rs, src/ship/system_registry.rs]
+      symbols: [parse_and_validate, ShipConfig]
+      tests: [cargo test]
+
+  - component: entity-spawn-orchestrator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Spawn Orchestrator
+      summary: Instantiates world and runtime entities with authored transform, collider, hull, ship, behaviour, faction, system, and presentation components.
+    architecture:
+      kind: lifecycle-service
+      authority: authoritative
+      owns: [spawned-entity-state]
+      reads: [entity-template-state, world-configuration-state, ship-station-system-topology-state]
+      produces: [spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/spawner.rs, src/world/server.rs]
+      symbols: [spawn_entity]
+      tests: [cargo test]
+
+  - state: spawned-entity-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Spawned Entity State
+      summary: Authoritative live ECS entities and their stable world/runtime identity after template and world configuration are resolved.
+    architecture:
+      classification: authoritative
+      owner: entity-spawn-orchestrator
+      writers: [entity-spawn-orchestrator]
+      replicas: [simulation-state-replica]
+    implementation:
+      status: declared
+      paths: [src/entities/spawner.rs, src/core/messages.rs]
+      messages: [EntitySpawned, EntityDespawned]
+
+  - component: model-marker-contract
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Model Marker Contract
+      summary: Connects authored model rigs and named marker points to ship systems, weapon origins, engine effects, cameras, and other presentation/runtime attachments.
+    architecture:
+      kind: configuration-contract
+      authority: authoritative
+      reads: [entity-template-state, ship-station-system-topology-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/model_rig.rs, src/entities/config.rs, src/server/pfx.rs]
+      symbols: [ModelRig]
+      tests: [cargo test]
+
+  - component: entity-override-resolver
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Override Resolver
+      summary: Applies world-authored entity overrides to template defaults before spawn without changing the template's shared definition.
+    architecture:
+      kind: configuration-transform
+      authority: authoritative
+      reads: [entity-template-state, world-configuration-state]
+      transforms: [entity-template-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/entity_override.rs, src/entities/spawner.rs]
+      tests: [cargo test]
+
+  - component: world-available-ship-catalog
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Available Ship Catalog
+      summary: Reads a loaded world's available ship entries and exposes the template paths and labels offered for player-ship selection.
+    architecture:
+      kind: catalog-provider
+      authority: authoritative
+      owns: [scenario-ship-catalog-state]
+      produces: [scenario-ship-catalog-state]
+      reads: [world-configuration-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/server/bridge.rs, server.html]
+      symbols: [AvailableShipEntry]
+      tests: [cargo test]
+
+  - component: entity-template-schema-validator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Template Schema Validator
+      summary: Parses and validates the authored entity configuration surface, including mesh and LOD, collider, region, hull, systems, stations, weapons, Helm, Power, Shields, Sensors, Navigation, Comms, behaviour, faction, and presentation sections.
+    architecture:
+      kind: configuration-validator
+      authority: authoritative
+      reads: [entity-template-state]
+      validates: [entity-template-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/config.rs, src/ship/config.rs]
+      tests: [cargo test]
+
+  - component: entity-component-composition
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Component Composition
+      summary: Applies each present validated template section as the matching runtime component set, including stable IDs/names, transform, physics, ship systems, faction/behaviour, combat, regions, and visual configuration.
+    architecture:
+      kind: entity-composer
+      authority: authoritative
+      reads: [entity-template-state, ship-station-system-topology-state]
+      writes: [spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/spawner.rs, src/entities/loader.rs, src/ship/config.rs]
+      tests: [cargo test]
+
+  - component: entity-template-capability-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Template Capability Contract
+      summary: Treats ship systems and station topology as authored capabilities rather than fixed categories, so templates may omit engines or any console system while the runtime composes only declared components.
+    architecture:
+      kind: configuration-contract
+      authority: authoritative
+      reads: [entity-template-state, ship-station-system-topology-state]
+      coordinates: [entity-component-composition]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/config.rs, src/ship/config.rs, src/entities/spawner.rs]
+      tests: [cargo test]

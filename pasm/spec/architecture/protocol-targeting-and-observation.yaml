@@ -1,0 +1,175 @@
+entities:
+  - component: host-local-console-bridge
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Local Console Bridge
+      summary: Decodes actions from host-page HTML consoles and injects them under the dedicated local-console identity, allowing only the host's local ship to be controlled without a PeerJS session claim.
+    architecture:
+      kind: local-command-bridge
+      authority: authoritative
+      owns: [host-local-console-identity-state]
+      consumes: [host-local-ui-action-command]
+      produces: [system-control-command]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server_app.rs]
+      symbols: [LOCAL_CONSOLE_TOKEN]
+      tests: [cargo test]
+
+  - state: host-local-console-identity-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Local Console Identity State
+      summary: Fixed trusted local-console token used only by host-page UI actions; it is not a remote player session, station claim, or authority to address a non-local ship.
+    architecture:
+      classification: local
+      owner: host-local-console-bridge
+      writers: [host-local-console-bridge]
+    implementation:
+      status: declared
+      paths: [src/console_bridge.rs, src/server/bridge.rs]
+      symbols: [LOCAL_CONSOLE_TOKEN]
+
+  - message: host-local-ui-action-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Local UI Action Command
+      summary: Browser server-page action envelope decoded by the host bridge before it is admitted as a local-ship system command.
+    architecture:
+      authority: request
+      producer: [host-camera-renderer, viewscreen-hud-effects]
+      consumer: [host-local-console-bridge]
+      validator: [host-local-console-bridge]
+      trust_boundary: host-page-to-host
+      payload: UiAction
+    implementation:
+      status: declared
+      paths: [src/console_bridge.rs, src/server/bridge.rs, src/core/codec.rs]
+      symbols: [decode_ui_action]
+      tests: [cargo test]
+
+  - component: wire-codec-protocol
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Wire Codec Protocol
+      summary: Sole JSON codec boundary for remote client and server envelopes, host-page UI actions, short-form system-control compatibility normalization, and serialized HUD, console, and lobby snapshots.
+    architecture:
+      kind: protocol-codec
+      authority: authoritative
+      reads: [system-control-command, simulation-state-replica, lobby-session-replica]
+      validates: [host-local-ui-action-command]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/codec.rs, src/core/messages.rs]
+      symbols: [JsonCodec, decode_bridge_client_message, decode_ui_action, encode_hud_state, encode_console_state, encode_lobby_state]
+      tests: [cargo test]
+
+  - component: host-page-push-bridge
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Page Push Bridge
+      summary: Forwards encoded host HUD, console, lobby, and AI chatter updates to registered server-page JavaScript callbacks without making that page authoritative for simulation state.
+    architecture:
+      kind: host-presentation-bridge
+      authority: derived
+      reads: [simulation-state-replica, lobby-session-replica]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server/viewscreen_border.rs]
+      symbols: [HudStateChanged, ConsoleStateChanged, LobbyStateChanged, AiChatterEvent]
+      tests: [cargo test]
+
+  - component: entity-targetability-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Targetability Contract
+      summary: Parses authored entity tags and target metadata, including selectable tags, cosmetic threat level, and description, then applies OR-based filter matching for radar visibility and Tactical selection eligibility.
+    architecture:
+      kind: configuration-contract
+      authority: authoritative
+      reads: [entity-template-state, radar-contact-projection-state]
+      produces: [entity-targetability-projection-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/tags.rs, src/entities/target.rs, src/entities/config.rs, src/entities/spawner.rs, src/console/weapons/server.rs]
+      symbols: [EntityTag, TargetSection, parse_tags, matches_any]
+      tests: [cargo test]
+
+  - state: entity-targetability-projection-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Targetability Projection State
+      summary: Derived eligible-target metadata used by Radar and Tactical surfaces; empty target tags exclude an entity from selectable target filters while still allowing separately authored radar visibility.
+    architecture:
+      classification: derived
+      owner: entity-targetability-contract
+      derived_from: [entity-template-state, radar-contact-projection-state]
+    implementation:
+      status: declared
+      paths: [src/entities/target.rs, src/console/weapons/server.rs, src/core/messages.rs]
+      tests: [cargo test]
+
+  - component: authored-toml-observer
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Authored TOML Observer
+      summary: PASM repository observer that inventories TOML files and source-locates authored template and world-layer path references without attempting general TOML runtime semantics.
+    architecture:
+      kind: repository-observer
+      authority: local
+      owns: [authored-content-observation-state]
+      produces: [authored-content-observation-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [pasm/scanners/toml.py, pasm/implementation/observation.py, tests/pasm/test_validation.py]
+      tests: [uv run pytest -q tests/pasm]
+
+  - state: authored-content-observation-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Authored Content Observation State
+      summary: Revision-linked TOML file inventory and resolved direct authored path edges for worlds, entity templates, and nested asteroid templates.
+    architecture:
+      classification: local
+      owner: authored-toml-observer
+      writers: [authored-toml-observer]
+    implementation:
+      status: declared
+      paths: [pasm/implementation/observation.py, pasm/scanners/toml.py]
+
+  - component: deprecated-console-ai-plugin
+    core:
+      status: deprecated
+      confidence: confirmed
+      title: Deprecated Console AI Plugin
+      summary: Inactive Low-complexity console-AI registration seam retained only while its pure helper library is assessed for migration or deletion; remove this PASM entity with the code when the seam is deleted.
+    architecture:
+      kind: deprecated-compatibility
+      authority: non-authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/console_ai/mod.rs, src/server_app.rs]
+      symbols: [ConsoleAiPlugin]
+      tests: [cargo test]
+    exceptions:
+      - rule: inactive-console-ai-must-be-removed-or-replaced
+        scope: [deprecated-console-ai-plugin]
+        rationale: The registered plugin currently installs no systems; retaining it without an explicit removal path risks confusing dormant helpers with live Backfill automation.
+        temporary: true
+        removal_condition: [ConsoleAiPlugin registration and the console_ai module are removed, or retained helpers are migrated to active system-command automation.]
+        approval_status: accepted

@@ -1,4 +1,74 @@
 entities:
+  - component: system-damage-availability-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      title: System Damage Availability Policy
+      summary: Maps per-system hull tiers to degraded, disabled, or destroyed availability and prevents damaged systems from accepting or applying control.
+    architecture:
+      kind: availability-policy
+      authority: authoritative
+      reads: [authoritative-damage-state]
+      writes: [system-control-source-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/damage.rs, src/server_app.rs, src/ship_plugin.rs]
+      symbols: [DamageTier, SystemHull]
+      tests: [cargo test]
+
+  - component: damage-source-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Damage Source Router
+      summary: Applies collision, weapon, and region damage through shields where applicable and then distributes leaked damage to repairable system hull.
+    architecture:
+      kind: damage-router
+      authority: authoritative
+      reads: [shield-arc-state, ship-modifier-state]
+      writes: [authoritative-damage-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server_app.rs, src/console/weapons/server.rs, src/regions/server.rs, src/ship/damage.rs]
+      tests: [cargo test]
+
+  - component: repair-team-cycle-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Repair Team Cycle Policy
+      summary: Repair teams travel to a target, repair at authored rate while on site, then return; Core is a valid repair target alongside station-owned systems.
+    architecture:
+      kind: lifecycle-policy
+      authority: authoritative
+      reads: [repair-team-state, authoritative-damage-state, ship-modifier-state]
+      writes: [repair-team-state, authoritative-damage-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/modifiers/repair_teams.rs, src/console/repair/server.rs]
+      symbols: [RepairTeams, tick_repair_teams]
+      tests: [cargo test]
+
+  - component: ship-destruction-threshold
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Destruction Threshold
+      summary: Transitions the player ship to GameOver when all repairable system hull is destroyed; non-local NPC ships instead despawn and emit destruction events.
+    architecture:
+      kind: outcome-policy
+      authority: authoritative
+      reads: [authoritative-damage-state]
+      writes: [game-over-reason-state, spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/damage.rs, src/console/weapons/server.rs, src/server_app.rs]
+      tests: [cargo test]
+
   - runtime: host-browser-runtime
     core:
       status: implemented

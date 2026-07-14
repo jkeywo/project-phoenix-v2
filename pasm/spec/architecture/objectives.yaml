@@ -1,4 +1,101 @@
 entities:
+  - component: objective-directive-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Directive Contract
+      summary: Typed objective directives that express Patrol, Destroy, Reach, Hail, or no AI action and declare their relevant system affinities.
+    architecture:
+      kind: domain-model
+      authority: authoritative
+      owns: [objective-directive-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs, src/ai/core.rs]
+      symbols: [directive_relevance]
+      tests: [cargo test]
+
+  - state: objective-directive-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Directive State
+      summary: Authoritative directive and target data attached to each active objective for system-affinity-aware AI consumption.
+    architecture:
+      classification: authoritative
+      owner: objective-directive-contract
+      writers: [objective-directive-contract]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs]
+
+  - component: objective-doctrine-score-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Doctrine Score Policy
+      summary: Scores active mission and doctrine objectives from mandatory priority, world conditions, zero gates, condition modifiers, and an optional Captain boost.
+    architecture:
+      kind: scoring-policy
+      authority: authoritative
+      reads: [objective-runtime-state, objective-directive-state, captain-objective-priority-state]
+      produces: [scored-objective-pool-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs, src/ship/viewscreen.rs]
+      symbols: [UtilityConfig, WorldConditions]
+      tests: [cargo test]
+
+  - component: objective-target-name-resolver
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Objective Target Name Resolver
+      summary: Resolves objective target names through the active world name-to-UUID table and ignores unresolved targets rather than substituting arbitrary entities.
+    architecture:
+      kind: reference-resolver
+      authority: authoritative
+      reads: [objective-directive-state, world-name-binding-state]
+      produces: [objective-target-resolution-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ai/core.rs, src/world/server.rs, src/objectives.rs]
+      tests: [cargo test]
+
+  - state: objective-target-resolution-state
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Objective Target Resolution State
+      summary: Derived per-objective result identifying resolved targets, unresolved directives, and intentional hold-station outcomes.
+    architecture:
+      classification: derived
+      owner: objective-target-name-resolver
+      derived_from: [objective-directive-state, world-name-binding-state]
+    implementation:
+      status: declared
+      paths: [src/ai/core.rs, src/world/server.rs]
+
+  - component: objective-outcome-controller
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Objective Outcome Controller
+      summary: Transitions objectives between Active, Completed, and Failed from authored trigger, Comms, and entity-destruction outcomes and feeds the resulting game flow.
+    architecture:
+      kind: lifecycle-controller
+      authority: authoritative
+      writes: [objective-runtime-state, game-over-reason-state]
+      reads: [world-content-lifecycle-state, spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs, src/world/server.rs, src/console/comms/server.rs]
+      tests: [cargo test]
+
   - component: objective-authoring-actions
     core:
       status: implemented
@@ -209,3 +306,38 @@ entities:
       authority: authoritative
       reads: [scored-objective-pool-state]
       runs_in: [host-browser-runtime]
+
+  - component: objective-comms-consequence-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Comms Consequence Router
+      summary: Applies the same authored objective add, complete, and fail actions from Comms responses as from world triggers, then allows their actions to drive world flags, entities, layer changes, and terminal outcomes.
+    architecture:
+      kind: consequence-router
+      authority: authoritative
+      reads: [comms-dialogue-state, objective-runtime-state]
+      writes: [objective-runtime-state, world-flag-state, world-layer-runtime-state]
+      coordinates: [comms-dialogue-controller, world-trigger-action-dispatcher, terminal-round-outcome-router]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/comms/server.rs, src/world/config.rs, src/world/server.rs]
+      tests: [cargo test]
+
+  - component: objective-player-ai-divergence-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Player and AI Divergence Contract
+      summary: "Current player projections and AI consumption intentionally diverge: Captain and Comms render different objective subsets while Helm, Tactical, and Navigation consume scored affinity-relevant directives rather than player-facing text."
+    architecture:
+      kind: projection-contract
+      authority: authoritative
+      reads: [objective-runtime-state, scored-objective-pool-state]
+      coordinates: [objective-player-projection, objective-ai-projection]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, src/console/comms/server.rs, src/ai/core.rs, src/console/navigation/mod.rs]
+      tests: [cargo test]

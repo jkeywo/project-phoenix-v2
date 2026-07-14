@@ -1,0 +1,195 @@
+entities:
+  - component: editor-mode-shell
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor Mode Shell
+      summary: Separate browser-local authoring shell with World, Entity, and Definitions modes, per-file dirty tracking, and undo/redo history.
+    architecture:
+      kind: authoring-interface
+      authority: local
+      owns: [editor-draft-state]
+      produces: [editor-draft-state]
+      depends_on: [editor-file-system-boundary, editor-model-marker-inspector, editor-runtime-reload-boundary]
+    implementation:
+      status: declared
+      paths: [editor.html, editor/app-v2.js, editor/mode-shell.js, editor/undo-controller.js]
+      tests: [npm run test:editor]
+
+  - state: editor-draft-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor Draft State
+      summary: Browser-local unsaved world, entity, faction, and complexity edits. It does not mutate authoritative game state or communicate through the game wire protocol.
+    architecture:
+      classification: local
+      owner: editor-mode-shell
+      writers: [editor-mode-shell]
+    implementation:
+      status: declared
+      paths: [editor/mode-shell.js, editor/undo-stack.js]
+
+  - component: editor-file-system-boundary
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor File System Boundary
+      summary: Chromium File System Access boundary that obtains a user-granted project directory handle, persists it in IndexedDB, and reads or writes only within that selected root.
+    architecture:
+      kind: local-storage-boundary
+      authority: local
+      reads: [editor-draft-state]
+      persists: [editor-draft-state]
+    implementation:
+      status: declared
+      paths: [editor/project-root.js, editor/save-flow.js]
+      tests: [npm run test:editor]
+
+  - component: editor-validation-service
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor Validation Service
+      summary: Runs local TOML, component, station, trigger-action, reference, and behavior checks and surfaces inline errors and warnings. A future save gate will block definite errors while keeping warnings non-blocking.
+    architecture:
+      kind: authoring-validator
+      authority: local
+      owns: [editor-validation-state]
+      reads: [editor-draft-state]
+      produces: [editor-validation-state]
+    implementation:
+      status: declared
+      paths: [editor/validation.js, editor/world-references.js, editor/world-references-indexed.js, editor/validation-badge.js]
+      tests: [npm run test:editor]
+
+  - component: editor-save-admission
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Editor Save Admission
+      summary: Local save gate that prevents writing authored TOML when validation reports definite errors, while allowing warnings and clearly presenting them to the author.
+    architecture:
+      kind: authoring-validator
+      authority: local
+      reads: [editor-draft-state, editor-validation-state]
+      validates: [editor-draft-state]
+
+  - component: editor-mod-pack-exporter
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Editor Mod Pack Exporter
+      summary: Builds a TOML-only ZIP and required manifest from selected validated authored files for use by a server-page mod upload.
+    architecture:
+      kind: authoring-exporter
+      authority: local
+      reads: [editor-draft-state, editor-validation-state]
+      depends_on: [editor-save-admission]
+
+  - component: host-mod-pack-upload
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Host Mod Pack Upload
+      summary: Server-page pre-scenario control that accepts one TOML-only ZIP with its required scenario manifest for the next selection session and presents validation failures without starting a round.
+    architecture:
+      kind: host-content-input
+      authority: authoritative
+      owns: [uploaded-mod-pack-state]
+      produces: [uploaded-mod-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - state: uploaded-mod-pack-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Uploaded Mod Pack State
+      summary: Host-session-scoped uploaded archive, required scenario manifest, and parsed candidate files, discarded when the host session ends and never applied to an in-progress round.
+    architecture:
+      classification: authoritative
+      owner: host-mod-pack-upload
+      writers: [host-mod-pack-upload]
+
+  - component: mod-content-overlay-resolver
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Mod Content Overlay Resolver
+      summary: Validates a TOML-only uploaded archive and required manifest against supported authored paths, composes exact-path replacements and additions over base content, and rejects the entire pack on invalid archive, manifest, path, parse, or reference failure.
+    architecture:
+      kind: content-composer
+      authority: authoritative
+      owns: [composed-world-content-pack-state]
+      reads: [uploaded-mod-pack-state, world-content-pack-state]
+      produces: [composed-world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - state: composed-world-content-pack-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Composed World Content Pack State
+      summary: Fully validated base-plus-mod authored TOML view used only for the next selected scenario and its dependent entities, factions, and definitions.
+    architecture:
+      classification: authoritative
+      owner: mod-content-overlay-resolver
+      writers: [mod-content-overlay-resolver]
+
+  - component: mod-aware-scenario-catalog
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Mod-Aware Scenario Catalog
+      summary: Extends the pre-scenario catalog with only the root worlds explicitly named by the validated mod manifest, alongside regular scenarios declared by assets/scenarios.toml.
+    architecture:
+      kind: content-catalog
+      authority: authoritative
+      reads: [composed-world-content-pack-state, scenario-ship-catalog-state, world-content-pack-state]
+      produces: [scenario-ship-catalog-state]
+      runs_in: [host-browser-runtime]
+
+  - state: editor-validation-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor Validation State
+      summary: Local source-oriented validation records for the editor UI. Runtime parser validation remains a separate host-authoritative concern.
+    architecture:
+      classification: local
+      owner: editor-validation-service
+      writers: [editor-validation-service]
+    implementation:
+      status: declared
+      paths: [editor/validation.js, editor/validation-badge.js]
+
+  - component: editor-model-marker-inspector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Editor Model and Marker Inspector
+      summary: Local Models and Entity previews inspect model-rig sidecars, extents, marker points, entity shapes, and component configuration for authored templates.
+    architecture:
+      kind: authoring-inspector
+      authority: local
+      reads: [editor-draft-state]
+    implementation:
+      status: declared
+      paths: [editor/models-rig.js, editor/models-mode-view.js, editor/entity-preview.js, editor/entity-preview-view.js]
+      tests: [npm run test:editor]
+
+  - component: editor-runtime-reload-boundary
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Editor Runtime Reload Boundary
+      summary: Saves authored TOML and locally invalidates editor caches, but does not hot-reload an already-running host simulation; a new runtime load consumes the saved authored files.
+    architecture:
+      kind: authoring-lifecycle
+      authority: local
+      reads: [editor-draft-state]
+      coordinates: [entity-template-cache, world-file-parser]
+      depends_on: [editor-file-system-boundary]
+    implementation:
+      status: declared
+      paths: [editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js]

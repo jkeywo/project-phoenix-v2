@@ -53,11 +53,21 @@ Helm and Sensors/Science radar modes use a semi-transparent circular black backi
 
 Captain camera buttons are not toggles: pressing the currently-active captain camera direction leaves the view unchanged. Pressing a captain camera direction while an overlay is active updates the remembered captain direction and immediately restores the camera.
 
+There is deliberately no separate default-camera action. Captain reclaims the
+shared screen by selecting **Fore** or **Cinematic**, as appropriate.
+
 ## Captain panel synchronisation
 
 The Captain console state push reports `view_direction` only for camera modes. When another console takes the viewscreen (`Radar`, `SensorsRadar`, `SystemChart`, `NavigationChart`, or `Comms`), `CaptainConsoleState.view_direction` is an empty string; `gui/captain-console.html` treats that as no selected direction so the Fore/Port/Starboard/Aft buttons lose their active highlight.
 
 HTML console panels derive their own `on_screen` flag from `SimSnapshot.view_mode`. The active non-captain console button shows `CLEAR SCREEN`; inactive buttons show `ON SCREEN`.
+
+## Intended arbitration
+
+The current arbiter gives source families fixed priorities. The intended PASM
+rule is simpler: the most recent admitted request wins regardless of its console
+of origin. Admission still decides which views a station may request; arbitration
+does not give Captain or Comms a separate source-priority override.
 
 ## Captain authority
 

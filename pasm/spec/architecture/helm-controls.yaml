@@ -1,4 +1,39 @@
 entities:
+  - component: helm-input-cadence-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Input Cadence Controller
+      summary: Samples admitted human Helm input at 10 Hz while retaining the last authoritative intent between simulation updates.
+    architecture:
+      kind: input-sampler
+      authority: authoritative
+      reads: [last-helm-input-state]
+      writes: [last-helm-input-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/helm/server.rs, src/ship_plugin.rs]
+      tests: [cargo test]
+
+  - component: helm-collision-physics
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Collision Physics
+      summary: Current authoritative planar physics applies thrust, yaw, lateral movement, collision response, and collision damage before the proposed shared 3D motion planner exists.
+    architecture:
+      kind: physics-service
+      authority: authoritative
+      reads: [last-helm-input-state, ship-modifier-state]
+      writes: [authoritative-ship-motion-state, authoritative-damage-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/physics.rs, src/ship_plugin.rs, src/server_app.rs]
+      symbols: [compute_physics]
+      tests: [cargo test]
+
   - component: helm-console-interface
     core:
       status: implemented

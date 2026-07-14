@@ -1,0 +1,48 @@
+entities:
+  - role: station-holder
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Station Holder
+      summary: Connected player who currently holds a ship station and may choose one of that station's authored operating ratings.
+    game_design:
+      architecture_links: [station-rating-controller, client-station-rating-control]
+      responsibilities: [choose station operating rating, understand which systems will become automated]
+      player_verbs: [set-station-rating]
+
+  - verb: set-station-rating
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Set Station Rating
+      summary: The current station holder selects one of its authored ratings at any time, including during an active round.
+    game_design:
+      architecture_links: [station-rating-controller, client-station-rating-control]
+      owner_role: station-holder
+      inputs: [selected authored rating]
+      resolution: host-authoritative
+      outputs: [updated station rating, updated human and AI system control sources, shared rating update]
+
+  - decision: station-rating-automation-boundary
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Station Rating Automation Boundary
+      summary: The station holder controls the selected rating; the resulting authored automated-system set determines which station systems are operated by AI.
+    game_design:
+      enforcement_links: [station-rating-controller]
+      owner_role: station-holder
+      protected: true
+      must_not_be: [changed by a player who does not hold the station, treated as a local client preference]
+
+  - mechanic: in-round-station-rating-change
+    core:
+      status: accepted
+      confidence: confirmed
+      title: In-Round Station Rating Change
+      summary: A station holder may change the rating mid-round. The host validates the holder and rating, applies the corresponding control-source transition immediately, and replicates the resulting selected rating to all clients.
+    game_design:
+      architecture_links: [station-rating-controller, station-rating-replica, client-station-rating-control]
+      participating_roles: [station-holder]
+      resolution: host-authoritative
+      outputs: [immediate control-source transition, shared active-rating presentation]

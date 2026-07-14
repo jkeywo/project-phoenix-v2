@@ -75,7 +75,27 @@ Save model: explicit save only. Cmd/Ctrl+S saves the active file; a "Save All" b
 - `validateWorldReferences` / `validateWorldReferencesIndexed` (`editor/world-references.js`, `editor/world-references-indexed.js`) — cross-reference checks (trigger entity-names, objective ids, AI states, anchor refs).
 - `validateBehaviourBlock(behaviour)` (`editor/validation.js:53`) — exactly one `initial_state`, no orphan transitions.
 
-All validation surfaces as inline error/warning badges (`editor/validation-badge.js`). Validation **never blocks save** — the editor will write valid TOML even when cross-references are unresolved, so authors can work on related files in any order. A WASM-compiled full Rust pre-save pass is deferred to a phase-2 PRD.
+All validation surfaces as inline error/warning badges (`editor/validation-badge.js`).
+The current editor permits saving despite errors. The accepted next design changes
+this: definite errors will block save and mod-pack export, while warnings remain
+non-blocking so authors can work across related files in any order. A
+WASM-compiled full Rust pre-save pass remains deferred to a later phase.
+
+## Planned Mod-Pack Export
+
+The editor will export selected validated authored TOML files as a ZIP mod pack
+with a required manifest naming its selectable root scenarios.
+On the server page, before scenario selection, the host will upload one pack for
+the current host session. Validated files overlay base content by exact supported
+path: matching paths replace the base file and new supported paths add content.
+Only root worlds named by the manifest join the selectable scenario list;
+supporting world files remain private composition content. The whole pack is
+rejected if its archive, manifest, paths, parse, or composed references are
+invalid; it cannot modify an in-progress round.
+
+Regular scenarios will use the same explicit contract in
+`assets/scenarios.toml` at the asset root. The selection catalog will merge
+that base manifest with a validated uploaded mod manifest.
 
 ## TOML Parsers (Pure)
 

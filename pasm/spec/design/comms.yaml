@@ -1,0 +1,113 @@
+entities:
+  - role: comms-operator
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Comms Operator
+      summary: Bridge role that manages the ship's shared Comms channel and commits dialogue responses on behalf of the crew.
+    game_design:
+      architecture_links: [comms-dialogue-controller, comms-range-enforcer]
+      responsibilities: [hail reachable physical contacts, read the shared ship Comms inbox, choose authored dialogue responses, put selected messages on the shared viewscreen]
+      player_verbs: [hail-contact, choose-comms-response]
+      protected_decisions: [comms-dialogue-response]
+      visible_information: [ship-comms-channel-information, comms-contact-reachability-information]
+
+  - verb: hail-contact
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Hail Contact
+      summary: Comms opens a world-authored dialogue with a reachable physical contact.
+    game_design:
+      architecture_links: [comms-dialogue-controller, comms-range-enforcer]
+      owner_role: comms-operator
+      inputs: [physical contact]
+      eligibility: [contact is in comms range]
+      resolution: host-authoritative
+      outputs: [shared Comms dialogue thread]
+
+  - verb: choose-comms-response
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Choose Comms Response
+      summary: Comms selects an authored response, immediately committing that bridge decision and its authored world consequences.
+    game_design:
+      architecture_links: [comms-dialogue-controller, important-comms-decision-presentation]
+      owner_role: comms-operator
+      inputs: [active dialogue response]
+      eligibility: [sender is reachable when the channel is physical]
+      resolution: host-authoritative
+      outputs: [selected dialogue response, authored world consequences]
+
+  - decision: comms-dialogue-response
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Comms Dialogue Response
+      summary: The Comms operator owns each dialogue response as an immediate, irreversible bridge decision.
+    game_design:
+      enforcement_links: [comms-dialogue-controller]
+      owner_role: comms-operator
+      protected: true
+      must_not_be: [auto-selected by a non-existent Comms AI policy, silently reversed after acceptance, committed by another bridge station]
+
+  - information: ship-comms-channel-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Ship Comms Channel Information
+      summary: Messages and contacts arrive through the ship's shared Comms channel rather than being revealed directly to other bridge roles.
+    game_design:
+      enforcement_links: [comms-blackboard-publisher]
+      visibility: role-visible
+      permitted_viewers: [comms-operator]
+      architectural_enforcement: [comms-blackboard-publisher projects shared inbox and contact state to the Comms surface]
+
+  - information: comms-contact-reachability-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Comms Contact Reachability Information
+      summary: Comms can tell whether a physical contact is reachable; synthetic senders remain readable even though they are not physical hail endpoints.
+    game_design:
+      enforcement_links: [comms-range-enforcer]
+      visibility: role-visible
+      permitted_viewers: [comms-operator]
+      architectural_enforcement: [comms-range-enforcer provides the authoritative physical endpoint gate and availability state]
+
+  - mechanic: important-comms-decision-warning
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Important Comms Decision Warning
+      summary: Authors may mark a response as important so the Comms UI gives a clear warning and confirmation before the normal immediate, irreversible response is sent.
+    game_design:
+      architecture_links: [important-comms-decision-presentation]
+      participating_roles: [comms-operator]
+      inputs: [authored important response marker]
+      resolution: client presentation before host-authoritative response submission
+      outputs: [informed response commitment]
+
+  - mechanic: comms-unavailable-response-feedback
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Comms Unavailable Response Feedback
+      summary: A response whose physical sender is out of range is greyed out. If a stale or forced submission is rejected, that response briefly flashes red.
+    game_design:
+      architecture_links: [comms-response-availability-presentation, comms-response-rejection-feedback]
+      participating_roles: [comms-operator]
+      inputs: [sender reachability, host response rejection]
+      resolution: client presentation from authoritative reachability and rejection feedback
+      outputs: [greyed unavailable response, brief red rejected-response flash]
+
+  - playtest-claim: comms-decisions-remain-consequential-and-legible
+    core:
+      status: proposed
+      confidence: provisional
+      title: Comms Decisions Remain Consequential and Legible
+      summary: Immediate dialogue choices should preserve bridge pressure, while the important marker prevents exceptional irreversible choices from being committed accidentally.
+    game_design:
+      claim: Comms retains sole ownership of consequential dialogue choices without surprising the operator on choices authors have identified as particularly important.
+      supports: [comms-dialogue-response, important-comms-decision-warning]

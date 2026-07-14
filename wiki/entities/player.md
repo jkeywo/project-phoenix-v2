@@ -42,7 +42,7 @@ The former per-player console list has been retired. Console access is derived f
 
 ## Mid-Game Station Claims
 
-During `InProgress`, spectators can still send `SelectStation` for an unoccupied station. The server assigns `Player.station` and broadcasts `StationAssigned` so the client can show the normal station help and Ready button, but it also forces `ready = false` and does not change the station rating. Backfill AI keeps operating the station until the player sends `SetReady { ready: true }`, at which point the handler broadcasts `RatingChanged` back to the default human rating. A manual `ReleaseStation` during `InProgress` clears readiness and reapplies `Backfill`.
+During `InProgress`, spectators can still send `SelectStation` for an unoccupied station. The server assigns `Player.station` and broadcasts `StationAssigned`, but forces `ready = false` and does not change the station rating. Backfill AI keeps operating the station until the player sends `SetReady { ready: true }`, at which point the handler broadcasts `RatingChanged` back to the default human rating. The intended client label for that in-round hand-off is **Take Station**, reserving **Ready** for lobby start readiness. A manual `ReleaseStation` during `InProgress` clears readiness and reapplies `Backfill`.
 
 ## Identity Vs Presence
 

@@ -1,0 +1,46 @@
+entities:
+  - role: sensors-ai-operator-role
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Sensors AI Operator
+      summary: AI-only Sensors role that selects an appropriate detectable target so Tactical receives its normal target designation and shield intelligence.
+    game_design:
+      architecture_links: [sensors-target-selection-ai]
+
+  - decision: ai-sensors-target-selection
+    core:
+      status: accepted
+      confidence: confirmed
+      title: AI Sensors Target Selection
+      summary: AI Sensors chooses an appropriate target within its own damage-scaled sensor horizon and sends Tactical an advisory designation.
+    game_design:
+      enforcement_links: [sensors-target-selection-ai]
+      owner_role: sensors-ai-operator-role
+      protected: true
+      must_not_be: [selected outside the effective sensor horizon, converted into a Tactical firing lock]
+
+  - information: sensors-target-intelligence
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Sensors Target Intelligence
+      summary: Sensors provides Tactical with a level-3 target designation and shield-frequency intelligence for the selected contact without taking Tactical target authority.
+    game_design:
+      enforcement_links: [sensors-target-designation, sensors-frequency-advisor]
+      visibility: team-visible
+      permitted_viewers: [sensors-operator, sensors-ai-operator-role, tactical-operator]
+      architectural_enforcement: [coordination-lag-router delivers advisory target and frequency messages]
+
+  - mechanic: ai-sensors-tactical-intelligence
+    core:
+      status: proposed
+      confidence: confirmed
+      title: AI Sensors Tactical Intelligence
+      summary: Backfill Sensors selects an appropriate hostile inside its effective horizon, then uses the existing designation and frequency-intelligence paths to advise Tactical.
+    game_design:
+      architecture_links: [sensors-target-selection-ai, sensors-target-designation, sensors-frequency-advisor]
+      participating_roles: [sensors-ai-operator-role, tactical-operator]
+      reads: [sensors-target-intelligence]
+      resolution: host-authoritative
+      outputs: [advisory target designation, shield frequency hint]

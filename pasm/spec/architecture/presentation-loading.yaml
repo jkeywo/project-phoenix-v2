@@ -1,0 +1,130 @@
+entities:
+  - component: asset-manifest-discovery
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Asset Manifest Discovery
+      summary: Recursively discovers renderable models, radar icons, model-rig sidecars, nested entity templates, and loadable sub-world assets from selected world content.
+    architecture:
+      kind: asset-discovery-service
+      authority: authoritative
+      owns: [asset-manifest-state]
+      reads: [world-configuration-state, entity-template-state]
+      produces: [asset-manifest-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server/asset_preload.rs, src/world/config.rs, src/entities/config.rs]
+      tests: [cargo test]
+
+  - state: asset-manifest-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Asset Manifest State
+      summary: Host-local discovered GLB model, radar-icon, sidecar, and sub-world paths needed before a selected scenario starts.
+    architecture:
+      classification: local
+      owner: asset-manifest-discovery
+      writers: [asset-manifest-discovery]
+    implementation:
+      status: declared
+      paths: [src/server/asset_preload.rs]
+
+  - component: host-asset-preloader
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Asset Preloader
+      summary: Loads the discovered manifest, broadcasts loading start and progress, gates engage through the Loading phase, and automatically transitions to InProgress once all required assets are ready.
+    architecture:
+      kind: lifecycle-controller
+      authority: authoritative
+      owns: [asset-loading-state]
+      reads: [asset-manifest-state, game-phase-state]
+      writes: [game-phase-state]
+      produces: [asset-loading-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server/asset_preload.rs, src/core/messages.rs]
+      tests: [cargo test]
+
+  - state: asset-loading-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Asset Loading State
+      summary: Host asset readiness and client-facing fraction used by the Loading surface; it is presentation readiness rather than gameplay authority.
+    architecture:
+      classification: authoritative
+      owner: host-asset-preloader
+      writers: [host-asset-preloader]
+      replicas: [client-presentation-state]
+    implementation:
+      status: declared
+      paths: [src/server/asset_preload.rs, src/core/messages.rs]
+
+  - component: model-rig-and-marker-loader
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Model Rig and Marker Loader
+      summary: Resolves model sidecars into base transforms, extents, marker points, target points, and camera markers used by entity rendering and system effects.
+    architecture:
+      kind: model-loader
+      authority: authoritative
+      owns: [model-marker-runtime-state]
+      reads: [asset-manifest-state, spawned-entity-state]
+      produces: [model-marker-runtime-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/model_rig.rs, src/entities/loader.rs]
+      tests: [cargo test]
+
+  - state: model-marker-runtime-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Model Marker Runtime State
+      summary: Resolved per-model marker and rig data used for camera placement, weapon origins, target points, and presentation attachments.
+    architecture:
+      classification: authoritative
+      owner: model-rig-and-marker-loader
+      writers: [model-rig-and-marker-loader]
+    implementation:
+      status: declared
+      paths: [src/entities/model_rig.rs]
+
+  - component: host-presentation-effects
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Presentation Effects
+      summary: Renders configured engine trails, phaser beams, torpedo and blaster effects, explosions, dust, nebula particles, star visuals, and viewscreen alert effects from authoritative events and entities.
+    architecture:
+      kind: presentation-effects
+      authority: derived
+      reads: [spawned-entity-state, model-marker-runtime-state, authoritative-ship-motion-state]
+      renders: [spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server/pfx.rs, src/server/renderer.rs, src/server/viewscreen_border.rs, src/entities/star.rs]
+      tests: [cargo test]
+
+  - component: client-audio-presentation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Audio Presentation
+      summary: Local browser playback for UI interaction, engine ambience, background hum, and Red Alert siren assets, controlled by local settings rather than simulation authority.
+    architecture:
+      kind: client-presentation
+      authority: local
+      reads: [client-presentation-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/settings-panel.js, gui, assets/sounds]

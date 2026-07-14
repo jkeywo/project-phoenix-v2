@@ -57,7 +57,7 @@ Architecture, patterns, processes.
 - **[RepairPlugin](./concepts/repair-plugin.md)** — Fourth simulation split: breakdown queue, three-team dispatch, repair-icon broadcast. Extracted from `simulation.rs` (#250).
 - **[PowerPlugin](./concepts/power-plugin.md)** — Fifth simulation split: 6+2 power allocation, battery exhaustion lock, recharge threshold, `PowerState` broadcaster. Extracted from `simulation.rs` (#254).
 - **[SciencePlugin](./concepts/science-plugin.md)** — Sixth simulation split: `SetScienceTarget` advisory hand-off from Sensors to Tactical. Extracted from `simulation.rs` (#258).
-- **[CommsPanel](./concepts/comms-panel.md)** — Comms console inbox/chat model, including thread grouping, contact/channel labels, and multi-speaker dialogue via TOML `speaker`.
+- **[CommsPanel](./concepts/comms-panel.md)** — Comms console inbox/chat model, including thread grouping, contact/channel labels, multi-speaker dialogue via TOML `speaker`, and immediate dialogue-decision intent.
 - **[Comms range](./concepts/comms-range.md)** — Per-entity `[comms].range` opt-in; `CommsRange` Component; pure `comms::in_range` helper; `update_comms_range_flags` server system stamps `in_range` / `sender_in_range`; client hides out-of-range contacts and greys response buttons; server enforces Hail/Respond gate.
 - **[Server HTML Lobby UI](./concepts/server-lobby-ui.md)** — HTML lobby overlay in `server.html`; `LobbyStateChanged` → `__updateLobby` push channel. Replaced the deleted Bevy `LobbyScreenRoot` tree (#436). Auto-fit grid + portrait reflow.
 - **[Client Architecture](./concepts/client-architecture.md)** — The pure-JS client: `gui/` module inventory, iframe consoles, state flow, Vitest coverage.
@@ -70,10 +70,13 @@ Architecture, patterns, processes.
 - **[Console UI Authoring Library](./concepts/console-ui-library.md)** — Per-console HTML pattern + `gui/console-ui.js` shared primitives (reconcileRows, setBtn, setBar, setAutoState, setText, keyedRebuild). Decision record for issue #509.
 - **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
 - **[PASM Runtime](./concepts/pasm-runtime.md)** — Phase 0-12 PASM foundation: typed model, repository observation, migration, design traceability, scenarios, semantic audit handoff, bounded task contexts, and CI validation.
+- **[PASM Feature Capture Backlog](./concepts/pasm-feature-capture-backlog.md)** — Ordered inventory of existing and missing gameplay, architecture, content, and presentation slices to capture in PASM.
 - **[PASM Midpoint Audit](./concepts/pasm-midpoint-audit.md)** — Current Phase 1-9 audit, including Repair, Helm, Red Alert, and world-file design gaps.
+- **[PASM Coverage Audit](./concepts/pasm-coverage-audit.md)** — Current code-to-PASM coverage review, including authority, codec, authored-content evidence, targeting, legacy AI, and design-traceability gaps.
 - **[Damage And Repair Intent](./concepts/damage-and-repair-intent.md)** — Intended information gates and authority handoff for Engineering, station owners, and repair teams.
 - **[Helm Control Intent](./concepts/helm-control-intent.md)** — Human helm commands, authoritative drive state, and the direct-write helm AI path.
 - **[Red Alert Intent](./concepts/red-alert-intent.md)** — Planned explicit Red Alert state-setting, selected Sensors target visibility, and mandatory AI-ship capability.
+- **[Shields Intent](./concepts/shields-intent.md)** — Human shield focus authority and AI focus from concentrated recent incoming damage.
 
 ## Sources
 

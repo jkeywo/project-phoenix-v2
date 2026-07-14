@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from pasm.core.validation import validate_spec_root
-from pasm.implementation.observation import observe_repository
+from pasm.implementation.observation import observe_entity_implementation, observe_repository
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -35,6 +35,15 @@ def test_authored_pasm_specs_validate() -> None:
         finding.rule.startswith("yaml.") or finding.rule == "core.confidence-valid"
         for finding in result.findings
     ), [finding.summary for finding in result.findings]
+
+
+def test_world_content_pack_is_observed_as_toml() -> None:
+    model = validate_spec_root(REPOSITORY_ROOT / "pasm" / "spec", workspace_root=REPOSITORY_ROOT).model
+    entity = model.entity_by_id("default-world-content")
+
+    assert entity is not None
+    observed = observe_entity_implementation(entity, REPOSITORY_ROOT)
+    assert any(file.path.as_posix() == "assets/worlds/default.toml" for file in observed.files)
 
 
 def test_duplicate_entity_is_reported() -> None:
@@ -147,7 +156,7 @@ def test_repository_inventory_records_languages_cargo_and_local_edges() -> None:
     assert inventory.revision is not None
     assert inventory.cargo_packages[0].name == "pasm-observation-fixture"
     assert inventory.cargo_packages[0].dependencies == ("serde",)
-    assert {file.language for file in inventory.files} == {"html", "javascript", "rust", "typescript"}
+    assert {file.language for file in inventory.files} == {"html", "javascript", "rust", "toml", "typescript"}
     assert any(
         edge.source.as_posix() == "src/alpha.rs" and edge.target.as_posix() == "src/gamma.rs"
         for edge in inventory.dependencies
@@ -155,6 +164,16 @@ def test_repository_inventory_records_languages_cargo_and_local_edges() -> None:
     assert any(
         edge.source.as_posix() == "ui/page.html" and edge.target.as_posix() == "ui/app.js"
         for edge in inventory.dependencies
+    )
+    assert any(
+        edge.source.as_posix() == "assets/worlds/default.toml"
+        and edge.target.as_posix() == "assets/entities/scout.toml"
+        for edge in inventory.dependencies
+    )
+    assert any(
+        symbol.name == "SCANNER_SENTINEL"
+        for file in inventory.files
+        for symbol in file.symbols
     )
 
 

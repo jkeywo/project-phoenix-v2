@@ -1,0 +1,194 @@
+entities:
+  - component: ship-station-system-topology
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Station and System Topology
+      summary: Ship-authored station, fine-system, power-group, rating, and console topology that defines who may operate each capability.
+      rationale:
+        - Station ownership is the authority source for player access; console labels alone must not grant control.
+    architecture:
+      kind: configuration-model
+      authority: authoritative
+      owns: [ship-station-system-topology-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/config.rs, assets/entities]
+      symbols: [ShipConfig, StationConfig, SystemInstanceConfig]
+      tests: [cargo test]
+
+  - state: ship-station-system-topology-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Station and System Topology State
+      summary: Authoritative parsed description of stations, systems, ratings, ownership, power groups, markers, and AI-only capabilities for a ship.
+    architecture:
+      classification: authoritative
+      owner: ship-station-system-topology
+      writers: [ship-station-system-topology]
+    implementation:
+      status: declared
+      paths: [src/ship/config.rs]
+      symbols: [ShipConfig]
+
+  - component: system-kind-registry
+    core:
+      status: implemented
+      confidence: confirmed
+      title: System Kind Registry
+      summary: Code-backed registry that validates ship-authored system kinds and names the required AI controller for each kind.
+    architecture:
+      kind: registry
+      authority: authoritative
+      reads: [ship-station-system-topology-state]
+      validates: [ship-station-system-topology-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/system_registry.rs]
+      symbols: [SystemKindRegistry]
+      tests: [cargo test]
+
+  - component: system-control-source-resolver
+    core:
+      status: implemented
+      confidence: confirmed
+      title: System Control Source Resolver
+      summary: Per-ship resolver that maps each system to Human, AI, or Offline policy for the current tick.
+      rationale:
+        - Human and AI operation share admitted commands and system contracts; only control-source policy decides which input is accepted.
+    architecture:
+      kind: authority-policy
+      authority: authoritative
+      owns: [system-control-source-state]
+      reads: [ship-station-system-topology-state, active-station-rating-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/control_source.rs, src/ship/rating.rs]
+      symbols: [ControlSourceResolver, ControlSource]
+      tests: [cargo test]
+
+  - state: system-control-source-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: System Control Source State
+      summary: Authoritative per-ship mapping from system id to the current Human, AI, or Offline control source and tick policy.
+    architecture:
+      classification: authoritative
+      owner: system-control-source-resolver
+      writers: [system-control-source-resolver]
+    implementation:
+      status: declared
+      paths: [src/ship/control_source.rs]
+      symbols: [ControlSourceResolver]
+
+  - component: station-rating-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Station Rating Controller
+      summary: Applies a station holder's selected rating and its configured automated systems to the authoritative control-source state, including a valid rating change during an active round.
+    architecture:
+      kind: control-handler
+      authority: authoritative
+      owns: [active-station-rating-state]
+      writes: [system-control-source-state]
+      reads: [ship-station-system-topology-state, session-station-ownership-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/rating.rs, src/ship_plugin.rs, src/lobby/handler.rs]
+      symbols: [ActiveStationRatings]
+      messages: [SetStationRating, RatingChanged]
+      tests: [cargo test]
+
+  - state: active-station-rating-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Active Station Rating State
+      summary: Authoritative per-ship selected ratings for occupied stations, including pending lobby selections and Backfill after disconnect.
+    architecture:
+      classification: authoritative
+      owner: station-rating-controller
+      writers: [station-rating-controller]
+      replicas: [station-rating-replica]
+    implementation:
+      status: declared
+      paths: [src/ship/rating.rs, src/lobby/session.rs]
+
+  - component: station-backfill-transition
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Station Backfill Transition
+      summary: Applies Backfill automation to a disconnected station and restores or yields the prior station on reconnect according to live ownership.
+    architecture:
+      kind: lifecycle-policy
+      authority: authoritative
+      writes: [active-station-rating-state, system-control-source-state]
+      reads: [session-station-ownership-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lobby/session.rs, src/lobby/server.rs, src/ship_plugin.rs]
+      tests: [cargo test, tests/smoke/reconnect.spec.ts]
+
+  - component: system-command-admission-policy
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: System Command Admission Policy
+      summary: Host admission checks target system identity, station ownership, availability, and control-source policy before a system handler observes a player command.
+      rationale:
+        - A client must not gain authority by naming another station's system or by bypassing a damaged, offline, or AI-controlled system.
+    architecture:
+      kind: command-validator
+      authority: authoritative
+      reads: [ship-station-system-topology-state, system-control-source-state, authoritative-damage-state]
+      validates: [system-control-command]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server_app.rs, src/ship_plugin.rs]
+      symbols: [AdmissionPlugin, admit_system_commands]
+      messages: [ControlSystem]
+      tests: [cargo test]
+
+  - message: system-control-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: System Control Command
+      summary: Untrusted client-to-host command addressed to a stable system id with one typed control payload.
+    architecture:
+      authority: request
+      producer: [client-network-interface]
+      consumer: [system-command-admission-policy]
+      validator: [system-command-admission-policy]
+      trust_boundary: client-to-host
+      payload: ControlSystem
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js]
+      messages: [ControlSystem]
+      tests: [cargo test, tests/client/action-map.test.js]
+
+  - state: station-rating-replica
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Station Rating Replica
+      summary: Non-authoritative player-facing projection of current station ratings and automatic operation state.
+    architecture:
+      classification: replicated
+      owner: station-rating-controller
+      derived_from: [active-station-rating-state]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, gui/settings-panel.js, gui/sim-state.js]
+      messages: [RatingChanged]

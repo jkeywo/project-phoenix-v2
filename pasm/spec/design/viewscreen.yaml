@@ -1,0 +1,72 @@
+entities:
+  - role: viewscreen-requester
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Viewscreen Requester
+      summary: Any authorised bridge station that can request its permitted surface on the shared host viewscreen.
+    game_design:
+      architecture_links: [viewscreen-arbiter]
+      responsibilities: [request an authorised shared viewscreen mode]
+      player_verbs: [request-viewscreen-mode]
+      visible_information: [shared-viewscreen-mode-information]
+
+  - role: captain-viewscreen-controller
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Captain Viewscreen Controller
+      summary: Captain-specific viewscreen requester who may select ship camera directions or cinematic presentation for the shared screen.
+    game_design:
+      architecture_links: [viewscreen-arbiter, viewscreen-source-registry]
+      responsibilities: [select Captain camera direction, select cinematic presentation, reclaim the shared screen]
+      player_verbs: [request-viewscreen-mode]
+
+  - verb: request-viewscreen-mode
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Request Viewscreen Mode
+      summary: An authorised station requests its permitted camera or system surface on the shared viewscreen.
+    game_design:
+      architecture_links: [viewscreen-arbiter, viewscreen-source-registry]
+      owner_role: captain-viewscreen-controller
+      inputs: [permitted viewscreen mode]
+      resolution: host-authoritative
+      outputs: [resolved shared viewscreen mode]
+
+  - information: shared-viewscreen-mode-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shared Viewscreen Mode Information
+      summary: The bridge can identify the currently resolved shared viewscreen owner and mode.
+    game_design:
+      enforcement_links: [viewscreen-arbiter]
+      visibility: team-visible
+      permitted_viewers: [viewscreen-requester]
+      architectural_enforcement: [viewscreen-resolution-state records the resolved owner and mode]
+
+  - mechanic: last-valid-viewscreen-command-wins
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Last Valid Viewscreen Command Wins
+      summary: The most recent admitted viewscreen command wins regardless of console origin; there is no fixed source-priority order.
+    game_design:
+      architecture_links: [viewscreen-latest-command-policy]
+      participating_roles: [viewscreen-requester]
+      resolution: host-authoritative
+      outputs: [latest-command shared viewscreen mode]
+
+  - decision: captain-camera-return-paths
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Captain Camera Return Paths
+      summary: Captain does not need a separate default-camera action. Selecting Fore or Cinematic is the intentional way to reclaim the shared viewscreen from a system surface.
+    game_design:
+      enforcement_links: [viewscreen-arbiter, viewscreen-source-registry]
+      owner_role: viewscreen-requester
+      protected: true
+      must_not_be: [given an additional default-camera control]

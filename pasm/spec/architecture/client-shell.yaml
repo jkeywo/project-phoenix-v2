@@ -1,0 +1,224 @@
+entities:
+  - component: client-console-registry
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Console Registry
+      summary: Pure-JavaScript registry mapping station and ship configuration to the phone console panels, including ship-specific panel variants.
+    architecture:
+      kind: client-shell
+      authority: non-authoritative
+      reads: [session-station-ownership-state, ship-station-system-topology-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/console-registry.js, gui/console-state.js, gui]
+      tests: [npx vitest run]
+
+  - component: client-simulation-state-store
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Simulation State Store
+      summary: Pure-JavaScript receiver that folds authoritative server messages into local presentation state and builds per-console iframe payloads.
+    architecture:
+      kind: client-state-store
+      authority: non-authoritative
+      owns: [client-presentation-state]
+      reads: [simulation-state-replica, ship-system-blackboards-state]
+      produces: [client-presentation-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/sim-state.js, gui/console-state.js, gui/lobby-state.js]
+      tests: [npx vitest run]
+
+  - state: client-presentation-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Presentation State
+      summary: Local non-authoritative console, lobby, connection, and panel data derived from host messages; it can be discarded and reconstructed on reconnect.
+    architecture:
+      classification: local
+      owner: client-simulation-state-store
+      writers: [client-simulation-state-store]
+    implementation:
+      status: declared
+      paths: [gui/sim-state.js, gui/console-state.js, gui/lobby-state.js]
+
+  - component: client-action-dispatcher
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Action Dispatcher
+      summary: Maps console UI actions to typed client messages and applies only optimistic local presentation mutations where the interface requires them.
+    architecture:
+      kind: client-command-adapter
+      authority: non-authoritative
+      reads: [client-presentation-state]
+      sends: [system-control-command]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/action-map.js, gui/sim-state.js]
+      tests: [npx vitest run]
+
+  - component: client-access-and-tab-shell
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Access and Tab Shell
+      summary: Uses authoritative station ownership and the selected ship configuration to show accessible consoles, active-console tabs, responsive phone layout, connection status, and reconnection state.
+    architecture:
+      kind: client-shell
+      authority: non-authoritative
+      reads: [session-station-ownership-state, client-presentation-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [client.html, gui/console-registry.js, gui/connection-manager.js, assets/phone_border]
+      tests: [npx vitest run, tests/smoke]
+
+  - component: client-settings-and-help-surface
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Settings, Help, and Accessibility Surface
+      summary: Local settings, volume, control help, and inline panel assistance; these change client presentation only and do not grant authority or alter simulation state.
+    architecture:
+      kind: client-preferences
+      authority: local
+      reads: [client-presentation-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/settings-panel.js, gui/help-panel.js]
+      tests: [npx vitest run]
+
+  - component: ship-manual-content-builder
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Ship Manual Content Builder
+      summary: Reads ship-authored per-station overview text and the authoritative configured topology to build a ship-specific player manual source.
+    architecture:
+      kind: documentation-builder
+      authority: authoritative
+      owns: [ship-authored-station-help-state]
+      reads: [ship-station-system-topology-state]
+      produces: [ship-authored-station-help-state]
+      runs_in: [host-browser-runtime]
+
+  - state: ship-authored-station-help-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Ship-Authored Station Help State
+      summary: Per-station authored overview text explaining how to play this ship's version of each station.
+    architecture:
+      classification: authoritative
+      owner: ship-manual-content-builder
+      writers: [ship-manual-content-builder]
+
+  - component: system-manual-section-provider
+    core:
+      status: proposed
+      confidence: confirmed
+      title: System Manual Section Provider
+      summary: Per-system documentation provider that derives explanatory manual content from the configured system, its vessel-specific values, and station-rating automation mapping.
+    architecture:
+      kind: documentation-provider
+      authority: derived
+      reads: [ship-station-system-topology-state]
+      produces: [system-manual-section-state]
+      runs_in: [host-browser-runtime]
+
+  - state: system-manual-section-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: System Manual Section State
+      summary: Generated player-facing documentation sections for the systems configured on the current ship.
+    architecture:
+      classification: derived
+      owner: system-manual-section-provider
+      writers: [system-manual-section-provider]
+
+  - component: station-manual-aggregator
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Station Manual Aggregator
+      summary: Combines each station's ship-authored overview with the generated manual sections for the systems it owns.
+    architecture:
+      kind: documentation-aggregator
+      authority: derived
+      owns: [ship-manual-state]
+      reads: [ship-authored-station-help-state, system-manual-section-state, ship-station-system-topology-state]
+      produces: [ship-manual-state]
+      runs_in: [host-browser-runtime]
+
+  - state: ship-manual-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Ship Manual State
+      summary: Derived ship-specific manual with one station section per authored station, ready to replicate as read-only player reference content.
+    architecture:
+      classification: derived
+      owner: station-manual-aggregator
+      writers: [station-manual-aggregator]
+      replicas: [ship-manual-replica]
+
+  - state: ship-manual-replica
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Ship Manual Replica
+      summary: Phone-client copy of the current ship manual, used only for player-facing reading and never as a source of authority.
+    architecture:
+      classification: replicated
+      owner: station-manual-aggregator
+      derived_from: [ship-manual-state]
+
+  - component: client-ship-manual-surface
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Client Ship Manual Surface
+      summary: Read-only client manual with tabs for every authored station, showing the ship-authored overview followed by generated vessel-specific system sections.
+    architecture:
+      kind: client-documentation-surface
+      authority: non-authoritative
+      reads: [ship-manual-replica, client-presentation-state]
+      runs_in: [phone-browser-runtime]
+
+  - component: client-station-rating-control
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Station Rating Control
+      summary: Non-authoritative station-holder control within the settings overlay that requests a selected authored rating and presents the host-replicated active rating.
+    architecture:
+      kind: client-command-adapter
+      authority: non-authoritative
+      reads: [client-presentation-state, station-rating-replica, session-station-ownership-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/settings-panel.js, gui/sim-state.js]
+      messages: [SetStationRating, RatingChanged]
+      tests: [npx vitest run]
+
+  - component: client-mid-round-station-handoff
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Client Mid-Round Station Handoff
+      summary: Client presentation that labels the existing in-progress readiness hand-off as Take Station after a player claims an available station, while retaining Ready for the lobby, and confirms an in-round station release before returning control to Backfill.
+    architecture:
+      kind: client-command-adapter
+      authority: non-authoritative
+      reads: [client-presentation-state, lobby-session-replica, system-control-source-state]
+      runs_in: [phone-browser-runtime]

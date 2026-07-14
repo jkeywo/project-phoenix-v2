@@ -1,0 +1,148 @@
+entities:
+  - component: comms-dialogue-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Comms Dialogue Controller
+      summary: Evaluates world-authored comms templates and admitted hail, response, clear, viewscreen, and channel-2 actions against the shared ship Comms inbox.
+    architecture:
+      kind: interaction-controller
+      authority: authoritative
+      owns: [comms-inbox-state, comms-dialogue-state]
+      reads: [world-configuration-state, world-name-binding-state, world-flag-state]
+      writes: [comms-inbox-state, comms-dialogue-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/comms/server.rs, src/console/comms/inbox.rs, src/world/content.rs]
+      tests: [cargo test]
+
+  - state: comms-inbox-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Comms Inbox State
+      summary: Shared ship Comms messages, contacts, read and urgent status, sender endpoint identity, and player-facing sender text.
+    architecture:
+      classification: authoritative
+      owner: comms-dialogue-controller
+      writers: [comms-dialogue-controller, world-comms-runtime]
+      replicas: [ship-system-blackboards-state]
+    implementation:
+      status: declared
+      paths: [src/console/comms/inbox.rs, src/console/comms/server.rs, src/core/messages.rs]
+
+  - state: comms-dialogue-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Comms Dialogue State
+      summary: Active dialogue nodes, response follow-ups, and pending delayed delivery associated with message threads.
+    architecture:
+      classification: authoritative
+      owner: comms-dialogue-controller
+      writers: [comms-dialogue-controller]
+    implementation:
+      status: declared
+      paths: [src/world/content.rs, src/world/server.rs, src/console/comms/server.rs]
+
+  - component: comms-range-enforcer
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Comms Range and Jamming Enforcer
+      summary: Computes physical sender range and rejects hails and responses for unknown, out-of-range, or jammed endpoints while allowing synthetic senders to remain readable.
+    architecture:
+      kind: admission-policy
+      authority: authoritative
+      owns: [comms-range-state]
+      reads: [authoritative-ship-motion-state, ship-modifier-state]
+      validates: [comms-dialogue-controller]
+      produces: [comms-range-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/comms/range.rs, src/comms/component.rs, src/world/server.rs, src/console/comms/server.rs]
+      tests: [cargo test]
+
+  - state: comms-range-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Comms Range State
+      summary: Per-sender reachability flags used both for authoritative command gates and for the replicated unavailable presentation.
+    architecture:
+      classification: authoritative
+      owner: comms-range-enforcer
+      writers: [comms-range-enforcer]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/console/comms/server.rs]
+
+  - component: comms-blackboard-publisher
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Comms Blackboard Publisher
+      summary: Projects messages, contacts, urgency, reachability, and objective snapshots to the local ship's Comms surface.
+    architecture:
+      kind: blackboard-publisher
+      authority: authoritative
+      reads: [comms-inbox-state, comms-range-state, objective-runtime-state]
+      writes: [ship-system-blackboards-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/comms/server.rs, src/core/messages.rs, gui/comms-state.js]
+
+  - component: comms-ai-operator
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Comms AI Operator
+      summary: Applies per-ship AI control gating but currently has no autonomous hail or dialogue policy; complete hail behavior remains future Comms AI work.
+    architecture:
+      kind: ai-operator
+      authority: authoritative
+      reads: [system-control-source-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/comms/server.rs]
+      tests: [cargo test]
+
+  - component: important-comms-decision-presentation
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Important Comms Decision Presentation
+      summary: Future authored-response presentation contract that warns and confirms responses marked important before normal submission, without changing server authority or response finality.
+    architecture:
+      kind: presentation-contract
+      authority: non-authoritative
+      reads: [world-configuration-state, comms-dialogue-state]
+      runs_in: [phone-browser-runtime]
+
+  - component: comms-response-availability-presentation
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Comms Response Availability Presentation
+      summary: Future phone presentation that greys response controls when the authoritative sender reachability flag says a physical channel is unavailable.
+    architecture:
+      kind: presentation-contract
+      authority: non-authoritative
+      reads: [comms-range-state, comms-dialogue-state]
+      runs_in: [phone-browser-runtime]
+
+  - component: comms-response-rejection-feedback
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Comms Response Rejection Feedback
+      summary: Future host-to-phone rejection feedback that lets the attempted unavailable response flash red when a stale or forced submission is refused.
+    architecture:
+      kind: interaction-feedback-contract
+      authority: authoritative
+      reads: [comms-range-state, comms-dialogue-state]
+      runs_in: [host-browser-runtime, phone-browser-runtime]

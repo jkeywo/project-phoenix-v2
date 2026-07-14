@@ -1,0 +1,150 @@
+entities:
+  - component: faction-relationship-registry
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Faction Relationship Registry
+      summary: Parsed faction definitions and hostility relationships used to identify NPC allies, enemies, and valid combat targets.
+    architecture:
+      kind: configuration-registry
+      authority: authoritative
+      owns: [faction-relationship-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ai/faction.rs, assets/factions]
+      symbols: [FactionConfig]
+      tests: [cargo test]
+
+  - state: faction-relationship-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Faction Relationship State
+      summary: Authoritative faction names and relation lookup used by NPC doctrine, targeting, and world-spawned ships.
+    architecture:
+      classification: authoritative
+      owner: faction-relationship-registry
+      writers: [faction-relationship-registry]
+    implementation:
+      status: declared
+      paths: [src/ai/faction.rs, assets/factions]
+
+  - component: npc-ai-controller-provisioner
+    core:
+      status: implemented
+      confidence: confirmed
+      title: NPC AI Controller Provisioner
+      summary: Attaches an AI controller and all-AI system control sources to spawned entities that declare authored behavior.
+    architecture:
+      kind: lifecycle-service
+      authority: authoritative
+      owns: [npc-ai-controller-state]
+      writes: [system-control-source-state]
+      reads: [spawned-entity-state, entity-template-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ai/server.rs, src/entities/spawner.rs, src/ship/control_source.rs]
+      symbols: [AiControllerComponent]
+      tests: [cargo test]
+
+  - state: npc-ai-controller-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: NPC AI Controller State
+      summary: Authoritative per-NPC controller presence, doctrine input, current intent, and combat-memory state.
+    architecture:
+      classification: authoritative
+      owner: npc-ai-controller-provisioner
+      writers: [npc-ai-controller-provisioner, npc-doctrine-evaluator]
+    implementation:
+      status: declared
+      paths: [src/ai/server.rs, src/ship/combat_activity.rs]
+      symbols: [AiControllerComponent, RecentCombatActivity]
+
+  - component: npc-doctrine-evaluator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: NPC Doctrine Evaluator
+      summary: Converts faction relations, world conditions, and scored objective directives into per-NPC helm and weapons intent.
+      rationale:
+        - NPC behavior should be authored through objectives and doctrine, not embedded as faction-specific branches in individual ship systems.
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      reads: [npc-ai-controller-state, faction-relationship-state, scored-objective-pool-state, objective-target-resolution-state, world-snapshot-state]
+      writes: [npc-ai-controller-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs]
+      symbols: [operate_helm, operate_weapons, operate_lateral_thrust]
+      tests: [cargo test]
+
+  - component: per-system-ai-operator-suite
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Per-System AI Operator Suite
+      summary: Applies AI control policy separately for Helm, Tactical, Captain, Power, Shields, Sensors, Comms, Repair, and Navigation systems.
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      reads: [system-control-source-state, npc-ai-controller-state, ship-system-blackboards-state]
+      writes: [last-helm-input-state, weapons-target-state, active-station-rating-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship_plugin.rs, src/console/weapons/server.rs, src/console/captain/server.rs, src/ship/power.rs, src/ship/shields.rs, src/ship/sensors.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/mod.rs]
+      tests: [cargo test]
+
+  - component: ai-command-symmetry-migration
+    core:
+      status: proposed
+      confidence: confirmed
+      title: AI Command Symmetry Migration
+      summary: Planned migration in which NPC and Backfill AI express the same typed system inputs as a player, after objective and hazard calculation, instead of directly mutating downstream simulation state.
+      rationale:
+        - Shared inputs make authority, damage gating, blackboards, and player/AI behavior auditable through one system path.
+    architecture:
+      kind: migration-target
+      authority: authoritative
+      reads: [npc-ai-controller-state, system-control-source-state]
+      sends: [system-control-command]
+      runs_in: [host-browser-runtime]
+
+  - component: ai-combat-memory
+    core:
+      status: implemented
+      confidence: confirmed
+      title: AI Combat Memory
+      summary: Per-ship recent-damage and combat-activity memory used by AI, including Captain Red Alert automation, without a separate private timing copy.
+    architecture:
+      kind: state-service
+      authority: authoritative
+      owns: [recent-combat-activity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/combat_activity.rs, src/console/captain/server.rs]
+      symbols: [RecentCombatActivity]
+      tests: [cargo test]
+
+  - state: recent-combat-activity-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Recent Combat Activity State
+      summary: Authoritative per-ship recent attack and damage timestamps consumed by combat-aware AI and viewscreen aggregation.
+    architecture:
+      classification: authoritative
+      owner: ai-combat-memory
+      writers: [ai-combat-memory]
+      replicas: [ship-system-blackboards-state]
+    implementation:
+      status: declared
+      paths: [src/ship/combat_activity.rs]
+      symbols: [RecentCombatActivity]

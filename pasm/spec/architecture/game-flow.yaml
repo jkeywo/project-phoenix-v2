@@ -1,0 +1,248 @@
+entities:
+  - component: pre-scenario-lobby-surface
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Pre-Scenario Lobby Surface
+      summary: Shared server-screen and connected-client selection surface available before any scenario world is loaded; the server QR code is visible from this state.
+      rationale:
+        - Players should be able to join before content selection instead of waiting for a host-preloaded scenario.
+    architecture:
+      kind: lobby-interface
+      authority: non-authoritative
+      reads: [pre-scenario-selection-state, scenario-ship-catalog-state]
+      sends: [select-scenario-command, select-player-ship-command]
+      runs_in: [host-browser-runtime, phone-browser-runtime]
+
+  - state: pre-scenario-selection-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Pre-Scenario Selection State
+      summary: Authoritative round-setup state containing no selection or the first accepted scenario and player-ship choices for the next game.
+    architecture:
+      classification: authoritative
+      owner: scenario-ship-selection-arbiter
+      writers: [scenario-ship-selection-arbiter]
+      replicas: [lobby-session-replica]
+
+  - state: scenario-ship-catalog-state
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Scenario and Ship Catalog State
+      summary: Host-known selectable world and per-world available-ship catalog. Current code exposes available ships only after the host has loaded a world.
+    architecture:
+      classification: authoritative
+      owner: world-available-ship-catalog
+      writers: [world-available-ship-catalog]
+      replicas: [lobby-session-replica]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/server/bridge.rs, server.html]
+      symbols: [WorldConfig]
+      tests: [cargo test]
+
+  - component: scenario-ship-selection-arbiter
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Scenario and Ship Selection Arbiter
+      summary: Authoritative first-writer-wins arbiter for scenario and player-ship selection from either the server screen or a connected client.
+      rationale:
+        - Selection is deliberately not a vote and does not require a special captain role before the ship topology exists.
+    architecture:
+      kind: command-handler
+      authority: authoritative
+      owns: [pre-scenario-selection-state, world-load-request-state]
+      reads: [scenario-ship-catalog-state]
+      consumes: [select-scenario-command, select-player-ship-command]
+      produces: [world-load-request-state]
+      runs_in: [host-browser-runtime]
+
+  - message: select-scenario-command
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Select Scenario Command
+      summary: Client or server-screen request naming one offered scenario; the first valid request locks the next round's scenario selection.
+    architecture:
+      authority: request
+      producer: [pre-scenario-lobby-surface]
+      consumer: [scenario-ship-selection-arbiter]
+      validator: [scenario-ship-selection-arbiter]
+      trust_boundary: client-to-host
+      payload: SelectScenario
+
+  - message: select-player-ship-command
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Select Player Ship Command
+      summary: Client or server-screen request naming one ship offered by the selected scenario; the first valid request locks the next round's player ship.
+    architecture:
+      authority: request
+      producer: [pre-scenario-lobby-surface]
+      consumer: [scenario-ship-selection-arbiter]
+      validator: [scenario-ship-selection-arbiter]
+      trust_boundary: client-to-host
+      payload: SelectPlayerShip
+
+  - state: world-load-request-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Load Request State
+      summary: Authoritative selected scenario and ship inputs awaiting validation, asset discovery, and world activation for the next round.
+    architecture:
+      classification: authoritative
+      owner: scenario-ship-selection-arbiter
+      writers: [scenario-ship-selection-arbiter]
+
+  - component: game-flow-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Game Flow Controller
+      summary: Authoritative controller for Lobby, Loading, InProgress, and GameOver phase transitions, ready countdown, and round reset.
+    architecture:
+      kind: state-machine
+      authority: authoritative
+      owns: [game-phase-state, game-over-reason-state]
+      reads: [session-identity-state, pre-scenario-selection-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lobby/handler.rs, src/lobby/server.rs, src/server_app.rs, src/server/asset_preload.rs]
+      symbols: [GameOverReason]
+      messages: [GameStarted, GameOver, LoadingProgress, ReturnedToLobby]
+      tests: [cargo test, tests/client/lobby-state.test.js]
+
+  - state: game-phase-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Game Phase State
+      summary: "Authoritative current round phase: Lobby, Loading, InProgress, or GameOver."
+    architecture:
+      classification: authoritative
+      owner: game-flow-controller
+      writers: [game-flow-controller]
+      replicas: [lobby-session-replica]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/server_app.rs]
+      symbols: [GamePhase]
+
+  - state: game-over-reason-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Game Over Reason State
+      summary: Authoritative terminal reason written by player-ship destruction or authored world/comms outcomes and projected to every player.
+    architecture:
+      classification: authoritative
+      owner: game-flow-controller
+      writers: [game-flow-controller]
+      replicas: [lobby-session-replica]
+    implementation:
+      status: declared
+      paths: [src/server_app.rs, src/console/weapons/server.rs, src/regions/server.rs, src/console/comms/server.rs]
+      symbols: [GameOverReason]
+
+  - component: round-return-controller
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Round Return Controller
+      summary: Returns every connected player and the server screen from GameOver to the common pre-scenario selection lobby. Connection and name persist, while station claims and ready state clear before the next selection; prior round selection clears only when return is complete.
+    architecture:
+      kind: lifecycle-controller
+      authority: authoritative
+      writes: [game-phase-state, pre-scenario-selection-state]
+      reads: [game-over-reason-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lobby/handler.rs, client.html, server.html]
+      messages: [ReturnToLobby, ReturnedToLobby]
+      tests: [cargo test]
+
+  - component: legacy-scenario-confirmation-signal
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Legacy Scenario Confirmation Signal
+      summary: Current Lobby signal that broadcasts ScenarioLoaded without carrying a scenario identifier because the host has already loaded the world.
+    architecture:
+      kind: compatibility-adapter
+      authority: authoritative
+      reads: [game-phase-state]
+      produces: [lobby-session-replica]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lobby/handler.rs, src/server/bridge.rs, server.html]
+      messages: [ConfirmScenario, ScenarioLoaded]
+      tests: [cargo test]
+    exceptions:
+      - rule: scenario-selection-must-be-explicit
+        scope: [legacy-scenario-confirmation-signal]
+        rationale: Current host-page loading predates the shared pre-scenario selection flow.
+        temporary: true
+        removal_condition: [SelectScenario and SelectPlayerShip are admitted by scenario-ship-selection-arbiter.]
+        approval_status: accepted
+
+  - component: game-start-entity-lifecycle
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Game-Start Entity Lifecycle
+      summary: Spawns deferred game-start world entities when the round enters InProgress, preserving world-owned identity, template composition, and lifecycle events.
+    architecture:
+      kind: lifecycle-controller
+      authority: authoritative
+      reads: [game-phase-state, world-configuration-state, world-layer-runtime-state]
+      writes: [spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server_app.rs, src/world/server.rs, src/entities/spawner.rs]
+      tests: [cargo test]
+
+  - component: entity-destruction-lifecycle
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Destruction Lifecycle
+      summary: Converts destroyed ships and generated runtime entities into destruction events, removes their ECS presence and replicated snapshots, and lets world triggers and objectives observe the result.
+    architecture:
+      kind: lifecycle-controller
+      authority: authoritative
+      reads: [authoritative-damage-state, spawned-entity-state]
+      writes: [spawned-entity-state, world-layer-runtime-state]
+      produces: [simulation-state-replica]
+      coordinates: [world-trigger-action-dispatcher, objective-outcome-controller]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server_app.rs, src/world/server.rs, src/console/weapons/server.rs, src/regions/server.rs]
+      tests: [cargo test]
+
+  - component: terminal-round-outcome-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Terminal Round Outcome Router
+      summary: Routes player-ship destruction and authored world or Comms GameOver actions into one authoritative terminal reason and GameOver phase transition; NPC destruction remains a local entity-lifecycle event unless authored content makes it terminal.
+    architecture:
+      kind: outcome-router
+      authority: authoritative
+      reads: [spawned-entity-state, game-phase-state]
+      writes: [game-phase-state, game-over-reason-state]
+      coordinates: [entity-destruction-lifecycle, world-trigger-action-dispatcher]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server_app.rs, src/world/server.rs, src/console/comms/server.rs]
+      tests: [cargo test]

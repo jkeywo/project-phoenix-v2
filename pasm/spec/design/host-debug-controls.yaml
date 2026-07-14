@@ -1,0 +1,49 @@
+entities:
+  - role: host-debug-operator
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Host Debug Operator
+      summary: Person operating the server page who may inspect host diagnostics and use its current simulation-affecting debug controls.
+    game_design:
+      architecture_links: [debug-overlay-controller, host-debug-simulation-controls]
+      responsibilities: [inspect diagnostics, pause simulation, apply host debug overrides]
+      player_verbs: [use-host-debug-control]
+
+  - verb: use-host-debug-control
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Use Host Debug Control
+      summary: The host operator may use the server-page debug panel to inspect diagnostics, pause simulation, toggle region wireframes, enable local-ship god mode, or enable instagib damage. Teleport to Waypoint remains a separate proposed action.
+    game_design:
+      architecture_links: [debug-overlay-controller, host-debug-simulation-controls]
+      owner_role: host-debug-operator
+      inputs: [selected host debug action]
+      resolution: host-local direct control
+      outputs: [diagnostic presentation or active simulation debug override]
+
+  - mechanic: host-debug-teleport-to-waypoint
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Host Debug Teleport to Waypoint
+      summary: The server-page Debug panel offers a Teleport to Waypoint action that immediately moves the local ship to the current authoritative shared Navigation waypoint. The action is unavailable when no waypoint exists.
+    game_design:
+      architecture_links: [host-debug-waypoint-teleport, navigation-waypoint-controller]
+      participating_roles: [host-debug-operator]
+      reads: [navigation-waypoint-state]
+      resolution: host-authoritative-debug-override
+      outputs: [local ship at waypoint]
+
+  - decision: host-debug-controls-available-in-normal-builds
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Host Debug Controls Available in Normal Builds
+      summary: For now, the complete host Debug panel remains accessible in normal builds. Simulation-affecting controls, including waypoint teleport, are intentional host powers rather than hidden development-only controls.
+    game_design:
+      enforcement_links: [host-debug-simulation-controls]
+      owner_role: host-debug-operator
+      protected: true
+      must_not_be: [exposed to phone clients, silently treated as non-gameplay diagnostics]

@@ -154,3 +154,100 @@ entities:
         - authoritative-red-alert-state
       runs_in:
         - host-browser-runtime
+
+  - component: current-red-alert-toggle-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Current Red Alert Toggle Controller
+      summary: Current admitted-command handler that toggles each addressed ship's ShipRedAlert state when it receives ToggleRedAlert.
+    architecture:
+      kind: control-handler
+      authority: authoritative
+      owns: [current-red-alert-state]
+      consumes: [current-toggle-red-alert-command]
+      writes: [current-red-alert-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, src/core/messages.rs]
+      tests: [cargo test]
+
+  - state: current-red-alert-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Current Red Alert State
+      summary: Per-ship host-owned boolean alert state currently mutated by toggle semantics and replicated through the Captain blackboard.
+    architecture:
+      classification: authoritative
+      owner: current-red-alert-toggle-controller
+      writers: [current-red-alert-toggle-controller]
+      replicas: [ship-system-blackboards-state]
+    implementation:
+      status: declared
+      paths: [src/ship/state.rs, src/console/captain/server.rs, src/core/messages.rs]
+
+  - message: current-toggle-red-alert-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Current Toggle Red Alert Command
+      summary: Current admitted request to invert the addressed ship's Red Alert state; it is intentionally represented separately from the proposed idempotent set command.
+    architecture:
+      authority: request
+      producer: [client-action-dispatcher, current-red-alert-ai-operator]
+      consumer: [current-red-alert-toggle-controller]
+      validator: [system-command-admission-policy]
+      payload: ToggleRedAlert
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, gui/action-map.js, gui/sim-state.js]
+
+  - component: current-red-alert-ai-operator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Current Red Alert AI Operator
+      summary: For AI-controlled Red Alert systems, derives desired alert from per-ship recent combat activity and emits the existing toggle only when desired and current state differ.
+    architecture:
+      kind: ai-operator
+      authority: authoritative
+      reads: [current-red-alert-state, recent-combat-activity-state, system-control-source-state]
+      sends: [current-toggle-red-alert-command]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, src/ai/core.rs]
+      tests: [cargo test]
+
+  - component: red-alert-current-presentation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Current Red Alert Presentation
+      summary: Projects the current alert boolean into Captain client data and host viewscreen visual treatment; the client may play the local Red Alert siren from its replica.
+    architecture:
+      kind: presentation-layer
+      authority: derived
+      reads: [current-red-alert-state]
+      writes: [ship-system-blackboards-state]
+      renders: [current-red-alert-state]
+      runs_in: [host-browser-runtime, phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, src/server/viewscreen_border.rs, gui/components/ph-red-alert.js, assets/sounds/red_alert_siren.ogg]
+
+  - component: red-alert-toggle-to-set-migration-plan
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Red Alert Toggle-to-Set Migration Plan
+      summary: Replaces ToggleRedAlert with SetRedAlert active state across Captain and AI command producers, then retires the toggle handler after client and NPC command-path migration.
+    architecture:
+      kind: migration-plan
+      authority: authoritative
+      reads: [current-red-alert-state]
+      writes: [authoritative-red-alert-state]
+      coordinates: [current-red-alert-toggle-controller, host-red-alert-control-router, current-red-alert-ai-operator, red-alert-ai-operator]
+      runs_in: [host-browser-runtime]

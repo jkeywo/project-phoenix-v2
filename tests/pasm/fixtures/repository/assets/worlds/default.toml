@@ -1,0 +1,4 @@
+[[entity]]
+template_path = "assets/entities/scout.toml"
+
+extra_worlds = ["assets/worlds/patrol.toml"]

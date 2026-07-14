@@ -121,6 +121,14 @@ The waypoint is also drawn on the Helm radar (`buildHelmConsoleState` →
 with `edge: true` when out of range so the helmsman can still see the
 bearing.
 
+## Intended Helm contract
+
+The waypoint is the normal shared desired-destination surface, not a direct
+motion command. Future Helm AI should consume it whenever Helm is AI-controlled,
+whether its writer was human Navigation or Navigation AI. `NavigateTo` remains a
+level-3 advisory coordination request for an explicit ask to Helm; it should not
+be the normal route by which Navigation AI makes the ship move.
+
 ## Wire surface
 
 - `ClientMessage::SetNavigationWaypoint { x: f32, z: f32, source_uuid:

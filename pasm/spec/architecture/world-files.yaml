@@ -302,3 +302,88 @@ entities:
       reads: [world-entity-identity-state, world-name-binding-state]
       coordinates: [world-comms-runtime]
       runs_in: [host-browser-runtime]
+
+  - component: world-layer-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Layer Runtime
+      summary: Loads the base world and additive extra worlds, queues runtime layer changes, maintains loaded layer ownership, and applies load and unload transitions.
+    architecture:
+      kind: lifecycle-controller
+      authority: authoritative
+      owns: [world-layer-runtime-state]
+      reads: [world-configuration-state, world-name-binding-state]
+      writes: [world-layer-runtime-state, spawned-entity-state]
+      produces: [world-layer-runtime-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/world/config.rs]
+      tests: [cargo test]
+
+  - state: world-layer-runtime-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Layer Runtime State
+      summary: Loaded world layers, pending load/unload changes, and each layer's owned spawned entities and runtime content.
+    architecture:
+      classification: authoritative
+      owner: world-layer-runtime
+      writers: [world-layer-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs]
+
+  - component: world-trigger-action-dispatcher
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Trigger Action Dispatcher
+      summary: "Executes the concrete authored trigger catalogue: objectives, AI state, modifiers and flags, game over, layer changes, world flags, spawning, destruction, and faction relationship changes."
+    architecture:
+      kind: action-dispatcher
+      authority: authoritative
+      reads: [world-flag-state, world-name-binding-state, world-layer-runtime-state]
+      writes: [objective-runtime-state, ship-modifier-state, spawned-entity-state, world-layer-runtime-state]
+      coordinates: [npc-doctrine-evaluator, game-flow-controller]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/world/server.rs, src/world/content.rs]
+      tests: [cargo test]
+
+  - component: world-runtime-spawn-resolver
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Runtime Spawn Resolver
+      summary: Resolves immediate versus game-start spawn timing and runtime spawn-action anchors, positions, rotations, scales, generated UUID aliases, and groups.
+    architecture:
+      kind: entity-spawner
+      authority: authoritative
+      reads: [world-configuration-state, world-name-binding-state, world-layer-runtime-state]
+      writes: [world-name-binding-state, spawned-entity-state, world-layer-runtime-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/world/server.rs]
+      tests: [cargo test]
+
+  - component: world-unload-cleanup-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Unload Cleanup Controller
+      summary: Removes unloaded-layer entities, triggers, generated spawn results, and layer-owned runtime records; reloading reconstructs those layer-local contracts.
+    architecture:
+      kind: lifecycle-controller
+      authority: authoritative
+      reads: [world-layer-runtime-state]
+      writes: [world-layer-runtime-state, spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs]
+      tests: [cargo test]

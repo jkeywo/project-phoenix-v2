@@ -1,0 +1,100 @@
+entities:
+  - component: authored-space-entity-loader
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Authored Space Entity Loader
+      summary: Loads authored stars, planets, stations, outposts, navigation beacons, docks, regions, and field declarations through the common entity template and world spawn pipeline.
+    architecture:
+      kind: entity-loader
+      authority: authoritative
+      reads: [entity-template-state, world-configuration-state]
+      writes: [spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/config.rs, src/entities/loader.rs, src/world/server.rs, assets/entities]
+      tests: [cargo test]
+
+  - component: celestial-renderer
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Celestial Renderer
+      summary: Builds the configured star surface and halo rendering assets; other authored space entities use their template models and common renderer path.
+    architecture:
+      kind: renderer
+      authority: derived
+      reads: [spawned-entity-state]
+      renders: [spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/star.rs, src/server/renderer.rs, assets/entities/star_sun.toml]
+      tests: [cargo test]
+
+  - component: asteroid-field-lifecycle
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Asteroid Field Lifecycle
+      summary: Owns deterministic field density and a player-centred grid window, spawning active cells and retiring cells outside the window.
+    architecture:
+      kind: streaming-lifecycle
+      authority: authoritative
+      owns: [asteroid-window-state]
+      reads: [world-configuration-state, authoritative-ship-motion-state]
+      writes: [spawned-entity-state]
+      produces: [asteroid-window-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/asteroids/window.rs, src/asteroids/spawner.rs, src/asteroids/lifecycle.rs]
+      tests: [cargo test]
+
+  - state: asteroid-window-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Asteroid Window State
+      summary: Current grid position, active cells, deterministic field ownership, and destroyed-asteroid tracking for the streamed window.
+    architecture:
+      classification: authoritative
+      owner: asteroid-field-lifecycle
+      writers: [asteroid-field-lifecycle]
+    implementation:
+      status: declared
+      paths: [src/asteroids/lifecycle.rs, src/asteroids/window.rs]
+
+  - component: asteroid-destruction-respawn-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Asteroid Destruction and Respawn Policy
+      summary: Records asteroid destruction for the active window, emits destruction effects, and regenerates fresh deterministic field content when the player leaves a cell and later returns.
+    architecture:
+      kind: lifecycle-policy
+      authority: authoritative
+      reads: [asteroid-window-state]
+      writes: [asteroid-window-state, spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/asteroids/lifecycle.rs, src/asteroids/spawner.rs, src/server/renderer.rs]
+      tests: [cargo test]
+
+  - component: terrain-region-integration
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Terrain Region Integration
+      summary: Represents authored radiation zones, nebulae, asteroid belts, and dock volumes as region shapes whose gameplay effects are resolved by the shared region/modifier contract.
+    architecture:
+      kind: integration-layer
+      authority: authoritative
+      reads: [spawned-entity-state, region-membership-state]
+      coordinates: [region-containment-service, region-effect-resolution]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/regions/shape.rs, src/regions/server.rs, assets/entities/region_radiation_zone.toml, assets/entities/region_nebula.toml, assets/entities/region_asteroid_belt.toml]

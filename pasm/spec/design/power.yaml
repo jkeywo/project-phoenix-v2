@@ -1,0 +1,96 @@
+entities:
+  - role: power-operator
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Power Operator
+      summary: Bridge role that allocates the ship's authored power groups and manages battery reserve through normal and emergency conditions.
+    game_design:
+      architecture_links: [ship-power-controller]
+      responsibilities: [set power-group allocation, manage battery reserve, respond to reactor and battery availability]
+      player_verbs: [set-power-group-allocation]
+      protected_decisions: [human-power-allocation]
+      visible_information: [power-grid-information, power-brownout-information]
+
+  - role: power-ai-operator-role
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Power AI Operator
+      summary: AI-only role that applies authored rules for each power group while preserving a robust battery reserve.
+    game_design:
+      architecture_links: [authored-power-ai-rule-evaluator]
+
+  - verb: set-power-group-allocation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Set Power Group Allocation
+      summary: Power sets an explicit level for one authored group through the reactor's authoritative allocation surface.
+    game_design:
+      architecture_links: [ship-power-controller]
+      owner_role: power-operator
+      inputs: [authored power group, desired allocation level]
+      resolution: host-authoritative
+      outputs: [updated power-group allocation]
+
+  - decision: human-power-allocation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Human Power Allocation
+      summary: A human Power operator owns allocation while the power system is human-controlled.
+    game_design:
+      enforcement_links: [ship-power-controller]
+      owner_role: power-operator
+      protected: true
+      must_not_be: [overridden by Power AI while human-controlled]
+
+  - decision: ai-power-allocation-rules
+    core:
+      status: proposed
+      confidence: confirmed
+      title: AI Power Allocation Rules
+      summary: AI Power evaluates rules authored per power group instead of fixed Helm, Weapons, or Sensors branches; each rule declares the minimum battery reserve at which it may apply.
+    game_design:
+      enforcement_links: [authored-power-ai-rule-evaluator]
+      owner_role: power-ai-operator-role
+      protected: true
+      must_not_be: [hard-coded to a fixed group list, allowed to cause avoidable brownouts]
+
+  - information: power-grid-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Power Grid Information
+      summary: Power sees group allocation, total supply, battery reserve, allocation lock state, and fine reactor and battery availability.
+    game_design:
+      enforcement_links: [ship-power-state]
+      visibility: role-visible
+      permitted_viewers: [power-operator]
+      architectural_enforcement: [ship-power-state replicates the authoritative power blackboard]
+
+  - information: power-brownout-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Power Brownout Information
+      summary: Power receives an advisory when active demand exceeds normal supply and battery reserve is draining toward emergency lock.
+    game_design:
+      enforcement_links: [ship-power-controller]
+      visibility: role-visible
+      permitted_viewers: [power-operator, power-ai-operator-role]
+      architectural_enforcement: [ship-power-controller produces brownout state and coordination advisories]
+
+  - mechanic: authored-power-group-ai-rules
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Authored Power Group AI Rules
+      summary: Each authored power group supplies data-defined AI rules that select its allocation from current ship conditions. Every rule declares a minimum battery reserve below which it cannot apply, preventing routine brownouts.
+    game_design:
+      architecture_links: [authored-power-ai-rule-evaluator]
+      participating_roles: [power-ai-operator-role]
+      reads: [power-grid-information, power-brownout-information]
+      resolution: host-authoritative
+      outputs: [rule-derived group allocations]

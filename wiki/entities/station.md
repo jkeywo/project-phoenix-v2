@@ -72,7 +72,11 @@ handler checks before processing input or running AI controllers.
 rating is active. `[station.rating.ai_tuning]` carries optional rule parameters
 consumed by the per-kind AI controller (e.g. fire delay, engagement threshold).
 
-Ratings change at runtime via the `RatingChanged` server broadcast (PRD #517 A2).
+The current station holder may change ratings at runtime, including during an
+active round, via `SetStationRating`. The host validates that the sender holds
+the station and that the requested name is authored for it, applies the new
+automated-system set immediately, then broadcasts `RatingChanged` to every
+client. This is shared game authority, not a local settings preference.
 
 ## Lobby flow
 

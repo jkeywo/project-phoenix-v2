@@ -8,7 +8,7 @@ updated: 2026-07-14
 
 Summary
 
-PASM is now seeded as a small Python runtime in `pasm/` that covers Phase 0 through Phase 12: package layout, typed core entities, restricted YAML parsing, typed architecture, implementation, migration, game-design sections, bounded fact reachability, provider-neutral semantic audit records, task contexts, CI validation, cross-file reference validation, deterministic findings, repository-wide observation, cross-domain traceability, unit fixtures, and CLI tools.
+PASM is now seeded as a small Python runtime in `pasm/` that covers Phase 0 through Phase 12: package layout, typed core entities, restricted YAML parsing, typed architecture, implementation, migration, game-design sections, bounded fact reachability, provider-neutral semantic audit records, task contexts, CI validation, cross-file reference validation, deterministic findings, repository-wide observation, cross-domain traceability, unit fixtures, and CLI tools. Its authored Phoenix model now additionally covers Station/System authority, sessions/replication, blackboards/coordination, game flow, ship/entity configuration, and expanded objectives.
 
 ## Current scope
 
@@ -31,10 +31,16 @@ Implemented in this slice:
 - `pasm context --entity <id> [--depth N]` traverses explicit architecture links into a bounded task-context bundle, includes mapped paths plus migration/evidence declarations, and reports linked entities omitted by the depth bound ([pasm/context.py](/C:/Coding/project-phoenix-v2/pasm/context.py));
 - CI runs the PASM test suite and deterministic validation, then uploads revision-linked scan and traceability JSON as a `pasm-reports` artifact. Semantic audit reports remain advisory ([.github/workflows/ci.yml](/C:/Coding/project-phoenix-v2/.github/workflows/ci.yml)).
 - lightweight Rust, JavaScript/TypeScript, and HTML scanners that recognise top-level/exported declarations, imports, Rust module declarations, and HTML script sources ([pasm/scanners/rust.py](/C:/Coding/project-phoenix-v2/pasm/scanners/rust.py), [pasm/scanners/javascript.py](/C:/Coding/project-phoenix-v2/pasm/scanners/javascript.py), [pasm/scanners/html.py](/C:/Coding/project-phoenix-v2/pasm/scanners/html.py));
+- lightweight TOML observation for authored template/world path references, alongside architecture contracts for the host-local console bridge, wire codec, host-page push callbacks, entity targetability, and temporary console-AI deprecation ([pasm/scanners/toml.py](/C:/Coding/project-phoenix-v2/pasm/scanners/toml.py), [pasm/spec/architecture/protocol-targeting-and-observation.yaml](/C:/Coding/project-phoenix-v2/pasm/spec/architecture/protocol-targeting-and-observation.yaml));
 - unit fixtures under `tests/pasm/fixtures/`.
 - a real authored Phoenix architecture slice at [pasm/spec/architecture/engineering-damage.yaml](/C:/Coding/project-phoenix-v2/pasm/spec/architecture/engineering-damage.yaml).
 - an authored Engineering diagnosis and repair design slice at [pasm/spec/design/engineering-diagnosis.yaml](/C:/Coding/project-phoenix-v2/pasm/spec/design/engineering-diagnosis.yaml).
 - authored Helm and Red Alert design slices at [pasm/spec/design/helm-controls.yaml](/C:/Coding/project-phoenix-v2/pasm/spec/design/helm-controls.yaml) and [pasm/spec/design/red-alert.yaml](/C:/Coding/project-phoenix-v2/pasm/spec/design/red-alert.yaml).
+- authored architecture slices for Station/System authority, sessions and replication, blackboards and coordination, game flow, and ship/entity configuration at [pasm/spec/architecture](/C:/Coding/project-phoenix-v2/pasm/spec/architecture); the objective slice now includes directive, doctrine scoring, target-resolution, and outcome contracts.
+- authored architecture slices for NPC doctrine/factions, current Helm and Repair runtime details, Power/modifiers/regions, expanded Tactical weapon ownership, and Shields at [pasm/spec/architecture](/C:/Coding/project-phoenix-v2/pasm/spec/architecture). Proposed gameplay changes remain distinguished from observed implementation mappings.
+- authored architecture slices for Radar/Sensors, Navigation, Comms, Viewscreen/cameras/debug, expanded world-layer runtime, and terrain/asteroid streaming at [pasm/spec/architecture](/C:/Coding/project-phoenix-v2/pasm/spec/architecture). Current AI stubs and future authority changes are recorded as partial or proposed rather than inferred as shipped.
+- authored architecture slices for concrete world content packs, the separate editor, the phone client shell, presentation/loading, and current-versus-proposed Red Alert behavior at [pasm/spec/architecture](/C:/Coding/project-phoenix-v2/pasm/spec/architecture). Presentation values that remain hardcoded are documented as observed technical debt.
+- expanded the remaining early capture slices for game-start/destruction/terminal round lifecycle, entity-template validation and capability composition, and objective Comms consequences plus player/AI projection divergence at [pasm/spec/architecture](/C:/Coding/project-phoenix-v2/pasm/spec/architecture).
 
 ## Deliberate boundaries
 

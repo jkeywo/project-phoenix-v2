@@ -11,9 +11,10 @@ from pasm.core.model import SourceLocation, SpecEntity
 from pasm.scanners.html import scan_html_imports, scan_html_symbols
 from pasm.scanners.javascript import scan_javascript_imports, scan_javascript_symbols
 from pasm.scanners.rust import scan_rust_imports, scan_rust_symbols
+from pasm.scanners.toml import scan_toml_imports, scan_toml_symbols
 
 
-SUPPORTED_SUFFIXES = {".rs", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".html"}
+SUPPORTED_SUFFIXES = {".rs", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".html", ".toml"}
 IGNORED_DIRECTORIES = {".git", ".venv", "node_modules", "target", "dist", "build", "__pycache__"}
 
 
@@ -209,6 +210,7 @@ def _scan_file(path: Path, workspace_root: Path) -> ObservedFile | None:
         ".ts": ("typescript", scan_javascript_symbols, scan_javascript_imports),
         ".tsx": ("typescript", scan_javascript_symbols, scan_javascript_imports),
         ".html": ("html", scan_html_symbols, scan_html_imports),
+        ".toml": ("toml", scan_toml_symbols, scan_toml_imports),
     }
     entry = language_map.get(suffix)
     if entry is None:
@@ -269,7 +271,7 @@ def _resolve_import_target(
         return _first_existing_module(source_path.parent, imported.target, workspace_root)
     if imported.kind == "rust-use":
         return _resolve_rust_use(source_path, imported.target, workspace_root)
-    if imported.kind in {"javascript-import", "html-script"}:
+    if imported.kind in {"javascript-import", "html-script", "toml-path"}:
         return _resolve_web_import(source_path, imported.target, workspace_root)
     return None
 
@@ -290,7 +292,8 @@ def _resolve_rust_use(source_path: Path, target: str, workspace_root: Path) -> P
 def _resolve_web_import(source_path: Path, target: str, workspace_root: Path) -> Path | None:
     if target.startswith(("http://", "https://", "//", "#")) or not target:
         return None
-    candidate = workspace_root / target.lstrip("/") if target.startswith("/") else source_path.parent / target
+    workspace_relative = target.startswith("/") or target.startswith("assets/")
+    candidate = workspace_root / target.lstrip("/") if workspace_relative else source_path.parent / target
     candidate = candidate.resolve()
     if not candidate.is_relative_to(workspace_root):
         return None

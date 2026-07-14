@@ -1,0 +1,151 @@
+entities:
+  - component: ship-power-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Power Controller
+      summary: Owns power-group allocation, reactor availability, battery reserves, brownout behavior, and the authoritative power blackboard.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [ship-power-state]
+      reads: [ship-station-system-topology-state, system-control-source-state, inter-system-message-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/power.rs, src/ship/config.rs]
+      symbols: [handle_power_messages, tick_power_system]
+      tests: [cargo test, tests/smoke/power-console.spec.ts]
+
+  - state: ship-power-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Power State
+      summary: Authoritative per-ship power-group levels, battery charge, reactor/battery availability, and emergency lock state.
+    architecture:
+      classification: authoritative
+      owner: ship-power-controller
+      writers: [ship-power-controller]
+      replicas: [ship-system-blackboards-state]
+    implementation:
+      status: declared
+      paths: [src/ship/power.rs, src/core/messages.rs]
+      symbols: [PowerBlackboard]
+
+  - component: ship-modifier-cache
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Modifier Cache
+      summary: Per-ship source-aware cache that combines numeric modifiers and OR-aggregated flags into authoritative gameplay multipliers.
+      rationale:
+        - Power, impulse, and regions must compose without each feature directly changing every consumer's tuning value.
+    architecture:
+      kind: modifier-service
+      authority: authoritative
+      owns: [ship-modifier-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/modifiers/cache.rs, src/core/flag_kind.rs]
+      symbols: [ShipModifiers]
+      tests: [cargo test]
+
+  - component: authored-power-ai-rule-evaluator
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Authored Power AI Rule Evaluator
+      summary: Future per-ship Power AI that evaluates data-defined rules for every authored power group. Each rule carries its own minimum permitted battery reserve, so allocation planning avoids avoidable brownouts without a fixed global emergency mode.
+    architecture:
+      kind: ai-operator
+      authority: authoritative
+      reads: [ship-power-state, system-control-source-state, ship-system-blackboards-state]
+      writes: [ship-power-state]
+      runs_in: [host-browser-runtime]
+
+  - state: ship-modifier-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Modifier State
+      summary: Authoritative per-ship modifiers for speed, yaw, radar range, phaser damage, hull damage, repair rate, and repair-team capacity plus Comms-jammed and sensor-blind flags.
+    architecture:
+      classification: authoritative
+      owner: ship-modifier-cache
+      writers: [ship-modifier-translator]
+      replicas: [simulation-state-replica]
+    implementation:
+      status: declared
+      paths: [src/modifiers/cache.rs, src/core/messages.rs]
+      symbols: [ShipModifiers]
+
+  - component: ship-modifier-translator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Modifier Translator
+      summary: Translates power allocation, active impulse, and region entry/exit into source-keyed modifier and flag updates, clearing all region effects on exit.
+    architecture:
+      kind: translator
+      authority: authoritative
+      writes: [ship-modifier-state]
+      reads: [ship-power-state, impulse-drive-state, region-membership-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/modifiers/coordination.rs, src/regions/server.rs]
+      symbols: [apply_power_modifiers, apply_region_effects, apply_impulse_to]
+      tests: [cargo test]
+
+  - component: region-containment-service
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Region Containment Service
+      summary: Evaluates authored sphere, box, and torus region membership for live ships and emits entry and exit events.
+    architecture:
+      kind: spatial-service
+      authority: authoritative
+      owns: [region-membership-state]
+      reads: [spawned-entity-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/regions/server.rs, src/regions/shape.rs]
+      symbols: [RegionPlugin, RegionShape]
+      tests: [cargo test]
+
+  - state: region-membership-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Region Membership State
+      summary: Authoritative transient relation recording which ships currently occupy each authored region and which region effects apply.
+    architecture:
+      classification: authoritative
+      owner: region-containment-service
+      writers: [region-containment-service]
+    implementation:
+      status: declared
+      paths: [src/regions/server.rs, src/regions/effects.rs]
+      symbols: [RegionEffectKind]
+
+  - component: region-effect-resolution
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Region Effect Resolution
+      summary: Resolves damage zones, slow zones, impulse blockers, radar dampening, Comms jamming, sensor blindness, and nebula fog from active region membership.
+    architecture:
+      kind: effect-resolver
+      authority: authoritative
+      reads: [region-membership-state]
+      writes: [ship-modifier-state, authoritative-damage-state, impulse-drive-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/regions/effects.rs, src/regions/server.rs, src/modifiers/coordination.rs]
+      symbols: [RegionEffectKind]
+      tests: [cargo test]

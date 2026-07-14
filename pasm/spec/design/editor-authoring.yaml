@@ -1,0 +1,109 @@
+entities:
+  - role: scenario-author
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Scenario Author
+      summary: Local editor user who creates, validates, saves, and exports authored world, entity, faction, and complexity content.
+    game_design:
+      architecture_links: [editor-mode-shell, editor-validation-service, editor-save-admission, editor-mod-pack-exporter]
+      responsibilities: [author content, resolve definite validation errors, export a mod pack]
+      player_verbs: [save-authored-content, export-mod-pack]
+
+  - role: host-mod-pack-operator
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Host Mod Pack Operator
+      summary: Person at the server page who uploads a mod pack before selecting the next scenario.
+    game_design:
+      architecture_links: [host-mod-pack-upload, mod-content-overlay-resolver, mod-aware-scenario-catalog]
+      responsibilities: [upload mod pack, select a scenario from the composed catalog]
+      player_verbs: [upload-mod-pack]
+
+  - verb: save-authored-content
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Save Authored Content
+      summary: Save an edited authored file only when local validation has no definite errors; warnings remain visible but do not prevent deliberate authoring work.
+    game_design:
+      architecture_links: [editor-validation-service, editor-save-admission]
+      owner_role: scenario-author
+      inputs: [edited authored TOML]
+      resolution: local-validation-gate
+      outputs: [saved authored TOML or visible blocking errors]
+
+  - verb: export-mod-pack
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Export Mod Pack
+      summary: Export selected authored TOML files and a manifest naming selectable root scenarios as a ZIP mod pack suitable for a host to apply before scenario selection.
+    game_design:
+      architecture_links: [editor-mod-pack-exporter, editor-validation-service]
+      owner_role: scenario-author
+      inputs: [selected authored TOML files]
+      resolution: local-validation-gate
+      outputs: [TOML-only ZIP mod pack, selectable scenario manifest]
+
+  - verb: upload-mod-pack
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Upload Mod Pack
+      summary: Upload a TOML-only ZIP and its required scenario manifest to the server page before scenario selection, where its files may add content or replace files at the same supported authored path.
+    game_design:
+      architecture_links: [host-mod-pack-upload, mod-content-overlay-resolver, mod-aware-scenario-catalog]
+      owner_role: host-mod-pack-operator
+      inputs: [ZIP mod pack]
+      resolution: host-authoritative-validation
+      outputs: [composed content catalog or visible package errors]
+
+  - decision: mod-pack-content-composition
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Mod Pack Content Composition
+      summary: A validated mod pack overlays base authored TOML by exact supported path, replacing matching files and adding new files. Only root worlds explicitly named by its manifest appear in the selectable scenario list.
+    game_design:
+      enforcement_links: [mod-content-overlay-resolver, mod-aware-scenario-catalog]
+      owner_role: host-mod-pack-operator
+      protected: true
+      must_not_be: [partially applied, allowed to escape supported authored paths, allowed to alter a round already in progress]
+
+  - mechanic: blocking-authoring-errors
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Blocking Authoring Errors
+      summary: The editor distinguishes definite errors from warnings. Errors block save and export; warnings remain non-blocking so an author can work across related files.
+    game_design:
+      architecture_links: [editor-validation-service, editor-save-admission, editor-mod-pack-exporter]
+      participating_roles: [scenario-author]
+      resolution: local-validation-gate
+      outputs: [blocked invalid save or export, visible warnings]
+
+  - mechanic: mod-pack-scenario-manifest
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Mod Pack Scenario Manifest
+      summary: A mod pack carries a required manifest that explicitly names the root world files it contributes to scenario selection. Other included world files remain supporting content only.
+    game_design:
+      architecture_links: [editor-mod-pack-exporter, mod-content-overlay-resolver, mod-aware-scenario-catalog]
+      participating_roles: [scenario-author, host-mod-pack-operator]
+      resolution: host-authoritative-validation
+      outputs: [explicit selectable mod scenario list]
+
+  - mechanic: unified-scenario-manifest
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Unified Scenario Manifest
+      summary: Base content declares selectable regular scenarios in assets/scenarios.toml using the same manifest contract as a mod pack. The composed catalog merges the base manifest with a validated mod manifest.
+    game_design:
+      architecture_links: [base-scenario-manifest, mod-aware-scenario-catalog]
+      participating_roles: [scenario-author, host-mod-pack-operator]
+      resolution: host-authoritative-content-catalog
+      outputs: [explicit regular scenario list, explicit mod scenario list, composed selectable scenario catalog]

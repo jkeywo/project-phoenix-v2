@@ -1,0 +1,170 @@
+entities:
+  - component: viewscreen-arbiter
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Viewscreen Arbiter
+      summary: Resolves captain camera selection, cinematic mode, and competing channel-2 system requests into one active viewscreen owner and mode.
+    architecture:
+      kind: arbitration-service
+      authority: authoritative
+      owns: [viewscreen-resolution-state]
+      reads: [inter-system-message-state]
+      produces: [viewscreen-resolution-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/viewscreen.rs, src/core/messages.rs]
+      tests: [cargo test]
+
+  - state: viewscreen-resolution-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Viewscreen Resolution State
+      summary: The resolved owner and mode for the shared host display, including Captain cameras, Helm and Sensors radar, navigation, Comms, and cinematic presentation.
+    architecture:
+      classification: authoritative
+      owner: viewscreen-arbiter
+      writers: [viewscreen-arbiter]
+    implementation:
+      status: declared
+      paths: [src/ship/viewscreen.rs, src/core/messages.rs, src/server/renderer.rs]
+
+  - component: viewscreen-source-registry
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Viewscreen Source Registry
+      summary: "Maps each viewscreen mode to its owning system: Captain camera/cinematic, Helm radar, Sensors radar, Navigation chart, or Comms."
+    architecture:
+      kind: routing-policy
+      authority: authoritative
+      reads: [viewscreen-resolution-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/viewscreen.rs, src/ship/system_registry.rs]
+      tests: [cargo test]
+
+  - component: viewscreen-latest-command-policy
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Viewscreen Latest Command Policy
+      summary: Future arbiter policy that resolves competing admitted viewscreen requests strictly by recency, regardless of source system, replacing the current fixed source-priority ordering.
+    architecture:
+      kind: arbitration-policy
+      authority: authoritative
+      reads: [inter-system-message-state]
+      writes: [viewscreen-resolution-state]
+      runs_in: [host-browser-runtime]
+
+  - component: host-camera-renderer
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Camera and Viewscreen Renderer
+      summary: Renders the resolved camera or system surface, camera markers, cinematic state, world presentation, HUD text, and viewscreen effects on the authoritative host page.
+    architecture:
+      kind: renderer
+      authority: authoritative
+      reads: [viewscreen-resolution-state, ship-system-blackboards-state, world-configuration-state]
+      renders: [viewscreen-resolution-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server/renderer.rs, src/server/radar.rs, src/server/viewscreen_border.rs]
+      tests: [cargo test]
+
+  - component: viewscreen-hud-effects
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Viewscreen HUD and Alert Effects
+      summary: Presents shield flash, camera shake, lobby state, compass labels, and Red Alert visual treatment around the host viewscreen.
+    architecture:
+      kind: presentation-layer
+      authority: derived
+      reads: [viewscreen-resolution-state, shield-status-blackboard-state]
+      renders: [viewscreen-resolution-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/server/viewscreen_border.rs, src/core/messages.rs]
+
+  - component: debug-overlay-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Debug Overlay Controller
+      summary: Maintains host-local diagnostic toggles for regions, modifier overlay, damage, entities, and entity inspection, plus the bounded damage log used by diagnostics.
+    architecture:
+      kind: diagnostic-service
+      authority: host-local
+      owns: [debug-overlay-state]
+      produces: [debug-overlay-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/debug_overlay.rs]
+      tests: [cargo test]
+
+  - state: debug-overlay-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Debug Overlay State
+      summary: Host-local diagnostic-toggle and damage-log state. It is not replicated to phone clients and does not itself alter gameplay.
+    architecture:
+      classification: local
+      owner: debug-overlay-controller
+      writers: [debug-overlay-controller]
+    implementation:
+      status: declared
+      paths: [src/debug_overlay.rs]
+
+  - component: host-debug-simulation-controls
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Debug Simulation Controls
+      summary: Server-page controls that pause the simulation, make the local ship invulnerable, or apply instagib damage. They remain available in normal builds and are never exposed through phone-client authority.
+    architecture:
+      kind: host-debug-control
+      authority: authoritative
+      owns: [host-debug-simulation-override-state]
+      writes: [game-phase-state, authoritative-damage-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [server.html, src/server/bridge.rs, src/server_app.rs]
+      symbols: [wasm_toggle_debug_pause, wasm_toggle_god_mode, wasm_toggle_instagib]
+      tests: [cargo test]
+
+  - state: host-debug-simulation-override-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Debug Simulation Override State
+      summary: Host-owned active pause, god-mode, and instagib settings that directly affect the current authoritative simulation without client replication.
+    architecture:
+      classification: authoritative
+      owner: host-debug-simulation-controls
+      writers: [host-debug-simulation-controls]
+    implementation:
+      status: declared
+      paths: [src/server/bridge.rs]
+
+  - component: host-debug-waypoint-teleport
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Host Debug Waypoint Teleport
+      summary: Server-page Debug action that is enabled only when the authoritative shared Navigation waypoint exists and immediately places the local ship at that waypoint.
+    architecture:
+      kind: host-debug-control
+      authority: authoritative
+      reads: [navigation-waypoint-state]
+      writes: [authoritative-ship-motion-state]
+      runs_in: [host-browser-runtime]

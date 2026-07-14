@@ -1,0 +1,135 @@
+entities:
+  - component: system-blackboard-publisher
+    core:
+      status: implemented
+      confidence: confirmed
+      title: System Blackboard Publisher
+      summary: Publishes each system's current authoritative state during the simulation publish phase and then aggregates ship-wide views.
+      rationale:
+        - Systems need a shared, inspectable state surface without reading or mutating each other's private implementation state.
+    architecture:
+      kind: state-publisher
+      authority: authoritative
+      owns: [ship-system-blackboards-state, frozen-system-blackboards-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/sim_sets.rs, src/ship/viewscreen.rs, src/core/messages.rs]
+      symbols: [SimSet]
+      messages: [BlackboardUpdate]
+      tests: [cargo test]
+
+  - state: ship-system-blackboards-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship System Blackboard State
+      summary: Authoritative current-tick per-ship published state for Helm, Weapons, Power, Shields, Captain, Repair, Comms, Sensors, Navigation, and Viewscreen systems.
+    architecture:
+      classification: authoritative
+      owner: system-blackboard-publisher
+      writers: [system-blackboard-publisher]
+      replicas: [simulation-state-replica]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/ship/viewscreen.rs]
+      symbols: [SystemBlackboard]
+
+  - state: frozen-system-blackboards-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Frozen System Blackboard State
+      summary: Previous-tick immutable snapshot used for deterministic cross-system reads during simulation work before the next publish phase.
+    architecture:
+      classification: derived
+      owner: system-blackboard-publisher
+      derived_from: [ship-system-blackboards-state]
+    implementation:
+      status: declared
+      paths: [src/ship/viewscreen.rs, src/sim_sets.rs]
+
+  - component: inter-system-message-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Inter-System Message Router
+      summary: Typed same-tick channel for system-to-system operational messages such as joystick state, battery drain, and torpedo-round claims.
+    architecture:
+      kind: message-router
+      authority: authoritative
+      owns: [inter-system-message-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/ship_plugin.rs, src/console/weapons/server.rs]
+      symbols: [InterSystemMsg]
+      messages: [InterSystemPayload]
+      tests: [cargo test]
+
+  - state: inter-system-message-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Inter-System Message State
+      summary: Ephemeral addressed messages consumed by the target system in the same simulation tick; this channel is not a player-visible coordination queue.
+    architecture:
+      classification: ephemeral
+      owner: inter-system-message-router
+      writers: [inter-system-message-router]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs]
+      symbols: [InterSystemMsg, InterSystemPayload]
+
+  - component: coordination-lag-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Coordination Lag Router
+      summary: Per-ship delayed advisory channel for player and system coordination, with target control and availability resolved at delivery time.
+      rationale:
+        - Coordination latency should affect the message path consistently without freezing stale ownership decisions at send time.
+    architecture:
+      kind: coordination-service
+      authority: authoritative
+      owns: [coordination-lag-queue-state]
+      reads: [system-control-source-state, session-station-ownership-state]
+      produces: [coordination-delivery-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/coordination.rs, src/ship_plugin.rs, src/core/messages.rs]
+      symbols: [CoordinationLagQueue, CoordinationPayload]
+      messages: [SendCoordination, CoordinationPopup]
+      tests: [cargo test, tests/client/sim-state.test.js]
+
+  - state: coordination-lag-queue-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Coordination Lag Queue State
+      summary: Authoritative per-ship queue of pending advisory messages with configured delivery delay.
+    architecture:
+      classification: authoritative
+      owner: coordination-lag-router
+      writers: [coordination-lag-router]
+    implementation:
+      status: declared
+      paths: [src/ship/coordination.rs, src/ship_plugin.rs]
+      symbols: [CoordinationLagQueue, CoordinationQueue]
+
+  - state: coordination-delivery-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Coordination Delivery State
+      summary: Ephemeral delivered advisories including target designation, arc-bearing request, repair request, navigation request, power warning, and shield warning.
+    architecture:
+      classification: ephemeral
+      owner: coordination-lag-router
+      derived_from: [coordination-lag-queue-state]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/ship_plugin.rs]
+      messages: [CoordinationPopup]

@@ -1,0 +1,107 @@
+entities:
+  - component: world-content-pack-catalog
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Content Pack Catalog
+      summary: Catalogues the authored root scenarios and their loadable supporting world files without treating content identity as a generic world-runtime concern. Current root selection is hardcoded; it will move to the shared base scenario manifest.
+    architecture:
+      kind: content-catalog
+      authority: authoritative
+      owns: [world-content-pack-state]
+      reads: [world-configuration-state]
+      produces: [world-content-pack-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/worlds/before_the_fire.toml]
+
+  - component: base-scenario-manifest
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Base Scenario Manifest
+      summary: Assets-root scenarios.toml manifest that explicitly lists regular selectable root worlds using the same schema as a mod-pack scenario manifest.
+    architecture:
+      kind: content-catalog
+      authority: authoritative
+      produces: [world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - state: world-content-pack-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Content Pack State
+      summary: "The authored catalog: default, combat_test, and before_the_fire are selectable root worlds; patrol, reinforcements, btf_path_a, btf_path_b, btf_path_c, and btf_aphelion_protocol are composition content loaded by worlds or their triggers."
+    architecture:
+      classification: authoritative
+      owner: world-content-pack-catalog
+      writers: [world-content-pack-catalog]
+    implementation:
+      status: declared
+      paths: [assets/worlds]
+
+  - component: default-world-content
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Default World Content
+      summary: Starbase Alpha defence content with authored celestial terrain, player ship, patrol entities, objectives, triggers, and Comms.
+    architecture:
+      kind: content-pack
+      authority: authoritative
+      reads: [world-content-pack-state]
+      coordinates: [world-file-parser, world-layer-runtime]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [assets/worlds/default.toml]
+
+  - component: combat-test-world-content
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Combat Test World Content
+      summary: Selectable eight-wave Starbase Alpha defence content with authored ship-power tier gates, hostile faction changes, victory groups, and defeat conditions.
+    architecture:
+      kind: content-pack
+      authority: authoritative
+      reads: [world-content-pack-state]
+      coordinates: [world-file-parser, world-trigger-action-dispatcher]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [assets/worlds/combat_test.toml]
+
+  - component: before-the-fire-world-content
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Before the Fire World Content
+      summary: Selectable Axiom System investigation content whose narrative progression loads the BTF path and protocol sub-worlds.
+    architecture:
+      kind: content-pack
+      authority: authoritative
+      reads: [world-content-pack-state]
+      coordinates: [world-file-parser, world-layer-runtime]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [assets/worlds/before_the_fire.toml]
+
+  - component: loadable-world-content-library
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Loadable World Content Library
+      summary: Supporting patrol, reinforcements, BTF path, and Aphelion Protocol worlds that are loaded additively through extra_worlds or trigger actions instead of becoming selectable roots.
+    architecture:
+      kind: content-pack
+      authority: authoritative
+      reads: [world-content-pack-state]
+      coordinates: [world-layer-runtime, world-trigger-action-dispatcher]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [assets/worlds/patrol.toml, assets/worlds/reinforcements.toml, assets/worlds/btf_path_a.toml, assets/worlds/btf_path_b.toml, assets/worlds/btf_path_c.toml, assets/worlds/btf_aphelion_protocol.toml]

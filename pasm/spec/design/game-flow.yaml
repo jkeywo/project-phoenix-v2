@@ -1,0 +1,99 @@
+entities:
+  - role: connected-player
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Connected Player
+      summary: A named connected participant who can join a pre-scenario selection and claim a station after a scenario and ship are chosen.
+    game_design:
+      architecture_links: [pre-scenario-lobby-surface, game-flow-controller, round-return-controller, station-claim-router]
+      responsibilities: [participate in the next-round selection, claim a station, set ready]
+      player_verbs: [select-next-scenario-or-ship, claim-station, set-ready, take-station]
+
+  - verb: select-next-scenario-or-ship
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Select Next Scenario or Ship
+      summary: A connected player may make the first valid scenario or player-ship choice from the shared pre-scenario lobby.
+    game_design:
+      architecture_links: [pre-scenario-lobby-surface, scenario-ship-selection-arbiter]
+      owner_role: connected-player
+      inputs: [offered scenario or player ship]
+      resolution: host-authoritative-first-valid-request
+      outputs: [locked next-round scenario or ship selection]
+
+  - verb: claim-station
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Claim Station
+      summary: A connected player claims an available station after the next round has a selected scenario and ship.
+    game_design:
+      architecture_links: [game-flow-controller, station-claim-router]
+      owner_role: connected-player
+      inputs: [available station]
+      resolution: host-authoritative
+      outputs: [station assignment]
+
+  - verb: set-ready
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Set Ready
+      summary: A connected player marks their current round setup as ready; collective readiness drives the normal round-start transition.
+    game_design:
+      architecture_links: [game-flow-controller]
+      owner_role: connected-player
+      inputs: [ready state]
+      resolution: host-authoritative
+      outputs: [shared ready state, possible round-start transition]
+
+  - verb: take-station
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Take Station
+      summary: During an active round, a player who has claimed an available station explicitly takes it from Backfill AI. This is the existing readiness hand-off with a distinct player-facing label.
+    game_design:
+      architecture_links: [station-claim-router, client-mid-round-station-handoff]
+      owner_role: connected-player
+      inputs: [claimed station]
+      resolution: host-authoritative
+      outputs: [human control source for the claimed station]
+
+  - mechanic: mid-round-station-handoff-presentation
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Mid-Round Station Handoff Presentation
+      summary: The same authoritative hand-off action is labelled Take Station during InProgress, while Ready remains reserved for collective lobby start readiness.
+    game_design:
+      architecture_links: [station-claim-router, client-mid-round-station-handoff]
+      participating_roles: [connected-player]
+      resolution: host-authoritative
+      outputs: [clear Backfill-to-human hand-off]
+
+  - mechanic: confirmed-mid-round-station-release
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Confirmed Mid-Round Station Release
+      summary: Leaving a station during InProgress requires a client confirmation because it immediately returns that station to Backfill AI. Lobby release remains immediate.
+    game_design:
+      architecture_links: [station-claim-router, client-mid-round-station-handoff]
+      participating_roles: [connected-player]
+      resolution: client-confirmed-host-authoritative
+      outputs: [intentional station release, Backfill restoration]
+
+  - mechanic: round-return-preserves-identity-clears-claims
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Round Return Preserves Identity and Clears Claims
+      summary: At Game Over return, connected players retain their connection and name but all station claims and ready state clear before the next scenario and ship selection.
+    game_design:
+      architecture_links: [round-return-controller, pre-scenario-lobby-surface]
+      participating_roles: [connected-player]
+      resolution: host-authoritative
+      outputs: [pre-scenario selection screen, retained player identity, cleared station claims, cleared ready state]

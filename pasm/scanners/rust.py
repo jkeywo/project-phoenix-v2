@@ -4,7 +4,7 @@ import re
 
 
 RUST_SYMBOL_RE = re.compile(
-    r"^\s*(?:pub\s+)?(?:(?:async\s+)?fn|struct|enum|trait|type)\s+([A-Za-z_][A-Za-z0-9_]*)",
+    r"^\s*(?:pub\s+)?(?:(?:async\s+)?fn|struct|enum|trait|type|const|static)\s+([A-Za-z_][A-Za-z0-9_]*)",
     re.MULTILINE,
 )
 RUST_USE_RE = re.compile(r"^\s*use\s+((?:crate|self|super)::[A-Za-z_][A-Za-z0-9_:]*)", re.MULTILINE)

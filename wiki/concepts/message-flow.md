@@ -121,6 +121,17 @@ See [Networking](./networking.md) for the DataChannel creation details.
 
 Six near-identical `RefCell<bool>` thread-locals (one per debug overlay) were replaced by one `DebugToggleKind` enum-keyed pending set plus `apply_pending_toggles` — a pure function (no Bevy/wasm dependency, unit-testable natively) that flips the corresponding `bool` flag for each variant present in the set. Adding a new debug overlay means: add a variant to `DebugToggleKind`, add its resource field to `apply_pending_toggles`, and add one `wasm_bindgen` export — no new thread-local, no new drain block. The six `wasm_bindgen` export names/signatures are unchanged so `server.html`'s hotkey wiring needed no changes.
 
+The server-page Debug panel is intentionally available in normal builds for now.
+Its overlay, damage, entity, and inspector views are host-local diagnostics, but
+pause, god mode, and instagib alter the authoritative simulation and are
+host-only powers rather than diagnostic-only controls. They are never sent to
+phone clients.
+
+The intended Debug panel also includes **Teleport to Waypoint**: it is enabled
+only while the shared authoritative Navigation waypoint exists, and immediately
+moves the local ship there. Like the other simulation overrides, it remains
+host-only and available in normal builds for now.
+
 ## Diagnosing WASM panics
 
 `wasm_init` calls `console_error_panic_hook::set_once()` before `App::new()`. Without this, any Rust panic anywhere in the Bevy app traps the wasm instance and every *subsequent* JS→WASM call surfaces as `RuntimeError: memory access out of bounds`, almost always pointing at `wasm_receive_message` (the next entry point fired by PeerJS). The hook routes the real panic message + Rust source location to `console.error` so the actual fault is visible.

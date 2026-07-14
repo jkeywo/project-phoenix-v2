@@ -1,0 +1,158 @@
+entities:
+  - component: session-identity-manager
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Session Identity Manager
+      summary: Host-owned persistent session records keyed by client-held UUID token rather than transient PeerJS peer id.
+      rationale:
+        - Reconnect must restore a player's identity and eligible station relationship after WebRTC peer replacement.
+    architecture:
+      kind: session-manager
+      authority: authoritative
+      owns: [session-identity-state, session-station-ownership-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lobby/session.rs, src/lobby/handler.rs]
+      symbols: [SessionManager]
+      tests: [cargo test]
+
+  - state: session-identity-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Session Identity State
+      summary: Authoritative player identity, connection, readiness, and reconnect state keyed by session token.
+    architecture:
+      classification: authoritative
+      owner: session-identity-manager
+      writers: [session-identity-manager]
+    implementation:
+      status: declared
+      paths: [src/lobby/session.rs]
+      symbols: [SessionManager]
+
+  - state: session-station-ownership-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Session Station Ownership State
+      summary: Authoritative mapping from connected session to claimed station; console access is derived from this mapping and ship topology.
+    architecture:
+      classification: authoritative
+      owner: session-identity-manager
+      writers: [session-identity-manager]
+      replicas: [lobby-session-replica]
+    implementation:
+      status: declared
+      paths: [src/lobby/session.rs, src/lobby/stations_policy.rs]
+      tests: [cargo test, tests/smoke/stations.spec.ts]
+
+  - component: peer-transport-bridge
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Peer Transport Bridge
+      summary: Browser host and phone-client transport bridge that maps peer connections to session tokens and exchanges encoded messages.
+    architecture:
+      kind: transport-adapter
+      authority: non-authoritative
+      sends: [system-control-command, session-identify-command]
+      receives: [lobby-session-replica, simulation-state-replica]
+      runs_in: [phone-browser-runtime]
+      platforms:
+        allowed: [browser]
+        forbidden: [host-only]
+    implementation:
+      status: declared
+      paths: [server.html, client.html, gui/connection-manager.js, src/server/bridge.rs]
+      symbols: [ConnectionManager]
+      tests: [tests/client/connection-manager.test.js, tests/smoke/client-connect.spec.ts]
+
+  - message: session-identify-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Session Identify Command
+      summary: Client reconnect handshake carrying persistent token and player name to establish or restore a host session.
+    architecture:
+      authority: request
+      producer: [peer-transport-bridge]
+      consumer: [session-identity-manager]
+      validator: [session-identity-manager]
+      trust_boundary: client-to-host
+      payload: Identify
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/lobby/handler.rs, gui/connection-manager.js]
+      messages: [Identify, Welcome]
+      tests: [cargo test, tests/client/connection-manager.test.js]
+
+  - component: station-claim-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Station Claim Router
+      summary: Authoritative lobby and mid-game router for selecting, releasing, and broadcasting station assignments.
+    architecture:
+      kind: command-handler
+      authority: authoritative
+      writes: [session-station-ownership-state]
+      reads: [ship-station-system-topology-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/lobby/handler.rs, src/lobby/stations_policy.rs, src/lobby/server.rs]
+      messages: [SelectStation, ReleaseStation, StationAssigned]
+      tests: [cargo test, tests/smoke/stations.spec.ts]
+
+  - component: host-state-broadcaster
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host State Broadcaster
+      summary: Host-side broadcaster that emits phase-gated, audience-scoped snapshots and reliable events from authoritative simulation and lobby state.
+    architecture:
+      kind: replication-service
+      authority: authoritative
+      produces: [lobby-session-replica, simulation-state-replica]
+      reads: [session-identity-state, session-station-ownership-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/broadcast, src/lobby/server.rs, src/server/bridge.rs]
+      symbols: [SimBroadcaster, LobbyBroadcaster, Audience, Cadence]
+      tests: [cargo test]
+
+  - state: lobby-session-replica
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Lobby Session Replica
+      summary: Replicated lobby projection of players, readiness, station assignments, and scenario/loading signals.
+    architecture:
+      classification: replicated
+      owner: host-state-broadcaster
+      derived_from: [session-identity-state, session-station-ownership-state, game-phase-state]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, gui/lobby-state.js]
+      messages: [Welcome, PlayerJoined, StationAssigned, ReadyChanged]
+      tests: [tests/client/lobby-state.test.js, tests/smoke/lobby.spec.ts]
+
+  - state: simulation-state-replica
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Simulation State Replica
+      summary: Replicated state and event stream used by console clients and late-join reconstruction; it never grants client simulation authority.
+    architecture:
+      classification: replicated
+      owner: host-state-broadcaster
+      derived_from: [ship-system-blackboards-state, authoritative-damage-state, world-configuration-state]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, gui/sim-state.js, gui/console-state.js]
+      messages: [SimState, BlackboardUpdate, EntitySpawned, EntityDespawned]
+      tests: [tests/client/sim-state.test.js, tests/smoke/snapshot-channel.spec.ts]

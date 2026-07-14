@@ -9,7 +9,7 @@ use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{
     AdmittedCommands, ClientMessage, CoordinationPayload, InterSystemMsg, InterSystemPayload,
-    InterSystemQueue, ModifierSlot, StationId, SystemControlPayload,
+    InterSystemQueue, ModifierSlot, StationId, SystemControlPayload, SystemId,
 };
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
@@ -67,6 +67,18 @@ pub struct CoordinationQueue(pub CoordinationLagQueue);
 /// by `operate_helm_ai` to bias steering toward the requested bearing.
 #[derive(Component, Clone, Debug, Default)]
 pub struct PendingArcBearingRequest(pub Option<uuid::Uuid>);
+
+/// Tracks the last-seen `DamageTier` per system per ship for detecting
+/// crossings to worse tiers (issue #682). Initialised during ship spawn;
+/// each tick of the tier-crossing detector updates entries for every system.
+#[derive(Component, Clone, Debug, Default)]
+pub struct LastSystemTiers(pub std::collections::HashMap<SystemId, DamageTier>);
+
+/// Tracks which stations have already been flagged for human repair popups
+/// (issue #682). Key: station_id. Value: the worst tier already alerted for.
+/// Prevents re-popup every tick for Operational->Damaged crossings.
+#[derive(Component, Clone, Debug, Default)]
+pub struct RepairHumanAlerted(pub std::collections::HashMap<String, DamageTier>);
 
 /// Newtype resource used by the WASM bridge to pass a custom `ShipConfig`
 /// before the ship entity is spawned.  Consumed during ship spawn and then
@@ -325,6 +337,7 @@ impl Plugin for ShipPlugin {
                 handle_coordination_messages.in_set(crate::sim_sets::SimSet::Input),
                 process_coordination_lag.in_set(crate::sim_sets::SimSet::Modifiers),
                 sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
+                detect_damage_tier_crossings.in_set(crate::sim_sets::SimSet::Damage),
             )
                 .after(crate::lobby::process_lobby),
         );
@@ -1503,6 +1516,13 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
         CoordinationPayload::NavigateTo { label, .. } => {
             format!("Navigation: steer toward {label}")
         }
+        CoordinationPayload::RepairRequest {
+            station_label,
+            tier,
+            ..
+        } => {
+            format!("Repair requested for {station_label} ({tier:?})")
+        }
     }
 }
 
@@ -1515,6 +1535,8 @@ pub fn process_coordination_lag(
             &mut CoordinationQueue,
             Option<&mut PendingArcBearingRequest>,
             Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&mut RepairHumanAlerted>,
+            Option<&mut crate::console::repair::server::RepairRequestQueue>,
             Has<LocalShip>,
         ),
         With<crate::server_app::Ship>,
@@ -1523,16 +1545,21 @@ pub fn process_coordination_lag(
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
     mut chatter_writer: MessageWriter<AiChatterEvent>,
 ) {
+    let repair_id = crate::ship::system_registry::repair_system_id();
     let now = time.elapsed_secs();
-    for (ship_config, control_sources, mut queue, mut pending_bearing, mut ai_memory, is_local) in
-        ship_components.iter_mut()
+    for (
+        ship_config,
+        control_sources,
+        mut queue,
+        mut pending_bearing,
+        mut ai_memory,
+        mut alerted,
+        mut repair_queue,
+        is_local,
+    ) in ship_components.iter_mut()
     {
         let due = queue.0.due_messages(now);
         for msg in due {
-            // Resolve the target through the full policy (which honours
-            // damage-driven `offline_systems`), not just the raw control
-            // source. A damage-disabled console can neither operate AI nor
-            // accept human input, so it must never receive a popup.
             let target_policy = control_sources.0.policy_for(&msg.target);
             let action = if !target_policy.operate_ai && !target_policy.accept_human_input {
                 coordination::DeliverAction::Consume
@@ -1543,6 +1570,27 @@ pub fn process_coordination_lag(
 
             match action {
                 coordination::DeliverAction::Consume => {
+                    // RepairRequest for AI repair: push into the priority queue.
+                    if target_policy.operate_ai && msg.target == repair_id {
+                        if let CoordinationPayload::RepairRequest {
+                            station_id,
+                            station_label,
+                            tier,
+                            deficit,
+                        } = &msg.payload
+                        {
+                            if let Some(ref mut rq) = repair_queue {
+                                rq.push_or_merge(
+                                    crate::console::repair::server::RepairQueueEntry {
+                                        station_id: station_id.clone(),
+                                        station_label: station_label.clone(),
+                                        tier: *tier,
+                                        deficit: *deficit,
+                                    },
+                                );
+                            }
+                        }
+                    }
                     // AI Helm folds a consumed arc-bearing request into its
                     // steering (issue #677) rather than only chattering about it.
                     if target_policy.operate_ai
@@ -1585,6 +1633,28 @@ pub fn process_coordination_lag(
                     if !is_local {
                         continue;
                     }
+
+                    // Escalation-only filter for repair popups (issue #682):
+                    // human repair sees popups only on first-damage and
+                    // Disabled/Destroyed tier crossings.
+                    if msg.target == repair_id {
+                        if let CoordinationPayload::RepairRequest {
+                            station_id, tier, ..
+                        } = &msg.payload
+                        {
+                            let already = alerted
+                                .as_deref()
+                                .and_then(|a| a.0.get(station_id).copied())
+                                .unwrap_or(DamageTier::Operational);
+                            if *tier < DamageTier::Disabled && already != DamageTier::Operational {
+                                continue;
+                            }
+                            if let Some(a) = alerted.as_deref_mut() {
+                                a.0.insert(station_id.clone(), *tier);
+                            }
+                        }
+                    }
+
                     let label = if msg.sender_label.is_empty() {
                         "AI".to_string()
                     } else {
@@ -1701,6 +1771,89 @@ pub fn sync_console_damage_tiers(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Detect damage-tier crossings and emit `CoordinationEnqueue::RepairRequest`
+/// when a system drops to a worse tier (issue #682).
+///
+/// Runs in `SimSet::Damage` (after hull damage is applied). For each ship
+/// with both `EntitySystemHull` and `LastSystemTiers`, compares the current
+/// tier (via `tier_for`) against the last-seen tier.  On a crossing to a
+/// *worse* tier, enqueues a `RepairRequest` for the system's owning station
+/// (or `"core"` for ownerless systems).  Destroyed systems are skipped —
+/// they are unrepairable.
+pub fn detect_damage_tier_crossings(
+    mut ships: Query<(
+        Entity,
+        &crate::entity_spawner::EntitySystemHull,
+        &mut LastSystemTiers,
+        &ShipConfigComponent,
+        &ShipSystemControlSources,
+        Option<&mut RepairHumanAlerted>,
+    )>,
+    mut coord_writer: MessageWriter<CoordinationEnqueue>,
+) {
+    for (entity, hull_comp, mut last_tiers, config, sources, mut alerted) in &mut ships {
+        let hull = &hull_comp.0;
+        for (system_id, _cur, _max) in hull.entries() {
+            let current_tier = hull.tier_for(system_id);
+            let prev_tier = last_tiers
+                .0
+                .get(system_id)
+                .copied()
+                .unwrap_or(DamageTier::Operational);
+
+            if current_tier > prev_tier {
+                if current_tier == DamageTier::Destroyed {
+                    continue;
+                }
+
+                let system_config = config.0.system(system_id);
+                let station_id = system_config
+                    .and_then(|s| s.station.as_ref())
+                    .map(|s| s.0.clone())
+                    .unwrap_or_else(|| "core".to_string());
+                let station_label = station_id.clone();
+                let entry = hull.get(system_id).expect("just iterated entry");
+                let deficit = entry.max - entry.current;
+                let sender_origin = sources.0.source_for(system_id);
+
+                coord_writer.write(CoordinationEnqueue {
+                    source_entity: entity,
+                    sender_origin,
+                    target: crate::ship::system_registry::repair_system_id(),
+                    payload: CoordinationPayload::RepairRequest {
+                        station_id,
+                        station_label,
+                        tier: current_tier,
+                        deficit,
+                    },
+                    sender_label: system_id.0.clone(),
+                });
+            } else if current_tier == DamageTier::Operational && prev_tier > DamageTier::Operational
+            {
+                let system_config = config.0.system(system_id);
+                let station_id = system_config
+                    .and_then(|s| s.station.as_ref())
+                    .map(|s| s.0.clone())
+                    .unwrap_or_else(|| "core".to_string());
+                if let Some(ref mut a) = alerted {
+                    if crate::console::repair::server::all_systems_in_station_are_operational(
+                        &station_id,
+                        hull,
+                        &config.0,
+                    ) {
+                        a.0.remove(&station_id);
+                    }
+                }
+            }
+        }
+        for (system_id, _cur, _max) in hull.entries() {
+            last_tiers
+                .0
+                .insert(system_id.clone(), hull.tier_for(system_id));
         }
     }
 }

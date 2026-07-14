@@ -1,3 +1,4 @@
+use crate::damage::DamageTier;
 pub use crate::entity_tags::EntityTag;
 use crate::flag_kind::FlagKind;
 use crate::stations_config::ShipStations;
@@ -1187,6 +1188,13 @@ pub enum CoordinationPayload {
     },
     /// Navigation gives Helm a long-range steer-to position (issue #681).
     NavigateTo { x: f32, z: f32, label: String },
+    /// A system has crossed to a worse damage tier and needs repair (issue #682).
+    RepairRequest {
+        station_id: String,
+        station_label: String,
+        tier: DamageTier,
+        deficit: f32,
+    },
 }
 
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -2092,6 +2100,14 @@ pub struct PowerGroupEntry {
     pub max_level: u8,
 }
 
+/// Preview of a queued repair request for blackboard publication (issue #682).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct QueueEntryPreview {
+    pub station_label: String,
+    pub tier: DamageTier,
+    pub deficit: f32,
+}
+
 /// Raw sim truth for the Repair system, published each tick into the ship
 /// blackboard (issue #564).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -2106,6 +2122,9 @@ pub struct RepairBlackboard {
     /// Systems that can be targeted for repair dispatch (in display order).
     #[serde(default)]
     pub damageable_systems: Vec<SystemId>,
+    /// Priority-queue preview entries (worst-first) for human repair UI (issue #682).
+    #[serde(default)]
+    pub queue_depth: Vec<QueueEntryPreview>,
 }
 
 /// Raw sim truth for the Comms system, published each tick into the ship

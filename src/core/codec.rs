@@ -1027,6 +1027,36 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
     }
 
+    /// `CoordinationPayload::RepairRequest` round-trip (issue #682 — damaged
+    /// system pushes repair request to the Repair console).
+    #[test]
+    fn repair_request_coordination_payload_round_trips() {
+        let send_msg = ClientMessage::SendCoordination {
+            target: crate::system_registry::repair_system_id(),
+            payload: CoordinationPayload::RepairRequest {
+                station_id: "helm".into(),
+                station_label: "Helm".into(),
+                tier: crate::damage::DamageTier::Damaged,
+                deficit: 12.5,
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, send_msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+
+        let popup_msg = ServerMessage::CoordinationPopup {
+            target: crate::system_registry::repair_system_id(),
+            payload: CoordinationPayload::RepairRequest {
+                station_id: "helm".into(),
+                station_label: "Helm".into(),
+                tier: crate::damage::DamageTier::Disabled,
+                deficit: 20.0,
+            },
+            sender_label: "Helm System".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, popup_msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    }
+
     /// BlasterFired server message round-trip (issue #631, extended #638).
     #[test]
     fn blaster_fired_server_message_round_trips() {

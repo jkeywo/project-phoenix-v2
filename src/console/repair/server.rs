@@ -1,10 +1,11 @@
 use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
+use crate::damage::DamageTier;
 use crate::messages::ModifierSlot;
 use crate::messages::{
-    AdmittedCommands, RepairBlackboard, RepairTarget, ServerMessage, SystemBlackboard,
-    SystemControlPayload, SystemHullStatus, SystemId, TeamSlot,
+    AdmittedCommands, QueueEntryPreview, RepairBlackboard, RepairTarget, ServerMessage,
+    SystemBlackboard, SystemControlPayload, SystemHullStatus, SystemId, TeamSlot,
 };
 use crate::modifiers::ShipModifiers;
 use crate::repair_teams::RepairTeams;
@@ -19,6 +20,100 @@ use crate::ship_plugin::ShipSystemControlSources;
 /// (per-entity path after issue #590 unification).
 #[derive(Resource, Component, Clone)]
 pub struct ShipRepairTeams(pub RepairTeams);
+
+/// Priority queue of pending repair requests for a ship (issue #682).
+/// Sorted by severity (worst tier first, then largest deficit).
+/// Deduped by station_id: a new request for an already-queued station keeps
+/// the worst tier and largest deficit.
+#[derive(Component, Clone, Debug, Default)]
+pub struct RepairRequestQueue {
+    pub entries: Vec<RepairQueueEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RepairQueueEntry {
+    pub station_id: String,
+    pub station_label: String,
+    pub tier: DamageTier,
+    pub deficit: f32,
+}
+
+impl RepairRequestQueue {
+    pub fn push_or_merge(&mut self, entry: RepairQueueEntry) {
+        if entry.tier == DamageTier::Destroyed {
+            return;
+        }
+        if let Some(existing) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.station_id == entry.station_id)
+        {
+            if entry.tier > existing.tier {
+                existing.tier = entry.tier;
+            }
+            if entry.deficit > existing.deficit {
+                existing.deficit = entry.deficit;
+            }
+            if !entry.station_label.is_empty() {
+                existing.station_label = entry.station_label.clone();
+            }
+        } else {
+            self.entries.push(entry);
+        }
+    }
+
+    /// Pop the highest-severity entry (worst tier, then largest deficit).
+    pub fn pop_worst(&mut self) -> Option<RepairQueueEntry> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let idx = self
+            .entries
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                a.tier
+                    .partial_cmp(&b.tier)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        a.deficit
+                            .partial_cmp(&b.deficit)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+            })
+            .map(|(i, _)| i)
+            .unwrap();
+        Some(self.entries.swap_remove(idx))
+    }
+
+    pub fn remove_station(&mut self, station_id: &str) {
+        self.entries.retain(|e| e.station_id != station_id);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn peek(&self) -> Option<&RepairQueueEntry> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        self.entries.iter().max_by(|a, b| {
+            a.tier
+                .partial_cmp(&b.tier)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    a.deficit
+                        .partial_cmp(&b.deficit)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        })
+    }
+}
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
@@ -202,6 +297,7 @@ fn publish_repair_blackboard(
         (
             Option<&ShipRepairTeams>,
             &crate::entity_spawner::EntitySystemHull,
+            Option<&RepairRequestQueue>,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -213,7 +309,7 @@ fn publish_repair_blackboard(
     // Prefer per-entity component on LocalShip; fall back to global Resource.
     let entity_view = ship_q.single().ok();
     let default_teams;
-    let teams: &ShipRepairTeams = match entity_view.and_then(|(t, _)| t) {
+    let teams: &ShipRepairTeams = match entity_view.as_ref().and_then(|(t, _, _)| t.as_ref()) {
         Some(t) => t,
         None => match teams_res.as_deref() {
             Some(t) => t,
@@ -223,7 +319,8 @@ fn publish_repair_blackboard(
             }
         },
     };
-    let hull_ref = entity_view.map(|(_, h)| h);
+    let hull_ref = entity_view.as_ref().map(|(_, h, _)| h);
+    let repair_queue_ref = entity_view.as_ref().and_then(|(_, _, rq)| rq.as_deref());
     let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
     // Build the SystemHullStatus list from the authoritative `SystemHull`
@@ -246,6 +343,27 @@ fn publish_repair_blackboard(
     let damageable_systems: Vec<SystemId> =
         system_hull.iter().map(|s| s.system_id.clone()).collect();
 
+    let queue_depth: Vec<QueueEntryPreview> = repair_queue_ref
+        .map(|rq| {
+            let mut entries = rq.entries.clone();
+            entries.sort_by(|a, b| {
+                b.tier.cmp(&a.tier).then_with(|| {
+                    b.deficit
+                        .partial_cmp(&a.deficit)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+            });
+            entries
+                .iter()
+                .map(|e| QueueEntryPreview {
+                    station_label: e.station_label.clone(),
+                    tier: e.tier,
+                    deficit: e.deficit,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Emit the new SystemId-keyed hull + damageable list only (legacy
     // `console_hull` / `damageable_consoles` wire fields were dropped in #619).
     let bb = RepairBlackboard {
@@ -253,6 +371,7 @@ fn publish_repair_blackboard(
         travel_duration_secs: teams.0.timings().travel_duration,
         system_hull,
         damageable_systems,
+        queue_depth,
     };
 
     if let Some(mut blackboards) = blackboards_q.iter_mut().next() {
@@ -266,6 +385,45 @@ fn publish_repair_blackboard(
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 // ── AI controller stub ─────────────────────────────────────────────────────────
+
+pub fn all_systems_in_station_are_operational(
+    station_id: &str,
+    hull: &crate::damage::SystemHull,
+    config: &crate::ship::config::ShipConfig,
+) -> bool {
+    let systems_in_station: Vec<_> = config
+        .systems
+        .iter()
+        .filter(|s| s.station.as_ref().map(|st| st.0.as_str()) == Some(station_id))
+        .collect();
+    !systems_in_station.is_empty()
+        && systems_in_station
+            .iter()
+            .all(|s| hull.tier_for(&s.id) == DamageTier::Operational)
+}
+
+fn best_damaged_system_in_station(
+    station_id: &str,
+    hull: &crate::damage::SystemHull,
+    config: &crate::ship::config::ShipConfig,
+) -> Option<crate::messages::SystemId> {
+    config
+        .systems
+        .iter()
+        .filter(|s| {
+            s.station.as_ref().map(|st| st.0.as_str()) == Some(station_id)
+                && hull.tier_for(&s.id) != DamageTier::Operational
+                && hull.tier_for(&s.id) != DamageTier::Destroyed
+        })
+        .max_by(|a, b| {
+            let deficit_a = hull.get(&a.id).map(|e| e.max - e.current).unwrap_or(0.0);
+            let deficit_b = hull.get(&b.id).map(|e| e.max - e.current).unwrap_or(0.0);
+            deficit_a
+                .partial_cmp(&deficit_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|s| s.id.clone())
+}
 
 /// Per-kind AI loop for repair. Iterates every ship (`With<Ship>`) whose
 /// Repair system is `ControlSource::Ai` and auto-dispatches any idle team to
@@ -286,54 +444,120 @@ pub fn operate_repair_ai(
             &ShipSystemControlSources,
             Option<&mut ShipRepairTeams>,
             Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&mut RepairRequestQueue>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (sources, teams_comp, hull_comp) in ships.iter_mut() {
+    for (sources, teams_comp, hull_comp, repair_queue_comp, config_comp) in ships.iter_mut() {
         let policy = sources.0.policy_for(&repair_system_id());
         if !policy.operate_ai {
             continue;
         }
-        // Need both a team roster and a hull to make any decision.
         let (Some(mut teams), Some(hull)) = (teams_comp, hull_comp) else {
             continue;
         };
-        // Pick the system with the largest current HP deficit (max - cur > 0).
-        // Ties broken by entry order (first-declared wins).
-        // Destroyed systems (hp == 0) are skipped — they are unrepairable.
-        let target: Option<SystemId> = hull
-            .0
-            .entries()
-            .filter(|(sid, cur, max)| {
-                max - cur > 0.0 && hull.0.tier_for(sid) != crate::damage::DamageTier::Destroyed
-            })
-            .max_by(|(_, a_cur, a_max), (_, b_cur, b_max)| {
-                let a_deficit = a_max - a_cur;
-                let b_deficit = b_max - b_cur;
-                a_deficit
-                    .partial_cmp(&b_deficit)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|(sid, _, _)| sid.clone());
-        let Some(target) = target else {
-            continue;
-        };
-        // Look up the target's display name from the hull entry so the
-        // resulting `TeamSlot` carries the human-readable label. Falls back
-        // to the raw SystemId string only if the entry is missing (which
-        // should not happen for a target we just picked from the hull).
-        let target_display = hull
-            .0
-            .get(&target)
-            .map(|e| e.display_name.clone())
-            .unwrap_or_else(|| target.0.clone());
-        // Dispatch every idle team to the target. Reuses the same
-        // `RepairTeams::dispatch` entry point that the human console uses.
-        while let Some(idx) = teams.0.lowest_free_team() {
-            teams
+
+        if let (Some(mut rq), Some(config)) = (repair_queue_comp, config_comp) {
+            rq.entries.retain(|entry| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .filter(|s| {
+                        s.station.as_ref().map(|st| st.0.as_str())
+                            == Some(entry.station_id.as_str())
+                    })
+                    .any(|s| {
+                        let t = hull.0.tier_for(&s.id);
+                        t != DamageTier::Operational && t != DamageTier::Destroyed
+                    })
+            });
+
+            // Determine which stations already have at least one active team
+            // (Travelling or Repairing), so idle teams are directed to
+            // unassigned queue entries only (Option C).
+            let assigned_stations: std::collections::HashSet<String> = teams
                 .0
-                .dispatch(idx, target.clone(), target_display.clone());
+                .slots()
+                .iter()
+                .filter_map(|slot| match slot {
+                    TeamSlot::Travelling { system_id, .. }
+                    | TeamSlot::Repairing { system_id, .. } => system_id.as_ref().and_then(|sid| {
+                        config
+                            .0
+                            .system(sid)
+                            .and_then(|sc| sc.station.as_ref())
+                            .map(|s| s.0.clone())
+                    }),
+                    _ => None,
+                })
+                .collect();
+
+            // Sort entries by priority (worst tier, then largest deficit).
+            let mut sorted_entries: Vec<&RepairQueueEntry> = rq.entries.iter().collect();
+            sorted_entries.sort_by(|a, b| {
+                b.tier.cmp(&a.tier).then_with(|| {
+                    b.deficit
+                        .partial_cmp(&a.deficit)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+            });
+
+            // Dispatch each idle team to the next unassigned queue entry.
+            let mut newly_assigned: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for entry in &sorted_entries {
+                if assigned_stations.contains(&entry.station_id)
+                    || newly_assigned.contains(&entry.station_id)
+                {
+                    continue;
+                }
+                let Some(idx) = teams.0.lowest_free_team() else {
+                    break;
+                };
+                let target_sid =
+                    best_damaged_system_in_station(&entry.station_id, &hull.0, &config.0)
+                        .unwrap_or_else(|| crate::messages::SystemId(entry.station_id.clone()));
+                let display = hull
+                    .0
+                    .get(&target_sid)
+                    .map(|e| e.display_name.clone())
+                    .unwrap_or_else(|| entry.station_label.clone());
+                teams.0.dispatch(idx, target_sid, display);
+                newly_assigned.insert(entry.station_id.clone());
+            }
+        } else {
+            // Fallback: no queue component — poll hull directly (NPC ships
+            // that were not spawned through the full entity spawner path).
+            let target: Option<crate::messages::SystemId> = hull
+                .0
+                .entries()
+                .filter(|(sid, cur, max)| {
+                    max - cur > 0.0 && hull.0.tier_for(sid) != DamageTier::Destroyed
+                })
+                .max_by(|(_, a_cur, a_max), (_, b_cur, b_max)| {
+                    let a_deficit = a_max - a_cur;
+                    let b_deficit = b_max - b_cur;
+                    a_deficit
+                        .partial_cmp(&b_deficit)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(sid, _, _)| sid.clone());
+            let Some(target) = target else {
+                continue;
+            };
+            let target_display = hull
+                .0
+                .get(&target)
+                .map(|e| e.display_name.clone())
+                .unwrap_or_else(|| target.0.clone());
+            while let Some(idx) = teams.0.lowest_free_team() {
+                teams
+                    .0
+                    .dispatch(idx, target.clone(), target_display.clone());
+            }
         }
     }
 }
@@ -406,6 +630,9 @@ mod tests {
             ShipShields(ShieldSystem::default(), 0.5),
             ShipImpulse(crate::impulse::ImpulseState::new()),
             crate::modifiers::ShipModifiers::new(),
+            RepairRequestQueue::default(),
+            crate::ship_plugin::RepairHumanAlerted::default(),
+            crate::ship_plugin::LastSystemTiers::default(),
         ));
         app
     }
@@ -843,6 +1070,69 @@ mod tests {
         assert!(
             bb.damageable_systems.contains(&SystemId("core".into())),
             "Core should appear in damageable_systems"
+        );
+    }
+
+    /// A queue entry whose station's only system transitions Disabled→Destroyed
+    /// must be evicted by the retain predicate (zombie-entry regression).
+    #[test]
+    fn queue_entry_evicted_when_all_systems_destroyed() {
+        use crate::damage::SystemHull;
+        use crate::ship::config::{ShipConfig, SystemInstanceConfig};
+
+        let station_id = "helm";
+        let system_id = SystemId("helm".into());
+
+        let config = ShipConfig {
+            stations: vec![],
+            systems: vec![SystemInstanceConfig {
+                id: system_id.clone(),
+                kind: "helm".into(),
+                station: Some(StationId(station_id.into())),
+                ai_only: false,
+                power_group: None,
+                marker: None,
+                config: None,
+            }],
+            power_groups: Default::default(),
+            coordination_lag_secs: 2.0,
+        };
+
+        let mut hull = SystemHull::from_config(&[(system_id.clone(), 25.0_f32)]);
+
+        let mut rq = RepairRequestQueue { entries: vec![] };
+        rq.entries.push(RepairQueueEntry {
+            station_id: station_id.into(),
+            station_label: "Helm".into(),
+            tier: crate::damage::DamageTier::Disabled,
+            deficit: 25.0,
+        });
+        assert_eq!(rq.entries.len(), 1, "entry must be present before retain");
+
+        hull.set_hp(&system_id, 0.0);
+        assert_eq!(
+            hull.tier_for(&system_id),
+            crate::damage::DamageTier::Destroyed,
+            "system must be Destroyed after set_hp(0)"
+        );
+
+        rq.entries.retain(|entry| {
+            config
+                .systems
+                .iter()
+                .filter(|s| {
+                    s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
+                })
+                .any(|s| {
+                    let t = hull.tier_for(&s.id);
+                    t != crate::damage::DamageTier::Operational
+                        && t != crate::damage::DamageTier::Destroyed
+                })
+        });
+
+        assert!(
+            rq.entries.is_empty(),
+            "queue entry must be evicted when all station systems are Destroyed"
         );
     }
 

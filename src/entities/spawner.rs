@@ -294,6 +294,9 @@ pub fn spawn_entity(
         // AI folds into its steering once the request is consumed.
         entity_commands.insert(crate::weapons_plugin::WeaponsArcRequestState::default());
         entity_commands.insert(crate::ship_plugin::PendingArcBearingRequest::default());
+        entity_commands.insert(crate::ship_plugin::LastSystemTiers::default());
+        entity_commands.insert(crate::ship_plugin::RepairHumanAlerted::default());
+        entity_commands.insert(crate::console::repair::server::RepairRequestQueue::default());
         entity_commands.insert(crate::power_plugin::ShipPowerSystem(
             crate::modifiers::power_system::PowerSystem::default(),
         ));

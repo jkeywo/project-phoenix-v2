@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// | Damaged     | `disabled_threshold_pct <= ratio < damaged_threshold_pct` |
 /// | Disabled    | `0 < ratio < disabled_threshold_pct`       |
 /// | Destroyed   | `current == 0`                             |
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum DamageTier {
     Operational,
     Damaged,

@@ -3394,6 +3394,8 @@ fn operate_tactical_ai(
             &mut WeaponsTarget,
             Option<&mut TorpedoSystemResource>,
             &crate::server_app::ShipSystemBlackboards,
+            Option<&crate::modifiers::ShipModifiers>,
+            Option<&crate::entity_spawner::WeaponsConsoleSection>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -3424,6 +3426,8 @@ fn operate_tactical_ai(
         mut weapons_target,
         mut torpedo_sys_comp,
         blackboards,
+        modifiers,
+        weapons_section,
     ) in ship_query.iter_mut()
     {
         // Only run for ships whose Tactical surface is AI-controlled.
@@ -3440,11 +3444,23 @@ fn operate_tactical_ai(
             continue;
         }
 
+        // Damage-scaled tactical radar range (issue #680). Scale the base
+        // per-ship config range by the shared RadarRange modifier multiplier.
+        let radar_range_mult = modifiers
+            .map(|m| m.get(&ModifierSlot::RadarRange))
+            .unwrap_or(1.0);
+        let base_range = weapons_section
+            .and_then(|s| s.0.radar.as_ref().map(|r| r.range))
+            .unwrap_or(0.0);
+        let effective_tactical_range = base_range * radar_range_mult;
+
         // Always set weapons_target from Destroy objectives regardless of
         // control source. This lets both human and AI Tactical operators
         // benefit from mission objective auto-targeting. When no Destroy
         // objective is available (or its target entity can't be resolved),
         // fall back to the last attacker.
+        // Gate on radar range (issue #680): only acquire targets within
+        // the damage-scaled tactical radar range of this ship.
         let objective_target = match top_destroy_objective_target(Some(blackboards)) {
             Some("") => None,
             Some(target_name) => {
@@ -3453,7 +3469,30 @@ fn operate_tactical_ai(
             None => None,
         };
         if let Some(uuid) = objective_target.or_else(|| last_attacker.0.clone()) {
-            weapons_target.0 = Some(uuid);
+            let in_range =
+                effective_tactical_range <= 0.0 || !effective_tactical_range.is_finite() || {
+                    let target_xz = asteroid_q
+                        .iter()
+                        .find_map(|(u, t)| {
+                            (u.0 == uuid).then_some((t.translation.x, t.translation.z))
+                        })
+                        .or_else(|| {
+                            other_ships_q.iter().find_map(|(u, t, _)| {
+                                (u.0 == uuid).then_some((t.translation.x, t.translation.z))
+                            })
+                        });
+                    match target_xz {
+                        Some((tx, tz)) => {
+                            let dx = tx - physics.x;
+                            let dz = tz - physics.z;
+                            dx * dx + dz * dz <= effective_tactical_range * effective_tactical_range
+                        }
+                        None => false,
+                    }
+                };
+            if in_range {
+                weapons_target.0 = Some(uuid);
+            }
         }
 
         // Stale-target guard: if WeaponsTarget points to an entity that no
@@ -3461,11 +3500,32 @@ fn operate_tactical_ai(
         // idle after its last Destroy-objective target is killed — without this
         // guard, tick_phaser_auto_fire and the torpedo path both skip on the
         // dead entity UUID and never acquire a fresh target.
+        // Also clears targets beyond radar range (issue #680).
         if let Some(ref current) = weapons_target.0 {
             let alive = asteroid_q.iter().any(|(u, _)| u.0 == *current)
                 || other_ships_q.iter().any(|(u, _, _)| u.0 == *current);
             if !alive {
                 weapons_target.0 = None;
+            } else if effective_tactical_range > 0.0 && effective_tactical_range.is_finite() {
+                let in_range = asteroid_q
+                    .iter()
+                    .find_map(|(u, t)| {
+                        (u.0 == *current).then_some((t.translation.x, t.translation.z))
+                    })
+                    .or_else(|| {
+                        other_ships_q.iter().find_map(|(u, t, _)| {
+                            (u.0 == *current).then_some((t.translation.x, t.translation.z))
+                        })
+                    })
+                    .map(|(tx, tz)| {
+                        let dx = tx - physics.x;
+                        let dz = tz - physics.z;
+                        dx * dx + dz * dz <= effective_tactical_range * effective_tactical_range
+                    })
+                    .unwrap_or(false);
+                if !in_range {
+                    weapons_target.0 = None;
+                }
             }
         }
 
@@ -8090,6 +8150,73 @@ station = "tactical"
             crate::entity_spawner::EntityUuid(uuid.into()),
             Transform::from_xyz(x, 0.0, z),
         ));
+    }
+
+    #[test]
+    fn tactical_ai_respects_radar_range() {
+        let mut app = test_app();
+        let near_uuid = uuid::Uuid::new_v4().to_string();
+        let far_uuid = uuid::Uuid::new_v4().to_string();
+
+        // Attach a WeaponsConsoleSection with a radar range of 100 so the
+        // tactical AI reads a finite, damage-scaled horizon for the test.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+            if let Ok(entity) = q.single_mut(app.world_mut()) {
+                use crate::entity_tags::EntityTag;
+                app.world_mut().entity_mut(entity).insert(
+                    crate::entity_spawner::WeaponsConsoleSection(
+                        crate::entity_config::WeaponsConsoleConfig {
+                            torpedo_arc_color: vec![],
+                            power_multipliers: None,
+                            phaser_banks: vec![],
+                            blaster_banks: vec![],
+                            radar: Some(crate::radar_config::RadarConfig {
+                                range: 100.0,
+                                shows: vec![EntityTag::Ship],
+                                selects: vec![],
+                            }),
+                        },
+                    ),
+                );
+            }
+        }
+
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // Far target — beyond radar range.
+        spawn_entity_target(&mut app, &far_uuid, 0.0, -500.0);
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("target".into(), far_uuid.clone());
+        insert_destroy_objective_blackboard(&mut app, "target", 80.0);
+
+        tick(&mut app);
+
+        assert!(
+            get_weapons_target(&mut app).is_none(),
+            "Tactical AI must NOT acquire a target beyond radar range"
+        );
+
+        // Near target — now within range. Update the runtime mapping so the
+        // same objective name resolves to the nearby entity.
+        spawn_entity_target(&mut app, &near_uuid, 0.0, -50.0);
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("target".into(), near_uuid.clone());
+
+        set_weapons_target(&mut app, None);
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(near_uuid.as_str()),
+            "Tactical AI must acquire a target within radar range"
+        );
     }
 
     fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) {

@@ -220,14 +220,36 @@ pub fn publish_sensors_blackboard(
 /// the sensor AI produces no active decisions in the current game design
 /// (Sensors is purely advisory: the AI auto-suggests scan targets to Tactical
 /// via the coordination bus in `tick_sensors_frequency_hint`).
-pub fn operate_sensors_ai(ships: Query<&crate::ship_plugin::ShipSystemControlSources>) {
-    for sources in &ships {
+///
+/// Reads the damage-scaled `SensorsBlackboard.radar_range` so future perception
+/// is already clipped to the long-range sensor horizon (issue #680).
+pub fn operate_sensors_ai(
+    ships: Query<
+        (
+            &crate::ship_plugin::ShipSystemControlSources,
+            &crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (sources, blackboards) in &ships {
         let policy = sources
             .0
             .policy_for(&crate::system_registry::sensors_system_id());
         if !policy.operate_ai {
             continue;
         }
+        // Read the sensors blackboard radar range so the stub is wired to
+        // the live damage-scaled value. Future AI logic uses this to gate
+        // entity perception.
+        let _radar_range = blackboards
+            .0
+            .get(&crate::system_registry::sensors_system_id())
+            .and_then(|bb| match bb {
+                crate::messages::SystemBlackboard::Sensors(sbb) => Some(sbb.radar_range),
+                _ => None,
+            })
+            .unwrap_or(0.0);
         // TODO: implement sensors AI logic (target suggestion, scan selection)
     }
 }

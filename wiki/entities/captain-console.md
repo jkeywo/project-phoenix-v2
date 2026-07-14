@@ -2,49 +2,14 @@
 title: Captain Console
 type: entity
 tags: [console, captain, red-alert, view-mode, authority]
-sources: [src/client/captain_plugin.rs, src/server/simulation.rs, PRD-001, PRD-036, Issue-490]
-updated: 2026-06-22
+sources: [src/console/captain/server.rs, src/core/messages.rs, gui/components/ph-red-alert.js, gui/components/ph-camera-select.js]
+updated: 2026-07-14
 ---
 
 # Captain Console
 
-The "Captain's Chair." The authority seat: only the captain can start the game, toggle Red Alert, and change the viewscreen camera.
+The Captain station operates the ship's Red Alert system and the local viewscreen mode. Its controls use the normal admitted `ControlSystem` path; station ownership and system control source determine whether a human input is accepted or an AI operates it.
 
-## Controls
+`ToggleRedAlert` changes the addressed ship's `ShipRedAlert`. `SetView` selects a camera, Radar, Navigation Chart, or Cinematic mode for the local ship's viewscreen. The phone UI composes reusable Red Alert and camera-select components and renders the authoritative state.
 
-| Control | Effect | Source |
-|---|---|---|
-| Engage | `StartGame` → phase transitions Lobby → InProgress | PRD #1 |
-| Red Alert toggle | Flips `ShipState.red_alert`; renders red border on viewscreen and all consoles. During the station/system migration this is also addressable as `ControlSystem { target: "red-alert", payload: ToggleRedAlert }`. | PRD #1 / Issue #490 |
-| View selector (Fore/Aft/Port/Starboard) | `SetView { mode: Camera(direction) }` → repositions hull camera | PRD #36 |
-
-## Server-side guards
-
-All captain messages are guarded in the simulation/lobby handlers by checking `sender_token == SessionManager::captain_token()`. Non-captains sending these messages get silently dropped — no error, no broadcast.
-
-The HTML captain console can render Red Alert as AI-operated by reading
-`CaptainConsoleState.red_alert_auto`; in that mode the button is read-only and
-shows an AUTO badge while the existing alert border tint still follows
-`red_alert`.
-
-## Layout
-
-3×3 CSS grid above the Red Alert button (PRD #36):
-
-```
-   ▲          fore (top-centre)
-◄ View ►     port · label · starboard
-   ▼          aft (bottom-centre)
-```
-
-The active view direction is highlighted. State is restored from `SimSnapshot.view_mode` on reconnect, so refreshing the captain's phone preserves the current camera.
-
-## What the captain does *not* control
-
-- Ship movement → that's [Helm Console](./helm-console.md).
-- Weapons / Engineering / Science → see [Bridge Crew Stations (planned)](./bridge-crew-stations-planned.md).
-
-## Related
-
-- [Console](./console.md) · [View Modes](../concepts/view-modes.md)
-- [PRD #36 — Captain View Selector](../sources/prd-036-captain-view-selector.md)
+The Captain console does not own the lobby start transition: the game starts collectively when connected crew are ready. Other station capabilities are defined by the loaded ship configuration; see [Station](./station.md), [Console](./console.md), and [System](./system.md).

@@ -62,5 +62,5 @@ Tests live in `src/science_plugin.rs` under `#[cfg(test)] mod tests`.
 - `src/science_plugin.rs`
 - `src/server_app.rs` (aggregator registration via `add_simulation_plugins`)
 - Issue [#258](https://github.com/jkeywo/project-phoenix-v2/issues/258)
-- [Console Plugin Pattern](./console-plugin-pattern.md)
+- [Console UI Authoring Library](./console-ui-library.md)
 - [Broadcaster Seam](./broadcaster-seam.md)

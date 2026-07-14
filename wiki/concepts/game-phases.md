@@ -6,9 +6,6 @@ sources:
   - src/core/messages.rs
   - src/lobby/handler.rs
   - src/lobby/server.rs
-  - wiki/sources/issue-542-c6-delete-startgame.md
-  - wiki/sources/issue-544-c3-ai-backfill-disconnect.md
-  - wiki/sources/issue-544-c4-reconnect-yields.md
 updated: 2026-06-24
 ---
 

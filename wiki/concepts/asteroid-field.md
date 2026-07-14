@@ -2,7 +2,7 @@
 title: Asteroid Field
 type: concept
 tags: [asteroid, world, deterministic, seed]
-sources: [src/server/asteroid_spawner.rs, PRD-022]
+sources: [src/asteroids/spawner.rs, src/asteroids/mod.rs]
 updated: 2026-05-08
 ---
 
@@ -43,4 +43,4 @@ PRD #22's PoC stance: simpler clients (render once), simpler reconnect (`Welcome
 ## Related
 
 - [Asteroid](../entities/asteroid.md) · [World Data](../entities/world-data.md)
-- [Draft 2 — Game Map](../sources/design-02-game-map.md)
+- Draft 2 — Game Map

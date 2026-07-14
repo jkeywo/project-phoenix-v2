@@ -2,7 +2,7 @@
 title: Codec Seam
 type: concept
 tags: [codec, serialization, serde, abstraction]
-sources: [src/shared/codec.rs, AGENTS.md]
+sources: [src/core/codec.rs, AGENTS.md]
 updated: 2026-05-08
 ---
 
@@ -53,7 +53,7 @@ fn helm_input_round_trips() {
 }
 ```
 
-When you add a new message variant, the codec test is the **first** thing that should exist. See the workflow in [AGENTS.md](../sources/repo-agents.md).
+When you add a new message variant, the codec test is the **first** thing that should exist. See the workflow in AGENTS.md.
 
 ## Related
 

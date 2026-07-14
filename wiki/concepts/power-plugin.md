@@ -75,6 +75,6 @@ Tests live in `src/power_plugin.rs` under `#[cfg(test)] mod tests`.
 - `src/server_app.rs` (ordering constraints within `add_simulation_plugins`)
 - `src/modifiers/coordination.rs` (`translate_power_modifiers`)
 - Issue [#254](https://github.com/jkeywo/project-phoenix-v2/issues/254)
-- [Console Plugin Pattern](./console-plugin-pattern.md)
+- [Console UI Authoring Library](./console-ui-library.md)
 - [Broadcaster Seam](./broadcaster-seam.md)
 - [Modifier Coordination](./modifier-coordination.md)

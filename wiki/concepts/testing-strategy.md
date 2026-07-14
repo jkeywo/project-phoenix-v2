@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: concept
 tags: [tests, cargo, playwright, smoke, pyramid]
-sources: [tests/smoke/, src/server/, AGENTS.md, PRD-051]
+sources: [tests/smoke/, src/server/, AGENTS.md]
 updated: 2026-06-24
 ---
 
@@ -84,4 +84,4 @@ CI runs the suite on every push and pull request via `.github/workflows/ci.yml`.
 ## Related
 
 - [Codec Seam](./codec-seam.md) · [Architecture](./architecture.md)
-- [PRD #51](../sources/prd-051-smoke-test-harness.md)
+- PRD #51

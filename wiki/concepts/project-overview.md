@@ -2,7 +2,7 @@
 title: Project Overview
 type: concept
 tags: [overview, intro]
-sources: [README.md, AGENTS.md, PRD-001]
+sources: [README.md, AGENTS.md]
 updated: 2026-05-08
 ---
 
@@ -36,7 +36,7 @@ Existing bridge sims (e.g. Artemis SBS) require dedicated installs on a shared L
 - Drafts 1–8 in `docs/` — entity config files, multi-system maps, science console, combat update (torpedoes + 4-quadrant shields), ship's power, space stations, scenario files, comms console.
 - Architecture note — per-console message subscriptions to reduce traffic as consoles multiply.
 
-See the [Roadmap Overview](../roadmap/overview.md) for the synthesis.
+See the Roadmap Overview for the synthesis.
 
 ## Tech stack at a glance
 
@@ -52,4 +52,4 @@ See the [Roadmap Overview](../roadmap/overview.md) for the synthesis.
 ## Related
 
 - [Architecture](./architecture.md) · [Networking](./networking.md) · [Game Loop](./game-loop.md)
-- [PRD #1](../sources/prd-001-bridge-simulator.md) — original product spec
+- PRD #1 — original product spec

@@ -2,7 +2,7 @@
 title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, fsa, vitest]
-sources: [PRD-350, editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/action-schema.js, editor/world-toml.js, editor/entity-toml.js]
+sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/action-schema.js, editor/world-toml.js, editor/entity-toml.js]
 updated: 2026-05-22
 ---
 
@@ -119,7 +119,7 @@ The two PRD #350 runtime additions have **landed** in `src/world/config.rs` and 
 - Two new trigger actions: `TriggerAction::LoadWorld { path }` (`src/world/config.rs:278`) and `TriggerAction::UnloadWorld { path }` (`src/world/config.rs:280`). Parsed from TOML at `src/world/config.rs:422` / `:425`. Dispatched at `src/world/server.rs:1017` / `:1022`, where each fires queues a `WorldLayerChange` onto `PendingWorldLayerChanges`.
 - Additive-loading runtime state: `WorldLayerMap(HashMap<String, WorldRuntime>)` and `PendingWorldLayerChanges(Vec<WorldLayerChange>)` (`src/world/server.rs:83`–`:95`). `apply_world_layer_changes` (`src/world/server.rs:1146` doc comment, fn at `:1156`) drains the queue each frame, mutating `WorldLayerMap` and `WorldContentRuntime`. Runtime test coverage lives at `src/world/server.rs:2308`–`:2710`.
 
-The **remaining editor-side work** for this PRD: the World Mode layer tree must show `load_world`-reachable worlds in a "triggerable worlds" section with a session-only load/unload toggle for preview, and the trigger action editor needs file-picker wiring for `load_world` / `unload_world` paths. These are still in flight. The runtime additive-loading state machine that [PRD #341](../sources/refactor-2026-05-entity-schema.md) collapsed is partially reintroduced for these two actions only, scoped narrowly to path-keyed load/unload.
+The **remaining editor-side work** for this PRD: the World Mode layer tree must show `load_world`-reachable worlds in a "triggerable worlds" section with a session-only load/unload toggle for preview, and the trigger action editor needs file-picker wiring for `load_world` / `unload_world` paths. These are still in flight. The runtime additive-loading state machine that PRD #341 collapsed is partially reintroduced for these two actions only, scoped narrowly to path-keyed load/unload.
 
 ## Test Infrastructure
 
@@ -158,6 +158,6 @@ The editor's Vitest suite is **separate from** the runtime's Playwright smoke te
 
 ## Cross-Links
 
-- Source: [PRD #350 — Scenario Editor Rewrite](../sources/prd-350-scenario-editor-rewrite.md)
+- Source: PRD #350 — Scenario Editor Rewrite
 - Runtime parser the editor mirrors: `src/world/config.rs`
-- Related runtime sources: [PRD #341 — Entity Schema Refactor](../sources/refactor-2026-05-entity-schema.md), [PRD #153 — Region Entities + Entity Pipeline](../sources/prd-153-region-entities.md), [PRD #119 — Stations, Scenarios & Comms](../sources/prd-119-stations-scenarios-comms.md)
+- Related runtime sources: PRD #341 — Entity Schema Refactor, PRD #153 — Region Entities + Entity Pipeline, PRD #119 — Stations, Scenarios & Comms

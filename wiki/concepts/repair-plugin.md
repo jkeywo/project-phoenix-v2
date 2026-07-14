@@ -113,5 +113,5 @@ Five additional tests were added by issue #526. See the source file for the full
 - Issue [#508](https://github.com/jkeywo/project-phoenix-v2/issues/508)
 - Issue [#526](https://github.com/jkeywo/project-phoenix-v2/issues/526)
 - Issue [#619](https://github.com/jkeywo/project-phoenix-v2/issues/619) — Console enum + legacy `console_hull` / `damageable_consoles` fields deleted; `system_hull` / `damageable_systems` are the survivors
-- [Console Plugin Pattern](./console-plugin-pattern.md)
+- [Console UI Authoring Library](./console-ui-library.md)
 - [Broadcaster Seam](./broadcaster-seam.md)

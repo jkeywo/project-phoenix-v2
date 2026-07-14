@@ -2,13 +2,13 @@
 title: Session
 type: entity
 tags: [session, server, identity, reconnect]
-sources: [src/server/session.rs, PRD-001]
+sources: [src/lobby/session.rs, src/lobby/handler.rs]
 updated: 2026-05-08
 ---
 
 # Session
 
-The server-side record of a [Player](./player.md). Lives in `SessionManager` (`src/server/session.rs`). Survives disconnects and reconnects.
+The server-side record of a [Player](./player.md). Lives in `SessionManager` (`src/lobby/session.rs`). Survives disconnects and reconnects.
 
 ## Why sessions, not peer IDs
 

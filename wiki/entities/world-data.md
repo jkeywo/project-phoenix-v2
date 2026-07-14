@@ -8,7 +8,10 @@ updated: 2026-07-14
 
 # World Data
 
-The TOML-defined static layout of a single game session: anchors, entity instances, triggers, comms templates, and the global ambient light. Loaded once at startup, processed into ECS entities + runtime state.
+The TOML-defined layout for a root world or a supporting world layer: anchors,
+entity instances, triggers, comms templates, objectives, and global ambient
+light. The root loads at startup; supporting worlds can be composed at startup
+or loaded during play.
 
 ## Source schema (`src/world/config.rs`)
 
@@ -36,7 +39,7 @@ template = "assets/entities/star_sun.toml"
 transform = { position = [0.0, 50.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [1.0, 1.0, 1.0] }
 ```
 
-`[[trigger]]` and `[[comms]]` blocks are documented under [World Plugin](../concepts/world-plugin.md) and [Comms Templates](../concepts/comms-templates.md).
+`[[trigger]]` and `[[comms]]` blocks are documented under [World Plugin](../concepts/world-plugin.md).
 
 ## Proposed Authoring Contract
 
@@ -84,12 +87,12 @@ Optional top-level `[ambient_light]` block on the world TOML. Applied by the `sp
 
 - Old per-section blocks `[star]`, `[planet]`, `[station]`, `[science_console]` on entity TOMLs are **gone**. Stars are now plain entities with `[mesh] + [[light]]`; planets are `[mesh] + [collider]`; stations are `[mesh] + [hull]`, with hull damage tracked via `[hull].hull_integrity`.
 - Old `WorldEntity` flat fields `position` / `anchor` / `relative_to` / `offset` have been folded into the single `transform = { ... }` table.
-- See [refactor-2026-05-entity-schema](../sources/refactor-2026-05-entity-schema.md) for the full slice-by-slice account.
+- See refactor-2026-05-entity-schema for the full slice-by-slice account.
 
 ## Related
 
 - [Asteroid](./asteroid.md) · [Asteroid Field](../concepts/asteroid-field.md)
 - [World Plugin](../concepts/world-plugin.md)
-- [Draft 1 — Entity Config Files](../sources/design-01-entity-config-files.md)
-- [Draft 2 — Game Map](../sources/design-02-game-map.md)
-- [Refactor 2026-05 — Entity Schema](../sources/refactor-2026-05-entity-schema.md)
+- Draft 1 — Entity Config Files
+- Draft 2 — Game Map
+- Refactor 2026-05 — Entity Schema

@@ -64,4 +64,4 @@ The bevy `debug` feature (enabling Bevy debug internals like system-name recordi
 ## Related
 
 - [Architecture](./architecture.md) · [Testing Strategy](./testing-strategy.md)
-- [PRD #1](../sources/prd-001-bridge-simulator.md) — original deploy decision
+- PRD #1 — original deploy decision

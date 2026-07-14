@@ -80,8 +80,8 @@ See [AI Ship Unification](./ai-ship-unification.md) for the full architecture.
 
 ## Cross-references
 
-- [PRD #487 - Station / Console / System architecture redesign](../sources/prd-487-station-console-system-redesign.md)
-- [PRD #517 - Consistency cleanup for the 9 coarse systems](../sources/prd-517-consistency-cleanup.md)
-- [Issue #525 - SystemId naming convention](../sources/issue-525-systemid-naming.md)
-- [PRD #520 - AI ship unification](../sources/prd-520-ai-ship-unification.md)
+- PRD #487 - Station / Console / System architecture redesign
+- PRD #517 - Consistency cleanup for the 9 coarse systems
+- Issue #525 - SystemId naming convention
+- PRD #520 - AI ship unification
 - [AI Ship Unification](./ai-ship-unification.md)

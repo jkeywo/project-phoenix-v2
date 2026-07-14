@@ -2,7 +2,7 @@
 title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost]
-sources: [gui/helm-console.html, gui/console-state.js, gui/radar-widget.js, src/ship_plugin.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/modifiers/coordination.rs, PRD-022]
+sources: [gui/helm-console.html, gui/console-state.js, gui/radar-widget.js, src/ship_plugin.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/modifiers/coordination.rs]
 updated: 2026-06-20
 ---
 
@@ -79,4 +79,4 @@ These live as constants in `compute_physics`'s `ShipPhysicsConfig` so they can b
 
 - [Ship](./ship.md) · [Ship Physics](../concepts/ship-physics.md)
 - [Radar Projection](../concepts/radar-projection.md)
-- [PRD #22 — Helm and Game World](../sources/prd-022-helm-and-game-world.md)
+- PRD #22 — Helm and Game World

@@ -1,29 +1,13 @@
 ---
-title: Red Alert Intent
+title: Red Alert Runtime
 type: concept
-tags: [red-alert, captain, sensors, ai, pasm]
-sources: [src/console/captain/server.rs, src/ai/core.rs, src/ship/state.rs, pasm/spec/architecture/red-alert.yaml]
+tags: [red-alert, captain, sensors, ai]
+sources: [src/console/captain/server.rs, src/ship/state.rs, src/core/messages.rs]
 updated: 2026-07-14
 ---
 
-# Red Alert Intent
+# Red Alert Runtime
 
-Red Alert is a per-ship authoritative state owned by the host simulation. The current code uses a toggle command, while PASM records the agreed target design without changing the runtime yet.
+Red Alert is authoritative per-ship state (`ShipRedAlert`). The current command is `ToggleRedAlert`, admitted for the ship's Red Alert system and applied by the Captain console server plugin. Captain AI can emit the same admitted command for a ship it operates.
 
-The Phase 7 PASM design slice records Captain and AI alert decisions, selected-Sensors target visibility, Sensors-to-Captain coordination, and the mandatory NPC capability recovery path in `pasm/spec/design/red-alert.yaml`.
-
-## Planned command contract
-
-`SetRedAlert { active: bool }` replaces `ToggleRedAlert`. Captain UI and AI both request an explicit desired state through normal command admission; the host assigns that state to the addressed ship. This makes retries, duplicate messages, and stale displayed state harmless.
-
-## Sensors target visibility
-
-The Sensors console will display `ALERT: RED` or `ALERT: NOMINAL` only for its selected radar target when that target has a Red Alert capability. Non-ship targets and ships without that capability expose no alert value. This avoids making Red Alert a generic marker on every radar blip.
-
-## AI ships
-
-Every behaviour-driven AI ship must have an AI-only `red-alert` system. Spawn logic will add the capability when absent from authored TOML, so Captain AI can operate its already-existing per-ship alert state. Authors may still declare it explicitly.
-
-## Current implementation gap
-
-`ShipRedAlert` is already per ship in `src/ship/state.rs:30`, and the captain AI already derives a desired alert state from recent combat in `src/console/captain/server.rs:128`. The runtime still emits and applies `ToggleRedAlert`, target scan data does not carry alert status, and NPC configurations can omit the Red Alert system.
+The active state is published to the relevant console and viewscreen presentation. The design for explicit set-state commands, Sensors target visibility, and required NPC capability coverage belongs in [PASM's Red Alert slice](../../pasm/spec/design/red-alert.yaml).

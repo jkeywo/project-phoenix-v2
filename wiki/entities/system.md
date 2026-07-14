@@ -2,7 +2,7 @@
 title: System
 type: entity
 tags: [system, systemid, control-source, ai, wire-protocol, damage-tier]
-sources: [src/ship/config.rs, src/ship/system_registry.rs, src/ship_plugin.rs, src/ship/damage.rs, src/ship/control_source.rs, assets/entities/player_ship.toml]
+sources: [src/ship/config.rs, src/ship/system_registry.rs, src/ship_plugin.rs, src/ship/damage.rs, src/ship/control_source.rs, assets/entities/alliance_battleship.toml]
 updated: 2026-07-03
 ---
 
@@ -136,8 +136,8 @@ Current fine kinds registered in `SystemKindRegistry::with_core_systems`:
 
 - [Station](./station.md) — the owning seat; holds the rating table
 - [Console](./console.md) — GUI layer; separate from System
-- [player_ship.toml](../sources/player_ship_toml.md) — TOML source
-- [Issue #518](../sources/issue-540-config-migration-docs.md) — B1–B6 migration
-- [PRD #487](../sources/prd-487-station-console-system-redesign.md) — architecture context
+- player_ship.toml — TOML source
+- Issue #518 — B1–B6 migration
+- PRD #487 — architecture context
 - [Coarse-system migration](../concepts/coarse-system-migration.md)
 - [Issue #507](https://github.com/jkeywo/project-phoenix-v2/issues/507) — Per-system damage tiers

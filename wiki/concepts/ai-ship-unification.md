@@ -122,7 +122,7 @@ Queries use `With<Ship>` + `.iter()` (never `single()`). The lobby handlers use 
 
 ## Cross-references
 
-- [PRD #520 — AI Ship Unification](../sources/prd-520-ai-ship-unification.md)
-- [PRD #142 — AI and Behaviour System](../sources/prd-142-ai-and-behaviour.md)
+- PRD #520 — AI Ship Unification
+- PRD #142 — AI and Behaviour System
 - [Coarse-system migration](./coarse-system-migration.md) — `ControlSourceResolver` context
 - [Ship entity](../entities/ship.md)

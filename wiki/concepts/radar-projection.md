@@ -72,4 +72,4 @@ PRD #66 mentions extending `radar.rs` for **range-based** and **type-based** fil
 ## Related
 
 - [Helm Console](../entities/helm-console.md) · [View Modes](./view-modes.md)
-- [PRD #66](../sources/prd-066-weapons-and-engineering.md)
+- PRD #66

@@ -47,7 +47,7 @@ Resources that do not belong to any single plugin live in `server_app.rs`:
 
 `ShipHullIntegrity` was previously listed here as a `Resource`; it was deleted
 in PRD #597 PR 10 (`EntitySystemHull` is the sole hull store — see
-[PRD #597](../sources/prd-597-ship-parity.md)). `ShipImpulse` was previously
+PRD #597). `ShipImpulse` was previously
 listed here as a `Resource` too; issue #606 removed its `Resource` derive, so
 it is now a per-entity `Component` only, populated on the ship entity at spawn
 (`spawn_game_start_entities` for the player ship) rather than initialised as a

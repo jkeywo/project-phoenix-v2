@@ -105,9 +105,9 @@ While migration is in progress, modules live at their old flat paths alongside t
 
 The Rust/WASM layer **never touches sockets**. All networking is JavaScript.
 
-## Plugin pattern
+## Console delivery
 
-Every console is a **Bevy plugin** owning its UI, marker components, setup systems, and event handlers. See [Console Plugin Pattern](./console-plugin-pattern.md). Adding a console = adding one plugin.
+The authoritative half of each console is a server-side Bevy plugin under `src/console/<name>/`. Phone interfaces are pure HTML/JavaScript and compose reusable web components; see [Client Architecture](./client-architecture.md) and [Console UI Authoring Library](./console-ui-library.md).
 
 ## Pure-function seams
 

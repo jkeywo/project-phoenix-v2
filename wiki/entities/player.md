@@ -6,7 +6,6 @@ sources:
   - src/core/messages.rs
   - src/lobby/session.rs
   - src/lobby/handler.rs
-  - wiki/sources/issue-545-c5-retire-player-consoles.md
 updated: 2026-07-02
 ---
 
@@ -57,4 +56,4 @@ PeerJS peer IDs are ephemeral. The session token is the stable identity. See [Ne
 
 - [Session](./session.md) - server-side storage for players and station ownership.
 - [Console](./console.md) - UI/operator surfaces derived from station ownership.
-- [Issue #545 C5](../sources/issue-545-c5-retire-player-consoles.md) - the slice that deleted the per-player console list.
+- Issue #545 C5 - the slice that deleted the per-player console list.

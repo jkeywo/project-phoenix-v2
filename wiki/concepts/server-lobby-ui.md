@@ -118,4 +118,4 @@ Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.ts` (`SelectStati
 - `src/core/messages.rs` — `LobbyStatePayload` / `StationPayload`
 - Issue [#436](https://github.com/jkeywo/project-phoenix-v2/issues/436) — original HTML rebuild
 - [Message Flow](./message-flow.md), [Codec Seam](./codec-seam.md)
-- [PRD #120 — Station-Based Lobby](../sources/prd-120-station-based-lobby.md)
+- PRD #120 — Station-Based Lobby

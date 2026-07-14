@@ -345,5 +345,5 @@ modifiers.
 - [PRD #117](https://github.com/jkeywo/project-phoenix-v2/issues/117) — Modifier system (`modifiers.rs` cache + wire).
 - [PRD #118](https://github.com/jkeywo/project-phoenix-v2/issues/118) — Power console (6+2 power allocation driving `ModifierSource::Console`).
 - [PRD #153](https://github.com/jkeywo/project-phoenix-v2/issues/153) — Region entities (`RegionEffectKind`, `EntityUuid` driving `ModifierSource::RegionEffect`).
-- [PRD #597 — Ship Parity](../sources/prd-597-ship-parity.md) — Introduced the per-entity `ShipModifiers` Component (PR 6); issue #606 later deleted the `Resource` half.
+- PRD #597 — Ship Parity — Introduced the per-entity `ShipModifiers` Component (PR 6); issue #606 later deleted the `Resource` half.
 - [Broadcaster Seam](./broadcaster-seam.md) — How modifier events (`ModifierAdded`/`ModifierRemoved`) are broadcast to clients.

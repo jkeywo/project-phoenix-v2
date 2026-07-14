@@ -2,7 +2,7 @@
 title: Station
 type: entity
 tags: [station, lobby, roster, rating, ai]
-sources: [src/ship/config.rs, src/lobby/stations_config.rs, src/ship_plugin.rs, assets/entities/player_ship.toml]
+sources: [src/ship/config.rs, src/lobby/stations_config.rs, src/ship_plugin.rs, assets/entities/alliance_battleship.toml]
 updated: 2026-07-03
 ---
 
@@ -92,7 +92,7 @@ client. This is shared game authority, not a local settings preference.
 
 - [Console](./console.md) — GUI panel keyed on the station id
 - [System](./system.md) — fine-grained capability instance owned by a station
-- [player_ship.toml](../sources/player_ship_toml.md) — TOML source
-- [Issue #518](../sources/issue-540-config-migration-docs.md) — B1–B6 migration
-- [PRD #487](../sources/prd-487-station-console-system-redesign.md) — architecture context
+- player_ship.toml — TOML source
+- Issue #518 — B1–B6 migration
+- PRD #487 — architecture context
 - Issue [#619](https://github.com/jkeywo/project-phoenix-v2/issues/619) — Console enum + `StationDef.consoles` + `StationConfig.console` deleted

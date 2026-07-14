@@ -273,7 +273,7 @@ Regression test:
 - `src/weapons_plugin.rs`
 - `src/server_app.rs` (integration tests)
 - Issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)
-- [Console Plugin Pattern](./console-plugin-pattern.md)
+- [Console UI Authoring Library](./console-ui-library.md)
 - [Broadcaster Seam](./broadcaster-seam.md)
 
 ## Per-bank phasers and per-tube torpedoes (2026-05)

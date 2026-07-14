@@ -35,10 +35,11 @@ Conventions:
 
 ## 1. Worlds
 
-**Purpose:** the single content file for a session — anchors, the static layout
-of entity instances, named trigger-eligible spawns, world-event triggers, comms
-dialogues, and objectives. One world per session; chaining (`load_scenario`)
-is not supported.
+**Purpose:** a root or supporting content file for a session: anchors, the
+static layout of entity instances, named trigger-eligible spawns, world-event
+triggers, comms dialogues, and objectives. A root world can load supporting
+worlds through `extra_worlds`, and triggers can load worlds during play through
+`load_world`.
 
 **Location:** `assets/worlds/*.toml` (e.g. `assets/worlds/default.toml`,
 `assets/worlds/patrol.toml`).
@@ -154,8 +155,8 @@ Every action has a `type` field. Additional fields vary:
 | `remove_flag` | `entity`, `tag`, `kind` | — | |
 | `game_over` | — | `message` | End the game with an optional message. |
 
-**Removed actions** (no longer supported): `load_scenario`, `unload_scenario` —
-each session loads exactly one world TOML and runs it to completion.
+**Removed actions** (no longer supported): `load_scenario`, `unload_scenario`.
+Use `load_world` and `unload_world` for runtime composition.
 
 ### 1.6 `[[comms]]`
 

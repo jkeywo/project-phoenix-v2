@@ -2,7 +2,7 @@
 title: Networking
 type: concept
 tags: [networking, peerjs, webrtc, session-token, star-topology, datachannel, snapshot]
-sources: [server.html, client.html, gui/connection-manager.js, AGENTS.md, PRD-001, PRD-017]
+sources: [server.html, client.html, gui/connection-manager.js, AGENTS.md]
 updated: 2026-07-05
 ---
 
@@ -93,7 +93,7 @@ Both pages show a coloured dot in the top-right:
 
 ## Smoke testing without WebRTC
 
-The Playwright suite swaps `window.Peer` for a `BroadcastChannel`-backed shim before any page script runs (`addInitScript`). The shim (`tests/smoke/peerjs-shim.js`) includes a `DataChannel` implementation that propagates sub-channel creation via control messages, so the snapshot DataChannel works end-to-end in smoke tests. Same surface, no signalling server. See [Testing Strategy](./testing-strategy.md), [PRD #51](../sources/prd-051-smoke-test-harness.md), and `tests/smoke/snapshot-channel.spec.ts`.
+The Playwright suite swaps `window.Peer` for a `BroadcastChannel`-backed shim before any page script runs (`addInitScript`). The shim (`tests/smoke/peerjs-shim.js`) includes a `DataChannel` implementation that propagates sub-channel creation via control messages, so the snapshot DataChannel works end-to-end in smoke tests. Same surface, no signalling server. See [Testing Strategy](./testing-strategy.md), PRD #51, and `tests/smoke/snapshot-channel.spec.ts`.
 
 ## Related
 

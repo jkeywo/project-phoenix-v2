@@ -2,7 +2,7 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/navigation-console.html, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/core/messages.rs, src/server_app.rs, assets/entities/player_ship.toml]
+sources: [gui/navigation-console.html, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/core/messages.rs, src/server_app.rs, assets/entities/alliance_battleship.toml]
 updated: 2026-07-02
 ---
 

@@ -2,7 +2,7 @@
 title: Ship Physics
 type: concept
 tags: [ship, physics, rapier, controller, pure-function]
-sources: [src/ship/physics.rs, src/server_app.rs, PRD-022]
+sources: [src/ship/physics.rs, src/ship_plugin.rs, src/server_app.rs]
 updated: 2026-07-03
 ---
 
@@ -56,4 +56,4 @@ Collision damage is a consumer of `forward_speed`, not a parameter to the pure p
 ## Related
 
 - [Helm Console](../entities/helm-console.md) · [Ship](../entities/ship.md)
-- [PRD #22](../sources/prd-022-helm-and-game-world.md)
+- PRD #22

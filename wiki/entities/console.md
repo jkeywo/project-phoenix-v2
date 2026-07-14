@@ -92,7 +92,7 @@ capability is being addressed" address. Both are just lowercase-kebab strings.
 - [Station](./station.md) — the lobby seat that owns a Console
 - [System](./system.md) — fine-grained capability addressed by SystemId
 - [Player](./player.md) · [Session](./session.md)
-- [Console Plugin Pattern](../concepts/console-plugin-pattern.md)
-- [PRD #487](../sources/prd-487-station-console-system-redesign.md) — station/system redesign
-- [Issue #518](../sources/issue-540-config-migration-docs.md) — B1–B6 config migration
+- [Console UI Authoring Library](../concepts/console-ui-library.md)
+- PRD #487 — station/system redesign
+- Issue #518 — B1–B6 config migration
 - Issue [#619](https://github.com/jkeywo/project-phoenix-v2/issues/619) — Console enum deletion (final slice of PRD #516)

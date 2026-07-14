@@ -6,22 +6,22 @@
 
 A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking uses PeerJS (WebRTC) in a star topology.
 
-For the current feature set, console roster, and in-flight work, read **[wiki/concepts/project-overview.md](./wiki/concepts/project-overview.md)** and **[wiki/roadmap/overview.md](./wiki/roadmap/overview.md)** — that state changes too fast to keep accurate here. Planned work lives on the GitHub issue tracker (label `PRD`). Domain vocabulary lives in **[CONTEXT.md](./CONTEXT.md)** — use those terms, don't invent synonyms.
+For the current feature set, read **[wiki/concepts/project-overview.md](./wiki/concepts/project-overview.md)** and the relevant PASM slice under [`pasm/spec/`](./pasm/spec/). Planned work lives on the GitHub issue tracker (label `PRD`). Domain vocabulary lives in **[CONTEXT.md](./CONTEXT.md)** — use those terms, don't invent synonyms.
 
 ---
 
 ## Wiki — Read It and Maintain It
 
-This repo carries an **LLM-maintained wiki** under `wiki/`. It is a persistent, compounding knowledge base that summarises and indexes the raw sources (this file, `README.md`, `CONTEXT.md`, the codebase, PRDs, design drafts). Treat it as the index you reach for first when orienting in a new session, and update it whenever you ingest a new source or learn something non-trivial.
+This repo carries a **small LLM-maintained wiki** under `wiki/`. It indexes current code-oriented concepts and entities. Treat it as the orientation index, not as an archive of historical PRDs or design drafts.
 
 **Read [wiki/SCHEMA.md](./wiki/SCHEMA.md) at the start of any non-trivial task.** It defines the layout, page conventions, and workflows.
 
 - *Orienting* — open `wiki/index.md`, find candidate pages, read them; follow their `sources:` links when precision matters.
-- *Ingesting a new source* — create/update the matching `wiki/sources/` page, update every `entities/` and `concepts/` page it touches, append one line to `wiki/log.md`, update `wiki/index.md` if pages were created.
-- *Answering a query* — synthesise from the wiki; file non-trivial answers back as new `concepts/` or `roadmap/` pages.
-- *Linting* — **run the SCHEMA.md lint pass whenever you close out a PRD or a batch of issues**: check `file.rs:LINE` references still resolve, index entries match files on disk, superseded pages are marked, and roadmap pages whose PRD shipped get closed. This is the step that historically never ran; don't skip it.
+- *Recording current understanding* — update the affected `entities/` or `concepts/` page and `wiki/index.md` if pages were created. Record intended design and architecture in `pasm/spec/` instead of duplicating it in the wiki.
+- *Answering a query* — synthesise from the wiki; update a current `concepts/` or `entities/` page only when the runtime understanding changes. Record design in PASM and planning in GitHub instead.
+- *Linting* — **run the SCHEMA.md lint pass whenever you close out a PRD or a batch of issues**: check `file.rs:LINE` references still resolve, index entries match files on disk, and superseded material has been removed or replaced. This is the step that historically never ran; don't skip it.
 
-The wiki is *not* a replacement for `README.md`, `CONTEXT.md`, or this file — those remain the canonical raw sources.
+The wiki is not a replacement for code, `README.md`, `CONTEXT.md`, this file, PASM, or GitHub issues. Code is runtime truth; PASM is in-repository design truth; GitHub is planning truth.
 
 ---
 

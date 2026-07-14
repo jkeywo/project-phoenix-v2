@@ -11,7 +11,7 @@ A browser-based spaceship bridge simulator for groups. One browser tab on a shar
 1. Open the **[view screen](https://jkeywo.github.io/project-phoenix-v2/)** in a browser tab on a shared monitor or TV.
 2. Players scan the QR code on screen with their phones and open the link.
 3. Each player sets a name and claims a console (Captain's Chair or Helm).
-4. The captain presses **Engage** to start the game.
+4. The game starts once the connected crew is ready.
 5. Navigate the ship through the asteroid field without hitting anything.
 
 ### Consoles
@@ -28,7 +28,7 @@ A browser-based spaceship bridge simulator for groups. One browser tab on a shar
 | **Navigation** | System chart on viewscreen, cancel impulse charge |
 | **Comms** | Manage contacts, send and receive messages, track objectives |
 
-Players join *stations* (bundles of one or more consoles, defined per player count in `assets/entities/player_ship.toml`) rather than individual consoles. Joining and leaving auto-shuffles the crew; spectators wait in a FIFO queue.
+Players claim fixed ship-authored stations rather than individual consoles. Vacant stations can be claimed directly; releasing or disconnecting hands their systems to Backfill AI.
 
 See [`wiki/`](./wiki/) for a deeper architectural map and [GitHub PRDs](https://github.com/jkeywo/project-phoenix-v2/issues?q=label%3APRD) for upcoming work (save/load, scenarios + comms console, AI behaviours).
 
@@ -38,13 +38,14 @@ See [`wiki/`](./wiki/) for a deeper architectural map and [GitHub PRDs](https://
 
 | Layer | Tech |
 |---|---|
-| Game engine (server + client) | [Bevy](https://bevyengine.org/) 0.18 (Rust) |
+| Game engine (authoritative server) | [Bevy](https://bevyengine.org/) 0.18 (Rust/WASM) |
 | Physics | [bevy_rapier3d](https://github.com/dimforge/bevy_rapier) 0.33 |
 | Networking | [PeerJS](https://peerjs.com/) (WebRTC, no server needed) |
-| Build | [Trunk](https://trunkrs.dev/) (Rust → WASM, two separate builds) |
+| Client | Pure HTML/CSS/JavaScript |
+| Build | [Trunk](https://trunkrs.dev/) for the server; Node build script for the client |
 | Hosting | GitHub Pages |
 
-Both pages compile to WebAssembly. The host page (`server.html`) runs the authoritative game simulation. The client page (`client.html`) runs a thin Bevy UI layer — lobby panel, console panels, and radar — that sends and receives JSON messages over PeerJS.
+The host page (`server.html`) runs the authoritative WebAssembly game simulation. The phone client (`client.html`) is pure HTML/CSS/JavaScript; it renders lobby and console interfaces, sends inputs, and applies JSON state snapshots over PeerJS.
 
 ---
 

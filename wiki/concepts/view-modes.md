@@ -2,7 +2,7 @@
 title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
-sources: [src/core/messages.rs, src/server/renderer.rs, src/server/radar.rs, PRD-036]
+sources: [src/core/messages.rs, src/console/captain/server.rs, src/server/renderer.rs, src/server/radar.rs]
 updated: 2026-07-12
 ---
 
@@ -96,5 +96,5 @@ The 3D camera output is now framed by the viewscreen border (`ViewscreenBorderPl
 ## Related
 
 - [Captain Console](../entities/captain-console.md) · [Radar Projection](./radar-projection.md)
-- [PRD #36](../sources/prd-036-captain-view-selector.md) · [PRD #180](../sources/prd-180-viewscreen-frame.md)
+- PRD #36 · PRD #180
 - [`UiMaterial` shader pattern](./ui-materials.md)

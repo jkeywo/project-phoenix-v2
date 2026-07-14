@@ -158,6 +158,17 @@ def test_repository_inventory_records_languages_cargo_and_local_edges() -> None:
     )
 
 
+def test_repository_symbol_references_are_source_located() -> None:
+    from pasm.implementation.observation import find_repository_symbol_references
+
+    references = find_repository_symbol_references(
+        observe_repository(REPOSITORY_FIXTURES), "run"
+    )
+
+    assert any(reference.path.as_posix() == "src/alpha.rs" for reference in references)
+    assert all(reference.line is not None for reference in references)
+
+
 def test_observed_repository_dependency_drift_is_reported() -> None:
     result = validate_spec_root(REPOSITORY_FIXTURES / "spec", workspace_root=REPOSITORY_FIXTURES)
     finding_ids = {finding.id for finding in result.findings}

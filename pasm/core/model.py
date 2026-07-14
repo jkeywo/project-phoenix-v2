@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from pasm.architecture.model import ArchitectureSection
+from pasm.domains.game_design.model import GameDesignSection
 from pasm.implementation.model import ImplementationSection
 from pasm.migration.model import MigrationSection
 
@@ -132,6 +133,7 @@ class SpecEntity:
     exceptions: tuple[ExceptionSpec, ...] = ()
     evidence: tuple[EvidenceItem, ...] = ()
     architecture: ArchitectureSection | None = None
+    game_design: GameDesignSection | None = None
     implementation: ImplementationSection | None = None
     migration: MigrationSection | None = None
     domain_sections: dict[str, object] = field(default_factory=dict)

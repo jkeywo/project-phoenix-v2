@@ -1,0 +1,12 @@
+scenario:
+  id: helm-control
+  steps:
+    - kind: action
+      actor: helm-operator
+      value: set-helm-actuator-input
+    - kind: reveal
+      value: collision-hazard-information
+    - kind: fail
+      value: helm-actuator-unavailable
+    - kind: recover
+      value: helm-actuator-unavailable

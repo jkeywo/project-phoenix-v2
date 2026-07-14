@@ -1,0 +1,211 @@
+entities:
+  - component: objective-authoring-actions
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Objective Authoring Actions
+      summary: World triggers and comms responses add, complete, or fail named mission objectives, with optional AI directives and utility configuration.
+    architecture:
+      kind: configuration-action
+      authority: authoritative
+      produces: [objective-runtime-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/world/server.rs, src/console/comms/server.rs]
+      symbols: [TriggerAction, handle_ai_events]
+      tests: [cargo test]
+
+  - component: objective-manager
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Manager
+      summary: Owns objective lifecycle, unique IDs, status transitions, snapshots, and active directive utility scoring.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [objective-runtime-state, scored-objective-pool-state]
+      produces: [objective-runtime-state, scored-objective-pool-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs, src/world/server.rs]
+      symbols: [ObjectiveManager, ObjectiveManagerRes, scored_pool_with_boost]
+      tests: [cargo test]
+
+  - state: objective-runtime-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Runtime State
+      summary: Session-lifetime objectives keyed by unique ID, retaining active, completed, and failed records with player text, targets, source, directive, and utility data.
+    architecture:
+      classification: authoritative
+      owner: objective-manager
+      writers: [objective-manager, objective-authoring-actions]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs]
+      symbols: [ObjectiveManager]
+      tests: [cargo test]
+
+  - state: scored-objective-pool-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Scored Objective Pool
+      summary: Active objectives ranked by base priority, mandatory bonus, satisfied condition modifiers, zero gates, and optional Captain boost; only active objectives enter the pool.
+    architecture:
+      classification: derived
+      owner: objective-manager
+      writers: [objective-manager]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs]
+      symbols: [WorldConditions, UtilityConfig]
+      tests: [cargo test]
+
+  - component: objective-ai-projection
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective AI Projection
+      summary: Publishes the shared scored objective pool to current Backfill Helm and Tactical AI, which select directives relevant to their system affinity.
+    architecture:
+      kind: projection
+      authority: authoritative
+      reads: [scored-objective-pool-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs]
+      symbols: [score_doctrine_pool, operate_helm, directive_relevance]
+      tests: [cargo test]
+
+  - component: captain-objective-priority
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Captain Objective Priority Boost
+      summary: Captain can toggle one objective ID as a global score boost; it affects the shared scored pool and Captain projection, including otherwise zero-gated doctrine objectives.
+    architecture:
+      kind: control-handler
+      authority: authoritative
+      owns: [captain-objective-priority-state]
+      reads: [objective-runtime-state]
+      produces: [captain-objective-priority-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, gui/action-map.js]
+      symbols: [handle_set_objective_priority]
+      tests: [cargo test]
+
+  - state: captain-objective-priority-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Captain Objective Priority State
+      summary: Optional globally boosted objective ID. It is not scoped to a ship, AI controller, or individual objective consumer.
+    architecture:
+      classification: authoritative
+      owner: captain-objective-priority
+      writers: [captain-objective-priority]
+    implementation:
+      status: declared
+      paths: [src/server_app.rs]
+      symbols: [CaptainPriorityBoost]
+      tests: [cargo test]
+
+  - component: objective-player-projection
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Objective Player Projection
+      summary: Projects objective snapshots into console blackboards and GUI objective lists. Captain sees mission objectives regardless of score and doctrine objectives only when score is positive; Comms receives the complete snapshot list.
+    architecture:
+      kind: projection
+      authority: authoritative
+      reads: [objective-runtime-state, scored-objective-pool-state, captain-objective-priority-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, src/console/comms/server.rs, gui/components/ph-objective-list.js]
+      symbols: [publish_captain_blackboard, publish_comms_blackboard]
+      tests: [cargo test, npx vitest run]
+
+  - component: scoped-objective-priority
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Scoped Objective Priority
+      summary: Captain priority selection applies only to the intended local ship or system AI consumer, never every objective consumer in the session.
+    architecture:
+      kind: control-policy
+      authority: authoritative
+      owns: [scoped-objective-priority-state]
+      reads: [objective-runtime-state]
+      produces: [scoped-objective-priority-state]
+      runs_in: [host-browser-runtime]
+
+  - state: scoped-objective-priority-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Scoped Objective Priority State
+      summary: Objective boost selections keyed by their explicitly declared local scope rather than one global objective ID.
+    architecture:
+      classification: authoritative
+      owner: scoped-objective-priority
+      writers: [scoped-objective-priority]
+
+  - component: objective-visibility-policy
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Objective Visibility Policy
+      summary: Comms and Captain both hide doctrine objectives whose current utility score is zero, while mission objectives remain visible.
+    architecture:
+      kind: projection-policy
+      authority: authoritative
+      reads: [objective-runtime-state, scored-objective-pool-state]
+      runs_in: [host-browser-runtime]
+
+  - component: objective-authoring-validation
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Objective Authoring Validation
+      summary: World composition validation resolves objective IDs and rejects duplicate objective declarations or references before the root world activates.
+    architecture:
+      kind: configuration-validator
+      authority: authoritative
+      reads: [world-authoring-validation-state, world-composition-state]
+      coordinates: [objective-manager]
+      runs_in: [host-browser-runtime]
+
+  - component: objective-world-lifecycle
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Objective World Lifecycle
+      summary: Objectives are owned by their authoring world layer and are removed when that layer unloads.
+    architecture:
+      kind: lifecycle-policy
+      authority: authoritative
+      reads: [world-content-lifecycle-state, objective-runtime-state]
+      coordinates: [objective-manager]
+      runs_in: [host-browser-runtime]
+
+  - component: comms-objective-ai
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Comms Objective AI
+      summary: Backfill Comms consumes relevant Hail directives from its local scored objective pool and issues the same Comms actions as a player.
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      reads: [scored-objective-pool-state]
+      runs_in: [host-browser-runtime]

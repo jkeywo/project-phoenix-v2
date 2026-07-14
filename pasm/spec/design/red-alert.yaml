@@ -1,0 +1,179 @@
+entities:
+  - role: captain
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Captain
+      summary: Bridge role that sets the player ship's explicit Red Alert state.
+    game_design:
+      architecture_links:
+        - red-alert-console-interface
+      responsibilities:
+        - decide whether the ship should enter or leave Red Alert
+      player_verbs:
+        - set-red-alert
+      protected_decisions:
+        - player-ship-red-alert-state
+      coordination_with:
+        - sensors-operator
+
+  - role: sensors-operator
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Sensors Operator
+      summary: Bridge role that selects a radar target and sees that contact's Red Alert state when available.
+    game_design:
+      architecture_links:
+        - sensor-target-alert-publisher
+      responsibilities:
+        - inspect the selected radar contact
+      visible_information:
+        - selected-target-red-alert-information
+      coordination_with:
+        - captain
+
+  - role: red-alert-ai-operator-role
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Red Alert AI Operator
+      summary: AI-only role that sets Red Alert for behaviour-driven ships when their Red Alert system is AI-controlled.
+    game_design:
+      architecture_links:
+        - red-alert-ai-operator
+
+  - verb: set-red-alert
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Set Red Alert
+      summary: Captain requests a specific active or inactive Red Alert state instead of toggling it.
+    game_design:
+      architecture_links:
+        - red-alert-console-interface
+        - set-red-alert-command
+      owner_role: captain
+      inputs:
+        - desired alert state
+      resolution: host-authoritative
+      outputs:
+        - explicit red alert request
+      produces_facts:
+        - selected target alert state available
+
+  - decision: player-ship-red-alert-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Player Ship Red Alert State
+      summary: The Captain chooses the Red Alert state for a human-controlled ship.
+    game_design:
+      architecture_links:
+        - red-alert-console-interface
+        - set-red-alert-command
+      enforcement_links:
+        - host-red-alert-control-router
+      owner_role: captain
+      protected: true
+      must_not_be:
+        - toggled-from-stale-client-state
+        - automatically-set-while-the-red-alert-system-is-human-controlled
+
+  - decision: ai-ship-red-alert-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: AI Ship Red Alert State
+      summary: Red Alert AI decides the state for a behaviour-driven ship when its fine system is AI-controlled.
+    game_design:
+      enforcement_links:
+        - host-red-alert-control-router
+      owner_role: red-alert-ai-operator-role
+      protected: true
+      must_not_be:
+        - omitted-because-an-npc-ship-config-forgot-the-capability
+        - routed-through-a-human-captain-interface
+
+  - information: selected-target-red-alert-information
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Selected Target Red Alert Information
+      summary: Sensors sees the current alert state only for its selected radar target, and no value for contacts without Red Alert capability.
+    game_design:
+      enforcement_links:
+        - sensor-target-alert-publisher
+      visibility: role-visible
+      permitted_viewers:
+        - sensors-operator
+      architectural_enforcement:
+        - sensor-target-alert-publisher replicates selected-target-alert-state only for the selected Sensors contact
+
+  - mechanic: explicit-red-alert-state-setting
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Explicit Red Alert State Setting
+      summary: Human and AI operators submit the desired state; the authoritative router assigns that state to the addressed ship.
+    game_design:
+      participating_roles:
+        - captain
+        - red-alert-ai-operator-role
+      inputs:
+        - desired alert state
+      reads:
+        - authoritative-red-alert-state
+      changes:
+        - authoritative-red-alert-state
+      resolution: host-authoritative
+      outputs:
+        - updated ship alert state
+
+  - coordination: sensors-captain-alert-intelligence
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Sensors Captain Alert Intelligence
+      summary: Sensors can report the selected contact's alert state to inform Captain decisions without creating a global radar marker system.
+    game_design:
+      participating_roles:
+        - sensors-operator
+        - captain
+      information_exchanged:
+        - selected-target-red-alert-information
+      actions_required:
+        - set-red-alert
+      intended_player_effect: Captain receives focused contact intelligence without unnecessary information for every radar object.
+
+  - failure: unavailable-npc-red-alert-capability
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Unavailable NPC Red Alert Capability
+      summary: A behaviour-driven NPC cannot enter or leave Red Alert if its ship lacks an AI-only Red Alert system.
+    game_design:
+      causes:
+        - NPC configuration omits red alert capability
+      consequences:
+        - AI ship alert behaviour cannot operate
+      affected_roles:
+        - red-alert-ai-operator-role
+      visible_to:
+        - red-alert-ai-operator-role
+      terminal: false
+      recovery_paths:
+        - provision the mandatory AI-only red alert capability during NPC spawn
+
+  - playtest-claim: explicit-red-alert-remains-legible
+    core:
+      status: proposed
+      confidence: provisional
+      title: Explicit Red Alert Remains Legible
+      summary: Explicit state setting and selected-target alert intelligence should make alert changes reliable and understandable.
+    game_design:
+      claim: Captains can set a predictable alert state while Sensors provides focused target context and AI ships remain independently operable.
+      supports:
+        - player-ship-red-alert-state
+        - selected-target-red-alert-information
+        - explicit-red-alert-state-setting

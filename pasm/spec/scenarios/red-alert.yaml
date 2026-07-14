@@ -1,0 +1,12 @@
+scenario:
+  id: red-alert
+  steps:
+    - kind: action
+      actor: captain
+      value: set-red-alert
+    - kind: reveal
+      value: selected-target-red-alert-information
+    - kind: fail
+      value: unavailable-npc-red-alert-capability
+    - kind: recover
+      value: unavailable-npc-red-alert-capability

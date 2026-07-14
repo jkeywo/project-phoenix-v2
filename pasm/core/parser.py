@@ -21,6 +21,7 @@ from .model import (
     Status,
 )
 from pasm.architecture.model import ArchitectureSection, PlatformConstraints
+from pasm.domains.game_design.model import GameDesignSection, InformationVisibility
 from pasm.implementation.model import ImplementationSection, MappingStatus
 from pasm.migration.model import MigrationPredicate, MigrationSection, RemovalCondition
 
@@ -119,6 +120,19 @@ ALLOWED_MIGRATION_FIELDS = {
     "legacy_symbols",
     "target_symbols",
     "removal_conditions",
+}
+ALLOWED_GAME_DESIGN_FIELDS = {
+    "architecture_links", "enforcement_links",
+    "responsibilities", "player_verbs", "exclusive_verbs", "protected_decisions", "player_role",
+    "visible_information", "hidden_information", "coordination_with", "expected_decision_frequency",
+    "owner_role", "protected", "must_not_be", "visibility", "permitted_viewers",
+    "reveal_conditions", "reveal_condition", "indirect_signals", "architectural_enforcement", "participating_roles",
+    "inputs", "reads", "changes", "eligibility", "costs", "resolution", "outputs", "produces_facts",
+    "failure", "side_effects", "information_revealed", "information_exchanged",
+    "actions_required", "intended_player_effect", "implementation_path", "sources", "sinks",
+    "capacity", "pressure_intent", "causes", "consequences", "affected_roles", "visible_to",
+    "terminal", "recovery_paths", "affected_mechanics", "intended_directional_effect",
+    "bounds", "maturity", "supporting_evidence", "claim", "supports",
 }
 ALLOWED_REMOVAL_CONDITION_FIELDS = {"predicate", "subject", "allowed_callers"}
 ALLOWED_YAML_TAGS = {
@@ -430,6 +444,14 @@ def _parse_entity(
             entity_id=entity_id,
             section=("entities", str(index), "architecture"),
         ),
+        game_design=_game_design_section(
+            pairs.get("game_design"),
+            path=path,
+            spec_root=spec_root,
+            findings=findings,
+            entity_id=entity_id,
+            section=("entities", str(index), "game_design"),
+        ),
         implementation=_implementation_section(
             pairs.get("implementation"),
             path=path,
@@ -462,7 +484,7 @@ def _raw_domain_sections(
 ) -> dict[str, Any]:
     sections: dict[str, Any] = {}
     for section_name in ALLOWED_DOMAIN_SECTION_NAMES:
-        if section_name in {"architecture", "implementation", "migration_plan"}:
+        if section_name in {"architecture", "game_design", "implementation", "migration_plan"}:
             continue
         node = pairs.get(section_name)
         if node is None:
@@ -486,6 +508,134 @@ def _raw_domain_sections(
             section=base_section + (section_name,),
         )
     return sections
+
+
+def _game_design_section(
+    node: Node | None,
+    path: Path,
+    spec_root: Path,
+    findings: list[Finding],
+    entity_id: EntityId,
+    section: tuple[str, ...],
+) -> GameDesignSection | None:
+    if node is None:
+        return None
+    if not isinstance(node, MappingNode):
+        findings.append(
+            _error_finding(
+                finding_id=f"invalid-game-design-section:{entity_id}",
+                summary=f"Entity '{entity_id}' section 'game_design' must be a mapping.",
+                details="Phase 7 game-design declarations use a restricted mapping schema.",
+                rule="yaml.game-design-section-mapping",
+                location=_location_for_node(path, spec_root, node, *section),
+            )
+        )
+        return None
+    values = _mapping_to_nodes(
+        node,
+        allowed_fields=ALLOWED_GAME_DESIGN_FIELDS,
+        findings=findings,
+        path=path,
+        spec_root=spec_root,
+        section=section,
+    )
+    visibility = _game_design_visibility(
+        values.get("visibility"), path, spec_root, findings, entity_id, section + ("visibility",)
+    )
+    return GameDesignSection(
+        field_locations={
+            name: _location_for_node(path, spec_root, field_node, *section, name)
+            for name, field_node in values.items()
+        },
+        architecture_links=_entity_id_list(values.get("architecture_links"), path, spec_root, findings, entity_id, section + ("architecture_links",)),
+        enforcement_links=_entity_id_list(values.get("enforcement_links"), path, spec_root, findings, entity_id, section + ("enforcement_links",)),
+        responsibilities=_string_list(values.get("responsibilities"), path, spec_root, findings, entity_id, section + ("responsibilities",)),
+        player_verbs=_entity_id_list(values.get("player_verbs"), path, spec_root, findings, entity_id, section + ("player_verbs",)),
+        exclusive_verbs=_entity_id_list(values.get("exclusive_verbs"), path, spec_root, findings, entity_id, section + ("exclusive_verbs",)),
+        protected_decisions=_entity_id_list(values.get("protected_decisions"), path, spec_root, findings, entity_id, section + ("protected_decisions",)),
+        visible_information=_entity_id_list(values.get("visible_information"), path, spec_root, findings, entity_id, section + ("visible_information",)),
+        hidden_information=_entity_id_list(values.get("hidden_information"), path, spec_root, findings, entity_id, section + ("hidden_information",)),
+        coordination_with=_entity_id_list(values.get("coordination_with"), path, spec_root, findings, entity_id, section + ("coordination_with",)),
+        expected_decision_frequency=_optional_string(values.get("expected_decision_frequency"), path, spec_root, findings, entity_id, section + ("expected_decision_frequency",)),
+        owner_role=_game_design_owner_role(values, path, spec_root, findings, entity_id, section),
+        protected=_optional_bool(values.get("protected"), path, spec_root, findings, entity_id, section + ("protected",)),
+        must_not_be=_string_list(values.get("must_not_be"), path, spec_root, findings, entity_id, section + ("must_not_be",)),
+        visibility=visibility,
+        permitted_viewers=_entity_id_list(values.get("permitted_viewers"), path, spec_root, findings, entity_id, section + ("permitted_viewers",)),
+        reveal_conditions=_string_list(values.get("reveal_conditions"), path, spec_root, findings, entity_id, section + ("reveal_conditions",)) + _string_list(values.get("reveal_condition"), path, spec_root, findings, entity_id, section + ("reveal_condition",)),
+        indirect_signals=_string_list(values.get("indirect_signals"), path, spec_root, findings, entity_id, section + ("indirect_signals",)),
+        architectural_enforcement=_string_list(values.get("architectural_enforcement"), path, spec_root, findings, entity_id, section + ("architectural_enforcement",)),
+        participating_roles=_entity_id_list(values.get("participating_roles"), path, spec_root, findings, entity_id, section + ("participating_roles",)),
+        inputs=_string_list(values.get("inputs"), path, spec_root, findings, entity_id, section + ("inputs",)),
+        reads=_entity_id_list(values.get("reads"), path, spec_root, findings, entity_id, section + ("reads",)),
+        changes=_entity_id_list(values.get("changes"), path, spec_root, findings, entity_id, section + ("changes",)),
+        eligibility=_string_list(values.get("eligibility"), path, spec_root, findings, entity_id, section + ("eligibility",)),
+        costs=_string_list(values.get("costs"), path, spec_root, findings, entity_id, section + ("costs",)),
+        resolution=_optional_string(values.get("resolution"), path, spec_root, findings, entity_id, section + ("resolution",)),
+        outputs=_string_list(values.get("outputs"), path, spec_root, findings, entity_id, section + ("outputs",)),
+        produces_facts=_string_list(values.get("produces_facts"), path, spec_root, findings, entity_id, section + ("produces_facts",)),
+        failure=_entity_id_list(values.get("failure"), path, spec_root, findings, entity_id, section + ("failure",)),
+        side_effects=_string_list(values.get("side_effects"), path, spec_root, findings, entity_id, section + ("side_effects",)),
+        information_revealed=_entity_id_list(values.get("information_revealed"), path, spec_root, findings, entity_id, section + ("information_revealed",)),
+        information_exchanged=_entity_id_list(values.get("information_exchanged"), path, spec_root, findings, entity_id, section + ("information_exchanged",)),
+        actions_required=_entity_id_list(values.get("actions_required"), path, spec_root, findings, entity_id, section + ("actions_required",)),
+        intended_player_effect=_optional_string(values.get("intended_player_effect"), path, spec_root, findings, entity_id, section + ("intended_player_effect",)),
+        implementation_path=_string_list(values.get("implementation_path"), path, spec_root, findings, entity_id, section + ("implementation_path",)),
+        sources=_string_list(values.get("sources"), path, spec_root, findings, entity_id, section + ("sources",)),
+        sinks=_string_list(values.get("sinks"), path, spec_root, findings, entity_id, section + ("sinks",)),
+        capacity=_optional_string(values.get("capacity"), path, spec_root, findings, entity_id, section + ("capacity",)),
+        pressure_intent=_string_list(values.get("pressure_intent"), path, spec_root, findings, entity_id, section + ("pressure_intent",)),
+        causes=_string_list(values.get("causes"), path, spec_root, findings, entity_id, section + ("causes",)),
+        consequences=_string_list(values.get("consequences"), path, spec_root, findings, entity_id, section + ("consequences",)),
+        affected_roles=_entity_id_list(values.get("affected_roles"), path, spec_root, findings, entity_id, section + ("affected_roles",)),
+        visible_to=_entity_id_list(values.get("visible_to"), path, spec_root, findings, entity_id, section + ("visible_to",)),
+        terminal=_optional_bool(values.get("terminal"), path, spec_root, findings, entity_id, section + ("terminal",)),
+        recovery_paths=_string_list(values.get("recovery_paths"), path, spec_root, findings, entity_id, section + ("recovery_paths",)),
+        affected_mechanics=_entity_id_list(values.get("affected_mechanics"), path, spec_root, findings, entity_id, section + ("affected_mechanics",)),
+        intended_directional_effect=_optional_string(values.get("intended_directional_effect"), path, spec_root, findings, entity_id, section + ("intended_directional_effect",)),
+        bounds=_optional_string(values.get("bounds"), path, spec_root, findings, entity_id, section + ("bounds",)),
+        maturity=_optional_string(values.get("maturity"), path, spec_root, findings, entity_id, section + ("maturity",)),
+        supporting_evidence=_string_list(values.get("supporting_evidence"), path, spec_root, findings, entity_id, section + ("supporting_evidence",)),
+        claim=_optional_string(values.get("claim"), path, spec_root, findings, entity_id, section + ("claim",)),
+        supports=_entity_id_list(values.get("supports"), path, spec_root, findings, entity_id, section + ("supports",)),
+    )
+
+
+def _game_design_visibility(node, path, spec_root, findings, entity_id, section):
+    raw = _optional_string(node, path, spec_root, findings, entity_id, section)
+    if raw is None:
+        return None
+    try:
+        return InformationVisibility(raw)
+    except ValueError:
+        findings.append(
+            _error_finding(
+                finding_id=f"invalid-information-visibility:{entity_id}:{raw}",
+                summary=f"Entity '{entity_id}' uses unknown information visibility '{raw}'.",
+                details="Visibility must use a fixed Phase 7 information-visibility value.",
+                rule="game-design.information-visibility-valid",
+                location=_location_for_node(path, spec_root, node, *section),
+            )
+        )
+        return None
+
+
+def _game_design_owner_role(values, path, spec_root, findings, entity_id, section):
+    owner_node = values.get("owner_role")
+    player_role_node = values.get("player_role")
+    if owner_node is not None and player_role_node is not None:
+        findings.append(
+            _error_finding(
+                finding_id=f"duplicate-game-design-owner-role:{entity_id}",
+                summary=f"Entity '{entity_id}' declares both 'owner_role' and legacy 'player_role'.",
+                details="Use one role-owner spelling in a game-design declaration.",
+                rule="game-design.owner-role-single-spelling",
+                location=_location_for_node(path, spec_root, player_role_node, *section, "player_role"),
+            )
+        )
+    node = owner_node or player_role_node
+    field_name = "owner_role" if owner_node is not None else "player_role"
+    return _optional_entity_id(node, path, spec_root, findings, entity_id, section + (field_name,))
 
 
 def _architecture_section(
@@ -1088,6 +1238,30 @@ def _required_bool(
                 details="Restricted YAML accepts booleans only where the schema explicitly requires them.",
                 rule="yaml.boolean-field",
                 location=_location_for_node(path, spec_root, node, *section, field_name),
+            )
+        )
+        return None
+    return node.value.lower() == "true"
+
+
+def _optional_bool(
+    node: Node | None,
+    path: Path,
+    spec_root: Path,
+    findings: list[Finding],
+    entity_id: EntityId,
+    section: tuple[str, ...],
+) -> bool | None:
+    if node is None:
+        return None
+    if not isinstance(node, ScalarNode) or node.tag != "tag:yaml.org,2002:bool":
+        findings.append(
+            _error_finding(
+                finding_id=f"invalid-optional-bool:{entity_id}:{'.'.join(section)}",
+                summary=f"Entity '{entity_id}' field '{section[-1]}' must be true or false.",
+                details="Restricted YAML accepts booleans only where the schema explicitly permits them.",
+                rule="yaml.optional-boolean-field",
+                location=_location_for_node(path, spec_root, node, *section),
             )
         )
         return None

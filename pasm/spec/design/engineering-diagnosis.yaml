@@ -1,0 +1,299 @@
+entities:
+  - role: engineering
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Engineering
+      summary: Bridge role that dispatches repair teams and prioritises work after a team arrives.
+    game_design:
+      architecture_links:
+        - repair-console-interface
+      responsibilities:
+        - maintain ship survivability from aggregate and authorised detailed damage information
+        - dispatch repair teams
+        - prioritise on-site repair work
+      player_verbs:
+        - dispatch-repair-team
+        - prioritise-onsite-repair
+      protected_decisions:
+        - repair-team-dispatch
+        - onsite-repair-priority
+      visible_information:
+        - engineering-aggregate-hull-information
+        - core-damage-detail-information
+      hidden_information:
+        - onsite-noncore-damage-detail-information
+      coordination_with:
+        - station-owner
+      expected_decision_frequency: situational
+
+  - role: station-owner
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Station Owner
+      summary: Player role responsible for operating a ship station and asking Engineering for repairs when needed.
+    game_design:
+      architecture_links:
+        - station-owner-damage-interface
+      responsibilities:
+        - operate the owned station
+        - request repair attention when the owned station is damaged
+      player_verbs:
+        - request-repair
+      visible_information:
+        - station-owner-local-damage-information
+      coordination_with:
+        - engineering
+
+  - verb: request-repair
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Request Repair
+      summary: A station owner asks Engineering for repair attention; human players do this socially and AI uses an advisory message.
+    game_design:
+      architecture_links:
+        - station-owner-damage-interface
+        - ai-repair-request-signal
+      owner_role: station-owner
+      outputs:
+        - repair-request
+
+  - verb: dispatch-repair-team
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Dispatch Repair Team
+      summary: Engineering assigns an available team to a station or core repair target.
+    game_design:
+      architecture_links:
+        - repair-console-interface
+        - dispatch-repair-team-command
+        - host-repair-router
+      owner_role: engineering
+      inputs:
+        - repair target
+      costs:
+        - repair-team availability
+      resolution: host-authoritative
+      outputs:
+        - team-travels-to-target
+      produces_facts:
+        - assigned repair team has arrived at the target station
+
+  - verb: prioritise-onsite-repair
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Prioritise On-Site Repair
+      summary: Engineering chooses which internal subsystem an already-arrived team repairs first.
+    game_design:
+      architecture_links:
+        - repair-console-interface
+        - onsite-repair-priority-command
+      owner_role: engineering
+      eligibility:
+        - assigned repair team has arrived at the target station
+      resolution: host-authoritative
+      outputs:
+        - repair-priority-updated
+
+  - decision: repair-team-dispatch
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Repair Team Dispatch
+      summary: Engineering decides whether and where to dispatch a repair team.
+    game_design:
+      enforcement_links:
+        - host-repair-router
+      owner_role: engineering
+      protected: true
+      must_not_be:
+        - fully-automated
+        - committed-by-station-owner
+
+  - decision: onsite-repair-priority
+    core:
+      status: accepted
+      confidence: confirmed
+      title: On-Site Repair Priority
+      summary: Engineering decides the order of subsystem repairs once the assigned team is on site.
+    game_design:
+      enforcement_links:
+        - host-repair-router
+      owner_role: engineering
+      protected: true
+      must_not_be:
+        - fully-automated
+        - committed-before-team-arrival
+
+  - information: engineering-aggregate-hull-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Engineering Aggregate Hull Information
+      summary: Engineering can see ship-wide total hull percentage, but not general subsystem detail.
+    game_design:
+      enforcement_links:
+        - repair-visibility-publisher
+      visibility: role-visible
+      permitted_viewers:
+        - engineering
+      architectural_enforcement:
+        - repair-visibility-publisher exposes engineering-aggregate-hull-state only
+
+  - information: core-damage-detail-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Core Damage Detail Information
+      summary: Engineering can inspect exact damage for systems designated Core.
+    game_design:
+      enforcement_links:
+        - repair-visibility-publisher
+      visibility: role-visible
+      permitted_viewers:
+        - engineering
+      architectural_enforcement:
+        - repair-visibility-publisher exposes core-damage-detail-state through the dedicated core interface
+
+  - information: station-owner-local-damage-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Station Owner Local Damage Information
+      summary: A station owner knows exact damage details for systems owned by that station.
+    game_design:
+      enforcement_links:
+        - station-owner-damage-interface
+      visibility: role-visible
+      permitted_viewers:
+        - station-owner
+      architectural_enforcement:
+        - station-owner-damage-interface exposes station-owner-local-damage-state
+
+  - information: onsite-noncore-damage-detail-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: On-Site Non-Core Damage Detail
+      summary: Exact non-Core system damage becomes visible to Engineering only while an assigned repair team is on site.
+    game_design:
+      enforcement_links:
+        - repair-visibility-publisher
+      visibility: hidden
+      permitted_viewers:
+        - engineering
+      reveal_conditions:
+        - assigned repair team has arrived at the target station
+      indirect_signals:
+        - ship-wide aggregate hull percentage
+        - station owner repair request
+      architectural_enforcement:
+        - repair-visibility-publisher derives onsite-repair-detail-state from damage and repair-team state
+
+  - mechanic: repair-team-travel-and-diagnosis
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Repair Team Travel And Diagnosis
+      summary: Dispatch sends a team to a target; arrival grants Engineering the detail needed to prioritise repair work.
+    game_design:
+      participating_roles:
+        - engineering
+      inputs:
+        - repair target
+      reads:
+        - authoritative-damage-state
+        - repair-team-state
+      changes:
+        - repair-team-state
+      costs:
+        - travel time
+      resolution: host-authoritative
+      information_revealed:
+        - onsite-noncore-damage-detail-information
+
+  - coordination: station-owner-repair-request
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Station Owner Repair Request
+      summary: The owner of a damaged station asks Engineering to consider dispatching a team.
+    game_design:
+      participating_roles:
+        - station-owner
+        - engineering
+      information_exchanged:
+        - station-owner-local-damage-information
+      actions_required:
+        - request-repair
+        - dispatch-repair-team
+      intended_player_effect: Station owners identify their need, while Engineering retains the dispatch decision.
+      implementation_path:
+        - player speech for human station owners
+        - ai-repair-request-signal for AI station owners
+
+  - resource: repair-team-capacity
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Repair Team Capacity
+      summary: Available repair teams are a limited shared resource that Engineering allocates among damaged targets.
+    game_design:
+      sources:
+        - ship repair crew roster
+      sinks:
+        - active team assignments
+      capacity: bounded
+      owner_role: engineering
+      pressure_intent:
+        - force consequential triage between repair targets
+
+  - failure: unresolved-system-damage
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Unresolved System Damage
+      summary: A damaged station continues to degrade ship capability until players coordinate and repair it.
+    game_design:
+      causes:
+        - combat or environmental damage
+      consequences:
+        - reduced station capability
+      affected_roles:
+        - station-owner
+        - engineering
+      visible_to:
+        - station-owner
+        - engineering
+      terminal: false
+      recovery_paths:
+        - dispatch a repair team and complete repair work
+
+  - tuning: repair-team-travel-time
+    core:
+      status: provisional
+      confidence: provisional
+      title: Repair Team Travel Time
+      summary: Travel duration controls how long Engineering waits before gaining non-Core diagnostic detail.
+    game_design:
+      affected_mechanics:
+        - repair-team-travel-and-diagnosis
+      intended_directional_effect: Longer travel increases coordination pressure and delays information reveal.
+      bounds: designer-tuned per ship
+      maturity: not yet calibrated by playtest
+
+  - playtest-claim: repair-information-gates-create-coordination
+    core:
+      status: proposed
+      confidence: provisional
+      title: Repair Information Gates Create Coordination
+      summary: The repair information gates are expected to make station-owner requests and Engineering triage meaningful.
+    game_design:
+      claim: Owners asking for help, followed by Engineering dispatch and arrival-gated detail, produces consequential coordination instead of automatic repair routing.
+      supports:
+        - station-owner-repair-request
+        - repair-team-travel-and-diagnosis

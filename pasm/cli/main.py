@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import yaml
 from pathlib import Path
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 
 from pasm.core.validation import ValidationResult, validate_spec_root
 from pasm.implementation.observation import observe_entity_implementation, observe_repository
+from pasm.integration.traceability import build_traceability_rows
+from pasm.domains.game_design.scenarios import load_scenario, validate_scenario
+from pasm.audit import build_audit_bundle, load_audit_report, persist_audit_report
+from pasm.context import build_context_bundle
 
 
 def main() -> int:
@@ -111,6 +116,35 @@ def main() -> int:
         "--workspace-root",
         help="Repository root used to resolve implementation paths.",
     )
+    traceability_parser = subparsers.add_parser(
+        "traceability", help="Report design-to-architecture-to-implementation links."
+    )
+    traceability_parser.add_argument(
+        "spec_root", nargs="?", default="pasm/spec", help="Directory containing PASM YAML files."
+    )
+    traceability_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    traceability_parser.add_argument("--workspace-root", help="Repository root used to resolve implementation paths.")
+    scenario_parser = subparsers.add_parser("scenario", help="Validate a lightweight PASM scenario.")
+    scenario_parser.add_argument("scenario_path", help="Scenario YAML file.")
+    scenario_parser.add_argument("--spec-root", default="pasm/spec", help="Directory containing PASM YAML files.")
+    scenario_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    audit_parser = subparsers.add_parser("audit", help="Build or ingest a structured semantic audit.")
+    audit_subparsers = audit_parser.add_subparsers(dest="audit_command", required=True)
+    bundle_parser = audit_subparsers.add_parser("bundle", help="Build a focused LLM audit bundle for one entity.")
+    bundle_parser.add_argument("entity_id")
+    bundle_parser.add_argument("spec_root", nargs="?", default="pasm/spec")
+    bundle_parser.add_argument("--workspace-root")
+    report_parser = audit_subparsers.add_parser("report", help="Validate, bind, and optionally persist an LLM audit report.")
+    report_parser.add_argument("report_path")
+    report_parser.add_argument("--bundle", help="Bundle JSON that the external audit reviewed.")
+    report_parser.add_argument("--persist-dir", help="Directory for canonical revision-bound audit records.")
+    report_parser.add_argument("--json", action="store_true")
+    context_parser = subparsers.add_parser("context", help="Build a bounded task-context bundle from PASM links.")
+    context_parser.add_argument("--entity", dest="entity_ids", action="append", required=True, help="Seed entity ID; repeat for multiple seeds.")
+    context_parser.add_argument("--depth", type=int, default=1, help="Architecture-link traversal depth (default: 1).")
+    context_parser.add_argument("spec_root", nargs="?", default="pasm/spec")
+    context_parser.add_argument("--workspace-root")
+    context_parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args()
     if args.command == "validate":
@@ -149,6 +183,62 @@ def main() -> int:
             print(_scan_to_json(observations, inventory, result))
         else:
             print(_scan_to_text(observations, inventory, result))
+        return result.exit_code
+    if args.command == "traceability":
+        result = _validate_from_args(args)
+        rows = build_traceability_rows(result.model.entities)
+        if args.json:
+            print(json.dumps({
+                "ok": result.ok,
+                "exit_code": result.exit_code,
+                "findings": [_json_ready(finding) for finding in result.findings],
+                "rows": [_json_ready(row) for row in rows],
+            }, indent=2, sort_keys=True))
+        else:
+            print(_traceability_to_text(rows, result))
+        return result.exit_code
+    if args.command == "scenario":
+        result = validate_spec_root(Path(args.spec_root))
+        try:
+            scenario = load_scenario(Path(args.scenario_path))
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            payload = {"ok": False, "error": str(exc)}
+            print(json.dumps(payload, indent=2, sort_keys=True) if args.json else f"Scenario: FAILED\n{exc}")
+            return 1
+        findings = result.findings + tuple(validate_scenario(scenario, result.model.entities, Path(args.scenario_path)))
+        ok = not any(item.severity.value == "error" for item in findings)
+        payload = {"ok": ok, "scenario": scenario.id, "findings": [_json_ready(item) for item in findings]}
+        print(json.dumps(payload, indent=2, sort_keys=True) if args.json else f"Scenario: {scenario.id}\nStatus: {'OK' if ok else 'FAILED'}")
+        return 0 if ok else 1
+    if args.command == "audit" and args.audit_command == "bundle":
+        result = _validate_from_args(args)
+        entity = result.model.entity_by_id(args.entity_id)
+        if entity is None:
+            print(json.dumps({"ok": False, "error": f"Entity '{args.entity_id}' was not found."}, indent=2))
+            return 1
+        print(json.dumps(build_audit_bundle(entity, _workspace_root_from_args(args, result)), indent=2, sort_keys=True))
+        return result.exit_code
+    if args.command == "audit" and args.audit_command == "report":
+        try:
+            bundle = json.loads(Path(args.bundle).read_text(encoding="utf-8")) if args.bundle else None
+            if args.persist_dir and bundle is None:
+                raise ValueError("Persisting an audit report requires --bundle.")
+            report = load_audit_report(Path(args.report_path), bundle)
+            persisted_path = persist_audit_report(report, bundle, Path(args.persist_dir)) if args.persist_dir else None
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2) if args.json else f"Audit report: FAILED\n{exc}")
+            return 1
+        payload = {"ok": True, "audit_kind": report.audit_kind, "entity_ids": list(report.entity_ids), "repository_revision": report.repository_revision, "semantic_findings": [_json_ready(item) for item in report.findings], "persisted_path": persisted_path.as_posix() if persisted_path else None, "deterministic_findings_included": False}
+        print(json.dumps(payload, indent=2, sort_keys=True) if args.json else f"Audit report: OK\nKind: {report.audit_kind}\nSemantic findings: {len(report.findings)}\nDeterministic findings: separate (run pasm validate).")
+        return 0
+    if args.command == "context":
+        result = _validate_from_args(args)
+        try:
+            bundle = build_context_bundle(result.model.entities, tuple(args.entity_ids), max(0, args.depth))
+        except ValueError as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2) if args.json else str(exc))
+            return 1
+        print(json.dumps(_json_ready(bundle), indent=2, sort_keys=True))
         return result.exit_code
     if args.command == "query" and args.query_command == "entity":
         result = _validate_from_args(args)
@@ -426,6 +516,17 @@ def _entity_to_text(entity) -> str:
         lines.append("Migration:")
         lines.append(f"  legacy_entities: {', '.join(item.value for item in entity.migration.legacy_entities) or '(none)'}")
         lines.append(f"  target_entities: {', '.join(item.value for item in entity.migration.target_entities) or '(none)'}")
+    if entity.game_design is not None:
+        lines.append("Game design:")
+        for label, value in (
+            ("owner_role", entity.game_design.owner_role.value if entity.game_design.owner_role else None),
+            ("protected", entity.game_design.protected),
+            ("visibility", entity.game_design.visibility.value if entity.game_design.visibility else None),
+            ("player_verbs", ", ".join(item.value for item in entity.game_design.player_verbs) or None),
+            ("protected_decisions", ", ".join(item.value for item in entity.game_design.protected_decisions) or None),
+        ):
+            if value is not None:
+                lines.append(f"  {label}: {value}")
     lines.append(f"Source: {entity.source_location.render()}")
     return "\n".join(lines)
 
@@ -467,6 +568,19 @@ def _migration_to_text(entity_id: str, migration) -> str:
         lines.append("removal_conditions:")
         for condition in migration.removal_conditions:
             lines.append(f"  - {condition.predicate.value}: {condition.subject}")
+    return "\n".join(lines)
+
+
+def _traceability_to_text(rows, result) -> str:
+    lines = ["Validation: OK" if result.ok else "Validation: FAILED", f"Traceability rows: {len(rows)}"]
+    for row in rows:
+        links = ", ".join(item.value for item in row.architecture_links) or "(none)"
+        enforcement = ", ".join(item.value for item in row.enforcement_links) or "(none)"
+        paths = ", ".join(row.implementation_paths) or "(no mapped implementation)"
+        lines.append(f"{row.design_kind}: {row.design_entity.value}")
+        lines.append(f"  architecture: {links}")
+        lines.append(f"  enforcement: {enforcement}")
+        lines.append(f"  implementation: {paths} [{row.implementation_status}]")
     return "\n".join(lines)
 
 

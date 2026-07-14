@@ -1,0 +1,279 @@
+entities:
+  - role: helm-operator
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Helm Operator
+      summary: Player role that directs ship movement through available fine helm systems.
+    game_design:
+      architecture_links:
+        - helm-console-interface
+      responsibilities:
+        - choose course and speed
+        - manage impulse and boost when available
+        - respond to collision information and tactical arc requests
+      player_verbs:
+        - set-helm-actuator-input
+        - engage-impulse
+        - set-boost-state
+      protected_decisions:
+        - helm-course-and-speed
+      visible_information:
+        - helm-status-information
+        - collision-hazard-information
+        - tactical-arc-request-information
+      coordination_with:
+        - tactical-operator
+
+  - role: tactical-operator
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Tactical Operator
+      summary: Player role that can ask Helm to orient the ship for a weapon arc.
+    game_design:
+      architecture_links:
+        - helm-console-interface
+      responsibilities:
+        - request a useful firing orientation from Helm
+      player_verbs:
+        - request-firing-arc
+      coordination_with:
+        - helm-operator
+
+  - role: helm-ai-operator-role
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Helm AI Operator
+      summary: Backfill operator that selects typed helm actuator inputs when the relevant Helm system is AI-controlled.
+
+  - verb: set-helm-actuator-input
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Set Helm Actuator Input
+      summary: Helm supplies forward/reverse thrust, yaw, and lateral input for the ship capabilities it controls.
+    game_design:
+      architecture_links:
+        - helm-console-interface
+        - helm-input-command
+      owner_role: helm-operator
+      inputs:
+        - forward or reverse thrust
+        - yaw steering
+        - lateral thrust where available
+      resolution: host-authoritative
+      outputs:
+        - ship actuator intent
+      produces_facts:
+        - helm actuator input accepted
+
+  - verb: engage-impulse
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Engage Impulse
+      summary: Helm starts or cancels impulse travel when the ship provides that capability.
+    game_design:
+      architecture_links:
+        - helm-console-interface
+        - start-impulse-charge-command
+      owner_role: helm-operator
+      eligibility:
+        - ship has impulse capability
+      resolution: host-authoritative
+
+  - verb: set-boost-state
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Set Boost State
+      summary: Helm enables or disables boost when the ship provides it and impulse is not active.
+    game_design:
+      architecture_links:
+        - helm-console-interface
+        - set-boost-command
+      owner_role: helm-operator
+      eligibility:
+        - ship has boost capability
+        - impulse is not active
+      resolution: host-authoritative
+
+  - verb: request-firing-arc
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Request Firing Arc
+      summary: Tactical asks Helm to favour a facing that brings a target within weapon arc.
+    game_design:
+      architecture_links:
+        - helm-console-interface
+      owner_role: tactical-operator
+      outputs:
+        - temporary facing request
+
+  - decision: helm-course-and-speed
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Helm Course And Speed
+      summary: The current human Helm operator decides the ship's player-directed course and speed.
+    game_design:
+      architecture_links:
+        - helm-console-interface
+      enforcement_links:
+        - host-helm-control-router
+      owner_role: helm-operator
+      protected: true
+      must_not_be:
+        - overwritten-by-ai-while-helm-is-human-controlled
+        - silently-replaced-by-a-tactical-arc-request
+
+  - information: helm-status-information
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Helm Status Information
+      summary: Helm can inspect the available drive states and current movement telemetry for the ship.
+    game_design:
+      enforcement_links:
+        - helm-console-interface
+      visibility: role-visible
+      permitted_viewers:
+        - helm-operator
+      architectural_enforcement:
+        - helm-status-blackboard-state is replicated to the helm console interface
+
+  - information: collision-hazard-information
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Collision Hazard Information
+      summary: Shared 3D hazard forces and capability facts guide actuator responses without exposing a separate player collision controller.
+    game_design:
+      enforcement_links:
+        - helm-motion-planner
+      visibility: role-visible
+      permitted_viewers:
+        - helm-operator
+        - helm-ai-operator-role
+      architectural_enforcement:
+        - helm-motion-planner publishes hazard-assessment-state for fine helm systems
+
+  - information: tactical-arc-request-information
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Tactical Arc Request Information
+      summary: Helm receives a temporary facing request from Tactical, distinct from a docking movement request.
+    game_design:
+      enforcement_links:
+        - helm-console-interface
+      visibility: team-visible
+      permitted_viewers:
+        - helm-operator
+        - tactical-operator
+      architectural_enforcement:
+        - tactical-arc-request-state is consumed as desired facing rather than lateral drift
+
+  - mechanic: hazard-aware-helm-actuation
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Hazard Aware Helm Actuation
+      summary: Objectives and shared hazard forces produce desired motion, then each available fine actuator responds according to authored sensitivity.
+    game_design:
+      participating_roles:
+        - helm-operator
+        - helm-ai-operator-role
+      reads:
+        - desired-motion-state
+        - hazard-assessment-state
+      changes:
+        - helm-actuator-input-state
+      resolution: host-authoritative
+      side_effects:
+        - engines slow for arrival or collision avoidance
+        - lateral thrust responds primarily to collision avoidance
+        - vertical thrust responds only to moving hazards in bounded vertical mode
+
+  - coordination: tactical-helm-arc-request
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Tactical Helm Arc Request
+      summary: Tactical communicates a desired firing orientation, while Helm retains the movement decision.
+    game_design:
+      participating_roles:
+        - tactical-operator
+        - helm-operator
+      information_exchanged:
+        - tactical-arc-request-information
+      actions_required:
+        - request-firing-arc
+        - set-helm-actuator-input
+      intended_player_effect: Tactical can ask for a firing arc without commandeering Helm movement.
+
+  - resource: impulse-availability
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Impulse Availability
+      summary: Impulse is a ship-specific drive mode whose manoeuvrability constrains Helm's tactical options.
+    game_design:
+      sources:
+        - ship impulse capability
+      sinks:
+        - long-range travel
+      capacity: ship-specific
+      owner_role: helm-operator
+      pressure_intent:
+        - trade rapid travel against harshly reduced steering and unavailable boost
+
+  - failure: helm-actuator-unavailable
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Helm Actuator Unavailable
+      summary: Damage or ship configuration can remove engines, steering, lateral thrust, vertical thrust, impulse, or boost from Helm options.
+    game_design:
+      causes:
+        - damaged fine helm system
+        - ship lacks the authored capability
+      consequences:
+        - reduced movement options
+      affected_roles:
+        - helm-operator
+      visible_to:
+        - helm-operator
+      terminal: false
+      recovery_paths:
+        - repair the damaged helm system
+        - use remaining available actuators
+
+  - tuning: impulse-steering-and-hazard-response
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Impulse Steering And Hazard Response
+      summary: Ship-authored policy controls the harsh impulse steering multiplier and each actuator's response to shared hazard forces.
+    game_design:
+      affected_mechanics:
+        - hazard-aware-helm-actuation
+      intended_directional_effect: Lower impulse steering and stronger hazard sensitivity make travel safer but reduce precise manoeuvring.
+      bounds: impulse steering multiplier is ship-authored, with 0.1 as the standard intended value
+      maturity: proposed pending ship capability and actuator migration
+
+  - playtest-claim: helm-shared-intent-preserves-player-agency
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Shared Intent Preserves Player Agency
+      summary: Shared desired motion and hazard information should improve AI and avoidance behaviour without taking manual Helm decisions away from players.
+    game_design:
+      claim: Players retain course authority while collision response and tactical requests become legible, capability-aware constraints rather than hidden competing controllers.
+      supports:
+        - helm-course-and-speed
+        - hazard-aware-helm-actuation
+        - tactical-helm-arc-request

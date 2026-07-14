@@ -20,8 +20,8 @@ The merger of *map* and *scenario* into a single *world* concept is complete:
 - **One parser:** `world::config::parse_world` → `WorldConfig` (anchors + `[[entity]]` instances + `[[trigger]]` + `[[comms]]` templates), single-pass, populates a `WORLD_CONFIG` thread-local
 - **One block type in TOML:** `[[entity]]`. The legacy `[[spawn]]` block was folded in (PRD #341)
 - **One immediate-spawn pipeline:** `world::server::spawn_world_entities`, driven by `world::config::partition_immediate_entities` to route asteroid-field templates and other templates through the shared spawner
-- **Flat runtime state (PRD #342):** there is no per-world ownership tracking. Triggers, comms templates, dialogues, inbox messages, and objectives all live for the duration of the session. The legacy multi-world layering machinery (per-element ownership tags, owner components, runtime layer maps, per-world unload paths) has been deleted
-- **Removed trigger actions:** the old chaining actions (`load_world`-style) no longer exist; each session loads exactly one world TOML and runs it to completion
+- **Layered runtime state:** a root world can load `extra_worlds` and triggers can add or unload named child layers. Each layer carries its own flags and loader path; entities and ad-hoc spawns are tracked for unload cleanup. Comms and objectives are not yet fully layer-owned, which is recorded as proposed PASM lifecycle work.
+- **Layer trigger actions:** `load_world` and `unload_world` are live additive layer-management actions. They are not scenario replacement; the root world remains active throughout the session.
 
 ## Load path
 

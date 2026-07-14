@@ -1,0 +1,304 @@
+entities:
+  - component: world-file-parser
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World File Parser
+      summary: Parses authoritative world TOML into WorldConfig, including entities, triggers, comms, visual settings, and predicates.
+    architecture:
+      kind: configuration-loader
+      authority: authoritative
+      owns: [world-configuration-state]
+      produces:
+        - world-configuration-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths: [src/world/config.rs]
+      symbols: [parse_world, WorldConfig, WorldEntity, Trigger]
+      tests: [cargo test]
+
+  - state: world-configuration-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Configuration State
+      summary: Parsed authoritative world content, including entity declarations and name-to-UUID bindings.
+    architecture:
+      classification: authoritative
+      owner: world-file-parser
+      writers: [world-file-parser]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs]
+      symbols: [WorldConfig]
+
+  - component: world-entity-spawner
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Entity Spawner
+      summary: Assigns stable UUIDs to named world entries and spawns immediate entities through the unified entity pipeline.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [world-name-binding-state]
+      reads: [world-configuration-state, world-flag-state]
+      produces: [world-name-binding-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/world/config.rs]
+      symbols: [spawn_world_entities, assign_named_entity_uuids, partition_immediate_entities_three_way]
+      tests: [cargo test]
+
+  - state: world-name-binding-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Name Binding State
+      summary: Stable mapping from authored entity names to runtime UUIDs for trigger and comms resolution.
+    architecture:
+      classification: authoritative
+      owner: world-entity-spawner
+      writers: [world-entity-spawner]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/world/config.rs]
+      symbols: [assign_named_entity_uuids, WorldConfig]
+      tests: [cargo test]
+
+  - component: world-flag-store
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Flag Store
+      summary: Host-owned counters with boolean views and layered parent lookup for world predicates.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [world-flag-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/flags.rs]
+      symbols: [FlagStore, Predicate, parse_predicate]
+      tests: [cargo test]
+
+  - state: world-flag-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Flag State
+      summary: Authoritative named flag and counter values used by entity and trigger predicates.
+    architecture:
+      classification: authoritative
+      owner: world-flag-store
+      writers: [world-flag-store]
+    implementation:
+      status: declared
+      paths: [src/world/flags.rs]
+      symbols: [FlagStore]
+      tests: [cargo test]
+
+  - component: world-trigger-evaluator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Trigger Evaluator
+      summary: Evaluates trigger conditions, predicate gates, action predicates, and delayed actions against world runtime state.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      reads: [world-configuration-state, world-flag-state, world-name-binding-state]
+      coordinates: [world-objective-manager, world-comms-runtime]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/world/config.rs, src/world/flags.rs]
+      symbols: [Trigger, TriggerAction, Predicate]
+      tests: [cargo test]
+
+  - component: world-objective-manager
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Objective Manager
+      summary: Server-side objective resource updated by world content actions.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/objectives.rs]
+      symbols: [ObjectiveManagerRes, ObjectiveManager]
+
+  - component: world-comms-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Comms Runtime
+      summary: Evaluates world comms templates, maintains contacts and inbox state, and marks initial content for broadcast on game start.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      reads: [world-configuration-state, world-name-binding-state, world-flag-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/world/config.rs, src/console/comms/inbox.rs]
+      symbols: [CommsInboxRes, mark_comms_dirty_on_game_start]
+      tests: [cargo test]
+
+  - component: world-presentation-config
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Presentation Configuration
+      summary: Host-side world ambient-light and dust settings consumed by renderer effects.
+    architecture:
+      kind: configuration
+      authority: authoritative
+      reads: [world-configuration-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/server/renderer.rs, src/server/pfx.rs]
+      symbols: [AmbientLightConfig]
+      tests: [cargo test]
+
+  - component: world-authoring-validator
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Authoring Validator
+      summary: Resolves every authored world reference before activation and reports source-located errors for missing templates, names, flags, objectives, trigger targets, comms senders, and child-world paths.
+    architecture:
+      kind: configuration-validator
+      authority: authoritative
+      owns: [world-authoring-validation-state]
+      reads: [world-configuration-state, world-composition-state]
+      produces: [world-authoring-validation-state]
+      runs_in: [host-browser-runtime]
+
+  - state: world-authoring-validation-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Authoring Validation State
+      summary: Source-located errors and warnings for the complete effective world composition; any error blocks activation of the entire root world.
+    architecture:
+      classification: authoritative
+      owner: world-authoring-validator
+      writers: [world-authoring-validator]
+
+  - component: world-identity-contract
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Entity Identity Contract
+      summary: Separates an entity's unique authored name, used only for world references, from its player-facing display_name.
+    architecture:
+      kind: configuration-schema
+      authority: authoritative
+      owns: [world-entity-identity-state]
+      produces: [world-entity-identity-state]
+      runs_in: [host-browser-runtime]
+
+  - state: world-entity-identity-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Entity Identity State
+      summary: "Effective world entity identity: a unique reference name and independent display text. Duplicate reference names in one effective namespace are authoring errors."
+    architecture:
+      classification: authoritative
+      owner: world-identity-contract
+      writers: [world-identity-contract]
+
+  - component: world-composition-contract
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Composition Contract
+      summary: "Defines hierarchical reference resolution for layered worlds: parent.<name> climbs one layer, repeated parent segments may climb further, and child-world aliases qualify child names as child_world.<name>."
+    architecture:
+      kind: configuration-schema
+      authority: authoritative
+      owns: [world-composition-state]
+      produces: [world-composition-state]
+      runs_in: [host-browser-runtime]
+
+  - state: world-composition-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Composition State
+      summary: The root-to-child world tree, its aliases, and its effective reference namespaces. Name collisions are detected across every namespace where an unqualified reference could resolve ambiguously.
+    architecture:
+      classification: authoritative
+      owner: world-composition-contract
+      writers: [world-composition-contract]
+
+  - component: world-load-lifecycle-contract
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Load Lifecycle Contract
+      summary: Defines load, deferred activation, unload, cleanup, and reload semantics for base and child worlds, and activates a root world only after its full composition validates.
+    architecture:
+      kind: lifecycle-policy
+      authority: authoritative
+      owns: [world-content-lifecycle-state]
+      reads: [world-authoring-validation-state, world-composition-state]
+      produces: [world-content-lifecycle-state]
+      runs_in: [host-browser-runtime]
+
+  - state: world-content-lifecycle-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Content Lifecycle State
+      summary: The authoritative activation state of each world layer and its owned runtime content. Failed validation leaves no partial root-world content active.
+    architecture:
+      classification: authoritative
+      owner: world-load-lifecycle-contract
+      writers: [world-load-lifecycle-contract]
+
+  - component: world-objective-contract
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Objective Contract
+      summary: Defines objective identifiers, display text, ownership, transition rules, and cleanup when the world layer that authored an objective unloads.
+    architecture:
+      kind: configuration-schema
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+
+  - component: world-trigger-lifecycle-contract
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Trigger Lifecycle Contract
+      summary: Defines whether each authored trigger is once-only or repeatable, its reset and cooldown rules, and what happens to pending delayed actions when its world unloads.
+    architecture:
+      kind: lifecycle-policy
+      authority: authoritative
+      reads: [world-content-lifecycle-state]
+      runs_in: [host-browser-runtime]
+
+  - component: world-comms-identity-contract
+    core:
+      status: proposed
+      confidence: confirmed
+      title: World Comms Identity Contract
+      summary: Resolves each authored comms sender reference to its world entity identity while carrying separate sender display text. All world comms deliver to the ship Comms system, not role-specific inboxes.
+    architecture:
+      kind: configuration-schema
+      authority: authoritative
+      reads: [world-entity-identity-state, world-name-binding-state]
+      coordinates: [world-comms-runtime]
+      runs_in: [host-browser-runtime]

@@ -10,6 +10,8 @@ from .references import validate_references
 from pasm.architecture.validation import validate_architecture
 from pasm.implementation.validation import validate_implementation
 from pasm.migration.validation import validate_migrations
+from pasm.domains.game_design.validation import validate_game_design
+from pasm.integration.validation import validate_cross_domain
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ def validate_spec_root(
     findings: list[Finding] = []
 
     yaml_paths = sorted(
-        path for path in spec_root.rglob("*") if path.suffix.lower() in {".yaml", ".yml"}
+        path for path in spec_root.rglob("*") if path.suffix.lower() in {".yaml", ".yml"} and "scenarios" not in path.relative_to(spec_root).parts
     )
 
     if not yaml_paths:
@@ -87,6 +89,8 @@ def validate_spec_root(
     findings.extend(validate_architecture(tuple(entities)))
     findings.extend(validate_implementation(tuple(entities), workspace_root))
     findings.extend(validate_migrations(tuple(entities), workspace_root))
+    findings.extend(validate_game_design(tuple(entities)))
+    findings.extend(validate_cross_domain(tuple(entities)))
 
     return ValidationResult(
         model=PasmModel(spec_root=spec_root, entities=tuple(entities)),

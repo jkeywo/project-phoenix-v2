@@ -10,6 +10,8 @@ Summary
 
 The shipped helm path splits cleanly into two modes. Human helm sends admitted `ControlSystem` commands for thrust, steering, lateral thrust, impulse, and boost, while helm AI reads scored doctrine objectives plus a world snapshot and directly updates authoritative motion, cached helm intent, and impulse state on the host. The intended next-step design keeps that code truth visible, but moves toward a shared 3D desired-motion plus hazard-assessment surface consumed by fine helm systems.
 
+The Phase 7 PASM design slice now records Helm player agency, tactical arc-request coordination, shared collision-hazard information, actuator capability failure, and the agreed impulse/hazard-response tuning intent in `pasm/spec/design/helm-controls.yaml`.
+
 ## Human helm path
 
 - The phone client sends coarse helm commands through `gui/action-map.js:143`, `gui/action-map.js:165`, `gui/action-map.js:173`, `gui/action-map.js:181`, and `gui/action-map.js:344`.

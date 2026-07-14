@@ -25,6 +25,8 @@ People, things, and game objects.
 - **[Ship](./entities/ship.md)** — The player-controlled vessel. Capsule collider, XZ plane, Y-up.
 - **[Asteroid](./entities/asteroid.md)** — Static obstacle in the field. Sphere collider.
 - **[World Data](./entities/world-data.md)** — The TOML-defined layout of a session: anchors, entities, triggers, comms templates.
+- **[Objectives](./concepts/objectives.md)** — World-authored mission objectives, utility-scored AI directives, and console projections.
+- **[Weapons Intent](./concepts/weapons-intent.md)** — Tactical phaser, blaster, and torpedo capabilities and their current control flow.
 - **[Bridge Crew Stations (planned)](./entities/bridge-crew-stations-planned.md)** — *Historical.* All listed consoles have shipped; superseded by the Station/System model.
 - **[Editor](./entities/editor.md)** — In-browser TOML authoring tool (Scenario / Entity / Definitions modes) over the File System Access API. Vitest-tested deep modules. Not part of the game runtime.
 
@@ -67,8 +69,8 @@ Architecture, patterns, processes.
 - **[AI Ship Unification](./concepts/ai-ship-unification.md)** — Unified Ship ECS model; per-kind AI plugins; NPC ships via same Components as player ship; `server.rs` intent-only for helm.
 - **[Console UI Authoring Library](./concepts/console-ui-library.md)** — Per-console HTML pattern + `gui/console-ui.js` shared primitives (reconcileRows, setBtn, setBar, setAutoState, setText, keyedRebuild). Decision record for issue #509.
 - **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
-- **[PASM Runtime](./concepts/pasm-runtime.md)** — Phase 0-6 PASM foundation: typed model, architecture + implementation + migration validation, declared-file observation, and CLI tooling.
-- **[PASM Midpoint Audit](./concepts/pasm-midpoint-audit.md)** — Phase 0-6 exit-criteria review plus repair and helm conformance gaps at the Phase 6 midpoint.
+- **[PASM Runtime](./concepts/pasm-runtime.md)** — Phase 0-12 PASM foundation: typed model, repository observation, migration, design traceability, scenarios, semantic audit handoff, bounded task contexts, and CI validation.
+- **[PASM Midpoint Audit](./concepts/pasm-midpoint-audit.md)** — Current Phase 1-9 audit, including Repair, Helm, Red Alert, and world-file design gaps.
 - **[Damage And Repair Intent](./concepts/damage-and-repair-intent.md)** — Intended information gates and authority handoff for Engineering, station owners, and repair teams.
 - **[Helm Control Intent](./concepts/helm-control-intent.md)** — Human helm commands, authoritative drive state, and the direct-write helm AI path.
 - **[Red Alert Intent](./concepts/red-alert-intent.md)** — Planned explicit Red Alert state-setting, selected Sensors target visibility, and mandatory AI-ship capability.

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+import re
 import subprocess
 import tomllib
 
@@ -71,6 +73,24 @@ class RepositoryInventory:
     dependencies: tuple[ObservedDependency, ...]
 
 
+def find_repository_symbol_references(
+    inventory: RepositoryInventory,
+    symbol: str,
+) -> tuple[SourceLocation, ...]:
+    """Return lexical identifier references outside a symbol's own declaration.
+
+    This is deliberately evidence, not a call graph: macros, comments, dynamic
+    dispatch, and generated code cannot be classified safely by this scanner.
+    """
+    pattern = re.compile(rf"\b{re.escape(symbol)}\b")
+    locations: list[SourceLocation] = []
+    for observed_file in inventory.files:
+        for line_number, line in enumerate(observed_file.raw_text.splitlines(), start=1):
+            if pattern.search(line):
+                locations.append(SourceLocation(path=observed_file.path, line=line_number, column=1))
+    return tuple(locations)
+
+
 @dataclass(frozen=True)
 class ObservedImplementation:
     entity_id: str
@@ -90,6 +110,7 @@ class ObservedImplementation:
         return any(file.contains_text(text) for file in self.files)
 
 
+@lru_cache(maxsize=8)
 def observe_repository(workspace_root: Path) -> RepositoryInventory:
     workspace_root = workspace_root.resolve()
     files = tuple(

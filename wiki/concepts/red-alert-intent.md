@@ -10,6 +10,8 @@ updated: 2026-07-14
 
 Red Alert is a per-ship authoritative state owned by the host simulation. The current code uses a toggle command, while PASM records the agreed target design without changing the runtime yet.
 
+The Phase 7 PASM design slice records Captain and AI alert decisions, selected-Sensors target visibility, Sensors-to-Captain coordination, and the mandatory NPC capability recovery path in `pasm/spec/design/red-alert.yaml`.
+
 ## Planned command contract
 
 `SetRedAlert { active: bool }` replaces `ToggleRedAlert`. Captain UI and AI both request an explicit desired state through normal command admission; the host assigns that state to the addressed ship. This makes retries, duplicate messages, and stale displayed state harmless.

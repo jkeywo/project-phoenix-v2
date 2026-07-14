@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from pasm.audit import build_audit_bundle
+from pasm.core.validation import validate_spec_root
 from pasm.cli.main import main
 
 
@@ -133,3 +135,64 @@ def test_cli_query_migration_json_success(capsys, monkeypatch) -> None:
     assert exit_code == 0
     assert payload["legacy_entities"] == [{"value": "legacy-helm-driver"}]
     assert payload["target_entities"] == [{"value": "helm-motion-planner-target"}]
+
+
+def test_cli_traceability_json_success(capsys, monkeypatch) -> None:
+    repository_root = Path(__file__).parents[2]
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pasm", "traceability", str(repository_root / "pasm" / "spec"),
+            "--workspace-root", str(repository_root), "--json",
+        ],
+    )
+    exit_code = main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    repair_row = next(row for row in payload["rows"] if row["design_entity"]["value"] == "dispatch-repair-team")
+    assert repair_row["implementation_status"] == "declared"
+    assert "src/console/repair/server.rs" in repair_row["implementation_paths"]
+
+
+def test_cli_audit_bundle_json_success(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("sys.argv", ["pasm", "audit", "bundle", "observed-repair-ui", str(FIXTURES / "observed"), "--workspace-root", str(FIXTURES.parent)])
+    assert main() == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == 1
+    assert payload["entity"]["id"]["value"] == "observed-repair-ui"
+    assert len(payload["bundle_sha256"]) == 64
+
+
+def test_cli_audit_report_persists_bundle_bound_evidence(tmp_path: Path, capsys, monkeypatch) -> None:
+    model = validate_spec_root(FIXTURES / "observed", workspace_root=FIXTURES.parent).model
+    entity = model.entity_by_id("observed-repair-ui")
+    assert entity is not None
+    bundle = build_audit_bundle(entity, FIXTURES.parent)
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps({
+        "schema_version": 1,
+        "audit_kind": "architecture",
+        "repository_revision": bundle["repository_revision"],
+        "bundle_sha256": bundle["bundle_sha256"],
+        "entity_ids": bundle["entity_ids"],
+        "findings": [],
+    }), encoding="utf-8")
+    history = tmp_path / "history"
+    monkeypatch.setattr("sys.argv", ["pasm", "audit", "report", str(report_path), "--bundle", str(bundle_path), "--persist-dir", str(history), "--json"])
+    assert main() == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["audit_kind"] == "architecture"
+    assert Path(payload["persisted_path"]).is_file()
+    assert (history / "bundles" / f"{bundle['bundle_sha256']}.json").is_file()
+
+
+def test_cli_context_json_success(capsys, monkeypatch) -> None:
+    monkeypatch.setattr("sys.argv", ["pasm", "context", "--entity", "authoritative-state", "--depth", "1", str(FIXTURES / "valid"), "--json"])
+    assert main() == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["seeds"] == ["authoritative-state"]
+    assert payload["dependency_depth"] == 1

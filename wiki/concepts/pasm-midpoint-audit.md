@@ -8,26 +8,22 @@ updated: 2026-07-14
 
 Summary
 
-At the Phase 6 midpoint, PASM has a useful typed foundation but does not yet satisfy every Phase 0-6 roadmap exit criterion. Phases 1-5 are substantially present, including a repository-wide observed model with direct-edge conformance, while Phase 6 cannot reliably discover undeclared callers outside already-modelled entities. The authored repair and helm slices also retain several design decisions that are only prose or are absent.
+This supersedes the Phase 6 midpoint framing. PASM Phases 1-9 are implemented and exercised by 45 Python tests; `pasm validate` is error-free and `cargo check` passes. The model is useful for declared architecture, direct repository-edge observation, migrations, design traceability, and lightweight scenarios. It is not a proof that proposed feature behaviour is already in the game.
 
 ## Phase status
 
-- Phase 0 is partial: subsystem fixtures and package scaffolding exist, but the roadmap's ten to fifteen audit questions were never recorded.
-- Phase 1 is substantially implemented: typed IDs, locations, lifecycle, confidence, references, exceptions, evidence, and findings exist. Duplicate IDs are incorrectly checked by `(kind, id)`, despite the documented global uniqueness rule.
-- Phase 2 is substantially implemented: restricted YAML, source locations, unknown-field rejection, cross-file loading, validation CLI, JSON, and exit codes exist. The live authored helm file does not parse because it uses unsupported confidence values.
-- Phase 3 is substantially implemented for authored intent: architecture types and ownership, dependency, authority, trust-boundary, and message checks exist. There is no dedicated architecture query, transitive dependency checking, or observed-code enforcement.
-- Phase 4 is substantially implemented: typed mappings, path existence, basic coverage, and implementation query exist. Test declarations are strings only and are not verified or executed by PASM.
-- Resolved on 2026-07-14: Phase 5 records repository revision, Cargo package metadata, Rust/JS/TS/HTML files, source-located imports, and resolved local file edges. It compares direct observed entity edges against declared and forbidden architecture dependencies only when file ownership is unambiguous; unsupported semantic or transitive relationships remain explicit scope boundaries.
-- Phase 6 is partial: the typed model, representative helm migration, removal predicates, overlap heuristic, and fixture checks exist. Caller discovery only searches implementation files of PASM entities, `test-passes` is hard-coded unsatisfied, and the target-symbol/removal model is much narrower than the migration semantics in the design docs.
+- Phases 1-4: implemented. The typed core, restricted source-located YAML, architecture ownership/authority checks, implementation mappings, `validate`, and implementation queries work.
+- Phase 5: implemented for repository inventory and unambiguous direct local file dependencies. It intentionally does not infer transitive or runtime/dataflow relationships.
+- Phase 6: implemented as a bounded migration audit. Removal conditions and writer overlap work; arbitrary caller/dataflow discovery remains out of scope.
+- Phases 7-8: implemented. Typed game design, design-to-architecture enforcement links, and truthful traceability distinguish proposed design from implemented mappings.
+- Phase 9: implemented as deliberately lightweight ordered scenario validation, not a game simulation or general reachability engine.
 
 ## Runtime and packaging findings
 
-- `pasm/spec/architecture/helm-controls.yaml` uses `confidence: intended` and `confidence: mixed`, but `pasm/core/model.py` only accepts confirmed, inferred, provisional, disputed, and unknown. These entities fail parsing and cause follow-on unresolved-reference findings.
-- `vertical-movement-mode-state` names `ship-capability-model` as its owner, but no such entity is declared.
-- `pyproject.toml` omits `pasm.migration` from the explicit package list, so a built installation can omit code imported by the core model and CLI.
-- Package metadata still describes Phase 0-2 and `pasm/README.md` opens with Phase 0-4, while the wiki claims Phase 0-6.
-- `validate_spec_root()` derives the workspace as exactly two parents above the chosen spec root. This works for `pasm/spec` but makes custom spec roots and fixtures depend on directory depth rather than explicit configuration.
-- PASM tests could not be run in the current desktop runtime because Python, PyYAML, and pytest are unavailable. Syntax compilation had passed previously; this audit verified the game with `cargo check`, 56 repair-focused Rust tests, 81 helm-focused Rust tests, and 379 focused client tests.
+- `uv run pytest -q tests/pasm` passes 45 tests and `uv run pasm validate` reports no errors.
+- Validation retains ten warnings: two missing mappings for world state entities, four declared Repair/Helm dependencies without observed direct file edges, and four intentional pending Helm migration conditions/overlapping writers.
+- Direct-edge observation remains a conservative signal. A clean report cannot prove runtime control flow, actor identity, or information visibility.
+- Some parser diagnostic text still says "Phase 0-2" although the implementation has reached Phase 9. This is documentation noise, not a semantic failure.
 
 ## Repair findings
 

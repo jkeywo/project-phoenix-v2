@@ -3,7 +3,7 @@ title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot]
 sources: [src/world/config.rs, src/world/server.rs, src/server/renderer.rs, src/entities/config.rs, assets/worlds/default.toml]
-updated: 2026-06-24
+updated: 2026-07-14
 ---
 
 # World Data
@@ -37,6 +37,16 @@ transform = { position = [0.0, 50.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [
 ```
 
 `[[trigger]]` and `[[comms]]` blocks are documented under [World Plugin](../concepts/world-plugin.md) and [Comms Templates](../concepts/comms-templates.md).
+
+## Proposed Authoring Contract
+
+PASM records the next world-file design as proposed, not shipped. `name` becomes the unique internal reference key; `display_name` is separate player-facing text. This avoids using UI copy as a lookup key.
+
+Before any root world activates, validation must resolve all templates, entity names, flags, objectives, trigger targets, comms senders, and child-world paths. A duplicate or unresolved reference is a source-located authoring error that prevents the **entire** root composition from loading, with no partial spawn.
+
+Layered-world resolution is also proposed to grow beyond the current flag-only `parent:` convention: `parent.<name>` addresses the enclosing world (repeatable to climb further) and `child_world.<name>` addresses a named child layer. The validator must detect collisions in every namespace where an unqualified name would be ambiguous. Current code supports `extra_worlds`, `load_world`, `unload_world`, and `parent:` only for flags; general object namespaces are not yet implemented.
+
+World comms retain a sender reference for runtime resolution and carry separate sender display text. Every message still goes to the ship Comms system; world files do not define per-role message visibility.
 
 ## TransformConfig (`src/world/config.rs:48`)
 

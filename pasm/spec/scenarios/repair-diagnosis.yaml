@@ -1,0 +1,12 @@
+scenario:
+  id: repair-diagnosis
+  steps:
+    - kind: action
+      actor: engineering
+      value: dispatch-repair-team
+    - kind: reveal
+      value: onsite-noncore-damage-detail-information
+    - kind: fail
+      value: unresolved-system-damage
+    - kind: recover
+      value: unresolved-system-damage

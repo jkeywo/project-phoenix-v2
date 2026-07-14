@@ -11,6 +11,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── PASM model validation ───────────────────────────────────────────────────
+  pasm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Run PASM tests
+        run: uv run pytest -q tests/pasm
+
+      - name: Validate PASM model
+        run: uv run pasm validate
+
+      - name: Generate revision-linked PASM reports
+        run: |
+          mkdir -p target/pasm
+          uv run pasm scan --json > target/pasm/scan.json
+          uv run pasm traceability --json > target/pasm/traceability.json
+
+      - name: Upload PASM reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: pasm-reports
+          path: target/pasm/
+          retention-days: 14
+
   # ── Unit tests (native, fast — fail-fast before expensive WASM build) ─────────
   test:
     runs-on: ubuntu-latest

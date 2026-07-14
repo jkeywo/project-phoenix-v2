@@ -1,0 +1,215 @@
+entities:
+  - component: tactical-weapons-controls
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Tactical Weapons Controls
+      summary: Tactical player and Backfill controls select a target, fire configured phaser, blaster, and torpedo banks, and manage phaser mode and torpedo tubes through admitted ControlSystem commands.
+    architecture:
+      kind: control-interface
+      authority: authoritative
+      owns: [weapons-target-state]
+      produces: [weapons-target-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, gui/action-map.js]
+      symbols: [handle_set_target, handle_fire_phaser, handle_fire_torpedo]
+      tests: [cargo test, npx vitest run]
+
+  - state: weapons-target-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Weapons Target State
+      summary: Authoritative locked target used by player weapons and current Tactical projections.
+    architecture:
+      classification: authoritative
+      owner: tactical-weapons-controls
+      writers: [tactical-weapons-controls]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs]
+      symbols: [WeaponsTarget]
+      tests: [cargo test]
+
+  - component: phaser-beam-system
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Phaser Beam System
+      summary: Per-bank arc-limited sustained beams accumulate damage while in range, then enter cooldown. Ship TOML supplies bank arcs and beam tuning.
+    architecture:
+      kind: weapon-system
+      authority: authoritative
+      owns: [phaser-beam-state]
+      reads: [weapons-target-state]
+      produces: [phaser-beam-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, src/entities/config.rs]
+      symbols: [handle_fire_phaser, tick_beams, PhaserBankConfig]
+      tests: [cargo test]
+
+  - state: phaser-beam-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Phaser Beam State
+      summary: Active beam, per-bank cooldown, firing mode, frequency, and shield-pierce damage state.
+    architecture:
+      classification: authoritative
+      owner: phaser-beam-system
+      writers: [phaser-beam-system]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs]
+      symbols: [ActiveBeam, PhaserCooldown, CurrentPhaserMode]
+      tests: [cargo test]
+
+  - component: blaster-projectile-system
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Blaster Projectile System
+      summary: Per-bank straight-line predicted bolt volleys with optional hold-to-charge, per-bank cooldown, collision radius, range lifetime, and shield pierce.
+    architecture:
+      kind: weapon-system
+      authority: authoritative
+      owns: [blaster-projectile-state]
+      produces: [blaster-projectile-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/weapons/blaster.rs, src/console/weapons/server.rs, src/entities/config.rs]
+      symbols: [BlasterSystem, BlasterProjectile, BlasterBankConfig]
+      tests: [cargo test]
+
+  - state: blaster-projectile-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Blaster Projectile State
+      summary: In-flight bolts plus each bank's pending volley, cooldown, and optional charge progress.
+    architecture:
+      classification: authoritative
+      owner: blaster-projectile-system
+      writers: [blaster-projectile-system]
+    implementation:
+      status: declared
+      paths: [src/weapons/blaster.rs]
+      symbols: [BlasterVolleyState]
+      tests: [cargo test]
+
+  - component: torpedo-system
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Torpedo System
+      summary: Per-tube firing arcs and reload state draw from a shared magazine; in-flight guided torpedoes detonate by proximity and snapshot launch-time damage and shield pierce.
+    architecture:
+      kind: weapon-system
+      authority: authoritative
+      owns: [torpedo-state]
+      reads: [weapons-target-state]
+      produces: [torpedo-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/weapons/torpedo.rs, src/console/weapons/server.rs, src/entities/config.rs]
+      symbols: [TorpedoSystem, tick_torpedo_system, TorpedoesConfig]
+      tests: [cargo test]
+
+  - state: torpedo-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Torpedo State
+      summary: Shared ammunition, per-tube load state, and in-flight torpedo guidance and detonation state.
+    architecture:
+      classification: authoritative
+      owner: torpedo-system
+      writers: [torpedo-system]
+    implementation:
+      status: declared
+      paths: [src/weapons/torpedo.rs]
+      symbols: [TorpedoSystem]
+      tests: [cargo test]
+
+  - component: tactical-weapons-projection
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Tactical Weapons Projection
+      summary: Publishes configured arcs, target lock, per-bank readiness and cooldown, blaster charge, tube status, magazine, and in-flight visual events to Tactical GUI.
+    architecture:
+      kind: projection
+      authority: authoritative
+      reads: [weapons-target-state, phaser-beam-state, blaster-projectile-state, torpedo-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
+      symbols: [weapons_update_broadcaster]
+      tests: [cargo test, npx vitest run]
+
+  - component: phaser-attack-target-lock
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Phaser Attack Target Lock
+      summary: A phaser attack captures the current weapons target when it begins and keeps that target for the attack while the target remains in the firing arc.
+    architecture:
+      kind: weapon-policy
+      authority: authoritative
+      reads: [weapons-target-state]
+      runs_in: [host-browser-runtime]
+
+  - component: patterned-barrel-attacks
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Patterned Barrel Attacks
+      summary: Blaster and torpedo banks declare multiple barrel marker points and a timed attack pattern of offsets and barrel-index arrays, allowing alternating or simultaneous shots.
+    architecture:
+      kind: configuration-schema
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+
+  - component: weapon-readiness-feedback-policy
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Weapon Readiness Feedback Policy
+      summary: Phaser, blaster, and torpedo projections expose a consistent readiness, target-range, target-arc, and blocking-reason contract to Tactical.
+    architecture:
+      kind: projection-policy
+      authority: authoritative
+      reads: [weapons-target-state, phaser-beam-state, blaster-projectile-state, torpedo-state]
+      runs_in: [host-browser-runtime]
+
+  - component: three-dimensional-torpedoes
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Three-Dimensional Torpedoes
+      summary: Torpedoes use full 3D position, guidance, collision, and detonation once ship vertical movement becomes simulation truth.
+    architecture:
+      kind: weapon-system
+      authority: authoritative
+      replacement: torpedo-system
+      runs_in: [host-browser-runtime]
+
+  - component: weapon-family-arc-bearing-coordination
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Weapon-Family Arc-Bearing Coordination
+      summary: Tactical requests a Helm bearing when the selected usable phaser, blaster, or torpedo family has a target in range but outside its available firing arcs.
+    architecture:
+      kind: coordination-policy
+      authority: authoritative
+      reads: [weapons-target-state]
+      coordinates: [tactical-weapons-controls]
+      runs_in: [host-browser-runtime]

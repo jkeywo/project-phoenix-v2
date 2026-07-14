@@ -4,7 +4,12 @@ from pathlib import Path
 
 from pasm.core.findings import Finding, FindingCategory, Severity
 from pasm.core.model import EntityId, SourceLocation, SpecEntity
-from pasm.implementation.observation import ObservedImplementation, observe_entity_implementation
+from pasm.implementation.observation import (
+    ObservedImplementation,
+    find_repository_symbol_references,
+    observe_entity_implementation,
+    observe_repository,
+)
 from pasm.migration.model import MigrationPredicate, MigrationSection, RemovalCondition
 
 
@@ -19,6 +24,7 @@ def validate_migrations(
         for entity in entities
         if entity.implementation is not None
     }
+    inventory = observe_repository(workspace_root)
 
     for entity in entities:
         migration = entity.migration
@@ -27,6 +33,7 @@ def validate_migrations(
         findings.extend(_validate_migration_shape(entity, migration))
         findings.extend(_validate_removal_conditions(entity, migration, workspace_root, entity_map, observations))
         findings.extend(_validate_legacy_callers(entity, migration, entity_map, observations))
+        findings.extend(_report_unmodelled_legacy_references(entity, migration, entity_map, inventory))
         findings.extend(_validate_duplicate_writers(entity, migration, entity_map))
         findings.extend(_validate_target_legacy_residue(entity, migration, entity_map, observations))
     return findings
@@ -167,6 +174,47 @@ def _validate_legacy_callers(
                     requires_decision=False,
                 )
             )
+    return findings
+
+
+def _report_unmodelled_legacy_references(
+    entity: SpecEntity,
+    migration: MigrationSection,
+    entity_map: dict[str, SpecEntity],
+    inventory,
+) -> list[Finding]:
+    """Surface repository-wide lexical evidence not owned by a PASM entity."""
+    declared_paths = {
+        path
+        for candidate in entity_map.values()
+        if candidate.implementation is not None
+        for path in candidate.implementation.paths + candidate.implementation.legacy_paths + candidate.implementation.target_paths
+    }
+    findings: list[Finding] = []
+    for symbol in migration.legacy_symbols:
+        locations = tuple(
+            location
+            for location in find_repository_symbol_references(inventory, symbol)
+            if location.path not in declared_paths
+        )
+        if not locations:
+            continue
+        findings.append(
+            Finding(
+                id=f"unmodelled-legacy-reference:{entity.id}:{symbol}",
+                category=FindingCategory.INCOMPLETE_MIGRATION,
+                severity=Severity.WARNING,
+                confidence="inferred",
+                summary=f"Migration '{entity.id}' found repository-wide lexical references to legacy symbol '{symbol}' outside PASM-mapped files.",
+                details="This bounded Phase 5/6 audit reports candidate references only; it does not prove a call, runtime reachability, actor identity, or data flow.",
+                rule="migration.repository-wide-legacy-reference-candidate",
+                spec_entities=(entity.id,),
+                implementation_locations=locations,
+                evidence=(symbol,),
+                suggested_resolution="Map the relevant file to a PASM entity, confirm it is not a caller, or remove the legacy reference.",
+                requires_decision=False,
+            )
+        )
     return findings
 
 

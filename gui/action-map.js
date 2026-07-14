@@ -341,6 +341,16 @@ export const ACTION_MAP = Object.freeze({
     if (a.message_id) send('ShowOnScreen', { message_id: a.message_id });
   },
 
+  /** Set the phaser frequency to an explicit value (0.0–1.0). */
+  set_phaser_frequency: (a, send) => {
+    if (typeof a.frequency === 'number') {
+      send('ControlSystem', {
+        target: 'tactical',
+        payload: { type: 'SetPhaserFrequency', data: { frequency: a.frequency } },
+      });
+    }
+  },
+
   /** Set lateral thrust via analog joystick (ph-lateral-thrust-joystick component). */
   set_lateral_thrust: (a, send) => {
     send('ControlSystem', {

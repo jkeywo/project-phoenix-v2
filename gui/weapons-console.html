@@ -134,8 +134,17 @@
       box-shadow: 0 0 5px var(--loaded);
     }
 
-    .ctrl-col .frequency         { padding: 8px 0 4px; }
-    .ctrl-col .frequency .freq-bar { height: 26px; }
+    .ctrl-col .frequency         { padding: 8px 0 4px; position: relative; }
+    .ctrl-col .frequency .freq-row { display: flex; align-items: center; gap: 6px; }
+    .ctrl-col .frequency .freq-row .freq-label { font-size: 11px; letter-spacing: 0.15em; color: var(--ink-faint); min-width: 36px; }
+    .ctrl-col .frequency .freq-bar-wrap { flex: 1; position: relative; height: 26px; cursor: pointer; }
+    .ctrl-col .frequency .freq-bar { height: 26px; position: absolute; top: 0; left: 0; border: 1px solid var(--line-faint); background: var(--bg-deep); overflow: hidden; }
+    .ctrl-col .frequency .freq-bar.on { background: linear-gradient(90deg, #0a2a6a, #1a5aaa); }
+    .ctrl-col .frequency .freq-bar.tgt { pointer-events: none; background: var(--tactical); width: 4px; z-index: 1; }
+    .ctrl-col .frequency .freq-bar .freq-value { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--ink-bright); font-family: "JetBrains Mono", monospace; pointer-events: none; }
+    .ctrl-col .frequency .freq-btn { background: var(--bg-raised); border: 1px solid var(--line-faint); color: var(--ink-bright); cursor: pointer; padding: 0 10px; font-size: 14px; height: 26px; line-height: 24px; font-family: "JetBrains Mono", monospace; user-select: none; }
+    .ctrl-col .frequency .freq-btn:hover { background: var(--accent); border-color: var(--accent); }
+    .ctrl-col .frequency .freq-btn:active { background: var(--accent-bright); }
     .ctrl-col .tubes             { display: flex; gap: 10px; margin-top: 6px; }
     .ctrl-col .fire-row          { margin-top: 12px; }
 
@@ -206,6 +215,8 @@
       .cooldown-row .bar { height: 9px; }
       .cooldown-row .value { font-size: 10px; min-width: 44px; letter-spacing: 0.1em; }
       .cooldown-row .arc-dot { width: 7px; height: 7px; }
+      .ctrl-col .frequency .freq-bar-wrap { height: 18px; }
+      .ctrl-col .frequency .freq-btn { height: 18px; padding: 0 6px; font-size: 12px; line-height: 16px; }
       .ctrl-col .frequency .freq-bar { height: 18px; }
       .radar-col > .readout { padding: 6px 14px; }
       .radar-col > .readout .v { font-size: 20px; }
@@ -392,8 +403,17 @@
       .ctrl-col .frequency .freq-bar {
         height: 10px;
       }
-      .freq-row {
-        display: none;
+      .ctrl-col .frequency .freq-bar-wrap { height: 10px; }
+      .ctrl-col .frequency .freq-btn { height: 10px; padding: 0 4px; font-size: 8px; line-height: 8px; }
+      .ctrl-col .frequency .freq-bar {
+        height: 10px;
+      }
+      .ctrl-col .frequency .freq-row .freq-label {
+        font-size: 8px;
+        min-width: 28px;
+      }
+      .ctrl-col .frequency .freq-bar .freq-value {
+        font-size: 9px;
       }
       .help-btn {
         width: 1.4rem;
@@ -493,7 +513,11 @@
       .cooldown-row .bar { height: 0.6rem; }
       .cooldown-row .value { font-size: 0.65rem; min-width: 2.8rem; letter-spacing: 0.08em; }
       .ctrl-col .frequency { padding: 0.25rem 0; }
+      .ctrl-col .frequency .freq-bar-wrap { height: 1.25rem; }
+      .ctrl-col .frequency .freq-btn { height: 1.25rem; padding: 0 0.35rem; font-size: 0.7rem; line-height: 1.2rem; }
       .ctrl-col .frequency .freq-bar { height: 1.25rem; }
+      .ctrl-col .frequency .freq-row .freq-label { font-size: 0.6rem; min-width: 2rem; }
+      .ctrl-col .frequency .freq-bar .freq-value { font-size: 0.65rem; }
 
       .ctrl-col .tubes { gap: 0.25rem; margin-top: 0.25rem; }
       .mag-row {
@@ -828,6 +852,22 @@
                 <div class="cooldown-list" id="phaser-cooldowns">
                   <!-- Per-bank cooldown rows are built dynamically from
                        `state.banks` + `state.phaserBanks` (ship config). -->
+                </div>
+
+                <!-- Phaser frequency bar ─────────────────────────── -->
+                <div class="frequency" id="frequency-bar" data-hideable="phaser_frequency">
+                  <div class="freq-row">
+                    <span class="freq-label">FREQ</span>
+                    <button class="freq-btn" id="freq-minus" type="button">−</button>
+                    <div class="freq-bar-wrap" id="freq-bar-wrap">
+                      <div class="freq-bar" id="freq-bar-bg" style="width:100%;"></div>
+                      <div class="freq-bar on" id="freq-bar-on" style="width:50%;">
+                        <span class="freq-value" id="freq-value">0.50</span>
+                      </div>
+                      <div class="freq-bar tgt" id="freq-bar-tgt" style="left:50%;"></div>
+                    </div>
+                    <button class="freq-btn" id="freq-plus" type="button">+</button>
+                  </div>
                 </div>
 
                 <!-- Fire phasers + compact MAN/AUTO mode toggle.
@@ -1388,6 +1428,24 @@
         _renderCooldownRow(els, bank, bankCooldownTotals[id] || 0, inArc);
       });
 
+      // ── Phaser frequency bar (issue #679) ──────────────────────────
+      var freq = typeof s.phaserFrequency === 'number' ? s.phaserFrequency : 0.5;
+      var hint = typeof s.frequencyHint === 'number' ? s.frequencyHint : null;
+      var onBar = document.getElementById('freq-bar-on');
+      var tgtBar = document.getElementById('freq-bar-tgt');
+      var freqVal = document.getElementById('freq-value');
+      if (onBar && freqVal) {
+        var pct = Math.round(freq * 100);
+        onBar.style.width = pct + '%';
+        freqVal.textContent = (freq).toFixed(2);
+      }
+      if (tgtBar && hint !== null) {
+        tgtBar.style.display = '';
+        tgtBar.style.left = Math.round(hint * 100) + '%';
+      } else if (tgtBar) {
+        tgtBar.style.display = 'none';
+      }
+
       var firePhaserBtn = document.getElementById('fire-phaser');
       if (firePhaserBtn) {
         firePhaserBtn.className = 'btn ' + (anyReady ? 'danger' : 'disabled');
@@ -1483,6 +1541,28 @@
     });
     if (_modeAutoEl) _modeAutoEl.addEventListener('click', function() {
       sendAction('set_phaser_mode', { mode: 'Auto' });
+    });
+
+    // ── Frequency controls ─────────────────────────────────────────────
+    var _freqWrap = document.getElementById('freq-bar-wrap');
+    var _freqMinus = document.getElementById('freq-minus');
+    var _freqPlus = document.getElementById('freq-plus');
+    var _currentFreq = function() {
+      return typeof _state.phaserFrequency === 'number' ? _state.phaserFrequency : 0.5;
+    };
+    if (_freqWrap) _freqWrap.addEventListener('click', function(e) {
+      var rect = _freqWrap.getBoundingClientRect();
+      var pct = (e.clientX - rect.left) / rect.width;
+      var val = Math.round(Math.min(1, Math.max(0, pct)) * 100) / 100;
+      sendAction('set_phaser_frequency', { frequency: val });
+    });
+    if (_freqMinus) _freqMinus.addEventListener('click', function() {
+      var val = _currentFreq();
+      sendAction('set_phaser_frequency', { frequency: Math.round((val - 0.1) * 100) / 100 });
+    });
+    if (_freqPlus) _freqPlus.addEventListener('click', function() {
+      var val = _currentFreq();
+      sendAction('set_phaser_frequency', { frequency: Math.round((val + 0.1) * 100) / 100 });
     });
 
     // ── Radar tap-to-lock via RadarWidget ────────────────────────────────

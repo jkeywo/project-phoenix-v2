@@ -403,7 +403,7 @@ mod tests {
             crate::ship_plugin::CoordinationQueue::default(),
             crate::entity_spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
             crate::server_app::ShipSystemBlackboards::default(),
-            ShipShields(ShieldSystem::default()),
+            ShipShields(ShieldSystem::default(), 0.5),
             ShipImpulse(crate::impulse::ImpulseState::new()),
             crate::modifiers::ShipModifiers::new(),
         ));

@@ -205,6 +205,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
     {
         let mut q = world.query_filtered::<&ShipShields, With<LocalShip>>();
         if let Ok(shields) = q.single(world) {
+            let frequency = shields.frequency();
             let facings: Vec<ShieldFacingStatus> = shields
                 .0
                 .snapshot()
@@ -222,7 +223,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
                     priority: s.priority,
                 })
                 .collect();
-            messages.push(ServerMessage::ShieldStatus { facings });
+            messages.push(ServerMessage::ShieldStatus { facings, frequency });
         }
     }
 
@@ -260,6 +261,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
                 torpedo_count: current.torpedo_count,
                 phaser_mode: current.phaser_mode,
                 blasters: current.blasters,
+                phaser_frequency: current.phaser_frequency,
             });
         }
     }
@@ -476,7 +478,10 @@ mod tests {
             .spawn((
                 crate::simulation::LocalShip,
                 crate::simulation::ShipSystemBlackboards::default(),
-                crate::ship::shields::ShipShields(crate::weapons::shield::ShieldSystem::default()),
+                crate::ship::shields::ShipShields(
+                    crate::weapons::shield::ShieldSystem::default(),
+                    0.5,
+                ),
                 crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
                     (SystemId("helm".into()), 25.0),
                 ])),
@@ -701,6 +706,7 @@ mod tests {
             torpedo_count: 7,
             phaser_mode: crate::messages::PhaserMode::Auto,
             blasters: vec![],
+            phaser_frequency: 0.5,
         };
         *app.world_mut().resource_mut::<LastWeaponsUpdate>() = seeded.clone();
 

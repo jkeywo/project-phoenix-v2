@@ -2,14 +2,16 @@ use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
-    InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard, PowerBlackboard, PowerGroupEntry,
-    PowerGroupId, PowerReactorBlackboard, ServerMessage, StationId, SystemBlackboard, SystemId,
+    CoordinationPayload, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard,
+    PowerBlackboard, PowerGroupEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage,
+    StationId, SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
     power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
     SENSORS_POWER_GROUP, WEAPONS_POWER_GROUP,
 };
-use crate::ship_plugin::LastHelmInput;
+use crate::ship::control_source::ControlSource;
+use crate::ship_plugin::{CoordinationEnqueue, LastHelmInput};
 
 // ── Resources ──────────────────────────────────────────────────────────────────
 
@@ -85,6 +87,19 @@ impl Default for PowerAiConfigResource {
     }
 }
 
+/// Debounce state for power brownout coordination advisories (issue #678).
+///
+/// Tracks which power groups have already been notified of a brownout
+/// condition so the advisory only fires once per transition into brownout.
+/// Cleared when the group exits the brownout condition, allowing re-fire
+/// on subsequent brownout cycles.
+#[derive(Component, Default, Clone)]
+pub struct PowerBrownoutState {
+    /// Group id strings (e.g. "weapons", "helm", "sensors") that are
+    /// currently in a notified-brownout state.
+    pub notified_groups: std::collections::HashSet<String>,
+}
+
 /// Maps a canonical power group id string to its display label in the HTML
 /// power panel. Anything unknown falls back to the upper-cased id string
 /// (via the caller).
@@ -111,7 +126,8 @@ pub struct ShipPowerPlugin;
 
 impl Plugin for ShipPowerPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::InterSystemQueue>();
+        app.init_resource::<crate::messages::InterSystemQueue>()
+            .add_message::<CoordinationEnqueue>();
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
@@ -123,6 +139,7 @@ impl Plugin for ShipPowerPlugin {
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
                     operate_power_ai.in_set(crate::sim_sets::SimSet::Physics),
                     handle_power_inter_system.in_set(crate::sim_sets::SimSet::Modifiers),
+                    tick_power_brownout_advisory.in_set(crate::sim_sets::SimSet::Modifiers),
                     publish_power_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             )
@@ -572,6 +589,92 @@ pub fn operate_power_ai(
     }
 }
 
+// ── Power brownout advisory (issue #678) ─────────────────────────────────────
+
+/// Map a power group id string to the target `SystemId` for coordination.
+fn system_id_for_power_group(group: &str) -> Option<SystemId> {
+    match group {
+        WEAPONS_POWER_GROUP => Some(crate::system_registry::tactical_system_id()),
+        HELM_POWER_GROUP => Some(crate::system_registry::helm_system_id()),
+        SENSORS_POWER_GROUP => Some(crate::system_registry::sensors_system_id()),
+        _ => None,
+    }
+}
+
+/// Emit power brownout coordination advisories for groups with active demand
+/// that cannot be satisfied (total allocation > 6 → battery draining).
+///
+/// An advisory fires **only** when:
+/// - Total allocation > 6 (battery is draining — supply cannot meet demand)
+/// - The group's allocation level > 1 (system is actively drawing, not idle)
+///
+/// Debounced via [`PowerBrownoutState`]: fires once on transition into
+/// brownout and clears when the condition resolves, allowing re-fire.
+pub fn tick_power_brownout_advisory(
+    mut ships: Query<
+        (
+            Entity,
+            &ShipPowerSystem,
+            &mut PowerBrownoutState,
+            Option<&PowerConfigResource>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    config_res: Option<Res<PowerConfigResource>>,
+    mut writer: MessageWriter<CoordinationEnqueue>,
+) {
+    for (entity, power, mut brownout_state, config_comp) in ships.iter_mut() {
+        let total = power.0.total();
+        let cfg_default;
+        let cfg: &PowerConfigResource = match config_comp {
+            Some(c) => c,
+            None => match config_res.as_deref() {
+                Some(c) => c,
+                None => {
+                    cfg_default = PowerConfigResource::default();
+                    &cfg_default
+                }
+            },
+        };
+        let rate = cfg
+            .0
+            .rates
+            .get((total as usize).clamp(3, 8) - 3)
+            .copied()
+            .unwrap_or(0.0);
+        let is_draining = rate < 0.0;
+
+        let mut still_brownouting = std::collections::HashSet::new();
+
+        for (group_id, level) in power.0.iter() {
+            if is_draining && level > 1 {
+                still_brownouting.insert(group_id.0.clone());
+
+                // Rising edge: group was not previously notified → emit advisory.
+                if !brownout_state.notified_groups.contains(&group_id.0) {
+                    if let Some(sys_id) = system_id_for_power_group(&group_id.0) {
+                        writer.write(CoordinationEnqueue {
+                            source_entity: entity,
+                            sender_origin: ControlSource::Ai,
+                            target: sys_id,
+                            payload: CoordinationPayload::PowerBrownout {
+                                group: group_id.0.clone(),
+                                label: power_group_label(&group_id.0).to_string(),
+                                allocated_level: level,
+                            },
+                            sender_label: "Power".into(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Update notified set: groups still in brownout stay notified;
+        // groups that cleared are removed (can re-fire on next cycle).
+        brownout_state.notified_groups = still_brownouting;
+    }
+}
+
 // ── Blackboard publish (issue #561) ──────────────────────────────────────────
 
 fn publish_power_blackboard(
@@ -770,9 +873,10 @@ mod tests {
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
-            ShipShields(ShieldSystem::default()),
+            ShipShields(ShieldSystem::default(), 0.5),
             ShipModifiers::new(),
             ShipImpulse(crate::impulse::ImpulseState::new()),
+            PowerBrownoutState::default(),
         ));
         app
     }
@@ -1542,9 +1646,10 @@ mod tests {
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
-            crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+            crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
             ShipImpulse(crate::impulse::ImpulseState::new()),
             ShipModifiers::new(),
+            PowerBrownoutState::default(),
         ));
         start_game_with_power(&mut app);
         // Baseline: reactor online — allocation should update.
@@ -1773,5 +1878,140 @@ mod tests {
             power_state_to_power_holder,
             "PowerState broadcast must still target the Power holder even when the reactor is offline"
         );
+    }
+
+    // ── Brownout advisory tests (issue #678) ────────────────────────────────
+
+    #[derive(Resource, Default)]
+    struct CoordEnqueueBox(Vec<CoordinationEnqueue>);
+
+    fn collect_coord(
+        mut reader: MessageReader<CoordinationEnqueue>,
+        mut box_: ResMut<CoordEnqueueBox>,
+    ) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    fn drain_coord(app: &mut App) -> Vec<CoordinationEnqueue> {
+        let msgs = app.world().resource::<CoordEnqueueBox>().0.clone();
+        app.world_mut().resource_mut::<CoordEnqueueBox>().0.clear();
+        msgs
+    }
+
+    fn brownout_test_app() -> App {
+        let mut app = test_app();
+        // Insert ShipPowerSystem component on the LocalShip entity so
+        // tick_power_brownout_advisory's query matches it.
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ShipPowerSystem(PowerSystem::default()));
+        app.init_resource::<CoordEnqueueBox>()
+            .add_systems(PostUpdate, collect_coord);
+        app
+    }
+
+    #[test]
+    fn tick_power_brownout_advisory_emits_on_drain_and_debounces() {
+        let mut app = brownout_test_app();
+        start_game(&mut app);
+
+        // Helper: mutate the per-entity ShipPowerSystem component (the
+        // advisory system reads from the component, not the resource).
+        fn set_ship_power(app: &mut App, group: &str, level: u8) {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
+            if let Ok(mut ps) = q.single_mut(app.world_mut()) {
+                let _ =
+                    ps.0.set_group_allocation(&PowerGroupId(group.into()), level);
+            }
+        }
+
+        // Tick 1: default total=6, not draining (rate=2.0 > 0) → no advisory.
+        let _ = tick(&mut app);
+        let emitted = drain_coord(&mut app);
+        assert!(
+            emitted.is_empty(),
+            "no advisory when total=6 (not draining): got {}",
+            emitted.len()
+        );
+
+        // Set total=7 (helm up to 3, weapons=2, sensors=2).
+        // With default rates [6,5,4,2,-2,-6], total=7 → rate=-2.0 → draining.
+        // All three groups have level > 1 → all three emit advisories.
+        set_ship_power(&mut app, HELM_POWER_GROUP, 3);
+        let _ = tick(&mut app);
+        let emitted = drain_coord(&mut app);
+        assert_eq!(
+            emitted.len(),
+            3,
+            "three PowerBrownout advisories (one per group) when draining at total=7"
+        );
+        for e in &emitted {
+            assert!(
+                matches!(&e.payload, CoordinationPayload::PowerBrownout { .. }),
+                "expected PowerBrownout, got {:?}",
+                e.payload
+            );
+        }
+
+        // Tick 2: still draining → debounce holds → no re-emission.
+        let _ = tick(&mut app);
+        let emitted = drain_coord(&mut app);
+        assert!(
+            emitted.is_empty(),
+            "debounce: no re-emission while condition persists"
+        );
+
+        // Reset helm to 2 → total=6, condition clears.
+        set_ship_power(&mut app, HELM_POWER_GROUP, 2);
+        let _ = tick(&mut app);
+        let emitted = drain_coord(&mut app);
+        assert!(emitted.is_empty(), "no advisory when condition clears");
+
+        // Re-enter drain (total=7 again) → re-fire allowed (debounce cleared).
+        set_ship_power(&mut app, HELM_POWER_GROUP, 3);
+        let _ = tick(&mut app);
+        let emitted = drain_coord(&mut app);
+        assert_eq!(
+            emitted.len(),
+            3,
+            "re-fire: three advisories re-emitted after clear-and-return"
+        );
+
+        // Clear again, then set sensors=1 (level 1, idle) alongside
+        // weapons=3 and helm=3 → only weapons and helm should fire.
+        set_ship_power(&mut app, HELM_POWER_GROUP, 2);
+        let _ = tick(&mut app);
+        let _ = drain_coord(&mut app); // flush any stale events
+        set_ship_power(&mut app, HELM_POWER_GROUP, 3);
+        set_ship_power(&mut app, WEAPONS_POWER_GROUP, 3);
+        set_ship_power(&mut app, SENSORS_POWER_GROUP, 1);
+        let _ = tick(&mut app);
+        let emitted = drain_coord(&mut app);
+        assert_eq!(
+            emitted.len(),
+            2,
+            "two advisories: weapons and helm (level 3), sensors at 1 should not fire"
+        );
+        for e in &emitted {
+            match &e.payload {
+                CoordinationPayload::PowerBrownout { group, .. } => {
+                    assert_ne!(
+                        group.as_str(),
+                        SENSORS_POWER_GROUP,
+                        "sensors at level 1 must not get a brownout advisory"
+                    );
+                }
+                _ => panic!("unexpected payload type"),
+            }
+        }
     }
 }

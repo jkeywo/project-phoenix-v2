@@ -286,6 +286,9 @@ pub fn spawn_entity(
         // `CoordinationEnqueue.source_entity`.
         entity_commands.insert(crate::ship::shields::ShieldsCoordinationState::default());
         entity_commands.insert(crate::ship::sensors::SensorsFrequencyState::default());
+        // Power brownout advisory debounce state (issue #678): per-ship
+        // so each ship tracks its own brownout notification cycle.
+        entity_commands.insert(crate::ship::power::PowerBrownoutState::default());
         // Weapons->Helm arc-bearing request state (issue #677): per-ship
         // debounce for the channel-3 request, and the pending bearing Helm
         // AI folds into its steering once the request is consumed.
@@ -587,7 +590,12 @@ pub fn spawn_entity(
         } else {
             ShieldSystem::new(&ship_wide)
         };
-        let mut shields = crate::ship::shields::ShipShields(shield_system);
+        let freq = config
+            .shield_arcs
+            .first()
+            .map(|a| a.frequency)
+            .unwrap_or(sc.frequency);
+        let mut shields = crate::ship::shields::ShipShields(shield_system, freq);
         shields.0.focus_config = ShieldFocusConfig {
             bonus_max_hp: sc.focus_bonus_max_hp,
             bonus_regen: sc.focus_bonus_regen,
@@ -606,7 +614,12 @@ pub fn spawn_entity(
         let ship_wide = crate::shield::ShieldConfig::default();
         let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
         let shield_system = ShieldSystem::from_arcs(&arcs, &ship_wide);
-        entity_commands.insert(crate::ship::shields::ShipShields(shield_system));
+        let freq = config
+            .shield_arcs
+            .first()
+            .map(|a| a.frequency)
+            .unwrap_or(0.5);
+        entity_commands.insert(crate::ship::shields::ShipShields(shield_system, freq));
     }
 
     // Shields AI config — loaded from [shields_console.ai] for NPC ships if

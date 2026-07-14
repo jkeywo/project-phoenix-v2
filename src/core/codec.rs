@@ -470,19 +470,12 @@ mod tests {
                         volley_max: 3,
                         loaded_count: 2,
                         target_count: 3,
-                        load_progress: 0.5,
+                        load_progress: 1.0,
                     }],
                     torpedo_count: 10,
                     phaser_mode: PhaserMode::Auto,
-                    blasters: vec![BlasterBankState {
-                        id: "fore".to_string(),
-                        fire_ready: true,
-                        on_cooldown: false,
-                        cooldown_remaining: 0.0,
-                        pending_volley: 0,
-                        charge_progress: 0.0,
-                        has_charge: false,
-                    }],
+                    blasters: vec![],
+                    phaser_frequency: 0.5,
                 },
             ),
             (
@@ -553,6 +546,7 @@ mod tests {
                         arc_id: "fore".into(),
                         priority: 1,
                     }],
+                    frequency: 0.5,
                 },
             ),
             (
@@ -976,6 +970,34 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
     }
 
+    /// `CoordinationPayload::PowerBrownout` round-trip, embedded in both
+    /// directions of the channel-3 bus (issue #678).
+    #[test]
+    fn power_brownout_coordination_payload_round_trips() {
+        let send_msg = ClientMessage::SendCoordination {
+            target: crate::system_registry::tactical_system_id(),
+            payload: CoordinationPayload::PowerBrownout {
+                group: "weapons".into(),
+                label: "WEAPONS".into(),
+                allocated_level: 2,
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, send_msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, send_msg);
+
+        let popup_msg = ServerMessage::CoordinationPopup {
+            target: crate::system_registry::tactical_system_id(),
+            payload: CoordinationPayload::PowerBrownout {
+                group: "weapons".into(),
+                label: "WEAPONS".into(),
+                allocated_level: 2,
+            },
+            sender_label: "Power".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, popup_msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+    }
+
     /// BlasterFired server message round-trip (issue #631, extended #638).
     #[test]
     fn blaster_fired_server_message_round_trips() {
@@ -1068,6 +1090,7 @@ mod tests {
             torpedo_count: 8,
             phaser_mode: PhaserMode::Auto,
             blasters: vec![],
+            phaser_frequency: 0.5,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

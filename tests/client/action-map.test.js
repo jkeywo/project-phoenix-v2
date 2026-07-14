@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 33 expected action keys', () => {
+  it('contains exactly the 34 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -30,6 +30,7 @@ describe('ACTION_MAP', () => {
       'set_navigation_chart',
       'set_navigation_waypoint',
       'set_objective_priority',
+      'set_phaser_frequency',
       'set_phaser_mode',
       'set_power',
       'set_radar_view',

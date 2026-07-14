@@ -1065,18 +1065,20 @@ fn broadcast_shield_status(
         })
         .collect();
 
+    let frequency = shields.frequency();
     if facings != last.0 {
         // State changed — broadcast to everyone.
         last.0 = facings.clone();
-        outbox
-            .0
-            .push((Target::All, ServerMessage::ShieldStatus { facings }));
+        outbox.0.push((
+            Target::All,
+            ServerMessage::ShieldStatus { facings, frequency },
+        ));
     } else if let Some(token) = sessions.0.holder_for_station(&StationId("shields".into())) {
         // Nothing changed but the Shields holder still gets a periodic refresh
         // so regenerating HP stays smooth on their panel.
         outbox.0.push((
             Target::Token(token.to_string()),
-            ServerMessage::ShieldStatus { facings },
+            ServerMessage::ShieldStatus { facings, frequency },
         ));
     }
 }
@@ -2089,6 +2091,7 @@ fn spawn_game_start_entities(
                 // `entities/spawner.rs` for details.
                 .insert(crate::ship::shields::ShieldsCoordinationState::default())
                 .insert(crate::ship::sensors::SensorsFrequencyState::default())
+                .insert(crate::ship::power::PowerBrownoutState::default())
                 // Per-entity CollisionCooldown so player and NPC ships each
                 // have their own cooldown timer (PRD #597 PR-8).
                 .insert(CollisionCooldown::default())
@@ -2144,7 +2147,12 @@ fn spawn_game_start_entities(
                 } else {
                     ShieldSystem::new(&ship_wide)
                 };
-                let mut shields = ShipShields(shield_system);
+                let freq = config
+                    .shield_arcs
+                    .first()
+                    .map(|a| a.frequency)
+                    .unwrap_or(sc.frequency);
+                let mut shields = ShipShields(shield_system, freq);
                 shields.0.focus_config = crate::shield::ShieldFocusConfig {
                     bonus_max_hp: sc.focus_bonus_max_hp,
                     bonus_regen: sc.focus_bonus_regen,
@@ -2158,14 +2166,20 @@ fn spawn_game_start_entities(
             } else if !config.shield_arcs.is_empty() {
                 let ship_wide = crate::shield::ShieldConfig::default();
                 let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
-                commands
-                    .entity(spawned)
-                    .insert(ShipShields(ShieldSystem::from_arcs(&arcs, &ship_wide)));
+                let freq = config
+                    .shield_arcs
+                    .first()
+                    .map(|a| a.frequency)
+                    .unwrap_or(0.5);
+                commands.entity(spawned).insert(ShipShields(
+                    ShieldSystem::from_arcs(&arcs, &ship_wide),
+                    freq,
+                ));
             } else {
                 // Default shields on the ship entity when no TOML shields_console block.
                 commands
                     .entity(spawned)
-                    .insert(ShipShields(ShieldSystem::default()));
+                    .insert(ShipShields(ShieldSystem::default(), 0.5));
             }
 
             // Shields AI config — loaded from [shields_console.ai] if present,
@@ -3342,7 +3356,7 @@ mod tests {
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
-                ShipShields(ShieldSystem::default()),
+                ShipShields(ShieldSystem::default(), 0.5),
                 ShipPhysicsComponent::default(),
                 crate::ship_state::ShipRedAlert::default(),
                 crate::ship_state::ShipViewMode::default(),
@@ -3372,6 +3386,7 @@ mod tests {
             crate::weapons_plugin::PhaserCooldown::default(),
             crate::sensors_plugin::SensorsTarget::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
+            crate::ship::power::PowerBrownoutState::default(),
         ));
         app.insert_resource(ShipEntity(ship));
         app
@@ -6929,7 +6944,7 @@ mod tests {
         let shield_status = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::ShieldStatus { facings } => Some(facings.clone()),
+                ServerMessage::ShieldStatus { facings, .. } => Some(facings.clone()),
                 _ => None,
             })
             .expect("expected a ShieldStatus broadcast after focus change");

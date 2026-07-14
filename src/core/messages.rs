@@ -1173,6 +1173,18 @@ pub enum CoordinationPayload {
     /// ("Tactical: come about, bring phasers to bear") via `route_coordination`
     /// (issue #677).
     ArcBearingRequest { uuid: String, label: String },
+    /// Power system reports a brownout (demand exceeds supply) for a group
+    /// that is actively drawing power it cannot get (issue #678).
+    /// Fire-once-debounced; only fires when the affected system has level > 1
+    /// (not idle at minimum draw) while total allocation > 6 (battery draining).
+    PowerBrownout {
+        /// Which power group (e.g. "weapons", "helm", "sensors").
+        group: String,
+        /// Human-readable label for the affected system (e.g. "WEAPONS").
+        label: String,
+        /// Current allocated level (what the system is actually getting).
+        allocated_level: u8,
+    },
 }
 
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -1257,6 +1269,9 @@ pub enum ServerMessage {
         /// Per-bank blaster state (issue #631). Empty when no blaster banks declared.
         #[serde(default)]
         blasters: Vec<BlasterBankState>,
+        /// Current phaser frequency (0.0–1.0) from ShipPhaserFrequency.
+        #[serde(default = "default_shield_frequency")]
+        phaser_frequency: f32,
     },
     /// Broadcast when a phaser beam starts. Sent to all players so the renderer
     /// can draw the beam on the viewscreen.
@@ -1293,6 +1308,9 @@ pub enum ServerMessage {
     /// status for every shield facing.
     ShieldStatus {
         facings: Vec<ShieldFacingStatus>,
+        /// Current shield generator frequency (0.0–1.0).
+        #[serde(default)]
+        frequency: f32,
     },
     /// Broadcast to all when a torpedo is launched from a tube.
     TorpedoLaunched {
@@ -2049,6 +2067,13 @@ pub struct ShieldsBlackboard {
     /// Bearing of the current Tactical target in degrees, or None if no target.
     #[serde(default)]
     pub target_bearing: Option<f32>,
+    /// Current shield generator frequency (0.0–1.0).
+    #[serde(default = "default_shield_frequency")]
+    pub frequency: f32,
+}
+
+fn default_shield_frequency() -> f32 {
+    0.5
 }
 
 /// A single entry in [`PowerBlackboard::groups`], one per `PowerGroupId`

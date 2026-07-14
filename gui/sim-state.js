@@ -215,6 +215,7 @@ export class ClientSimState {
         this.tubeStates = d.tubes || [];
         this.torpedoCount = typeof d.torpedo_count === 'number' ? d.torpedo_count : 0;
         this.phaserMode = d.phaser_mode || 'Auto';
+        if (typeof d.phaser_frequency === 'number') this.phaserFrequency = d.phaser_frequency;
         if (d.blasters != null) this.blasterBanks = d.blasters;
         break;
       case 'ShieldStatus':
@@ -269,6 +270,10 @@ export class ClientSimState {
         break;
       case 'CoordinationPopup':
         this.coordinationPopup = { target: d.target, payload: d.payload, senderLabel: d.sender_label, ts: Date.now() };
+        // Populate frequencyHint from FrequencyHint coordination payloads.
+        if (d.payload && d.payload.type === 'FrequencyHint' && d.payload.data && typeof d.payload.data.frequency === 'number') {
+          this.frequencyHint = d.payload.data.frequency;
+        }
         break;
       case 'ObjectiveSummary':
         this.objectives = d.objectives || [];

@@ -1737,7 +1737,7 @@ mod tests {
                     hull_config,
                 )),
                 LastHelmInput::default(),
-                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
                 ShipImpulse(crate::impulse::ImpulseState::new()),
             ))
             .id();
@@ -4007,7 +4007,7 @@ station = "helm"
                     hull_config,
                 )),
                 LastHelmInput::default(),
-                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
                 ShipImpulse(crate::impulse::ImpulseState::new()),
             ))
             .id();
@@ -4300,7 +4300,7 @@ station = "helm"
                     hull_config,
                 )),
                 LastHelmInput::default(),
-                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
                 ShipImpulse(crate::impulse::ImpulseState::new()),
             ))
             .id();
@@ -4417,7 +4417,7 @@ station = "helm"
                 )),
                 crate::entity_spawner::EntityShipArcHull(arc_hull),
                 LastHelmInput::default(),
-                crate::simulation::ShipShields(crate::shield::ShieldSystem::default()),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
             ))
             .id();
         app.world_mut().entity_mut(ship).insert((

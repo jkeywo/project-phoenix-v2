@@ -590,7 +590,12 @@ pub fn spawn_entity(
         } else {
             ShieldSystem::new(&ship_wide)
         };
-        let mut shields = crate::ship::shields::ShipShields(shield_system);
+        let freq = config
+            .shield_arcs
+            .first()
+            .map(|a| a.frequency)
+            .unwrap_or(sc.frequency);
+        let mut shields = crate::ship::shields::ShipShields(shield_system, freq);
         shields.0.focus_config = ShieldFocusConfig {
             bonus_max_hp: sc.focus_bonus_max_hp,
             bonus_regen: sc.focus_bonus_regen,
@@ -609,7 +614,8 @@ pub fn spawn_entity(
         let ship_wide = crate::shield::ShieldConfig::default();
         let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
         let shield_system = ShieldSystem::from_arcs(&arcs, &ship_wide);
-        entity_commands.insert(crate::ship::shields::ShipShields(shield_system));
+        let freq = config.shield_arcs.first().map(|a| a.frequency).unwrap_or(0.5);
+        entity_commands.insert(crate::ship::shields::ShipShields(shield_system, freq));
     }
 
     // Shields AI config — loaded from [shields_console.ai] for NPC ships if

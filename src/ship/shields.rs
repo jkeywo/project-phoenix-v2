@@ -17,7 +17,17 @@ use crate::ship_plugin::CoordinationEnqueue;
 /// derive has been dropped since no production code reads a global
 /// `Res<ShipShields>`.
 #[derive(Component)]
-pub struct ShipShields(pub crate::shield::ShieldSystem);
+pub struct ShipShields(pub crate::shield::ShieldSystem, pub f32);
+
+impl ShipShields {
+    pub fn frequency(&self) -> f32 {
+        self.1
+    }
+
+    pub fn set_frequency(&mut self, freq: f32) {
+        self.1 = freq.clamp(0.0, 1.0);
+    }
+}
 
 // ── Resources ──────────────────────────────────────────────────────────────────
 
@@ -192,7 +202,8 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
                     priority: s.priority,
                 })
                 .collect();
-            vec![crate::messages::ServerMessage::ShieldStatus { facings }]
+            let frequency = shields.frequency();
+            vec![crate::messages::ServerMessage::ShieldStatus { facings, frequency }]
         },
     )
 }
@@ -465,6 +476,7 @@ fn publish_shields_blackboard(
         focused_facing,
         target_bearing,
         grid_status,
+        frequency: shields.frequency(),
     };
 
     // Per-arc fine blackboards (issue #514). One entry per arc under
@@ -679,7 +691,7 @@ mod tests {
             .spawn((
                 crate::simulation::Ship,
                 crate::server_app::LocalShip,
-                ShipShields(crate::shield::ShieldSystem::new(&config)),
+                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
@@ -833,7 +845,7 @@ mod tests {
             .spawn((
                 crate::simulation::Ship,
                 crate::server_app::LocalShip,
-                ShipShields(crate::shield::ShieldSystem::new(&config)),
+                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
@@ -938,7 +950,7 @@ mod tests {
             .spawn((
                 crate::simulation::Ship,
                 crate::server_app::LocalShip,
-                ShipShields(crate::shield::ShieldSystem::new(&config)),
+                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {

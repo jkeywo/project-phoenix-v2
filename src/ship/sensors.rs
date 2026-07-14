@@ -6,9 +6,6 @@ use crate::messages::{
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
-// Placeholder shield frequency returned until entities expose a real value.
-const PLACEHOLDER_SHIELD_FREQUENCY: f32 = 0.5;
-
 // ── Resources ──────────────────────────────────────────────────────────────────
 
 /// The currently selected science target on the Sensors console. `None` means
@@ -130,6 +127,10 @@ pub fn tick_sensors_frequency_hint(
         With<crate::server_app::Ship>,
     >,
     mut writer: MessageWriter<CoordinationEnqueue>,
+    target_shields_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &crate::ship::shields::ShipShields,
+    )>,
 ) {
     for (entity, weapons_target, control_sources, mut state) in ship_q.iter_mut() {
         let current_target = match weapons_target.0.clone() {
@@ -141,8 +142,17 @@ pub fn tick_sensors_frequency_hint(
             }
         };
 
-        // Placeholder: real implementation would look up the entity's shield frequency.
-        let frequency = PLACEHOLDER_SHIELD_FREQUENCY;
+        // Look up the target entity's shield frequency; fall back to 0.5.
+        let frequency = target_shields_q
+            .iter()
+            .find_map(|(uuid, shields)| {
+                if uuid.0 == current_target {
+                    Some(shields.frequency())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0.5);
 
         let target_changed = state.last_sent_target.as_deref() != Some(&current_target);
         let frequency_changed = state.last_sent_frequency != Some(frequency);

@@ -31,6 +31,11 @@ pub const BEAM_DAMAGE_PER_SEC: f32 =
 /// beam is active. Sent via the inter-system command channel (issue #559).
 pub const PHASER_BATTERY_DRAIN_PER_SEC: f32 = 5.0;
 
+/// Delay before NPC tactical AI auto-matches phaser frequency to the locked
+/// target's shield frequency (seconds). Defined here as a tuning constant
+/// rather than an inline literal (code review finding #679).
+const NPC_FREQ_MATCH_DELAY: f32 = 2.0;
+
 // ── Resources ─────────────────────────────────────────────────────────────
 
 /// Cache of the last `WeaponsUpdate` sent to the Tactical holder.
@@ -45,6 +50,8 @@ pub struct LastWeaponsUpdate {
     pub phaser_mode: PhaserMode,
     /// Per-bank blaster state (issue #631). Empty when no blaster banks declared.
     pub blasters: Vec<BlasterBankState>,
+    /// Current phaser frequency (0.0–1.0).
+    pub phaser_frequency: f32,
 }
 
 /// True on the first tick of the weapons broadcaster, then cleared.
@@ -268,6 +275,10 @@ fn on_beam_ended(
 #[derive(Resource, Default)]
 pub struct TacticalAiController;
 
+/// Per-ship frequency match state for NPC auto-match frequency AI.
+#[derive(Resource, Default)]
+pub struct NpcFrequencyMatchStates(pub std::collections::HashMap<Entity, crate::console_ai::FrequencyMatchState>);
+
 pub struct WeaponsPlugin;
 
 impl Plugin for WeaponsPlugin {
@@ -279,6 +290,7 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<PhaserCombatConfigResource>()
             .init_resource::<WeaponsUpdateFirstTick>()
             .init_resource::<TacticalAiController>()
+            .init_resource::<NpcFrequencyMatchStates>()
             .init_resource::<BlasterSystemResource>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
                 TorpedoConfig::default(),
@@ -301,6 +313,7 @@ impl Plugin for WeaponsPlugin {
                     handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
                     operate_tactical_ai.in_set(crate::sim_sets::SimSet::Input),
+                    tick_npc_auto_match_frequency.in_set(crate::sim_sets::SimSet::Input),
                     tick_blaster_auto_fire.in_set(crate::sim_sets::SimSet::Input),
                     handle_fire_blaster.in_set(crate::sim_sets::SimSet::Input),
                 ),
@@ -1198,6 +1211,8 @@ fn tick_beams(
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             // Shooter's faction for LOS friendly-fire check.
             Option<&FactionComponent>,
+            // Shooter's phaser frequency for frequency-matching damage (issue #679).
+            Option<&crate::ship_state::ShipPhaserFrequency>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1264,6 +1279,7 @@ fn tick_beams(
         shield_pierce: f32,
         end_beam_early: bool,
         is_local_shooter: bool,
+        shooter_phaser_freq: f32,
         /// UUID of the entity that will actually receive damage this tick.
         /// Equals `target_uuid` when LOS is clear; set to the blocker's UUID
         /// when a blocking entity intercepts the beam.
@@ -1289,6 +1305,7 @@ fn tick_beams(
         _weapons_target_opt,
         is_local_shooter,
         shooter_faction_opt,
+        shooter_phaser_freq_opt,
     ) in ship_q.iter_mut()
     {
         cooldown.tick(dt);
@@ -1519,6 +1536,7 @@ fn tick_beams(
             effective_target_x,
             effective_target_z,
             zero_damage,
+            shooter_phaser_freq: shooter_phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
         });
     }
 
@@ -1627,14 +1645,27 @@ fn tick_beams(
                 break;
             }
 
+            // Frequency-matching damage multiplier (issue #679).
+            // When phaser frequency matches shield frequency, damage is at
+            // 100%; the further apart they are, the less damage gets through.
+            // Minimum 25% unless the target has no shields (then 100%).
+            let freq_mult: f32 = if let Some(ref shields) = ship_shields_comp {
+                let sf = shields.frequency();
+                let pf = state.shooter_phaser_freq;
+                (1.0 - (pf - sf).abs() * 0.5).clamp(0.25, 1.0)
+            } else {
+                1.0
+            };
+            let base_damage = (state.damage_to_apply as f32 * freq_mult).round() as i32;
+
             // Route damage through shields if present and any facing online.
             let (damage_to_hull, shield_amount) = if let Some(ref mut shields) = ship_shields_comp {
                 let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
                 if all_offline {
-                    (state.damage_to_apply as f32, 0.0f32)
+                    (base_damage as f32, 0.0f32)
                 } else {
                     let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
-                        state.damage_to_apply as f32,
+                        base_damage as f32,
                         state.shield_pierce,
                     );
                     let bearing = if target_is_local {
@@ -1663,7 +1694,7 @@ fn tick_beams(
                     (pierced + leak as f32, shielded)
                 }
             } else {
-                (state.damage_to_apply as f32, 0.0f32)
+                (base_damage as f32, 0.0f32)
             };
 
             let ship_destroyed = if damage_to_hull > 0.0 {
@@ -1772,7 +1803,7 @@ fn tick_beams(
     // cleared, cooldown started, WeaponsTarget cleared for LocalShip).
 
     for state in shooters {
-        let Ok((_, _, _, mut beam, mut cooldown, _, _, mut weapons_target_opt, _, _)) =
+        let Ok((_, _, _, mut beam, mut cooldown, _, _, mut weapons_target_opt, _, _, _)) =
             ship_q.get_mut(state.shooter_entity)
         else {
             continue;
@@ -3554,6 +3585,62 @@ fn operate_tactical_ai(
     }
 }
 
+/// NPC auto-match phaser frequency to locked target's shield frequency.
+///
+/// Runs in `SimSet::Input`. When the ship's tactical system is AI-operated
+/// and a target is locked, waits `delay_secs` then writes the matching
+/// frequency to `ShipPhaserFrequency`.
+fn tick_npc_auto_match_frequency(
+    time: Res<Time>,
+    target_shields_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        Option<&crate::ship::shields::ShipShields>,
+    )>,
+    mut ship_q: Query<(
+        Entity,
+        &ShipSystemControlSources,
+        &crate::ship_plugin::ShipConfigComponent,
+        &WeaponsTarget,
+        &mut crate::ship_state::ShipPhaserFrequency,
+    )>,
+    mut states: ResMut<NpcFrequencyMatchStates>,
+) {
+    let dt = time.delta_secs();
+    for (entity, control_sources, ship_config, target, mut phaser_freq) in ship_q.iter_mut()
+    {
+        if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
+            states.0.remove(&entity);
+            continue;
+        }
+
+        let locked_target = target.0.clone();
+        let target_frequency = locked_target
+            .as_ref()
+            .and_then(|uuid| {
+                target_shields_q
+                    .iter()
+                    .find(|(u, _)| u.0.as_str() == uuid.as_str())
+                    .and_then(|(_, shields)| shields.map(|s| s.frequency()))
+            })
+            .unwrap_or(0.5);
+
+        let input = crate::console_ai::FrequencyMatchInput {
+            locked_target,
+            target_frequency,
+            dt,
+            delay_secs: NPC_FREQ_MATCH_DELAY,
+            trigger_active: true,
+        };
+
+        let state = states.0.entry(entity).or_default();
+        let output = crate::console_ai::tick_auto_match_frequency(state, &input);
+
+        if let crate::console_ai::FrequencyMatchOutput::Match { frequency } = output {
+            phaser_freq.0 = frequency;
+        }
+    }
+}
+
 fn top_destroy_objective_target(
     blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
 ) -> Option<&str> {
@@ -3699,6 +3786,11 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             .unwrap_or(1.0)
     };
     let phaser_mode = world.resource::<CurrentPhaserMode>().0;
+    let phaser_frequency = {
+        let mut q = world
+            .query_filtered::<&crate::ship_state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>();
+        q.single(world).ok().map(|f| f.0).unwrap_or(0.5)
+    };
     let banks_config = {
         // Prefer per-entity component on LocalShip; fall back to global resource.
         let mut q = world
@@ -3832,6 +3924,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         torpedo_count,
         phaser_mode,
         blasters: Vec::new(), // Populated by weapons_update_broadcaster from BlasterSystemResource.
+        phaser_frequency,
     }
 }
 
@@ -3869,6 +3962,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 torpedo_count,
                 phaser_mode,
                 blasters,
+                phaser_frequency,
             } = current.clone();
             *world.resource_mut::<LastWeaponsUpdate>() = current;
 
@@ -3880,6 +3974,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 torpedo_count,
                 phaser_mode,
                 blasters,
+                phaser_frequency,
             }]
         },
     )
@@ -6380,7 +6475,7 @@ station = "tactical"
                     max_hp: shield_max.round() as i32,
                     regen_per_sec,
                     offline_duration: 10.0,
-                })),
+                }), 0.5),
                 Transform::from_xyz(npc_x, 0.0, npc_z),
             ))
             .id()
@@ -6527,7 +6622,7 @@ station = "tactical"
                     crate::messages::SystemId("captain".into()),
                     30.0,
                 )])),
-                crate::ship::shields::ShipShields(shield_sys),
+                crate::ship::shields::ShipShields(shield_sys, 0.5),
                 Transform::from_xyz(0.0, 0.0, -20.0),
             ))
             .id();
@@ -6654,7 +6749,7 @@ station = "tactical"
         });
         app.world_mut().entity_mut(player_entity).insert((
             EntityUuid("player-ship".into()),
-            crate::ship::shields::ShipShields(shield_sys),
+            crate::ship::shields::ShipShields(shield_sys, 0.5),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ));
 
@@ -7133,7 +7228,7 @@ station = "tactical"
             let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
             let local = q.single(app.world()).unwrap();
             app.world_mut().entity_mut(local).insert(ShipShields(
-                crate::shield::ShieldSystem::new(&shield_config),
+                crate::shield::ShieldSystem::new(&shield_config), 0.5,
             ));
         }
 

@@ -653,7 +653,7 @@ mod tests {
             crate::simulation::Ship,
             Transform::default(),
             crate::ship_state::ShipPhysics::default(),
-            crate::simulation::ShipShields(ShieldSystem::new(&ShieldConfig::default())),
+            crate::simulation::ShipShields(ShieldSystem::new(&ShieldConfig::default()), 0.5),
             crate::entity_spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
             ShipModifiers::new(),
         ));
@@ -830,7 +830,7 @@ mod tests {
             .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
                 max_hp: 100,
                 ..Default::default()
-            })));
+            }), 0.5));
 
         spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 50.0);
         tick_with_dt(&mut app, 0.1);
@@ -865,7 +865,7 @@ mod tests {
             .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
                 max_hp: 1000,
                 ..Default::default()
-            })));
+            }), 0.5));
 
         // 100 dps for 1s = 100 damage. shield_pierce = 0.3 →
         // pierced = 30 (to hull), absorbed = 70 (to fore shield).
@@ -904,7 +904,7 @@ mod tests {
             .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
                 max_hp: 1000,
                 ..Default::default()
-            })));
+            }), 0.5));
 
         // shield_pierce = 0.0: all damage absorbed by fore shield, hull untouched.
         spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 50.0, 0.0);

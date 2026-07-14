@@ -470,19 +470,12 @@ mod tests {
                         volley_max: 3,
                         loaded_count: 2,
                         target_count: 3,
-                        load_progress: 0.5,
+                        load_progress: 1.0,
                     }],
                     torpedo_count: 10,
                     phaser_mode: PhaserMode::Auto,
-                    blasters: vec![BlasterBankState {
-                        id: "fore".to_string(),
-                        fire_ready: true,
-                        on_cooldown: false,
-                        cooldown_remaining: 0.0,
-                        pending_volley: 0,
-                        charge_progress: 0.0,
-                        has_charge: false,
-                    }],
+                    blasters: vec![],
+                    phaser_frequency: 0.5,
                 },
             ),
             (
@@ -553,6 +546,7 @@ mod tests {
                         arc_id: "fore".into(),
                         priority: 1,
                     }],
+                    frequency: 0.5,
                 },
             ),
             (
@@ -1096,6 +1090,7 @@ mod tests {
             torpedo_count: 8,
             phaser_mode: PhaserMode::Auto,
             blasters: vec![],
+            phaser_frequency: 0.5,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

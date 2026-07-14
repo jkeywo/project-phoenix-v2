@@ -1136,6 +1136,11 @@ pub struct ShieldsConsoleConfig {
     /// from `ShieldConfig::default()` are used.
     #[serde(default)]
     pub base: Option<ShieldsBaseConfig>,
+    /// Shield generator frequency (0.0–1.0). Default 0.5. When
+    /// `[[shield_arc]]` blocks are present, the first arc's frequency
+    /// takes precedence.
+    #[serde(default = "default_shield_frequency")]
+    pub frequency: f32,
     /// AI tuning parameters for the shields focus controller.
     #[serde(default)]
     pub ai: Option<ShieldsAiConfigToml>,
@@ -1174,6 +1179,7 @@ impl Default for ShieldsConsoleConfig {
             focus_focused_damage_multiplier: default_focus_focused_damage_multiplier(),
             focus_unfocused_damage_multiplier: default_focus_unfocused_damage_multiplier(),
             base: None,
+            frequency: default_shield_frequency(),
             ai: None,
         }
     }
@@ -1288,6 +1294,15 @@ pub struct ShieldArcConfig {
     /// covering that bearing are offline. Default 1.
     #[serde(default = "default_arc_priority")]
     pub priority: u32,
+    /// Shield generator frequency (0.0–1.0) for this arc's shield system.
+    /// When multiple arcs are declared, the first arc's frequency seeds the
+    /// ship-wide shield frequency. Default 0.5.
+    #[serde(default = "default_shield_frequency")]
+    pub frequency: f32,
+}
+
+fn default_shield_frequency() -> f32 {
+    0.5
 }
 
 fn default_arc_priority() -> u32 {

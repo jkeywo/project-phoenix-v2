@@ -478,7 +478,10 @@ mod tests {
             .spawn((
                 crate::simulation::LocalShip,
                 crate::simulation::ShipSystemBlackboards::default(),
-                crate::ship::shields::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
+                crate::ship::shields::ShipShields(
+                    crate::weapons::shield::ShieldSystem::default(),
+                    0.5,
+                ),
                 crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
                     (SystemId("helm".into()), 25.0),
                 ])),

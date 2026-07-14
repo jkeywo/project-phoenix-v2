@@ -1929,7 +1929,8 @@ mod tests {
                 .world_mut()
                 .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
             if let Ok(mut ps) = q.single_mut(app.world_mut()) {
-                let _ = ps.0.set_group_allocation(&PowerGroupId(group.into()), level);
+                let _ =
+                    ps.0.set_group_allocation(&PowerGroupId(group.into()), level);
             }
         }
 
@@ -1973,10 +1974,7 @@ mod tests {
         set_ship_power(&mut app, HELM_POWER_GROUP, 2);
         let _ = tick(&mut app);
         let emitted = drain_coord(&mut app);
-        assert!(
-            emitted.is_empty(),
-            "no advisory when condition clears"
-        );
+        assert!(emitted.is_empty(), "no advisory when condition clears");
 
         // Re-enter drain (total=7 again) → re-fire allowed (debounce cleared).
         set_ship_power(&mut app, HELM_POWER_GROUP, 3);
@@ -1992,7 +1990,7 @@ mod tests {
         // weapons=3 and helm=3 → only weapons and helm should fire.
         set_ship_power(&mut app, HELM_POWER_GROUP, 2);
         let _ = tick(&mut app);
-        let _ = drain_coord(&mut app);  // flush any stale events
+        let _ = drain_coord(&mut app); // flush any stale events
         set_ship_power(&mut app, HELM_POWER_GROUP, 3);
         set_ship_power(&mut app, WEAPONS_POWER_GROUP, 3);
         set_ship_power(&mut app, SENSORS_POWER_GROUP, 1);

@@ -1069,9 +1069,10 @@ fn broadcast_shield_status(
     if facings != last.0 {
         // State changed — broadcast to everyone.
         last.0 = facings.clone();
-        outbox
-            .0
-            .push((Target::All, ServerMessage::ShieldStatus { facings, frequency }));
+        outbox.0.push((
+            Target::All,
+            ServerMessage::ShieldStatus { facings, frequency },
+        ));
     } else if let Some(token) = sessions.0.holder_for_station(&StationId("shields".into())) {
         // Nothing changed but the Shields holder still gets a periodic refresh
         // so regenerating HP stays smooth on their panel.
@@ -2146,7 +2147,11 @@ fn spawn_game_start_entities(
                 } else {
                     ShieldSystem::new(&ship_wide)
                 };
-                let freq = config.shield_arcs.first().map(|a| a.frequency).unwrap_or(sc.frequency);
+                let freq = config
+                    .shield_arcs
+                    .first()
+                    .map(|a| a.frequency)
+                    .unwrap_or(sc.frequency);
                 let mut shields = ShipShields(shield_system, freq);
                 shields.0.focus_config = crate::shield::ShieldFocusConfig {
                     bonus_max_hp: sc.focus_bonus_max_hp,
@@ -2161,10 +2166,15 @@ fn spawn_game_start_entities(
             } else if !config.shield_arcs.is_empty() {
                 let ship_wide = crate::shield::ShieldConfig::default();
                 let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
-                let freq = config.shield_arcs.first().map(|a| a.frequency).unwrap_or(0.5);
-                commands
-                    .entity(spawned)
-                    .insert(ShipShields(ShieldSystem::from_arcs(&arcs, &ship_wide), freq));
+                let freq = config
+                    .shield_arcs
+                    .first()
+                    .map(|a| a.frequency)
+                    .unwrap_or(0.5);
+                commands.entity(spawned).insert(ShipShields(
+                    ShieldSystem::from_arcs(&arcs, &ship_wide),
+                    freq,
+                ));
             } else {
                 // Default shields on the ship entity when no TOML shields_console block.
                 commands

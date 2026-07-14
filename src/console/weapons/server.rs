@@ -277,7 +277,9 @@ pub struct TacticalAiController;
 
 /// Per-ship frequency match state for NPC auto-match frequency AI.
 #[derive(Resource, Default)]
-pub struct NpcFrequencyMatchStates(pub std::collections::HashMap<Entity, crate::console_ai::FrequencyMatchState>);
+pub struct NpcFrequencyMatchStates(
+    pub std::collections::HashMap<Entity, crate::console_ai::FrequencyMatchState>,
+);
 
 pub struct WeaponsPlugin;
 
@@ -3606,8 +3608,7 @@ fn tick_npc_auto_match_frequency(
     mut states: ResMut<NpcFrequencyMatchStates>,
 ) {
     let dt = time.delta_secs();
-    for (entity, control_sources, ship_config, target, mut phaser_freq) in ship_q.iter_mut()
-    {
+    for (entity, control_sources, ship_config, target, mut phaser_freq) in ship_q.iter_mut() {
         if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
             states.0.remove(&entity);
             continue;
@@ -6470,12 +6471,15 @@ station = "tactical"
                     crate::messages::SystemId("captain".into()),
                     hull_max,
                 )])),
-                crate::ship::shields::ShipShields(ShieldSystem::new(&ShieldConfig {
-                    num_facings: 1,
-                    max_hp: shield_max.round() as i32,
-                    regen_per_sec,
-                    offline_duration: 10.0,
-                }), 0.5),
+                crate::ship::shields::ShipShields(
+                    ShieldSystem::new(&ShieldConfig {
+                        num_facings: 1,
+                        max_hp: shield_max.round() as i32,
+                        regen_per_sec,
+                        offline_duration: 10.0,
+                    }),
+                    0.5,
+                ),
                 Transform::from_xyz(npc_x, 0.0, npc_z),
             ))
             .id()
@@ -7228,7 +7232,8 @@ station = "tactical"
             let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
             let local = q.single(app.world()).unwrap();
             app.world_mut().entity_mut(local).insert(ShipShields(
-                crate::shield::ShieldSystem::new(&shield_config), 0.5,
+                crate::shield::ShieldSystem::new(&shield_config),
+                0.5,
             ));
         }
 

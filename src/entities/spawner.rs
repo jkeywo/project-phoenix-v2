@@ -614,7 +614,11 @@ pub fn spawn_entity(
         let ship_wide = crate::shield::ShieldConfig::default();
         let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
         let shield_system = ShieldSystem::from_arcs(&arcs, &ship_wide);
-        let freq = config.shield_arcs.first().map(|a| a.frequency).unwrap_or(0.5);
+        let freq = config
+            .shield_arcs
+            .first()
+            .map(|a| a.frequency)
+            .unwrap_or(0.5);
         entity_commands.insert(crate::ship::shields::ShipShields(shield_system, freq));
     }
 

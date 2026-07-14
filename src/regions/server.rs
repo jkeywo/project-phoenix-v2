@@ -825,12 +825,13 @@ mod tests {
             .query_filtered::<Entity, With<LocalShip>>()
             .single(app.world())
             .unwrap();
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
+        app.world_mut().entity_mut(ship).insert(ShipShields(
+            ShieldSystem::new(&ShieldConfig {
                 max_hp: 100,
                 ..Default::default()
-            }), 0.5));
+            }),
+            0.5,
+        ));
 
         spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 50.0);
         tick_with_dt(&mut app, 0.1);
@@ -860,12 +861,13 @@ mod tests {
             .query_filtered::<Entity, With<LocalShip>>()
             .single(app.world())
             .unwrap();
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
+        app.world_mut().entity_mut(ship).insert(ShipShields(
+            ShieldSystem::new(&ShieldConfig {
                 max_hp: 1000,
                 ..Default::default()
-            }), 0.5));
+            }),
+            0.5,
+        ));
 
         // 100 dps for 1s = 100 damage. shield_pierce = 0.3 →
         // pierced = 30 (to hull), absorbed = 70 (to fore shield).
@@ -899,12 +901,13 @@ mod tests {
             .query_filtered::<Entity, With<LocalShip>>()
             .single(app.world())
             .unwrap();
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(ShipShields(ShieldSystem::new(&ShieldConfig {
+        app.world_mut().entity_mut(ship).insert(ShipShields(
+            ShieldSystem::new(&ShieldConfig {
                 max_hp: 1000,
                 ..Default::default()
-            }), 0.5));
+            }),
+            0.5,
+        ));
 
         // shield_pierce = 0.0: all damage absorbed by fore shield, hull untouched.
         spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 50.0, 0.0);

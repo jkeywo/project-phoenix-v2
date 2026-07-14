@@ -1490,7 +1490,9 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
             format!("Come about, bring phasers to bear on {label}")
         }
         CoordinationPayload::PowerBrownout {
-            label, allocated_level, ..
+            label,
+            allocated_level,
+            ..
         } => {
             format!("{label} brownout (level {allocated_level})")
         }

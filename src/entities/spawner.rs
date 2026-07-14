@@ -286,6 +286,9 @@ pub fn spawn_entity(
         // `CoordinationEnqueue.source_entity`.
         entity_commands.insert(crate::ship::shields::ShieldsCoordinationState::default());
         entity_commands.insert(crate::ship::sensors::SensorsFrequencyState::default());
+        // Power brownout advisory debounce state (issue #678): per-ship
+        // so each ship tracks its own brownout notification cycle.
+        entity_commands.insert(crate::ship::power::PowerBrownoutState::default());
         // Weapons->Helm arc-bearing request state (issue #677): per-ship
         // debounce for the channel-3 request, and the pending bearing Helm
         // AI folds into its steering once the request is consumed.

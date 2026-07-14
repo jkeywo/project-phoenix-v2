@@ -2089,6 +2089,7 @@ fn spawn_game_start_entities(
                 // `entities/spawner.rs` for details.
                 .insert(crate::ship::shields::ShieldsCoordinationState::default())
                 .insert(crate::ship::sensors::SensorsFrequencyState::default())
+                .insert(crate::ship::power::PowerBrownoutState::default())
                 // Per-entity CollisionCooldown so player and NPC ships each
                 // have their own cooldown timer (PRD #597 PR-8).
                 .insert(CollisionCooldown::default())
@@ -3372,6 +3373,7 @@ mod tests {
             crate::weapons_plugin::PhaserCooldown::default(),
             crate::sensors_plugin::SensorsTarget::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
+            crate::ship::power::PowerBrownoutState::default(),
         ));
         app.insert_resource(ShipEntity(ship));
         app

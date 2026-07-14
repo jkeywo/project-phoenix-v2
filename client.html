@@ -1690,6 +1690,11 @@
       } else if (payload.type === 'ArcBearingRequest') {
         title = 'Tactical: come about, bring phasers to bear';
         body = payload.data?.label || payload.label || '';
+      } else if (payload.type === 'PowerBrownout') {
+        const label = payload.data?.label || payload.label || 'System';
+        const level = payload.data?.allocated_level ?? payload.allocated_level ?? '?';
+        title = label + ' Power Brownout';
+        body = 'Allocation: ' + level;
       } else {
         title = payload.type || 'Advisory';
         body = '';

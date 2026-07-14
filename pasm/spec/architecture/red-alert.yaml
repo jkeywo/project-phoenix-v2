@@ -1,0 +1,156 @@
+entities:
+  - component: red-alert-console-interface
+    core:
+      status: proposed
+      confidence: provisional
+      title: Red Alert Console Interface
+      summary: Captain-facing control that displays the ship alert state and requests an explicit target state.
+      rationale:
+        - A state-setting control is idempotent, unlike a toggle command that can be applied twice or arrive after the displayed state changes.
+        - The control remains read-only while the red-alert system is AI-controlled.
+    architecture:
+      kind: client-interface
+      authority: non-authoritative
+      reads:
+        - red-alert-status-replica
+      sends:
+        - set-red-alert-command
+      runs_in:
+        - phone-browser-runtime
+
+  - state: authoritative-red-alert-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Authoritative Red Alert State
+      summary: Per-ship host-owned boolean alert state. The state exists today, but its target design requires explicit set semantics rather than toggle semantics.
+    architecture:
+      classification: authoritative
+      owner: host-red-alert-control-router
+      writers:
+        - host-red-alert-control-router
+      replicas:
+        - red-alert-status-replica
+        - selected-target-alert-state
+
+  - state: red-alert-status-replica
+    core:
+      status: proposed
+      confidence: provisional
+      title: Red Alert Status Replica
+      summary: Non-authoritative captain and viewscreen presentation of the local ship's alert state.
+    architecture:
+      classification: replicated
+      derived_from:
+        - authoritative-red-alert-state
+      owner: red-alert-console-interface
+
+  - message: set-red-alert-command
+    core:
+      status: proposed
+      confidence: provisional
+      title: Set Red Alert Command
+      summary: Client-to-host request carrying the desired Red Alert state as active true or false.
+      rationale:
+        - The payload expresses the requested end state, so retries and duplicate delivery do not invert the alert state.
+        - AI operators use the same command shape after they calculate their desired state.
+    architecture:
+      authority: request
+      producer:
+        - red-alert-console-interface
+        - red-alert-ai-operator
+      consumer:
+        - host-command-admission
+        - host-red-alert-control-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: set-red-alert-active
+
+  - component: host-red-alert-control-router
+    core:
+      status: proposed
+      confidence: provisional
+      title: Host Red Alert Control Router
+      summary: Authoritative handler that validates an admitted SetRedAlert command and assigns its active value to the addressed ship.
+      rationale:
+        - The router must assign rather than invert the state.
+        - It must apply commands to the owning ship entity so player and AI ships remain independent.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns:
+        - authoritative-red-alert-state
+      consumes:
+        - set-red-alert-command
+      writes:
+        - authoritative-red-alert-state
+      runs_in:
+        - host-browser-runtime
+
+  - component: red-alert-ai-operator
+    core:
+      status: proposed
+      confidence: provisional
+      title: Red Alert AI Operator
+      summary: Per-ship AI operator that derives a desired alert state from recent combat activity and submits the same explicit set command used by the captain interface.
+      rationale:
+        - AI should activate alert for recent damage, hostile fire, or weapon use, then stand down after the configured combat window ends.
+        - The operator is enabled by the Red Alert system's own control source, not by the umbrella Captain system.
+    architecture:
+      kind: service
+      authority: authoritative
+      reads:
+        - authoritative-red-alert-state
+      sends:
+        - set-red-alert-command
+      runs_in:
+        - host-browser-runtime
+
+  - state: selected-target-alert-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Selected Sensor Target Alert State
+      summary: Read-only alert state for the contact selected on the Sensors radar, absent for targets without a Red Alert capability.
+      rationale:
+        - Sensors should show the selected contact's current alert state without exposing a new detail field for every radar contact.
+        - The state is useful for ship contacts and remains absent for asteroids, planets, and other non-ship targets.
+    architecture:
+      classification: replicated
+      derived_from:
+        - authoritative-red-alert-state
+      owner: sensor-target-alert-publisher
+
+  - component: sensor-target-alert-publisher
+    core:
+      status: proposed
+      confidence: provisional
+      title: Sensor Target Alert Publisher
+      summary: Host publication path that resolves the current Sensors target to a ship and replicates only that ship's alert state to the Sensors scan card.
+    architecture:
+      kind: publisher
+      authority: authoritative
+      reads:
+        - authoritative-red-alert-state
+      writes:
+        - selected-target-alert-state
+      runs_in:
+        - host-browser-runtime
+
+  - component: npc-red-alert-capability-provisioner
+    core:
+      status: proposed
+      confidence: provisional
+      title: NPC Red Alert Capability Provisioner
+      summary: NPC ship-spawn rule that ensures every behaviour-driven ship has an AI-only red-alert system, adding it when its authored ship configuration omits one.
+      rationale:
+        - An NPC can carry alert state today but cannot be operated by Red Alert AI unless its system configuration declares that capability.
+        - The capability is mandatory for behaviour-driven ships and must be AI-controlled; authors may still declare it explicitly for clarity.
+    architecture:
+      kind: service
+      authority: authoritative
+      writes:
+        - authoritative-red-alert-state
+      runs_in:
+        - host-browser-runtime

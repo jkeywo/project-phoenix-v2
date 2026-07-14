@@ -1,0 +1,1003 @@
+entities:
+  - component: helm-console-interface
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Console Interface
+      summary: Player-facing helm surface for steering, thrust, lateral thrust, impulse, boost, and radar display.
+      rationale:
+        - Helm input is issued from the phone client as ControlSystem messages, not by mutating simulation state locally.
+        - The same interface also renders engine, boost, impulse, and lateral-thrust status from replicated blackboards.
+    architecture:
+      kind: client-interface
+      authority: non-authoritative
+      owns:
+        - helm-ui-state
+      reads:
+        - helm-status-blackboard-state
+        - helm-lateral-thrust-blackboard-state
+        - helm-engine-blackboard-state
+      writes:
+        - helm-ui-state
+      sends:
+        - helm-input-command
+        - lateral-thrust-command
+        - start-impulse-charge-command
+        - cancel-impulse-command
+        - toggle-boost-command
+        - set-boost-command
+      depends_on:
+        - client-network-interface
+      runs_in:
+        - phone-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - gui/action-map.js
+        - gui/console-state.js
+        - gui/battleship/helm.html
+        - gui/cruiser/helm.html
+        - gui/destroyer/helm.html
+        - gui/components/ph-helm-joystick.js
+        - gui/components/ph-lateral-thrust-joystick.js
+        - gui/components/ph-impulse-btn.js
+        - gui/components/ph-boost-btn.js
+      symbols:
+        - buildHelmConsoleState
+        - PhHelmJoystick
+        - PhLateralThrustJoystick
+        - PhImpulseBtn
+        - PhBoostBtn
+      tests:
+        - tests/client/console-state.test.js
+        - tests/client/action-map.test.js
+        - tests/client/ph-helm-joystick.test.js
+        - tests/client/ph-lateral-thrust-joystick.test.js
+        - tests/client/ph-impulse-btn.test.js
+        - tests/client/ph-boost-btn.test.js
+
+  - state: helm-ui-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm UI State
+      summary: Client-local assembled helm presentation state derived from replicated blackboards and view-model helpers.
+    architecture:
+      classification: local-view
+      owner: helm-console-interface
+    implementation:
+      status: declared
+      paths:
+        - gui/console-state.js
+        - gui/battleship/helm.html
+        - gui/cruiser/helm.html
+        - gui/destroyer/helm.html
+      symbols:
+        - buildHelmConsoleState
+
+  - component: host-helm-control-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Helm Control Router
+      summary: Authoritative host handler that turns admitted helm, lateral-thrust, impulse, and boost commands into ship state changes.
+      rationale:
+        - Human helm commands are admitted at the host boundary and then applied to authoritative state on the LocalShip.
+        - Impulse and boost are separate host-owned drive states even though the UI targets the coarse helm system.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns:
+        - last-helm-input-state
+        - authoritative-ship-motion-state
+        - impulse-drive-state
+        - boost-drive-state
+      reads:
+        - last-helm-input-state
+        - impulse-drive-state
+        - boost-drive-state
+      writes:
+        - last-helm-input-state
+        - authoritative-ship-motion-state
+        - impulse-drive-state
+        - boost-drive-state
+      consumes:
+        - helm-input-command
+        - lateral-thrust-command
+        - start-impulse-charge-command
+        - cancel-impulse-command
+        - toggle-boost-command
+        - set-boost-command
+      depends_on:
+        - host-command-admission
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship_plugin.rs
+        - src/ship/physics.rs
+      symbols:
+        - process_helm_inputs
+        - handle_impulse_messages
+        - handle_boost_messages
+        - compute_physics
+      messages:
+        - HelmInput
+        - LateralThrustInput
+        - StartImpulseCharge
+        - CancelImpulse
+        - ToggleBoost
+        - SetBoost
+      tests:
+        - cargo test
+
+  - state: last-helm-input-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Last Helm Input State
+      summary: Authoritative cached helm intent used by the host for physics, engine telemetry, and partial-AI handoff.
+      rationale:
+        - The host stores the latest thrust, steering, and lateral inputs rather than replaying raw control messages every frame.
+        - AI also writes this state for the LocalShip so replicated telemetry matches automated movement intent.
+    architecture:
+      classification: authoritative
+      owner: host-helm-control-router
+      writers:
+        - host-helm-control-router
+        - helm-ai-operator
+        - helm-lateral-thrust-ai-operator
+      replicas:
+        - helm-lateral-thrust-blackboard-state
+        - helm-engine-blackboard-state
+    implementation:
+      status: declared
+      paths:
+        - src/ship_plugin.rs
+      symbols:
+        - LastHelmInput
+
+  - state: authoritative-ship-motion-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Authoritative Ship Motion State
+      summary: Host-owned X/Z position, yaw, forward speed, lateral speed, and roll for the ship helm path.
+    architecture:
+      classification: authoritative
+      owner: host-helm-control-router
+      writers:
+        - host-helm-control-router
+        - helm-ai-operator
+      replicas:
+        - helm-status-blackboard-state
+    implementation:
+      status: declared
+      paths:
+        - src/ship/state.rs
+        - src/ship_plugin.rs
+      symbols:
+        - ShipPhysics
+        - sync_ship_position
+
+  - state: desired-motion-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Desired Motion State
+      summary: Ship-local 3D desired-motion contract with desired_velocity_local and desired_facing_local, formed by adding hazard forces to objective travel intent before fine helm systems choose how to actuate it.
+      rationale:
+        - The intended helm design separates motion intent from actuation so engines, steering, lateral thrust, and vertical thrust can respond according to ship capability.
+        - The shared state must be 3D now even though most current ships move in-plane, to avoid hard-coding planar assumptions before bounded and full-3D craft arrive.
+        - Desired facing must be split from desired travel so arc-bearing requests, docking, and future broadside behaviors can influence orientation without hijacking movement.
+        - Hazard avoidance is a boids-like vector contribution to desired direction and speed, not a direct order to one particular actuator.
+    architecture:
+      classification: authoritative
+      owner: helm-motion-planner
+      writers:
+        - helm-motion-planner
+      readers:
+        - helm-ai-operator
+        - helm-lateral-thrust-ai-operator
+        - helm-vertical-thrust-ai-operator
+      replicas:
+        - helm-motion-blackboard-state
+
+  - state: hazard-assessment-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Hazard Assessment State
+      summary: Shared per-ship 3D hazard assessment that publishes capability-style hazard facts, force contributions, and per-actuator sensitivity inputs for helm actuation.
+      rationale:
+        - Collision avoidance should be computed centrally for the ship rather than separately inside each fine-system AI operator.
+        - Different fine systems may filter the same hazard picture differently, such as vertical thrust ignoring static terrain while engines still brake for it.
+        - Hazard publication should expose reusable facts and capabilities rather than hard-coded object categories so fine systems can apply their own policies.
+        - "A ship ignores hazards with a lower size_rating than its own: large ships do not avoid smaller ships at all."
+        - Each fine actuator owns its sensitivity to hazard distance and force weighting; those authored sensitivities implicitly determine response priority instead of one global priority ladder.
+        - Vertical separation is evaluated for collision and weapon range even when its present visual effect is negligible.
+    architecture:
+      classification: authoritative
+      owner: helm-motion-planner
+      writers:
+        - helm-motion-planner
+      readers:
+        - helm-ai-operator
+        - helm-lateral-thrust-ai-operator
+        - helm-vertical-thrust-ai-operator
+      replicas:
+        - helm-motion-blackboard-state
+
+  - state: impulse-drive-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Impulse Drive State
+      summary: Host-owned impulse charge and active-phase state for long straight-line acceleration.
+      rationale:
+        - Human helm starts and cancels charge through admitted commands.
+        - Helm AI decides engage or cancel directly from doctrine target geometry and configured distance thresholds.
+    architecture:
+      classification: authoritative
+      owner: host-helm-control-router
+      writers:
+        - host-helm-control-router
+        - helm-ai-operator
+      replicas:
+        - helm-status-blackboard-state
+    implementation:
+      status: declared
+      paths:
+        - src/server_app.rs
+        - src/ship/impulse.rs
+        - src/ship_plugin.rs
+      symbols:
+        - ShipImpulse
+        - ImpulseState
+        - ImpulsePhase
+        - tick_impulse
+      tests:
+        - cargo test
+
+  - state: impulse-manoeuvre-policy-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Impulse Manoeuvre Policy State
+      summary: Ship-authored impulse policy that applies a harsh steering multiplier while impulse is active and disables boost during impulse travel.
+      rationale:
+        - Impulse should not force steering fully to zero; the standard steering multiplier is 0.1 so course correction remains possible but severe.
+        - Boost is unavailable while impulse is active, regardless of the ship's normal boost capability.
+        - The steering multiplier and any ship-specific override belong in authored capability data rather than executable constants.
+    architecture:
+      classification: authoritative
+      owner: ship-capability-model
+      readers:
+        - helm-input-arbiter
+        - host-helm-control-router
+
+  - state: boost-drive-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Boost Drive State
+      summary: Host-owned boost battery and active-state resource for short high-power helm bursts.
+      rationale:
+        - Boost is feature-gated by TOML config and does nothing when the ship omits boost configuration.
+        - Drain is based on current helm intent, and impulse-active movement drains as full-forward thrust.
+    architecture:
+      classification: authoritative
+      owner: host-helm-control-router
+      writers:
+        - host-helm-control-router
+      replicas:
+        - helm-status-blackboard-state
+    implementation:
+      status: declared
+      paths:
+        - src/server_app.rs
+        - src/ship/boost.rs
+        - src/ship_plugin.rs
+      symbols:
+        - ShipBoost
+        - BoostState
+        - tick_boost
+      tests:
+        - cargo test
+
+  - component: helm-blackboard-publisher
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Blackboard Publisher
+      summary: Host publisher that derives helm, lateral-thrust, and engine status blackboards from authoritative motion and drive state.
+    architecture:
+      kind: adapter
+      authority: authoritative
+      reads:
+        - authoritative-ship-motion-state
+        - last-helm-input-state
+        - impulse-drive-state
+        - boost-drive-state
+      produces:
+        - helm-status-blackboard-state
+        - helm-lateral-thrust-blackboard-state
+        - helm-engine-blackboard-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/console/helm/server.rs
+      symbols:
+        - publish_helm_blackboard
+      tests:
+        - cargo test
+
+  - state: helm-status-blackboard-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Status Blackboard State
+      summary: Replicated helm snapshot containing motion, live radar range, impulse progress, and boost status for the client UI.
+    architecture:
+      classification: replicated
+      owner: helm-blackboard-publisher
+      derived_from:
+        - authoritative-ship-motion-state
+        - impulse-drive-state
+        - boost-drive-state
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/console/helm/server.rs
+        - gui/console-state.js
+      symbols:
+        - HelmBlackboard
+        - buildHelmConsoleState
+
+  - state: helm-motion-blackboard-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Motion Blackboard State
+      summary: Replicated or ship-local 3D motion-planning surface exposing objective velocity, desired facing, avoidance velocity, combined desired velocity, avoidance urgency, and primary hazard identity.
+      rationale:
+        - The smallest useful shared interface is a local-space velocity-based contract rather than direct thrust or steering commands.
+        - Keeping this blackboard 3D allows bounded and full-3D ships to share the same contract even while current consumer logic remains mostly planar.
+        - Desired facing belongs beside desired velocity because some helm requests care more about orientation than translation.
+    architecture:
+      classification: replicated
+      owner: helm-motion-planner
+      derived_from:
+        - desired-motion-state
+        - hazard-assessment-state
+
+  - state: helm-lateral-thrust-blackboard-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Lateral Thrust Blackboard State
+      summary: Replicated lateral-thrust status showing current lateral input, online state, and AI auto status.
+    architecture:
+      classification: replicated
+      owner: helm-blackboard-publisher
+      derived_from:
+        - last-helm-input-state
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/console/helm/server.rs
+        - gui/console-state.js
+      symbols:
+        - HelmLateralThrustBlackboard
+        - buildHelmConsoleState
+
+  - state: helm-engine-blackboard-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Engine Blackboard State
+      summary: Replicated per-engine thrust and online-state telemetry derived from fine helm-engine systems and joystick intent.
+      rationale:
+        - Both helm engines receive the same joystick signal and individually gate on damage or AI ownership.
+        - Engine damage scales applied thrust in the authoritative motion step before the telemetry is published.
+    architecture:
+      classification: replicated
+      owner: helm-blackboard-publisher
+      derived_from:
+        - last-helm-input-state
+        - authoritative-ship-motion-state
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/console/helm/server.rs
+        - gui/console-state.js
+      symbols:
+        - HelmEngineBlackboard
+        - buildHelmConsoleState
+
+  - component: helm-motion-planner
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Motion Planner
+      summary: Host-side shared motion planner that turns objectives plus world hazards into a 3D desired-motion and hazard-assessment surface for fine helm systems.
+      rationale:
+        - The intended architecture replaces separate helm and lateral avoidance calculations with a single ship-level planning pass.
+        - Fine systems should interpret a shared desired motion field rather than each generating independent avoidance commands.
+    architecture:
+      kind: service
+      authority: authoritative
+      owns:
+        - desired-motion-state
+        - hazard-assessment-state
+        - docking-motion-intent-state
+      reads:
+        - helm-objective-state
+        - world-snapshot-state
+        - authoritative-ship-motion-state
+      produces:
+        - desired-motion-state
+        - hazard-assessment-state
+        - helm-motion-blackboard-state
+      runs_in:
+        - host-browser-runtime
+
+  - migration: helm-shared-motion-planner-rollout
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Shared Motion Planner Rollout
+      summary: Planned migration from direct-write helm avoidance helpers toward a shared desired-motion and hazard-assessment planning surface.
+      rationale:
+        - Current helm AI computes steering and lateral avoidance inside separate operators.
+        - Intended helm design centralises planning and lets fine systems consume shared movement and hazard intent.
+        - Current repository observation is file-level, and several PASM entities share src/ship_plugin.rs. It cannot truthfully attribute helper references inside that file to a specific architectural entity, so this migration retains explicit removal conditions rather than an imprecise caller allowlist.
+    migration_plan:
+      legacy_entities:
+        - helm-ai-operator
+        - helm-lateral-thrust-ai-operator
+      target_entities:
+        - helm-motion-planner
+        - helm-vertical-thrust-ai-operator
+      temporary_adapters:
+        - helm-ai-operator
+        - helm-lateral-thrust-ai-operator
+      target_symbols:
+        - desired-motion-state
+        - hazard-assessment-state
+      removal_conditions:
+        - predicate: symbol-does-not-exist
+          subject: operate_helm
+        - predicate: symbol-does-not-exist
+          subject: operate_lateral_thrust
+
+  - component: helm-objective-aggregator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Objective Aggregator
+      summary: Host-side doctrine scorer that writes helm-relevant scored objectives into the shared viewscreen blackboard.
+      rationale:
+        - Helm AI does not invent goals locally; it consumes the scored doctrine pool produced earlier in the server tick.
+        - The same pool feeds both player Backfill AI and NPC helm AI.
+    architecture:
+      kind: service
+      authority: authoritative
+      produces:
+        - helm-objective-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ai/server.rs
+      symbols:
+        - aggregate_doctrine_blackboards
+      tests:
+        - cargo test
+
+  - state: helm-objective-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Objective State
+      summary: Scored objective pool carrying helm-relevant Patrol, Reach, and Destroy directives for automated helm decisions.
+    architecture:
+      classification: replicated
+      owner: helm-objective-aggregator
+    implementation:
+      status: declared
+      paths:
+        - src/ai/server.rs
+        - src/core/messages.rs
+      symbols:
+        - aggregate_doctrine_blackboards
+        - ScoredObjective
+        - SystemAffinity
+
+  - component: ai-world-snapshot-builder
+    core:
+      status: implemented
+      confidence: confirmed
+      title: AI World Snapshot Builder
+      summary: Host-side snapshot builder that gathers visible entity data for helm AI navigation and avoidance.
+    architecture:
+      kind: service
+      authority: authoritative
+      owns:
+        - world-snapshot-state
+      produces:
+        - world-snapshot-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ai/server.rs
+      symbols:
+        - build_world_snapshot
+        - WorldSnapshot
+      tests:
+        - cargo test
+
+  - state: vertical-movement-mode-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Vertical Movement Mode State
+      summary: Ship capability declaring whether the craft supports no vertical motion, bounded AI vertical motion, or full 3D six-degree-of-freedom flight.
+      rationale:
+        - Vertical movement support is ship-specific rather than universal, just like engines, steering, lateral thrust, and boost.
+        - Bounded motion provides AI-only above-below avoidance without turning the current player game into full free 3D flight.
+        - In bounded mode the ship should return gradually toward its authored cruise plane once avoidance urgency falls, rather than snapping immediately back.
+    architecture:
+      classification: authoritative
+      owner: ship-capability-model
+      readers:
+        - helm-motion-planner
+        - helm-vertical-thrust-ai-operator
+        - helm-ai-operator
+
+  - component: ship-capability-model
+    core:
+      status: proposed
+      confidence: provisional
+      title: Ship Capability Model
+      summary: Intended ship-authored capability surface for optional helm systems, movement modes, and manoeuvre policy.
+      rationale:
+        - Ships should declare whether they have engines, steering, lateral thrust, vertical thrust, impulse, and boost instead of relying on universal helm assumptions.
+        - A ship without engines is a stationary installation through capability data, not a special code path.
+        - Capability data also owns impulse steering behaviour, boost availability during impulse, actuator hazard sensitivities, and vertical movement limits.
+    architecture:
+      kind: service
+      authority: authoritative
+      owns:
+        - vertical-movement-mode-state
+        - impulse-manoeuvre-policy-state
+      runs_in:
+        - host-browser-runtime
+
+  - state: world-snapshot-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Snapshot State
+      summary: AI-facing 3D snapshot of nearby entities, positions, radii, factions, and motion used by helm steering, avoidance, collision checks, and range evaluation.
+    architecture:
+      classification: authoritative
+      owner: ai-world-snapshot-builder
+    implementation:
+      status: declared
+      paths:
+        - src/ai/server.rs
+        - src/ai/core.rs
+      symbols:
+        - WorldSnapshot
+        - WorldView
+        - AiWorldEntity
+        - visible_entities
+
+  - state: pending-arc-bearing-request-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Pending Arc Bearing Request State
+      summary: Host-owned temporary request that biases helm AI steering toward a target until weapons can bear.
+      rationale:
+        - This is an internal coordination state, not a player-authored objective.
+        - Helm AI clears it when the target leaves visibility or some phaser bank arc can already cover the target.
+    architecture:
+      classification: authoritative
+      owner: helm-ai-operator
+      writers:
+        - helm-ai-operator
+    implementation:
+      status: declared
+      paths:
+        - src/ship_plugin.rs
+      symbols:
+        - PendingArcBearingRequest
+
+  - state: docking-motion-intent-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Docking Motion Intent State
+      summary: Docking-specific desired-motion request that may use controlled reverse and lateral translation for close manoeuvres.
+      rationale:
+        - Arc-bearing requests affect desired facing only; they must not ask slow lateral or reverse thrust to drift into a better firing arc.
+        - Docking is the distinct future concern that may legitimately need low-speed lateral and reverse movement, so it receives its own intent now.
+    architecture:
+      classification: authoritative
+      owner: helm-motion-planner
+      readers:
+        - helm-input-arbiter
+        - helm-lateral-thrust-ai-operator
+
+  - component: helm-ai-operator
+    core:
+      status: implemented
+      confidence: inferred
+      title: Helm AI Operator
+      summary: Current authoritative AI helm executor that reads scored objectives and world snapshots, computes steering and avoidance internally, and directly updates motion, cached helm intent, and impulse state.
+      rationale:
+        - Helm AI does not synthesize human helm messages in the shipped code path.
+        - This is a temporary implementation shape relative to the intended design, where fine helm systems should read a shared desired-motion surface and set the same typed actuator inputs a player can set, according to capability.
+    architecture:
+      kind: service
+      authority: authoritative
+      owns:
+        - pending-arc-bearing-request-state
+      reads:
+        - helm-objective-state
+        - world-snapshot-state
+        - authoritative-ship-motion-state
+        - impulse-drive-state
+        - pending-arc-bearing-request-state
+      writes:
+        - authoritative-ship-motion-state
+        - last-helm-input-state
+        - impulse-drive-state
+        - pending-arc-bearing-request-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship_plugin.rs
+        - src/ai/core.rs
+      symbols:
+        - operate_helm_ai
+        - operate_helm
+        - decide_impulse
+        - steer_toward
+      tests:
+        - cargo test
+
+  - component: helm-lateral-thrust-ai-operator
+    core:
+      status: implemented
+      confidence: inferred
+      title: Helm Lateral Thrust AI Operator
+      summary: Current partial-automation helm helper that drives lateral thrust only when that fine system is AI-controlled but main helm remains human-controlled.
+      rationale:
+        - This is distinct from full helm Backfill AI.
+        - It fills the simplified-rating gap where only lateral thrust is automated for obstacle avoidance, but today still recomputes avoidance locally instead of consuming a shared ship-level hazard assessment.
+    architecture:
+      kind: service
+      authority: authoritative
+      reads:
+        - helm-objective-state
+        - world-snapshot-state
+        - authoritative-ship-motion-state
+      writes:
+        - last-helm-input-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship_plugin.rs
+        - src/ai/core.rs
+      symbols:
+        - operate_lateral_thrust_ai
+        - operate_lateral_thrust
+      tests:
+        - cargo test
+
+  - state: helm-actuator-input-state
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Actuator Input State
+      summary: Authoritative per-ship control inputs for engines, steering, lateral thrust, vertical thrust, impulse, and boost, regardless of whether a human or AI selected them.
+      rationale:
+        - AI and human helm operation should converge on the same input surface; downstream physics and actuator systems must not branch on controller identity.
+        - AI derives inputs from objectives, desired motion, docking intent, and hazard assessment, while a player supplies them through admitted commands.
+    architecture:
+      classification: authoritative
+      owner: helm-input-arbiter
+      writers:
+        - host-helm-control-router
+        - helm-input-arbiter
+      readers:
+        - helm-engines-ai-operator
+        - helm-steering-ai-operator
+        - helm-lateral-thrust-ai-operator
+        - helm-vertical-thrust-ai-operator
+
+  - component: helm-engines-ai-operator
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Engines AI Operator
+      summary: Fine-system operator that converts shared actuator input into forward or reverse thrust, slowing for arrival and collision avoidance according to ship capability and sensitivity.
+    architecture:
+      kind: service
+      authority: authoritative
+      reads:
+        - helm-actuator-input-state
+        - hazard-assessment-state
+        - impulse-manoeuvre-policy-state
+      writes:
+        - authoritative-ship-motion-state
+      runs_in:
+        - host-browser-runtime
+
+  - component: helm-steering-ai-operator
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Steering AI Operator
+      summary: Fine-system operator that converts shared actuator input and desired facing into ship rotation, constrained to yaw until a full-3D ship capability enables additional rotational degrees of freedom.
+    architecture:
+      kind: service
+      authority: authoritative
+      reads:
+        - helm-actuator-input-state
+        - desired-motion-state
+        - impulse-manoeuvre-policy-state
+      writes:
+        - authoritative-ship-motion-state
+      runs_in:
+        - host-browser-runtime
+
+  - component: helm-input-arbiter
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Input Arbiter
+      summary: Host-side arbiter that turns player commands or AI-selected motion into the same authoritative actuator-input state before physics applies it.
+    architecture:
+      kind: service
+      authority: authoritative
+      owns:
+        - helm-actuator-input-state
+      reads:
+        - desired-motion-state
+        - docking-motion-intent-state
+        - hazard-assessment-state
+        - impulse-manoeuvre-policy-state
+      runs_in:
+        - host-browser-runtime
+
+  - component: helm-vertical-thrust-ai-operator
+    core:
+      status: proposed
+      confidence: provisional
+      title: Helm Vertical Thrust AI Operator
+      summary: Intended non-player-facing fine-system operator that consumes shared 3D motion intent and applies bounded or full vertical movement for collision avoidance against moving hazards.
+      rationale:
+        - Vertical thrust is a separate fine system even though it is not player-facing yet.
+        - In bounded mode it should support AI-only above-below avoidance and then return toward the authored cruise plane when urgency falls.
+        - This operator should react to moving hazards only, leaving static-obstacle responses to other helm actuators.
+    architecture:
+      kind: service
+      authority: authoritative
+      reads:
+        - desired-motion-state
+        - hazard-assessment-state
+        - vertical-movement-mode-state
+        - authoritative-ship-motion-state
+      writes:
+        - last-helm-input-state
+        - authoritative-ship-motion-state
+      runs_in:
+        - host-browser-runtime
+
+  - component: torpedo-flight-operator
+    core:
+      status: proposed
+      confidence: provisional
+      title: Torpedo Flight Operator
+      summary: Intended projectile-flight operator that should move torpedoes in full 3D once ship vertical separation becomes real simulation truth.
+      rationale:
+        - If ships can diverge in Y for collision avoidance, torpedoes should also navigate and resolve travel in 3D rather than remaining effectively planar.
+    architecture:
+      kind: service
+      authority: authoritative
+      reads:
+        - authoritative-ship-motion-state
+        - world-snapshot-state
+      runs_in:
+        - host-browser-runtime
+
+  - message: helm-input-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Input Command
+      summary: Client-to-host thrust and steering request for the coarse helm system.
+    architecture:
+      authority: request
+      producer:
+        - helm-console-interface
+      consumer:
+        - host-command-admission
+        - host-helm-control-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: helm-input
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - gui/action-map.js
+      messages:
+        - HelmInput
+      tests:
+        - tests/client/action-map.test.js
+        - cargo test
+
+  - message: lateral-thrust-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Lateral Thrust Command
+      summary: Client-to-host sideways-thrust request for the fine helm lateral-thrust system.
+    architecture:
+      authority: request
+      producer:
+        - helm-console-interface
+      consumer:
+        - host-command-admission
+        - host-helm-control-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: lateral-thrust-input
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - gui/action-map.js
+      messages:
+        - LateralThrustInput
+      tests:
+        - tests/client/action-map.test.js
+        - cargo test
+
+  - message: start-impulse-charge-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Start Impulse Charge Command
+      summary: Client-to-host request to begin charging the impulse drive when the ship is not inside an impulse-blocking region.
+    architecture:
+      authority: request
+      producer:
+        - helm-console-interface
+      consumer:
+        - host-command-admission
+        - host-helm-control-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: start-impulse-charge
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - gui/action-map.js
+      messages:
+        - StartImpulseCharge
+      tests:
+        - tests/client/action-map.test.js
+        - cargo test
+
+  - message: cancel-impulse-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Cancel Impulse Command
+      summary: Client-to-host request to cancel a charging or active impulse drive.
+    architecture:
+      authority: request
+      producer:
+        - helm-console-interface
+      consumer:
+        - host-command-admission
+        - host-helm-control-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: cancel-impulse
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - gui/action-map.js
+      messages:
+        - CancelImpulse
+      tests:
+        - tests/client/action-map.test.js
+        - cargo test
+
+  - message: toggle-boost-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Toggle Boost Command
+      summary: Client-to-host request to toggle the boost drive on or off when boost is enabled for the ship.
+    architecture:
+      authority: request
+      producer:
+        - helm-console-interface
+      consumer:
+        - host-command-admission
+        - host-helm-control-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: toggle-boost
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - gui/action-map.js
+      messages:
+        - ToggleBoost
+      tests:
+        - tests/client/action-map.test.js
+        - cargo test
+
+  - message: set-boost-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Set Boost Command
+      summary: Client-to-host hold-style boost command that explicitly activates or deactivates the boost drive.
+    architecture:
+      authority: request
+      producer:
+        - helm-console-interface
+      consumer:
+        - host-command-admission
+        - host-helm-control-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: set-boost
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - gui/action-map.js
+      messages:
+        - SetBoost
+      tests:
+        - tests/client/action-map.test.js
+        - cargo test

@@ -1,0 +1,14 @@
+entities:
+  - system: pasm-runtime
+    core:
+      status: provisional
+      confidence: confirmed
+      title: PASM Runtime
+      summary: Phase 0-2 runtime foundation for loading and validating PASM files.
+      references:
+        - pasm-cli
+  - component: pasm-cli
+    core:
+      status: provisional
+      title: PASM CLI
+      summary: Command-line entry point for validating PASM specs.

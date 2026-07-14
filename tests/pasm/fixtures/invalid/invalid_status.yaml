@@ -1,0 +1,4 @@
+entities:
+  - component: engineering-station
+    core:
+      status: shipped

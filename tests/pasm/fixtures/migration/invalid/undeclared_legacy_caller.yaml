@@ -1,0 +1,76 @@
+entities:
+  - component: invalid-legacy-helm-driver
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Invalid Legacy Helm Driver
+      summary: Legacy direct-write helm helper.
+    architecture:
+      authority: authoritative
+      owns:
+        - invalid-migration-authoritative-state
+      writes:
+        - invalid-migration-authoritative-state
+    implementation:
+      status: declared
+      paths:
+        - fixtures/migration_scan/legacy.js
+      symbols:
+        - oldHelmDriver
+
+  - component: invalid-helm-motion-planner-target
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Invalid Helm Motion Planner Target
+      summary: Target still writes the same state and still calls the legacy helper.
+    architecture:
+      authority: authoritative
+      writes:
+        - invalid-migration-authoritative-state
+    implementation:
+      status: declared
+      paths:
+        - fixtures/migration_scan/target_with_residue.js
+      symbols:
+        - newHelmPlannerWithResidue
+
+  - component: invalid-rogue-caller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Invalid Rogue Caller
+      summary: Unapproved legacy caller.
+    implementation:
+      status: declared
+      paths:
+        - fixtures/migration_scan/rogue.js
+      symbols:
+        - rogueHelmDriverUse
+
+  - state: invalid-migration-authoritative-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Invalid Migration Authoritative State
+      summary: Shared authoritative state for invalid migration tests.
+    architecture:
+      classification: authoritative
+      owner: invalid-legacy-helm-driver
+
+  - migration: invalid-helm-driver-rollout
+    core:
+      status: proposed
+      confidence: provisional
+      title: Invalid Helm Driver Rollout
+      summary: Migration fixture with undeclared callers and overlapping writers.
+    migration_plan:
+      legacy_entities:
+        - invalid-legacy-helm-driver
+      target_entities:
+        - invalid-helm-motion-planner-target
+      legacy_symbols:
+        - oldHelmDriver
+      removal_conditions:
+        - predicate: symbol-does-not-exist
+          subject: oldHelmDriver

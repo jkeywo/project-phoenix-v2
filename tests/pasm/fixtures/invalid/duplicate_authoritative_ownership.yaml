@@ -1,0 +1,21 @@
+entities:
+  - component: owner-a
+    core:
+      status: implemented
+    architecture:
+      authority: authoritative
+      owns:
+        - shared-authoritative-state
+  - component: owner-b
+    core:
+      status: implemented
+    architecture:
+      authority: authoritative
+      owns:
+        - shared-authoritative-state
+  - state: shared-authoritative-state
+    core:
+      status: implemented
+    architecture:
+      classification: authoritative
+      owner: owner-a

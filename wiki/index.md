@@ -67,6 +67,11 @@ Architecture, patterns, processes.
 - **[AI Ship Unification](./concepts/ai-ship-unification.md)** — Unified Ship ECS model; per-kind AI plugins; NPC ships via same Components as player ship; `server.rs` intent-only for helm.
 - **[Console UI Authoring Library](./concepts/console-ui-library.md)** — Per-console HTML pattern + `gui/console-ui.js` shared primitives (reconcileRows, setBtn, setBar, setAutoState, setText, keyedRebuild). Decision record for issue #509.
 - **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
+- **[PASM Runtime](./concepts/pasm-runtime.md)** — Phase 0-6 PASM foundation: typed model, architecture + implementation + migration validation, declared-file observation, and CLI tooling.
+- **[PASM Midpoint Audit](./concepts/pasm-midpoint-audit.md)** — Phase 0-6 exit-criteria review plus repair and helm conformance gaps at the Phase 6 midpoint.
+- **[Damage And Repair Intent](./concepts/damage-and-repair-intent.md)** — Intended information gates and authority handoff for Engineering, station owners, and repair teams.
+- **[Helm Control Intent](./concepts/helm-control-intent.md)** — Human helm commands, authoritative drive state, and the direct-write helm AI path.
+- **[Red Alert Intent](./concepts/red-alert-intent.md)** — Planned explicit Red Alert state-setting, selected Sensors target visibility, and mandatory AI-ship capability.
 
 ## Sources
 
@@ -159,6 +164,7 @@ Open (planned work):
 - **[AGENTS.md](./sources/repo-agents.md)** — Agent operating manual.
 - **[CONTEXT.md](./sources/repo-context.md)** — Domain vocabulary.
 - **[player_ship.toml](./sources/player_ship_toml.md)** — Player ship config (hull, weapons, banks, tubes, stations, …).
+- **[PASM v1.0 Documentation Set](./sources/pasm-docs-v1.md)** — Architecture-first executable-spec design for Project Phoenix and the phased runtime roadmap.
 
 ## Roadmap
 
@@ -170,3 +176,4 @@ Synthesis of where the project is going.
 - **[Combat & Damage](./roadmap/combat-and-damage.md)** — *Shipped/historical.* Combat loop landed and evolved past this plan.
 - **[Data-Driven Content](./roadmap/data-driven-content.md)** — *Shipped/historical.* All gameplay data is TOML now.
 - **[Open Architectural Questions](./roadmap/open-architectural-questions.md)** — Per-console messaging, scenarios.
+- **[PASM Observed Repository Model](./roadmap/pasm-observed-repository-model.md)** — Implemented Phase 5 repository inventory, dependency observation, and direct-edge conformance checks.

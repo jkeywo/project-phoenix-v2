@@ -1,0 +1,100 @@
+entities:
+  - runtime: host-runtime
+    core:
+      status: implemented
+    architecture:
+      kind: runtime
+      authority: authoritative
+  - runtime: client-runtime
+    core:
+      status: implemented
+    architecture:
+      kind: runtime
+      authority: non-authoritative
+  - component: host-sim
+    core:
+      status: implemented
+    architecture:
+      authority: authoritative
+      owns:
+        - authoritative-state
+      runs_in:
+        - host-runtime
+  - state: authoritative-state
+    core:
+      status: implemented
+    architecture:
+      classification: authoritative
+      owner: host-sim
+      writers:
+        - host-sim
+  - component: client-panel
+    core:
+      status: implemented
+    architecture:
+      authority: non-authoritative
+      owns:
+        - local-view-state
+      reads:
+        - replicated-state
+      depends_on:
+        - client-network
+      must_not_depend_on:
+        - host-sim
+      runs_in:
+        - client-runtime
+  - state: local-view-state
+    core:
+      status: implemented
+    architecture:
+      classification: local-view
+      owner: client-panel
+  - component: client-network
+    core:
+      status: implemented
+    architecture:
+      authority: non-authoritative
+      runs_in:
+        - client-runtime
+      sends:
+        - update-command
+  - component: snapshot-publisher
+    core:
+      status: implemented
+    architecture:
+      authority: authoritative
+      owns:
+        - replicated-state
+      reads:
+        - authoritative-state
+      runs_in:
+        - host-runtime
+  - state: replicated-state
+    core:
+      status: implemented
+    architecture:
+      classification: replicated
+      owner: snapshot-publisher
+      derived_from:
+        - authoritative-state
+  - component: command-validator
+    core:
+      status: implemented
+    architecture:
+      authority: authoritative
+      validates:
+        - update-command
+      runs_in:
+        - host-runtime
+  - message: update-command
+    core:
+      status: implemented
+    architecture:
+      authority: request
+      producer:
+        - client-panel
+      consumer:
+        - command-validator
+      validator:
+        - command-validator
+      trust_boundary: client-to-host

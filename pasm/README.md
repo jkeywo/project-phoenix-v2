@@ -1,0 +1,44 @@
+# PASM Foundation
+
+Phase 0-6 of the **Phoenix Architecture & System Model** lives in this top-level `pasm/` Python package.
+
+## Running PASM tests
+
+Use the project-managed Python environment so PASM does not depend on a global Python installation:
+
+```powershell
+uv sync --group dev
+uv run pytest -q
+```
+
+`pasm validate` resolves implementation paths relative to `pasm/spec` by default. For nested fixtures or an external spec root, pass `--workspace-root <path>` explicitly.
+
+- The PASM design docs live beside the authored YAML under [`spec/`](./spec/), making `pasm/` the single canonical package and specification root.
+- Authored PASM YAML lives under [`spec/`](./spec/). The seed files there are intentionally small so `pasm validate` has a real default target.
+- The first parser pass uses **PyYAML**'s composed node tree instead of a custom grammar. That keeps the implementation simple while still preserving source line/column information.
+- The restricted YAML subset currently accepts mappings, sequences, strings, and explicit booleans only. Unknown fields are rejected, anchors and custom tags are rejected.
+- Phase 3 types the `architecture` section and validates ownership, forbidden dependencies, trust-boundary message validation, and non-authoritative ownership of authoritative state. `game_design` is still preserved as raw structured data for later phases.
+- Phase 4 types the `implementation` section and validates declared paths, empty mappings, and missing implementation coverage for shipped entities. `pasm query implementation <id>` shows the declared mapping without needing repository scanning.
+- Phase 5 builds a repository-wide observed model: `pasm scan --json` records the Git revision, Cargo packages, Rust/JS/TS/HTML files, source-located symbols and imports, and resolved local file dependency edges. It keeps the declared-file symbol/message checks as a compatibility layer.
+- PASM derives entity-level conformance only from direct resolvable local file edges with unambiguous PASM ownership. It warns when a declared dependency has no matching direct edge or code introduces an undeclared edge, and errors when an observed edge violates `must_not_depend_on`. Package imports, shared implementation files, and indirect runtime relationships remain inventory evidence rather than pretending to be semantic dependencies.
+- `pasm scan` emits its inventory even when `pasm validate` has findings, while returning the same nonzero exit code so CI and migration work remain honest.
+- `symbols` means top-level Rust items, top-level/exported JavaScript/TypeScript declarations, and HTML `id` attributes. JSON keys like `core_systems` should be recorded via the surrounding builder symbol or a declared message, not as implementation symbols.
+- The first real Phoenix slice is intentionally the shipped **damage ownership + repair flow**, not a fictional diagnosis mechanic. The PASM docs recommend "engineering damage diagnosis", but the current repo surface is closer to authoritative damage state, replicated repair blackboards, and repair-team dispatch, so the authored PASM spec models that truthfully.
+- The second real Phoenix slice is the shipped **helm control + helm AI flow**. PASM models the code as it exists today: human helm uses admitted client-to-host commands, while helm AI reads doctrine/world snapshots and writes authoritative motion plus impulse state directly instead of synthesizing helm commands.
+- Helm capability is ship-specific rather than universal. PASM should treat engines, steering, lateral thrust, vertical thrust, impulse, and boost as authored per-ship capabilities; a ship with no engines is effectively a starbase and should not be special-cased elsewhere.
+- The intended next-step helm architecture is a shared ship-level 3D desired-motion plus hazard-assessment surface, not separate per-subsystem avoidance math. Fine helm systems should consume that shared intent and express it according to their own capabilities and hazard filters.
+- That shared helm contract should include both `desired_velocity_local` and `desired_facing_local`, because arc-bearing and docking concerns can diverge from pure travel direction.
+- The planned vertical movement capability uses `vertical_movement_mode = none | bounded | full_3d`. `bounded` is AI-only above/below avoidance within authored limits; `full_3d` implies six-degree-of-freedom craft.
+- Hazard assessment should publish reusable capability-style facts such as `movable`, `dangerous`, and `size_rating` instead of rigid object categories; subsystems decide how much those facts matter.
+- `helm-vertical-thrust` is intended as a separate fine system even before it becomes player-facing. Its first responsibility is collision avoidance against moving hazards only, while engines and lateral thrust may still respond to static hazards.
+- In bounded vertical mode, ships should drift back toward their authored cruise plane gradually after danger passes.
+- Once ship Y separation becomes real simulation truth, torpedoes should move in full 3D as well.
+- Helm AI is intended to select the same typed actuator inputs as a player, with no human-versus-AI branch after input arbitration. The current direct-write helm AI remains an explicitly temporary implementation shape.
+- Arc-bearing requests control facing, not translational drift. Docking is a separate future motion intent that may legitimately request slow reverse and lateral movement.
+- Impulse steering should use an authored harsh multiplier (standard `0.1`) rather than a total steering lockout; boost is disabled while impulse is active.
+- Central hazard assessment should publish 3D force contributions as well as `movable`, `dangerous`, and `size_rating`. A ship ignores hazards smaller than itself, and each actuator's authored sensitivity to those forces determines its response priority.
+- The Helm shared-motion migration deliberately uses symbol-removal conditions, not a legacy-caller allowlist. Phase 5 observes whole files and cannot attribute references within shared `src/ship_plugin.rs` to individual PASM entities; caller findings there would be noise. The remaining pending removal conditions still expose the real unfinished migration.
+- Phase 6 adds a typed `migration_plan` section on `migration` entities and `pasm query migration <id>`. The initial migration runtime is deliberately narrow: it evaluates fixed removal-condition predicates, checks undeclared legacy callers against observed declared files, flags overlapping legacy/target writers, and reports target-side legacy residue as a heuristic rather than pretending to solve general refactor analysis.
+- The Red Alert design slice records a planned migration from `ToggleRedAlert` to `SetRedAlert { active }`. The explicit desired state is chosen because it is idempotent across retries, duplicates, and stale UI state. The current toggle runtime is intentionally left unchanged until its implementation slice begins.
+- Red Alert target intelligence is deliberately scoped to the selected Sensors radar contact. A target that has no Red Alert capability exposes no alert value; PASM does not require alert markers for every radar blip.
+- Every behaviour-driven AI ship must have an AI-only `red-alert` capability. The intended spawn rule adds it when an NPC author omitted it, while allowing explicit TOML declaration for clarity.

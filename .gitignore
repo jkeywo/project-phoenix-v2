@@ -35,3 +35,14 @@ tests/smoke/playwright-report
 #.idea/
 /.codegraph/daemon.pid
 tests/smoke/test-results-full.json
+
+# Python
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+.venv/
+*.egg-info/
+
+# Distribution / packaging
+.Python

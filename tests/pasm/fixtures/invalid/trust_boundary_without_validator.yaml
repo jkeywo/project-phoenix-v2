@@ -1,0 +1,16 @@
+entities:
+  - component: browser-console
+    core:
+      status: implemented
+  - component: host-receiver
+    core:
+      status: implemented
+  - message: unvalidated-command
+    core:
+      status: implemented
+    architecture:
+      producer:
+        - browser-console
+      consumer:
+        - host-receiver
+      trust_boundary: client-to-host

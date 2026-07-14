@@ -1,0 +1,69 @@
+entities:
+  - component: alpha
+    core:
+      status: implemented
+      confidence: confirmed
+      summary: Rust source with an undeclared local dependency.
+    architecture:
+      depends_on:
+        - beta
+    implementation:
+      status: observed
+      paths:
+        - src/alpha.rs
+
+  - component: beta
+    core:
+      status: implemented
+      confidence: confirmed
+      summary: Declared dependency with no observed direct edge.
+    implementation:
+      status: observed
+      paths:
+        - src/beta.rs
+
+  - component: gamma
+    core:
+      status: implemented
+      confidence: confirmed
+      summary: Observed but undeclared Rust dependency.
+    implementation:
+      status: observed
+      paths:
+        - src/gamma.rs
+
+  - component: web-shell
+    core:
+      status: implemented
+      confidence: confirmed
+      summary: HTML entry point.
+    architecture:
+      depends_on:
+        - web-app
+    implementation:
+      status: observed
+      paths:
+        - ui/page.html
+
+  - component: web-app
+    core:
+      status: implemented
+      confidence: confirmed
+      summary: JavaScript module.
+    architecture:
+      depends_on:
+        - web-helper
+    implementation:
+      status: observed
+      paths:
+        - ui/app.js
+
+  - component: web-helper
+    core:
+      status: implemented
+      confidence: confirmed
+      summary: JavaScript helper module.
+    implementation:
+      status: observed
+      paths:
+        - ui/helper.js

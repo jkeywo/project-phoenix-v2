@@ -1,0 +1,14 @@
+entities:
+  - component: client-owner
+    core:
+      status: implemented
+    architecture:
+      authority: non-authoritative
+      owns:
+        - leaked-authoritative-state
+  - state: leaked-authoritative-state
+    core:
+      status: implemented
+    architecture:
+      classification: authoritative
+      owner: client-owner

@@ -200,7 +200,7 @@ pub fn handle_dispatch_repair_team(
     >,
     teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Some((admitted, _ship_config, mut teams_comp, hull_opt)) = ship_query.iter_mut().next()
+    let Some((admitted, ship_config, mut teams_comp, hull_opt)) = ship_query.iter_mut().next()
     else {
         return;
     };
@@ -230,10 +230,7 @@ pub fn handle_dispatch_repair_team(
             target: repair_target,
         } = &cmd.payload
         {
-            let sid = match repair_target {
-                RepairTarget::Station(station_id) => SystemId(station_id.0.clone()),
-                RepairTarget::Core => SystemId("core".into()),
-            };
+            let sid = resolve_repair_target(repair_target, ship_config, hull_ref);
             let display = display_name_for(&sid);
             pending.push((*team_idx as usize, sid, display));
         }
@@ -257,6 +254,42 @@ pub fn handle_dispatch_repair_team(
     // into the Resource so legacy Resource-based readers see the latest state).
     if let (Some(t), Some(r)) = (teams_comp.as_deref(), teams_res.as_deref_mut()) {
         r.0 = t.0.clone();
+    }
+}
+
+/// Resolve a station-level repair order to a concrete hull system.
+///
+/// The repair console deliberately addresses stations, while repair teams heal
+/// a single `SystemHull` entry. Prefer the most damaged repairable system the
+/// ship configuration assigns to that station. The station-id fallback keeps
+/// older/coarse hull layouts working until they migrate to fine system hulls.
+fn resolve_repair_target(
+    target: &RepairTarget,
+    ship_config: &crate::ship_plugin::ShipConfigComponent,
+    hull: Option<&crate::damage::SystemHull>,
+) -> SystemId {
+    match target {
+        RepairTarget::Core => SystemId("core".into()),
+        RepairTarget::Station(station_id) => {
+            let Some(hull) = hull else {
+                return SystemId(station_id.0.clone());
+            };
+
+            ship_config
+                .0
+                .systems_for_station(station_id)
+                .filter_map(|system| {
+                    let entry = hull.get(&system.id)?;
+                    if entry.current <= 0.0 || entry.current >= entry.max {
+                        return None;
+                    }
+                    let damage_fraction = 1.0 - entry.current / entry.max;
+                    Some((system.id.clone(), damage_fraction))
+                })
+                .max_by(|left, right| left.1.total_cmp(&right.1))
+                .map(|(system_id, _)| system_id)
+                .unwrap_or_else(|| SystemId(station_id.0.clone()))
+        }
     }
 }
 
@@ -612,6 +645,7 @@ mod tests {
         // Spawn the player ship entity so handle_dispatch_repair_team can query it.
         let hull_config = &[
             (SystemId("helm".into()), 25.0_f32),
+            (SystemId("helm-engine-port".into()), 25.0),
             (SystemId("tactical".into()), 25.0),
             (SystemId("power".into()), 25.0),
             (SystemId("shields".into()), 25.0),
@@ -777,6 +811,78 @@ mod tests {
         assert!(
             team_is_travelling(teams, 0),
             "team 0 should be travelling after dispatch"
+        );
+    }
+
+    /// A station dispatch must resolve to an owned fine hull system so a team
+    /// can finish travelling and restore HP instead of immediately returning.
+    #[test]
+    fn station_dispatch_repairs_damaged_owned_fine_system() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        let local_ship = {
+            let mut query = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
+            query
+                .single(app.world())
+                .expect("test fixture must contain one LocalShip")
+        };
+        app.world_mut()
+            .entity_mut(local_ship)
+            .insert(ShipRepairTeams(crate::repair_teams::RepairTeams::default()));
+
+        let damaged_system = SystemId("helm-engine-port".into());
+        let hp_before = 10.0;
+        {
+            let mut query = app.world_mut().query_filtered::<
+                &mut crate::entity_spawner::EntitySystemHull,
+                With<crate::simulation::LocalShip>,
+            >();
+            let mut hull = query
+                .single_mut(app.world_mut())
+                .expect("test fixture must contain one LocalShip hull");
+            hull.0.set_hp(&damaged_system, hp_before);
+        }
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId(REPAIR_SYSTEM_ID.into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
+            },
+        );
+        tick(&mut app);
+
+        {
+            let teams = app.world().resource::<ShipRepairTeams>();
+            let TeamSlot::Travelling { system_id, .. } = &teams.0.slots()[0] else {
+                panic!("team 0 should be travelling to the damaged fine system");
+            };
+            assert_eq!(system_id.as_ref(), Some(&damaged_system));
+        }
+
+        // Default travel time is five seconds and the test clock advances 0.2s
+        // per update. Run long enough to arrive and perform at least one repair.
+        for _ in 0..30 {
+            tick(&mut app);
+        }
+
+        let mut query = app.world_mut().query_filtered::<
+            &crate::entity_spawner::EntitySystemHull,
+            With<crate::simulation::LocalShip>,
+        >();
+        let hull = query
+            .single(app.world())
+            .expect("test fixture must contain one LocalShip hull");
+        assert!(
+            hull.0.current_for(&damaged_system).unwrap() > hp_before,
+            "the arrived team should restore the station-owned fine system"
         );
     }
 

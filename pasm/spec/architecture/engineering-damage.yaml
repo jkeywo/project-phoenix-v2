@@ -1,0 +1,451 @@
+entities:
+  - runtime: host-browser-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Browser Runtime
+      summary: The browser tab that runs the authoritative Phoenix simulation.
+    architecture:
+      kind: runtime
+      authority: authoritative
+
+  - runtime: phone-browser-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Phone Browser Runtime
+      summary: Player phone runtime for the non-authoritative console client.
+    architecture:
+      kind: runtime
+      authority: non-authoritative
+
+  - component: client-network-interface
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Client Network Interface
+      summary: PeerJS/WebRTC client transport for console messages and state snapshots.
+    architecture:
+      kind: adapter
+      authority: non-authoritative
+      runs_in:
+        - phone-browser-runtime
+      sends:
+        - dispatch-repair-team-command
+    implementation:
+      status: declared
+      paths:
+        - client.html
+        - gui/connection-manager.js
+      symbols:
+        - ConnectionManager
+      tests:
+        - tests/client/connection-manager.test.js
+
+  - component: repair-console-interface
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Repair Console Interface
+      summary: Player-facing repair console for aggregate hull, core damage, and on-site team repair work.
+      rationale:
+        - Engineering should not see exact non-core damage details before a team arrives on site.
+        - Engineering should still be able to act proactively based on aggregate cues and crew coordination.
+    architecture:
+      kind: client-interface
+      authority: non-authoritative
+      owns:
+        - repair-ui-state
+      reads:
+        - engineering-aggregate-hull-state
+        - core-damage-detail-state
+        - onsite-repair-detail-state
+        - repair-team-state
+      writes:
+        - repair-ui-state
+      sends:
+        - dispatch-repair-team-command
+        - onsite-repair-priority-command
+      depends_on:
+        - client-network-interface
+      must_not_depend_on:
+        - host-damage-state
+      runs_in:
+        - phone-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - gui/repair-console.html
+        - gui/console-state.js
+        - gui/engineering-console.html
+      symbols:
+        - buildRepairConsoleState
+        - repairCoreAndTargets
+      tests:
+        - tests/client/console-state.test.js
+        - tests/client/repair-button.test.js
+
+  - state: repair-ui-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Repair UI State
+      summary: Local client-only state for the repair console presentation.
+    architecture:
+      classification: local-view
+      owner: repair-console-interface
+    implementation:
+      status: declared
+      paths:
+        - gui/repair-console.html
+        - gui/console-state.js
+
+  - component: host-damage-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Damage State
+      summary: Authoritative per-system hull and damage-tier state on the host simulation.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns:
+        - authoritative-damage-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship/damage.rs
+        - src/entities/spawner.rs
+        - src/ship_plugin.rs
+      symbols:
+        - SystemHull
+        - DamageTier
+        - sync_console_damage_tiers
+      tests:
+        - cargo test
+
+  - state: authoritative-damage-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Authoritative Damage State
+      summary: The host-owned truth for per-system hull, tiers, and repairable damage.
+    architecture:
+      classification: authoritative
+      owner: host-damage-state
+      writers:
+        - host-damage-state
+      replicas:
+        - engineering-aggregate-hull-state
+        - core-damage-detail-state
+        - station-owner-local-damage-state
+        - onsite-repair-detail-state
+    implementation:
+      status: declared
+      paths:
+        - src/ship/damage.rs
+        - src/console/repair/server.rs
+        - src/core/messages.rs
+      symbols:
+        - SystemHull
+        - RepairBlackboard
+
+  - component: host-command-admission
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Command Admission
+      summary: Admission layer that validates incoming system commands before simulation handlers run.
+    architecture:
+      kind: service
+      authority: authoritative
+      validates:
+        - dispatch-repair-team-command
+      consumes:
+        - dispatch-repair-team-command
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/server_app.rs
+      symbols:
+        - AdmissionPlugin
+      tests:
+        - cargo test
+
+  - component: host-repair-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Repair Router
+      summary: Server-side repair handler that routes station-level repair-team dispatches into authoritative ship systems.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      reads:
+        - authoritative-damage-state
+        - repair-team-state
+      consumes:
+        - dispatch-repair-team-command
+        - onsite-repair-priority-command
+      depends_on:
+        - host-command-admission
+      must_not_depend_on:
+        - repair-console-interface
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/console/repair/server.rs
+      symbols:
+        - handle_dispatch_repair_team
+      messages:
+        - DispatchRepairTeam
+      tests:
+        - cargo test
+
+  - component: repair-visibility-publisher
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Repair Visibility Publisher
+      summary: Host publisher that derives the different damage views for Engineering and owning stations.
+      rationale:
+        - Aggregate hull, core detail, owner-local detail, and on-site team detail are different information surfaces.
+        - Team arrival is an information gate for non-core engineering detail.
+    architecture:
+      kind: adapter
+      authority: authoritative
+      reads:
+        - authoritative-damage-state
+        - repair-team-state
+      produces:
+        - engineering-aggregate-hull-state
+        - core-damage-detail-state
+        - station-owner-local-damage-state
+        - onsite-repair-detail-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/console/repair/server.rs
+        - gui/console-state.js
+      symbols:
+        - publish_repair_blackboard
+        - buildRepairConsoleState
+      tests:
+        - tests/client/console-state.test.js
+
+  - component: station-owner-damage-interface
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Station Owner Damage Interface
+      summary: The local station-facing damage surface that shows exact machine state for systems the station owns.
+    architecture:
+      kind: client-interface
+      authority: non-authoritative
+      reads:
+        - station-owner-local-damage-state
+      runs_in:
+        - phone-browser-runtime
+    implementation:
+      status: suspected
+      paths:
+        - gui/console-state.js
+      tests:
+        - tests/client/console-state.test.js
+
+  - component: host-repair-team-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Repair Team State
+      summary: Authoritative host-side repair team travel and assignment state.
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns:
+        - repair-team-state
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/console/repair/server.rs
+        - src/modifiers/repair_teams.rs
+      symbols:
+        - ShipRepairTeams
+        - RepairTeams
+        - tick_repair_teams
+      tests:
+        - cargo test
+
+  - state: repair-team-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Repair Team State
+      summary: The host-owned state for travelling, on-site, and returning repair teams.
+    architecture:
+      classification: authoritative
+      owner: host-repair-team-state
+      writers:
+        - host-repair-team-state
+    implementation:
+      status: declared
+      paths:
+        - src/modifiers/repair_teams.rs
+        - src/console/repair/server.rs
+        - src/core/messages.rs
+      symbols:
+        - TeamSlot
+        - RepairTeams
+
+  - state: engineering-aggregate-hull-state
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Engineering Aggregate Hull State
+      summary: Ship-wide aggregate hull percentage visible to Engineering before any team arrives.
+    architecture:
+      classification: replicated
+      owner: repair-visibility-publisher
+      derived_from:
+        - authoritative-damage-state
+    implementation:
+      status: declared
+      paths:
+        - gui/console-state.js
+      symbols:
+        - overallHull
+        - buildRepairConsoleState
+
+  - state: core-damage-detail-state
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Core Damage Detail State
+      summary: Exact core damage detail visible to Engineering through the dedicated core interface.
+    architecture:
+      classification: replicated
+      owner: repair-visibility-publisher
+      derived_from:
+        - authoritative-damage-state
+    implementation:
+      status: declared
+      paths:
+        - gui/repair-console.html
+        - gui/console-state.js
+      symbols:
+        - buildRepairConsoleState
+        - repairCoreAndTargets
+
+  - state: station-owner-local-damage-state
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Station Owner Local Damage State
+      summary: Exact damage detail for the systems owned by a station.
+    architecture:
+      classification: player-knowledge
+      owner: repair-visibility-publisher
+      derived_from:
+        - authoritative-damage-state
+    implementation:
+      status: suspected
+      paths:
+        - gui/console-state.js
+
+  - state: onsite-repair-detail-state
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: On-Site Repair Detail State
+      summary: Exact non-core damage detail revealed to Engineering only for a station where a repair team is currently on site.
+      rationale:
+        - Team travel is both a repair delay and an information delay.
+        - Recalling a team before arrival should not reveal hidden details.
+    architecture:
+      classification: player-knowledge
+      owner: repair-visibility-publisher
+      derived_from:
+        - authoritative-damage-state
+        - repair-team-state
+    implementation:
+      status: suspected
+      paths:
+        - src/modifiers/repair_teams.rs
+        - gui/console-state.js
+
+  - message: dispatch-repair-team-command
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Dispatch Repair Team Command
+      summary: Client-to-host request to send a repair team to a station-level target or core.
+    architecture:
+      authority: request
+      producer:
+        - repair-console-interface
+      consumer:
+        - host-command-admission
+        - host-repair-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: dispatch-repair-team
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - gui/action-map.js
+        - gui/repair-button.js
+      messages:
+        - DispatchRepairTeam
+      tests:
+        - tests/client/action-map.test.js
+        - tests/client/repair-button.test.js
+
+  - message: onsite-repair-priority-command
+    core:
+      status: proposed
+      confidence: provisional
+      title: On-Site Repair Priority Command
+      summary: Engineering command that prioritizes which internal subsystem a team repairs first after arriving on site.
+      rationale:
+        - Engineering should gain subsystem-level priority authority only after the team reaches the station.
+    architecture:
+      authority: request
+      producer:
+        - repair-console-interface
+      consumer:
+        - host-command-admission
+        - host-repair-router
+      validator:
+        - host-command-admission
+      trust_boundary: client-to-host
+      payload: onsite-repair-priority
+
+  - message: ai-repair-request-signal
+    core:
+      status: accepted
+      confidence: confirmed
+      title: AI Repair Request Signal
+      summary: Advisory level-3 request emitted by AI-owned stations when they want Engineering attention.
+      rationale:
+        - Human stations can ask socially, but AI-owned stations need an explicit in-game request surface.
+        - Requests are advisory and do not become durable workflow state.
+    architecture:
+      authority: advisory
+      producer:
+        - station-owner-damage-interface
+      consumer:
+        - repair-console-interface
+      payload: ai-repair-request

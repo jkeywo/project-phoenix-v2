@@ -1,0 +1,12 @@
+entities:
+  - component: mixed-dependency
+    core:
+      status: implemented
+    architecture:
+      depends_on:
+        - forbidden-target
+      must_not_depend_on:
+        - forbidden-target
+  - component: forbidden-target
+    core:
+      status: implemented

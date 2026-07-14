@@ -1,0 +1,8 @@
+entities:
+  - component: engineering-station
+    core:
+      status: accepted
+      title: Missing quote
+    evidence:
+      - kind: test
+        summary: "unterminated

@@ -183,22 +183,190 @@ fn publish_navigation_blackboard(
     }
 }
 
-// ── AI controller stub ─────────────────────────────────────────────────────────
+// ── AI controller ──────────────────────────────────────────────────────────────
 
 /// Per-entity AI loop for navigation. Loops over ALL ship entities (player and NPC)
 /// where the Navigation system is `ControlSource::Ai`.
 ///
-/// Currently a compile-verified stub — Navigation AI sets waypoints based on
-/// doctrine objectives (deferred to later fine-grained decomposition).
-pub fn operate_navigation_ai(ships: Query<&crate::ship_plugin::ShipSystemControlSources>) {
-    for sources in &ships {
+/// Reads the viewscreen blackboard's `scored_objectives`, picks the top
+/// Helm-relevant objective with `score > 0`, resolves its `AiDirective` to a
+/// world location using a nav-range-filtered entity view, sets the ship's
+/// `NavigationWaypoint` (AI write path), and emits a `NavigateTo` coordination
+/// message to Helm.
+pub fn operate_navigation_ai(
+    mut ships: Query<(
+        Entity,
+        &crate::ship_plugin::ShipSystemControlSources,
+        &crate::server_app::ShipSystemBlackboards,
+        &mut NavigationWaypoint,
+        &crate::ship_state::ShipPhysics,
+        Option<&crate::entity_spawner::EntityUuid>,
+    )>,
+    entities: Query<(&crate::entity_spawner::EntityUuid, &Transform)>,
+    ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut coordination_writer: MessageWriter<crate::ship_plugin::CoordinationEnqueue>,
+) {
+    let all_entities: Vec<(String, [f32; 3])> = entities
+        .iter()
+        .map(|(uuid, transform)| {
+            (
+                uuid.0.clone(),
+                [
+                    transform.translation.x,
+                    transform.translation.y,
+                    transform.translation.z,
+                ],
+            )
+        })
+        .collect();
+
+    let nav_range = ship_client_config
+        .as_ref()
+        .map(|c| c.0.nav_chart_range)
+        .unwrap_or(0.0);
+
+    for (entity, sources, blackboards, mut waypoint, ship_physics, _self_uuid_opt) in
+        ships.iter_mut()
+    {
         let policy = sources
             .0
             .policy_for(&crate::system_registry::navigation_system_id());
         if !policy.operate_ai {
             continue;
         }
-        // TODO: implement navigation AI logic (set waypoints from doctrine objectives)
+
+        let scored: Vec<crate::messages::ScoredObjective> = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+            _ => vec![],
+        };
+
+        let top = scored
+            .iter()
+            .filter(|o| {
+                o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+            })
+            .max_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        let Some(top_obj) = top else {
+            waypoint.0 = None;
+            continue;
+        };
+
+        let ship_pos = [ship_physics.x, 0.0, ship_physics.z];
+        let nav_filtered: Vec<(String, [f32; 3])> = if nav_range > 0.0 && nav_range.is_finite() {
+            all_entities
+                .iter()
+                .filter(|(_, pos)| {
+                    let dx = pos[0] - ship_pos[0];
+                    let dz = pos[2] - ship_pos[2];
+                    (dx * dx + dz * dz).sqrt() <= nav_range
+                })
+                .cloned()
+                .collect()
+        } else {
+            all_entities.clone()
+        };
+
+        match &top_obj.directive {
+            crate::messages::AiDirective::Destroy { target } => {
+                if target.is_empty() {
+                    waypoint.0 = None;
+                    continue;
+                }
+                let found = nav_filtered.iter().find(|(uuid, _)| uuid == target);
+
+                if let Some((_, pos)) = found {
+                    let x = pos[0];
+                    let z = pos[2];
+                    waypoint.0 = Some(WaypointMode::Anchored {
+                        source_uuid: target.clone(),
+                        last_x: x,
+                        last_z: z,
+                    });
+                    coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin: crate::ship::control_source::ControlSource::Ai,
+                        target: crate::system_registry::helm_system_id(),
+                        payload: crate::messages::CoordinationPayload::NavigateTo {
+                            x,
+                            z,
+                            label: top_obj.snapshot.text.clone(),
+                        },
+                        sender_label: "Navigation".into(),
+                    });
+                } else {
+                    waypoint.0 = None;
+                }
+            }
+            crate::messages::AiDirective::Reach { anchor } => {
+                if anchor.is_empty() {
+                    waypoint.0 = None;
+                    continue;
+                }
+                let pos = world_config
+                    .as_ref()
+                    .and_then(|wc| wc.anchors.get(anchor.as_str()).copied());
+
+                if let Some(pos) = pos {
+                    let x = pos[0];
+                    let z = pos[2];
+                    waypoint.0 = Some(WaypointMode::Free { x, z });
+                    coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin: crate::ship::control_source::ControlSource::Ai,
+                        target: crate::system_registry::helm_system_id(),
+                        payload: crate::messages::CoordinationPayload::NavigateTo {
+                            x,
+                            z,
+                            label: top_obj.snapshot.text.clone(),
+                        },
+                        sender_label: "Navigation".into(),
+                    });
+                } else {
+                    waypoint.0 = None;
+                }
+            }
+            crate::messages::AiDirective::Patrol { anchors, .. } => {
+                if anchors.is_empty() {
+                    waypoint.0 = None;
+                    continue;
+                }
+                let anchor_name = &anchors[0];
+                let pos = world_config
+                    .as_ref()
+                    .and_then(|wc| wc.anchors.get(anchor_name.as_str()).copied());
+
+                if let Some(pos) = pos {
+                    let x = pos[0];
+                    let z = pos[2];
+                    waypoint.0 = Some(WaypointMode::Free { x, z });
+                    coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin: crate::ship::control_source::ControlSource::Ai,
+                        target: crate::system_registry::helm_system_id(),
+                        payload: crate::messages::CoordinationPayload::NavigateTo {
+                            x,
+                            z,
+                            label: top_obj.snapshot.text.clone(),
+                        },
+                        sender_label: "Navigation".into(),
+                    });
+                } else {
+                    waypoint.0 = None;
+                }
+            }
+            _ => {
+                waypoint.0 = None;
+            }
+        }
     }
 }
 
@@ -263,6 +431,7 @@ mod tests {
             .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
+            .add_message::<crate::ship_plugin::CoordinationEnqueue>()
             .add_systems(PostUpdate, collect);
         // Spawn the player ship entity so handle_navigation_waypoint can query it.
         app.world_mut().spawn((
@@ -278,6 +447,7 @@ mod tests {
             NavigationWaypoint::default(),
             ShipImpulse(crate::impulse::ImpulseState::new()),
             crate::modifiers::ShipModifiers::new(),
+            crate::ship_state::ShipPhysics::default(),
         ));
         app
     }
@@ -809,6 +979,344 @@ mod tests {
         );
         tick(&mut app);
         assert!(get_nav_waypoint(&mut app).is_none());
+    }
+
+    // ── Helpers for operate_navigation_ai integration tests ────────────────
+
+    fn set_navigation_control_source(
+        app: &mut App,
+        source: crate::ship::control_source::ControlSource,
+    ) {
+        let mut q = app.world_mut().query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+        for mut cs in q.iter_mut(app.world_mut()) {
+            cs.0.set(crate::system_registry::navigation_system_id(), source);
+        }
+    }
+
+    fn inject_viewscreen_objective(
+        app: &mut App,
+        objectives: Vec<crate::messages::ScoredObjective>,
+    ) {
+        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        use crate::server_app::ShipSystemBlackboards;
+
+        let bb = ViewscreenBlackboard {
+            scored_objectives: objectives,
+            ..Default::default()
+        };
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
+        if let Ok(mut bbs) = q.single_mut(app.world_mut()) {
+            bbs.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                SystemBlackboard::Viewscreen(bb),
+            );
+        }
+    }
+
+    fn spawn_test_entity(app: &mut App, uuid: &str, x: f32, z: f32) {
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid.into()),
+            Transform::from_xyz(x, 0.0, z),
+        ));
+    }
+
+    #[derive(Resource, Default)]
+    struct NavCoordCapture(Vec<crate::ship_plugin::CoordinationEnqueue>);
+
+    fn capture_nav_coord(
+        mut reader: MessageReader<crate::ship_plugin::CoordinationEnqueue>,
+        mut capture: ResMut<NavCoordCapture>,
+    ) {
+        for ev in reader.read() {
+            capture.0.push(ev.clone());
+        }
+    }
+
+    fn drain_nav_coord(app: &mut App) -> Vec<crate::ship_plugin::CoordinationEnqueue> {
+        let msgs = app.world().resource::<NavCoordCapture>().0.clone();
+        app.world_mut().resource_mut::<NavCoordCapture>().0.clear();
+        msgs
+    }
+
+    #[test]
+    fn operate_navigation_ai_destroy_sets_anchored_waypoint_and_emits_navigate_to() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        app.init_resource::<NavCoordCapture>()
+            .add_systems(PostUpdate, capture_nav_coord);
+
+        // Insert the entity within nav range (default 500).
+        spawn_test_entity(&mut app, "target-entity", 400.0, 0.0);
+
+        // Inject Destroy objective with score > 0.
+        inject_viewscreen_objective(
+            &mut app,
+            vec![crate::messages::ScoredObjective {
+                id: "destroy-test".into(),
+                score: 80.0,
+                directive: crate::messages::AiDirective::Destroy {
+                    target: "target-entity".into(),
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![
+                    crate::messages::SystemAffinity::Helm,
+                    crate::messages::SystemAffinity::Weapons,
+                ],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "destroy-test".into(),
+                    text: "Destroy target".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec!["target-entity".into()],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            }],
+        );
+
+        tick(&mut app);
+
+        // Check waypoint is set (Anchored).
+        let wp = get_nav_waypoint(&mut app);
+        assert!(
+            matches!(wp, Some(WaypointMode::Anchored { .. })),
+            "expected Anchored waypoint, got {:?}",
+            wp
+        );
+        if let Some(WaypointMode::Anchored {
+            source_uuid,
+            last_x,
+            last_z,
+        }) = wp
+        {
+            assert_eq!(source_uuid, "target-entity");
+            assert!((last_x - 400.0).abs() < 0.01);
+            assert!((last_z - 0.0).abs() < 0.01);
+        }
+
+        // Check NavigateTo was emitted.
+        let coords = drain_nav_coord(&mut app);
+        let nav_to = coords.iter().find(|c| {
+            matches!(
+                &c.payload,
+                crate::messages::CoordinationPayload::NavigateTo { .. }
+            )
+        });
+        assert!(nav_to.is_some(), "expected NavigateTo coordination event");
+    }
+
+    #[test]
+    fn operate_navigation_ai_reach_sets_free_waypoint_and_emits_navigate_to() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        app.init_resource::<NavCoordCapture>()
+            .add_systems(PostUpdate, capture_nav_coord);
+
+        // Insert a WorldConfig with an anchor.
+        let mut wc = crate::world::config::WorldConfig::default();
+        wc.anchors.insert("base".into(), [300.0, 0.0, -100.0]);
+        app.world_mut().insert_resource(wc);
+
+        inject_viewscreen_objective(
+            &mut app,
+            vec![crate::messages::ScoredObjective {
+                id: "reach-test".into(),
+                score: 70.0,
+                directive: crate::messages::AiDirective::Reach {
+                    anchor: "base".into(),
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "reach-test".into(),
+                    text: "Reach base".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            }],
+        );
+
+        tick(&mut app);
+
+        // Check waypoint is Free.
+        let wp = get_nav_waypoint(&mut app);
+        assert_eq!(
+            wp,
+            Some(WaypointMode::Free {
+                x: 300.0,
+                z: -100.0
+            })
+        );
+
+        // Check NavigateTo was emitted.
+        let coords = drain_nav_coord(&mut app);
+        let nav_to = coords.iter().find(|c| {
+            matches!(
+                &c.payload,
+                crate::messages::CoordinationPayload::NavigateTo { .. }
+            )
+        });
+        assert!(nav_to.is_some(), "expected NavigateTo coordination event");
+        if let Some(crate::messages::CoordinationPayload::NavigateTo { x, z, label }) =
+            nav_to.map(|c| &c.payload)
+        {
+            assert!((*x - 300.0).abs() < 0.01);
+            assert!((*z - (-100.0)).abs() < 0.01);
+            assert_eq!(label, "Reach base");
+        }
+    }
+
+    #[test]
+    fn operate_navigation_ai_patrol_sets_free_waypoint() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let mut wc = crate::world::config::WorldConfig::default();
+        wc.anchors.insert("patrol_pt".into(), [200.0, 0.0, 50.0]);
+        app.world_mut().insert_resource(wc);
+
+        inject_viewscreen_objective(
+            &mut app,
+            vec![crate::messages::ScoredObjective {
+                id: "patrol-test".into(),
+                score: 60.0,
+                directive: crate::messages::AiDirective::Patrol {
+                    anchors: vec!["patrol_pt".into()],
+                    loop_path: true,
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "patrol-test".into(),
+                    text: "Patrol area".into(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            }],
+        );
+
+        tick(&mut app);
+
+        let wp = get_nav_waypoint(&mut app);
+        assert_eq!(wp, Some(WaypointMode::Free { x: 200.0, z: 50.0 }));
+    }
+
+    #[test]
+    fn operate_navigation_ai_no_objective_clears_waypoint() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // First set a waypoint to verify it gets cleared.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut NavigationWaypoint, With<crate::server_app::LocalShip>>();
+            if let Ok(mut wp) = q.single_mut(app.world_mut()) {
+                wp.0 = Some(WaypointMode::Free { x: 500.0, z: 500.0 });
+            }
+        }
+        assert!(
+            get_nav_waypoint(&mut app).is_some(),
+            "waypoint must be set before clearing test"
+        );
+
+        // Inject empty scored_objectives.
+        inject_viewscreen_objective(&mut app, vec![]);
+
+        tick(&mut app);
+
+        assert!(
+            get_nav_waypoint(&mut app).is_none(),
+            "waypoint must be cleared when no objective"
+        );
+    }
+
+    #[test]
+    fn operate_navigation_ai_target_out_of_nav_range_skips_waypoint() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // Spawn target beyond default nav_chart_range (500).
+        spawn_test_entity(&mut app, "far-entity", 1000.0, 0.0);
+
+        inject_viewscreen_objective(
+            &mut app,
+            vec![crate::messages::ScoredObjective {
+                id: "destroy-far".into(),
+                score: 80.0,
+                directive: crate::messages::AiDirective::Destroy {
+                    target: "far-entity".into(),
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "destroy-far".into(),
+                    text: "Destroy far target".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec!["far-entity".into()],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            }],
+        );
+
+        tick(&mut app);
+
+        // The target is beyond nav range, so waypoint should be cleared.
+        assert!(
+            get_nav_waypoint(&mut app).is_none(),
+            "waypoint must be None when target is beyond nav range"
+        );
+    }
+
+    #[test]
+    fn operate_navigation_ai_human_controlled_does_not_set_waypoint() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        // Keep Navigation on Human control (default).
+        // set_navigation_control_source is NOT called.
+
+        let mut wc = crate::world::config::WorldConfig::default();
+        wc.anchors.insert("some_anchor".into(), [100.0, 0.0, 0.0]);
+        app.world_mut().insert_resource(wc);
+
+        inject_viewscreen_objective(
+            &mut app,
+            vec![crate::messages::ScoredObjective {
+                id: "reach-human".into(),
+                score: 50.0,
+                directive: crate::messages::AiDirective::Reach {
+                    anchor: "some_anchor".into(),
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "reach-human".into(),
+                    text: "Reach".into(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            }],
+        );
+
+        tick(&mut app);
+
+        assert!(
+            get_nav_waypoint(&mut app).is_none(),
+            "human-controlled navigation must not set waypoints"
+        );
     }
 
     /// Verifies operate_navigation_ai runs per-entity for AI-controlled ships (issue #592 AC).

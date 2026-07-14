@@ -714,6 +714,9 @@ fn operate_helm_ai(
             ..crate::ai::WorldView::default()
         };
 
+        let nav_handoff = behaviour_section
+            .map(|b| b.0.nav_handoff_speed)
+            .unwrap_or(0.6);
         let (thrust, mut steering) = crate::ai::operate_helm(
             &mut ai_memory.0,
             &world_view,
@@ -730,6 +733,7 @@ fn operate_helm_ai(
                 .as_deref()
                 .map(|r| &r.0)
                 .unwrap_or(&crate::faction::FactionRegistry::default()),
+            nav_handoff,
         );
 
         // ── Weapons->Helm arc-bearing request (issue #677) ────────────────────
@@ -1496,6 +1500,9 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
         } => {
             format!("{label} brownout (level {allocated_level})")
         }
+        CoordinationPayload::NavigateTo { label, .. } => {
+            format!("Navigation: steer toward {label}")
+        }
     }
 }
 
@@ -1507,6 +1514,7 @@ pub fn process_coordination_lag(
             &ShipSystemControlSources,
             &mut CoordinationQueue,
             Option<&mut PendingArcBearingRequest>,
+            Option<&mut crate::ai_plugin::ShipAiMemory>,
             Has<LocalShip>,
         ),
         With<crate::server_app::Ship>,
@@ -1516,7 +1524,7 @@ pub fn process_coordination_lag(
     mut chatter_writer: MessageWriter<AiChatterEvent>,
 ) {
     let now = time.elapsed_secs();
-    for (ship_config, control_sources, mut queue, mut pending_bearing, is_local) in
+    for (ship_config, control_sources, mut queue, mut pending_bearing, mut ai_memory, is_local) in
         ship_components.iter_mut()
     {
         let due = queue.0.due_messages(now);
@@ -1543,6 +1551,14 @@ pub fn process_coordination_lag(
                         if let CoordinationPayload::ArcBearingRequest { uuid, .. } = &msg.payload {
                             if let Some(pending) = pending_bearing.as_deref_mut() {
                                 pending.0 = uuid::Uuid::parse_str(uuid).ok();
+                            }
+                        }
+                        // Channel-3 Navigation-to-Helm handoff (issue #681):
+                        // stash the long-range steer target for AI Helm's
+                        // fallthrough in operate_helm.
+                        if let CoordinationPayload::NavigateTo { x, z, .. } = &msg.payload {
+                            if let Some(ai_mem) = ai_memory.as_deref_mut() {
+                                ai_mem.0.nav_goal = Some([*x, *z]);
                             }
                         }
                     }
@@ -3792,6 +3808,7 @@ station = "helm"
             crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &registry,
+            0.6,
         );
         assert!(
             thrust > 0.0,
@@ -3812,6 +3829,7 @@ station = "helm"
             crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &FactionRegistry::default(),
+            0.6,
         );
         assert_eq!(
             thrust_empty, 0.0,

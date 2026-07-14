@@ -1185,6 +1185,8 @@ pub enum CoordinationPayload {
         /// Current allocated level (what the system is actually getting).
         allocated_level: u8,
     },
+    /// Navigation gives Helm a long-range steer-to position (issue #681).
+    NavigateTo { x: f32, z: f32, label: String },
 }
 
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a

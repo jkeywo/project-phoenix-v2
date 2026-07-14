@@ -128,6 +128,12 @@ pub struct AiMemory {
     pub home_position: [f32; 3],
     /// Current index into the active patrol waypoint list.
     pub waypoint_index: usize,
+    /// Channel-3 Navigation-to-Helm handoff steer target (issue #681).
+    /// Set when Navigation AI sends `NavigateTo`; consumed by `operate_helm`
+    /// as a fallthrough when no local Helm-relevant objective resolves.
+    /// Cleared on arrival (`WAYPOINT_ARRIVAL_RADIUS`) or when a local
+    /// objective (Destroy / Patrol / Reach) resolves to a non-None result.
+    pub nav_goal: Option<[f32; 2]>,
 }
 
 // ── WorldView ─────────────────────────────────────────────────────────────────
@@ -402,6 +408,7 @@ pub fn operate_helm(
     avoidance_look_ahead_secs: f32,
     forward_speed: f32,
     faction_registry: &crate::faction::FactionRegistry,
+    nav_handoff_speed: f32,
 ) -> (f32, f32) {
     use crate::messages::{AiDirective, SystemAffinity};
 
@@ -473,9 +480,36 @@ pub fn operate_helm(
             _ => None,
         };
         if let Some(result) = result {
+            // Local objective resolved — clear the nav_goal handoff so the
+            // ship doesn't blend two conflicting targets (issue #681).
+            memory.nav_goal = None;
             return result;
         }
     }
+
+    // Fall through to Channel-3 Navigation handoff (issue #681).
+    // When no Helm-relevant objective resolved and Navigation has given us a
+    // long-range steer target, navigate toward it. This lets a Navigation AI
+    // guide a short-range Helm toward an objective the Helm cannot yet see.
+    if let Some([nx, nz]) = memory.nav_goal {
+        if let Some(result) = helm_navigate_to(
+            memory,
+            world_view,
+            [nx, 0.0, nz],
+            waypoint_arrival_radius,
+            avoidance_buffer,
+            avoidance_look_ahead_secs,
+            forward_speed,
+            nav_handoff_speed,
+        ) {
+            if result == (0.0, 0.0) {
+                memory.nav_goal = None; // arrived
+            }
+            return result;
+        }
+        memory.nav_goal = None; // stale / invalid target
+    }
+
     (0.0, 0.0)
 }
 
@@ -1210,6 +1244,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
         assert!(thrust > 0.0, "should thrust toward waypoint");
     }
@@ -1229,6 +1264,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
         assert_eq!(thrust, 0.0);
         assert_eq!(steering, 0.0);
@@ -1254,6 +1290,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
         assert_eq!(thrust, 0.0, "zero-gated pool must produce no thrust");
         assert_eq!(steering, 0.0);
@@ -1306,6 +1343,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
         assert_eq!(
             memory.waypoint_index, 1,
@@ -1388,6 +1426,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
         assert!(
             thrust > 0.0,
@@ -1475,6 +1514,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
 
         // The Destroy path sets memory.target to the resolved UUID.
@@ -1560,6 +1600,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
         assert!(
             (thrust - target_speed).abs() < 1e-4,
@@ -1600,6 +1641,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
         // At dist=25, t = (25-20)/(30-20) = 0.5 → expected thrust = 0.4
         let expected = target_speed * 0.5;
@@ -1640,6 +1682,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
         assert_eq!(thrust, 0.0, "inside stop_dist: thrust must be 0");
     }
@@ -1678,6 +1721,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
 
         assert_eq!(thrust, 0.0, "inside stop_dist: thrust must be 0");
@@ -1735,6 +1779,7 @@ mod tests {
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
             &empty_registry(),
+            0.6,
         );
 
         assert_eq!(thrust, 0.0);
@@ -2227,5 +2272,249 @@ mod tests {
             40.0,
         );
         assert_eq!(decide_impulse(&input), ImpulseDecision::NoChange);
+    }
+
+    // ── nav_goal (issue #681) ──────────────────────────────────────────────
+
+    /// When no Helm-relevant objective resolves, nav_goal fallthrough should
+    /// steer toward the stored nav_goal position.
+    #[test]
+    fn operate_helm_falls_through_to_nav_goal_when_no_objective() {
+        let mut memory = AiMemory {
+            nav_goal: Some([100.0, 0.0]),
+            ..Default::default()
+        };
+        let world = world_at_origin(); // entities list empty, anchors empty
+        let pool: Vec<crate::messages::ScoredObjective> = vec![];
+        let doctrine = vec![];
+
+        let (thrust, _steering) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+            0.6,
+        );
+        assert!(
+            thrust > 0.0,
+            "nav_goal fallthrough must produce positive thrust"
+        );
+    }
+
+    /// When nav_goal target is reached (within WAYPOINT_ARRIVAL_RADIUS),
+    /// operate_helm should return zero thrust and clear nav_goal.
+    #[test]
+    fn operate_helm_clears_nav_goal_on_arrival() {
+        let mut memory = AiMemory {
+            nav_goal: Some([0.0, -1.0]), // just one unit away (within arrival radius)
+            ..Default::default()
+        };
+        // Ship at origin, target at [0, 0, -1] => dist = 1 < 20 => arrived
+        let world = world_at_origin();
+        let pool = vec![];
+        let doctrine = vec![];
+
+        let (thrust, _steering) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+            0.6,
+        );
+        assert_eq!(thrust, 0.0, "arrived at nav_goal must produce zero thrust");
+        assert!(
+            memory.nav_goal.is_none(),
+            "nav_goal must be cleared on arrival"
+        );
+    }
+
+    /// When a local objective resolves (Patrol with valid anchor), nav_goal
+    /// must be cleared so the ship doesn't blend two conflicting targets.
+    #[test]
+    fn operate_helm_clears_nav_goal_when_local_objective_resolves() {
+        let mut memory = AiMemory {
+            nav_goal: Some([-999.0, -999.0]), // far away (not nav_goal land)
+            ..Default::default()
+        };
+        let world = world_at_origin();
+        let pool = patrol_pool(); // Patrol toward "alpha"
+        let doctrine = patrol_doctrine();
+        let anchors = anchors_with_alpha(); // alpha at [100, 0, 0]
+
+        let (thrust, _) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+            0.6,
+        );
+        assert!(
+            thrust > 0.0,
+            "patrol must produce thrust even when nav_goal is set"
+        );
+        assert!(
+            memory.nav_goal.is_none(),
+            "nav_goal must be cleared when a local objective resolves"
+        );
+    }
+
+    /// End-to-end: when no local Helm objective resolves and Navigation has
+    /// set a nav_goal, operate_helm navigates toward it. Once a visible hostile
+    /// appears with a matching Destroy objective, the helm transitions to
+    /// destroy behaviour (AC #5).
+    #[test]
+    fn operate_helm_transitions_from_nav_goal_to_destroy() {
+        let target_uuid = Uuid::new_v4();
+        let mut memory = AiMemory {
+            nav_goal: Some([200.0, 0.0]),
+            ..Default::default()
+        };
+
+        // Phase 1: empty pool, only nav_goal → navigate toward nav_goal
+        let world_empty = world_at_origin();
+        let empty_pool: Vec<crate::messages::ScoredObjective> = vec![];
+
+        let (thrust1, _) = operate_helm(
+            &mut memory,
+            &world_empty,
+            &empty_pool,
+            &[],
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+            0.6,
+        );
+        assert!(
+            thrust1 > 0.0,
+            "nav_goal fallthrough must produce thrust toward steer target"
+        );
+        assert!(
+            memory.nav_goal.is_some(),
+            "nav_goal must persist when target not yet reached"
+        );
+
+        // Phase 2: hostile entity appears in range with a Destroy objective
+        // → helm switches to destroy, clearing nav_goal.
+        let world_with_hostile = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: target_uuid,
+                name: Some("enemy-hostile".into()),
+                position: [100.0, 0.0, 0.0],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let destroy_pool: Vec<crate::messages::ScoredObjective> =
+            vec![crate::messages::ScoredObjective {
+                id: "destroy-hostile".into(),
+                score: 90.0,
+                directive: crate::messages::AiDirective::Destroy {
+                    target: "enemy-hostile".into(),
+                },
+                source: crate::messages::ObjectiveSource::Doctrine,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "destroy-hostile".into(),
+                    text: "Destroy hostile".into(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec!["enemy-hostile".into()],
+                    source: crate::messages::ObjectiveSource::Doctrine,
+                },
+            }];
+        let destroy_doctrine = vec![crate::entity_config::DoctrineObjective {
+            id: "destroy-hostile".into(),
+            text: "Destroy hostile".into(),
+            directive_kind: Some("Destroy".into()),
+            base_priority: 90.0,
+            target_speed: 0.9,
+            maintain_range: 25.0,
+            ..Default::default()
+        }];
+
+        let (thrust2, _) = operate_helm(
+            &mut memory,
+            &world_with_hostile,
+            &destroy_pool,
+            &destroy_doctrine,
+            &std::collections::HashMap::new(),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+            0.6,
+        );
+
+        assert!(
+            thrust2 > 0.0,
+            "resolved Destroy must produce thrust toward hostile"
+        );
+        assert!(
+            memory.nav_goal.is_none(),
+            "nav_goal must be cleared when local Destroy objective resolves"
+        );
+        assert_eq!(
+            memory.target,
+            Some(target_uuid),
+            "memory.target must be set to the hostile entity"
+        );
+    }
+
+    /// When a local objective exists but fails to resolve (e.g. Destroy with
+    /// target not in world view), operate_helm should fall through to nav_goal.
+    #[test]
+    fn operate_helm_falls_through_unresolvable_destroy_to_nav_goal() {
+        let mut memory = AiMemory {
+            nav_goal: Some([100.0, 0.0]),
+            ..Default::default()
+        };
+        let world = world_at_origin(); // no entities -> Destroy unresolvable
+        let pool = destroy_then_patrol_pool(&std::collections::HashMap::new());
+        // destroy_then_patrol_pool has Destroy (score 90, unresolvable), Patrol (score 30, resolvable)
+        // but we pass empty anchors, so Patrol also unresolvable => fall through to nav_goal
+
+        let (thrust, _steering) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &[],
+            &std::collections::HashMap::new(), // no anchors -> Patrol also unresolvable
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+            0.6,
+        );
+        assert!(
+            thrust > 0.0,
+            "must fall through to nav_goal when no objective resolves"
+        );
     }
 }

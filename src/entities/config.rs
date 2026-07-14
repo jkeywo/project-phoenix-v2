@@ -102,6 +102,11 @@ pub struct BehaviourConfig {
     /// Defaults to [`crate::ai::AVOIDANCE_LOOK_AHEAD_SECS`] when absent.
     #[serde(default = "default_avoidance_look_ahead_secs")]
     pub avoidance_look_ahead_secs: f32,
+    /// Speed fraction [0, 1] for the Channel-3 Navigation→Helm handoff
+    /// fallthrough (nav_goal), used when no local Helm-relevant objective
+    /// resolves but Navigation has given a long-range steer target.
+    #[serde(default = "default_nav_handoff_speed")]
+    pub nav_handoff_speed: f32,
 }
 
 fn default_waypoint_arrival_radius() -> f32 {
@@ -110,6 +115,10 @@ fn default_waypoint_arrival_radius() -> f32 {
 
 fn default_avoidance_buffer() -> f32 {
     crate::ai::AVOIDANCE_BUFFER
+}
+
+fn default_nav_handoff_speed() -> f32 {
+    0.6
 }
 
 fn default_avoidance_look_ahead_secs() -> f32 {

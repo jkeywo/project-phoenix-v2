@@ -163,6 +163,24 @@ pub struct ShipAiMemory(pub AiMemory);
 #[derive(Component, Default)]
 pub struct AiControllerComponent;
 
+/// Marker component: entity is eligible for high-fidelity AI simulation.
+/// Entities without this marker run at reduced simulation fidelity.
+#[derive(Component)]
+pub struct AiHighFidelity;
+
+/// AI personality and capability profile for NPC entities.
+#[derive(Component, Clone, Debug)]
+pub struct AiProfile {
+    pub aggression: f32,
+    pub sensor_range: f32,
+}
+
+/// Tracks time since last LOD state transition for dwell-based demotion.
+#[derive(Component, Clone, Debug)]
+pub struct LodTransitionTimer {
+    pub last_state_change_secs: f64,
+}
+
 /// Marker component set on NPC entities currently in a warp-out sequence.
 /// Carries the data needed to draw the warp-exit visual and to populate
 /// `EntitySnapshot::warp_out_remaining_secs` in the broadcast.

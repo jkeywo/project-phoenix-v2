@@ -1,5 +1,6 @@
 pub mod core;
 pub mod faction;
+pub mod lod;
 pub mod server;
 
 pub use core::{

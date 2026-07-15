@@ -2052,6 +2052,7 @@ fn spawn_game_start_entities(
                 .entity(spawned)
                 .insert(Ship)
                 .insert(LocalShip)
+                .insert(crate::ai_plugin::AiHighFidelity)
                 .insert(ShipSystemBlackboards::default())
                 .insert(ship_config)
                 .insert(initial_control_sources)

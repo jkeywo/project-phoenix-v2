@@ -3145,7 +3145,7 @@ position = [0.5, -0.1, 0.25]
                 thrust_command(),
                 crate::ship_plugin::ShipSystemControlSources::default(),
                 crate::ship_plugin::LastHelmInput::default(),
-                // `integrate_helm_physics` (issue #695) is scoped to
+                // `integrate_ship_physics` (issue #695) is scoped to
                 // `AiHighFidelity` — add the marker + helm intent
                 // components so `process_helm_inputs` -> physics still
                 // moves this ship, matching pre-#695 behavior.
@@ -3202,7 +3202,7 @@ position = [0.5, -0.1, 0.25]
                 thrust_command(),
                 crate::ship_plugin::ShipSystemControlSources::default(),
                 crate::ship_plugin::LastHelmInput::default(),
-                // `integrate_helm_physics` (issue #695) is scoped to
+                // `integrate_ship_physics` (issue #695) is scoped to
                 // `AiHighFidelity` — add the marker + helm intent
                 // components so `process_helm_inputs` -> physics still
                 // moves this ship, matching pre-#695 behavior.

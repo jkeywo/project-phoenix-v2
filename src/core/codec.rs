@@ -49,6 +49,20 @@ pub fn encode_console_state<T: serde::Serialize>(s: &T) -> Result<String, serde_
     serde_json::to_string(s)
 }
 
+/// Encode the merged ship + world audio config for `__audioConfig`. Sent once
+/// on game start; JS builds its `<audio>` elements and Web Audio graph from it.
+pub fn encode_audio_config(
+    p: &crate::audio_config::AudioConfigPayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(p)
+}
+
+/// Encode a one-shot positional audio cue for `__audioCue`. Coordinates are
+/// listener-relative — see `audio_config::listener_relative`.
+pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, serde_json::Error> {
+    serde_json::to_string(c)
+}
+
 /// Decode a `window.__sendAction` envelope into a typed `UiAction`. The
 /// envelope's extra `console` field is ignored by serde.
 pub fn decode_ui_action(s: &str) -> Result<crate::messages::UiAction, serde_json::Error> {
@@ -1810,6 +1824,7 @@ mod tests {
             condition: "ALERT".into(),
             red_alert: true,
             engine_thrust: 0.0,
+            phaser_firing: true,
             game_over_message: None,
         };
         let json = encode_hud_state(&state).expect("encode hud");
@@ -1825,6 +1840,7 @@ mod tests {
             condition: "NOMINAL".into(),
             red_alert: false,
             engine_thrust: 0.0,
+            phaser_firing: false,
             game_over_message: None,
         };
         let json = encode_hud_state(&state).expect("encode hud");

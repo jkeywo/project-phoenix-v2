@@ -272,8 +272,9 @@ impl Plugin for ShipPlugin {
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
                 handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
                 handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
-                // Shared physics-integration step (issue #695): reads the
-                // intent components written by `process_helm_inputs`
+                // Sole helm-path writer of ShipPhysics (issues #695, #699):
+                // reads the intent components written by
+                // `process_helm_inputs`
                 // (human/admission) and `operate_helm_ai` (AI decision),
                 // plus the post-transition `ShipImpulse`/`ShipBoost` state
                 // applied by `apply_helm_commands`, then performs the
@@ -283,7 +284,7 @@ impl Plugin for ShipPlugin {
                 // `tick_impulse` so it reads this tick's freshly-ticked
                 // impulse phase, mirroring the old fused
                 // `process_helm_inputs` ordering.
-                integrate_helm_physics
+                integrate_ship_physics
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(operate_helm_ai)
                     .after(process_helm_inputs)
@@ -294,7 +295,7 @@ impl Plugin for ShipPlugin {
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(process_helm_inputs)
                     .after(operate_helm_ai)
-                    .after(integrate_helm_physics),
+                    .after(integrate_ship_physics),
                 handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
                 handle_coordination_enqueue.in_set(crate::sim_sets::SimSet::Input),
                 handle_coordination_messages.in_set(crate::sim_sets::SimSet::Input),
@@ -304,6 +305,15 @@ impl Plugin for ShipPlugin {
             )
                 .after(crate::lobby::process_lobby),
         );
+
+        // Debug-only helm-path single-writer tripwire (issue #699). The frame
+        // stamp is bumped once in `First` so every writer in a given frame
+        // observes the same value; `integrate_ship_physics` stamps each ship
+        // it integrates and panics if that ship was already stamped this
+        // frame. Compiled out entirely in release builds.
+        #[cfg(debug_assertions)]
+        app.init_resource::<crate::ship::helm::HelmPhysicsFrame>()
+            .add_systems(First, crate::ship::helm::tick_helm_physics_frame);
     }
 }
 
@@ -313,7 +323,7 @@ impl Plugin for ShipPlugin {
 /// `LastHelmInput` (kept for broadcast/back-compat consumers) and the
 /// shared `ThrustInput`/`SteeringInput`/`LateralThrustInput` intent
 /// components. Physics integration itself now lives in
-/// `integrate_helm_physics`, which reads those intent components for both
+/// `integrate_ship_physics`, which reads those intent components for both
 /// the player ship and any AI-promoted NPC.
 fn process_helm_inputs(
     time: Res<Time>,
@@ -406,9 +416,13 @@ fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy 
 ///  - Reads `ShipSystemBlackboards` viewscreen entry for scored objectives.
 ///  - Builds a `WorldView` from `WorldSnapshot` (all other entities for avoidance),
 ///    falling back to a direct ECS query when `WorldSnapshot` is absent (tests).
-///  - Calls `operate_helm(memory, ...)` and writes the result to `ShipPhysics`.
+///  - Calls `operate_helm(memory, ...)` and writes the result to the shared
+///    `ThrustInput`/`SteeringInput`/`LateralThrustInput` intent components —
+///    the same ones the admitted human path writes. It takes `&ShipPhysics`
+///    **read-only** and never advances physics itself; `integrate_ship_physics`
+///    is the sole helm-path writer (issues #695, #699).
 ///  - For `LocalShip` entities: also writes to `LastHelmInput` so
-///    `process_helm_inputs` applies the correct physics this tick.
+///    broadcast/back-compat consumers see the AI's decision.
 ///  - For NPC ships with `AiControllerComponent`: also updates `last_helm_intent`
 ///    for backward compatibility until `tick_ai_controllers` is retired (#595).
 ///
@@ -539,7 +553,7 @@ fn operate_helm_ai(
         if !has_helm_objective {
             // No objectives → zero out intent (decelerate to stop). Written
             // for every AiHighFidelity ship (not just the player) so the
-            // shared `integrate_helm_physics` step decelerates it via the
+            // shared `integrate_ship_physics` step decelerates it via the
             // normal physics curve instead of coasting on a stale intent.
             thrust_in.0 = 0.0;
             steering_in.0 = 0.0;
@@ -684,7 +698,7 @@ fn operate_helm_ai(
 
         // ── Write intent components ────────────────────────────────────────────
         // Physics integration itself now happens in the shared
-        // `integrate_helm_physics` system, which reads these intent
+        // `integrate_ship_physics` system, which reads these intent
         // components for both the player ship and any AI-promoted NPC.
         thrust_in.0 = thrust;
         steering_in.0 = steering;
@@ -965,7 +979,7 @@ fn operate_lateral_thrust_ai(
             }
         }
         // Write the shared intent component too, for whichever ship this is
-        // (local or NPC), so `integrate_helm_physics` sees the AI-driven
+        // (local or NPC), so `integrate_ship_physics` sees the AI-driven
         // lateral value. Guarded: only present while `AiHighFidelity`.
         if let Some(mut intent) = lateral_intent {
             intent.0 = lateral;
@@ -1076,7 +1090,7 @@ fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
 /// Admission-only (issue #695): turns hull-damage auto-cancel and admitted
 /// `StartImpulseCharge`/`CancelImpulse` messages into an `ImpulseCommand`
 /// intent, rather than mutating `ShipImpulse` directly. The shared
-/// `integrate_helm_physics` system applies the actual `start_charge`/
+/// `integrate_ship_physics` system applies the actual `start_charge`/
 /// `cancel_charge` transition. Only writes the intent when something
 /// actually happened this tick (hull damage or an admitted command) —
 /// otherwise leaves the persisted intent alone, mirroring the old
@@ -1153,7 +1167,7 @@ fn tick_impulse(
 /// Admission-only (issue #695): turns admitted `ToggleBoost`/`SetBoost`
 /// messages into a `BoostCommand` intent (the desired active state),
 /// rather than mutating `ShipBoost` directly. The shared
-/// `integrate_helm_physics` system applies the actual `activate`/
+/// `integrate_ship_physics` system applies the actual `activate`/
 /// `deactivate` transition (which itself enforces the battery-empty guard,
 /// same as the old direct `toggle()`/`activate()` calls did). No-op when
 /// the feature is disabled for this ship, matching the old behavior.
@@ -1267,7 +1281,7 @@ fn is_inside_blocks_impulse(
 }
 
 /// Applies commanded impulse/boost phase transitions (issue #695), split
-/// out from `integrate_helm_physics` so it can run *before*
+/// out from `integrate_ship_physics` so it can run *before*
 /// `process_helm_inputs` — whose stale-input edge-detection needs to
 /// observe this tick's freshly-transitioned `ShipImpulse.phase`, not last
 /// tick's (the old fused `process_helm_inputs` mutated `ShipImpulse` via
@@ -1331,30 +1345,46 @@ fn apply_helm_commands(
     }
 }
 
-/// Shared physics-integration step (issue #695). Reads the
-/// `ThrustInput`/`SteeringInput`/`LateralThrustInput` intent components —
-/// written this tick by whichever of `process_helm_inputs` (human
-/// admission) or `operate_helm_ai` (AI decision) is authoritative for a
-/// given ship's helm, per the existing `ControlTickPolicy` mutual-exclusion
+/// Sole writer of the helm path into `ShipPhysics` (issue #699; extracted
+/// from the old fused `process_helm_inputs` monolith by issue #695).
+///
+/// Reads the `ThrustInput`/`SteeringInput`/`LateralThrustInput` intent
+/// components — written this tick by whichever of `process_helm_inputs`
+/// (human admission) or `operate_helm_ai` (AI decision) is authoritative for
+/// a given ship's helm, per the existing `ControlTickPolicy` mutual-exclusion
 /// gate — plus the post-transition `ShipImpulse`/`ShipBoost` state applied
 /// by `apply_helm_commands`, and performs the actual physics integration.
 /// Runs for both the player ship and any AI-promoted NPC (anything
 /// carrying `AiHighFidelity`, which is exactly the set of ships carrying
-/// these intent components).
+/// these intent components). Human and AI helm therefore share one
+/// integrator and produce identical trajectories from identical intent —
+/// nothing below this point branches on human-vs-AI.
 ///
-/// Mirrors the physics tail that used to live in `process_helm_inputs`:
-/// engine-damage thrust scaling, impulse autopilot override + acceleration
-/// boost, boost-drive speed/steering multiplier, then `compute_physics`.
+/// Concerns handled here, in order:
+///  - impulse autopilot override (forces thrust=1, steering=0, lateral=0),
+///  - engine-damage thrust scaling (issue #511),
+///  - impulse acceleration multiplier,
+///  - boost-drive speed/acceleration/steering multiplier,
+///  - exactly one `compute_physics` call per ship per frame,
+///  - visual banking/roll lerp.
+///
 /// Visual banking/roll is preserved as LocalShip-only, exactly as before —
 /// `operate_helm_ai` never applied roll to NPCs, and this system doesn't
 /// start doing so either.
+///
+/// This system is the only *helm-path* writer of
+/// `ShipPhysics.x/z/yaw/forward_speed/lateral_speed/roll`, enforced in debug
+/// builds by `HelmPhysicsWriteGuard`. It is not the only writer of those
+/// fields overall — see the sanctioned-exception table on `ShipPhysics`
+/// (`src/ship/state.rs`) for the four out-of-band writers.
 #[allow(clippy::too_many_arguments)]
-fn integrate_helm_physics(
+fn integrate_ship_physics(
     time: Res<Time>,
     physics_cfg_res: Option<Res<ShipPhysicsConfigResource>>,
     bank_cfg_res: Option<Res<BankConfigResource>>,
     mut ships: Query<
         (
+            Entity,
             Has<LocalShip>,
             &ShipSystemControlSources,
             &mut ShipPhysics,
@@ -1370,10 +1400,16 @@ fn integrate_helm_physics(
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
+    #[cfg(debug_assertions)] frame: Res<crate::ship::helm::HelmPhysicsFrame>,
+    #[cfg(debug_assertions)] mut guard_q: Query<&mut crate::ship::helm::HelmPhysicsWriteGuard>,
+    #[cfg(debug_assertions)] mut commands: Commands,
 ) {
     let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
 
     for (
+        // Only read by the debug-only write tracker below; underscored so
+        // release builds need no blanket `allow(unused_variables)`.
+        _entity,
         is_local,
         sources,
         mut physics,
@@ -1388,6 +1424,21 @@ fn integrate_helm_physics(
         (impulse, boost),
     ) in ships.iter_mut()
     {
+        // Debug-only single-writer tripwire (issue #699). Self-healing: ships
+        // that lack a guard get one, so promotion/demotion needs no bookkeeping.
+        #[cfg(debug_assertions)]
+        {
+            let entity = _entity;
+            match guard_q.get_mut(entity) {
+                Ok(mut guard) => guard.record_write(entity, "integrate_ship_physics", frame.0),
+                Err(_) => {
+                    let mut guard = crate::ship::helm::HelmPhysicsWriteGuard::default();
+                    guard.record_write(entity, "integrate_ship_physics", frame.0);
+                    commands.entity(entity).insert(guard);
+                }
+            }
+        }
+
         let default_modifiers;
         let modifiers: &ShipModifiers = match modifiers {
             Some(m) => m,
@@ -2663,6 +2714,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             sensors_console: None,
             navigation_console: None,
@@ -4503,20 +4555,17 @@ station = "helm"
     }
 
     /// When helm is under AI control (`operate_ai = true`), `process_helm_inputs`
-    /// must NOT apply a second physics integration step.
+    /// must NOT admit stale human input over the AI's decision.
     ///
-    /// `operate_helm_ai` already runs `compute_physics` and writes the result
-    /// into `ShipPhysics` every Bevy frame.  If `process_helm_inputs` then runs
-    /// `compute_physics` again using the updated state as its starting point
-    /// (with a *different* fixed dt of 1/30 s), the player ship ends up moving
-    /// ~3× faster than intended relative to NPC ships that are only driven by
-    /// `operate_helm_ai`.
-    ///
-    /// Regression guard: set helm to AI, write a non-zero intent into
-    /// `LastHelmInput`, tick the app, and assert that `ShipPhysics.x` does NOT
-    /// advance by more than one single `operate_helm_ai` step.
+    /// Post-#695 `process_helm_inputs` no longer integrates physics at all —
+    /// `integrate_ship_physics` is the sole helm-path writer. What this test
+    /// pins is the *admission* skip: with helm AI-controlled, a stale non-zero
+    /// `LastHelmInput` must not reach the intent components and therefore must
+    /// not move the ship. (Before #695 this same setup guarded against a second
+    /// `compute_physics` call at a different dt, which made the player ship
+    /// move ~3× faster than AI-driven NPCs.)
     #[test]
-    fn process_helm_inputs_skips_physics_when_helm_is_ai_controlled() {
+    fn ai_controlled_helm_does_not_admit_stale_human_input() {
         let mut app = test_app();
         set_helm_control_source(&mut app, ControlSource::Ai);
 
@@ -4539,17 +4588,278 @@ station = "helm"
         let after = get_ship_physics(&mut app);
 
         // operate_helm_ai has no objectives in this test (blackboard empty), so
-        // it zeros out LastHelmInput and skips to `continue` — physics stays put.
-        // If process_helm_inputs fired anyway it would have used the stale
-        // thrust=1.0 from before the tick and moved the ship.
+        // it zeros the intent components. If process_helm_inputs admitted the
+        // stale thrust=1.0 anyway, integrate_ship_physics would have moved the
+        // ship.
         assert_eq!(
             after.x, before.x,
             "ShipPhysics.x must not advance when helm is AI-controlled: \
-             process_helm_inputs must skip physics integration"
+             process_helm_inputs must skip admission"
         );
         assert_eq!(
             after.forward_speed, before.forward_speed,
-            "forward_speed must not change when process_helm_inputs skips physics"
+            "forward_speed must not change when process_helm_inputs skips admission"
+        );
+    }
+
+    // ── integrate_ship_physics single-writer tests (issue #699) ───────────────
+
+    /// Minimal app exercising `integrate_ship_physics` in isolation, with the
+    /// debug helm write-tracker wired up exactly as `ShipPlugin` wires it.
+    ///
+    /// Deliberately excludes `process_helm_inputs`/`operate_helm_ai` so a test
+    /// can seed the intent components directly and observe what the integrator
+    /// alone does with them — which is the whole point of the #695/#699 split.
+    fn integrator_only_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin).insert_resource(
+            bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_millis(200)),
+        );
+        #[cfg(debug_assertions)]
+        app.init_resource::<crate::ship::helm::HelmPhysicsFrame>()
+            .add_systems(First, crate::ship::helm::tick_helm_physics_frame);
+        app.add_systems(Update, integrate_ship_physics);
+        app
+    }
+
+    /// Spawn a ship into `integrator_only_app` with the given helm control
+    /// source and intent, optionally as the `LocalShip`.
+    fn spawn_integrator_ship(
+        app: &mut App,
+        source: ControlSource,
+        is_local: bool,
+        thrust: f32,
+        steering: f32,
+        lateral: f32,
+    ) -> Entity {
+        let mut sources = ShipSystemControlSources::default();
+        sources
+            .0
+            .set(crate::system_registry::helm_system_id(), source);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Ship,
+                sources,
+                ShipPhysics::default(),
+                crate::ai_plugin::AiHighFidelity,
+                ThrustInput(thrust),
+                SteeringInput(steering),
+                LateralThrustInput(lateral),
+            ))
+            .id();
+        if is_local {
+            app.world_mut().entity_mut(entity).insert(LocalShip);
+        }
+        entity
+    }
+
+    fn physics_of(app: &mut App, entity: Entity) -> ShipPhysics {
+        *app.world().entity(entity).get::<ShipPhysics>().unwrap()
+    }
+
+    /// AC: `integrate_ship_physics` is the sole helm-path writer of
+    /// `ShipPhysics`, observed through the debug write-tracker.
+    ///
+    /// After a tick, every high-fidelity ship must be stamped, and stamped by
+    /// `integrate_ship_physics` — no other system claimed the helm write.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn integrate_ship_physics_is_sole_helm_writer() {
+        let mut app = integrator_only_app();
+        let ship = spawn_integrator_ship(&mut app, ControlSource::Human, true, 1.0, 0.0, 0.0);
+
+        // Several ticks: the tracker must not trip, and the stamp must track
+        // the frame counter rather than going stale.
+        for _ in 0..5 {
+            tick(&mut app);
+            let frame = app
+                .world()
+                .resource::<crate::ship::helm::HelmPhysicsFrame>()
+                .0;
+            let guard = app
+                .world()
+                .entity(ship)
+                .get::<crate::ship::helm::HelmPhysicsWriteGuard>()
+                .expect("integrate_ship_physics must self-heal a write guard onto every ship");
+            assert_eq!(
+                guard.last_write(),
+                Some((frame, "integrate_ship_physics")),
+                "integrate_ship_physics must be the sole helm-path writer of ShipPhysics"
+            );
+        }
+
+        // Sanity: the ship actually moved, so the tracker was tracking a real
+        // integration rather than a no-op.
+        assert!(
+            physics_of(&mut app, ship).forward_speed > 0.0,
+            "ship must have actually been integrated"
+        );
+    }
+
+    /// The write-tracker must actually bite: if some other writer stamps the
+    /// ship for the frame `integrate_ship_physics` is about to run, the
+    /// integrator panics rather than silently double-integrating.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "single-writer violation")]
+    fn write_tracker_panics_when_a_second_helm_writer_claims_the_same_frame() {
+        let mut app = integrator_only_app();
+        let ship = spawn_integrator_ship(&mut app, ControlSource::Human, true, 1.0, 0.0, 0.0);
+        tick(&mut app);
+
+        // Impersonate a second helm-path writer claiming the *next* frame
+        // (the frame counter is bumped in `First`, before the integrator runs).
+        let next_frame = app
+            .world()
+            .resource::<crate::ship::helm::HelmPhysicsFrame>()
+            .0
+            + 1;
+        {
+            let mut ship_mut = app.world_mut().entity_mut(ship);
+            let mut guard = ship_mut
+                .get_mut::<crate::ship::helm::HelmPhysicsWriteGuard>()
+                .unwrap();
+            guard.record_write(ship, "some_future_helm_system", next_frame);
+        }
+
+        tick(&mut app);
+    }
+
+    /// AC: AI helm and human helm produce identical trajectories given
+    /// equivalent inputs.
+    ///
+    /// Post-#695 both paths converge on the same intent components, and
+    /// `integrate_ship_physics` is the only thing downstream of them. This pins
+    /// that the integrator does not branch on human-vs-AI: two ships whose helm
+    /// `ControlSource` differs, but whose intent is identical, must trace the
+    /// same path. (Set up via `integrator_only_app` so the two *deciders* are
+    /// out of the picture — this is specifically about the shared integrator.)
+    #[test]
+    fn ai_and_human_helm_produce_identical_trajectories() {
+        let mut app = integrator_only_app();
+        // Non-trivial intent: thrust + steering + strafe, so any human-vs-AI
+        // branch anywhere in the integrator would show up as divergence.
+        const THRUST: f32 = 0.8;
+        // Sized so `acceleration * dt` (≈6.7/tick at the `HELM_AI_MAX_DT_SECS`
+        // cap) carries the ship past `THRUST * TEST_MAX_SPEED` = 16.0 well
+        // inside the loop below.
+        const TEST_MAX_SPEED: f32 = 20.0;
+        const TEST_ACCELERATION: f32 = 200.0;
+        let human = spawn_integrator_ship(&mut app, ControlSource::Human, false, THRUST, 0.6, -0.4);
+        let ai = spawn_integrator_ship(&mut app, ControlSource::Ai, false, THRUST, 0.6, -0.4);
+
+        // `compute_physics` is acceleration-rate-limited: while
+        // `|target - forward_speed| > acceleration * dt` the per-tick delta is
+        // exactly `acceleration * dt` *regardless of thrust magnitude*, so any
+        // thrust divergence between the two ships is invisible. With the stock
+        // config and `dt` capped at `HELM_AI_MAX_DT_SECS`, neither ship escapes
+        // that regime within a short test — which made this test blind to
+        // thrust. Give both ships an identical high-acceleration config so
+        // `forward_speed` reaches its thrust-proportional target within a few
+        // ticks and thrust becomes observable. Test setup, not gameplay tuning.
+        let test_cfg = ShipPhysicsConfigResource(ShipPhysicsConfig {
+            max_speed: TEST_MAX_SPEED,
+            acceleration: TEST_ACCELERATION,
+            ..ShipPhysicsConfig::new()
+        });
+        for e in [human, ai] {
+            app.world_mut().entity_mut(e).insert(test_cfg.clone());
+        }
+
+        // Precondition: the two ships genuinely differ in control source,
+        // otherwise this test is vacuous.
+        let policy_of = |app: &App, e: Entity| {
+            helm_control_policy(
+                app.world()
+                    .entity(e)
+                    .get::<ShipSystemControlSources>()
+                    .unwrap(),
+            )
+        };
+        assert!(
+            policy_of(&app, ai).operate_ai && !policy_of(&app, human).operate_ai,
+            "test must compare an AI-controlled helm against a human-controlled one"
+        );
+
+        // Compare the whole trajectory, not just the endpoint.
+        for step in 0..10 {
+            tick(&mut app);
+            assert_eq!(
+                physics_of(&mut app, human),
+                physics_of(&mut app, ai),
+                "human- and AI-controlled helm must integrate identically from \
+                 identical intent (diverged at step {step})"
+            );
+        }
+
+        // Sanity: the ships actually moved and turned, so equality is not the
+        // trivial equality of two untouched defaults.
+        let p = physics_of(&mut app, human);
+        assert!(
+            p.yaw != 0.0 && p.lateral_speed != 0.0,
+            "ships must have actually manoeuvred, got {p:?}"
+        );
+
+        // Anti-vacuity guard for thrust specifically. `forward_speed` must have
+        // settled at its thrust-proportional target, proving the trajectory left
+        // `compute_physics`'s acceleration-rate-limited regime — the regime in
+        // which the per-tick delta is independent of thrust and the equality
+        // above therefore says nothing about it. Without this, retuning
+        // `acceleration`/`max_speed` could silently re-blind the test to thrust.
+        assert_eq!(
+            p.forward_speed,
+            THRUST * TEST_MAX_SPEED,
+            "forward_speed must reach its thrust-proportional target, else this \
+             test cannot observe thrust at all"
+        );
+    }
+
+    /// AC: impulse override zeroes steering and lateral.
+    ///
+    /// While impulse is active the autopilot forces thrust=1/steering=0/
+    /// lateral=0 regardless of helm intent. A control ship with identical
+    /// intent but no impulse must yaw and strafe, proving the override is what
+    /// suppresses them rather than the inputs being ignored generally.
+    #[test]
+    fn impulse_override_zeroes_steering_and_lateral() {
+        let mut app = integrator_only_app();
+        let impulsing = spawn_integrator_ship(&mut app, ControlSource::Human, true, 0.0, 1.0, 1.0);
+        let control = spawn_integrator_ship(&mut app, ControlSource::Human, true, 0.0, 1.0, 1.0);
+
+        let mut active = crate::impulse::ImpulseState::new();
+        active.start_charge();
+        active.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        assert_eq!(active.phase, ImpulsePhase::Active, "impulse must be active");
+        app.world_mut()
+            .entity_mut(impulsing)
+            .insert(ShipImpulse(active));
+
+        for _ in 0..5 {
+            tick(&mut app);
+        }
+
+        let p = physics_of(&mut app, impulsing);
+        assert_eq!(p.yaw, 0.0, "impulse override must zero steering, got {p:?}");
+        assert_eq!(
+            p.lateral_speed, 0.0,
+            "impulse override must zero lateral thrust, got {p:?}"
+        );
+        assert_eq!(
+            p.roll, 0.0,
+            "impulse override must level the ship, got {p:?}"
+        );
+        assert!(
+            p.forward_speed > 0.0,
+            "impulse autopilot must force full forward thrust despite thrust=0.0 intent, got {p:?}"
+        );
+
+        // The control ship shares the same intent but has no impulse: it must
+        // turn and strafe, so the assertions above are about the override.
+        let c = physics_of(&mut app, control);
+        assert!(
+            c.yaw != 0.0 && c.lateral_speed != 0.0,
+            "control ship (no impulse) must steer and strafe from the same intent, got {c:?}"
         );
     }
 
@@ -4603,7 +4913,7 @@ station = "helm"
             .entity_mut(ship)
             .insert((ShipModifiers::new(), ShipBoost::default()));
         // This ship carries no AiHighFidelity bundle by default (unlike
-        // `test_app()`), but `integrate_helm_physics` (issue #695) is
+        // `test_app()`), but `integrate_ship_physics` (issue #695) is
         // scoped to `AiHighFidelity`, and these engine-thrust tests drive
         // `ShipPhysics` purely through `LastHelmInput` + the human
         // admission/physics pipeline. Add the marker + helm intent

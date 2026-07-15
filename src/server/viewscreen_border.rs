@@ -444,6 +444,7 @@ fn spawn_hud_state_entity(mut commands: Commands) {
         condition: "NOMINAL".to_string(),
         red_alert: false,
         engine_thrust: 0.0,
+        phaser_firing: false,
         game_over_message: None,
     }));
 }
@@ -456,6 +457,7 @@ fn compute_hud_state(
     hull_current: f32,
     hull_max: f32,
     engine_thrust: f32,
+    phaser_firing: bool,
     phase: &GamePhase,
     game_over_reason: Option<&GameOverReason>,
 ) -> ViewscreenHudState {
@@ -484,6 +486,7 @@ fn compute_hud_state(
         condition: if alert { "ALERT" } else { "NOMINAL" }.to_string(),
         red_alert: alert,
         engine_thrust,
+        phaser_firing,
         game_over_message,
     }
 }
@@ -498,6 +501,7 @@ fn recompute_hud_state(
     game_over_reason: Option<Res<GameOverReason>>,
     physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
     last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
+    beam_q: Query<&crate::weapons_plugin::ActiveBeam, With<crate::simulation::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
     let Some(phase) = phase else { return };
@@ -512,12 +516,18 @@ fn recompute_hud_state(
         .next()
         .map(|li| li.thrust.abs())
         .unwrap_or(0.0);
+    // `ActiveBeam.target_uuid` is `Some` exactly while a beam is burning.
+    let phaser_firing = beam_q
+        .single()
+        .map(|b| b.target_uuid.is_some())
+        .unwrap_or(false);
     let next = compute_hud_state(
         red_alert,
         &physics,
         hull_current,
         hull_max,
         engine_thrust,
+        phaser_firing,
         phase.get(),
         game_over_reason.as_deref(),
     );
@@ -543,12 +553,15 @@ fn push_game_over_hud_state(
         .single()
         .map(|h| (h.0.total_current(), h.0.total_max()))
         .unwrap_or((100.0, 100.0));
+    // Engine thrust and phaser fire are both forced off at game over so the
+    // looping SFX stop with the sim.
     let next = compute_hud_state(
         red_alert,
         &physics,
         hull_current,
         hull_max,
         0.0,
+        false,
         &GamePhase::GameOver,
         game_over_reason.as_deref(),
     );
@@ -594,6 +607,7 @@ mod tests {
             100.0,
             100.0,
             0.0,
+            false,
             &GamePhase::InProgress,
             None,
         );
@@ -602,6 +616,7 @@ mod tests {
         assert_eq!(state.condition, "NOMINAL");
         assert!(!state.red_alert);
         assert_eq!(state.engine_thrust, 0.0);
+        assert!(!state.phaser_firing);
         assert!(state.game_over_message.is_none());
     }
 
@@ -617,6 +632,7 @@ mod tests {
             50.0,
             100.0,
             0.75,
+            true,
             &GamePhase::InProgress,
             None,
         );
@@ -625,6 +641,7 @@ mod tests {
         assert_eq!(state.condition, "ALERT");
         assert!(state.red_alert);
         assert!((state.engine_thrust - 0.75).abs() < f32::EPSILON);
+        assert!(state.phaser_firing);
     }
 
     #[test]
@@ -636,6 +653,7 @@ mod tests {
             100.0,
             100.0,
             0.5,
+            false,
             &GamePhase::InProgress,
             None,
         );
@@ -653,6 +671,7 @@ mod tests {
             0.0,
             100.0,
             0.0,
+            false,
             &GamePhase::GameOver,
             Some(&reason),
         );
@@ -670,6 +689,7 @@ mod tests {
             50.0,
             100.0,
             0.0,
+            false,
             &GamePhase::GameOver,
             Some(&reason),
         );

@@ -1699,6 +1699,11 @@ pub struct EntityConfig {
     pub torpedoes: Option<TorpedoesConfig>,
     /// Repair team timings (travel duration, repair rate).
     pub repair: Option<RepairConfig>,
+    /// Ship audio: filenames and tuning for the ambient bed, engine, blaster,
+    /// phaser loop, and forcefield. Server-only playback — the host page's JS
+    /// builds its audio graph from this. `None` ⇒ the ship is silent.
+    #[serde(default)]
+    pub audio: Option<crate::audio_config::ShipAudioConfig>,
     /// Comms range — when present, the entity can send/receive comms within
     /// this radius of the player ship.
     pub comms: Option<CommsConfig>,
@@ -2785,6 +2790,87 @@ radius = 100.0
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.shape.is_none());
         assert!(config.effects.is_none());
+    }
+
+    // ── Ship audio tests ─────────────────────────────────────────────────
+
+    /// `EntityConfig` is `deny_unknown_fields`, so an `[audio]` block in a
+    /// shipped template would break *every* load of that template — not just
+    /// audio — if the field were ever removed. These parse the real files.
+    #[test]
+    fn player_ship_templates_parse_audio_block() {
+        for (name, toml_str) in [
+            (
+                "alliance_cruiser",
+                include_str!("../../assets/entities/alliance_cruiser.toml"),
+            ),
+            (
+                "alliance_destroyer",
+                include_str!("../../assets/entities/alliance_destroyer.toml"),
+            ),
+            (
+                "alliance_battleship",
+                include_str!("../../assets/entities/alliance_battleship.toml"),
+            ),
+        ] {
+            let config =
+                EntityConfig::from_toml(toml_str).unwrap_or_else(|e| panic!("{name}.toml: {e}"));
+            let audio = config
+                .audio
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name}.toml must have [audio]"));
+
+            assert_eq!(
+                audio.ambient.as_ref().expect("[audio.ambient]").file,
+                "assets/sounds/Ambient.mp3",
+                "{name}"
+            );
+            assert_eq!(
+                audio.engine.as_ref().expect("[audio.engine]").file,
+                "assets/sounds/Engine.mp3",
+                "{name}"
+            );
+            assert_eq!(
+                audio.blaster.as_ref().expect("[audio.blaster]").file,
+                "assets/sounds/Blaster.mp3",
+                "{name}"
+            );
+            assert_eq!(
+                audio
+                    .phaser_loop
+                    .as_ref()
+                    .expect("[audio.phaser_loop]")
+                    .file,
+                "assets/sounds/PhaserLoop.mp3",
+                "{name}"
+            );
+            assert_eq!(
+                audio.forcefield.as_ref().expect("[audio.forcefield]").file,
+                "assets/sounds/ForcefieldHit.mp3",
+                "{name}"
+            );
+        }
+    }
+
+    /// Preserves the volumes the JS previously hardcoded (`hum.volume = 0.25`,
+    /// `engine.volume = thrust * 0.15`), so making them data-driven did not
+    /// silently change how the game sounds.
+    #[test]
+    fn cruiser_audio_preserves_legacy_volumes() {
+        let toml_str = include_str!("../../assets/entities/alliance_cruiser.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("must parse");
+        let audio = config.audio.as_ref().expect("[audio]");
+        assert_eq!(audio.ambient.as_ref().unwrap().volume, 0.25);
+        assert_eq!(audio.engine.as_ref().unwrap().volume_at_full_thrust, 0.15);
+        assert_eq!(audio.engine.as_ref().unwrap().idle_volume, 0.0);
+    }
+
+    #[test]
+    fn entity_without_audio_block_parses_to_none() {
+        let config =
+            EntityConfig::from_toml(include_str!("../../assets/entities/station_axiom.toml"))
+                .expect("must parse");
+        assert!(config.audio.is_none());
     }
 
     // ── Station hull tests (post-[station] removal; PRD slice 2) ──────────

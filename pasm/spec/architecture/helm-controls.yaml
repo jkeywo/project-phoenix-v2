@@ -119,7 +119,7 @@ entities:
       rationale:
         - Human helm commands are admitted at the host boundary and then applied to authoritative state on the LocalShip.
         - Impulse and boost are separate host-owned drive states even though the UI targets the coarse helm system.
-        - "Issue #695 split admission from physics integration: process_helm_inputs, handle_impulse_messages, and handle_boost_messages now only write ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand/BoostCommand intent components instead of mutating ShipPhysics/ShipImpulse/ShipBoost directly. The shared integrate_helm_physics and apply_helm_commands systems in src/ship_plugin.rs perform the actual integration for any AiHighFidelity ship (the LocalShip and promoted NPCs alike), so the same intent surface serves both the human and helm-ai-operator paths."
+        - "Issue #695 split admission from physics integration: process_helm_inputs, handle_impulse_messages, and handle_boost_messages now only write ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand/BoostCommand intent components instead of mutating ShipPhysics/ShipImpulse/ShipBoost directly. The shared integrate_ship_physics and apply_helm_commands systems in src/ship_plugin.rs perform the actual integration for any AiHighFidelity ship (the LocalShip and promoted NPCs alike), so the same intent surface serves both the human and helm-ai-operator paths."
     architecture:
       kind: subsystem
       authority: authoritative
@@ -158,7 +158,7 @@ entities:
         - process_helm_inputs
         - handle_impulse_messages
         - handle_boost_messages
-        - integrate_helm_physics
+        - integrate_ship_physics
         - apply_helm_commands
         - compute_physics
         - ThrustInput
@@ -689,7 +689,7 @@ entities:
       status: implemented
       confidence: inferred
       title: Helm AI Operator
-      summary: Current authoritative AI helm executor that reads scored objectives and world snapshots, computes steering and avoidance internally, and writes the same ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand intent components the admitted human path writes, for the shared integrate_helm_physics/apply_helm_commands systems to apply.
+      summary: Current authoritative AI helm executor that reads scored objectives and world snapshots, computes steering and avoidance internally, and writes the same ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand intent components the admitted human path writes, for the shared integrate_ship_physics/apply_helm_commands systems to apply.
       rationale:
         - Helm AI does not synthesize human helm messages in the shipped code path.
         - This is a temporary implementation shape relative to the intended design, where fine helm systems should read a shared desired-motion surface and set the same typed actuator inputs a player can set, according to capability.

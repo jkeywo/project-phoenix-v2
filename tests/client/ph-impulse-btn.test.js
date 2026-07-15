@@ -27,6 +27,67 @@ describe('PhImpulseBtn', () => {
     expect(customElements.get('ph-impulse-btn')).toBeDefined();
   });
 
+  describe('Ctrl keybind', () => {
+    const ctrlDown = (init) => document.dispatchEvent(
+      new KeyboardEvent('keydown', Object.assign({ code: 'ControlLeft', bubbles: true }, init)));
+
+    it('starts the charge when ready', () => {
+      const sendAction = vi.fn();
+      const { el } = setup({ sendAction });
+      el.state = { state: 'ready', charge_pct: 0, auto: false };
+      ctrlDown();
+      expect(sendAction).toHaveBeenCalledWith('start_impulse_charge', {});
+    });
+
+    it('cancels the charge when already charging', () => {
+      const sendAction = vi.fn();
+      const { el } = setup({ sendAction });
+      el.state = { state: 'charging', charge_pct: 40, auto: false };
+      ctrlDown();
+      expect(sendAction).toHaveBeenCalledWith('cancel_impulse', {});
+    });
+
+    it('ignores auto-repeat so a held Ctrl does not start/cancel repeatedly', () => {
+      const sendAction = vi.fn();
+      const { el } = setup({ sendAction });
+      el.state = { state: 'ready', charge_pct: 0, auto: false };
+      ctrlDown();
+      ctrlDown({ repeat: true });
+      ctrlDown({ repeat: true });
+      expect(sendAction).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing under AUTO or on cooldown', () => {
+      const sendAction = vi.fn();
+      const { el } = setup({ sendAction });
+      el.state = { state: 'ready', charge_pct: 0, auto: true };
+      ctrlDown();
+      el.state = { state: 'cooldown', charge_pct: 0, auto: false };
+      ctrlDown();
+      expect(sendAction).not.toHaveBeenCalled();
+    });
+
+    it('ignores other keys and keys typed into a text field', () => {
+      const sendAction = vi.fn();
+      const { el } = setup({ sendAction });
+      el.state = { state: 'ready', charge_pct: 0, auto: false };
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', bubbles: true }));
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      input.dispatchEvent(new KeyboardEvent('keydown', { code: 'ControlLeft', bubbles: true }));
+      expect(sendAction).not.toHaveBeenCalled();
+    });
+
+    it('stops listening once removed from the page', () => {
+      const sendAction = vi.fn();
+      const { el } = setup({ sendAction });
+      el.state = { state: 'ready', charge_pct: 0, auto: false };
+      el.remove();
+      ctrlDown();
+      expect(sendAction).not.toHaveBeenCalled();
+    });
+  });
+
   it('creates a shadow root', () => {
     const { el } = setup();
     expect(el.shadowRoot).toBeDefined();

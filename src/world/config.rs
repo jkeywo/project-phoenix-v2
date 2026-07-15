@@ -578,6 +578,10 @@ pub struct RawWorld {
     /// Optional world-level ambient light override.
     #[serde(default)]
     pub ambient_light: Option<AmbientLightConfig>,
+    /// Optional world-level audio (red-alert siren + music). Every other
+    /// sound is configured on the ship entity instead.
+    #[serde(default)]
+    pub audio: Option<crate::audio_config::WorldAudioConfig>,
     /// Optional ambient dust particle effect config.
     #[serde(default)]
     pub dust: Option<DustPfxConfig>,
@@ -1333,6 +1337,9 @@ pub struct WorldConfig {
     /// Optional world-level ambient light override; `None` means the
     /// renderer falls back to its built-in constants.
     pub ambient_light: Option<AmbientLightConfig>,
+    /// Optional world-level audio (red-alert siren + music); `None` means red
+    /// alert is silent. Every other sound comes from the local ship's config.
+    pub audio: Option<crate::audio_config::WorldAudioConfig>,
     /// Optional ambient dust particle effect config; `None` means the
     /// renderer falls back to built-in dust defaults.
     pub dust: Option<DustPfxConfig>,
@@ -1496,6 +1503,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         name_to_uuid: HashMap::new(),
         extra_worlds: raw.extra_worlds,
         ambient_light: raw.ambient_light,
+        audio: raw.audio,
         dust: raw.dust,
         available_ships,
         player_spawn: raw.player_spawn,
@@ -4300,6 +4308,36 @@ brightness = 150.0
         let al = cfg.ambient_light.as_ref().expect("ambient_light present");
         assert!(al.color.is_none());
         assert_eq!(al.brightness, Some(150.0));
+    }
+
+    #[test]
+    fn parse_world_reads_top_level_audio_block() {
+        let toml = r#"
+[audio.red_alert]
+siren_file   = "assets/sounds/red_alert_siren.ogg"
+siren_volume = 0.7
+music_file   = "assets/sounds/last_stand_in_space_looped.ogg"
+music_volume = 0.35
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let ra = cfg
+            .audio
+            .as_ref()
+            .and_then(|a| a.red_alert.as_ref())
+            .expect("red_alert present");
+        assert_eq!(ra.siren_file, "assets/sounds/red_alert_siren.ogg");
+        assert_eq!(ra.siren_volume, 0.7);
+        assert_eq!(
+            ra.music_file,
+            "assets/sounds/last_stand_in_space_looped.ogg"
+        );
+        assert_eq!(ra.music_volume, 0.35);
+    }
+
+    #[test]
+    fn parse_world_omits_audio_when_block_missing() {
+        let cfg = parse_world("").expect("empty TOML parses");
+        assert!(cfg.audio.is_none());
     }
 
     // ── spawn_entity / destroy_entity actions (issue #417) ────────────────

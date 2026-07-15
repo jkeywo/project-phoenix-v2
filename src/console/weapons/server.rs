@@ -2898,6 +2898,16 @@ fn tick_blaster_auto_fire(
 /// Tick every ship's `BlasterSystemResource` — advance volley timers and
 /// launch projectiles. Emits `ServerMessage::BlasterFired` for each
 /// projectile launched. Runs in `SimSet::Physics`.
+///
+/// # Sanctioned out-of-band `ShipPhysics` writer (issue #699)
+///
+/// `integrate_ship_physics` is the sole *helm-path* writer of
+/// `ShipPhysics.x/z/yaw/forward_speed/lateral_speed/roll`. The recoil impulse
+/// (issue #638) accumulates into `forward_speed` directly and is an
+/// intentional exception: it is a weapons-fire impulse added on top of
+/// whatever the helm integrator produced, not a helm decision. It deliberately
+/// does not opt into the debug `HelmPhysicsWriteGuard`. See the writer-policy
+/// table on `ShipPhysics` (`src/ship/state.rs`).
 fn tick_blaster_system(
     time: Res<Time>,
     mut ship_q: Query<

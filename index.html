@@ -839,7 +839,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-fbde24a4c3af45f9.js" crossorigin="anonymous" integrity="sha384-+j1xQiY3MydySND6309Pw/vPyrGIYV/0zdua5BSl2xAx/nAxynlmSEzoh8o5dAeg"><link rel="preload" href="./project-phoenix-fbde24a4c3af45f9_bg.wasm" crossorigin="anonymous" integrity="sha384-dPFrRiLs8RPDtgWtxR81gfohcIkbQ8Ak1o7QpGXPCbcevWZSyZybQ6Zx+FvdY8NQ" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-d7cee27dac1d4d1f.js" crossorigin="anonymous" integrity="sha384-V6FCN9dWI4Zb3HQwI1bElShwXeP3MOgLC3TWMhKtUSSkV5ikpkWq5xsXNrEF+nUH"><link rel="preload" href="./project-phoenix-d7cee27dac1d4d1f_bg.wasm" crossorigin="anonymous" integrity="sha384-BqAbGSqODwLPFxAf8umLGZL/Kgea8G30O72rGDt2wxShFInYrC6RkCPr1Yuf2+jj" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -892,10 +892,10 @@
     </div>
   </div>
 
-  <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
-  <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
-  <audio id="ship-engine"     src="assets/sounds/ship_engine.wav"      loop></audio>
-  <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.ogg"      ></audio>
+  <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken).
+       No <audio> tags here: filenames and volumes are data-driven from TOML
+       and arrive via set_audio_config_callback, so the elements are built at
+       runtime by __audioConfig below. -->
 
   <!-- Scenario selector shown before the server boots -->
   <div id="scenario-panel">
@@ -1080,8 +1080,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-fbde24a4c3af45f9.js';
-const wasm = await init({ module_or_path: './project-phoenix-fbde24a4c3af45f9_bg.wasm' });
+import init, * as bindings from './project-phoenix-d7cee27dac1d4d1f.js';
+const wasm = await init({ module_or_path: './project-phoenix-d7cee27dac1d4d1f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1115,7 +1115,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   //
   // Rust pushes ViewscreenHudState JSON here via the registered
   // set_hud_state_callback. We parse it, write the status strip cells, and
-  // toggle the red-alert vignette class.
+  // toggle the red-alert vignette class. It also carries the two audio state
+  // flags (red_alert, phaser_firing) and engine_thrust — see the data-driven
+  // audio module below for the playback side.
 
   // ── Screen shake (issue #116 follow-up) ────────────────────────────────
   // Rust pushes (x, y) pixel offsets every frame via set_shake_callback.
@@ -1134,7 +1136,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
   };
 
-  let _hudPrevRedAlert = false;
   window.__updateHud = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
@@ -1155,16 +1156,36 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       condition.textContent = s.condition;
     }
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
-    // ── Red-alert siren on transition ───────────────────────────────────────
-    if (s.red_alert && !_hudPrevRedAlert) {
-      document.getElementById('red-alert-siren').play().catch(() => {});
+    // ── Red alert: siren one-shot on the edge, music loops underneath ───────
+    if (s.red_alert && !_prevRedAlert && _els.siren) {
+      _els.siren.currentTime = 0;
+      _els.siren.play().catch(() => {});
     }
-    _hudPrevRedAlert = !!s.red_alert;
-    // ── Engine hum volume from thrust ───────────────────────────────────────
-    if (typeof s.engine_thrust === 'number') {
-      const engine = document.getElementById('ship-engine');
-      if (engine) engine.volume = s.engine_thrust * 0.15;
+    if (_els.music) {
+      if (s.red_alert && _els.music.paused) {
+        _els.music.play().catch(() => {});
+      } else if (!s.red_alert && !_els.music.paused) {
+        _els.music.pause();
+        _els.music.currentTime = 0;
+      }
     }
+    _prevRedAlert = !!s.red_alert;
+    // ── Engine volume from thrust (coefficients from the ship's TOML) ───────
+    if (_els.engine && _audioCfg && _audioCfg.engine && typeof s.engine_thrust === 'number') {
+      const e = _audioCfg.engine;
+      _els.engine.volume = clampVol(e.idle_volume + s.engine_thrust * e.volume_at_full_thrust);
+    }
+    // ── Phaser loop follows the change-detected firing flag ────────────────
+    if (_els.phaser && _audioCfg && _audioCfg.phaser_loop) {
+      if (s.phaser_firing && !_prevPhaser) {
+        _els.phaser.volume = clampVol(_audioCfg.phaser_loop.volume);
+        _els.phaser.currentTime = 0;
+        _els.phaser.play().catch(() => {});
+      } else if (!s.phaser_firing && _prevPhaser) {
+        _els.phaser.pause();
+      }
+    }
+    _prevPhaser = !!s.phaser_firing;
     // ── 4-slot viewscreen status strip ──────────────────────────────────────
     const vNav = document.getElementById('v-nav');
     const vTac = document.getElementById('v-tac');
@@ -1225,11 +1246,20 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     // ── Game-start cue (Loading → InProgress transition) ───────────────
+    // Only this edge dismisses the loading overlay — there's nothing to
+    // dismiss if we never showed it.
     if (s.phase === 'InProgress' && _lobbyPrevPhase === 'Loading') {
       const al = document.getElementById('asset-loading');
       if (al) al.style.display = 'none';
       const qrOverlay = document.getElementById('overlay');
       if (qrOverlay) qrOverlay.style.display = 'none';
+    }
+
+    // Audio unlocks on ANY entry into InProgress, not just from Loading:
+    // when the asset preload is already complete, drain_force_start /
+    // StartGame set InProgress directly and the sim never passes through
+    // Loading, so a Loading-only gate would leave the game silent.
+    if (s.phase === 'InProgress' && _lobbyPrevPhase !== 'InProgress') {
       startGameAudio();
     }
     _lobbyPrevPhase = s.phase;
@@ -1839,19 +1869,173 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     // ── Outbound routing ───────────────────────────────────────────────────
 
-    // ── JS audio state ─────────────────────────────────────────────────────
-    let gameAudioStarted = false;
+    // ── Data-driven audio ──────────────────────────────────────────────────
+    //
+    // Rust owns the config (ship [audio] + world [audio.red_alert]), the
+    // forcefield envelope, and the blaster's listener-relative geometry. This
+    // side only plays sounds. Nothing here hardcodes a filename or a volume.
+    //
+    // Looping beds and the siren use <audio> elements. The blaster uses Web
+    // Audio instead: one-shots overlap, and <audio> cannot pan.
 
-    function startGameAudio() {
-      if (gameAudioStarted) return;
-      gameAudioStarted = true;
-      const hum = document.getElementById('bg-hum');
-      hum.volume = 0.25;
-      hum.play().catch(() => {});
-      const engine = document.getElementById('ship-engine');
-      engine.volume = 0.0;
-      engine.play().catch(() => {});
+    let _audioCfg = null;      // payload from set_audio_config_callback
+    let _audioUnlocked = false; // user gesture / game start has happened
+    let _audioStarted = false;
+    let _els = {};             // key -> HTMLAudioElement
+    let _actx = null;          // AudioContext (blaster only)
+    let _blasterBuf = null;    // decoded AudioBuffer
+    let _prevRedAlert = false;
+    let _prevPhaser = false;
+
+    // HTMLMediaElement.volume throws IndexSizeError outside 0..1.
+    function clampVol(v) {
+      const n = Number(v);
+      if (!isFinite(n)) return 0;
+      return Math.min(1, Math.max(0, n));
     }
+
+    function mkLoop(key, spec, volume) {
+      if (!spec || !spec.file) return;
+      const el = new Audio(spec.file);
+      el.loop = true;
+      el.preload = 'auto';
+      el.volume = clampVol(volume);
+      _els[key] = el;
+    }
+
+    window.__audioConfig = function(json) {
+      let c;
+      try { c = JSON.parse(json); }
+      catch (e) { console.warn('[Phoenix] bad audio config', e); return; }
+      _audioCfg = c;
+
+      mkLoop('ambient', c.ambient, c.ambient && c.ambient.volume);
+      // Engine starts at idle and is ridden by thrust in __updateHud.
+      mkLoop('engine', c.engine, c.engine && c.engine.idle_volume);
+      // Phaser and forcefield start silent: the phaser is gated on the firing
+      // flag, and the forcefield's level is pushed from Rust each frame.
+      mkLoop('phaser', c.phaser_loop, 0);
+      mkLoop('forcefield', c.forcefield, 0);
+
+      if (c.red_alert && c.red_alert.music_file) {
+        const m = new Audio(c.red_alert.music_file);
+        m.loop = true;
+        m.preload = 'auto';
+        m.volume = clampVol(c.red_alert.music_volume);
+        _els.music = m;
+      }
+      if (c.red_alert && c.red_alert.siren_file) {
+        const s = new Audio(c.red_alert.siren_file);
+        s.preload = 'auto';
+        s.volume = clampVol(c.red_alert.siren_volume);
+        _els.siren = s;
+      }
+
+      initBlasterAudio(c.blaster);
+      maybeStartAudio();
+    };
+
+    function initBlasterAudio(spec) {
+      if (!spec || !spec.file) return;
+      try {
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        if (!Ctor) return;
+        _actx = _actx || new Ctor();
+      } catch (e) {
+        console.warn('[Phoenix] no AudioContext; blaster audio disabled', e);
+        return;
+      }
+      // Must not reject: a bubbling rejection fails the smoke test's
+      // pageerror assertion. Headless Chromium may refuse to decode at all,
+      // and "no blaster SFX" is an acceptable degradation.
+      fetch(spec.file)
+        .then(function(r) { return r.arrayBuffer(); })
+        .then(function(b) { return _actx.decodeAudioData(b); })
+        .then(function(buf) { _blasterBuf = buf; })
+        .catch(function(e) { console.warn('[Phoenix] blaster decode failed', e); });
+    }
+
+    // Called on the Loading → InProgress edge, which is also the autoplay
+    // unlock. The config push and this edge land in the same frame and the
+    // PostUpdate flushes are unordered, so whichever arrives second starts
+    // the audio — don't assume an ordering.
+    function startGameAudio() {
+      _audioUnlocked = true;
+      maybeStartAudio();
+    }
+
+    function maybeStartAudio() {
+      if (_audioStarted || !_audioUnlocked || !_audioCfg) return;
+      _audioStarted = true;
+      ['ambient', 'engine', 'phaser', 'forcefield'].forEach(function(k) {
+        if (_els[k]) _els[k].play().catch(function() {});
+      });
+      if (_actx && _actx.state === 'suspended') {
+        _actx.resume().catch(function() {});
+      }
+    }
+
+    // One-shot positional cue. Coordinates are already listener-relative, so
+    // the Web Audio listener stays at the origin facing -Z.
+    window.__audioCue = function(json) {
+      let c;
+      try { c = JSON.parse(json); } catch (e) { return; }
+      if (c.kind !== 'blaster' || !_blasterBuf || !_actx) return;
+      const spec = _audioCfg && _audioCfg.blaster;
+      if (!spec) return;
+      try {
+        const src = _actx.createBufferSource();
+        src.buffer = _blasterBuf;
+        const pan = _actx.createPanner();
+        pan.panningModel  = spec.panning_model;
+        pan.distanceModel = spec.distance_model;
+        pan.refDistance   = spec.ref_distance;
+        pan.maxDistance   = spec.max_distance;
+        pan.rolloffFactor = spec.rolloff_factor;
+        if (pan.positionX) {
+          pan.positionX.value = c.x;
+          pan.positionY.value = c.y;
+          pan.positionZ.value = c.z;
+        } else {
+          pan.setPosition(c.x, c.y, c.z); // older Safari
+        }
+        const g = _actx.createGain();
+        g.gain.value = clampVol(spec.volume);
+        src.connect(pan).connect(g).connect(_actx.destination);
+        src.start();
+      } catch (e) {
+        console.warn('[Phoenix] blaster cue failed', e);
+      }
+    };
+
+    // Forcefield SFX level, computed and clamped in Rust.
+    window.__audioLevel = function(level) {
+      if (_els.forcefield) _els.forcefield.volume = clampVol(level);
+    };
+
+    // Smoke-test hook — lets Playwright assert on audio state without
+    // needing to hear anything.
+    //
+    // The elements are deliberately exposed here rather than looked up via
+    // document.querySelectorAll('audio'): `new Audio()` builds *detached*
+    // elements that never enter the DOM, so a querySelectorAll sweep finds
+    // nothing and any assertion over it passes vacuously.
+    window.__audioDebug = function() {
+      const vols = {};
+      Object.keys(_els).forEach(function(k) { vols[k] = _els[k].volume; });
+      const paused = {};
+      Object.keys(_els).forEach(function(k) { paused[k] = _els[k].paused; });
+      return {
+        cfg: _audioCfg,
+        els: Object.keys(_els),
+        started: _audioStarted,
+        volumes: vols,
+        paused: paused,
+        musicPlaying: !!(_els.music && !_els.music.paused),
+        phaserPlaying: !!(_els.phaser && !_els.phaser.paused),
+        blasterReady: !!_blasterBuf
+      };
+    };
 
     function routeOutbound(target, payload, deliveryClass) {
       const useSnapshot = deliveryClass === 'snapshot';
@@ -2035,6 +2219,9 @@ function finishInit() {
   window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;
   window.set_shake_callback = wasmBindings.set_shake_callback;
   window.set_chatter_callback = wasmBindings.set_chatter_callback;
+  window.set_audio_config_callback = wasmBindings.set_audio_config_callback;
+  window.set_audio_cue_callback = wasmBindings.set_audio_cue_callback;
+  window.set_audio_level_callback = wasmBindings.set_audio_level_callback;
   if (typeof set_hud_state_callback === 'function') {
     set_hud_state_callback(window.__updateHud);
   }
@@ -2046,6 +2233,15 @@ function finishInit() {
   }
   if (typeof set_chatter_callback === 'function') {
     set_chatter_callback(window.__updateChatter);
+  }
+  if (typeof set_audio_config_callback === 'function') {
+    set_audio_config_callback(window.__audioConfig);
+  }
+  if (typeof set_audio_cue_callback === 'function') {
+    set_audio_cue_callback(window.__audioCue);
+  }
+  if (typeof set_audio_level_callback === 'function') {
+    set_audio_level_callback(window.__audioLevel);
   }
 
   // ── HTML console state relay (issue #428) ────────────────────────────────

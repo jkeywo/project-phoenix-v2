@@ -32,6 +32,10 @@
        player. installSessionToken() gives each tab its own token. -->
   <script type="module" src="gui/session-token.js"></script>
   <script type="module" src="gui/iframe-bridge.js"></script>
+  <!-- Key events reach only the focused document and never cross into an
+       iframe, so console keybinds died whenever the last click landed on host
+       chrome. Relays them to the active console (see gui/key-relay.js). -->
+  <script type="module" src="gui/key-relay.js"></script>
   <script type="module" src="gui/console-state.js"></script>
   <script type="module" src="gui/action-map.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
@@ -1515,6 +1519,27 @@
       pushConsoleStateFor(activeConsole);
     }
 
+    // Resolve the active console's iframe the same way pushConsoleStateFor
+    // does, so the relay always follows whatever iframe this ship mounted.
+    function activeConsoleIframe() {
+      if (!activeConsole) return null;
+      const registry = window.CONSOLE_REGISTRY || {};
+      const entry = registry[activeConsole];
+      return $(entry ? entry.iframeId : (activeConsole + '-iframe'));
+    }
+
+    // Send the host's key events to the active console, so helm's WASD/arrows,
+    // Ctrl impulse and Shift boost keep working after a click on the tab bar or
+    // any other host chrome moved focus out of the console iframe. Called from
+    // the DOMContentLoaded gate below, once the deferred modules have run.
+    function installConsoleKeyRelay() {
+      if (typeof window.installKeyRelay !== 'function') return;
+      window.installKeyRelay(document, () => {
+        const el = activeConsoleIframe();
+        try { return el && el.contentDocument; } catch (_) { return null; }
+      });
+    }
+
     // -- Weapons console iframe bridge (issue #422) --------------------------
     // Builds a WeaponsConsoleState JSON from client state and pushes it to the
     // gui/weapons-console.html iframe via its window.__updateConsole function.
@@ -2456,6 +2481,8 @@
               return t;
             })();
         console.log(`[client] session token ${myToken.slice(0, 8)}`);
+
+        installConsoleKeyRelay();
 
         // Mount the settings panel (gear button + overlay) once state is ready.
         // Provide send, a getState closure, and the UI click audio element.

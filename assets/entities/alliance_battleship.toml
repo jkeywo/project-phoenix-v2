@@ -692,3 +692,44 @@ entity_look_range = 80
 look_ahead_distance = 150
 hysteresis_secs = 3
 yaw_follow_deg_per_sec = 45
+
+# ── Audio ────────────────────────────────────────────────────────────────────
+# Every sound this ship makes. Playback is server-side only (the host page's
+# JS builds the audio graph from this). Omit a sub-block to silence that
+# sound; a sub-block that IS present must specify all of its fields.
+# Red-alert siren/music are configured per-world, not here.
+
+[audio.ambient]
+file   = "assets/sounds/Ambient.mp3"
+volume = 0.25
+
+[audio.engine]
+# volume = idle_volume + thrust_fraction * volume_at_full_thrust
+file                  = "assets/sounds/Engine.mp3"
+volume_at_full_thrust = 0.15
+idle_volume           = 0.0
+
+[audio.phaser_loop]
+file   = "assets/sounds/PhaserLoop.mp3"
+volume = 0.5
+
+[audio.blaster]
+# Positional one-shot — every rolloff field maps to a Web Audio PannerNode.
+file           = "assets/sounds/Blaster.mp3"
+volume         = 0.9
+ref_distance   = 30.0
+max_distance   = 800.0
+rolloff_factor = 1.2
+distance_model = "inverse"
+panning_model  = "equalpower"
+
+[audio.forcefield]
+# Continuous bed at base_volume; damage spikes it toward spike_volume, then it
+# decays back. Damage below damage_threshold HP is ignored entirely.
+file               = "assets/sounds/ForcefieldHit.mp3"
+base_volume        = 0.06
+spike_volume       = 0.80
+damage_threshold   = 1.0
+damage_full_spike  = 30.0
+decay_rate_per_sec = 1.5
+source             = "shield"

@@ -145,9 +145,10 @@ entities:
     implementation:
       status: declared
       paths:
-        - gui/repair-console.html
+        - gui/battleship/repair.html
+        - gui/cruiser/engineering.html
+        - gui/destroyer/engineering.html
         - gui/console-state.js
-        - gui/engineering-console.html
       symbols:
         - buildRepairConsoleState
         - repairCoreAndTargets
@@ -167,7 +168,9 @@ entities:
     implementation:
       status: declared
       paths:
-        - gui/repair-console.html
+        - gui/battleship/repair.html
+        - gui/cruiser/engineering.html
+        - gui/destroyer/engineering.html
         - gui/console-state.js
 
   - component: host-damage-state
@@ -410,7 +413,9 @@ entities:
     implementation:
       status: declared
       paths:
-        - gui/repair-console.html
+        - gui/battleship/repair.html
+        - gui/cruiser/engineering.html
+        - gui/destroyer/engineering.html
         - gui/console-state.js
       symbols:
         - buildRepairConsoleState

@@ -1615,8 +1615,10 @@ mod tests {
         // in the map, operate_helm must fall back to memory.home_position and
         // still steer toward it (never falling through to idle). home_position
         // is at [100, 0, 0] — to the right → positive steering.
-        let mut memory = AiMemory::default();
-        memory.home_position = [100.0, 0.0, 0.0];
+        let mut memory = AiMemory {
+            home_position: [100.0, 0.0, 0.0],
+            ..Default::default()
+        };
         let world = world_at_origin();
         let anchors = std::collections::HashMap::new(); // empty → no match
         let pool = retreat_pool("", 50.0);

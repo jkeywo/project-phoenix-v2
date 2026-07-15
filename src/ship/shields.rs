@@ -10,9 +10,34 @@ use crate::ship_plugin::CoordinationEnqueue;
 /// Pending Sensors->Shields threat bearing, delivered via the channel-3
 /// coordination bus (issue #683). Set by `process_coordination_lag` when a
 /// `CoordinationPayload::ThreatBearing` is consumed by an AI-controlled
-/// Shields; read by `operate_shields_ai` to bias facing toward the threat.
+/// Shields; read by `console_ai::server::ai_shield_focus` to bias facing
+/// toward the threat.
 #[derive(Component, Clone, Debug, Default)]
 pub struct PendingShieldsThreatBearing(pub Option<f32>);
+
+/// A single shield-focus command emitted by the AI decision system
+/// (`console_ai::server::ai_shield_focus`) for `console_ai::server::
+/// integrate_shield_state` to apply the same tick. Bevy-facing reflection of
+/// `console_ai::ShieldFocusAiOutput` (issue #692).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ShieldArcCmd {
+    /// Focus the facing at this index.
+    Focus(usize),
+    /// Clear the current focus.
+    ClearFocus,
+}
+
+/// Per-ship queue of pending shield-focus intents. Written by
+/// `ai_shield_focus`, drained and applied by `integrate_shield_state` in the
+/// same tick.
+///
+/// Present only while the ship carries `AiHighFidelity` — bundled alongside
+/// that marker at every spawn/promote site (see `lod_ai_ships` and the
+/// `AiHighFidelity` spawn sites in `server_app.rs` / `ship_plugin.rs` /
+/// `ai/server.rs`) so it stays scoped to high-fidelity AI ships, matching the
+/// "AI intent component" category from the station/system redesign.
+#[derive(Component, Default, Clone, Debug)]
+pub struct ShieldArcIntents(pub Vec<ShieldArcCmd>);
 
 // ── Components ─────────────────────────────────────────────────────────────────
 
@@ -61,19 +86,22 @@ pub struct ShieldsDamageHistory {
 }
 
 impl ShieldsDamageHistory {
-    fn ensure_len(&mut self, n: usize) {
+    /// `pub(crate)`: called from `console_ai::server::ai_shield_focus`
+    /// (issue #692 split the old fused `operate_shields_ai` out of this
+    /// module).
+    pub(crate) fn ensure_len(&mut self, n: usize) {
         if self.arcs.len() < n {
             self.arcs.resize(n, Vec::new());
         }
     }
 
-    fn record_damage(&mut self, facing_idx: usize, timestamp: f32, amount: i32) {
+    pub(crate) fn record_damage(&mut self, facing_idx: usize, timestamp: f32, amount: i32) {
         if facing_idx < self.arcs.len() {
             self.arcs[facing_idx].push(DamageRecord { timestamp, amount });
         }
     }
 
-    fn prune_old(&mut self, current_time: f32, window_secs: f32) {
+    pub(crate) fn prune_old(&mut self, current_time: f32, window_secs: f32) {
         let cutoff = current_time - window_secs;
         for arc in &mut self.arcs {
             arc.retain(|r| r.timestamp > cutoff);
@@ -154,7 +182,6 @@ impl Plugin for ShipShieldsPlugin {
                 (
                     handle_shields_messages.in_set(crate::sim_sets::SimSet::Input),
                     emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
-                    operate_shields_ai.in_set(crate::sim_sets::SimSet::Physics),
                     tick_shields.in_set(crate::sim_sets::SimSet::Modifiers),
                     publish_shields_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
@@ -532,142 +559,19 @@ fn publish_shields_blackboard(
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 // ── AI controller ────────────────────────────────────────────────────────────────
-
-/// Per-kind AI plugin for shields.
-///
-/// Gated on policy.operate_ai for the Shields system. Runs damage tracking,
-/// health monitoring, and focus decisions for all AI-controlled shield systems
-/// on player and NPC ships.
-///
-/// # Damage Tracking
-/// Damage is detected by comparing each arc's current HP against the last
-/// recorded HP stored in `ShieldsDamageHistory`. When HP decreases (and the
-/// arc is not offline), the delta is recorded as a `DamageRecord` with the
-/// current timestamp.
-///
-/// # Focus Decision (`tick_shield_focus_ai`)
-/// 1. **Damage concentration** — in the configurable time window, if any arc
-///    receives ≥ `damage_pct_threshold` % of total damage, focus it.
-/// 2. **Health imbalance** — if no arc met the damage threshold, compare
-///    normalized HP fractions; focus the weakest arc if it is below
-///    `health_ratio_threshold` % of the second-weakest arc.
-/// 3. **Otherwise clear focus.**
-///
-/// Ships with fewer than 2 arcs exit early (nothing to focus).
-fn operate_shields_ai(
-    time: Res<Time>,
-    global_ai_config: Res<ShieldsAiConfigResource>,
-    mut ships: Query<
-        (
-            &crate::ship_plugin::ShipSystemControlSources,
-            &mut ShipShields,
-            &mut ShieldsDamageHistory,
-            Option<&ShieldsAiConfigResource>,
-            &mut PendingShieldsThreatBearing,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-) {
-    let current_time = time.elapsed_secs();
-
-    for (control_sources, mut shields, mut damage_history, ai_config_comp, mut pending_threat) in
-        ships.iter_mut()
-    {
-        let policy = control_sources
-            .0
-            .policy_for(&crate::system_registry::shields_system_id());
-        if !policy.operate_ai {
-            continue;
-        }
-
-        // ── Threat-bearing override ─────────────────────────────────────────
-        // If Sensors has sent a threat bearing, override the normal damage-based
-        // focus to rotate/raise the closest facing toward the incoming threat.
-        if let Some(bearing_rad) = pending_threat.0.take() {
-            let bearing_deg = (bearing_rad.to_degrees() + 360.0) % 360.0;
-            let closest_idx = (0..shields.0.facings.len()).min_by(|&a, &b| {
-                let da = angular_distance_deg(shields.0.facings[a].center_deg, bearing_deg);
-                let db = angular_distance_deg(shields.0.facings[b].center_deg, bearing_deg);
-                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            if let Some(idx) = closest_idx {
-                shields.0.set_focused_facing(Some(idx));
-            }
-            continue; // Threat bearing takes priority over damage analysis
-        }
-
-        let ai_cfg: &ShieldsAiConfigResource = ai_config_comp.unwrap_or(&*global_ai_config);
-        let facings = &shields.0.facings;
-
-        // Single-arc ships have nothing to focus.
-        if facings.len() < 2 {
-            continue;
-        }
-
-        // Lazily resize damage history to match arc count.
-        damage_history.ensure_len(facings.len());
-
-        // ── Detect damage: compare current HP vs last recorded ──────────────
-        for (idx, facing) in facings.iter().enumerate() {
-            // Use the last record's HP as previous, or current HP if no records.
-            let prev_hp = damage_history
-                .arcs
-                .get(idx)
-                .and_then(|records| records.last())
-                .map(|r| r.amount)
-                .unwrap_or(facing.hp);
-
-            // Detect a decrease in HP (damage taken) while the arc was online.
-            // If the arc went offline the HP dropped to 0 but offline_remaining
-            // is set, which shows as a big jump in offline_remaining — we still
-            // want to record that as damage to the arc.
-            if facing.hp < prev_hp {
-                let delta = prev_hp - facing.hp;
-                damage_history.record_damage(idx, current_time, delta);
-            }
-        }
-
-        // Prune records outside the damage window.
-        damage_history.prune_old(current_time, ai_cfg.damage_window_secs);
-
-        // ── Build AI input ──────────────────────────────────────────────────
-        let facings_snapshot: Vec<_> = facings.iter().map(|f| f.snapshot()).collect();
-        let shields_is_low = true; // Rating gate deferred to per-ship AiTuning
-
-        let input = crate::console_ai::ShieldFocusAiInput {
-            facings: facings_snapshot,
-            shields_is_low,
-            damage_history: damage_history.arcs.clone(),
-            damage_window_secs: ai_cfg.damage_window_secs,
-            min_damage_window_secs: ai_cfg.min_damage_window_secs,
-            damage_pct_threshold: ai_cfg.damage_pct_threshold,
-            health_ratio_threshold: ai_cfg.health_ratio_threshold,
-            current_time_secs: current_time,
-        };
-
-        let decision = crate::console_ai::tick_shield_focus_ai(&input);
-
-        // Apply the focus decision.
-        let new_focus = match decision {
-            crate::console_ai::ShieldFocusAiOutput::Focus { facing_index } => {
-                if facing_index < facings.len() {
-                    Some(Some(facing_index))
-                } else {
-                    None
-                }
-            }
-            crate::console_ai::ShieldFocusAiOutput::ClearFocus => Some(None),
-            crate::console_ai::ShieldFocusAiOutput::None => None,
-        };
-
-        if let Some(focus) = new_focus {
-            shields.0.set_focused_facing(focus);
-        }
-    }
-}
+//
+// The fused decide+mutate `operate_shields_ai` system (damage tracking,
+// health monitoring, focus decision, threat-bearing override) was split in
+// issue #692 into `console_ai::server::ai_shield_focus` (decision, writes
+// `ShieldArcIntents`) and `console_ai::server::integrate_shield_state`
+// (adapter — applies intents via `set_focused_facing`, the same mutation
+// primitive `handle_shields_messages` above uses for the human path).
+// `ShieldsDamageHistory`, `ShieldsAiConfigResource`, and
+// `PendingShieldsThreatBearing` remain here since they're shield-domain state
+// read/written by the new systems.
 
 /// Angular distance (degrees) between two angles on a circle, always in [0, 180].
-fn angular_distance_deg(a: f32, b: f32) -> f32 {
+pub(crate) fn angular_distance_deg(a: f32, b: f32) -> f32 {
     let diff = (a - b).abs() % 360.0;
     diff.min(360.0 - diff)
 }

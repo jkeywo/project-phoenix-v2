@@ -40,22 +40,48 @@ pub struct SensorsThreatState {
     pub last_distance: Option<f32>,
 }
 
+/// TOML-loaded configuration for the Sensors AI controller
+/// (`console_ai::server::ai_frequency_hint`, issue #692).
+///
+/// Loaded from `[sensors_console.ai]` in the ship entity TOML. Defaults are
+/// used when the section is absent.
+///
+/// Dual `Resource + Component`, mirroring `ShieldsAiConfigResource`:
+/// production reads use the Resource form (ship-wide default), with the
+/// Component form available for per-ship overrides.
+#[derive(Resource, Component, Clone, Debug)]
+pub struct SensorsAiConfigResource {
+    /// Delay (seconds) between a target lock and the AI-driven Sensors
+    /// operator emitting a `FrequencyHint` coordination message to Tactical.
+    pub frequency_hint_delay_secs: f32,
+}
+
+impl Default for SensorsAiConfigResource {
+    fn default() -> Self {
+        Self {
+            frequency_hint_delay_secs: 3.0,
+        }
+    }
+}
+
 // ── Plugin ─────────────────────────────────────────────────────────────────────
 
 pub struct ShipSensorsPlugin;
 
 impl Plugin for ShipSensorsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<CoordinationEnqueue>().add_systems(
-            Update,
-            (
-                handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
-                operate_sensors_ai.in_set(crate::sim_sets::SimSet::Input),
-                tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
-                tick_sensors_threat_warning.in_set(crate::sim_sets::SimSet::Input),
-                publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
-            ),
-        );
+        app.add_message::<CoordinationEnqueue>()
+            .init_resource::<SensorsAiConfigResource>()
+            .add_systems(
+                Update,
+                (
+                    handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
+                    operate_sensors_ai.in_set(crate::sim_sets::SimSet::Input),
+                    tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
+                    tick_sensors_threat_warning.in_set(crate::sim_sets::SimSet::Input),
+                    publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                ),
+            );
     }
 }
 
@@ -129,6 +155,13 @@ pub fn handle_sensors_messages(
 /// Iterates every ship (player + NPC) so NPC Sensors→Tactical hints flow
 /// through the coordination bus alongside the player's. Each emission
 /// stamps its source ship so the enqueue handler routes it correctly.
+///
+/// Skips ships whose Sensors is fully AI-operated (`operate_ai` policy) AND
+/// which carry `AiHighFidelity` (issue #692) — those ships hand off to
+/// `console_ai::server::ai_frequency_hint`, which replicates a Low-complexity
+/// operator's reaction delay via `console_ai::tick_frequency_hint` instead of
+/// this system's immediate readout. Human-held Sensors (the overwhelmingly
+/// common case for the player ship) is unaffected.
 pub fn tick_sensors_frequency_hint(
     mut ship_q: Query<
         (
@@ -136,6 +169,7 @@ pub fn tick_sensors_frequency_hint(
             &crate::simulation::WeaponsTarget,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut SensorsFrequencyState,
+            Has<crate::ai_plugin::AiHighFidelity>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -145,7 +179,17 @@ pub fn tick_sensors_frequency_hint(
         &crate::ship::shields::ShipShields,
     )>,
 ) {
-    for (entity, weapons_target, control_sources, mut state) in ship_q.iter_mut() {
+    for (entity, weapons_target, control_sources, mut state, is_high_fidelity) in ship_q.iter_mut()
+    {
+        if is_high_fidelity
+            && control_sources
+                .0
+                .policy_for(&crate::system_registry::sensors_system_id())
+                .operate_ai
+        {
+            continue;
+        }
+
         let current_target = match weapons_target.0.clone() {
             Some(uuid) => uuid,
             None => {

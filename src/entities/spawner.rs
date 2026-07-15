@@ -387,6 +387,18 @@ pub fn spawn_entity(
                 );
             }
         }
+        // Sensors AI config — loaded from [sensors_console.ai] for NPC ships
+        // if present, otherwise the global `SensorsAiConfigResource` default
+        // applies. Inserted as a per-entity Component so `ai_frequency_hint`
+        // reads it via the Component query (mirrors the
+        // [shields_console.ai] pattern below).
+        if let Some(sc) = &config.sensors_console {
+            if let Some(ai) = &sc.ai {
+                entity_commands.insert(crate::ship::sensors::SensorsAiConfigResource {
+                    frequency_hint_delay_secs: ai.frequency_hint_delay_secs,
+                });
+            }
+        }
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
         // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
         // gets an empty modifier cache. Region-entry observers and

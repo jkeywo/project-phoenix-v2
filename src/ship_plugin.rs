@@ -1949,6 +1949,8 @@ mod tests {
             ShipModifiers::new(),
             ShipBoost::default(),
             crate::ai_plugin::AiHighFidelity,
+            crate::ship::shields::ShieldArcIntents::default(),
+            crate::console_ai_plugin::ShipFrequencyHintState::default(),
         ));
         app
     }
@@ -4633,6 +4635,8 @@ station = "helm"
             ShipModifiers::new(),
             ShipBoost::default(),
             ShipImpulse(crate::impulse::ImpulseState::new()),
+            crate::ship::shields::ShieldArcIntents::default(),
+            crate::console_ai_plugin::ShipFrequencyHintState::default(),
         ));
         app
     }

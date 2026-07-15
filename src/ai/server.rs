@@ -581,10 +581,26 @@ fn lod_ai_ships(
             match new_state {
                 LodState::High => {
                     commands.entity(entity).insert(AiHighFidelity);
+                    // AI intent/state components scoped to AiHighFidelity
+                    // (issue #692) — bundled alongside the marker so they
+                    // stay present exactly while the ship runs full-fidelity
+                    // AI decision systems.
+                    commands
+                        .entity(entity)
+                        .insert(crate::ship::shields::ShieldArcIntents::default());
+                    commands
+                        .entity(entity)
+                        .insert(crate::console_ai_plugin::ShipFrequencyHintState::default());
                     commands.entity(entity).insert(timer_comp);
                 }
                 LodState::Low => {
                     commands.entity(entity).remove::<AiHighFidelity>();
+                    commands
+                        .entity(entity)
+                        .remove::<crate::ship::shields::ShieldArcIntents>();
+                    commands
+                        .entity(entity)
+                        .remove::<crate::console_ai_plugin::ShipFrequencyHintState>();
                     commands.entity(entity).insert(timer_comp);
                 }
             }
@@ -1208,6 +1224,8 @@ mod tests {
                 Transform::from_xyz(x, 0.0, z),
                 ShipPhysics::default(),
                 AiHighFidelity,
+                crate::ship::shields::ShieldArcIntents::default(),
+                crate::console_ai_plugin::ShipFrequencyHintState::default(),
             ))
             .id()
     }

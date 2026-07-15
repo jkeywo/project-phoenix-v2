@@ -1600,6 +1600,27 @@ pub struct SensorsConsoleConfig {
     /// Long-range radar config for the Sensors console.
     #[serde(default)]
     pub long_range_radar: crate::radar_config::RadarConfig,
+    /// AI tuning parameters for the Sensors frequency-hint controller.
+    /// Loaded from `[sensors_console.ai]`.
+    #[serde(default)]
+    pub ai: Option<SensorsAiConfigToml>,
+}
+
+/// AI tuning parameters for the Sensors frequency-hint controller
+/// (`console_ai::tick_frequency_hint`, issue #692).
+///
+/// Loaded from `[sensors_console.ai]` in the ship entity TOML.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensorsAiConfigToml {
+    /// Delay (seconds) between a target lock and the AI-driven Sensors
+    /// operator emitting a `FrequencyHint` coordination message to Tactical.
+    #[serde(default = "default_sensors_ai_frequency_hint_delay_secs")]
+    pub frequency_hint_delay_secs: f32,
+}
+
+fn default_sensors_ai_frequency_hint_delay_secs() -> f32 {
+    3.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

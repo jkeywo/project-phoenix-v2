@@ -21,11 +21,19 @@ describe('helpSections', () => {
     ]);
   });
 
-  it('returns the helm tuples (4 sections incl. the 10× burst)', () => {
+  it('returns the helm tuples (5 sections incl. the 10× burst)', () => {
     const h = helpSections('helm');
-    expect(h).toHaveLength(4);
+    expect(h).toHaveLength(5);
     expect(h[0]).toEqual(['Pilot', 'Keep the ship moving and the target in arc for Tactical. You control where the fight happens.']);
-    expect(h[2]).toEqual(['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel.']);
+    expect(h[2]).toEqual(['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel. Press Ctrl or gamepad B to charge, again to cancel.']);
+  });
+
+  it('documents the impulse and boost bindings on helm', () => {
+    const byTitle = Object.fromEntries(helpSections('helm'));
+    expect(byTitle['Impulse Drive']).toContain('Ctrl');
+    expect(byTitle['Impulse Drive']).toContain('gamepad B');
+    expect(byTitle['Boost']).toContain('Hold Shift');
+    expect(byTitle['Boost']).toContain('gamepad A');
   });
 
   it('returns the tactical tuples', () => {
@@ -243,9 +251,9 @@ describe('renderInlineHelp', () => {
     // (title-cased); in Node the fallback returns the raw station-id
     // argument. Both paths are exercised — assert on the Node fallback.
     expect(heading.textContent).toBe('helm');
-    // Helm has 4 help sections
+    // One rendered child per helm help section.
     const sections = groups[0].children.find((c) => c.className === 'help-sections');
-    expect(sections.children).toHaveLength(4);
+    expect(sections.children).toHaveLength(helpSections('helm').length);
   });
 
   it('renders help sections for multiple consoles', () => {

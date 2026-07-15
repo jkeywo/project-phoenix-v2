@@ -1,5 +1,8 @@
+import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
+
 export class PhImpulseBtn extends HTMLElement {
   #state = null;
+  #stopGamepad = null;
 
   constructor() {
     super();
@@ -9,7 +12,8 @@ export class PhImpulseBtn extends HTMLElement {
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
+    .header { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
+    .binding { margin-left: auto; font-size: 0.55rem; letter-spacing: 0.15em; color: var(--ink-faint); }
     .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
     .btn { --charge: 0; width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.9rem; font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: background 0.3s ease; }
     .btn.ready { background: var(--bg-card); border-color: var(--loaded); color: var(--loaded); }
@@ -20,6 +24,7 @@ export class PhImpulseBtn extends HTMLElement {
   </style>
   <div class="header">
     <span>IMPULSE DRIVE</span>
+    <span class="binding" id="binding">CTRL · B</span>
     <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
   </div>
   <button class="btn ready" id="btn">IMPULSE</button>
@@ -29,19 +34,43 @@ export class PhImpulseBtn extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
-    const btn = this.shadowRoot.getElementById('btn');
-    btn.addEventListener('click', () => {
-      if (!this.sendAction || btn.disabled) return;
-      const s = this.#state || {};
-      const st = s.state || 'ready';
-      // Pressing IMPULSE again while it is charging cancels the charge.
-      if (st === 'charging') {
-        this.sendAction('cancel_impulse', {});
-      } else if (st === 'ready') {
-        this.sendAction('start_impulse_charge', {});
-      }
+    this.shadowRoot.getElementById('btn').addEventListener('click', this.#press);
+    // Ctrl and gamepad B fire the same press as the on-screen button, so the
+    // helm keeps impulse under thumb while the other hand flies the stick.
+    if (typeof document !== 'undefined') document.addEventListener('keydown', this.#onKeyDown);
+    this.#stopGamepad = observeGamepadButton(GAMEPAD_BUTTON.B, (pressed) => {
+      if (pressed) this.#press();
     });
   }
+
+  disconnectedCallback() {
+    if (typeof document !== 'undefined') document.removeEventListener('keydown', this.#onKeyDown);
+    if (this.#stopGamepad) { this.#stopGamepad(); this.#stopGamepad = null; }
+  }
+
+  #onKeyDown = (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.code !== 'ControlLeft' && e.code !== 'ControlRight') return;
+    // Held Ctrl auto-repeats; impulse is a discrete press, and a repeat would
+    // otherwise start and immediately cancel the charge over and over.
+    if (e.repeat) return;
+    e.preventDefault();
+    this.#press();
+  };
+
+  #press = () => {
+    const btn = this.shadowRoot.getElementById('btn');
+    if (!this.sendAction || btn.disabled) return;
+    const s = this.#state || {};
+    const st = s.state || 'ready';
+    // Pressing IMPULSE again while it is charging cancels the charge.
+    if (st === 'charging') {
+      this.sendAction('cancel_impulse', {});
+    } else if (st === 'ready') {
+      this.sendAction('start_impulse_charge', {});
+    }
+  };
 
   set state(val) {
     this.#state = val;

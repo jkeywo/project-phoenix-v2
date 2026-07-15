@@ -31,8 +31,9 @@ const HELP_SECTIONS = {
   ],
   helm: [
     ['Pilot', 'Keep the ship moving and the target in arc for Tactical. You control where the fight happens.'],
-    ['Thrust & Steering', 'Drag to accelerate, reverse, or steer.'],
-    ['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel.'],
+    ['Thrust & Steering', 'Drag to accelerate, reverse, or steer. WASD or the arrow keys steer too, as does a gamepad stick.'],
+    ['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel. Press Ctrl or gamepad B to charge, again to cancel.'],
+    ['Boost', 'Hold Shift or gamepad A for 3× speed while the battery lasts. It drains in a few seconds and takes far longer to refill, so save it for closing a gap.'],
     ['On Screen', 'Push your radar to the viewscreen when someone needs to see your situation.'],
   ],
   tactical: [

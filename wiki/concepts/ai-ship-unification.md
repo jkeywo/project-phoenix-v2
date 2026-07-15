@@ -43,8 +43,11 @@ Per-tick (SimSet::Physics)
     └─ NPC ship path (With<AiControllerComponent>)
          policy.operate_ai? → apply physics to Transform using last_helm_intent
 
-  operate_tactical_ai (Without<AiControllerComponent>)
-    └─ player ship Backfill only; NPC tactical fires via synthetic tokens
+  ai_target_selection (SimSet::Input)
+    └─ every ship whose tactical surface is AI-operated: picks a target and
+       writes both WeaponsBlackboard.locked_target (intent) and WeaponsTarget
+       (truth). Firing is separate: ai_phaser_auto_fire / ai_torpedo_auto_fire
+       decide, integrate_weapons_state applies.
 
   operate_shields_ai, operate_power_ai, operate_comms_ai, …  (stubs, #551)
     └─ one system per kind; gated on policy.operate_ai
@@ -69,7 +72,7 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 | System | File | Status |
 |--------|------|--------|
 | `operate_helm_ai` | `src/ship_plugin.rs` | ✅ Full (applies NPC Transform physics; takes `FactionRegistryResource` for hostile detection) |
-| `operate_tactical_ai` | `src/console/weapons/server.rs` | ✅ Player-ship path; NPC via tokens |
+| `ai_target_selection` | `src/console/weapons/server.rs` | ✅ Full (all ships; replaced `operate_tactical_ai` in #700) |
 | `operate_captain_ai` | `src/console/captain/server.rs` | ✅ |
 | `operate_power_ai` | `src/ship/power.rs` | Stub |
 | `operate_shields_ai` | `src/ship/shields.rs` | Stub |
@@ -80,7 +83,7 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 
 ## Objective-driven Backfill bridge
 
-Until issue #581 moves blackboards to per-ship components, the player ship's Backfill AI reads the singleton viewscreen blackboard as a bridge. `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries; `player_ship_helm_ai` consumes Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. `operate_tactical_ai` uses the same pool to lock the top positive Destroy target before existing phaser/torpedo automation runs.
+Until issue #581 moves blackboards to per-ship components, the player ship's Backfill AI reads the singleton viewscreen blackboard as a bridge. `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries; `player_ship_helm_ai` consumes Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. `ai_target_selection` uses the same pool to lock the top positive Destroy target before the phaser/torpedo automation runs.
 
 This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anchors around Starbase Alpha, while each spawned `wave_N` gets a higher-scored Destroy objective that resolves through the runtime `wave_N -> uuid` mapping. Missing named targets are ignored rather than falling back to an arbitrary hostile.
 

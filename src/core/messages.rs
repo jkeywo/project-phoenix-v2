@@ -1907,22 +1907,24 @@ pub struct ShieldArcBlackboard {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsBlackboard {
     pub target_uuid: Option<String>,
-    /// The Tactical AI's *selected* target — the decide-phase output of
-    /// `ai_target_selection` (issue #697).
+    /// The Tactical AI's *selected* target — the output of
+    /// `ai_target_selection` (issues #697, #700).
     ///
     /// Distinct from `target_uuid`, which mirrors the authoritative
     /// `WeaponsTarget` ECS component (the ship's actual lock, set by whoever
-    /// last wrote it — human `SetTarget`, the AI integrator, or the beam /
+    /// last wrote it — human `SetTarget`, the Tactical AI, or the beam /
     /// torpedo paths). `locked_target` is *intent*, `target_uuid` is *truth*:
     ///
-    /// - Tactical AI-operated: `ai_target_selection` writes `locked_target`,
-    ///   then `operate_tactical_ai` applies it to `WeaponsTarget`, so after a
-    ///   tick the two agree.
+    /// - Tactical AI-operated: `ai_target_selection` publishes `locked_target`
+    ///   and applies the same choice to `WeaponsTarget`, so after a tick the
+    ///   two agree.
     /// - Tactical human-operated: the AI selects nothing, so `locked_target`
     ///   is `None` while `target_uuid` may be set by the human's lock.
     ///
-    /// Only `ai_target_selection` writes this field; only `operate_tactical_ai`
-    /// turns it into a `WeaponsTarget` write. `publish_weapons_blackboard`
+    /// Only `ai_target_selection` writes this field, and nothing on the server
+    /// reads it back — it is reported, not consumed. Its job is to make the
+    /// AI's reasoning observable and to tell an AI-driven lock apart from a
+    /// human's on the wire. `publish_weapons_blackboard`
     /// carries the value forward when it rebuilds the blackboard (it runs in
     /// `SimSet::Publish`, after the AI wrote its intent in `SimSet::Input`),
     /// dropping it if the selected entity is no longer live — the beam and

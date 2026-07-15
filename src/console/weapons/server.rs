@@ -127,7 +127,7 @@ pub struct PhaserIntents(pub Vec<PhaserCmd>);
 
 /// UUID of the last entity that attacked this ship. Written by the unified
 /// `tick_beams` in the Damage phase on the targeted ship's entity;
-/// consumed by that ship's `operate_tactical_ai` as a fallback target.
+/// consumed by that ship's `ai_target_selection` as a fallback target.
 /// `None` when no recent attacker is known.
 ///
 /// Per-ship `Component` — every ship (player + NPC) tracks its own attacker.
@@ -327,13 +327,6 @@ fn on_beam_ended(
 
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
-/// Marker resource for the coarse Tactical system AI controller.
-/// The `operate_tactical_ai` system reads this to confirm the AI path is
-/// initialised; internal state lives in ECS resources the operate step reads
-/// directly.
-#[derive(Resource, Default)]
-pub struct TacticalAiController;
-
 /// Per-ship frequency match state for NPC auto-match frequency AI.
 #[derive(Resource, Default)]
 pub struct NpcFrequencyMatchStates(
@@ -350,7 +343,6 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<PhaserRenderConfig>()
             .init_resource::<PhaserCombatConfigResource>()
             .init_resource::<WeaponsUpdateFirstTick>()
-            .init_resource::<TacticalAiController>()
             .init_resource::<NpcFrequencyMatchStates>()
             .init_resource::<BlasterSystemResource>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
@@ -364,27 +356,24 @@ impl Plugin for WeaponsPlugin {
                 Update,
                 (
                     // `handle_set_target` is the other `SimSet::Input` writer of
-                    // `WeaponsTarget`, so it has to be ordered against the AI pair
-                    // below — the pair must be atomic with respect to it.
+                    // `WeaponsTarget`, and is ordered against `ai_target_selection`
+                    // below.
                     //
-                    // Pre-split, `operate_tactical_ai` read and wrote
-                    // `WeaponsTarget` in one system, so only two interleavings
-                    // existed and both kept a human's lock: either the handler ran
-                    // first and the AI seeded from the fresh lock, or it ran second
-                    // and its write landed last. The split adds a third —
-                    // selection → handler → integrator — in which the integrator
-                    // writes back intent derived from the *pre-SetTarget* value and
-                    // silently discards the human's lock. It is not recovered next
-                    // tick either, because selection re-seeds from the clobbered
-                    // `WeaponsTarget`.
+                    // `ai_target_selection` reads `WeaponsTarget` (as the seed for
+                    // its selection) and writes it back in the same system, so only
+                    // two interleavings exist and both keep a human's lock: either
+                    // the handler runs first and selection seeds from the fresh
+                    // lock, or it runs second and its write lands last.
                     //
-                    // That interleaving is reachable in normal play: this handler
-                    // gates on `any_bank_accepts_human_input` and the AI pair on
-                    // `any_tactical_system_operates_ai`, which both hold on any
-                    // mixed-rating ship (a Human phaser bank plus, say, an Ai
-                    // torpedo tube or magazine). Ordering the handler before
-                    // selection restores the pre-split guarantee: admitted human
-                    // input is always seen by selection in the same tick.
+                    // The edge is kept anyway, and is worth keeping: it pins the
+                    // better of the two, in which admitted human input is visible to
+                    // selection — and to every other `Input` reader of
+                    // `WeaponsTarget` — in the tick it was admitted, rather than a
+                    // tick later. Both gates hold at once on any mixed-rating ship
+                    // (`any_bank_accepts_human_input` for a Human phaser bank,
+                    // `any_tactical_system_operates_ai` for, say, an Ai torpedo tube
+                    // or magazine), so this is an ordinary configuration, not a
+                    // contrived one.
                     handle_set_target
                         .in_set(crate::sim_sets::SimSet::Input)
                         .before(ai_target_selection),
@@ -404,25 +393,17 @@ impl Plugin for WeaponsPlugin {
                     handle_load_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
-                    // Tactical AI decide → integrate pair (issue #697).
+                    // Tactical AI target selection (issues #697, #700).
                     //
-                    // Both stay in `SimSet::Input` — where the pre-split
-                    // `operate_tactical_ai` already lived — rather than moving
-                    // to the `Physics` + `AiTickLabel` set that ConsoleAiPlugin's
-                    // other decide/integrate pairs use. The `WeaponsTarget` write
-                    // has to land in `Input`: `tick_phaser_auto_fire`,
-                    // `handle_fire_phaser` and `tick_npc_auto_match_frequency` all
-                    // read it from `Input`, so integrating in `Physics` would push
-                    // the write past them and make them read last tick's lock —
-                    // an observable behaviour change this split must not make.
-                    //
-                    // The `.before` is load-bearing, not decorative: `Input` has no
-                    // other intra-set ordering, so without it Bevy is free to run
-                    // the integrator first and apply last tick's intent.
-                    ai_target_selection
-                        .in_set(crate::sim_sets::SimSet::Input)
-                        .before(operate_tactical_ai),
-                    operate_tactical_ai.in_set(crate::sim_sets::SimSet::Input),
+                    // Stays in `SimSet::Input` — where the pre-split
+                    // `operate_tactical_ai` lived — rather than moving to the
+                    // `Physics` + `AiTickLabel` set that ConsoleAiPlugin's
+                    // decide/integrate pairs use. The `WeaponsTarget` write has to
+                    // land in `Input`: `ai_phaser_auto_fire`, `handle_fire_phaser`
+                    // and `tick_npc_auto_match_frequency` all read it from `Input`,
+                    // so writing it from `Physics` would push the write past them
+                    // and make them read last tick's lock.
+                    ai_target_selection.in_set(crate::sim_sets::SimSet::Input),
                     tick_npc_auto_match_frequency.in_set(crate::sim_sets::SimSet::Input),
                     tick_blaster_auto_fire.in_set(crate::sim_sets::SimSet::Input),
                     handle_fire_blaster.in_set(crate::sim_sets::SimSet::Input),
@@ -699,7 +680,7 @@ fn any_blaster_bank_operates_ai(
 /// torpedo magazine) has an operable fine system whose policy has
 /// `operate_ai == true`.
 ///
-/// Used as the ship-level early-skip gate in `operate_tactical_ai` after
+/// Used as the ship-level early-skip gate in `ai_target_selection` after
 /// issue #512 deleted the coarse `[[system]] id = "tactical"` block.
 /// Mirrors the shape of `any_bank_operates_ai` but covers the full tactical
 /// surface (weapons_target sync + torpedo auto-fire both need to run when
@@ -3703,67 +3684,43 @@ fn tick_torpedo_system(
 
 // ── Tactical AI ───────────────────────────────────────────────────────────
 //
-// Decomposed by issue #697 (tactical split 1/3) into a decide/integrate pair,
-// mirroring the shape every other console AI already uses (`ai_shield_focus`
-// → `integrate_shield_state`, `ai_power_allocation` → `integrate_power_state`
-// in `console_ai::server`):
+// `ai_target_selection` is the whole of the Tactical AI's targeting path
+// (issues #697, #700). It reads the world, the ship's own objective
+// blackboard, and its last attacker; it publishes the chosen target to
+// `WeaponsBlackboard.locked_target` as observable intent, and applies that
+// same choice to the authoritative `WeaponsTarget` component (truth) in the
+// same system.
 //
-//   ai_target_selection — DECIDE. Reads the world, the ship's own objective
-//       blackboard, and its last attacker; writes the chosen target to
-//       `WeaponsBlackboard.locked_target` (intent). Read-only everywhere else.
-//   operate_tactical_ai — INTEGRATE. Applies `locked_target` to the
-//       authoritative `WeaponsTarget` component (truth).
+// It began (#697) as a decide/integrate pair — `ai_target_selection` →
+// `operate_tactical_ai` — mirroring the shape the other console AIs use
+// (`ai_shield_focus` → `integrate_shield_state`). #700 folded the integrator
+// back in, because unlike those pairs the two halves could not be separated by
+// a sim set: every `WeaponsTarget` reader runs in `SimSet::Input`, so the write
+// had to stay in `Input` too, which left the "pair" as two systems in the same
+// set held together by an explicit `.before` edge and an `Option<Option<_>>`
+// to distinguish "the decider never ran" from "the decider chose nothing".
 //
-// Both run in `SimSet::Input`, explicitly ordered `ai_target_selection`
-// `.before(operate_tactical_ai)` — see `WeaponsPlugin::build` for why the pair
-// stays in `Input` rather than moving to the `Physics` + `AiTickLabel` set the
-// other console AI pairs use.
+// Folding them back makes read-seed-decide-write atomic with respect to the
+// other `Input` writer of `WeaponsTarget` (`handle_set_target`), which is what
+// the `.before` edge existed to enforce. See `WeaponsPlugin::build`.
 //
-// Neither system fires weapons. Issue #698 (slice 2/3) split firing itself the
-// same way: `ai_phaser_auto_fire` / `ai_torpedo_auto_fire` decide and write
-// `PhaserIntents` / `TorpedoIntents`; `integrate_weapons_state` is the sole
-// system that mutates `ActiveBeam` and `TorpedoSystem` from those intents.
-// `operate_tactical_ai` is now pure orchestration glue: gate, then apply
-// `locked_target` to `WeaponsTarget`.
+// This system does not fire weapons. Issue #698 split firing itself into a
+// decide/integrate pair that *does* straddle sim sets: `ai_phaser_auto_fire` /
+// `ai_torpedo_auto_fire` decide and write `PhaserIntents` / `TorpedoIntents`;
+// `integrate_weapons_state` is the sole system that mutates `ActiveBeam` and
+// `TorpedoSystem` from those intents.
 
-/// Read the Tactical AI's target decision out of a ship's blackboards.
-///
-/// The two `Option` levels are distinct and must not be collapsed:
-///
-/// - Outer `None` — the ship has no Weapons blackboard entry, so
-///   `ai_target_selection` never ran for it. There is no decision to integrate
-///   and `operate_tactical_ai` must leave `WeaponsTarget` untouched.
-/// - `Some(None)` — selection ran and deliberately chose nothing: no candidate
-///   was in range, or the standing lock went dead / drifted out of range. The
-///   integrator must clear `WeaponsTarget`.
-///
-/// Collapsing the two into a bare `Option<String>` makes "the decider never
-/// ran" indistinguishable from "the decider chose nothing", which silently
-/// turns any ship the decider skips into a ship whose lock is cleared every
-/// tick. `operate_tactical_ai`'s query is kept identical to
-/// `ai_target_selection`'s so the two match the same entities, but this type
-/// is what makes the invariant hold even if they ever drift apart.
-fn blackboard_locked_target(
-    blackboards: &crate::server_app::ShipSystemBlackboards,
-) -> Option<Option<String>> {
-    match blackboards
-        .0
-        .get(&crate::system_registry::tactical_system_id())
-    {
-        Some(SystemBlackboard::Weapons(weapons)) => Some(weapons.locked_target.clone()),
-        _ => None,
-    }
-}
-
-/// Record `ai_target_selection`'s decision on a ship's blackboards, creating
+/// Publish `ai_target_selection`'s decision on a ship's blackboards, creating
 /// the Weapons entry if the ship has none yet.
 ///
-/// Creation is required, not incidental: `blackboard_locked_target` reads a
-/// missing entry as "the decider never ran", so a decider that chose `None`
-/// and wrote nothing would be read as "skip" and leave a stale lock in place —
-/// the pre-split code cleared it. `publish_weapons_blackboard` rebuilds the
-/// entry from real ship state later in the same tick, so a bare default entry
-/// never escapes to the wire.
+/// This is observability, not a control channel: nothing reads `locked_target`
+/// back to drive behaviour — `ai_target_selection` applies its own decision to
+/// `WeaponsTarget` directly. The field is what lets a client (or a human
+/// watching a backfilled console) see *why* the ship's lock is what it is, and
+/// it is what distinguishes AI intent from a human's lock on the wire.
+///
+/// `publish_weapons_blackboard` rebuilds the entry from real ship state later
+/// in the same tick, so a bare default entry never escapes to the wire.
 fn record_locked_target_decision(
     blackboards: &mut crate::server_app::ShipSystemBlackboards,
     value: Option<String>,
@@ -3777,12 +3734,12 @@ fn record_locked_target_decision(
     }
 }
 
-/// Drop any stale Tactical AI intent from a ship the decider is skipping.
+/// Drop any stale Tactical AI intent from a ship the selector is skipping.
 ///
 /// A no-op when the ship has no Weapons blackboard entry, rather than an
-/// insert of an empty one: absence is what tells `operate_tactical_ai` no
-/// decision was made, and `publish_weapons_blackboard` owns creating the entry
-/// with real ship state.
+/// insert of an empty one: `publish_weapons_blackboard` owns creating the entry
+/// with real ship state, and a ship the AI does not target for has no intent to
+/// report in the first place.
 fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSystemBlackboards) {
     if let Some(SystemBlackboard::Weapons(weapons)) = blackboards
         .0
@@ -3792,17 +3749,32 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
     }
 }
 
-/// Tactical AI target prioritisation (issue #697).
+/// Tactical AI target prioritisation (issues #697, #700).
 ///
 /// Runs for every ship whose Tactical surface is AI-controlled — player ship
-/// and NPC alike, with no `AiHighFidelity` gate, matching the pre-split
-/// `operate_tactical_ai` it was extracted from.
+/// and NPC alike, with no `AiHighFidelity` gate.
 ///
-/// Selection order, unchanged from the pre-split code: the highest-scoring
-/// Weapons-relevant `Destroy` objective, else the ship's last attacker, else
-/// keep the current lock. Any candidate must be inside the damage-scaled
-/// tactical radar range (issue #680), and a lock that goes dead or drifts out
-/// of range is dropped.
+/// Selection order: the highest-scoring Weapons-relevant `Destroy` objective,
+/// else the ship's last attacker, else keep the current lock. Any candidate
+/// must be inside the damage-scaled tactical radar range (issue #680), and a
+/// lock that goes dead or drifts out of range is dropped.
+///
+/// The decision is applied to `WeaponsTarget` here, in the same system that
+/// makes it. `WeaponsTarget` is the single source of truth every consumer reads
+/// (`handle_fire_phaser`, `ai_phaser_auto_fire`, `ai_torpedo_auto_fire`,
+/// `tick_npc_auto_match_frequency`, …), and this is the only path by which the
+/// AI reaches it — a human-operated Tactical's lock is never overwritten,
+/// because the `operate_ai` gate below skips the ship entirely.
+///
+/// Seeding the selection from `WeaponsTarget` and writing it back within one
+/// system is deliberate: it makes the AI's read-modify-write atomic with
+/// respect to `handle_set_target`, the only other `SimSet::Input` writer of
+/// `WeaponsTarget`. `Input` has no intra-set ordering by default, so a
+/// separate integrator system could be scheduled between the two and write back
+/// a decision made before the human's `SetTarget` landed, silently dropping the
+/// human's lock on any mixed-rating ship. Do not re-split this without
+/// re-establishing that ordering — see `WeaponsPlugin::build` and
+/// `human_set_target_survives_the_tick_on_a_mixed_rating_ship`.
 fn ai_target_selection(
     mut ship_query: Query<
         (
@@ -3810,7 +3782,7 @@ fn ai_target_selection(
             &ShipSystemControlSources,
             &LastShipAttacker,
             &ShipPhysics,
-            &WeaponsTarget,
+            &mut WeaponsTarget,
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entity_spawner::WeaponsConsoleSection>,
@@ -3845,7 +3817,7 @@ fn ai_target_selection(
         control_sources,
         last_attacker,
         physics,
-        weapons_target,
+        mut weapons_target,
         mut blackboards,
         modifiers,
         weapons_section,
@@ -3925,58 +3897,12 @@ fn ai_target_selection(
             }
         }
 
-        record_locked_target_decision(&mut blackboards, selected);
-    }
-}
-
-/// Apply the Tactical AI's selected target to the authoritative
-/// `WeaponsTarget` component (issue #697).
-///
-/// `WeaponsTarget` is the single source of truth every consumer reads
-/// (`handle_fire_phaser`, `ai_phaser_auto_fire`, `ai_torpedo_auto_fire`,
-/// `tick_npc_auto_match_frequency`, …). This system is the only path by which
-/// the AI's `locked_target` intent reaches it, which is what keeps the two
-/// surfaces from disagreeing.
-///
-/// Gates on the same tactical `operate_ai` policy as `ai_target_selection`, so
-/// a human-operated Tactical console's lock is never overwritten.
-///
-/// The query deliberately mirrors `ai_target_selection`'s component set exactly
-/// — including `LastShipAttacker` and `ShipPhysics`, which this system does not
-/// itself read — so the decider and the integrator provably match the same
-/// entities. Widening one without the other would hand this system ships the
-/// decider never saw. `blackboard_locked_target`'s outer `Option` is the
-/// belt-and-braces guard for that case; keeping the queries aligned is the
-/// braces.
-fn operate_tactical_ai(
-    mut ship_query: Query<
-        (
-            &crate::ship_plugin::ShipConfigComponent,
-            &ShipSystemControlSources,
-            &LastShipAttacker,
-            &ShipPhysics,
-            &mut WeaponsTarget,
-            &crate::server_app::ShipSystemBlackboards,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-) {
-    for (ship_config, control_sources, _last_attacker, _physics, mut weapons_target, blackboards) in
-        ship_query.iter_mut()
-    {
-        if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
-            continue;
-        }
-
-        // Outer `None` means `ai_target_selection` never ran for this ship, so
-        // there is nothing to integrate — skip rather than clear. See
-        // `blackboard_locked_target`.
-        let Some(selected) = blackboard_locked_target(blackboards) else {
-            continue;
-        };
+        // Publish the decision as intent (observability), then apply it to the
+        // authoritative lock.
+        record_locked_target_decision(&mut blackboards, selected.clone());
         // Compare before writing: an unconditional assignment through `Mut`
         // would fire change detection every tick even when the lock is
-        // unchanged, which the pre-split code did not do.
+        // unchanged.
         if weapons_target.0 != selected {
             weapons_target.0 = selected;
         }
@@ -8066,7 +7992,7 @@ station = "tactical"
         }
 
         // Push a synthetic FirePhaser message for the NPC's ai: token.
-        // In production this would be emitted by operate_tactical_ai/ai_phaser_auto_fire,
+        // In production this would be emitted by ai_phaser_auto_fire,
         // but for this integration test we inject it directly.
         let ai_token = format!("ai:{}", npc_uuid_str);
         push(
@@ -8770,7 +8696,7 @@ station = "tactical"
         );
     }
 
-    // ── TacticalAiController tests ─────────────────────────────────────────
+    // ── Tactical AI tests ──────────────────────────────────────────────────
 
     /// Set the ControlSource for the coarse tactical system AND every
     /// tactical fine system on the LocalShip.
@@ -9055,7 +8981,7 @@ station = "tactical"
     }
 
     #[test]
-    fn ai_target_selection_publishes_locked_target_and_integrator_applies_it() {
+    fn ai_target_selection_publishes_locked_target_and_applies_it() {
         let mut app = test_app();
         let target_uuid = uuid::Uuid::new_v4().to_string();
         set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
@@ -9080,7 +9006,7 @@ station = "tactical"
         assert_eq!(
             get_weapons_target(&mut app).as_deref(),
             Some(target_uuid.as_str()),
-            "operate_tactical_ai must apply locked_target to the authoritative WeaponsTarget"
+            "ai_target_selection must apply its choice to the authoritative WeaponsTarget"
         );
         assert_eq!(
             bb.target_uuid, bb.locked_target,
@@ -9104,7 +9030,7 @@ station = "tactical"
         );
         assert!(
             get_weapons_target(&mut app).is_none(),
-            "and the integrator must clear the authoritative WeaponsTarget to match"
+            "and it must clear the authoritative WeaponsTarget to match"
         );
     }
 
@@ -9140,10 +9066,10 @@ station = "tactical"
     }
 
     /// Put the ship in the mixed-rating shape that makes `handle_set_target`
-    /// and the tactical AI pair run in the same tick: the phaser banks are
+    /// and `ai_target_selection` run in the same tick: the phaser banks are
     /// Human (so `any_bank_accepts_human_input` admits SetTarget) while the
     /// torpedo magazine is Ai (so `any_tactical_system_operates_ai` runs the
-    /// pair). This is an ordinary config, not a contrived one — it is what a
+    /// selector). This is an ordinary config, not a contrived one — it is what a
     /// ship looks like when Tactical is crewed but the magazine is backfilled.
     fn set_mixed_tactical_control_sources(app: &mut App) {
         use crate::ship::control_source::ControlSource;
@@ -9170,7 +9096,7 @@ station = "tactical"
 
     /// The mixed-rating shape above is only interesting if both gates really do
     /// fire on it. Pin that directly, so the regression test below can't quietly
-    /// decay into a test of a ship the AI pair never touches.
+    /// decay into a test of a ship the tactical AI never touches.
     #[test]
     fn mixed_rating_ship_admits_human_set_target_and_runs_the_tactical_ai() {
         let mut app = test_app();
@@ -9191,7 +9117,7 @@ station = "tactical"
         );
         assert!(
             any_tactical_system_operates_ai(control_sources, &ship_config.0),
-            "an Ai torpedo magazine must still run the tactical AI pair — if this \
+            "an Ai torpedo magazine must still run the tactical AI — if this \
              ever goes false the two writers stop overlapping and the ordering \
              regression below stops being reachable"
         );
@@ -9221,7 +9147,7 @@ station = "tactical"
             Some("target-uuid"),
             "the human's SetTarget must survive the tick it was admitted in: \
              ai_target_selection has to see it and carry it into its own selection, \
-             not integrate a decision made before the human's lock existed"
+             not apply a decision made before the human's lock existed"
         );
 
         // And it must still be there next tick — a lock clobbered on tick N is
@@ -9235,20 +9161,29 @@ station = "tactical"
         );
     }
 
-    /// Pins the "decider never ran" vs "decider chose nothing" distinction that
-    /// `blackboard_locked_target`'s `Option<Option<_>>` encodes. Exercises
-    /// `operate_tactical_ai` alone, which is the only way to reach a ship the
-    /// decider never saw while the two queries are aligned.
+    /// Ported from `integrator_leaves_weapons_target_alone_when_selection_never_ran`
+    /// (issue #700). That test pinned the "decider never ran" vs "decider chose
+    /// nothing" distinction which `blackboard_locked_target`'s `Option<Option<_>>`
+    /// carried between `ai_target_selection` and the separate `operate_tactical_ai`
+    /// integrator. With the integrator folded in, a decision and its application
+    /// are the same statement, so "never ran" can no longer be misread as "chose
+    /// nothing" — the bug is unrepresentable rather than merely guarded.
+    ///
+    /// What survives is the property underneath it, on the one path that can still
+    /// reach it: a ship the selector skips must keep the lock it already has, and
+    /// must not have an AI-intent entry conjured onto its blackboard.
     #[test]
-    fn integrator_leaves_weapons_target_alone_when_selection_never_ran() {
+    fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
         use crate::ship::control_source::{ControlSource, ControlSourceResolver};
         let mut app = App::new();
-        app.add_systems(Update, operate_tactical_ai);
+        app.add_systems(Update, ai_target_selection);
 
         let config = test_ship_config();
         let mut resolver = ControlSourceResolver::new();
+        // Human across the board: `any_tactical_system_operates_ai` is false, so
+        // selection skips this ship entirely.
         for system in &config.0.systems {
-            resolver.set(system.id.clone(), ControlSource::Ai);
+            resolver.set(system.id.clone(), ControlSource::Human);
         }
         let ship = app
             .world_mut()
@@ -9258,8 +9193,12 @@ station = "tactical"
                 ShipSystemControlSources(resolver),
                 LastShipAttacker::default(),
                 ShipPhysics::default(),
+                // The human operator's standing lock, on an entity that does not
+                // exist in this bare world — so if the AI ever did run for this
+                // ship, its stale-target guard would clear the lock and the
+                // assertion below would fail. That is the point: the AI must not
+                // run at all.
                 WeaponsTarget(Some("standing-lock".into())),
-                // No Weapons entry: this ship's decision was never made.
                 crate::server_app::ShipSystemBlackboards::default(),
             ))
             .id();
@@ -9269,9 +9208,18 @@ station = "tactical"
         assert_eq!(
             app.world().entity(ship).get::<WeaponsTarget>().unwrap().0,
             Some("standing-lock".into()),
-            "a missing Weapons blackboard entry means ai_target_selection never ran \
-             for this ship, so there is no decision to integrate — the integrator must \
-             skip it, not read the absence as 'the AI chose no target' and clear the lock"
+            "a ship whose Tactical is human-operated is skipped by the selector — \
+             it must keep the human's lock, not have it re-decided or cleared"
+        );
+        assert!(
+            !app.world()
+                .entity(ship)
+                .get::<crate::server_app::ShipSystemBlackboards>()
+                .unwrap()
+                .0
+                .contains_key(&crate::system_registry::tactical_system_id()),
+            "a skipped ship has no AI intent to report, so the selector must not \
+             insert a bare Weapons blackboard entry for it"
         );
     }
 
@@ -10384,14 +10332,14 @@ ai_only = true
         );
     }
 
-    /// Finding 2 regression: `operate_tactical_ai` used to gate its
-    /// early skip on the coarse `tactical` policy. Post-fix, it uses
+    /// Finding 2 regression: the tactical AI used to gate its early skip on the
+    /// coarse `tactical` policy. Post-fix, it uses
     /// `any_tactical_system_operates_ai` which iterates the ship config's
     /// phaser_bank / torpedo_tube / torpedo_magazine fine systems. This
     /// test seeds AI on `torpedo-magazine` alone (no coarse tactical) and
     /// asserts the AI's WeaponsTarget sync path fires.
     #[test]
-    fn operate_tactical_ai_runs_when_any_tactical_system_operates_ai() {
+    fn ai_target_selection_runs_when_any_tactical_system_operates_ai() {
         let mut app = test_app();
 
         // Set the LocalShip's active rating to Assisted so torpedo_auto_fire is enabled.
@@ -10418,7 +10366,7 @@ ai_only = true
             }
         }
 
-        // Simulate a Destroy objective so operate_tactical_ai has something
+        // Simulate a Destroy objective so ai_target_selection has something
         // to lock onto (the AI target-sync leg exercises the early-skip we're
         // testing).
         let target_uuid = uuid::Uuid::new_v4().to_string();
@@ -10434,7 +10382,7 @@ ai_only = true
         assert_eq!(
             get_weapons_target(&mut app).as_deref(),
             Some(target_uuid.as_str()),
-            "operate_tactical_ai must run and lock the objective target when ANY \
+            "ai_target_selection must run and lock the objective target when ANY \
              tactical fine system has operate_ai=true, even without the coarse tactical SystemId"
         );
     }
@@ -10447,7 +10395,7 @@ ai_only = true
 
     /// Spawns a target entity that `tick_npc_auto_match_frequency` can read a
     /// shield frequency from: `EntityUuid` (matched against the locked target),
-    /// `Transform` (so `operate_tactical_ai`'s stale-target guard treats it as
+    /// `Transform` (so `ai_target_selection`'s stale-target guard treats it as
     /// alive and keeps the lock), and `ShipShields` carrying `freq`.
     fn spawn_shield_target(app: &mut App, uuid: &str, freq: f32) {
         app.world_mut().spawn((

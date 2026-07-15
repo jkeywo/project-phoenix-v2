@@ -17,13 +17,17 @@
 //! `integrate_torpedo_intents`, replacing the old fused torpedo sub-block
 //! that used to live inside `console::weapons::server::operate_tactical_ai`
 //! with the same decide/`TorpedoIntents`-write + mutate-only-adapter shape.
-//! `operate_tactical_ai` keeps running for Tactical target selection only.
+//! `operate_tactical_ai` kept running for Tactical target selection only.
 //!
 //! Issue #698 completes that work: `ai_torpedo_auto_fire` is no longer
 //! preliminary (it reads real target-lock and target-shield state instead of
 //! hardcoding them), and `integrate_torpedo_intents` is gone — its body moved
 //! into `console::weapons::server::integrate_weapons_state`, the single
 //! adapter that drains both `TorpedoIntents` and `PhaserIntents`.
+//!
+//! Issue #700 finished the decomposition: `operate_tactical_ai` is gone
+//! entirely, and target selection now lives wholly in
+//! `console::weapons::server::ai_target_selection`.
 
 use bevy::prelude::*;
 
@@ -34,7 +38,7 @@ pub const AI_RULE_FREQUENCY_MATCH: &str = "frequency_match";
 /// Not yet consulted by `ai_frequency_hint` — that system currently gates
 /// only on `AiHighFidelity` + the coarse `operate_ai` policy (issue #692).
 /// A claimed/unclaimed split mirroring `AI_RULE_TORPEDO_AUTO_FIRE`'s use in
-/// `operate_tactical_ai` (see `console::weapons::server`) is a reasonable
+/// `ai_torpedo_auto_fire` is a reasonable
 /// follow-up, but wiring it here would require consulting the global
 /// `Sessions`/`ActiveStationRatings` resources per-ship, which — unlike
 /// Tactical's single-crewed-ship assumption — risks cross-ship coupling for
@@ -545,8 +549,8 @@ fn integrate_power_state(
 ///
 /// Wires the previously-orphaned `console_ai::auto_fire_torpedo`: for ships
 /// whose Tactical target is already locked (`WeaponsTarget`, written by
-/// `console::weapons::server::operate_tactical_ai` from `ai_target_selection`'s
-/// decision), decides which loaded, in-arc torpedo tubes to fire and writes the
+/// `console::weapons::server::ai_target_selection`), decides which loaded,
+/// in-arc torpedo tubes to fire and writes the
 /// decision into `TorpedoIntents` for
 /// `console::weapons::server::integrate_weapons_state` to apply, rather than
 /// calling `TorpedoSystem::launch` directly.
@@ -579,9 +583,9 @@ fn integrate_power_state(
 /// - `ShipSystemControlSources.policy_for(torpedo_magazine_system_id()).operate_ai`
 ///   — new constraint vs. the old fused block, which had no torpedo-specific
 ///   gate of its own beyond the combined `any_tactical_system_operates_ai`
-///   check that ran before `operate_tactical_ai` (that check still gates
-///   `ai_target_selection` / `operate_tactical_ai`; this is an *additional*,
-///   torpedo-specific gate). The torpedo magazine is the shared bottleneck
+///   check that ran before the old `operate_tactical_ai` (that check still
+///   gates `ai_target_selection`; this is an *additional*, torpedo-specific
+///   gate). The torpedo magazine is the shared bottleneck
 ///   resource across tubes, so its policy is the natural per-system gate
 ///   (no single unified `torpedo_system_id()` exists).
 /// - `AiHighFidelity` (query filter, new constraint vs. the old system).

@@ -3402,6 +3402,96 @@ automated_systems = []
         }
     }
 
+    /// The Courier is the single-station player hull. Its whole design rests on
+    /// a handful of config invariants that are individually easy to break and
+    /// fail silently at runtime, so pin them against the real asset.
+    #[test]
+    fn courier_toml_is_a_valid_single_station_hull() {
+        use crate::messages::{StationId, SystemId};
+
+        let toml_str = include_str!("../../assets/entities/alliance_courier.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("alliance_courier must parse");
+        let ship_config = config.ship_config.clone().expect("ship_config present");
+
+        // One station, one rating (more than one would render a complexity
+        // toggle in the solo lobby).
+        assert_eq!(ship_config.stations.len(), 1);
+        let pilot = StationId("pilot".into());
+        assert_eq!(ship_config.stations[0].id, pilot);
+        assert_eq!(ship_config.stations[0].ratings.len(), 1);
+        assert_eq!(
+            ship_config.stations[0].console.as_deref(),
+            Some("gui/courier/pilot.html")
+        );
+
+        // The guns live on "pilot", so every ship-level Tactical gate and the
+        // WeaponsUpdate broadcast must resolve there.
+        assert_eq!(ship_config.weapons_station(), Some(pilot.clone()));
+
+        // Exactly one weapon: one blaster, no phasers, no torpedoes.
+        let weapons = config.weapons_console.as_ref().expect("weapons_console");
+        assert_eq!(weapons.blaster_banks.len(), 1);
+        assert_eq!(weapons.blaster_banks[0].id, "fore");
+        assert!(
+            weapons.phaser_banks.is_empty(),
+            "courier has no phasers — an absent list must not synthesise a default bank"
+        );
+        assert!(config.torpedoes.is_none(), "courier has no torpedoes");
+
+        // No power system. [power_groups] is absent, so no system may declare a
+        // power_group or parsing fails with UnknownPowerGroup.
+        assert!(config.power.is_none(), "courier has no [power] block");
+        assert!(ship_config.power_groups.is_empty());
+        for sys in &ship_config.systems {
+            assert_eq!(
+                sys.power_group, None,
+                "system {:?} declares a power_group but the hull has no power groups",
+                sys.id
+            );
+        }
+
+        // Every system is owned by the pilot. Ownerless + ai_only would be
+        // inert on the player spawn path (ai_only_systems has no production
+        // caller), leaving the system at ControlSource::Human with no AI.
+        for sys in &ship_config.systems {
+            assert_eq!(
+                sys.station,
+                Some(pilot.clone()),
+                "system {:?} must be owned by the pilot station",
+                sys.id
+            );
+            assert!(!sys.ai_only, "system {:?} must not rely on ai_only", sys.id);
+        }
+
+        // Two arcs, fore and aft, hung off the pilot's shields system.
+        assert_eq!(config.shield_arcs.len(), 2);
+        let arc_ids: Vec<&str> = config.shield_arcs.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(arc_ids, vec!["fore", "aft"]);
+
+        // The systems the player has no panel for are AI-run via the rating.
+        let automated = &ship_config.stations[0].ratings[0].automated_systems;
+        for expected in [
+            "red-alert",
+            "repair",
+            "shields-system",
+            "shield-arc-fore",
+            "shield-arc-aft",
+        ] {
+            assert!(
+                automated.contains(&SystemId(expected.into())),
+                "{expected} must be automated — the pilot has no panel for it"
+            );
+        }
+
+        // Cinematic button only resolves when this block exists.
+        assert!(config.cinematic_camera.is_some());
+
+        // One team, slower than the destroyer's 2 teams at 0.5 hp/sec.
+        let repair = config.repair.as_ref().expect("[repair] present");
+        assert_eq!(repair.repair_team_count, 1);
+        assert!(repair.repair_rate_hp_per_sec < 0.5);
+    }
+
     #[test]
     fn battleship_toml_produces_five_shield_arcs() {
         let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");

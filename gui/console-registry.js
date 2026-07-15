@@ -14,6 +14,10 @@
  */
 export const REGISTRY = Object.freeze({
   captain:     { sectionId: 'captain-ui',     iframeId: 'captain-iframe'     },
+  // Courier's single station. client.html's mountConsoles would fall back to
+  // `${id}-ui`/`${id}-iframe` without this, but content-switcher.js derives
+  // CONSOLE_SECTION and HTML_SECTION_IDS from this map with no fallback.
+  pilot:       { sectionId: 'pilot-ui',       iframeId: 'pilot-iframe'       },
   helm:        { sectionId: 'helm-ui',        iframeId: 'helm-iframe'        },
   tactical:    { sectionId: 'weapons-ui',     iframeId: 'weapons-iframe'     },
   repair:      { sectionId: 'repair-ui',      iframeId: 'repair-iframe'      },

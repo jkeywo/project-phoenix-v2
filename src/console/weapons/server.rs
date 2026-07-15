@@ -8,8 +8,8 @@ use crate::messages::{
     AdmittedCommands, BlasterBankState, ClientMessage, CoordinationPayload, GamePhase,
     InterSystemMsg, InterSystemPayload, InterSystemQueue, ModifierSlot, PhaserBank,
     PhaserBankClientConfig, PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage,
-    StationId, SystemBlackboard, SystemControlPayload, SystemId, TorpedoTubeClientConfig,
-    TorpedoTubeState, WeaponsBlackboard,
+    SystemBlackboard, SystemControlPayload, SystemId, TorpedoTubeClientConfig, TorpedoTubeState,
+    WeaponsBlackboard,
 };
 use crate::model_rig::ModelMarkers;
 use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
@@ -573,17 +573,25 @@ fn handle_set_target(
 
 /// Returns true if `token` is authorized to issue Tactical fire orders.
 ///
-/// Either the token is the connected player currently holding the Tactical
-/// console, or it is the local HTML-console operator
+/// Either the token is the connected player currently holding the station that
+/// owns this ship's weapons, or it is the local HTML-console operator
 /// ([`crate::console_bridge::LOCAL_CONSOLE_TOKEN`]) — the browser server
 /// viewscreen / native wry server case, where the operator drives the console
 /// directly with no remote PeerJS session (issue #422 / PRD #419).
+///
+/// The weapons owner is resolved from the ship config rather than assumed to
+/// be a station named "tactical", so single-station hulls (the Courier, whose
+/// blaster lives on "pilot") authorize correctly.
 fn tactical_authorized(
     sessions: &Sessions,
-    _ship_config: &crate::ship_plugin::ShipConfigComponent,
+    ship_config: &crate::ship_plugin::ShipConfigComponent,
     token: &str,
 ) -> bool {
-    sessions.0.holder_for_station(&StationId("tactical".into())) == Some(token)
+    ship_config
+        .0
+        .weapons_station()
+        .and_then(|station| sessions.0.holder_for_station(&station))
+        == Some(token)
         || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
 }
 
@@ -2192,6 +2200,9 @@ fn handle_set_phaser_frequency(
     };
     // Ship-level gate (issue #512, option c): any bank human-operable.
     let allowed = any_bank_accepts_human_input(control_sources, &ship_config.0);
+    // Deliberately not `tactical_authorized` — that also admits
+    // LOCAL_CONSOLE_TOKEN, which this handler has never granted.
+    let weapons_station = ship_config.0.weapons_station();
     for ev in reader.read() {
         let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else {
             continue;
@@ -2199,7 +2210,10 @@ fn handle_set_phaser_frequency(
         if !allowed {
             continue;
         }
-        if sessions.0.holder_for_station(&StationId("tactical".into())) != Some(ev.token.as_str()) {
+        let held_by = weapons_station
+            .as_ref()
+            .and_then(|station| sessions.0.holder_for_station(station));
+        if held_by != Some(ev.token.as_str()) {
             continue;
         }
         if let Some(mut freq) = freq_q.iter_mut().next() {
@@ -4328,7 +4342,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
 
 pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
     crate::core::broadcast::SimBroadcaster::new().register(
-        crate::core::broadcast::Audience::Holding(StationId("tactical".into())),
+        crate::core::broadcast::Audience::HoldingWeapons,
         crate::core::broadcast::Cadence::Hz(10.0),
         |world: &mut World| {
             let mut current = compute_current_weapons_update(world);

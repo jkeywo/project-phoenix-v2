@@ -8,11 +8,11 @@ import {
 } from '../../gui/content-switcher.js';
 
 describe('CONSOLE_SECTION map', () => {
-  it('keys all ten HTML-panel consoles by lowercase station id', () => {
+  it('keys every HTML-panel console by lowercase station id', () => {
     // Post issues #618/#619 the map is single-keyed on lowercase station ids
     // (matching the Rust `StationId` newtype); the PascalCase Console aliases
     // are gone along with the enum.
-    const lowercase = ['captain', 'comms', 'engineering', 'helm', 'navigation', 'power', 'repair', 'science', 'sensors', 'shields', 'tactical'];
+    const lowercase = ['captain', 'comms', 'engineering', 'helm', 'navigation', 'pilot', 'power', 'repair', 'science', 'sensors', 'shields', 'tactical'];
     for (const id of lowercase) {
       expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, id)).toBe(true);
     }
@@ -58,10 +58,10 @@ describe('CONSOLE_SECTION map', () => {
     expect(Object.isFrozen(HTML_SECTION_IDS)).toBe(true);
   });
 
-  it('HTML_SECTION_IDS lists all eleven section ids', () => {
+  it('HTML_SECTION_IDS lists all twelve section ids', () => {
     expect([...HTML_SECTION_IDS].sort()).toEqual([
       'captain-ui', 'comms-ui', 'engineering-ui', 'helm-ui', 'navigation-ui',
-      'power-ui', 'repair-ui', 'science-ui', 'sensors-ui', 'shields-ui', 'weapons-ui',
+      'pilot-ui', 'power-ui', 'repair-ui', 'science-ui', 'sensors-ui', 'shields-ui', 'weapons-ui',
     ]);
   });
 });
@@ -79,6 +79,7 @@ describe('sectionForConsole', () => {
     expect(sectionForConsole('comms')).toBe('comms-ui');
     expect(sectionForConsole('navigation')).toBe('navigation-ui');
     expect(sectionForConsole('engineering')).toBe('engineering-ui');
+    expect(sectionForConsole('pilot')).toBe('pilot-ui');
   });
 
   it('returns null for empty / null / undefined', () => {
@@ -103,7 +104,7 @@ describe('consoleSections', () => {
       'captain-ui': false, 'helm-ui': false, 'weapons-ui': false,
       'repair-ui': false, 'power-ui': false, 'science-ui': false,
       'sensors-ui': false, 'shields-ui': false, 'comms-ui': false,
-      'navigation-ui': false, 'engineering-ui': false,
+      'navigation-ui': false, 'engineering-ui': false, 'pilot-ui': false,
     };
   }
 

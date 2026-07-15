@@ -21,6 +21,7 @@ import {
   buildNavigationConsoleState,
   buildScienceConsoleState,
   buildEngineeringConsoleState,
+  buildCourierConsoleState,
   buildCruiserCommsConsoleState,
   buildDestroyerCaptainConsoleState,
   buildDestroyerTacticalConsoleState,
@@ -1848,6 +1849,56 @@ describe('buildDestroyerCaptainConsoleState', () => {
     expect(s.sensors.target_name).toBe('Raider');
   });
 });
+
+// ── buildCourierConsoleState (single-station Courier) ─────────────────────────
+
+describe('buildCourierConsoleState', () => {
+  it('returns valid JSON', () => {
+    expect(() => parse(buildCourierConsoleState(EMPTY))).not.toThrow();
+  });
+
+  it('contains every sub-object the pilot console reads', () => {
+    const s = parse(buildCourierConsoleState(EMPTY));
+    for (const key of ['weapons', 'sensors', 'navigation', 'comms', 'captain', 'helm']) {
+      expect(s).toHaveProperty(key);
+    }
+  });
+
+  it('omits power, shields and repair — those are AI-run with no pilot panel', () => {
+    const s = parse(buildCourierConsoleState(EMPTY));
+    expect(s).not.toHaveProperty('power');
+    expect(s).not.toHaveProperty('shields');
+    expect(s).not.toHaveProperty('repair');
+  });
+
+  it('weapons sub-object carries the blips and ship position the one radar needs', () => {
+    const s = parse(buildCourierConsoleState(EMPTY));
+    expect(s.weapons).toHaveProperty('blips');
+    expect(s.weapons).toHaveProperty('blasters');
+    expect(s.weapons).toHaveProperty('ship_x');
+    expect(s.weapons).toHaveProperty('ship_z');
+    expect(s.weapons).toHaveProperty('ship_heading');
+  });
+
+  it('helm sub-object carries the flight-control fields', () => {
+    const s = parse(buildCourierConsoleState(EMPTY));
+    for (const key of ['helm_auto', 'lateral_auto', 'boost_enabled', 'boost_active', 'impulse_charge_progress']) {
+      expect(s.helm).toHaveProperty(key);
+    }
+  });
+
+  it('captain sub-object carries objectives and the camera view for the Fore/Cinematic buttons', () => {
+    const s = parse(buildCourierConsoleState({
+      blackboards: { captain: { red_alert: true, view_direction: 'cinematic', objectives: [] } },
+    }));
+    expect(s.captain.red_alert).toBe(true);
+    expect(s.captain.view_direction).toBe('cinematic');
+    expect(s.captain).toHaveProperty('objectives');
+  });
+
+});
+// The 'pilot' dispatch and own_hull routing need window.buildConsoleState,
+// which only exists under jsdom — see tests/client/console-state-resolver.test.js.
 
 // ── buildDestroyerTacticalConsoleState (issue #628) ───────────────────────────
 

@@ -350,7 +350,10 @@ source             = "shield"
     #[test]
     fn ship_audio_config_parses_every_section() {
         let cfg: ShipAudioConfig = toml::from_str(SHIP_TOML).expect("parses");
-        assert_eq!(cfg.ambient.as_ref().unwrap().file, "assets/sounds/Ambient.mp3");
+        assert_eq!(
+            cfg.ambient.as_ref().unwrap().file,
+            "assets/sounds/Ambient.mp3"
+        );
         assert_eq!(cfg.ambient.as_ref().unwrap().volume, 0.25);
         assert_eq!(cfg.engine.as_ref().unwrap().volume_at_full_thrust, 0.15);
         assert_eq!(cfg.phaser_loop.as_ref().unwrap().volume, 0.5);
@@ -499,8 +502,14 @@ music_volume = 0.35
             })
         );
         let json = serde_json::to_string(&p).unwrap();
-        assert!(!json.contains("decay_rate_per_sec"), "envelope leaked: {json}");
-        assert!(!json.contains("damage_threshold"), "envelope leaked: {json}");
+        assert!(
+            !json.contains("decay_rate_per_sec"),
+            "envelope leaked: {json}"
+        );
+        assert!(
+            !json.contains("damage_threshold"),
+            "envelope leaked: {json}"
+        );
     }
 
     #[test]
@@ -609,7 +618,10 @@ music_volume = 0.35
     #[test]
     fn listener_relative_sound_due_east_is_positive_x() {
         // yaw 0, sound 10 units East (+X world) is off the starboard beam.
-        approx(listener_relative(0.0, 0.0, 0.0, 10.0, 0.0), [10.0, 0.0, 0.0]);
+        approx(
+            listener_relative(0.0, 0.0, 0.0, 10.0, 0.0),
+            [10.0, 0.0, 0.0],
+        );
     }
 
     #[test]
@@ -625,7 +637,10 @@ music_volume = 0.35
 
     #[test]
     fn listener_relative_sound_astern_is_positive_z() {
-        approx(listener_relative(0.0, 0.0, 0.0, 0.0, 10.0), [0.0, 0.0, 10.0]);
+        approx(
+            listener_relative(0.0, 0.0, 0.0, 0.0, 10.0),
+            [0.0, 0.0, 10.0],
+        );
     }
 
     #[test]

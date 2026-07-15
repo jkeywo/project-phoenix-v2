@@ -143,9 +143,7 @@ fn process_forcefield_damage(
             ForcefieldSource::Hull => *hull,
             ForcefieldSource::Total => *hull + *shield,
         };
-        if let Some(spike) =
-            forcefield_spike(damage, cfg.damage_threshold, cfg.damage_full_spike)
-        {
+        if let Some(spike) = forcefield_spike(damage, cfg.damage_threshold, cfg.damage_full_spike) {
             // Take the louder of the decaying tail and the new hit, so a big
             // hit is never quietened by an in-flight decay.
             state.intensity = state.intensity.max(spike);
@@ -322,7 +320,10 @@ mod tests {
         for _ in 0..10 {
             tick(&mut app, 0.1);
             let now = intensity(&app);
-            assert!(now <= prev, "intensity rose without damage: {prev} -> {now}");
+            assert!(
+                now <= prev,
+                "intensity rose without damage: {prev} -> {now}"
+            );
             assert!(now >= 0.0, "intensity went negative: {now}");
             prev = now;
         }
@@ -340,7 +341,10 @@ mod tests {
         send_damage(&mut app, 0.0, 30.0);
         tick(&mut app, 0.001);
         let big = intensity(&app);
-        assert!(big > small, "big hit did not override tail: {small} -> {big}");
+        assert!(
+            big > small,
+            "big hit did not override tail: {small} -> {big}"
+        );
     }
 
     #[test]
@@ -374,7 +378,10 @@ mod tests {
         ));
         send_damage(&mut app, 0.0, 30.0);
         app.update();
-        assert_eq!(app.world().resource::<ForcefieldAudioState>().intensity, 0.0);
+        assert_eq!(
+            app.world().resource::<ForcefieldAudioState>().intensity,
+            0.0
+        );
     }
 
     #[test]

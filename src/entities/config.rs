@@ -2836,7 +2836,11 @@ radius = 100.0
                 "{name}"
             );
             assert_eq!(
-                audio.phaser_loop.as_ref().expect("[audio.phaser_loop]").file,
+                audio
+                    .phaser_loop
+                    .as_ref()
+                    .expect("[audio.phaser_loop]")
+                    .file,
                 "assets/sounds/PhaserLoop.mp3",
                 "{name}"
             );
@@ -2863,10 +2867,9 @@ radius = 100.0
 
     #[test]
     fn entity_without_audio_block_parses_to_none() {
-        let config = EntityConfig::from_toml(include_str!(
-            "../../assets/entities/station_axiom.toml"
-        ))
-        .expect("must parse");
+        let config =
+            EntityConfig::from_toml(include_str!("../../assets/entities/station_axiom.toml"))
+                .expect("must parse");
         assert!(config.audio.is_none());
     }
 

@@ -4100,7 +4100,10 @@ music_volume = 0.35
             .expect("red_alert present");
         assert_eq!(ra.siren_file, "assets/sounds/red_alert_siren.ogg");
         assert_eq!(ra.siren_volume, 0.7);
-        assert_eq!(ra.music_file, "assets/sounds/last_stand_in_space_looped.ogg");
+        assert_eq!(
+            ra.music_file,
+            "assets/sounds/last_stand_in_space_looped.ogg"
+        );
         assert_eq!(ra.music_volume, 0.35);
     }
 

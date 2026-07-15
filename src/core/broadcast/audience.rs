@@ -12,6 +12,14 @@ pub enum Audience {
     /// ship config, then targets that station's holder.  Falls back to
     /// `None` (skip broadcast) when no config is available.
     HoldingSystem(SystemId),
+    /// Resolves the station owning this ship's weapons suite from the ship
+    /// config, then targets that station's holder. `None` (skip broadcast)
+    /// when there's no config, no weapons owner, or the station is unheld.
+    ///
+    /// Distinct from `Holding(StationId("tactical"))` because the owner is not
+    /// always named "tactical" — the single-station Courier puts its blaster on
+    /// "pilot". See [`ShipConfig::weapons_station`].
+    HoldingWeapons,
     Token(String),
     AllExcept(String),
 }
@@ -35,6 +43,12 @@ impl Audience {
                 let station_id = ship_config
                     .and_then(|config| config.system(system_id))
                     .and_then(|sys| sys.station.clone())?;
+                sessions
+                    .holder_for_station(&station_id)
+                    .map(|t| Target::Token(t.to_string()))
+            }
+            Audience::HoldingWeapons => {
+                let station_id = ship_config.and_then(|config| config.weapons_station())?;
                 sessions
                     .holder_for_station(&station_id)
                     .map(|t| Target::Token(t.to_string()))
@@ -200,6 +214,66 @@ mod tests {
                 .resolve(&sm, Some(&ship_config())),
             None
         );
+    }
+
+    /// A hull whose guns live on a station that isn't named "tactical". This
+    /// is the Courier shape and the reason `HoldingWeapons` exists.
+    fn pilot_ship_config() -> ShipConfig {
+        let mut config = ship_config();
+        config.stations.push(StationConfig {
+            id: StationId("pilot".into()),
+            name: "Pilot".into(),
+            description: "Everything".into(),
+            rank: "".into(),
+            short_code: "PLT".into(),
+            ratings: vec![],
+            console: None,
+        });
+        config.systems.push(SystemInstanceConfig {
+            id: SystemId("blaster-fore".into()),
+            kind: "blaster_bank".into(),
+            station: Some(StationId("pilot".into())),
+            ai_only: false,
+            power_group: None,
+            marker: None,
+            config: None,
+        });
+        config
+    }
+
+    #[test]
+    fn audience_holding_weapons_resolves_to_the_weapons_station_holder() {
+        let sm = sm_with_holder("tok1", StationId("pilot".into()));
+        assert_eq!(
+            Audience::HoldingWeapons.resolve(&sm, Some(&pilot_ship_config())),
+            Some(Target::Token("tok1".to_string()))
+        );
+    }
+
+    #[test]
+    fn audience_holding_weapons_returns_none_when_weapons_station_unheld() {
+        let sm = sm_with_holder("tok1", StationId("helm".into()));
+        assert_eq!(
+            Audience::HoldingWeapons.resolve(&sm, Some(&pilot_ship_config())),
+            None
+        );
+    }
+
+    #[test]
+    fn audience_holding_weapons_returns_none_when_ship_has_no_weapons_owner() {
+        let sm = sm_with_holder("tok1", StationId("power".into()));
+        // The base fixture declares no weapon systems and no tactical station,
+        // which is the NPC shape.
+        assert_eq!(
+            Audience::HoldingWeapons.resolve(&sm, Some(&ship_config())),
+            None
+        );
+    }
+
+    #[test]
+    fn audience_holding_weapons_returns_none_when_no_config() {
+        let sm = sm_with_holder("tok1", StationId("pilot".into()));
+        assert_eq!(Audience::HoldingWeapons.resolve(&sm, None), None);
     }
 
     #[test]

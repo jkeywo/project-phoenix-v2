@@ -164,9 +164,11 @@ pub fn prune(
 /// `WeaponsUpdate` is gated on station ownership (unlike the other three
 /// messages, which are unconditional) because, unlike hull/shields/
 /// blackboards, it is genuinely station-scoped: it's normally only ever sent
-/// to whoever holds Tactical (`Audience::Holding(StationId("tactical"))` in
+/// to whoever holds the ship's weapons station (`Audience::HoldingWeapons` in
 /// `weapons_update_broadcaster`), so a reconnecting client who does not hold
 /// that station has no use for it and should not receive it here either.
+/// The owning station is resolved from the ship config — it's "tactical" on
+/// the crewed hulls but "pilot" on the single-station Courier.
 /// This deliberately does **not** touch `LastWeaponsUpdate` — same rule as
 /// the other three shared caches, so the next periodic broadcaster tick
 /// still diffs normally instead of being forced to re-send to everyone.
@@ -246,10 +248,25 @@ pub fn resync_for_token(world: &mut World, token: &str) {
     // to that holder (Audience::Holding), so anyone else has no use for it.
     // Deliberately does not read/write `LastWeaponsUpdate`.
     {
+        // Resolve the weapons owner from the ship config, then check the
+        // holder. The StationId is cloned out of the query before touching
+        // Sessions so the query borrow on `world` is released first.
+        //
+        // Falls back to "tactical" when the config can't answer — either no
+        // ShipConfigComponent or an empty default one. A real LocalShip always
+        // carries a populated config, so this only covers the pre-spawn window;
+        // defaulting to the historical station keeps a reconnecting player from
+        // silently losing their WeaponsUpdate if that ever changes.
+        let weapons_station: StationId = world
+            .query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<LocalShip>>()
+            .single(world)
+            .ok()
+            .and_then(|c| c.0.weapons_station())
+            .unwrap_or_else(|| StationId(crate::system_registry::TACTICAL_SYSTEM_ID.into()));
         let holds_tactical = world
             .resource::<Sessions>()
             .0
-            .holder_for_station(&StationId("tactical".into()))
+            .holder_for_station(&weapons_station)
             == Some(token);
         if holds_tactical {
             let current = compute_current_weapons_update(world);

@@ -8,6 +8,7 @@
 // panel renders empty.
 import { describe, it, expect } from 'vitest';
 import '../../gui/console-state.js';
+import { aggregateStationHull } from '../../gui/console-state.js';
 
 describe('buildConsoleStateInner engineering routing', () => {
   it('routes to the Destroyer builder (shields included) when station_systems lists "shields-system"', () => {
@@ -28,5 +29,37 @@ describe('buildConsoleStateInner engineering routing', () => {
     expect(s).not.toHaveProperty('shields');
     expect(s).toHaveProperty('power');
     expect(s).toHaveProperty('repair');
+  });
+});
+
+describe('buildConsoleStateInner pilot routing', () => {
+  it("routes the Courier's 'pilot' station to the combined single-console builder", () => {
+    const s = JSON.parse(window.buildConsoleStateInner('pilot', {}));
+    for (const key of ['weapons', 'sensors', 'navigation', 'comms', 'captain', 'helm']) {
+      expect(s).toHaveProperty(key);
+    }
+  });
+
+  // Every nested sub-object computes an own_hull for its own hardcoded station
+  // id ('tactical', 'sensors', ...), which is meaningless on a hull with one
+  // station. The top-level own_hull — the only one pilot.html reads — must be
+  // the pilot's, or the footer damage bar shows the wrong systems.
+  it("top-level own_hull aggregates the pilot station, not tactical", () => {
+    const state = {
+      stationSystems: { pilot: ['blaster-fore'] },
+      consoleHull: [
+        { system_id: 'blaster-fore', display_name: 'Blaster', hp: 6, max_hp: 12, tier: 'Damaged' },
+      ],
+    };
+    const s = JSON.parse(window.buildConsoleState('pilot', state));
+    // Round-trip the expectation too: withStationDamage stringifies, which
+    // drops undefined-valued keys.
+    expect(s.own_hull).toEqual(
+      JSON.parse(JSON.stringify(
+        aggregateStationHull('pilot', state.consoleHull, state.stationSystems)
+      ))
+    );
+    expect(s.own_hull).not.toBeNull();
+    expect(s.own_hull.entries.map((e) => e.system_id)).toEqual(['blaster-fore']);
   });
 });

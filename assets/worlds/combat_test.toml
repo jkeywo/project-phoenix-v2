@@ -18,10 +18,11 @@
 # Starbase Alpha sits at [500, 0, 100] — within the clear zone. Player ship
 # spawns at [400, 0, 200] (~140u from the starbase) ready to defend.
 #
-# Ship selection: all three Alliance hulls are available in the lobby.
+# Ship selection: four Alliance hulls are available in the lobby.
+#   Alliance Courier    power_rating = 25   (single-station, solo)
 #   Alliance Destroyer  power_rating = 70
 #   Alliance Cruiser    power_rating = 90
-#   Alliance Battleship power_rating = 100
+#   Alliance Battleship power_rating = 120
 #
 # Wave timeline (locked from the design interview):
 #   t=0   destroyer    enemy_n_outer
@@ -187,6 +188,12 @@ label = "Alliance Cruiser"
 [[available_ships]]
 template_path = "assets/entities/alliance_battleship.toml"
 label = "Alliance Battleship"
+
+# Single-station hull: one player flies the whole ship. power_rating = 25 keeps
+# it under both bonus-spawn gates below, so a solo pilot faces the base waves.
+[[available_ships]]
+template_path = "assets/entities/alliance_courier.toml"
+label = "Alliance Courier"
 
 [player_spawn]
 position = [400.0, 0.0, 200.0]

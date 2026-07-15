@@ -1342,6 +1342,17 @@ fn station_for_system(
     if let Some(system) = config.system(target) {
         return system.station.clone();
     }
+    // Step 2.5: the `tactical` coordination surface has no `[[system]]` block
+    // (deleted by #512) but is still addressed by SetTarget / SetPhaserMode /
+    // ToggleAutoFire. Resolve it to whoever actually owns the weapons suite —
+    // "tactical" for the crewed hulls, "pilot" for the single-station Courier.
+    // Without this, step 3's station-name fallback only works for hulls whose
+    // weapons station happens to be named "tactical".
+    if target.0 == crate::system_registry::TACTICAL_SYSTEM_ID {
+        if let Some(station) = config.weapons_station() {
+            return Some(station);
+        }
+    }
     // Step 3: station-name fallback — does the target match a known station?
     let candidate = StationId(target.0.clone());
     if config.station(&candidate).is_some() {
@@ -3319,6 +3330,59 @@ mod tests {
 
     #[derive(Resource)]
     struct ShipEntity(Entity);
+
+    // ── station_for_system ───────────────────────────────────────────────
+
+    /// The `tactical` coordination surface has no `[[system]]` block, so
+    /// resolving it relies on step 2.5's `weapons_station()` lookup. Without
+    /// it, a hull whose weapons station isn't literally named "tactical" gets
+    /// `None` and every SetTarget is denied.
+    #[test]
+    fn station_for_system_resolves_tactical_surface_to_the_weapons_owner() {
+        let crewed = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons."
+rank = "Ltn."
+
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+"#,
+            &["phaser_bank"],
+        )
+        .unwrap();
+        assert_eq!(
+            station_for_system(&crewed, &SystemId("tactical".into())),
+            Some(StationId("tactical".into())),
+            "crewed hulls must keep resolving to their tactical station"
+        );
+
+        let courier = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "pilot"
+name = "Pilot"
+description = "Everything."
+rank = "Ltn."
+
+[[system]]
+id = "blaster-fore"
+kind = "blaster_bank"
+station = "pilot"
+"#,
+            &["blaster_bank"],
+        )
+        .unwrap();
+        assert_eq!(
+            station_for_system(&courier, &SystemId("tactical".into())),
+            Some(StationId("pilot".into())),
+            "the Courier's guns live on pilot, so the tactical surface must resolve there"
+        );
+    }
 
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
         for m in reader.read() {

@@ -623,7 +623,6 @@ pub(crate) fn ai_torpedo_auto_fire(
         Without<crate::simulation::Asteroid>,
     >,
 ) {
-    let tactical_station = crate::messages::StationId("tactical".into());
     let policy_sid = crate::system_registry::torpedo_magazine_system_id();
 
     for (
@@ -644,6 +643,13 @@ pub(crate) fn ai_torpedo_auto_fire(
         if !policy.operate_ai {
             continue;
         }
+
+        // The station owning this ship's weapons — resolved per-ship rather
+        // than assumed to be named "tactical". NPCs have no weapons owner, so
+        // the fallback keeps them on the unclaimed (fire unconditionally) path.
+        let tactical_station = ship_config.0.weapons_station().unwrap_or_else(|| {
+            crate::messages::StationId(crate::system_registry::TACTICAL_SYSTEM_ID.into())
+        });
 
         // Claimed/unclaimed distinction, preserved verbatim from the old
         // fused block: claimed stations gate on the active rating's

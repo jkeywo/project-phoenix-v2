@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { REGISTRY } from '../../gui/console-registry.js';
 
 describe('REGISTRY', () => {
-  it('contains exactly the eleven HTML-panel consoles', () => {
+  it('contains exactly the twelve HTML-panel consoles', () => {
     expect(Object.keys(REGISTRY).sort()).toEqual([
-      'captain', 'comms', 'engineering', 'helm', 'navigation', 'power', 'repair', 'science', 'sensors', 'shields', 'tactical',
+      'captain', 'comms', 'engineering', 'helm', 'navigation', 'pilot', 'power', 'repair', 'science', 'sensors', 'shields', 'tactical',
     ]);
   });
 
@@ -14,6 +14,7 @@ describe('REGISTRY', () => {
 
   it.each([
     ['captain',     'captain-ui',     'captain-iframe'],
+    ['pilot',       'pilot-ui',       'pilot-iframe'],
     ['helm',        'helm-ui',        'helm-iframe'],
     ['tactical',    'weapons-ui',     'weapons-iframe'],
     ['repair',      'repair-ui',      'repair-iframe'],

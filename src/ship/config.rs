@@ -20,6 +20,18 @@ fn default_coordination_lag_secs() -> f32 {
     2.0
 }
 
+/// System kinds that constitute "the weapons suite" for
+/// [`ShipConfig::weapons_station`]. Every weapon system on a hull lives on one
+/// station by construction, so the first match wins.
+const WEAPONS_KINDS: &[&str] = &[
+    crate::system_registry::TACTICAL_KIND,
+    crate::system_registry::PHASER_BANK_KIND,
+    crate::system_registry::BLASTER_BANK_KIND,
+    crate::system_registry::TORPEDO_TUBE_KIND,
+    crate::system_registry::TORPEDO_MAGAZINE_KIND,
+    crate::system_registry::TACTICAL_RADAR_KIND,
+];
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StationConfig {
     pub id: StationId,
@@ -170,6 +182,30 @@ impl ShipConfig {
         self.systems
             .iter()
             .filter(move |system| system.station.as_ref() == Some(id))
+    }
+
+    /// The station whose holder is authoritative for this ship's weapons.
+    ///
+    /// Ship-level Tactical operations (SetTarget / SetPhaserMode /
+    /// SetPhaserFrequency / ToggleAutoFire) and the `WeaponsUpdate` broadcast
+    /// need to know who owns the guns. That owner is not always a station
+    /// literally named `"tactical"` — a single-station hull (the Courier) puts
+    /// its blaster on `"pilot"` — so resolve it from the config instead of
+    /// assuming the name.
+    ///
+    /// Returns `None` for ships with no human weapons owner (NPCs declare no
+    /// `station` on any system); callers treat that as "unclaimed".
+    pub fn weapons_station(&self) -> Option<StationId> {
+        self.systems
+            .iter()
+            .filter(|s| WEAPONS_KINDS.contains(&s.kind.as_str()))
+            .find_map(|s| s.station.clone())
+            .or_else(|| {
+                // Legacy/test ships declare a `tactical` station but no fine
+                // weapon systems. Preserve the pre-lookup behaviour for them.
+                let tactical = StationId(crate::system_registry::TACTICAL_SYSTEM_ID.into());
+                self.station(&tactical).map(|_| tactical)
+            })
     }
 
     /// Look up a named rating for a station.
@@ -833,5 +869,87 @@ power_group = "ops"
             .map(|s| s.id.0.as_str())
             .collect();
         assert_eq!(captain_system_ids, vec!["red-alert", "viewscreen"]);
+    }
+
+    // ── weapons_station ──────────────────────────────────────────────────
+
+    /// The crewed hulls put their fine weapon systems on a station named
+    /// "tactical"; resolving from config must not change that.
+    #[test]
+    fn weapons_station_resolves_tactical_for_crewed_hull_shape() {
+        let toml = r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons."
+rank = "Ltn."
+
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+"#;
+        let config = ShipConfig::from_toml(toml, KINDS).unwrap();
+        assert_eq!(
+            config.weapons_station(),
+            Some(StationId("tactical".into()))
+        );
+    }
+
+    /// The Courier puts its blaster on the single "pilot" station. This is the
+    /// case the whole lookup exists for.
+    #[test]
+    fn weapons_station_resolves_pilot_when_weapons_live_on_pilot() {
+        let toml = r#"
+[[station]]
+id = "pilot"
+name = "Pilot"
+description = "Everything."
+rank = "Ltn."
+
+[[system]]
+id = "blaster-fore"
+kind = "blaster_bank"
+station = "pilot"
+"#;
+        let config = ShipConfig::from_toml(toml, &["blaster_bank"]).unwrap();
+        assert_eq!(config.weapons_station(), Some(StationId("pilot".into())));
+    }
+
+    /// NPCs declare no `station` on any system — no human owns their guns.
+    #[test]
+    fn weapons_station_is_none_for_npc_shape() {
+        let toml = r#"
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+ai_only = true
+"#;
+        let config = ShipConfig::from_toml(toml, KINDS).unwrap();
+        assert_eq!(config.weapons_station(), None);
+    }
+
+    /// Legacy/test ships declare a `tactical` station but no fine weapon
+    /// systems. They must keep resolving to it, or the pre-lookup gates change
+    /// behaviour.
+    #[test]
+    fn weapons_station_falls_back_to_tactical_station_without_fine_systems() {
+        let toml = r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons."
+rank = "Ltn."
+
+[[system]]
+id = "helm"
+kind = "helm"
+station = "tactical"
+"#;
+        let config = ShipConfig::from_toml(toml, KINDS).unwrap();
+        assert_eq!(
+            config.weapons_station(),
+            Some(StationId("tactical".into()))
+        );
     }
 }

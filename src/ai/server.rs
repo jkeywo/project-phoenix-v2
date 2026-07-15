@@ -188,7 +188,10 @@ pub struct LodTransitionTimer {
 ///
 /// Each entry is `(objective_id, waypoint_index)` tracking the current
 /// waypoint for a patrol route. Entries are independent — advancing one
-/// does not affect others. Not yet wired to any system.
+/// does not affect others. Consumed by `simulate_low_lod_ships` to cheaply
+/// advance out-of-sensor-range NPCs along their patrol route (the low-LOD
+/// path). The high-LOD path (`helm_patrol`) tracks its waypoint separately
+/// via `AiMemory.waypoint_index`; unifying the two is future PRD #685 work.
 #[derive(Component, Clone, Debug, Default)]
 pub struct PatrolCursors(pub Vec<(String, usize)>);
 
@@ -646,16 +649,120 @@ fn lod_ai_ships(
     }
 }
 
-/// Cheap forward-movement simulation for ships running at low fidelity
-/// (those without the `AiHighFidelity` marker). Advances position based on
-/// current forward speed and heading without any AI decision-making,
-/// collision avoidance, or physics integration.
+/// Cheap patrol-advancement / forward-movement simulation for ships running at
+/// low fidelity (those without the `AiHighFidelity` marker).
+///
+/// A low-LOD ship with an active Helm-relevant `Patrol` objective cheaply
+/// follows its patrol route using per-objective [`PatrolCursors`]: it snaps its
+/// heading toward the current waypoint and advances forward at `forward_speed`.
+/// Ships with no patrol objective (or a stalled/terminal patrol) keep the
+/// pre-existing dumb forward-drift so they don't regress to standing still.
+///
+/// This is the *low-fidelity* path. It deliberately does NOT touch the
+/// high-LOD patrol path (`helm_patrol` / `AiMemory.waypoint_index` in
+/// `ai/core.rs`). The two coexist: low-LOD tracks the waypoint via
+/// `PatrolCursors`, high-LOD via `AiMemory.waypoint_index`. Unifying them is
+/// separate future PRD #685 Phase-3 work (a known, accepted limitation).
 fn simulate_low_lod_ships(
     time: Res<Time>,
-    mut ships: Query<&mut ShipPhysics, (With<Ship>, Without<AiHighFidelity>)>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut ships: Query<
+        (
+            &mut ShipPhysics,
+            Option<&crate::server_app::ShipSystemBlackboards>,
+            Option<&mut PatrolCursors>,
+        ),
+        (With<Ship>, Without<AiHighFidelity>),
+    >,
 ) {
     let dt = time.delta_secs();
-    for mut physics in &mut ships {
+    let anchors = world_config
+        .as_ref()
+        .map(|wc| wc.anchors.clone())
+        .unwrap_or_default();
+
+    for (mut physics, blackboards, mut cursors) in &mut ships {
+        // Find this ship's highest-scored Helm-relevant Patrol objective from
+        // its viewscreen blackboard. `aggregate_doctrine_blackboards` publishes
+        // `scored_objectives` there for every `BehaviourSection` ship,
+        // regardless of LOD — the same entry `operate_helm_ai` reads on the
+        // high-LOD path (see `ship_plugin.rs` ~:527).
+        let patrol = blackboards.and_then(|bb| {
+            match bb.0.get(&crate::system_registry::viewscreen_system_id()) {
+                Some(crate::messages::SystemBlackboard::Viewscreen(v)) => v
+                    .scored_objectives
+                    .iter()
+                    .filter(|o| {
+                        o.score > 0.0
+                            && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+                            && matches!(o.directive, crate::messages::AiDirective::Patrol { .. })
+                    })
+                    .max_by(|a, b| a.score.total_cmp(&b.score))
+                    .map(|o| (o.id.clone(), o.directive.clone())),
+                _ => None,
+            }
+        });
+
+        // Steer along the patrol route only when we have a Patrol objective AND
+        // a `PatrolCursors` component to track the waypoint index. A low-LOD
+        // ship lacking the component (query returns `None`) just falls through
+        // to the dumb forward-move below.
+        if let (
+            Some((
+                obj_id,
+                crate::messages::AiDirective::Patrol {
+                    anchors: waypoints,
+                    loop_path,
+                },
+            )),
+            Some(cursors),
+        ) = (patrol, cursors.as_mut())
+        {
+            // Look up (or lazily insert) this objective's cursor by matching the
+            // tuple's objective id — the `(objective_id, waypoint_index)` design.
+            if !cursors.0.iter().any(|(id, _)| id == &obj_id) {
+                cursors.0.push((obj_id.clone(), 0));
+            }
+            let slot = cursors
+                .0
+                .iter_mut()
+                .find(|(id, _)| id == &obj_id)
+                .expect("cursor entry just ensured to exist");
+
+            let (new_index, target) = crate::ai::patrol_cursor::advance_cursor(
+                slot.1,
+                &waypoints,
+                loop_path,
+                [physics.x, 0.0, physics.z],
+                &anchors,
+                // Match the high-LOD helm path, which passes the same constant
+                // to `operate_helm` (see `ship_plugin.rs` ~:612).
+                crate::ai::WAYPOINT_ARRIVAL_RADIUS,
+            );
+            slot.1 = new_index;
+
+            if let Some(target_pos) = target {
+                // Cheap steering: snap yaw toward the target XZ bearing, then
+                // advance forward. The forward vector below is
+                // (sin(yaw), -cos(yaw)), so the bearing that makes the ship
+                // face `target` is `dx.atan2(-dz)` (the same world-bearing
+                // convention used across the sim's yaw math).
+                let dx = target_pos[0] - physics.x;
+                let dz = target_pos[2] - physics.z;
+                if dx * dx + dz * dz > f32::EPSILON {
+                    physics.yaw = dx.atan2(-dz);
+                }
+                physics.x += physics.forward_speed * physics.yaw.sin() * dt;
+                physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
+                continue;
+            }
+            // `target == None` (empty waypoints / all anchors missing) → fall
+            // through to the dumb forward-move fallback below.
+        }
+
+        // Dumb forward-move fallback: no patrol objective, no cursor component,
+        // or a stalled/terminal patrol. Preserves the pre-existing low-LOD
+        // drift so non-patrol ships keep moving instead of standing still.
         physics.x += physics.forward_speed * physics.yaw.sin() * dt;
         physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
     }
@@ -1395,6 +1502,160 @@ mod tests {
         assert!(
             app.world().get::<AiHighFidelity>(npc).is_none(),
             "NPC must demote after dwell window elapses"
+        );
+    }
+
+    // ── Low-LOD patrol wiring (PatrolCursors / advance_cursor) ───────────────
+
+    /// Build a `ShipSystemBlackboards` carrying a single Helm-relevant Patrol
+    /// objective under the viewscreen entry (mirrors what
+    /// `aggregate_doctrine_blackboards` publishes for a patrolling ship).
+    fn blackboards_with_patrol(
+        id: &str,
+        waypoints: &[&str],
+        loop_path: bool,
+    ) -> crate::server_app::ShipSystemBlackboards {
+        let mut bb = crate::server_app::ShipSystemBlackboards::default();
+        bb.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
+                scored_objectives: vec![crate::messages::ScoredObjective {
+                    id: id.to_string(),
+                    score: 1.0,
+                    directive: crate::messages::AiDirective::Patrol {
+                        anchors: waypoints.iter().map(|w| w.to_string()).collect(),
+                        loop_path,
+                    },
+                    source: crate::messages::ObjectiveSource::Doctrine,
+                    relevance: vec![crate::messages::SystemAffinity::Helm],
+                    snapshot: crate::messages::ObjectiveSnapshot {
+                        id: id.to_string(),
+                        text: "Patrol".to_string(),
+                        mandatory: false,
+                        status: crate::messages::ObjectiveStatus::Active,
+                        targets: vec![],
+                        source: crate::messages::ObjectiveSource::Doctrine,
+                    },
+                }],
+                ..Default::default()
+            }),
+        );
+        bb
+    }
+
+    #[test]
+    fn low_lod_patrol_advances_cursor_and_steers_toward_next_waypoint() {
+        let mut app = build_lod_test_app();
+        // Anchors: ship starts AT wp0; wp1 is offset in +x so the steer is
+        // observable in both yaw and position.
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("wp0".to_string(), [500.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [700.0, 0.0, 500.0]);
+        app.insert_resource(world);
+
+        // Player at origin so the NPC (far away) stays low-LOD.
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(500.0, 0.0, 500.0),
+                ShipPhysics {
+                    x: 500.0,
+                    z: 500.0,
+                    forward_speed: 10.0,
+                    yaw: 0.0,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 100.0,
+                },
+                PatrolCursors::default(),
+                blackboards_with_patrol("patrol", &["wp0", "wp1"], true),
+            ))
+            .id();
+
+        tick_with_dt(&mut app, 0.1);
+
+        // Cursor advanced from wp0 (arrived) to wp1.
+        let cursors = app.world().get::<PatrolCursors>(npc).unwrap();
+        assert_eq!(
+            cursors.0,
+            vec![("patrol".to_string(), 1)],
+            "cursor should advance to waypoint index 1 after arriving at waypoint 0"
+        );
+
+        // Ship steered toward wp1 (700,0,500): dx=200, dz=0 → bearing = π/2.
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+        assert!(
+            (physics.yaw - std::f32::consts::FRAC_PI_2).abs() < 0.01,
+            "yaw should steer toward wp1 bearing (π/2), got {}",
+            physics.yaw,
+        );
+        assert!(
+            physics.x > 500.0,
+            "ship should advance toward wp1 (+x), got x={}",
+            physics.x,
+        );
+
+        // Must remain low-LOD (never promoted), proving this is the cheap path.
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_none(),
+            "patrolling NPC out of range must stay low-LOD"
+        );
+    }
+
+    #[test]
+    fn low_lod_without_patrol_objective_keeps_dumb_forward_move() {
+        let mut app = build_lod_test_app();
+        spawn_player(&mut app, 0.0, 0.0);
+
+        // NPC carries PatrolCursors + an (empty) blackboard but NO patrol
+        // objective — it must fall back to the pre-existing dumb forward-move.
+        let npc = app
+            .world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(500.0, 0.0, 0.0),
+                ShipPhysics {
+                    x: 500.0,
+                    z: 0.0,
+                    forward_speed: 10.0,
+                    yaw: 0.0,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 100.0,
+                },
+                PatrolCursors::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+            ))
+            .id();
+
+        let initial = *app.world().get::<ShipPhysics>(npc).unwrap();
+        tick_with_dt(&mut app, 0.1);
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+
+        // yaw=0, forward_speed=10, dt=0.1 → z advances by -1, x unchanged.
+        assert!(
+            (physics.z - (initial.z - 1.0)).abs() < 0.001,
+            "no-patrol NPC z should advance by forward_speed * dt: expected {}, got {}",
+            initial.z - 1.0,
+            physics.z,
+        );
+        assert!(
+            (physics.x - initial.x).abs() < 0.001,
+            "no-patrol NPC x should not change when yaw=0: expected {}, got {}",
+            initial.x,
+            physics.x,
+        );
+        // Cursor stays empty — nothing was advanced.
+        assert!(
+            app.world().get::<PatrolCursors>(npc).unwrap().0.is_empty(),
+            "cursor must stay empty when there is no patrol objective"
         );
     }
 }

@@ -279,6 +279,11 @@ pub fn spawn_entity(
         // thrust rather than pinning to an absolute level. Inserted
         // separately because Bevy's tuple Bundle max is 15 elements.
         entity_commands.insert(crate::ship_plugin::LastHelmInput::default());
+        // Per-objective patrol waypoint cursors, consumed by the low-LOD
+        // `simulate_low_lod_ships` path so out-of-sensor-range NPCs cheaply
+        // follow their patrol route. Inserted separately to stay under Bevy's
+        // tuple-Bundle element cap.
+        entity_commands.insert(crate::ai_plugin::PatrolCursors::default());
         // Per-ship coordination bus state (audit follow-up). Every ship
         // tracks its own shields down/restore notification cycle and its
         // own sensors→tactical frequency-hint dedupe state so the two

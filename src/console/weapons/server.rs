@@ -3569,12 +3569,27 @@ fn tick_npc_auto_match_frequency(
         &crate::ship_plugin::ShipConfigComponent,
         &WeaponsTarget,
         &mut crate::ship_state::ShipPhaserFrequency,
+        Has<crate::ai_plugin::AiHighFidelity>,
     )>,
     mut states: ResMut<NpcFrequencyMatchStates>,
 ) {
     let dt = time.delta_secs();
-    for (entity, control_sources, ship_config, target, mut phaser_freq) in ship_q.iter_mut() {
-        if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
+    // Gate: this frequency-hint system only runs for high-fidelity NPCs
+    // (issue #692 AC — both frequency-hint systems gated on `AiHighFidelity`).
+    //
+    // `AiHighFidelity` is read via `Has<>` and folded into the in-loop gate
+    // below rather than applied as a `With<AiHighFidelity>` query FILTER on
+    // purpose: `NpcFrequencyMatchStates` is only cleaned up here, in the gate's
+    // cleanup branch (`states.0.remove(&entity)`), which runs only while the
+    // entity is still iterated. A `With<>` filter would stop iterating demoted
+    // (no-longer-high-fidelity) NPCs entirely, orphaning their HashMap entries
+    // forever — a state leak. `Has<>` + in-loop gate keeps the cleanup path
+    // alive so demoted ships' state is pruned. Do not "simplify" this into a
+    // query filter.
+    for (entity, control_sources, ship_config, target, mut phaser_freq, has_high_fidelity) in
+        ship_q.iter_mut()
+    {
+        if !has_high_fidelity || !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
             states.0.remove(&entity);
             continue;
         }
@@ -9051,6 +9066,112 @@ ai_only = true
             Some(target_uuid.as_str()),
             "operate_tactical_ai must run and lock the objective target when ANY \
              tactical fine system has operate_ai=true, even without the coarse tactical SystemId"
+        );
+    }
+
+    // ── issue #692 (audit finding B1): tick_npc_auto_match_frequency gate ──
+    //
+    // Both frequency-hint systems must be gated on `AiHighFidelity`. The
+    // `tick_frequency_hint` path already is (`ai_frequency_hint`); these two
+    // tests cover the newly-added gate on the NPC auto-match path.
+
+    /// Spawns a target entity that `tick_npc_auto_match_frequency` can read a
+    /// shield frequency from: `EntityUuid` (matched against the locked target),
+    /// `Transform` (so `operate_tactical_ai`'s stale-target guard treats it as
+    /// alive and keeps the lock), and `ShipShields` carrying `freq`.
+    fn spawn_shield_target(app: &mut App, uuid: &str, freq: f32) {
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid.into()),
+            bevy::prelude::Transform::from_xyz(0.0, 0.0, -30.0),
+            crate::ship::shields::ShipShields(crate::shield::ShieldSystem::default(), freq),
+        ));
+    }
+
+    /// Puts the LocalShip's Tactical fine systems under AI control (so
+    /// `any_tactical_system_operates_ai` is true) and locks it onto
+    /// `target_uuid` — shared setup for both auto-match tests.
+    fn setup_npc_auto_match(app: &mut App, target_uuid: &str) {
+        set_tactical_control_source(app, crate::ship::control_source::ControlSource::Ai);
+        set_weapons_target(app, Some(target_uuid.into()));
+    }
+
+    fn local_ship_entity(app: &mut App) -> Entity {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+        q.single(app.world())
+            .expect("test_app must spawn a LocalShip")
+    }
+
+    /// Positive path: a high-fidelity NPC whose Tactical is AI-operated and
+    /// which has a target locked drives its `ShipPhaserFrequency` toward the
+    /// target's shield frequency once `NPC_FREQ_MATCH_DELAY` elapses.
+    #[test]
+    fn npc_auto_match_frequency_matches_with_high_fidelity() {
+        let mut app = test_app();
+        let target_uuid = "shield-target-hi-fi";
+        // Distinct from ShipPhaserFrequency's 0.5 default AND from the code's
+        // 0.5 fallback, so an observed change proves a real match fired.
+        let target_freq = 0.8_f32;
+
+        setup_npc_auto_match(&mut app, target_uuid);
+        spawn_shield_target(&mut app, target_uuid, target_freq);
+
+        let ship = local_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ai_plugin::AiHighFidelity);
+
+        assert_eq!(
+            get_phaser_frequency(&mut app),
+            0.5,
+            "test invariant: phaser frequency starts at its default"
+        );
+
+        // NPC_FREQ_MATCH_DELAY = 2.0s; test app ticks at 200ms → ≥10 ticks to
+        // cross the delay. Run extra to stay clear of first-tick dt edge cases.
+        for _ in 0..15 {
+            tick(&mut app);
+        }
+
+        assert_eq!(
+            get_phaser_frequency(&mut app),
+            target_freq,
+            "high-fidelity NPC must auto-match its phaser frequency to the locked \
+             target's shield frequency after the delay"
+        );
+    }
+
+    /// Negative path (the gate under test): identical setup but WITHOUT
+    /// `AiHighFidelity` → the new gate suppresses auto-match and the phaser
+    /// frequency never changes. This test fails if the `has_high_fidelity`
+    /// gate is removed.
+    #[test]
+    fn npc_auto_match_frequency_gated_off_without_high_fidelity() {
+        let mut app = test_app();
+        let target_uuid = "shield-target-lo-fi";
+        let target_freq = 0.8_f32;
+
+        setup_npc_auto_match(&mut app, target_uuid);
+        spawn_shield_target(&mut app, target_uuid, target_freq);
+
+        // Deliberately NOT high-fidelity — no AiHighFidelity component.
+
+        assert_eq!(
+            get_phaser_frequency(&mut app),
+            0.5,
+            "test invariant: phaser frequency starts at its default"
+        );
+
+        for _ in 0..15 {
+            tick(&mut app);
+        }
+
+        assert_eq!(
+            get_phaser_frequency(&mut app),
+            0.5,
+            "without AiHighFidelity the auto-match gate must not fire; the phaser \
+             frequency stays at its default"
         );
     }
 

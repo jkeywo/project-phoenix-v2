@@ -1951,6 +1951,8 @@ mod tests {
             crate::ai_plugin::AiHighFidelity,
             crate::ship::shields::ShieldArcIntents::default(),
             crate::console_ai_plugin::ShipFrequencyHintState::default(),
+            crate::ship::power::PowerReactorIntents::default(),
+            crate::ship::power::ShipPowerAiState::default(),
         ));
         app
     }
@@ -4637,6 +4639,8 @@ station = "helm"
             ShipImpulse(crate::impulse::ImpulseState::new()),
             crate::ship::shields::ShieldArcIntents::default(),
             crate::console_ai_plugin::ShipFrequencyHintState::default(),
+            crate::ship::power::PowerReactorIntents::default(),
+            crate::ship::power::ShipPowerAiState::default(),
         ));
         app
     }

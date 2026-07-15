@@ -2096,6 +2096,8 @@ fn spawn_game_start_entities(
                 .insert(crate::ai_plugin::AiHighFidelity)
                 .insert(crate::ship::shields::ShieldArcIntents::default())
                 .insert(crate::console_ai_plugin::ShipFrequencyHintState::default())
+                .insert(crate::ship::power::PowerReactorIntents::default())
+                .insert(crate::ship::power::ShipPowerAiState::default())
                 .insert(ShipSystemBlackboards::default())
                 .insert(ship_config)
                 .insert(initial_control_sources)
@@ -2371,14 +2373,17 @@ fn spawn_game_start_entities(
             commands.insert_resource(power_config);
 
             // Power AI config — unconditionally insert as per-entity
-            // Component so `operate_power_ai` iterating `With<Ship>` sees
+            // Component so `ai_power_allocation` iterating `With<Ship>` sees
             // a value on the player ship. Dual-writes the Resource.
             let ai_cfg = match config.power.as_ref().and_then(|pc| pc.ai.as_ref()) {
                 Some(ai) => PowerAiConfigResource {
-                    weapons_battery_floor: ai.weapons_battery_floor,
-                    shields_battery_floor: ai.shields_battery_floor,
-                    helm_battery_floor: ai.helm_battery_floor,
-                    helm_throttle_threshold: ai.helm_throttle_threshold,
+                    movement_thrust_threshold: ai.movement_thrust_threshold,
+                    movement_engage_delay_secs: ai.movement_engage_delay_secs,
+                    movement_battery_engage_min_pct: ai.movement_battery_engage_min_pct,
+                    movement_battery_recharge_pct: ai.movement_battery_recharge_pct,
+                    red_alert_engage_delay_secs: ai.red_alert_engage_delay_secs,
+                    red_alert_battery_engage_min_pct: ai.red_alert_battery_engage_min_pct,
+                    red_alert_battery_recharge_pct: ai.red_alert_battery_recharge_pct,
                 },
                 None => PowerAiConfigResource::default(),
             };

@@ -1034,34 +1034,65 @@ fn default_cinematic_yaw_follow_rate() -> f32 {
     45.0
 }
 
+/// AI tuning parameters for the power reactor AI controller (issue #693).
+///
+/// Loaded from `[power.ai]` in the ship entity TOML. Feeds the
+/// timer/hysteresis-based `console_ai::tick_power_movement_rule` /
+/// `tick_power_red_alert_rule` pure functions via
+/// `crate::ship::power::PowerAiConfigResource`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PowerAiConfigToml {
-    /// Battery fraction below which the AI won't boost weapons power.
-    #[serde(default = "default_weapons_battery_floor")]
-    pub weapons_battery_floor: f32,
-    /// Battery fraction below which the AI won't boost shields power (reserved).
-    #[serde(default = "default_shields_battery_floor")]
-    pub shields_battery_floor: f32,
-    /// Battery fraction below which the AI won't boost helm power.
-    #[serde(default = "default_helm_battery_floor")]
-    pub helm_battery_floor: f32,
-    /// Throttle fraction above which the AI considers helm "active".
-    #[serde(default = "default_helm_throttle_threshold")]
-    pub helm_throttle_threshold: f32,
+    /// Thrust level (0.0-1.0) above which the movement rule considers the
+    /// ship actively driving.
+    #[serde(default = "default_movement_thrust_threshold")]
+    pub movement_thrust_threshold: f32,
+    /// Seconds of sustained thrust required before the movement rule
+    /// engages the helm power overflow.
+    #[serde(default = "default_movement_engage_delay_secs")]
+    pub movement_engage_delay_secs: f32,
+    /// Battery percentage (0.0-100.0) required to engage the helm power
+    /// overflow.
+    #[serde(default = "default_movement_battery_engage_min_pct")]
+    pub movement_battery_engage_min_pct: f32,
+    /// Battery percentage (0.0-100.0) required to re-arm the movement rule
+    /// after it disengages.
+    #[serde(default = "default_movement_battery_recharge_pct")]
+    pub movement_battery_recharge_pct: f32,
+    /// Seconds red alert must persist before the red-alert rule engages the
+    /// weapons power overflow.
+    #[serde(default = "default_red_alert_engage_delay_secs")]
+    pub red_alert_engage_delay_secs: f32,
+    /// Battery percentage (0.0-100.0) required to engage the weapons power
+    /// overflow on red alert.
+    #[serde(default = "default_red_alert_battery_engage_min_pct")]
+    pub red_alert_battery_engage_min_pct: f32,
+    /// Battery percentage (0.0-100.0) required to re-arm the red-alert rule
+    /// after it disengages.
+    #[serde(default = "default_red_alert_battery_recharge_pct")]
+    pub red_alert_battery_recharge_pct: f32,
 }
 
-fn default_weapons_battery_floor() -> f32 {
-    0.5
+fn default_movement_thrust_threshold() -> f32 {
+    0.7
 }
-fn default_shields_battery_floor() -> f32 {
-    0.25
+fn default_movement_engage_delay_secs() -> f32 {
+    3.0
 }
-fn default_helm_battery_floor() -> f32 {
-    0.75
+fn default_movement_battery_engage_min_pct() -> f32 {
+    50.0
 }
-fn default_helm_throttle_threshold() -> f32 {
-    0.5
+fn default_movement_battery_recharge_pct() -> f32 {
+    100.0
+}
+fn default_red_alert_engage_delay_secs() -> f32 {
+    3.0
+}
+fn default_red_alert_battery_engage_min_pct() -> f32 {
+    10.0
+}
+fn default_red_alert_battery_recharge_pct() -> f32 {
+    100.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

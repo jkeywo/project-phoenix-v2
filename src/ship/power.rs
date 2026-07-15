@@ -4,14 +4,14 @@ use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
     CoordinationPayload, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard,
     PowerBlackboard, PowerGroupEntry, PowerGroupId, PowerReactorBlackboard, ServerMessage,
-    StationId, SystemBlackboard, SystemId,
+    SystemBlackboard, SystemId,
 };
 use crate::modifiers::power_system::{
     power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
     SENSORS_POWER_GROUP, WEAPONS_POWER_GROUP,
 };
 use crate::ship::control_source::ControlSource;
-use crate::ship_plugin::{CoordinationEnqueue, LastHelmInput};
+use crate::ship_plugin::CoordinationEnqueue;
 
 // ── Resources ──────────────────────────────────────────────────────────────────
 
@@ -61,30 +61,86 @@ impl Default for PowerMultiplierResource {
 /// at startup by the entity spawner. The fields mirror the `[power.ai]` TOML
 /// keys; defaults are used when the section is absent.
 ///
+/// Repurposed by issue #693: the old 4-field absolute-set tuning (used by the
+/// now-deleted `operate_power_ai`) is replaced by the 7 fields the
+/// timer/hysteresis-based `console_ai::tick_power_movement_rule` /
+/// `tick_power_red_alert_rule` pure functions need.
+///
 /// Dual-derives `Resource` (legacy global fallback used by tests) and
 /// `Component` (per-entity storage on each ship — PR 6 migration, see PRD #597).
 #[derive(Resource, Component, Clone, Debug)]
 pub struct PowerAiConfigResource {
-    /// Minimum battery charge fraction (0.0–1.0) before the AI boosts weapons power.
-    pub weapons_battery_floor: f32,
-    /// Minimum battery charge fraction (0.0–1.0) before the AI boosts shields power.
-    /// NOTE: PowerSystem has no dedicated shields field; this is reserved for future use.
-    pub shields_battery_floor: f32,
-    /// Minimum battery charge fraction (0.0–1.0) before the AI boosts helm power.
-    pub helm_battery_floor: f32,
-    /// Thrust level (0.0–1.0) above which the AI considers the ship actively moving.
-    pub helm_throttle_threshold: f32,
+    /// Thrust level (0.0–1.0) above which the movement rule considers the
+    /// ship actively driving.
+    pub movement_thrust_threshold: f32,
+    /// Seconds of sustained thrust required before the movement rule
+    /// engages the helm power overflow.
+    pub movement_engage_delay_secs: f32,
+    /// Battery percentage (0.0–100.0) required to engage the helm power
+    /// overflow.
+    pub movement_battery_engage_min_pct: f32,
+    /// Battery percentage (0.0–100.0) required to re-arm the movement rule
+    /// after it disengages.
+    pub movement_battery_recharge_pct: f32,
+    /// Seconds red alert must persist before the red-alert rule engages the
+    /// weapons power overflow.
+    pub red_alert_engage_delay_secs: f32,
+    /// Battery percentage (0.0–100.0) required to engage the weapons power
+    /// overflow on red alert.
+    pub red_alert_battery_engage_min_pct: f32,
+    /// Battery percentage (0.0–100.0) required to re-arm the red-alert rule
+    /// after it disengages.
+    pub red_alert_battery_recharge_pct: f32,
 }
 
 impl Default for PowerAiConfigResource {
     fn default() -> Self {
         Self {
-            weapons_battery_floor: 0.5,
-            shields_battery_floor: 0.25,
-            helm_battery_floor: 0.75,
-            helm_throttle_threshold: 0.5,
+            movement_thrust_threshold: 0.7,
+            movement_engage_delay_secs: 3.0,
+            movement_battery_engage_min_pct: 50.0,
+            movement_battery_recharge_pct: 100.0,
+            red_alert_engage_delay_secs: 3.0,
+            red_alert_battery_engage_min_pct: 10.0,
+            red_alert_battery_recharge_pct: 100.0,
         }
     }
+}
+
+// ── AI intent/state (issue #693) ─────────────────────────────────────────────
+
+/// A single power-reallocation command emitted by the AI decision system
+/// (`console_ai::server::ai_power_allocation`) for `console_ai::server::
+/// integrate_power_state` to apply the same tick. Carries the target power
+/// group and the absolute level to set via `PowerSystem::set_group_allocation`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PowerReactorCommand {
+    pub group: PowerGroupId,
+    pub level: u8,
+}
+
+/// Per-ship queue of pending power-reallocation intents. Written by
+/// `ai_power_allocation`, drained and applied by `integrate_power_state` in
+/// the same tick.
+///
+/// Present only while the ship carries `AiHighFidelity` — bundled alongside
+/// that marker at every spawn/promote site, mirroring `ShieldArcIntents`
+/// (see `ai::server::lod_ai_ships` and the `AiHighFidelity` spawn sites in
+/// `server_app.rs` / `ship_plugin.rs` / `ai/server.rs`).
+#[derive(Component, Default, Clone, Debug)]
+pub struct PowerReactorIntents(pub Vec<PowerReactorCommand>);
+
+/// Per-ship persistent state for the two timer/hysteresis-based power AI
+/// rules. `tick_power_movement_rule` and `tick_power_red_alert_rule` each
+/// need their own independent `EngageState` (confirmed by `console_ai::core`'s
+/// own tests, which use two separate local `state` variables).
+///
+/// Present only while the ship carries `AiHighFidelity`, matching
+/// `PowerReactorIntents`'s scoping.
+#[derive(Component, Default, Clone, Debug)]
+pub struct ShipPowerAiState {
+    pub movement: crate::console_ai::EngageState,
+    pub red_alert: crate::console_ai::EngageState,
 }
 
 /// Debounce state for power brownout coordination advisories (issue #678).
@@ -137,7 +193,6 @@ impl Plugin for ShipPowerPlugin {
                 (
                     handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
-                    operate_power_ai.in_set(crate::sim_sets::SimSet::Physics),
                     handle_power_inter_system.in_set(crate::sim_sets::SimSet::Modifiers),
                     tick_power_brownout_advisory.in_set(crate::sim_sets::SimSet::Modifiers),
                     publish_power_blackboard.in_set(crate::sim_sets::SimSet::Publish),
@@ -213,9 +268,12 @@ pub fn handle_power_messages(
     power_res: Option<ResMut<ShipPowerSystem>>,
 ) {
     let mut power_res = power_res;
-    // Iterate every ship (player + NPC) so both the player's Power console
-    // commands and the future NPC `operate_power_ai` writes into
-    // `AdmittedCommands` re-allocate that ship's own power grid.
+    // Iterate every ship (player + NPC) so the player's Power console
+    // commands re-allocate that ship's own power grid. NPC AI reallocation
+    // goes through a separate path — `console_ai::server::ai_power_allocation`
+    // / `integrate_power_state` — which mutates `ShipPowerSystem` directly
+    // via `set_group_allocation`, mirroring this handler's mutation
+    // primitive without routing through `AdmittedCommands`.
     for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
         let mut pending: Vec<(crate::messages::PowerGroupId, u8)> = Vec::new();
         for cmd in admitted.for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID) {
@@ -435,161 +493,14 @@ pub fn tick_power_system(
     }
 }
 
-/// AI controller for the power console.
-///
-/// Rules (all purely advisory — clamped by PowerSystem bounds):
-/// - High throttle AND sufficient battery → set Helm to 3
-/// - Zero throttle → set Helm to 1 (idle)
-/// - Otherwise → set Helm to 2
-/// - Red alert AND sufficient battery → set Weapons to 3
-///
-/// PowerSystem has no shields field; shields_battery_floor is reserved for
-/// future extension but produces no action today.
-///
-/// After PR 6 (PRD #597): iterates ALL ship entities where the Power system is
-/// `ControlSource::Ai`. Each ship reads its own `ShipRedAlert`,
-/// `LastHelmInput`, and `PowerConfigResource`/`PowerAiConfigResource`
-/// components (all default when absent). NPCs and the player ship follow the
-/// same code path — the only differentiators are the per-station control
-/// sources and the components on each entity.
-///
-/// The global `ShipPowerSystem` resource is still dual-written from the
-/// LocalShip entity's component so the legacy Resource-based broadcasters
-/// keep working during the migration.
-pub fn operate_power_ai(
-    mut power_res: Option<ResMut<ShipPowerSystem>>,
-    ai_config_res: Option<Res<PowerAiConfigResource>>,
-    config_res: Option<Res<PowerConfigResource>>,
-    sessions: Option<Res<crate::lobby::Sessions>>,
-    ship_comp_query: Query<
-        &crate::ship_plugin::ShipConfigComponent,
-        With<crate::server_app::LocalShip>,
-    >,
-    mut ship_power_q: Query<
-        (
-            Entity,
-            &crate::ship_plugin::ShipSystemControlSources,
-            &mut ShipPowerSystem,
-            Option<&crate::ship_state::ShipRedAlert>,
-            Option<&LastHelmInput>,
-            Option<&PowerConfigResource>,
-            Option<&PowerAiConfigResource>,
-            Has<crate::server_app::LocalShip>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-) {
-    // Yield to any human Power console holder on the player ship. NPC ships
-    // have no human console holders, so they always run the AI branch when
-    // their Power system is under AI control.
-    let human_holds_player_power =
-        if let (Some(sessions), Some(_ship_config)) = (&sessions, ship_comp_query.iter().next()) {
-            sessions
-                .0
-                .holder_for_station(&StationId("power".into()))
-                .is_some()
-        } else {
-            false
-        };
-
-    let ai_cfg_default;
-    let ai_cfg_fallback: &PowerAiConfigResource = match ai_config_res.as_deref() {
-        Some(c) => c,
-        None => {
-            ai_cfg_default = PowerAiConfigResource::default();
-            &ai_cfg_default
-        }
-    };
-    let cfg_default;
-    let cfg_fallback: &PowerConfigResource = match config_res.as_deref() {
-        Some(c) => c,
-        None => {
-            cfg_default = PowerConfigResource::default();
-            &cfg_default
-        }
-    };
-
-    let mut player_power: Option<crate::modifiers::power_system::PowerSystem> = None;
-    for (
-        _entity,
-        control_sources,
-        mut power_comp,
-        red_alert_comp,
-        last_helm_comp,
-        cfg_comp,
-        ai_cfg_comp,
-        is_local,
-    ) in ship_power_q.iter_mut()
-    {
-        // Skip the player ship when a human is at the Power console; NPCs
-        // never have a human holder so this only ever skips the player ship.
-        if is_local && human_holds_player_power {
-            continue;
-        }
-        let policy = control_sources
-            .0
-            .policy_for(&crate::system_registry::power_reactor_system_id());
-        if !policy.operate_ai {
-            continue;
-        }
-
-        let cfg: &PowerConfigResource = cfg_comp.unwrap_or(cfg_fallback);
-        let ai_cfg: &PowerAiConfigResource = ai_cfg_comp.unwrap_or(ai_cfg_fallback);
-        let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
-        let throttle = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
-
-        let battery_pct = power_comp.0.battery_charge / cfg.0.capacity;
-
-        let helm_id = PowerGroupId(HELM_POWER_GROUP.into());
-        let weapons_id = PowerGroupId(WEAPONS_POWER_GROUP.into());
-        let sensors_id = PowerGroupId(SENSORS_POWER_GROUP.into());
-
-        // Weapons: boost on red alert when battery allows.
-        if red_alert && battery_pct >= ai_cfg.weapons_battery_floor {
-            let _ = power_comp.0.set_group_allocation(&weapons_id, 3);
-        }
-
-        // Helm: scale with throttle demand and battery availability.
-        if throttle > ai_cfg.helm_throttle_threshold && battery_pct >= ai_cfg.helm_battery_floor {
-            let _ = power_comp.0.set_group_allocation(&helm_id, 3);
-        } else if throttle == 0.0 {
-            let _ = power_comp.0.set_group_allocation(&helm_id, 1);
-            if !red_alert || battery_pct < ai_cfg.weapons_battery_floor {
-                let _ = power_comp.0.set_group_allocation(&weapons_id, 2);
-            }
-        } else {
-            let _ = power_comp.0.set_group_allocation(&helm_id, 2);
-            if !red_alert || battery_pct < ai_cfg.weapons_battery_floor {
-                let _ = power_comp.0.set_group_allocation(&weapons_id, 2);
-            }
-        }
-
-        // Clamp all groups to [1, 4] — set_group_allocation already clamps
-        // but preserve the explicit clamping call for legibility and to keep
-        // the sensors group in-range if some future code path pokes it.
-        let helm_level = power_comp.0.level_for(&helm_id).clamp(1, 4);
-        let weapons_level = power_comp.0.level_for(&weapons_id).clamp(1, 4);
-        let sensors_level = power_comp.0.level_for(&sensors_id).clamp(1, 4);
-        let _ = power_comp.0.set_group_allocation(&helm_id, helm_level);
-        let _ = power_comp
-            .0
-            .set_group_allocation(&weapons_id, weapons_level);
-        let _ = power_comp
-            .0
-            .set_group_allocation(&sensors_id, sensors_level);
-
-        if is_local {
-            player_power = Some(power_comp.0.clone());
-        }
-    }
-
-    // Sync the global resource with the player ship's component (dual-write).
-    if let (Some(power_res), Some(player_power)) = (power_res.as_deref_mut(), player_power) {
-        power_res.0 = player_power;
-    }
-}
-
 // ── Power brownout advisory (issue #678) ─────────────────────────────────────
+//
+// The old fused `operate_power_ai` (absolute-set, non-timer, non-
+// AiHighFidelity-gated) was removed in issue #693. It is replaced by
+// `console_ai::server::ai_power_allocation` (decision, writes
+// `PowerReactorIntents`) + `console_ai::server::integrate_power_state`
+// (adapter — applies intents via `set_group_allocation`, the same mutation
+// primitive `handle_power_messages` above uses for the human path).
 
 /// Map a power group id string to the target `SystemId` for coordination.
 fn system_id_for_power_group(group: &str) -> Option<SystemId> {
@@ -1237,7 +1148,9 @@ mod tests {
     #[test]
     fn publish_power_blackboard_reflects_helm_level_change() {
         let mut app = test_app();
-        // Human holds Power so operate_power_ai yields and doesn't override.
+        // Human holds Power; this test app doesn't register any power AI
+        // system anyway (that lives in ConsoleAiPlugin), but a human holder
+        // keeps the scenario realistic.
         start_game_with_power(&mut app);
         tick(&mut app);
 
@@ -1319,126 +1232,12 @@ mod tests {
         );
     }
 
-    // ── operate_power_ai tests ──────────────────────────────────────────────
-
-    fn ai_test_app() -> App {
-        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
-        let mut app = App::new();
-        app.add_plugins(bevy::time::TimePlugin)
-            .insert_resource(ShipPowerSystem(PowerSystem::default()))
-            .init_resource::<PowerConfigResource>()
-            .init_resource::<PowerAiConfigResource>()
-            .add_systems(Update, operate_power_ai);
-
-        // Spawn a Ship entity with ShipPowerSystem component + AI power source.
-        let mut resolver = ControlSourceResolver::new();
-        resolver.set(
-            crate::system_registry::power_reactor_system_id(),
-            ControlSource::Ai,
-        );
-        app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
-            crate::ship_plugin::ShipSystemControlSources(resolver),
-            crate::ship_plugin::ShipConfigComponent::default(),
-            ShipPowerSystem(PowerSystem::default()),
-            crate::ship_state::ShipRedAlert::default(),
-            LastHelmInput::default(),
-        ));
-        app
-    }
-
-    #[test]
-    fn ai_sets_helm_to_three_when_high_throttle_and_battery_ok() {
-        let mut app = ai_test_app();
-        let ship = app
-            .world_mut()
-            .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
-            .single(app.world())
-            .unwrap();
-        app.world_mut().entity_mut(ship).insert(LastHelmInput {
-            thrust: 0.9,
-            steering: 0.0,
-            lateral: 0.0,
-        });
-        // battery_pct = 100/100 = 1.0 >= 0.75 floor
-        app.update();
-        assert_eq!(
-            app.world()
-                .resource::<ShipPowerSystem>()
-                .0
-                .level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
-            3
-        );
-    }
-
-    #[test]
-    fn ai_sets_helm_to_one_when_throttle_is_zero() {
-        let mut app = ai_test_app();
-        // Default LastHelmInput has thrust=0.0
-        app.update();
-        assert_eq!(
-            app.world()
-                .resource::<ShipPowerSystem>()
-                .0
-                .level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
-            1
-        );
-    }
-
-    #[test]
-    fn ai_sets_weapons_to_three_on_red_alert_with_battery() {
-        let mut app = ai_test_app();
-        {
-            let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
-            if let Ok(mut ra) = q.single_mut(app.world_mut()) {
-                ra.toggle();
-            }
-        }
-        app.update();
-        assert_eq!(
-            app.world()
-                .resource::<ShipPowerSystem>()
-                .0
-                .level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
-            3
-        );
-    }
-
-    #[test]
-    fn ai_does_not_boost_weapons_when_battery_low() {
-        let mut app = ai_test_app();
-        {
-            let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
-            if let Ok(mut ra) = q.single_mut(app.world_mut()) {
-                ra.toggle();
-            }
-        }
-        // Set battery low on both the resource and the component.
-        app.world_mut()
-            .resource_mut::<ShipPowerSystem>()
-            .0
-            .battery_charge = 30.0; // pct=0.3 < 0.5 floor
-        {
-            let mut q = app
-                .world_mut()
-                .query_filtered::<&mut ShipPowerSystem, With<crate::server_app::LocalShip>>();
-            let mut ps = q.single_mut(app.world_mut()).unwrap();
-            ps.0.battery_charge = 30.0;
-        }
-        app.update();
-        // weapons should not be 3 — battery below floor
-        assert_ne!(
-            app.world()
-                .resource::<ShipPowerSystem>()
-                .0
-                .level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
-            3,
-            "weapons should not be boosted when battery is below floor"
-        );
-    }
-
     // ── Inter-system command channel tests (issue #559) ───────────────────────
+    //
+    // `operate_power_ai`'s tests were removed in issue #693 along with the
+    // system itself. System-level coverage for the replacement
+    // `ai_power_allocation` / `integrate_power_state` lives in
+    // `console_ai::server`'s test module.
     //
     // These tests exercise the full weapons→power inter-system drain flow.
     // A minimal combined app registers both `drain_power_for_active_beam`

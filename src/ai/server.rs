@@ -582,15 +582,21 @@ fn lod_ai_ships(
                 LodState::High => {
                     commands.entity(entity).insert(AiHighFidelity);
                     // AI intent/state components scoped to AiHighFidelity
-                    // (issue #692) — bundled alongside the marker so they
-                    // stay present exactly while the ship runs full-fidelity
-                    // AI decision systems.
+                    // (issue #692, extended by #693 for power) — bundled
+                    // alongside the marker so they stay present exactly
+                    // while the ship runs full-fidelity AI decision systems.
                     commands
                         .entity(entity)
                         .insert(crate::ship::shields::ShieldArcIntents::default());
                     commands
                         .entity(entity)
                         .insert(crate::console_ai_plugin::ShipFrequencyHintState::default());
+                    commands
+                        .entity(entity)
+                        .insert(crate::ship::power::PowerReactorIntents::default());
+                    commands
+                        .entity(entity)
+                        .insert(crate::ship::power::ShipPowerAiState::default());
                     commands.entity(entity).insert(timer_comp);
                 }
                 LodState::Low => {
@@ -601,6 +607,12 @@ fn lod_ai_ships(
                     commands
                         .entity(entity)
                         .remove::<crate::console_ai_plugin::ShipFrequencyHintState>();
+                    commands
+                        .entity(entity)
+                        .remove::<crate::ship::power::PowerReactorIntents>();
+                    commands
+                        .entity(entity)
+                        .remove::<crate::ship::power::ShipPowerAiState>();
                     commands.entity(entity).insert(timer_comp);
                 }
             }
@@ -1226,6 +1238,8 @@ mod tests {
                 AiHighFidelity,
                 crate::ship::shields::ShieldArcIntents::default(),
                 crate::console_ai_plugin::ShipFrequencyHintState::default(),
+                crate::ship::power::PowerReactorIntents::default(),
+                crate::ship::power::ShipPowerAiState::default(),
             ))
             .id()
     }

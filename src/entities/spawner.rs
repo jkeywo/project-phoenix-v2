@@ -305,9 +305,10 @@ pub fn spawn_entity(
         // Per-entity power config (PRD #597 gap-4 closure). NPCs without a
         // `[power]` TOML block get `PowerConfigResource::default()` /
         // `PowerAiConfigResource::default()` so `translate_power_modifiers`,
-        // `operate_power_ai`, and `tick_power_system` can iterate every ship
-        // uniformly (`With<Ship>`) without an `is_npc` fork. When the TOML
-        // supplies `[power]` / `[power.ai]`, those values seed the components.
+        // `ai_power_allocation` (issue #693), and `tick_power_system` can
+        // iterate every ship uniformly (`With<Ship>`) without an `is_npc`
+        // fork. When the TOML supplies `[power]` / `[power.ai]`, those
+        // values seed the components.
         let power_config = match &config.power {
             Some(pc) => crate::power_plugin::PowerConfigResource(
                 crate::modifiers::power_system::PowerConfig {
@@ -321,10 +322,13 @@ pub fn spawn_entity(
         entity_commands.insert(power_config);
         let power_ai_config = match config.power.as_ref().and_then(|pc| pc.ai.as_ref()) {
             Some(ai) => crate::power_plugin::PowerAiConfigResource {
-                weapons_battery_floor: ai.weapons_battery_floor,
-                shields_battery_floor: ai.shields_battery_floor,
-                helm_battery_floor: ai.helm_battery_floor,
-                helm_throttle_threshold: ai.helm_throttle_threshold,
+                movement_thrust_threshold: ai.movement_thrust_threshold,
+                movement_engage_delay_secs: ai.movement_engage_delay_secs,
+                movement_battery_engage_min_pct: ai.movement_battery_engage_min_pct,
+                movement_battery_recharge_pct: ai.movement_battery_recharge_pct,
+                red_alert_engage_delay_secs: ai.red_alert_engage_delay_secs,
+                red_alert_battery_engage_min_pct: ai.red_alert_battery_engage_min_pct,
+                red_alert_battery_recharge_pct: ai.red_alert_battery_recharge_pct,
             },
             None => crate::power_plugin::PowerAiConfigResource::default(),
         };

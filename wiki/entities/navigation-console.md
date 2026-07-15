@@ -2,153 +2,47 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/navigation-console.html, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/core/messages.rs, src/server_app.rs, assets/entities/alliance_battleship.toml]
-updated: 2026-07-02
+sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/destroyer/tactical.html, gui/components/ph-navigation-map.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/core/messages.rs, src/entities/config.rs, assets/entities/alliance_battleship.toml]
+updated: 2026-07-15
 ---
 
 # Navigation Console
 
-The system-map console. Renders an overhead, north-up chart of the wider
-neighbourhood (stations, planets, stars, regions, objective beacons) at a
-much larger range than the Helm radar, and is the only seat that can set
-the shared **navigation waypoint**.
-
-Loaded as an iframe (`#navigation-iframe`) inside `client.html`; the entire
-console is a single self-contained HTML file with an inline `<script
-type="module">` block. There is no Rust client panel.
+Navigation provides the shared strategic chart and desired-destination surface. The Battleship has a dedicated Navigation console, while the Cruiser embeds Navigation in Comms and the Destroyer embeds it in Tactical. All three consume the same Navigation state and shared `ph-navigation-map` component; there is no Rust client panel.
 
 ## Chart contents
 
-Configured per-ship via `[navigation_console.system_chart]` in
-`assets/entities/player_ship.toml` (parsed into `NavigationConsoleConfig`,
-`src/entities/config.rs:937-949`):
+The ship entity's `[navigation_console.system_chart]` block supplies the chart range plus the `shows` and `selects` tag filters. `NavigationConsoleConfig` parses that data, the Navigation blackboard publishes it, and `buildNavigationConsoleState` turns the authoritative snapshot into the browser state used by every hull layout.
 
-- `range = 800` — world units of the chart radius.
-- `shows` — entity tags rendered as blips (default: `region`,
-  `asteroid_field`, `star`, `planet`, `station`, `player`,
-  `objective_marker`).
-- `selects` — entity tags that can be tapped to select (default: `station`,
-  `planet`, `star`, `region`).
+The chart is overhead, north-up, and world-anchored. It uses authored radar icons and colours, plots the ship at its world position, and renders the current shared waypoint. Pan and zoom are local presentation state.
 
-The blip pipeline runs through `buildNavigationConsoleState` in
-`gui/console-state.js:784`. Asteroids and ships are intentionally
-excluded from the system chart so it reads as a strategic overview.
+## Selection and waypoint placement
 
-The full-screen canvas renderer in `gui/navigation-console.html` uses the
-same radar icon contract as the shared `RadarWidget`: each blip's authored
-`icon` value is preferred over `kind`, assets resolve from
-`../assets/radar_icons/Icon-*.png`, and authored RGB `color` values are
-used for tint/fallback dots. Objective targets stay as gold rings layered
-around the blip; they do not replace the authored radar icon.
+Tapping a chart blip selects it locally, opens its information overlay, and sends `set_navigation_waypoint` with the blip's coordinates and `source_uuid`. This creates an anchored waypoint. Tapping empty chart space clears the local selection and sends the same action without `source_uuid`, creating a free waypoint at that world position. The Battleship page also exposes an explicit Clear Waypoint button.
 
-## Selection
-
-Tap any non-`own` blip to select it. `_selectedId` in
-`gui/navigation-console.html:311` is the local UUID of the current
-selection (matches the wire `EntitySnapshot.uuid`). The bottom-overlay
-panel (`#entity-overlay`, `gui/navigation-console.html:229-267`) shows the
-selected entity's name, stance/kind/faction badges, bearing and range
-from the ship.
-
-Tap empty space to clear the selection. Selection that disappears from
-the next state push (entity left the chart range) auto-clears via
-`gui/navigation-console.html:846-850`.
-
-## Waypoint
-
-The crew shares one navigation waypoint at a time, owned authoritatively
-by the server. Storage variant (added 2026-06-19):
+The server owns one waypoint per ship:
 
 ```rust
-// src/console/navigation/mod.rs
 pub enum WaypointMode {
     Free { x: f32, z: f32 },
     Anchored { source_uuid: String, last_x: f32, last_z: f32 },
 }
+
 pub struct NavigationWaypoint(pub Option<WaypointMode>);
 ```
 
-Broadcast as `SimSnapshot.navigation_waypoint:
-Option<WaypointSnapshot>` where `WaypointSnapshot { x, z, source_uuid:
-Option<String> }`. `source_uuid` is omitted on the wire (and on the
-client) for free waypoints; present for anchored ones.
+An anchored waypoint follows the source entity's live transform. If the source despawns, `refresh_anchored_waypoint` clears it. A free waypoint remains fixed. Non-finite coordinates are rejected.
 
-Only the player whose `Player.station == "navigation"` may set or clear the
-waypoint (`navigation_authorized` in `src/console/navigation/mod.rs`).
-NaN/Inf coordinates are rejected.
+## Authority and sharing
 
-### Three ways to set a waypoint
+Navigation commands enter through the same `ControlSystem` command path as other fine-system controls and are admitted for the Navigation system. The Navigation blackboard publishes the waypoint for all consumers. Helm and other consoles can display it, and AI Helm should treat it as the normal shared desired destination whether a human or Navigation AI wrote it.
 
-1. **Tap-to-place (free)** — `#btn-set-waypoint` arms placement mode,
-   the next canvas tap calls `set_navigation_waypoint { x, z }` (no
-   `source_uuid`). Waypoint never moves on its own.
-2. **Add Waypoint from selection (anchored)** — `#btn-add-waypoint`
-   appears when any selectable entity is selected. Sends
-   `set_navigation_waypoint { x, z, source_uuid: <selected uuid> }`.
-   The server's `refresh_anchored_waypoint` system
-   (`src/console/navigation/mod.rs`, runs in `SimSet::Modifiers`)
-   queries `EntityUuid + Transform` every tick and overwrites
-   `last_x`/`last_z` from the entity's live transform. The waypoint
-   tracks the entity until despawn.
-3. **Snap-to-objective (legacy)** — `#btn-set-waypoint` when the
-   selected entity has `objective_target = true` skips placement mode
-   and sends the entity's current coords as a *free* waypoint.
-
-### Auto-clear on despawn
-
-When an anchored waypoint's parent entity is no longer present
-(despawned, or never spawned), `refresh_anchored_waypoint` sets
-`NavigationWaypoint(None)`. The next broadcast omits
-`navigation_waypoint`. Crew sees `WP NOT SET`.
-
-### Bidirectional selection link
-
-The waypoint blip emitted into the chart's `blips` array carries the
-parent UUID as `source_uuid`. In the navigation iframe:
-
-- `buildWaypointBlip` (`gui/console-state.js:218-258`) marks the blip
-  `selectable: true` only when `source_uuid` is non-null.
-- `handleTap` (`gui/navigation-console.html:657-694`) hit-tests the
-  waypoint's world position separately; on a hit with non-null
-  `source_uuid`, sets `_selectedId` to the parent UUID (looked up in
-  `_entities`). This is how tapping the waypoint forwards selection to
-  the parent.
-- Free waypoints (no `source_uuid`) remain non-selectable; tapping them
-  falls through to normal hit-testing.
-
-The waypoint is also drawn on the Helm radar (`buildHelmConsoleState` →
-`buildWaypointBlip` with `edgeClamp: true`), clamped to the radar edge
-with `edge: true` when out of range so the helmsman can still see the
-bearing.
-
-## Intended Helm contract
-
-The waypoint is the normal shared desired-destination surface, not a direct
-motion command. Future Helm AI should consume it whenever Helm is AI-controlled,
-whether its writer was human Navigation or Navigation AI. `NavigateTo` remains a
-level-3 advisory coordination request for an explicit ask to Helm; it should not
-be the normal route by which Navigation AI makes the ship move.
+`NavigateTo` remains a level-3 advisory coordination request for an explicit ask to Helm; it is not the ordinary route by which Navigation AI moves the ship.
 
 ## Wire surface
 
-- `ClientMessage::SetNavigationWaypoint { x: f32, z: f32, source_uuid:
-  Option<String> }` — sender must hold the `"navigation"` station. Adding a
-  non-empty `source_uuid` switches into anchored mode.
-- `ClientMessage::ClearNavigationWaypoint` — also navigation-gated.
-- `SimSnapshot.navigation_waypoint: Option<WaypointSnapshot>` — present
-  whenever a waypoint is set; absent (`skip_serializing_if =
-  "Option::is_none"`) otherwise.
+- `SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }` sets a free or anchored waypoint.
+- `SystemControlPayload::ClearNavigationWaypoint` clears it.
+- `NavigationBlackboard.navigation_waypoint: Option<WaypointSnapshot>` publishes the current shared value.
 
-Round-trip coverage:
-`src/console/navigation/mod.rs` `mod tests` (7 tests), `src/core/codec.rs`
-(`client_set_navigation_waypoint{,_with_source_uuid,_legacy_payload_deserialises}`,
-`sim_snapshot_with_{,anchored_}navigation_waypoint_round_trips`),
-`tests/client/action-map.test.js`, `tests/client/console-state.test.js`,
-`tests/smoke/navigation-console.spec.ts`.
-
-## Cancel-impulse button
-
-The navigation chart shows a `CANCEL IMPULSE` button while the impulse
-drive is in `Charging` or `Active`. Emits `ClientMessage::CancelImpulse`.
-Behaviour mirrored on Helm and Sensors — see
-[Helm Console](./helm-console.md).
+`gui/action-map.js` maps the browser actions onto these authoritative commands. `buildWaypointBlip` also projects the shared waypoint onto Helm and other radar views, edge-clamping it where the consuming view requests that behaviour.

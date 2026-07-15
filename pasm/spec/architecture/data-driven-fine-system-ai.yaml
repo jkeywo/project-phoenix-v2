@@ -1,0 +1,156 @@
+entities:
+  - component: fine-system-ai-policy-schema
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Fine-System AI Policy Schema
+      summary: Defines inline per-system reactive rules, optional states, explicit priorities, named parameters, typed local memory, targeting, and explicit idle declarations for every AI-capable fine system.
+      rationale:
+        - AI behaviour belongs to the fine system that owns the operated capability rather than a ship-wide combat controller.
+        - Stateless systems should not acquire artificial lifecycle states merely to use the common evaluator.
+        - Designer-tunable behaviour values belong in entity TOML rather than Rust branches or hidden runtime defaults.
+    architecture:
+      kind: configuration-schema
+      authority: authoritative
+      reads: [ship-station-system-topology-state]
+      produces: [fine-system-ai-policy-state]
+      runs_in: [host-browser-runtime]
+
+  - component: ai-policy-expression-runtime
+    core:
+      status: proposed
+      confidence: confirmed
+      title: AI Policy Expression Runtime
+      summary: Extends the world-trigger predicate grammar with typed AI facts, explicit self/candidate/target contexts, read-only world flags and counters, ship power rating, named parameters, and bounded history operators.
+      rationale:
+        - AI authoring should mirror the repository's existing predicate syntax instead of introducing a second expression style.
+        - Scenario flags and counters are useful doctrine inputs but remain read-only to fine-system policies.
+        - Registered typed facts preserve validation without allowing arbitrary scripts or component access.
+    architecture:
+      kind: expression-service
+      authority: authoritative
+      reads:
+        - world-snapshot-state
+        - ship-system-blackboards-state
+        - scored-objective-pool-state
+        - radar-contact-projection-state
+        - system-control-source-state
+        - authoritative-ship-motion-state
+        - hazard-assessment-state
+        - recent-combat-activity-state
+      runs_in: [host-browser-runtime]
+
+  - component: per-system-target-ranking-policy
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Per-System Target Ranking Policy
+      summary: Unions registered candidate sources, filters candidates with typed policy expressions, applies additive authored utility, retains valid targets within a switch margin, and deterministically replaces invalid targets.
+      rationale:
+        - Sensors, Tactical, Helm actuators, and other fine systems need different ranking policies over shared authoritative contacts and objectives.
+        - Sensors designation remains advisory; another system may favour and copy it only through its own eligibility and ranking policy.
+        - Stable UUID tie-breaking and authored switch margins prevent query-order dependence and target oscillation.
+    architecture:
+      kind: selection-policy
+      authority: authoritative
+      reads:
+        - scored-objective-pool-state
+        - objective-target-resolution-state
+        - radar-contact-projection-state
+        - sensors-target-state
+        - weapons-target-state
+        - navigation-waypoint-state
+        - recent-combat-activity-state
+      writes: [fine-system-ai-policy-state]
+      runs_in: [host-browser-runtime]
+
+  - state: fine-system-ai-policy-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Fine-System AI Policy State
+      summary: Private per-fine-system active state, typed local memory, deterministic random occurrence counts, selected target, and bounded history required by the inline policy.
+      rationale:
+        - Policy state is private and cannot become a hidden ship-wide state machine.
+        - Cross-system behaviour observes public authoritative simulation facts rather than another policy's state name or memory.
+        - Policies reset when AI gains control and when an unavailable system recovers.
+    architecture:
+      classification: authoritative
+      owner: fine-system-ai-policy-runtime
+      writers: [fine-system-ai-policy-runtime, per-system-target-ranking-policy]
+
+  - component: fine-system-ai-policy-runtime
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Fine-System AI Policy Runtime
+      summary: Evaluates independent fine-system policies from an immutable tick snapshot, takes at most one transition, resolves the highest-priority rule per typed output channel, and emits typed system inputs as a batch.
+      rationale:
+        - All fine systems must observe one consistent tick snapshot rather than partially applied decisions from earlier systems.
+        - Typed verbs restricted by system kind preserve AI and human input symmetry and prevent arbitrary simulation writes.
+        - One transition per eligible tick prevents accidental state skipping and transition loops.
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      owns: [fine-system-ai-policy-state]
+      reads:
+        - fine-system-ai-policy-state
+        - system-control-source-state
+        - ship-station-system-topology-state
+        - ship-system-blackboards-state
+        - world-snapshot-state
+      writes: [fine-system-ai-policy-state]
+      sends: [system-control-command]
+      runs_in: [host-browser-runtime]
+
+  - component: ai-policy-tick-scheduler
+    core:
+      status: proposed
+      confidence: confirmed
+      title: AI Policy Tick Scheduler
+      summary: Runs policy evaluation on a deterministic 10 Hz base cadence with authored per-system integer tick multiples and next-tick visibility for outputs from other fine systems.
+      rationale:
+        - A shared cadence aligns AI actuation with Helm's established control rhythm.
+        - Integer evaluation multiples permit slower Sensors, Power, Repair, or Comms decisions without frame-dependent timers.
+    architecture:
+      kind: scheduler
+      authority: authoritative
+      reads: [system-control-source-state, fine-system-ai-policy-state]
+      coordinates: [fine-system-ai-policy-runtime]
+      runs_in: [host-browser-runtime]
+
+  - component: fine-system-ai-policy-validation
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Fine-System AI Policy Validation
+      summary: Rejects structurally invalid or ill-typed inline policies before world activation, warns for unreachable states, and accepts terminal states without warnings.
+      rationale:
+        - Missing policies, invalid references, priority conflicts, and forbidden outputs are deterministic content errors.
+        - A state with no exit may intentionally represent an NPC's end-of-life behaviour.
+        - Heuristic analysis must not manufacture certainty about authored gameplay intent.
+    architecture:
+      kind: configuration-validator
+      authority: authoritative
+      reads: [ship-station-system-topology-state]
+      coordinates: [fine-system-ai-policy-schema, ai-policy-expression-runtime, per-system-target-ranking-policy]
+      runs_in: [host-browser-runtime]
+
+  - component: legacy-ai-doctrine-retirement
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Legacy AI Doctrine Retirement
+      summary: Converts every existing NPC and Backfill AI operator to inline fine-system policy, then removes top-level behaviour doctrine parsing and monolithic direct-write AI paths without retaining a permanent compatibility evaluator.
+      rationale:
+        - Combat Test behaviour must exercise the same authoring model as all other AI rather than becoming a scenario-specific code path.
+        - Maintaining two AI policy formats would split authority and make behaviour difficult to audit.
+    architecture:
+      kind: migration-policy
+      authority: authoritative
+      reads: [npc-ai-controller-state, system-control-source-state]
+      coordinates:
+        - fine-system-ai-policy-runtime
+        - per-system-ai-operator-suite
+        - ai-command-symmetry-migration
+      runs_in: [host-browser-runtime]

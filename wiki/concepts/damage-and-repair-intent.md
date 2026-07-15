@@ -2,8 +2,8 @@
 title: Damage And Repair Intent
 type: concept
 tags: [damage, repair, engineering, station, information]
-sources: [pasm/spec/architecture/engineering-damage.yaml, src/console/repair/server.rs, gui/console-state.js, gui/engineering-console.html]
-updated: 2026-07-14
+sources: [pasm/spec/architecture/engineering-damage.yaml, src/console/repair/server.rs, gui/console-state.js, gui/components/ph-repair-teams.js, gui/destroyer/engineering.html, gui/cruiser/engineering.html, gui/battleship/repair.html]
+updated: 2026-07-15
 ---
 
 Summary
@@ -32,4 +32,4 @@ The intended damage-and-repair model separates information access by role and by
 
 ## Current implementation tension
 
-The shipped repair UI currently derives a global `system_hull` list and `dispatch_targets` directly from the repair blackboard, which means Engineering has broader pre-arrival visibility than intended. See [gui/console-state.js](/C:/Coding/project-phoenix-v2/gui/console-state.js) and [gui/engineering-console.html](/C:/Coding/project-phoenix-v2/gui/engineering-console.html).
+The shipped repair UI currently derives a global `system_hull` list and `dispatch_targets` directly from the repair blackboard, which means Engineering has broader pre-arrival visibility than intended. The state is assembled in [gui/console-state.js](/C:/Coding/project-phoenix-v2/gui/console-state.js) and rendered through the shared repair-team component used by the Destroyer and Cruiser Engineering consoles and the Battleship Repair console.

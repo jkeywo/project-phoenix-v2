@@ -325,7 +325,31 @@ impl Plugin for WeaponsPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_set_target.in_set(crate::sim_sets::SimSet::Input),
+                    // `handle_set_target` is the other `SimSet::Input` writer of
+                    // `WeaponsTarget`, so it has to be ordered against the AI pair
+                    // below — the pair must be atomic with respect to it.
+                    //
+                    // Pre-split, `operate_tactical_ai` read and wrote
+                    // `WeaponsTarget` in one system, so only two interleavings
+                    // existed and both kept a human's lock: either the handler ran
+                    // first and the AI seeded from the fresh lock, or it ran second
+                    // and its write landed last. The split adds a third —
+                    // selection → handler → integrator — in which the integrator
+                    // writes back intent derived from the *pre-SetTarget* value and
+                    // silently discards the human's lock. It is not recovered next
+                    // tick either, because selection re-seeds from the clobbered
+                    // `WeaponsTarget`.
+                    //
+                    // That interleaving is reachable in normal play: this handler
+                    // gates on `any_bank_accepts_human_input` and the AI pair on
+                    // `any_tactical_system_operates_ai`, which both hold on any
+                    // mixed-rating ship (a Human phaser bank plus, say, an Ai
+                    // torpedo tube or magazine). Ordering the handler before
+                    // selection restores the pre-split guarantee: admitted human
+                    // input is always seen by selection in the same tick.
+                    handle_set_target
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .before(ai_target_selection),
                     handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
                     tick_phaser_auto_fire.in_set(crate::sim_sets::SimSet::Input),
                     tick_weapons_arc_request.in_set(crate::sim_sets::SimSet::Input),
@@ -335,6 +359,24 @@ impl Plugin for WeaponsPlugin {
                     handle_load_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
+                    // Tactical AI decide → integrate pair (issue #697).
+                    //
+                    // Both stay in `SimSet::Input` — where the pre-split
+                    // `operate_tactical_ai` already lived — rather than moving
+                    // to the `Physics` + `AiTickLabel` set that ConsoleAiPlugin's
+                    // other decide/integrate pairs use. The `WeaponsTarget` write
+                    // has to land in `Input`: `tick_phaser_auto_fire`,
+                    // `handle_fire_phaser` and `tick_npc_auto_match_frequency` all
+                    // read it from `Input`, so integrating in `Physics` would push
+                    // the write past them and make them read last tick's lock —
+                    // an observable behaviour change this split must not make.
+                    //
+                    // The `.before` is load-bearing, not decorative: `Input` has no
+                    // other intra-set ordering, so without it Bevy is free to run
+                    // the integrator first and apply last tick's intent.
+                    ai_target_selection
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .before(operate_tactical_ai),
                     operate_tactical_ai.in_set(crate::sim_sets::SimSet::Input),
                     tick_npc_auto_match_frequency.in_set(crate::sim_sets::SimSet::Input),
                     tick_blaster_auto_fire.in_set(crate::sim_sets::SimSet::Input),
@@ -3395,23 +3437,113 @@ fn tick_torpedo_system(
     }
 }
 
-// ── Tactical AI controller ────────────────────────────────────────────────
+// ── Tactical AI ───────────────────────────────────────────────────────────
 //
-// Runs for every ship whose Tactical system's ControlSource is Ai.
-// Sub-regions are separated by comment banners — each banner marks a
-// future split point when the coarse Tactical system is decomposed into
-// fine-grained systems.
+// Decomposed by issue #697 (tactical split 1/3) into a decide/integrate pair,
+// mirroring the shape every other console AI already uses (`ai_shield_focus`
+// → `integrate_shield_state`, `ai_power_allocation` → `integrate_power_state`
+// in `console_ai::server`):
+//
+//   ai_target_selection — DECIDE. Reads the world, the ship's own objective
+//       blackboard, and its last attacker; writes the chosen target to
+//       `WeaponsBlackboard.locked_target` (intent). Read-only everywhere else.
+//   operate_tactical_ai — INTEGRATE. Applies `locked_target` to the
+//       authoritative `WeaponsTarget` component (truth).
+//
+// Both run in `SimSet::Input`, explicitly ordered `ai_target_selection`
+// `.before(operate_tactical_ai)` — see `WeaponsPlugin::build` for why the pair
+// stays in `Input` rather than moving to the `Physics` + `AiTickLabel` set the
+// other console AI pairs use.
+//
+// Neither system fires weapons: that stays with `tick_phaser_auto_fire` /
+// `ai_torpedo_auto_fire` until slices #698 / #700.
 
-fn operate_tactical_ai(
+/// Read the Tactical AI's target decision out of a ship's blackboards.
+///
+/// The two `Option` levels are distinct and must not be collapsed:
+///
+/// - Outer `None` — the ship has no Weapons blackboard entry, so
+///   `ai_target_selection` never ran for it. There is no decision to integrate
+///   and `operate_tactical_ai` must leave `WeaponsTarget` untouched.
+/// - `Some(None)` — selection ran and deliberately chose nothing: no candidate
+///   was in range, or the standing lock went dead / drifted out of range. The
+///   integrator must clear `WeaponsTarget`.
+///
+/// Collapsing the two into a bare `Option<String>` makes "the decider never
+/// ran" indistinguishable from "the decider chose nothing", which silently
+/// turns any ship the decider skips into a ship whose lock is cleared every
+/// tick. `operate_tactical_ai`'s query is kept identical to
+/// `ai_target_selection`'s so the two match the same entities, but this type
+/// is what makes the invariant hold even if they ever drift apart.
+fn blackboard_locked_target(
+    blackboards: &crate::server_app::ShipSystemBlackboards,
+) -> Option<Option<String>> {
+    match blackboards
+        .0
+        .get(&crate::system_registry::tactical_system_id())
+    {
+        Some(SystemBlackboard::Weapons(weapons)) => Some(weapons.locked_target.clone()),
+        _ => None,
+    }
+}
+
+/// Record `ai_target_selection`'s decision on a ship's blackboards, creating
+/// the Weapons entry if the ship has none yet.
+///
+/// Creation is required, not incidental: `blackboard_locked_target` reads a
+/// missing entry as "the decider never ran", so a decider that chose `None`
+/// and wrote nothing would be read as "skip" and leave a stale lock in place —
+/// the pre-split code cleared it. `publish_weapons_blackboard` rebuilds the
+/// entry from real ship state later in the same tick, so a bare default entry
+/// never escapes to the wire.
+fn record_locked_target_decision(
+    blackboards: &mut crate::server_app::ShipSystemBlackboards,
+    value: Option<String>,
+) {
+    let entry = blackboards
+        .0
+        .entry(crate::system_registry::tactical_system_id())
+        .or_insert_with(|| SystemBlackboard::Weapons(WeaponsBlackboard::default()));
+    if let SystemBlackboard::Weapons(weapons) = entry {
+        weapons.locked_target = value;
+    }
+}
+
+/// Drop any stale Tactical AI intent from a ship the decider is skipping.
+///
+/// A no-op when the ship has no Weapons blackboard entry, rather than an
+/// insert of an empty one: absence is what tells `operate_tactical_ai` no
+/// decision was made, and `publish_weapons_blackboard` owns creating the entry
+/// with real ship state.
+fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSystemBlackboards) {
+    if let Some(SystemBlackboard::Weapons(weapons)) = blackboards
+        .0
+        .get_mut(&crate::system_registry::tactical_system_id())
+    {
+        weapons.locked_target = None;
+    }
+}
+
+/// Tactical AI target prioritisation (issue #697).
+///
+/// Runs for every ship whose Tactical surface is AI-controlled — player ship
+/// and NPC alike, with no `AiHighFidelity` gate, matching the pre-split
+/// `operate_tactical_ai` it was extracted from.
+///
+/// Selection order, unchanged from the pre-split code: the highest-scoring
+/// Weapons-relevant `Destroy` objective, else the ship's last attacker, else
+/// keep the current lock. Any candidate must be inside the damage-scaled
+/// tactical radar range (issue #680), and a lock that goes dead or drifts out
+/// of range is dropped.
+fn ai_target_selection(
     mut ship_query: Query<
         (
-            Entity,
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
             &LastShipAttacker,
             &ShipPhysics,
-            &mut WeaponsTarget,
-            &crate::server_app::ShipSystemBlackboards,
+            &WeaponsTarget,
+            &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entity_spawner::WeaponsConsoleSection>,
         ),
@@ -3428,29 +3560,42 @@ fn operate_tactical_ai(
         Without<crate::simulation::Asteroid>,
     >,
 ) {
+    // World-space (x, z) of a targetable UUID, asteroid or entity.
+    let target_xz = |uuid: &str| -> Option<(f32, f32)> {
+        asteroid_q
+            .iter()
+            .find_map(|(u, t)| (u.0 == uuid).then_some((t.translation.x, t.translation.z)))
+            .or_else(|| {
+                other_ships_q.iter().find_map(|(u, t, _)| {
+                    (u.0 == uuid).then_some((t.translation.x, t.translation.z))
+                })
+            })
+    };
+
     for (
-        _entity,
         ship_config,
         control_sources,
         last_attacker,
         physics,
-        mut weapons_target,
-        blackboards,
+        weapons_target,
+        mut blackboards,
         modifiers,
         weapons_section,
     ) in ship_query.iter_mut()
     {
-        // Only run for ships whose Tactical surface is AI-controlled.
-        // Post-#512, "tactical is AI-controlled" means "at least one
-        // tactical fine system (phaser bank, torpedo tube, or the torpedo
-        // magazine) has `operate_ai == true` on its own policy". Ships that
-        // declare no tactical fine systems (test / legacy) fall back to
-        // the coarse `tactical.operate_ai` policy.
+        // Only select for ships whose Tactical surface is AI-controlled.
+        // Post-#512, "tactical is AI-controlled" means "at least one tactical
+        // fine system (phaser bank, torpedo tube, or the torpedo magazine) has
+        // `operate_ai == true` on its own policy". Ships that declare no
+        // tactical fine systems (test / legacy) fall back to the coarse
+        // `tactical.operate_ai` policy.
         //
-        // The player ship's Tactical fine systems may be human — skip in
-        // that case; the human operator drives via WeaponsTarget directly
-        // through the handle_set_target handler.
+        // The player ship's Tactical fine systems may be human — select nothing
+        // in that case; the human operator drives `WeaponsTarget` directly via
+        // `handle_set_target`. Clearing the intent here stops a ship that flips
+        // from AI to human control leaving a stale selection on its blackboard.
         if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
+            clear_locked_target_if_present(&mut blackboards);
             continue;
         }
 
@@ -3463,15 +3608,30 @@ fn operate_tactical_ai(
             .and_then(|s| s.0.radar.as_ref().map(|r| r.range))
             .unwrap_or(0.0);
         let effective_tactical_range = base_range * radar_range_mult;
+        // A non-positive or non-finite range means "unbounded" — the ship
+        // declares no radar, so range never culls a candidate.
+        let range_bounds_targets =
+            effective_tactical_range > 0.0 && effective_tactical_range.is_finite();
+        let within_range = |uuid: &str| -> bool {
+            match target_xz(uuid) {
+                Some((tx, tz)) => {
+                    let dx = tx - physics.x;
+                    let dz = tz - physics.z;
+                    dx * dx + dz * dz <= effective_tactical_range * effective_tactical_range
+                }
+                None => false,
+            }
+        };
 
-        // Always set weapons_target from Destroy objectives regardless of
-        // control source. This lets both human and AI Tactical operators
-        // benefit from mission objective auto-targeting. When no Destroy
-        // objective is available (or its target entity can't be resolved),
-        // fall back to the last attacker.
-        // Gate on radar range (issue #680): only acquire targets within
-        // the damage-scaled tactical radar range of this ship.
-        let objective_target = match top_destroy_objective_target(Some(blackboards)) {
+        // Start from the ship's current lock: acquisition below only *replaces*
+        // it when a fresh in-range candidate exists, and the staleness guard
+        // only clears it — preserving the pre-split semantics exactly.
+        let mut selected: Option<String> = weapons_target.0.clone();
+
+        // Acquire from Destroy objectives, falling back to the last attacker
+        // when no Destroy objective is available (or its target entity can't
+        // be resolved).
+        let objective_target = match top_destroy_objective_target(Some(&*blackboards)) {
             Some("") => None,
             Some(target_name) => {
                 resolve_objective_target_uuid(target_name, runtime.as_deref(), &other_ships_q)
@@ -3479,64 +3639,78 @@ fn operate_tactical_ai(
             None => None,
         };
         if let Some(uuid) = objective_target.or_else(|| last_attacker.0.clone()) {
-            let in_range =
-                effective_tactical_range <= 0.0 || !effective_tactical_range.is_finite() || {
-                    let target_xz = asteroid_q
-                        .iter()
-                        .find_map(|(u, t)| {
-                            (u.0 == uuid).then_some((t.translation.x, t.translation.z))
-                        })
-                        .or_else(|| {
-                            other_ships_q.iter().find_map(|(u, t, _)| {
-                                (u.0 == uuid).then_some((t.translation.x, t.translation.z))
-                            })
-                        });
-                    match target_xz {
-                        Some((tx, tz)) => {
-                            let dx = tx - physics.x;
-                            let dz = tz - physics.z;
-                            dx * dx + dz * dz <= effective_tactical_range * effective_tactical_range
-                        }
-                        None => false,
-                    }
-                };
-            if in_range {
-                weapons_target.0 = Some(uuid);
+            if !range_bounds_targets || within_range(&uuid) {
+                selected = Some(uuid);
             }
         }
 
-        // Stale-target guard: if WeaponsTarget points to an entity that no
-        // longer exists in the world, clear it. This prevents AI from sitting
+        // Stale-target guard: if the selection points at an entity that no
+        // longer exists in the world, drop it. This prevents AI from sitting
         // idle after its last Destroy-objective target is killed — without this
         // guard, tick_phaser_auto_fire and the torpedo path both skip on the
         // dead entity UUID and never acquire a fresh target.
-        // Also clears targets beyond radar range (issue #680).
-        if let Some(ref current) = weapons_target.0 {
-            let alive = asteroid_q.iter().any(|(u, _)| u.0 == *current)
-                || other_ships_q.iter().any(|(u, _, _)| u.0 == *current);
-            if !alive {
-                weapons_target.0 = None;
-            } else if effective_tactical_range > 0.0 && effective_tactical_range.is_finite() {
-                let in_range = asteroid_q
-                    .iter()
-                    .find_map(|(u, t)| {
-                        (u.0 == *current).then_some((t.translation.x, t.translation.z))
-                    })
-                    .or_else(|| {
-                        other_ships_q.iter().find_map(|(u, t, _)| {
-                            (u.0 == *current).then_some((t.translation.x, t.translation.z))
-                        })
-                    })
-                    .map(|(tx, tz)| {
-                        let dx = tx - physics.x;
-                        let dz = tz - physics.z;
-                        dx * dx + dz * dz <= effective_tactical_range * effective_tactical_range
-                    })
-                    .unwrap_or(false);
-                if !in_range {
-                    weapons_target.0 = None;
-                }
+        // Also drops targets beyond radar range (issue #680).
+        if let Some(current) = selected.clone() {
+            let alive = target_xz(&current).is_some();
+            if !alive || (range_bounds_targets && !within_range(&current)) {
+                selected = None;
             }
+        }
+
+        record_locked_target_decision(&mut blackboards, selected);
+    }
+}
+
+/// Apply the Tactical AI's selected target to the authoritative
+/// `WeaponsTarget` component (issue #697).
+///
+/// `WeaponsTarget` is the single source of truth every consumer reads
+/// (`handle_fire_phaser`, `tick_phaser_auto_fire`, `ai_torpedo_auto_fire`,
+/// `tick_npc_auto_match_frequency`, …). This system is the only path by which
+/// the AI's `locked_target` intent reaches it, which is what keeps the two
+/// surfaces from disagreeing.
+///
+/// Gates on the same tactical `operate_ai` policy as `ai_target_selection`, so
+/// a human-operated Tactical console's lock is never overwritten.
+///
+/// The query deliberately mirrors `ai_target_selection`'s component set exactly
+/// — including `LastShipAttacker` and `ShipPhysics`, which this system does not
+/// itself read — so the decider and the integrator provably match the same
+/// entities. Widening one without the other would hand this system ships the
+/// decider never saw. `blackboard_locked_target`'s outer `Option` is the
+/// belt-and-braces guard for that case; keeping the queries aligned is the
+/// braces.
+fn operate_tactical_ai(
+    mut ship_query: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &ShipSystemControlSources,
+            &LastShipAttacker,
+            &ShipPhysics,
+            &mut WeaponsTarget,
+            &crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (ship_config, control_sources, _last_attacker, _physics, mut weapons_target, blackboards) in
+        ship_query.iter_mut()
+    {
+        if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
+            continue;
+        }
+
+        // Outer `None` means `ai_target_selection` never ran for this ship, so
+        // there is nothing to integrate — skip rather than clear. See
+        // `blackboard_locked_target`.
+        let Some(selected) = blackboard_locked_target(blackboards) else {
+            continue;
+        };
+        // Compare before writing: an unconditional assignment through `Mut`
+        // would fire change detection every tick even when the lock is
+        // unchanged, which the pre-split code did not do.
+        if weapons_target.0 != selected {
+            weapons_target.0 = selected;
         }
 
         // ── PHASER AUTO-FIRE (future: split to phaser_bank system) ───────
@@ -3963,20 +4137,53 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
 
 // ── Blackboard publish (issue #560) ─────────────────────────────────────────
 
-/// Publish the Weapons system's blackboard from current sim state.
+/// Publish each ship's Weapons blackboard from current sim state.
 /// Runs in `SimSet::Publish` (phase 1a). Dirty-tracking and broadcast are
 /// handled globally by `broadcast_blackboard_updates` in `SimSet::Broadcast`.
+///
+/// Per-entity for every ship carrying `ShipSystemBlackboards` (issue #697),
+/// following the `ai::server::aggregate_doctrine_blackboards` precedent rather
+/// than the old `With<LocalShip>` + `.single()` shape: the NPC Tactical AI needs
+/// a Weapons blackboard of its own to read `locked_target` from, and slices
+/// #698 / #700 will need per-NPC `banks` / `tubes` to fire from.
+///
+/// Two tiers of field, split by `Has<LocalShip>` in the loop:
+///
+/// - **Ship state** — `target_uuid`, `locked_target`, `target_name`, `banks`,
+///   `tubes`, `torpedo_count`, `blasters`, and the per-bank / per-tube /
+///   magazine `is_online` flags. All derived from per-entity components that
+///   NPCs carry, so they are computed for every ship.
+/// - **Client render data** — `blips`, `regions`, `phaser_arcs`,
+///   `torpedo_arcs`, `phaser_mode`. Sourced from the player-only
+///   `CurrentPhaserMode` / `ShipClientConfigResource` resources and meaningless
+///   for a ship with no browser client, so they stay empty/default for NPCs.
+///   `blips` especially: it is O(all entities) per ship per tick, so computing
+///   it for every NPC would cost O(ships × entities) for data nobody reads.
+///
+/// Ships with no `[behaviour]` block carry no `ShipSystemBlackboards` (see
+/// `entities::spawner`) and are simply not iterated — no AI on board, so there
+/// is nothing to read a blackboard. None of this reaches the wire for NPCs:
+/// `broadcast_blackboard_updates` is `With<LocalShip>`-filtered, so NPC
+/// blackboards add zero bandwidth.
 fn publish_weapons_blackboard(
-    weapons_target_q: Query<&WeaponsTarget, With<crate::server_app::LocalShip>>,
-    beam_q: Query<&ActiveBeam, With<crate::server_app::LocalShip>>,
-    cooldown_q: Query<&PhaserCooldown, With<crate::server_app::LocalShip>>,
-    combat_config_q: Query<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
+    mut ship_q: Query<
+        (
+            Option<&WeaponsTarget>,
+            Option<&ActiveBeam>,
+            Option<&PhaserCooldown>,
+            Option<&PhaserCombatConfigResource>,
+            Option<&TorpedoSystemResource>,
+            Option<&BlasterSystemResource>,
+            Option<&ShipPhysics>,
+            Option<&crate::modifiers::ShipModifiers>,
+            Option<&ShipSystemControlSources>,
+            &mut crate::server_app::ShipSystemBlackboards,
+            Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     phaser_mode: Res<CurrentPhaserMode>,
-    torpedo_sys_q: Query<&TorpedoSystemResource, With<crate::server_app::LocalShip>>,
-    blaster_res_q: Query<&BlasterSystemResource, With<crate::server_app::LocalShip>>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    ship_physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
-    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
     world_res: Res<WorldResource>,
     entity_name_q: Query<(
         &crate::entity_spawner::EntityUuid,
@@ -3984,267 +4191,320 @@ fn publish_weapons_blackboard(
     )>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-    control_sources_q: Query<&ShipSystemControlSources, With<crate::server_app::LocalShip>>,
-    mut ship_blackboards_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::server_app::LocalShip>,
-    >,
 ) {
     use crate::system_registry::TACTICAL_SYSTEM_ID;
-    let physics = ship_physics_q.single().ok().copied().unwrap_or_default();
-    let weapons_target = weapons_target_q.single().ok();
-    let default_beam;
-    let beam: &ActiveBeam = match beam_q.single() {
-        Ok(b) => b,
-        Err(_) => {
-            default_beam = ActiveBeam::default();
-            &default_beam
-        }
-    };
-    let default_cooldown;
-    let cooldown: &PhaserCooldown = match cooldown_q.single() {
-        Ok(c) => c,
-        Err(_) => {
-            default_cooldown = PhaserCooldown::default();
-            &default_cooldown
-        }
-    };
-    // Per-entity component path (preferred). Fallback: use the default config.
-    let combat_config_default;
-    let combat_config: &PhaserCombatConfigResource = match combat_config_q.single() {
-        Ok(c) => c,
-        Err(_) => {
-            combat_config_default = PhaserCombatConfigResource::default();
-            &combat_config_default
-        }
-    };
-    let default_modifiers;
-    let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
-        Ok(m) => m,
-        Err(_) => {
-            default_modifiers = crate::modifiers::ShipModifiers::new();
-            &default_modifiers
-        }
-    };
-    let torpedo_sys_default;
-    let torpedo_sys: &TorpedoSystemResource = match torpedo_sys_q.single() {
-        Ok(t) => t,
-        Err(_) => {
-            torpedo_sys_default =
-                TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default()));
-            &torpedo_sys_default
-        }
-    };
 
-    let target_uuid = weapons_target.and_then(|wt| wt.0.clone());
-    let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-    let beam_active = beam.target_uuid.is_some();
-    let active_beam_bank = beam.bank.clone();
-
-    let target_live_pos: Option<(f32, f32)> = target_uuid
-        .as_deref()
-        .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
-
-    let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
-        entity_name_q
-            .iter()
-            .find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
-    });
-
-    let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
-        let effective_range =
-            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
-        let fire_ready = match target_live_pos {
-            None => false,
-            Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
-                tx,
-                tz,
-                physics.x,
-                physics.z,
-                physics.yaw,
-                effective_range,
-            ),
+    for (
+        weapons_target,
+        beam,
+        cooldown,
+        combat_config,
+        torpedo_sys,
+        blaster_res,
+        ship_physics,
+        modifiers,
+        control_sources,
+        mut entity_bbs,
+        is_local,
+    ) in ship_q.iter_mut()
+    {
+        let physics = ship_physics.copied().unwrap_or_default();
+        // Per-entity component path (preferred). Each fallback below mirrors the
+        // pre-#697 `.single()` error arm, so a ship (or test fixture) missing a
+        // component publishes exactly what it published before.
+        let default_beam;
+        let beam: &ActiveBeam = match beam {
+            Some(b) => b,
+            None => {
+                default_beam = ActiveBeam::default();
+                &default_beam
+            }
         };
-        let cd = cooldown.bank_remaining_secs("");
-        vec![PhaserBankState {
-            id: String::new(),
-            fire_ready,
-            on_cooldown: beam_active || cd > 0.0,
-            cooldown_remaining: cd,
-        }]
-    } else {
-        combat_config
+        let default_cooldown;
+        let cooldown: &PhaserCooldown = match cooldown {
+            Some(c) => c,
+            None => {
+                default_cooldown = PhaserCooldown::default();
+                &default_cooldown
+            }
+        };
+        let combat_config_default;
+        let combat_config: &PhaserCombatConfigResource = match combat_config {
+            Some(c) => c,
+            None => {
+                combat_config_default = PhaserCombatConfigResource::default();
+                &combat_config_default
+            }
+        };
+        let default_modifiers;
+        let modifiers: &crate::modifiers::ShipModifiers = match modifiers {
+            Some(m) => m,
+            None => {
+                default_modifiers = crate::modifiers::ShipModifiers::new();
+                &default_modifiers
+            }
+        };
+        let torpedo_sys_default;
+        let torpedo_sys: &TorpedoSystemResource = match torpedo_sys {
+            Some(t) => t,
+            None => {
+                torpedo_sys_default =
+                    TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default()));
+                &torpedo_sys_default
+            }
+        };
+
+        // Carry the Tactical AI's intent across the rebuild. `ai_target_selection`
+        // wrote `locked_target` back in `SimSet::Input`; this system reconstructs
+        // the whole blackboard, so without carrying it forward the field would be
+        // wiped every tick and always read `None` on the wire.
+        //
+        // Re-check liveness rather than carrying blindly: the Input pair decided
+        // on this target, but `tick_beams` (`Damage`) and `tick_torpedo_system`
+        // (`Physics`) both clear `WeaponsTarget` after a kill, later in the same
+        // tick. Carrying the dead value forward would publish `locked_target !=
+        // target_uuid` for one tick, contradicting the field's own contract (see
+        // `WeaponsBlackboard::locked_target` in `core::messages`) that the two
+        // agree once a tick has settled. Selection re-derives from `WeaponsTarget`
+        // and never from `locked_target`, so a dead value cannot resurrect a
+        // target — but it can be read, and #698 / #700 will read it.
+        let locked_target = entity_bbs
             .0
-            .banks
-            .iter()
-            .map(|b| {
-                let bank_ready = match target_live_pos {
-                    None => false,
-                    Some((tx, tz)) => {
-                        let bank_base_range = if b.beam_range > 0.0 {
-                            b.beam_range
-                        } else {
-                            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                        };
-                        let effective_bank_range = bank_base_range * radar_range_mult;
-                        let (rx, ry) = crate::weapons::phaser::ship_local(
-                            tx,
-                            tz,
-                            physics.x,
-                            physics.z,
-                            physics.yaw,
-                        );
-                        let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
-                            <= effective_bank_range * effective_bank_range;
-                        range_ok
-                            && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
+            .get(&SystemId(TACTICAL_SYSTEM_ID.to_string()))
+            .and_then(|bb| match bb {
+                SystemBlackboard::Weapons(weapons) => weapons.locked_target.clone(),
+                _ => None,
+            })
+            .filter(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q).is_some());
+
+        let target_uuid = weapons_target.and_then(|wt| wt.0.clone());
+        let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
+        let beam_active = beam.target_uuid.is_some();
+        let active_beam_bank = beam.bank.clone();
+
+        let target_live_pos: Option<(f32, f32)> = target_uuid
+            .as_deref()
+            .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
+
+        let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
+            entity_name_q
+                .iter()
+                .find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
+        });
+
+        let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
+            let effective_range =
+                crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
+            let fire_ready = match target_live_pos {
+                None => false,
+                Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
+                    tx,
+                    tz,
+                    physics.x,
+                    physics.z,
+                    physics.yaw,
+                    effective_range,
+                ),
+            };
+            let cd = cooldown.bank_remaining_secs("");
+            vec![PhaserBankState {
+                id: String::new(),
+                fire_ready,
+                on_cooldown: beam_active || cd > 0.0,
+                cooldown_remaining: cd,
+            }]
+        } else {
+            combat_config
+                .0
+                .banks
+                .iter()
+                .map(|b| {
+                    let bank_ready = match target_live_pos {
+                        None => false,
+                        Some((tx, tz)) => {
+                            let bank_base_range = if b.beam_range > 0.0 {
+                                b.beam_range
+                            } else {
+                                crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                            };
+                            let effective_bank_range = bank_base_range * radar_range_mult;
+                            let (rx, ry) = crate::weapons::phaser::ship_local(
+                                tx,
+                                tz,
+                                physics.x,
+                                physics.z,
+                                physics.yaw,
+                            );
+                            let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
+                                <= effective_bank_range * effective_bank_range;
+                            range_ok
+                                && crate::weapons::phaser::in_arc(
+                                    rx,
+                                    ry,
+                                    b.facing_deg,
+                                    b.fire_arc_deg,
+                                )
+                        }
+                    };
+                    let cd = cooldown.bank_remaining_secs(b.id.as_str());
+                    let beam_on_this_bank =
+                        beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
+                    PhaserBankState {
+                        id: b.id.clone(),
+                        fire_ready: bank_ready,
+                        on_cooldown: beam_on_this_bank || cd > 0.0,
+                        cooldown_remaining: cd,
                     }
+                })
+                .collect()
+        };
+
+        let tubes: Vec<TorpedoTubeState> = torpedo_sys
+            .0
+            .tubes
+            .iter()
+            .map(|t| {
+                let remaining = match &t.load_state {
+                    crate::torpedo::TubeLoadState::Loading { remaining, .. }
+                    | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                    _ => 0.0,
                 };
-                let cd = cooldown.bank_remaining_secs(b.id.as_str());
-                let beam_on_this_bank =
-                    beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
-                PhaserBankState {
-                    id: b.id.clone(),
-                    fire_ready: bank_ready,
-                    on_cooldown: beam_on_this_bank || cd > 0.0,
-                    cooldown_remaining: cd,
+                TorpedoTubeState {
+                    id: t.id.clone(),
+                    loaded: t.is_loaded(),
+                    reload_secs: remaining,
+                    state: t.load_state.label().to_string(),
+                    progress: t.load_state.progress(),
+                    load_time: t.load_time,
+                    volley_max: t.volley_max,
+                    loaded_count: t.loaded_count,
+                    target_count: t.target_count,
+                    load_progress: t.load_progress(),
                 }
             })
-            .collect()
-    };
+            .collect();
 
-    let tubes: Vec<TorpedoTubeState> = torpedo_sys
-        .0
-        .tubes
-        .iter()
-        .map(|t| {
-            let remaining = match &t.load_state {
-                crate::torpedo::TubeLoadState::Loading { remaining, .. }
-                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
-                _ => 0.0,
-            };
-            TorpedoTubeState {
-                id: t.id.clone(),
-                loaded: t.is_loaded(),
-                reload_secs: remaining,
-                state: t.load_state.label().to_string(),
-                progress: t.load_state.progress(),
-                load_time: t.load_time,
-                volley_max: t.volley_max,
-                loaded_count: t.loaded_count,
-                target_count: t.target_count,
-                load_progress: t.load_progress(),
+        // ── Client render data (LocalShip only) ──────────────────────────────
+        // Everything below this point is drawn by the browser Tactical console
+        // and is sourced from the two player-only resources. An NPC has no
+        // client, so it gets empty vectors and the default phaser mode — see the
+        // function doc. `blips` is the expensive one: skipping it for NPCs keeps
+        // this system O(entities), not O(ships × entities).
+        let mut blips: Vec<RadarBlip> = Vec::new();
+        let mut regions: Vec<RadarRegion> = Vec::new();
+        let mut phaser_arcs: Vec<PhaserBankClientConfig> = Vec::new();
+        let mut torpedo_arcs: Vec<TorpedoTubeClientConfig> = Vec::new();
+        let mut mode = crate::messages::PhaserMode::default();
+
+        if is_local {
+            mode = phaser_mode.0;
+            phaser_arcs = ship_config.0.phaser_banks.clone();
+            torpedo_arcs = ship_config.0.torpedo_tubes.clone();
+
+            // ── Radar blips ──────────────────────────────────────────────────
+            let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
+            let shows: Vec<crate::entity_tags::EntityTag> = ship_config
+                .0
+                .tactical_radar_shows
+                .iter()
+                .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
+                .collect();
+            let selects: Vec<crate::entity_tags::EntityTag> = ship_config
+                .0
+                .tactical_radar_selects
+                .iter()
+                .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
+                .collect();
+
+            let entity_meta: std::collections::HashMap<&str, &crate::messages::EntitySnapshot> =
+                world_res
+                    .0
+                    .entities
+                    .iter()
+                    .map(|e| (e.uuid.as_str(), e))
+                    .collect();
+
+            if !shows.is_empty() && effective_tactical_range > 0.0 {
+                for (uuid_comp, transform) in asteroid_q.iter() {
+                    let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
+                    if let Some(b) = project_blip(
+                        &uuid_comp.0,
+                        transform.translation.x,
+                        transform.translation.z,
+                        physics.x,
+                        physics.z,
+                        physics.yaw,
+                        effective_tactical_range,
+                        meta,
+                        &shows,
+                        &selects,
+                    ) {
+                        blips.push(b);
+                    }
+                }
+                for (uuid_comp, transform) in entity_q.iter() {
+                    let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
+                    if let Some(b) = project_blip(
+                        &uuid_comp.0,
+                        transform.translation.x,
+                        transform.translation.z,
+                        physics.x,
+                        physics.z,
+                        physics.yaw,
+                        effective_tactical_range,
+                        meta,
+                        &shows,
+                        &selects,
+                    ) {
+                        blips.push(b);
+                    }
+                }
             }
-        })
-        .collect();
 
-    // ── Radar blips ──────────────────────────────────────────────────────────
-    let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
-    let shows: Vec<crate::entity_tags::EntityTag> = ship_config
-        .0
-        .tactical_radar_shows
-        .iter()
-        .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
-        .collect();
-    let selects: Vec<crate::entity_tags::EntityTag> = ship_config
-        .0
-        .tactical_radar_selects
-        .iter()
-        .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
-        .collect();
-
-    let entity_meta: std::collections::HashMap<&str, &crate::messages::EntitySnapshot> = world_res
-        .0
-        .entities
-        .iter()
-        .map(|e| (e.uuid.as_str(), e))
-        .collect();
-
-    let mut blips: Vec<RadarBlip> = Vec::new();
-    if !shows.is_empty() && effective_tactical_range > 0.0 {
-        for (uuid_comp, transform) in asteroid_q.iter() {
-            let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
-            if let Some(b) = project_blip(
-                &uuid_comp.0,
-                transform.translation.x,
-                transform.translation.z,
-                physics.x,
-                physics.z,
-                physics.yaw,
-                effective_tactical_range,
-                meta,
-                &shows,
-                &selects,
-            ) {
-                blips.push(b);
-            }
+            // ── Region overlays ──────────────────────────────────────────────
+            regions = world_res
+                .0
+                .entities
+                .iter()
+                .filter_map(|e| {
+                    let shape = e.shape.as_deref()?;
+                    Some(RadarRegion {
+                        uuid: e.uuid.clone(),
+                        x: e.x(),
+                        z: e.z(),
+                        shape: shape.to_string(),
+                        radius: e.radius,
+                        inner_radius: e.inner_radius,
+                        outer_radius: e.radius,
+                        half_extents: e.half_extents.map(|h| [h[0], h[2]]),
+                        yaw: e.yaw,
+                        color: e.colour.unwrap_or([0.6, 0.4, 1.0]),
+                        name: e.name.clone(),
+                    })
+                })
+                .collect();
         }
-        for (uuid_comp, transform) in entity_q.iter() {
-            let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
-            if let Some(b) = project_blip(
-                &uuid_comp.0,
-                transform.translation.x,
-                transform.translation.z,
-                physics.x,
-                physics.z,
-                physics.yaw,
-                effective_tactical_range,
-                meta,
-                &shows,
-                &selects,
-            ) {
-                blips.push(b);
-            }
-        }
-    }
 
-    // ── Region overlays ──────────────────────────────────────────────────────
-    let regions: Vec<RadarRegion> = world_res
-        .0
-        .entities
-        .iter()
-        .filter_map(|e| {
-            let shape = e.shape.as_deref()?;
-            Some(RadarRegion {
-                uuid: e.uuid.clone(),
-                x: e.x(),
-                z: e.z(),
-                shape: shape.to_string(),
-                radius: e.radius,
-                inner_radius: e.inner_radius,
-                outer_radius: e.radius,
-                half_extents: e.half_extents.map(|h| [h[0], h[2]]),
-                yaw: e.yaw,
-                color: e.colour.unwrap_or([0.6, 0.4, 1.0]),
-                name: e.name.clone(),
-            })
-        })
-        .collect();
+        // Blaster bank states from this ship's own BlasterSystemResource.
+        let blasters: Vec<BlasterBankState> = blaster_res
+            .map(|r| r.0.iter().map(|b| b.bank_state()).collect())
+            .unwrap_or_default();
 
-    let phaser_arcs: Vec<PhaserBankClientConfig> = ship_config.0.phaser_banks.clone();
-    let torpedo_arcs: Vec<TorpedoTubeClientConfig> = ship_config.0.torpedo_tubes.clone();
+        let bb = WeaponsBlackboard {
+            target_uuid,
+            locked_target,
+            target_name,
+            banks,
+            tubes,
+            torpedo_count: torpedo_sys.0.torpedoes_remaining,
+            phaser_mode: mode,
+            phaser_arcs,
+            torpedo_arcs,
+            blasters,
+            blips,
+            regions,
+        };
 
-    // Collect blaster bank states from the LocalShip's BlasterSystemResource.
-    let blasters: Vec<BlasterBankState> = match blaster_res_q.single() {
-        Ok(blaster_res) => blaster_res.0.iter().map(|b| b.bank_state()).collect(),
-        Err(_) => Vec::new(),
-    };
-
-    let bb = WeaponsBlackboard {
-        target_uuid,
-        target_name,
-        banks,
-        tubes,
-        torpedo_count: torpedo_sys.0.torpedoes_remaining,
-        phaser_mode: phaser_mode.0,
-        phaser_arcs,
-        torpedo_arcs,
-        blasters: blasters.clone(),
-        blips,
-        regions,
-    };
-
-    if let Ok(mut entity_bbs) = ship_blackboards_q.single_mut() {
         entity_bbs.0.insert(
             SystemId(TACTICAL_SYSTEM_ID.to_string()),
             SystemBlackboard::Weapons(bb.clone()),
@@ -4260,11 +4520,10 @@ fn publish_weapons_blackboard(
         // This matches the same surface all message handlers gate on, so
         // damage-driven offline state is reflected everywhere consistently.
         // Falls back to `true` when the ship has no ControlSources (test
-        // paths that don't spawn a Ship entity with the component).
-        let offline_systems_opt = control_sources_q
-            .single()
-            .ok()
-            .map(|cs| &cs.0.offline_systems);
+        // paths that don't spawn a Ship entity with the component). NPCs get
+        // this for free: `entities::spawner` gives every ship with a
+        // `[behaviour]` block its own `ShipSystemControlSources`.
+        let offline_systems_opt = control_sources.map(|cs| &cs.0.offline_systems);
         for bank_state in &bb.banks {
             let Some(bank_sysid) = crate::system_registry::phaser_bank_system_id(&bank_state.id)
             else {
@@ -8282,6 +8541,475 @@ station = "tactical"
         assert!(
             get_weapons_target(&mut app).is_none(),
             "Tactical AI must not lock an arbitrary target when the objective target is missing"
+        );
+    }
+
+    // ── ai_target_selection / locked_target (issue #697) ────────────────────
+
+    /// Read a ship's published Weapons blackboard by entity.
+    fn weapons_blackboard_of(app: &mut App, entity: Entity) -> Option<WeaponsBlackboard> {
+        app.world()
+            .entity(entity)
+            .get::<crate::server_app::ShipSystemBlackboards>()
+            .and_then(
+                |bbs| match bbs.0.get(&crate::system_registry::tactical_system_id()) {
+                    Some(SystemBlackboard::Weapons(bb)) => Some(bb.clone()),
+                    _ => None,
+                },
+            )
+    }
+
+    /// Spawn an NPC ship: every component the spawner gives a `[behaviour]`
+    /// entity that the Weapons systems touch, minus the `LocalShip` marker.
+    /// Its Tactical fine systems are all AI-controlled.
+    fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+        let config = test_ship_config();
+        let mut resolver = ControlSourceResolver::new();
+        for system in &config.0.systems {
+            resolver.set(system.id.clone(), ControlSource::Ai);
+        }
+        app.world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                config,
+                ShipSystemControlSources(resolver),
+                crate::server_app::ShipSystemBlackboards::default(),
+                LastShipAttacker::default(),
+                ShipPhysics {
+                    x,
+                    z,
+                    ..Default::default()
+                },
+                WeaponsTarget::default(),
+                ActiveBeam::default(),
+                PhaserCooldown::default(),
+                PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                    banks: vec![crate::entity_config::PhaserBankConfig {
+                        id: "phaser-fore".into(),
+                        facing_deg: 0.0,
+                        fire_arc_deg: 270.0,
+                        auto_arc_deg: 240.0,
+                        ..Default::default()
+                    }],
+                }),
+                TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
+                crate::entity_spawner::EntityUuid(uuid.into()),
+                Transform::from_xyz(x, 0.0, z),
+            ))
+            .id()
+    }
+
+    fn set_last_attacker(app: &mut App, entity: Entity, uuid: Option<String>) {
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(LastShipAttacker(uuid));
+    }
+
+    #[test]
+    fn ai_target_selection_publishes_locked_target_and_integrator_applies_it() {
+        let mut app = test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        spawn_entity_target(&mut app, &target_uuid, 0.0, -30.0);
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+
+        tick(&mut app);
+
+        let local = local_ship_entity(&mut app);
+        let bb = weapons_blackboard_of(&mut app, local)
+            .expect("LocalShip must publish a Weapons blackboard");
+        assert_eq!(
+            bb.locked_target.as_deref(),
+            Some(target_uuid.as_str()),
+            "ai_target_selection must publish its choice as locked_target, and that intent \
+             must survive publish_weapons_blackboard rebuilding the blackboard in SimSet::Publish"
+        );
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(target_uuid.as_str()),
+            "operate_tactical_ai must apply locked_target to the authoritative WeaponsTarget"
+        );
+        assert_eq!(
+            bb.target_uuid, bb.locked_target,
+            "on an AI-operated ship, intent and truth agree after a tick"
+        );
+    }
+
+    #[test]
+    fn ai_target_selection_clears_locked_target_when_target_dies() {
+        let mut app = test_app();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        set_weapons_target(&mut app, Some("dead-target-uuid".into()));
+
+        tick(&mut app);
+
+        let local = local_ship_entity(&mut app);
+        let bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
+        assert_eq!(
+            bb.locked_target, None,
+            "a lock on an entity that no longer exists must be dropped from the AI's intent"
+        );
+        assert!(
+            get_weapons_target(&mut app).is_none(),
+            "and the integrator must clear the authoritative WeaponsTarget to match"
+        );
+    }
+
+    #[test]
+    fn human_tactical_leaves_locked_target_empty_and_keeps_the_human_lock() {
+        let mut app = test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Human);
+        spawn_entity_target(&mut app, &target_uuid, 0.0, -30.0);
+        // A Destroy objective the AI *would* act on, were it in control.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+        // The human operator's own lock, as handle_set_target would leave it.
+        set_weapons_target(&mut app, Some(target_uuid.clone()));
+
+        tick(&mut app);
+
+        let local = local_ship_entity(&mut app);
+        let bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
+        assert_eq!(
+            bb.locked_target, None,
+            "locked_target is AI intent only — a human-operated Tactical selects nothing, \
+             even with a live Destroy objective on the board"
+        );
+        assert_eq!(
+            bb.target_uuid.as_deref(),
+            Some(target_uuid.as_str()),
+            "target_uuid mirrors the authoritative WeaponsTarget, which the human still owns"
+        );
+    }
+
+    /// Put the ship in the mixed-rating shape that makes `handle_set_target`
+    /// and the tactical AI pair run in the same tick: the phaser banks are
+    /// Human (so `any_bank_accepts_human_input` admits SetTarget) while the
+    /// torpedo magazine is Ai (so `any_tactical_system_operates_ai` runs the
+    /// pair). This is an ordinary config, not a contrived one — it is what a
+    /// ship looks like when Tactical is crewed but the magazine is backfilled.
+    fn set_mixed_tactical_control_sources(app: &mut App) {
+        use crate::ship::control_source::ControlSource;
+        let world = app.world_mut();
+        let mut q = world
+            .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+        for mut cs in q.iter_mut(world) {
+            for sysid in [
+                crate::system_registry::phaser_fore_system_id(),
+                crate::system_registry::phaser_aft_system_id(),
+            ] {
+                cs.0.set(sysid, ControlSource::Human);
+            }
+            for sysid in [
+                crate::system_registry::torpedo_magazine_system_id(),
+                crate::system_registry::torpedo_tube_fore_port_system_id(),
+                crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+                crate::system_registry::torpedo_tube_aft_system_id(),
+            ] {
+                cs.0.set(sysid, ControlSource::Ai);
+            }
+        }
+    }
+
+    /// The mixed-rating shape above is only interesting if both gates really do
+    /// fire on it. Pin that directly, so the regression test below can't quietly
+    /// decay into a test of a ship the AI pair never touches.
+    #[test]
+    fn mixed_rating_ship_admits_human_set_target_and_runs_the_tactical_ai() {
+        let mut app = test_app();
+        setup_weapons_world(&mut app, 30.0, 0.0);
+        start_game_with_weapons(&mut app);
+        set_mixed_tactical_control_sources(&mut app);
+
+        let world = app.world_mut();
+        let mut q = world.query_filtered::<(
+            &ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
+        ), With<crate::server_app::LocalShip>>();
+        let (control_sources, ship_config) = q.single(world).expect("local ship");
+
+        assert!(
+            any_bank_accepts_human_input(control_sources, &ship_config.0),
+            "a Human phaser bank must still admit the human's SetTarget"
+        );
+        assert!(
+            any_tactical_system_operates_ai(control_sources, &ship_config.0),
+            "an Ai torpedo magazine must still run the tactical AI pair — if this \
+             ever goes false the two writers stop overlapping and the ordering \
+             regression below stops being reachable"
+        );
+    }
+
+    #[test]
+    fn human_set_target_survives_the_tick_on_a_mixed_rating_ship() {
+        let mut app = test_app();
+        setup_weapons_world(&mut app, 30.0, 0.0);
+        start_game_with_weapons(&mut app);
+        set_mixed_tactical_control_sources(&mut app);
+
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::tactical_system_id(),
+                payload: SystemControlPayload::SetTarget {
+                    uuid: "target-uuid".into(),
+                },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some("target-uuid"),
+            "the human's SetTarget must survive the tick it was admitted in: \
+             ai_target_selection has to see it and carry it into its own selection, \
+             not integrate a decision made before the human's lock existed"
+        );
+
+        // And it must still be there next tick — a lock clobbered on tick N is
+        // not recovered on tick N+1, because selection re-seeds from the
+        // (clobbered) WeaponsTarget.
+        tick(&mut app);
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some("target-uuid"),
+            "the human's lock must be stable across subsequent ticks"
+        );
+    }
+
+    /// Pins the "decider never ran" vs "decider chose nothing" distinction that
+    /// `blackboard_locked_target`'s `Option<Option<_>>` encodes. Exercises
+    /// `operate_tactical_ai` alone, which is the only way to reach a ship the
+    /// decider never saw while the two queries are aligned.
+    #[test]
+    fn integrator_leaves_weapons_target_alone_when_selection_never_ran() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+        let mut app = App::new();
+        app.add_systems(Update, operate_tactical_ai);
+
+        let config = test_ship_config();
+        let mut resolver = ControlSourceResolver::new();
+        for system in &config.0.systems {
+            resolver.set(system.id.clone(), ControlSource::Ai);
+        }
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                config,
+                ShipSystemControlSources(resolver),
+                LastShipAttacker::default(),
+                ShipPhysics::default(),
+                WeaponsTarget(Some("standing-lock".into())),
+                // No Weapons entry: this ship's decision was never made.
+                crate::server_app::ShipSystemBlackboards::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().entity(ship).get::<WeaponsTarget>().unwrap().0,
+            Some("standing-lock".into()),
+            "a missing Weapons blackboard entry means ai_target_selection never ran \
+             for this ship, so there is no decision to integrate — the integrator must \
+             skip it, not read the absence as 'the AI chose no target' and clear the lock"
+        );
+    }
+
+    #[derive(Resource)]
+    struct KillTargetOnDamage(String);
+
+    /// Stands in for `tick_beams` / `tick_torpedo_system`: both destroy the
+    /// locked target and clear `WeaponsTarget` *after* `SimSet::Input`, which is
+    /// what leaves a dead `locked_target` for `publish_weapons_blackboard` to
+    /// carry forward.
+    fn kill_target_after_input(
+        mut commands: Commands,
+        kill: Res<KillTargetOnDamage>,
+        target_q: Query<(Entity, &crate::entity_spawner::EntityUuid)>,
+        mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
+    ) {
+        for (entity, uuid) in target_q.iter() {
+            if uuid.0 == kill.0 {
+                commands.entity(entity).despawn();
+            }
+        }
+        for mut wt in weapons_target_q.iter_mut() {
+            if wt.0.as_deref() == Some(kill.0.as_str()) {
+                wt.0 = None;
+            }
+        }
+    }
+
+    #[test]
+    fn publish_drops_locked_target_when_the_selected_target_dies_mid_tick() {
+        let mut app = test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        spawn_entity_target(&mut app, &target_uuid, 0.0, -30.0);
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+
+        // Tick 1: the AI acquires the target while it is alive.
+        tick(&mut app);
+        let local = local_ship_entity(&mut app);
+        assert_eq!(
+            weapons_blackboard_of(&mut app, local)
+                .expect("blackboard")
+                .locked_target
+                .as_deref(),
+            Some(target_uuid.as_str()),
+            "precondition: the AI must be locked on before the target dies"
+        );
+
+        // Tick 2: Input selects the (still live) target, then the target is
+        // destroyed in Damage — exactly the beam/torpedo kill ordering.
+        app.insert_resource(KillTargetOnDamage(target_uuid.clone()));
+        app.add_systems(
+            Update,
+            kill_target_after_input.in_set(crate::sim_sets::SimSet::Damage),
+        );
+        tick(&mut app);
+
+        let bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
+        assert_eq!(
+            bb.target_uuid, None,
+            "precondition: the kill must have cleared the authoritative WeaponsTarget"
+        );
+        assert_eq!(
+            bb.locked_target, None,
+            "a locked_target whose entity died after SimSet::Input must not be carried \
+             forward: publishing it would put locked_target != target_uuid on the wire, \
+             contradicting the field's documented contract that the two agree after a tick"
+        );
+    }
+
+    #[test]
+    fn npc_ship_publishes_its_own_weapons_blackboard_with_ship_state_only() {
+        let mut app = test_app();
+        // LocalShip radar config: shows asteroids out to 300 units. Only the
+        // LocalShip has a browser client, so only it should get blips.
+        {
+            let mut cfg = app
+                .world_mut()
+                .resource_mut::<crate::lobby::server::ShipClientConfigResource>();
+            cfg.0.tactical_radar_shows = vec!["asteroid".into()];
+            cfg.0.tactical_radar_range = 300.0;
+        }
+        setup_weapons_world(&mut app, 0.0, -50.0);
+        start_game(&mut app);
+
+        // NPC at the origin, attacked by a live entity 30 units ahead.
+        let attacker_uuid = uuid::Uuid::new_v4().to_string();
+        spawn_entity_target(&mut app, &attacker_uuid, 0.0, -30.0);
+        let npc = spawn_npc_ship(&mut app, "npc-1", 0.0, 0.0);
+        set_last_attacker(&mut app, npc, Some(attacker_uuid.clone()));
+
+        tick(&mut app);
+
+        let bb = weapons_blackboard_of(&mut app, npc)
+            .expect("an NPC carrying ShipSystemBlackboards must get a Weapons blackboard too");
+
+        // Ship state — computed per-entity, so NPCs get the real thing.
+        assert_eq!(
+            bb.locked_target.as_deref(),
+            Some(attacker_uuid.as_str()),
+            "the NPC's Tactical AI must select its last attacker"
+        );
+        assert_eq!(
+            bb.target_uuid.as_deref(),
+            Some(attacker_uuid.as_str()),
+            "and the NPC's authoritative WeaponsTarget must follow its own intent"
+        );
+        assert_eq!(
+            bb.banks.len(),
+            1,
+            "banks come from the NPC's own PhaserCombatConfigResource"
+        );
+        assert_eq!(bb.banks[0].id, "phaser-fore");
+        assert_eq!(
+            bb.torpedo_count,
+            TorpedoConfig::default().count,
+            "torpedo_count comes from the NPC's own TorpedoSystemResource"
+        );
+
+        // Client render data — player-only, and left empty for NPCs.
+        assert!(
+            bb.blips.is_empty(),
+            "blips are client render data sourced from the player-only \
+             ShipClientConfigResource, and are O(all entities) to compute — an NPC \
+             with no browser client must not pay for them"
+        );
+        assert!(bb.regions.is_empty(), "regions are client render data");
+        assert!(
+            bb.phaser_arcs.is_empty(),
+            "phaser_arcs are client render data"
+        );
+        assert!(
+            bb.torpedo_arcs.is_empty(),
+            "torpedo_arcs are client render data"
+        );
+
+        // The contrast: the LocalShip *does* get its render data, so the
+        // assertions above are about the NPC tier and not a dead radar config.
+        let local = local_ship_entity(&mut app);
+        let local_bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
+        assert_eq!(
+            local_bb.blips.len(),
+            1,
+            "the LocalShip still gets its in-range asteroid blip"
+        );
+    }
+
+    #[test]
+    fn npc_and_local_ship_select_targets_independently() {
+        let mut app = test_app();
+        // Regression guard for the SetTarget-contamination class of bug: two
+        // ships, two different attackers, two independent locks.
+        let local_target = uuid::Uuid::new_v4().to_string();
+        let npc_target = uuid::Uuid::new_v4().to_string();
+        spawn_entity_target(&mut app, &local_target, 0.0, -30.0);
+        spawn_entity_target(&mut app, &npc_target, 0.0, 30.0);
+
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        let local = local_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(local)
+            .insert(LastShipAttacker(Some(local_target.clone())));
+
+        let npc = spawn_npc_ship(&mut app, "npc-1", 0.0, 0.0);
+        set_last_attacker(&mut app, npc, Some(npc_target.clone()));
+
+        tick(&mut app);
+
+        assert_eq!(
+            weapons_blackboard_of(&mut app, local)
+                .expect("blackboard")
+                .locked_target
+                .as_deref(),
+            Some(local_target.as_str())
+        );
+        assert_eq!(
+            weapons_blackboard_of(&mut app, npc)
+                .expect("blackboard")
+                .locked_target
+                .as_deref(),
+            Some(npc_target.as_str()),
+            "each ship selects from its own last-attacker surface, not a shared one"
         );
     }
 

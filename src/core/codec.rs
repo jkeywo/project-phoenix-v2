@@ -1860,6 +1860,52 @@ mod tests {
     }
 
     #[test]
+    fn system_blackboard_weapons_serde_fields() {
+        let bb = SystemBlackboard::Weapons(WeaponsBlackboard {
+            target_uuid: Some("truth-uuid".into()),
+            locked_target: Some("intent-uuid".into()),
+            target_name: Some("Raider".into()),
+            torpedo_count: 4,
+            ..Default::default()
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"kind\":\"Weapons\""), "got: {json}");
+        assert!(
+            json.contains("\"target_uuid\":\"truth-uuid\""),
+            "got: {json}"
+        );
+        assert!(
+            json.contains("\"locked_target\":\"intent-uuid\""),
+            "got: {json}"
+        );
+        assert!(json.contains("\"torpedo_count\":4"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+    }
+
+    #[test]
+    fn weapons_blackboard_legacy_wire_shape_defaults_locked_target() {
+        // Pre-#697 payloads carry no `locked_target`; they must still decode,
+        // defaulting the AI-intent field to None.
+        let legacy_json = r#"{"kind":"Weapons","data":{
+            "target_uuid":"truth-uuid",
+            "target_name":null,
+            "banks":[],
+            "tubes":[],
+            "torpedo_count":0,
+            "phaser_mode":"Manual"
+        }}"#;
+        let decoded: SystemBlackboard = serde_json::from_str(legacy_json).unwrap();
+        match decoded {
+            SystemBlackboard::Weapons(bb) => {
+                assert_eq!(bb.target_uuid.as_deref(), Some("truth-uuid"));
+                assert_eq!(bb.locked_target, None);
+            }
+            other => panic!("expected Weapons blackboard, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn system_blackboard_phaser_bank_serde_fields() {
         let bb = SystemBlackboard::PhaserBank(PhaserBankBlackboard {
             is_online: true,

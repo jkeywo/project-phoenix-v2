@@ -6671,6 +6671,69 @@ mod tests {
         );
     }
 
+    /// Issue #697 made `publish_weapons_blackboard` per-entity, so NPC ships now
+    /// carry populated Weapons blackboards. `broadcast_blackboard_updates` reads
+    /// only the `LocalShip`, and `LastBroadcastBlackboards` is a single global
+    /// map keyed on `SystemId` alone — it structurally assumes one broadcast
+    /// source. This pins that assumption: NPC blackboards must cost zero
+    /// bandwidth, or they would both leak and collide with the player ship's
+    /// cache entries under the same `SystemId`.
+    #[test]
+    fn npc_weapons_blackboards_add_no_wire_traffic() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // An NPC ship locked onto a target the player ship never sees.
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::ship_plugin::ShipConfigComponent::default(),
+                crate::ship_plugin::ShipSystemControlSources::default(),
+                ShipSystemBlackboards::default(),
+                crate::weapons_plugin::WeaponsTarget(Some("npc-only-target".into())),
+                crate::weapons_plugin::ActiveBeam::default(),
+                crate::weapons_plugin::PhaserCooldown::default(),
+                crate::weapons_plugin::LastShipAttacker::default(),
+                ShipPhysicsComponent::default(),
+                crate::entity_spawner::EntityUuid("npc-1".into()),
+                bevy::prelude::Transform::default(),
+            ))
+            .id();
+
+        let out = tick(&mut app);
+
+        // The NPC really does publish its own Weapons blackboard...
+        let npc_target = app
+            .world()
+            .entity(npc)
+            .get::<ShipSystemBlackboards>()
+            .and_then(|bbs| bbs.0.get(&SystemId("tactical".into())).cloned());
+        assert!(
+            matches!(
+                npc_target,
+                Some(crate::messages::SystemBlackboard::Weapons(ref bb))
+                    if bb.target_uuid.as_deref() == Some("npc-only-target")
+            ),
+            "NPC must publish its own Weapons blackboard, got {npc_target:?}"
+        );
+
+        // ...and none of it reaches any client.
+        for m in &out {
+            if let ServerMessage::BlackboardUpdate { updates } = &m.msg {
+                for (id, bb) in updates {
+                    if let crate::messages::SystemBlackboard::Weapons(w) = bb {
+                        assert_ne!(
+                            w.target_uuid.as_deref(),
+                            Some("npc-only-target"),
+                            "NPC weapons blackboard leaked to the wire under SystemId {id:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn entity_spawned_is_broadcast_to_all() {
         let mut app = test_app();

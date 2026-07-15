@@ -1902,6 +1902,29 @@ pub struct ShieldArcBlackboard {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsBlackboard {
     pub target_uuid: Option<String>,
+    /// The Tactical AI's *selected* target — the decide-phase output of
+    /// `ai_target_selection` (issue #697).
+    ///
+    /// Distinct from `target_uuid`, which mirrors the authoritative
+    /// `WeaponsTarget` ECS component (the ship's actual lock, set by whoever
+    /// last wrote it — human `SetTarget`, the AI integrator, or the beam /
+    /// torpedo paths). `locked_target` is *intent*, `target_uuid` is *truth*:
+    ///
+    /// - Tactical AI-operated: `ai_target_selection` writes `locked_target`,
+    ///   then `operate_tactical_ai` applies it to `WeaponsTarget`, so after a
+    ///   tick the two agree.
+    /// - Tactical human-operated: the AI selects nothing, so `locked_target`
+    ///   is `None` while `target_uuid` may be set by the human's lock.
+    ///
+    /// Only `ai_target_selection` writes this field; only `operate_tactical_ai`
+    /// turns it into a `WeaponsTarget` write. `publish_weapons_blackboard`
+    /// carries the value forward when it rebuilds the blackboard (it runs in
+    /// `SimSet::Publish`, after the AI wrote its intent in `SimSet::Input`),
+    /// dropping it if the selected entity is no longer live — the beam and
+    /// torpedo paths can kill the target after `SimSet::Input`, and publishing
+    /// a dead selection would break the "the two agree" guarantee above.
+    #[serde(default)]
+    pub locked_target: Option<String>,
     pub target_name: Option<String>,
     pub banks: Vec<PhaserBankState>,
     pub tubes: Vec<TorpedoTubeState>,

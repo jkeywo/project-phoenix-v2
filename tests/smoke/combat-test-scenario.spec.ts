@@ -32,13 +32,16 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
 
   // combat_test.toml declares three [[available_ships]] (Destroyer / Cruiser /
   // Battleship), so finishInit() re-shows the scenario-panel as a ship picker
-  // rather than calling startServer() immediately.  Wait for the first ship
-  // button to appear and click it so wasm_init() runs and __wasmReady can fire.
-  await serverPage.waitForSelector('#scenario-panel button.world-btn', {
+  // rather than calling startServer() immediately. Since 3d49287f the picker
+  // is the <ph-ship-picker> web component (rendering .ship-card elements in
+  // its shadow root, dispatching a "ship-selected" event on click) rather
+  // than plain button.world-btn elements. Wait for the first ship card to
+  // appear and click it so wasm_init() runs and __wasmReady can fire.
+  await serverPage.waitForSelector('#scenario-panel ph-ship-picker .ship-card', {
     state: 'visible',
     timeout: 60_000,
   });
-  await serverPage.click('#scenario-panel button.world-btn:first-child');
+  await serverPage.click('#scenario-panel ph-ship-picker .ship-card:first-child');
 
   await waitForWasmReady(serverPage);
 

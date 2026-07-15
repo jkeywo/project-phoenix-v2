@@ -240,6 +240,17 @@ impl Plugin for WorldPlugin {
                 Update,
                 handle_ai_events.in_set(crate::sim_sets::SimSet::Physics),
             )
+            // Cursor advancement is a `Modifiers` evaluator: `Physics` has
+            // finished moving every ship by then, so waypoint arrival is
+            // judged against this tick's final positions. It emits
+            // `AiWaypointReached`, which `handle_ai_events` turns into a
+            // `WorldEvent::WaypointReached` on the next tick (the same
+            // one-tick event bridge `AiEntityAttacked` already uses).
+            .add_systems(
+                Update,
+                crate::ai_plugin::advance_objective_cursors
+                    .in_set(crate::sim_sets::SimSet::Modifiers),
+            )
             .add_systems(
                 Update,
                 tick_delayed_actions
@@ -930,6 +941,24 @@ pub(crate) fn follow_up_trigger_holds(
                     .any(|e| matches!(e, WorldEvent::Hailed { target_uuid } if target_uuid == u))
             })
             .unwrap_or(false),
+        // Event-based, like `OnAttacked` / `OnHailed`: there is no
+        // "already arrived" state to inspect, so the follow-up waits for a
+        // fresh arrival. An omitted `waypoint` matches any waypoint.
+        TriggerCondition::OnWaypointReached {
+            entity_name,
+            waypoint,
+        } => name_to_uuid
+            .get(entity_name)
+            .map(|u| {
+                events.iter().any(|e| match e {
+                    WorldEvent::WaypointReached {
+                        uuid,
+                        waypoint: ev_waypoint,
+                    } => uuid == u && waypoint.as_ref().map(|w| w == ev_waypoint).unwrap_or(true),
+                    _ => false,
+                })
+            })
+            .unwrap_or(false),
     }
 }
 
@@ -1188,8 +1217,7 @@ fn handle_ai_events(
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
     mut commands: Commands,
-    mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
-    mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
+    mut ai_events: AiEventReaders,
     mut ai_query: Query<
         (
             &EntityUuid,
@@ -1209,15 +1237,24 @@ fn handle_ai_events(
     time: Option<Res<bevy::time::Time>>,
 ) {
     let mut world_events: Vec<WorldEvent> = Vec::new();
-    for ev in attacked_reader.read() {
+    for ev in ai_events.attacked.read() {
         world_events.push(WorldEvent::Attacked {
             uuid: ev.entity_uuid.clone(),
             attacker_uuid: ev.attacker_uuid.to_string(),
         });
     }
-    for ev in destroyed_reader.read() {
+    for ev in ai_events.destroyed.read() {
         world_events.push(WorldEvent::Destroyed {
             uuid: ev.entity_uuid.clone(),
+        });
+    }
+    // `advance_objective_cursors` writes these in `SimSet::Modifiers`, i.e.
+    // after this system has already run for the tick, so an arrival is
+    // observed here on the following tick.
+    for ev in ai_events.waypoint_reached.read() {
+        world_events.push(WorldEvent::WaypointReached {
+            uuid: ev.entity_uuid.clone(),
+            waypoint: ev.waypoint.clone(),
         });
     }
     // Drain any externally-queued world events (e.g. WorldLoaded pushed by
@@ -2715,6 +2752,18 @@ pub struct ShipModifiersParams<'w, 's> {
     pub components: Query<'w, 's, &'static mut crate::modifiers::ShipModifiers>,
 }
 
+/// The AI-plugin messages `handle_ai_events` bridges into `WorldEvent`s.
+///
+/// Grouped into a `SystemParam` for the same reason as `ShipModifiersParams`:
+/// `handle_ai_events` is at Bevy's 16-parameter limit, and each new AI event
+/// source would otherwise push it over.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct AiEventReaders<'w, 's> {
+    pub attacked: MessageReader<'w, 's, crate::ai_plugin::AiEntityAttacked>,
+    pub destroyed: MessageReader<'w, 's, crate::ai_plugin::AiEntityDestroyed>,
+    pub waypoint_reached: MessageReader<'w, 's, crate::ai_plugin::AiWaypointReached>,
+}
+
 /// builds always insert the registry via `init_world_runtime`, so the
 /// `None` branch is a test-only safety net that logs and skips the
 /// action.
@@ -3554,6 +3603,228 @@ pub(crate) mod tests {
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
         app
+    }
+
+    /// A scenario trigger fires when the named ship reaches the named
+    /// waypoint — the `AiWaypointReached` message the cursor evaluator emits
+    /// is bridged into a `WorldEvent::WaypointReached` and matched here.
+    #[test]
+    fn on_waypoint_reached_trigger_fires_add_objective_action() {
+        let mut app = ai_trigger_test_app();
+
+        let npc_uuid = "patrol-npc-uuid-001";
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime
+            .name_to_uuid
+            .insert("harrow_patrol".to_string(), npc_uuid.to_string());
+        runtime.trigger_states = vec![TriggerState {
+            trigger: crate::world::content::Trigger {
+                condition: TriggerCondition::OnWaypointReached {
+                    entity_name: "harrow_patrol".to_string(),
+                    waypoint: Some("wp_border".to_string()),
+                },
+                actions: vec![TriggerAction::AddObjective {
+                    id: "obj-border".to_string(),
+                    text: "Patrol reached the border".to_string(),
+                    mandatory: false,
+                    targets: vec![],
+                    directive: crate::messages::AiDirective::None,
+                    utility: crate::objectives::UtilityConfig::default(),
+                    source: crate::messages::ObjectiveSource::default(),
+                }],
+                when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiWaypointReached>>()
+            .write(crate::ai_plugin::AiWaypointReached {
+                entity_uuid: npc_uuid.to_string(),
+                objective_id: "patrol".to_string(),
+                waypoint: "wp_border".to_string(),
+            });
+
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-border"),
+            "reaching wp_border must fire the trigger's AddObjective action"
+        );
+    }
+
+    /// A trigger naming a specific waypoint must ignore arrivals at the
+    /// ship's other waypoints.
+    #[test]
+    fn on_waypoint_reached_trigger_ignores_a_different_waypoint() {
+        let mut app = ai_trigger_test_app();
+
+        let npc_uuid = "patrol-npc-uuid-002";
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime
+            .name_to_uuid
+            .insert("harrow_patrol".to_string(), npc_uuid.to_string());
+        runtime.trigger_states = vec![TriggerState {
+            trigger: crate::world::content::Trigger {
+                condition: TriggerCondition::OnWaypointReached {
+                    entity_name: "harrow_patrol".to_string(),
+                    waypoint: Some("wp_border".to_string()),
+                },
+                actions: vec![TriggerAction::AddObjective {
+                    id: "obj-border".to_string(),
+                    text: "Patrol reached the border".to_string(),
+                    mandatory: false,
+                    targets: vec![],
+                    directive: crate::messages::AiDirective::None,
+                    utility: crate::objectives::UtilityConfig::default(),
+                    source: crate::messages::ObjectiveSource::default(),
+                }],
+                when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiWaypointReached>>()
+            .write(crate::ai_plugin::AiWaypointReached {
+                entity_uuid: npc_uuid.to_string(),
+                objective_id: "patrol".to_string(),
+                waypoint: "wp_home".to_string(),
+            });
+
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            !objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-border"),
+            "arriving at wp_home must not fire a trigger scoped to wp_border"
+        );
+    }
+
+    /// Omitting `waypoint` scopes the trigger to the ship rather than to one
+    /// stop on its route: any arrival fires it.
+    #[test]
+    fn on_waypoint_reached_without_waypoint_fires_on_any_waypoint() {
+        let mut app = ai_trigger_test_app();
+
+        let npc_uuid = "patrol-npc-uuid-003";
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime
+            .name_to_uuid
+            .insert("harrow_patrol".to_string(), npc_uuid.to_string());
+        runtime.trigger_states = vec![TriggerState {
+            trigger: crate::world::content::Trigger {
+                condition: TriggerCondition::OnWaypointReached {
+                    entity_name: "harrow_patrol".to_string(),
+                    waypoint: None,
+                },
+                actions: vec![TriggerAction::AddObjective {
+                    id: "obj-any".to_string(),
+                    text: "Patrol reached a waypoint".to_string(),
+                    mandatory: false,
+                    targets: vec![],
+                    directive: crate::messages::AiDirective::None,
+                    utility: crate::objectives::UtilityConfig::default(),
+                    source: crate::messages::ObjectiveSource::default(),
+                }],
+                when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiWaypointReached>>()
+            .write(crate::ai_plugin::AiWaypointReached {
+                entity_uuid: npc_uuid.to_string(),
+                objective_id: "patrol".to_string(),
+                waypoint: "wp_anywhere".to_string(),
+            });
+
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-any"),
+            "an unscoped on_waypoint_reached trigger must fire on any arrival"
+        );
+    }
+
+    /// A trigger naming a different ship must not fire for this ship's arrival.
+    #[test]
+    fn on_waypoint_reached_trigger_ignores_a_different_ship() {
+        let mut app = ai_trigger_test_app();
+
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime
+            .name_to_uuid
+            .insert("harrow_patrol".to_string(), "uuid-harrow".to_string());
+        runtime
+            .name_to_uuid
+            .insert("other_ship".to_string(), "uuid-other".to_string());
+        runtime.trigger_states = vec![TriggerState {
+            trigger: crate::world::content::Trigger {
+                condition: TriggerCondition::OnWaypointReached {
+                    entity_name: "harrow_patrol".to_string(),
+                    waypoint: None,
+                },
+                actions: vec![TriggerAction::AddObjective {
+                    id: "obj-harrow".to_string(),
+                    text: "Harrow arrived".to_string(),
+                    mandatory: false,
+                    targets: vec![],
+                    directive: crate::messages::AiDirective::None,
+                    utility: crate::objectives::UtilityConfig::default(),
+                    source: crate::messages::ObjectiveSource::default(),
+                }],
+                when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+        }];
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiWaypointReached>>()
+            .write(crate::ai_plugin::AiWaypointReached {
+                entity_uuid: "uuid-other".to_string(),
+                objective_id: "patrol".to_string(),
+                waypoint: "wp_border".to_string(),
+            });
+
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            !objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-harrow"),
+            "another ship's arrival must not fire a trigger scoped to harrow_patrol"
+        );
     }
 
     #[test]
@@ -6817,6 +7088,7 @@ condition = "on_world_loaded"
             .init_resource::<SimOutbox>()
             .add_message::<crate::ai::server::AiEntityAttacked>()
             .add_message::<crate::ai::server::AiEntityDestroyed>()
+            .add_message::<crate::ai::server::AiWaypointReached>()
             .add_message::<CommsChannel2Event>()
             .add_systems(Update, (handle_ai_events, handle_comms_channel2).chain())
             .add_observer(handle_region_entered_event)

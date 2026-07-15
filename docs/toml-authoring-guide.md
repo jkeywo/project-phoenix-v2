@@ -130,10 +130,17 @@ offset        = [10.0, 0.0, -5.0]
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `condition` | string | **required** | One of `on_destroyed`, `on_attacked`, `on_timer`, `on_hailed`. |
+| `condition` | string | **required** | One of `on_destroyed`, `on_attacked`, `on_timer`, `on_hailed`, `on_waypoint_reached`. |
 | `entity` | string | depends | Required for entity-based conditions; references a named `[[entity]]` `name`. |
 | `after_secs` | f32 | depends | Required for `on_timer`. |
+| `waypoint` | string | none | Only for `on_waypoint_reached`. Names an anchor on the ship's route. Omit to fire on arrival at *any* waypoint of that ship's route. |
 | `[[trigger.action]]` | array | `[]` | Actions to fire (in order). |
+
+`on_waypoint_reached` fires when the named ship reaches a waypoint on the
+`Patrol` or `Reach` objective it is currently following. "Reached" means the
+ship came within that entity's `[behaviour] waypoint_arrival_radius` (see
+§ `[behaviour]`) of the waypoint's anchor — tune that radius per entity rather
+than expecting ships to land on an anchor exactly.
 
 Triggers are single-shot: each fires at most once per session.
 

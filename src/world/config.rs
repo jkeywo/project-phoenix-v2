@@ -190,6 +190,10 @@ struct RawTriggerEntry {
     condition: String,
     #[serde(default)]
     entity: Option<String>,
+    /// Optional anchor name for `on_waypoint_reached`; ignored by every
+    /// other condition. Omit to fire on any waypoint of the route.
+    #[serde(default)]
+    waypoint: Option<String>,
     /// Required by `on_all_destroyed`; ignored by every other condition.
     #[serde(default)]
     group: Option<String>,
@@ -496,6 +500,15 @@ pub enum TriggerCondition {
     /// Fires when the player ship exits the named region (or the region
     /// is despawned while the ship is inside).
     OnExitedRegion { entity_name: String },
+    /// Fires when the named ship reaches a waypoint on the Patrol/Reach
+    /// objective it is currently following.
+    ///
+    /// `waypoint` names a specific anchor on the route; when `None` the
+    /// trigger fires on arrival at *any* waypoint of that ship's route.
+    OnWaypointReached {
+        entity_name: String,
+        waypoint: Option<String>,
+    },
 }
 
 /// An action to execute when a trigger fires.
@@ -1075,6 +1088,9 @@ fn parse_comms_follow_up(raw_fu: &RawCommsFollowUp) -> Result<CommsDialogueNode,
             raw_fu.group.clone(),
             raw_fu.after_secs,
             raw_fu.name.clone(),
+            // Comms follow-ups have no `waypoint` field; an
+            // `on_waypoint_reached` follow-up fires on any waypoint.
+            None,
             "Comms follow-up",
         )?),
         None => None,
@@ -1111,6 +1127,7 @@ fn parse_trigger_condition_from_string(
     group: Option<String>,
     after_secs: Option<f32>,
     flag_name: Option<String>,
+    waypoint: Option<String>,
     ctx: &str,
 ) -> Result<TriggerCondition, String> {
     match name {
@@ -1154,6 +1171,12 @@ fn parse_trigger_condition_from_string(
         "on_exited_region" => Ok(TriggerCondition::OnExitedRegion {
             entity_name: entity
                 .ok_or_else(|| format!("{ctx} 'on_exited_region' requires an 'entity' field"))?,
+        }),
+        "on_waypoint_reached" => Ok(TriggerCondition::OnWaypointReached {
+            entity_name: entity
+                .ok_or_else(|| format!("{ctx} 'on_waypoint_reached' requires an 'entity' field"))?,
+            // `waypoint` is optional: omit it to fire on any waypoint.
+            waypoint,
         }),
         other => Err(format!("Unknown {ctx} condition '{}'", other)),
     }
@@ -1245,6 +1268,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             raw_trigger.group,
             raw_trigger.after_secs,
             raw_trigger.name,
+            raw_trigger.waypoint,
             "Trigger",
         )?;
         let (actions, raw_predicates, delay_secs) = parse_raw_actions(&raw_trigger.actions)?;
@@ -1278,6 +1302,9 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             raw_comms.group,
             raw_comms.after_secs,
             raw_comms.name,
+            // Comms blocks have no `waypoint` field; an
+            // `on_waypoint_reached` template fires on any waypoint.
+            None,
             "Comms block",
         )?;
         let responses = parse_comms_responses(&raw_comms.responses)?;
@@ -3005,6 +3032,74 @@ condition = "on_entered_region"
         let err = parse_world(toml).expect_err("missing entity must error");
         assert!(
             err.contains("on_entered_region") && err.contains("entity"),
+            "error must mention condition + entity field: {err}"
+        );
+    }
+
+    // -- on_waypoint_reached (issue #696) ----------------------------------
+
+    #[test]
+    fn parse_world_reads_on_waypoint_reached_condition() {
+        let toml = r#"
+[[trigger]]
+condition = "on_waypoint_reached"
+entity    = "harrow_patrol"
+waypoint  = "wp_border"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-border"
+  text = "The Harrow patrol reached the border."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(
+            cfg.triggers[0].condition,
+            TriggerCondition::OnWaypointReached {
+                entity_name: "harrow_patrol".into(),
+                waypoint: Some("wp_border".into()),
+            }
+        );
+        assert_eq!(cfg.triggers[0].actions.len(), 1);
+    }
+
+    #[test]
+    fn parse_world_reads_on_waypoint_reached_without_waypoint_as_any() {
+        let toml = r#"
+[[trigger]]
+condition = "on_waypoint_reached"
+entity    = "harrow_patrol"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-any"
+  text = "The Harrow patrol reached a waypoint."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(
+            cfg.triggers[0].condition,
+            TriggerCondition::OnWaypointReached {
+                entity_name: "harrow_patrol".into(),
+                waypoint: None,
+            },
+            "an omitted 'waypoint' field means any waypoint on the route"
+        );
+    }
+
+    #[test]
+    fn parse_world_rejects_on_waypoint_reached_without_entity() {
+        let toml = r#"
+[[trigger]]
+condition = "on_waypoint_reached"
+waypoint  = "wp_border"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "x"
+  text = "x"
+"#;
+        let err = parse_world(toml).expect_err("missing entity must error");
+        assert!(
+            err.contains("on_waypoint_reached") && err.contains("entity"),
             "error must mention condition + entity field: {err}"
         );
     }

@@ -63,6 +63,9 @@ pub enum WorldEvent {
     /// boundary or because the region entity was despawned while the
     /// ship was inside.
     ExitedRegion { uuid: String },
+    /// A ship (by UUID) reached the named waypoint anchor of the
+    /// Patrol/Reach objective its cursor is following.
+    WaypointReached { uuid: String, waypoint: String },
 }
 
 // ── Runtime state ─────────────────────────────────────────────────────────
@@ -188,7 +191,8 @@ pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String
         | TriggerCondition::OnAttacked { entity_name }
         | TriggerCondition::OnHailed { entity_name }
         | TriggerCondition::OnEnteredRegion { entity_name }
-        | TriggerCondition::OnExitedRegion { entity_name } => Some(entity_name.clone()),
+        | TriggerCondition::OnExitedRegion { entity_name }
+        | TriggerCondition::OnWaypointReached { entity_name, .. } => Some(entity_name.clone()),
         TriggerCondition::OnTimer { .. }
         | TriggerCondition::OnFlagSet { .. }
         | TriggerCondition::OnFlagCleared { .. }
@@ -545,6 +549,24 @@ fn condition_matches(
                 .get(entity_name)
                 .map(|u| u == uuid)
                 .unwrap_or(false)
+        }
+        (
+            TriggerCondition::OnWaypointReached {
+                entity_name,
+                waypoint,
+            },
+            WorldEvent::WaypointReached {
+                uuid,
+                waypoint: ev_waypoint,
+            },
+        ) => {
+            // An omitted `waypoint` means "any waypoint on this ship's route".
+            let waypoint_matches = waypoint.as_ref().map(|w| w == ev_waypoint).unwrap_or(true);
+            waypoint_matches
+                && name_to_uuid
+                    .get(entity_name)
+                    .map(|u| u == uuid)
+                    .unwrap_or(false)
         }
         _ => false,
     }

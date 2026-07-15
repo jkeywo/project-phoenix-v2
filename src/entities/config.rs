@@ -92,7 +92,7 @@ pub struct AiProfileConfig {
     pub sensor_range: f32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BehaviourConfig {
     /// Standing-doctrine objectives for this entity template.
@@ -115,6 +115,23 @@ pub struct BehaviourConfig {
     /// resolves but Navigation has given a long-range steer target.
     #[serde(default = "default_nav_handoff_speed")]
     pub nav_handoff_speed: f32,
+}
+
+/// Hand-written so `BehaviourConfig::default()` agrees with what serde
+/// produces for a `[behaviour]` block that omits every optional field.
+/// A derived `Default` would silently zero the tuning fields — a
+/// `waypoint_arrival_radius` of `0.0` means "arrival requires landing on the
+/// anchor exactly", which no NPC ever does.
+impl Default for BehaviourConfig {
+    fn default() -> Self {
+        Self {
+            doctrine: Vec::new(),
+            waypoint_arrival_radius: default_waypoint_arrival_radius(),
+            avoidance_buffer: default_avoidance_buffer(),
+            avoidance_look_ahead_secs: default_avoidance_look_ahead_secs(),
+            nav_handoff_speed: default_nav_handoff_speed(),
+        }
+    }
 }
 
 fn default_waypoint_arrival_radius() -> f32 {

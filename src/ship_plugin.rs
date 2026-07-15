@@ -609,7 +609,13 @@ fn operate_helm_ai(
                 .map(|b| b.0.doctrine.as_slice())
                 .unwrap_or(&[]),
             &anchors,
-            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
+            // Authored per entity template in TOML (`[behaviour]
+            // waypoint_arrival_radius`), same as the cursor evaluator reads —
+            // the helm's turn-at-waypoint decision must not disagree with the
+            // arrival that fires the scenario trigger.
+            behaviour_section
+                .map(|b| b.0.waypoint_arrival_radius)
+                .unwrap_or(crate::ai::WAYPOINT_ARRIVAL_RADIUS),
             crate::ai::AVOIDANCE_BUFFER,
             crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
             physics.forward_speed,
@@ -781,8 +787,10 @@ fn resolve_helm_target_position(
     }
 }
 
-/// Mark Reach objectives complete once any ship arrives within
-/// `WAYPOINT_ARRIVAL_RADIUS` of the objective's anchor.
+/// Mark Reach objectives complete once any ship arrives within its
+/// TOML-authored `[behaviour] waypoint_arrival_radius` of the objective's
+/// anchor (falling back to `WAYPOINT_ARRIVAL_RADIUS` for ships without a
+/// behaviour section).
 ///
 /// Runs in `Broadcast` (after `PublishAggregate` so `scored_objectives` is
 /// fresh) and only counts ships whose helm system is AI-controlled.
@@ -798,6 +806,7 @@ fn detect_reached_objective_completion(
             &ShipSystemControlSources,
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
+            Option<&crate::entities::spawner::BehaviourSection>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -810,10 +819,14 @@ fn detect_reached_objective_completion(
         .map(|wc| wc.anchors.clone())
         .unwrap_or_default();
 
-    for (sources, physics, blackboards) in ships.iter() {
+    for (sources, physics, blackboards, behaviour_section) in ships.iter() {
         if !helm_control_policy(sources).operate_ai {
             continue;
         }
+
+        let arrival_radius = behaviour_section
+            .map(|b| b.0.waypoint_arrival_radius)
+            .unwrap_or(crate::ai::WAYPOINT_ARRIVAL_RADIUS);
 
         let scored: Vec<crate::messages::ScoredObjective> = match blackboards
             .0
@@ -835,7 +848,7 @@ fn detect_reached_objective_completion(
             };
             let dx = target[0] - physics.x;
             let dz = target[2] - physics.z;
-            if (dx * dx + dz * dz).sqrt() < crate::ai::WAYPOINT_ARRIVAL_RADIUS {
+            if (dx * dx + dz * dz).sqrt() < arrival_radius {
                 objectives.0.complete(&obj.snapshot.id);
             }
         }
@@ -3960,6 +3973,129 @@ station = "helm"
             obj.map(|o| o.status == crate::messages::ObjectiveStatus::Completed)
                 .unwrap_or(false),
             "Reach objective should be completed when ship is within arrival radius"
+        );
+    }
+
+    /// Regression (issue #696 review, finding 2): `[behaviour]
+    /// waypoint_arrival_radius` is authored per entity template in TOML and
+    /// read by the cursor evaluator at every LOD. The high-LOD helm's own
+    /// turn-at-waypoint decision must agree with it rather than hardcoding
+    /// `WAYPOINT_ARRIVAL_RADIUS` — otherwise a designer's widened radius is
+    /// honoured for triggers but ignored for steering.
+    #[test]
+    fn high_lod_helm_honours_toml_authored_waypoint_arrival_radius() {
+        fn patrol_app(arrival_radius: Option<f32>) -> App {
+            let mut app = test_app();
+            // wp0 sits 100 units out — inside a 150 radius, outside the
+            // default 20.
+            let mut cfg = crate::world::config::WorldConfig::default();
+            cfg.anchors.insert("wp0".into(), [100.0, 0.0, 0.0]);
+            cfg.anchors.insert("wp1".into(), [900.0, 0.0, 0.0]);
+            set_ship_blackboard_objectives(
+                &mut app,
+                vec![patrol_scored_objective(vec!["wp0", "wp1"], 20.0)],
+            );
+            app.insert_resource(cfg);
+            set_helm_control_source(&mut app, ControlSource::Ai);
+            if let Some(radius) = arrival_radius {
+                let ship = find_ship_entity(&mut app);
+                app.world_mut().entity_mut(ship).insert(
+                    crate::entities::spawner::BehaviourSection(
+                        crate::entity_config::BehaviourConfig {
+                            waypoint_arrival_radius: radius,
+                            ..Default::default()
+                        },
+                    ),
+                );
+            }
+            tick(&mut app);
+            app
+        }
+
+        fn helm_waypoint_index(app: &mut App) -> usize {
+            app.world_mut()
+                .query::<&crate::ai_plugin::ShipAiMemory>()
+                .single(app.world())
+                .expect("ship must carry ShipAiMemory")
+                .0
+                .waypoint_index
+        }
+
+        assert_eq!(
+            helm_waypoint_index(&mut patrol_app(None)),
+            0,
+            "with the default arrival radius the helm is still 100 units short of wp0"
+        );
+        assert_eq!(
+            helm_waypoint_index(&mut patrol_app(Some(150.0))),
+            1,
+            "a TOML-widened arrival radius must move the high-LOD helm on to wp1, \
+             the same call the cursor evaluator makes"
+        );
+    }
+
+    /// Regression (issue #696 review, finding 2): Reach completion is the
+    /// other site that judged arrival against the hardcoded constant.
+    #[test]
+    fn detect_reach_completion_honours_toml_authored_arrival_radius() {
+        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::objectives::{ObjectiveManager, UtilityConfig};
+        use crate::world::server::ObjectiveManagerRes;
+
+        fn reach_app(arrival_radius: Option<f32>) -> App {
+            let mut app = test_app();
+            let anchor = "dock-mid";
+            // 100 units out: inside a 150 radius, outside the default 20.
+            set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 8.0)]);
+            app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+            set_helm_control_source(&mut app, ControlSource::Ai);
+            if let Some(radius) = arrival_radius {
+                let ship = find_ship_entity(&mut app);
+                app.world_mut().entity_mut(ship).insert(
+                    crate::entities::spawner::BehaviourSection(
+                        crate::entity_config::BehaviourConfig {
+                            waypoint_arrival_radius: radius,
+                            ..Default::default()
+                        },
+                    ),
+                );
+            }
+            let mut mgr = ObjectiveManager::new();
+            mgr.add_full(
+                "reach-dock-mid",
+                "Dock at Mid",
+                true,
+                vec![],
+                AiDirective::Reach {
+                    anchor: anchor.into(),
+                },
+                UtilityConfig::default(),
+                ObjectiveSource::Mission,
+            );
+            app.insert_resource(ObjectiveManagerRes(mgr));
+            tick(&mut app);
+            app
+        }
+
+        fn status(app: &App) -> Option<crate::messages::ObjectiveStatus> {
+            app.world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .into_iter()
+                .find(|o| o.id == "reach-dock-mid")
+                .map(|o| o.status)
+        }
+
+        assert_eq!(
+            status(&reach_app(None)),
+            Some(crate::messages::ObjectiveStatus::Active),
+            "the default arrival radius must not count 100 units away as reached"
+        );
+        assert_eq!(
+            status(&reach_app(Some(150.0))),
+            Some(crate::messages::ObjectiveStatus::Completed),
+            "a TOML-widened arrival radius must complete the Reach objective"
         );
     }
 

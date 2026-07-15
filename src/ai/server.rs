@@ -186,14 +186,22 @@ pub struct LodTransitionTimer {
 
 /// Per-objective patrol waypoint cursors.
 ///
-/// Each entry is `(objective_id, waypoint_index)` tracking the current
-/// waypoint for a patrol route. Entries are independent — advancing one
-/// does not affect others. Consumed by `simulate_low_lod_ships` to cheaply
-/// advance out-of-sensor-range NPCs along their patrol route (the low-LOD
-/// path). The high-LOD path (`helm_patrol`) tracks its waypoint separately
-/// via `AiMemory.waypoint_index`; unifying the two is future PRD #685 work.
+/// Each entry is a [`PatrolCursor`] tracking the current waypoint for one
+/// objective's patrol route. Entries are independent — advancing one does not
+/// affect others. Cursor state is interpreted (and its out-of-range terminal
+/// stop owned) by the pure `ai::patrol_cursor` module.
+///
+/// `advance_objective_cursors` (`SimSet::Modifiers`) is the sole writer: it
+/// owns arrival detection and cursor advancement for every ship regardless of
+/// LOD. Everyone else is a reader — notably `simulate_low_lod_ships`
+/// (`SimSet::Physics`), which reads the cursor to cheaply steer NPCs outside
+/// sensor range toward their current waypoint. That split is what stops a
+/// cursor from being advanced twice in one tick.
+///
+/// The high-LOD path (`helm_patrol`) tracks its waypoint separately via
+/// `AiMemory.waypoint_index`; unifying the two is issue #702 work.
 #[derive(Component, Clone, Debug, Default)]
-pub struct PatrolCursors(pub Vec<(String, usize)>);
+pub struct PatrolCursors(pub Vec<crate::ai::patrol_cursor::PatrolCursor>);
 
 /// Marker component set on NPC entities currently in a warp-out sequence.
 /// Carries the data needed to draw the warp-exit visual and to populate
@@ -244,6 +252,24 @@ pub struct AiEntityAttacked {
 #[derive(Message, Clone, Debug)]
 pub struct AiEntityDestroyed {
     pub entity_uuid: String,
+}
+
+/// Emitted by `advance_objective_cursors` when a ship reaches the waypoint its
+/// cursor is currently pointing at, immediately before the cursor advances.
+///
+/// The world plugin reads this in `handle_ai_events` and turns it into a
+/// `WorldEvent::WaypointReached`, which drives `on_waypoint_reached` scenario
+/// triggers — the same event-bridge shape `AiEntityAttacked` /
+/// `AiEntityDestroyed` already use, so the AI module stays free of any
+/// dependency on world content.
+#[derive(Message, Clone, Debug)]
+pub struct AiWaypointReached {
+    /// UUID of the ship that arrived.
+    pub entity_uuid: String,
+    /// Id of the objective whose cursor advanced.
+    pub objective_id: String,
+    /// Anchor name of the waypoint that was reached.
+    pub waypoint: String,
 }
 
 // ── WorldSnapshot resource ────────────────────────────────────────────────────
@@ -403,6 +429,7 @@ impl Plugin for AiPlugin {
         app.init_resource::<ScenariosBeingUnloaded>();
         app.add_message::<AiEntityAttacked>();
         app.add_message::<AiEntityDestroyed>();
+        app.add_message::<AiWaypointReached>();
         app.init_resource::<WorldSnapshot>();
         app.init_resource::<AiSnapshotTimer>();
         app.insert_resource(AiSnapshotReady(true));
@@ -649,20 +676,155 @@ fn lod_ai_ships(
     }
 }
 
-/// Cheap patrol-advancement / forward-movement simulation for ships running at
-/// low fidelity (those without the `AiHighFidelity` marker).
+/// The active Helm-relevant waypoint route a ship should be following, read
+/// from its viewscreen blackboard.
 ///
-/// A low-LOD ship with an active Helm-relevant `Patrol` objective cheaply
-/// follows its patrol route using per-objective [`PatrolCursors`]: it snaps its
-/// heading toward the current waypoint and advances forward at `forward_speed`.
-/// Ships with no patrol objective (or a stalled/terminal patrol) keep the
-/// pre-existing dumb forward-drift so they don't regress to standing still.
+/// `aggregate_doctrine_blackboards` publishes `scored_objectives` there for
+/// every `BehaviourSection` ship regardless of LOD — the same entry
+/// `operate_helm_ai` reads on the high-LOD path (see `ship_plugin.rs` ~:527).
+/// Both the low-LOD steering path and the cursor evaluator resolve their route
+/// through this one function so they can never disagree about which objective
+/// owns the cursor.
+///
+/// Returns `(objective_id, waypoint_anchor_names, loop_path)` for the
+/// highest-scored `Patrol` or `Reach` directive. `Reach` is modelled as a
+/// one-waypoint, non-looping route.
+fn active_waypoint_route(
+    blackboards: &crate::server_app::ShipSystemBlackboards,
+) -> Option<(String, Vec<String>, bool)> {
+    let bb = match blackboards
+        .0
+        .get(&crate::system_registry::viewscreen_system_id())
+    {
+        Some(crate::messages::SystemBlackboard::Viewscreen(v)) => v,
+        _ => return None,
+    };
+    bb.scored_objectives
+        .iter()
+        .filter(|o| {
+            o.score > 0.0
+                && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+                && matches!(
+                    o.directive,
+                    crate::messages::AiDirective::Patrol { .. }
+                        | crate::messages::AiDirective::Reach { .. }
+                )
+        })
+        .max_by(|a, b| a.score.total_cmp(&b.score))
+        .and_then(|o| match &o.directive {
+            crate::messages::AiDirective::Patrol { anchors, loop_path } => {
+                Some((o.id.clone(), anchors.clone(), *loop_path))
+            }
+            crate::messages::AiDirective::Reach { anchor } => {
+                Some((o.id.clone(), vec![anchor.clone()], false))
+            }
+            _ => None,
+        })
+}
+
+/// Advance every ship's objective cursors as it reaches its waypoints.
+///
+/// Runs in `SimSet::Modifiers` — after `Physics` has moved the ships this
+/// tick, so arrival is judged against fresh positions, and before `Publish`.
+/// This is the single owner of `PatrolCursors` state: the low-LOD steering
+/// path (`simulate_low_lod_ships`) only *reads* the cursor, so a cursor can
+/// never be advanced twice in one tick.
+///
+/// Per ship, per active Helm-relevant `Patrol`/`Reach` objective: advance the
+/// cursor via the pure `advance_cursor` (which judges arrival against the
+/// radius and handles wraparound, terminal stops, settling degenerate looping
+/// routes, and skipping waypoints whose anchors are unknown), then emit one
+/// `AiWaypointReached` per waypoint it reports as consumed.
+///
+/// Covers all ships carrying a `BehaviourSection` regardless of LOD — the
+/// high-LOD helm path still tracks its own waypoint via
+/// `AiMemory.waypoint_index`; unifying the two is issue #702.
+pub(crate) fn advance_objective_cursors(
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut ships: Query<(
+        &BehaviourSection,
+        &ShipPhysics,
+        &crate::server_app::ShipSystemBlackboards,
+        &mut PatrolCursors,
+        Option<&EntityUuid>,
+    )>,
+    mut reached: MessageWriter<AiWaypointReached>,
+) {
+    let Some(world_config) = world_config else {
+        return;
+    };
+    let anchors = anchors_from_world_config(&world_config);
+
+    for (behaviour, physics, blackboards, mut cursors, entity_uuid) in &mut ships {
+        let Some((obj_id, waypoints, loop_path)) = active_waypoint_route(blackboards) else {
+            continue;
+        };
+
+        // Arrival radius is authored per entity template in TOML
+        // (`[behaviour] waypoint_arrival_radius`), so designers can tune how
+        // close a ship must get before its cursor advances.
+        let arrival_radius = behaviour.0.waypoint_arrival_radius;
+        let entity_pos = [physics.x, 0.0, physics.z];
+
+        // Look up (or lazily insert) this objective's cursor by objective id.
+        if !cursors.0.iter().any(|c| c.objective_id == obj_id) {
+            cursors
+                .0
+                .push(crate::ai::patrol_cursor::PatrolCursor::new(obj_id.clone()));
+        }
+        let cursor = cursors
+            .0
+            .iter_mut()
+            .find(|c| c.objective_id == obj_id)
+            .expect("cursor entry just ensured to exist");
+
+        // One tick can carry a ship past several waypoints at once (waypoints
+        // spaced closer together than the arrival radius, or a slow tick), so
+        // `advance_cursor` reports *every* waypoint it consumed rather than
+        // just the first — one message each, or triggers keyed to the
+        // intermediate waypoints would silently never fire.
+        let reached_waypoints = crate::ai::patrol_cursor::advance_cursor(
+            cursor,
+            &waypoints,
+            loop_path,
+            entity_pos,
+            &anchors,
+            arrival_radius,
+        );
+
+        // Only ships with a UUID can be named by a scenario trigger; bare
+        // test entities without one simply advance their cursor silently.
+        let Some(uuid) = entity_uuid else {
+            continue;
+        };
+        for waypoint in reached_waypoints {
+            reached.write(AiWaypointReached {
+                entity_uuid: uuid.0.clone(),
+                objective_id: obj_id.clone(),
+                waypoint,
+            });
+        }
+    }
+}
+
+/// Cheap steering / forward-movement simulation for ships running at low
+/// fidelity (those without the `AiHighFidelity` marker).
+///
+/// A low-LOD ship with an active Helm-relevant `Patrol`/`Reach` objective
+/// cheaply follows its route: it snaps its heading toward the waypoint its
+/// [`PatrolCursors`] entry currently points at and advances forward at
+/// `forward_speed`. Ships with no such objective (or a stalled/terminal route)
+/// keep the pre-existing dumb forward-drift so they don't regress to standing
+/// still.
+///
+/// Read-only with respect to the cursor: arrival detection and advancement
+/// belong to `advance_objective_cursors` in `SimSet::Modifiers`.
 ///
 /// This is the *low-fidelity* path. It deliberately does NOT touch the
 /// high-LOD patrol path (`helm_patrol` / `AiMemory.waypoint_index` in
 /// `ai/core.rs`). The two coexist: low-LOD tracks the waypoint via
 /// `PatrolCursors`, high-LOD via `AiMemory.waypoint_index`. Unifying them is
-/// separate future PRD #685 Phase-3 work (a known, accepted limitation).
+/// separate issue #702 work (a known, accepted limitation).
 fn simulate_low_lod_ships(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
@@ -670,7 +832,7 @@ fn simulate_low_lod_ships(
         (
             &mut ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
-            Option<&mut PatrolCursors>,
+            Option<&PatrolCursors>,
         ),
         (With<Ship>, Without<AiHighFidelity>),
     >,
@@ -681,65 +843,25 @@ fn simulate_low_lod_ships(
         .map(|wc| wc.anchors.clone())
         .unwrap_or_default();
 
-    for (mut physics, blackboards, mut cursors) in &mut ships {
-        // Find this ship's highest-scored Helm-relevant Patrol objective from
-        // its viewscreen blackboard. `aggregate_doctrine_blackboards` publishes
-        // `scored_objectives` there for every `BehaviourSection` ship,
-        // regardless of LOD — the same entry `operate_helm_ai` reads on the
-        // high-LOD path (see `ship_plugin.rs` ~:527).
-        let patrol = blackboards.and_then(|bb| {
-            match bb.0.get(&crate::system_registry::viewscreen_system_id()) {
-                Some(crate::messages::SystemBlackboard::Viewscreen(v)) => v
-                    .scored_objectives
-                    .iter()
-                    .filter(|o| {
-                        o.score > 0.0
-                            && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
-                            && matches!(o.directive, crate::messages::AiDirective::Patrol { .. })
-                    })
-                    .max_by(|a, b| a.score.total_cmp(&b.score))
-                    .map(|o| (o.id.clone(), o.directive.clone())),
-                _ => None,
-            }
-        });
+    for (mut physics, blackboards, cursors) in &mut ships {
+        let route = blackboards.and_then(active_waypoint_route);
 
-        // Steer along the patrol route only when we have a Patrol objective AND
-        // a `PatrolCursors` component to track the waypoint index. A low-LOD
-        // ship lacking the component (query returns `None`) just falls through
-        // to the dumb forward-move below.
-        if let (
-            Some((
-                obj_id,
-                crate::messages::AiDirective::Patrol {
-                    anchors: waypoints,
-                    loop_path,
-                },
-            )),
-            Some(cursors),
-        ) = (patrol, cursors.as_mut())
-        {
-            // Look up (or lazily insert) this objective's cursor by matching the
-            // tuple's objective id — the `(objective_id, waypoint_index)` design.
-            if !cursors.0.iter().any(|(id, _)| id == &obj_id) {
-                cursors.0.push((obj_id.clone(), 0));
-            }
-            let slot = cursors
+        // Steer along the route only when we have a Patrol/Reach objective AND
+        // a `PatrolCursors` component tracking the waypoint index. A low-LOD
+        // ship lacking either just falls through to the dumb forward-move
+        // below. A ship whose cursor entry has not been created yet (the
+        // evaluator inserts it at the end of this tick) steers toward the
+        // first waypoint in the meantime.
+        if let (Some((obj_id, waypoints, loop_path)), Some(cursors)) = (route, cursors) {
+            let index = cursors
                 .0
-                .iter_mut()
-                .find(|(id, _)| id == &obj_id)
-                .expect("cursor entry just ensured to exist");
+                .iter()
+                .find(|c| c.objective_id == obj_id)
+                .map(|c| c.index())
+                .unwrap_or(0);
 
-            let (new_index, target) = crate::ai::patrol_cursor::advance_cursor(
-                slot.1,
-                &waypoints,
-                loop_path,
-                [physics.x, 0.0, physics.z],
-                &anchors,
-                // Match the high-LOD helm path, which passes the same constant
-                // to `operate_helm` (see `ship_plugin.rs` ~:612).
-                crate::ai::WAYPOINT_ARRIVAL_RADIUS,
-            );
-            slot.1 = new_index;
+            let target =
+                crate::ai::patrol_cursor::cursor_target(index, &waypoints, loop_path, &anchors);
 
             if let Some(target_pos) = target {
                 // Cheap steering: snap yaw toward the target XZ bearing, then
@@ -756,8 +878,10 @@ fn simulate_low_lod_ships(
                 physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
                 continue;
             }
-            // `target == None` (empty waypoints / all anchors missing) → fall
-            // through to the dumb forward-move fallback below.
+            // `target == None` (empty route / finished non-looping route /
+            // unknown anchor) → fall through to the dumb forward-move
+            // fallback below. The evaluator skips past unknown anchors on
+            // this same tick, so the drift lasts one tick at most.
         }
 
         // Dumb forward-move fallback: no patrol objective, no cursor component,
@@ -1346,11 +1470,20 @@ mod tests {
     use crate::server_app::{LocalShip, Ship};
     use crate::ship_state::ShipPhysics;
 
+    /// Mirrors the production schedule: `simulate_low_lod_ships` (Physics)
+    /// steers from the cursor, then `advance_objective_cursors` (Modifiers)
+    /// advances it against the ship's post-movement position. The `SimSet`s
+    /// themselves aren't configured here, so the order is stated explicitly.
     fn build_lod_test_app() -> App {
         let mut app = App::new();
+        app.add_message::<AiWaypointReached>();
         app.insert_resource(Time::<()>::default()).add_systems(
             Update,
-            (simulate_low_lod_ships.before(lod_ai_ships), lod_ai_ships),
+            (
+                simulate_low_lod_ships.before(lod_ai_ships),
+                lod_ai_ships,
+                advance_objective_cursors.after(simulate_low_lod_ships),
+            ),
         );
         app
     }
@@ -1543,19 +1676,198 @@ mod tests {
         bb
     }
 
+    /// Spawn a low-LOD patrolling NPC at `(x, z)` carrying the TOML-authored
+    /// `BehaviourSection` the cursor evaluator reads its arrival radius from.
+    fn spawn_patrolling_npc(
+        app: &mut App,
+        x: f32,
+        z: f32,
+        uuid: &str,
+        objective_id: &str,
+        waypoints: &[&str],
+        loop_path: bool,
+    ) -> Entity {
+        app.world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(x, 0.0, z),
+                ShipPhysics {
+                    x,
+                    z,
+                    forward_speed: 10.0,
+                    yaw: 0.0,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 100.0,
+                },
+                EntityUuid(uuid.to_string()),
+                BehaviourSection(BehaviourConfig::default()),
+                PatrolCursors::default(),
+                blackboards_with_patrol(objective_id, waypoints, loop_path),
+            ))
+            .id()
+    }
+
+    /// Every cursor on `entity` as `(objective_id, waypoint_index)`.
+    fn cursor_state(app: &App, entity: Entity) -> Vec<(String, usize)> {
+        app.world()
+            .get::<PatrolCursors>(entity)
+            .unwrap()
+            .0
+            .iter()
+            .map(|c| (c.objective_id.clone(), c.index()))
+            .collect()
+    }
+
     #[test]
-    fn low_lod_patrol_advances_cursor_and_steers_toward_next_waypoint() {
+    fn cursor_advances_when_ship_arrives_at_its_waypoint() {
         let mut app = build_lod_test_app();
-        // Anchors: ship starts AT wp0; wp1 is offset in +x so the steer is
-        // observable in both yaw and position.
+        // Ship starts AT wp0, so it arrives immediately; wp1 is 200 units away.
         let mut world = crate::world::config::WorldConfig::default();
         world.anchors.insert("wp0".to_string(), [500.0, 0.0, 500.0]);
         world.anchors.insert("wp1".to_string(), [700.0, 0.0, 500.0]);
         app.insert_resource(world);
-
-        // Player at origin so the NPC (far away) stays low-LOD.
         spawn_player(&mut app, 0.0, 0.0);
 
+        let npc = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-1",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
+        );
+
+        tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            cursor_state(&app, npc),
+            vec![("patrol".to_string(), 1)],
+            "cursor must advance to waypoint 1 after arriving at waypoint 0"
+        );
+    }
+
+    #[test]
+    fn cursor_does_not_advance_while_ship_is_short_of_its_waypoint() {
+        let mut app = build_lod_test_app();
+        // wp0 sits 200 units away — far outside the default arrival radius.
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("wp0".to_string(), [700.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [900.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let npc = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-1",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
+        );
+
+        tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            cursor_state(&app, npc),
+            vec![("patrol".to_string(), 0)],
+            "cursor must stay on waypoint 0 until the ship reaches it"
+        );
+    }
+
+    /// The arrival radius is designer-tunable via `[behaviour]
+    /// waypoint_arrival_radius` in entity TOML — a ship with a wide radius
+    /// counts as arrived from a distance that a default-radius ship does not.
+    #[test]
+    fn arrival_radius_comes_from_the_entity_behaviour_config() {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("wp0".to_string(), [600.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [900.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        // Both ships sit 100 units from wp0, but only the wide-radius ship
+        // is close enough to count as arrived.
+        let narrow = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-narrow",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
+        );
+        let wide = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-wide",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
+        );
+        app.world_mut()
+            .entity_mut(wide)
+            .insert(BehaviourSection(BehaviourConfig {
+                waypoint_arrival_radius: 150.0,
+                ..Default::default()
+            }));
+
+        tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            cursor_state(&app, narrow),
+            vec![("patrol".to_string(), 0)],
+            "default arrival radius must not count 100 units away as arrived"
+        );
+        assert_eq!(
+            cursor_state(&app, wide),
+            vec![("patrol".to_string(), 1)],
+            "a TOML-widened arrival radius must count 100 units away as arrived"
+        );
+    }
+
+    #[test]
+    fn reach_objective_cursor_advances_to_terminal_on_arrival() {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        world
+            .anchors
+            .insert("dock".to_string(), [500.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let mut bb = crate::server_app::ShipSystemBlackboards::default();
+        bb.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
+                scored_objectives: vec![crate::messages::ScoredObjective {
+                    id: "reach-dock".to_string(),
+                    score: 1.0,
+                    directive: crate::messages::AiDirective::Reach {
+                        anchor: "dock".to_string(),
+                    },
+                    source: crate::messages::ObjectiveSource::Mission,
+                    relevance: vec![crate::messages::SystemAffinity::Helm],
+                    snapshot: crate::messages::ObjectiveSnapshot {
+                        id: "reach-dock".to_string(),
+                        text: "Reach the dock".to_string(),
+                        mandatory: false,
+                        status: crate::messages::ObjectiveStatus::Active,
+                        targets: vec![],
+                        source: crate::messages::ObjectiveSource::Mission,
+                    },
+                }],
+                ..Default::default()
+            }),
+        );
+
+        // Ship sits on the dock anchor → arrived.
         let npc = app
             .world_mut()
             .spawn((
@@ -1565,29 +1877,55 @@ mod tests {
                     x: 500.0,
                     z: 500.0,
                     forward_speed: 10.0,
-                    yaw: 0.0,
                     ..Default::default()
                 },
                 AiProfile {
                     aggression: 0.5,
                     sensor_range: 100.0,
                 },
+                EntityUuid("npc-reach".to_string()),
+                BehaviourSection(BehaviourConfig::default()),
                 PatrolCursors::default(),
-                blackboards_with_patrol("patrol", &["wp0", "wp1"], true),
+                bb,
             ))
             .id();
 
         tick_with_dt(&mut app, 0.1);
 
-        // Cursor advanced from wp0 (arrived) to wp1.
-        let cursors = app.world().get::<PatrolCursors>(npc).unwrap();
         assert_eq!(
-            cursors.0,
-            vec![("patrol".to_string(), 1)],
-            "cursor should advance to waypoint index 1 after arriving at waypoint 0"
+            cursor_state(&app, npc),
+            vec![("reach-dock".to_string(), 1)],
+            "a Reach cursor is a one-waypoint route: arriving moves it to the terminal index"
+        );
+    }
+
+    #[test]
+    fn low_lod_npc_follows_patrol_route_between_waypoints() {
+        let mut app = build_lod_test_app();
+        // Ship starts AT wp0; wp1 is offset in +x so the steer is observable
+        // in both yaw and position.
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("wp0".to_string(), [500.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [700.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let npc = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-1",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
         );
 
-        // Ship steered toward wp1 (700,0,500): dx=200, dz=0 → bearing = π/2.
+        // Tick 1 arrives at wp0 and advances the cursor to wp1; tick 2 is the
+        // first tick that steers toward wp1.
+        tick_with_dt(&mut app, 0.1);
+        tick_with_dt(&mut app, 0.1);
+
+        // Steering toward wp1 (700,0,500): dx=+200, dz=0 → bearing = π/2.
         let physics = app.world().get::<ShipPhysics>(npc).unwrap();
         assert!(
             (physics.yaw - std::f32::consts::FRAC_PI_2).abs() < 0.01,
@@ -1604,6 +1942,405 @@ mod tests {
         assert!(
             app.world().get::<AiHighFidelity>(npc).is_none(),
             "patrolling NPC out of range must stay low-LOD"
+        );
+    }
+
+    /// End-to-end route following: a low-LOD NPC placed on a two-waypoint
+    /// looping route drives itself to the far waypoint, wraps back to the
+    /// first, and returns — without ever being promoted to high LOD.
+    #[test]
+    fn low_lod_npc_patrol_route_wraps_around_and_returns_to_first_waypoint() {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("wp0".to_string(), [500.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [700.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let npc = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-1",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
+        );
+
+        // forward_speed 10 → ~1 unit/tick at dt=0.1, so the 200-unit leg out
+        // to wp1 takes ~180 ticks to close to within the 20-unit arrival
+        // radius. Run until the cursor wraps back to wp0 (bounded well above
+        // that), sampling the cursor each tick to prove the whole cycle.
+        let mut seen_indices = Vec::new();
+        let mut reached_max_x: f32 = 500.0;
+        for _ in 0..600 {
+            tick_with_dt(&mut app, 0.1);
+            let idx = cursor_state(&app, npc)[0].1;
+            if seen_indices.last() != Some(&idx) {
+                seen_indices.push(idx);
+            }
+            reached_max_x = reached_max_x.max(app.world().get::<ShipPhysics>(npc).unwrap().x);
+            // Stop on the first wraparound: 0 → 1 → back to 0.
+            if seen_indices.len() == 2 {
+                break;
+            }
+        }
+
+        assert_eq!(
+            seen_indices,
+            vec![1, 0],
+            "cursor must advance to wp1, then wrap back to wp0 on a looping route"
+        );
+        assert!(
+            reached_max_x > 680.0,
+            "ship must actually travel the leg out to wp1 (x≈700), got max x={}",
+            reached_max_x,
+        );
+
+        // Steering reads the cursor before the evaluator advances it, so the
+        // turn toward wp0 happens on the tick *after* the wrap.
+        tick_with_dt(&mut app, 0.1);
+
+        // Having wrapped, it is heading back toward wp0 (-x) → bearing = -π/2.
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+        assert!(
+            (physics.yaw + std::f32::consts::FRAC_PI_2).abs() < 0.01,
+            "after wraparound the ship should steer back toward wp0 (-π/2), got {}",
+            physics.yaw,
+        );
+        assert!(
+            physics.x < reached_max_x,
+            "ship must be travelling back toward wp0 after the wrap"
+        );
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_none(),
+            "patrolling NPC out of range must stay low-LOD for the whole route"
+        );
+    }
+
+    /// The arrival that advances the cursor is announced as an
+    /// `AiWaypointReached` message — the bridge the world plugin turns into a
+    /// `WorldEvent::WaypointReached` for `on_waypoint_reached` triggers.
+    #[test]
+    fn reaching_a_waypoint_emits_ai_waypoint_reached() {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("wp0".to_string(), [500.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [700.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-1",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
+        );
+
+        tick_with_dt(&mut app, 0.1);
+
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<AiWaypointReached>>();
+        let mut cursor = messages.get_cursor();
+        let emitted: Vec<_> = cursor.read(messages).collect();
+
+        assert_eq!(
+            emitted.len(),
+            1,
+            "arriving at wp0 must announce exactly once"
+        );
+        assert_eq!(emitted[0].entity_uuid, "npc-1");
+        assert_eq!(emitted[0].objective_id, "patrol");
+        assert_eq!(
+            emitted[0].waypoint, "wp0",
+            "the announced waypoint must be the one arrived at, not the next one"
+        );
+    }
+
+    /// Read every `AiWaypointReached` emitted so far, as `(uuid, waypoint)`.
+    fn reached_waypoints(app: &App) -> Vec<(String, String)> {
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<AiWaypointReached>>();
+        let mut cursor = messages.get_cursor();
+        cursor
+            .read(messages)
+            .map(|m| (m.entity_uuid.clone(), m.waypoint.clone()))
+            .collect()
+    }
+
+    /// Regression: a tick that carries the cursor past several waypoints at
+    /// once must announce every one of them. With `wp0` and `wp1` spaced
+    /// closer than the arrival radius, the cursor jumps 0 → 2 in a single
+    /// tick; announcing only `wp0` would leave an `on_waypoint_reached`
+    /// trigger keyed to `wp1` silently dead.
+    #[test]
+    fn one_message_per_waypoint_consumed_when_a_tick_skips_several() {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        // wp0 and wp1 are 5 units apart — well inside the 20-unit default
+        // arrival radius — while wp2 is a long leg away.
+        world.anchors.insert("wp0".to_string(), [500.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [505.0, 0.0, 500.0]);
+        world.anchors.insert("wp2".to_string(), [700.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let npc = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-1",
+            "patrol",
+            &["wp0", "wp1", "wp2"],
+            true,
+        );
+
+        tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            reached_waypoints(&app),
+            vec![
+                ("npc-1".to_string(), "wp0".to_string()),
+                ("npc-1".to_string(), "wp1".to_string()),
+            ],
+            "both waypoints consumed this tick must be announced, in route order"
+        );
+        assert_eq!(
+            cursor_state(&app, npc),
+            vec![("patrol".to_string(), 2)],
+            "cursor must land on the far wp2 after skipping wp0 and wp1"
+        );
+    }
+
+    /// Regression: a looping route whose every waypoint sits inside the
+    /// arrival radius closes its lap immediately. Any route with legs shorter
+    /// than the authored `waypoint_arrival_radius` does this — a designer
+    /// widening the radius for a station-keeping patrol, not just a
+    /// pathological case.
+    ///
+    /// The contract has three parts, and the second and third are what the
+    /// original permanent-retirement design broke: the ship announced its lap
+    /// and then lost its cursor entirely, fell through to the dumb
+    /// forward-move, and flew out of the cluster in a straight line forever
+    /// with no way back.
+    #[test]
+    fn looping_route_entirely_inside_arrival_radius_announces_once_then_holds_station() {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        // All three anchors are within the 20-unit default arrival radius of
+        // the ship's spawn point.
+        world.anchors.insert("wp0".to_string(), [500.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [505.0, 0.0, 500.0]);
+        world.anchors.insert("wp2".to_string(), [500.0, 0.0, 505.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let npc = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-1",
+            "patrol",
+            &["wp0", "wp1", "wp2"],
+            true,
+        );
+
+        // First tick: the lap closes — each waypoint announced exactly once.
+        tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            reached_waypoints(&app),
+            vec![
+                ("npc-1".to_string(), "wp0".to_string()),
+                ("npc-1".to_string(), "wp1".to_string()),
+                ("npc-1".to_string(), "wp2".to_string()),
+            ],
+            "the closing lap must announce each waypoint exactly once"
+        );
+
+        // ── 2. No per-tick spam, and the ship holds station ────────────────
+        // Drain, then tick long enough that a ship flying off at
+        // forward_speed (1 unit/tick here) would be 200 units clear of the
+        // cluster.
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<AiWaypointReached>>()
+            .clear();
+        for _ in 0..200 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        assert!(
+            reached_waypoints(&app).is_empty(),
+            "a settled degenerate route must not re-announce its waypoints every tick"
+        );
+        assert_eq!(
+            cursor_state(&app, npc),
+            vec![("patrol".to_string(), 0)],
+            "the cursor must stay on a real waypoint index, not a sentinel"
+        );
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+        let drift = ((physics.x - 500.0).powi(2) + (physics.z - 500.0).powi(2)).sqrt();
+        assert!(
+            drift < 20.0,
+            "the ship must keep station on its route, not fly out of the cluster: \
+             drifted {} units to ({}, {})",
+            drift,
+            physics.x,
+            physics.z,
+        );
+
+        // ── 3. Moved out of the radius, the route resumes ──────────────────
+        // Shove the ship 2000 units clear (a knockback, tow or scenario
+        // teleport does the same thing).
+        {
+            let mut physics = app.world_mut().get_mut::<ShipPhysics>(npc).unwrap();
+            physics.x = 2500.0;
+            physics.z = 500.0;
+        }
+        tick_with_dt(&mut app, 0.1);
+
+        assert!(
+            reached_waypoints(&app).is_empty(),
+            "nothing was arrived at 2000 units out"
+        );
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+        assert!(
+            (physics.yaw + std::f32::consts::FRAC_PI_2).abs() < 0.01,
+            "the resumed route must steer back toward wp0 (-π/2), got {}",
+            physics.yaw,
+        );
+        assert!(
+            physics.x < 2500.0,
+            "the ship must fly back toward its route, got x={}",
+            physics.x,
+        );
+
+        // Back in the cluster, the lap is flown and announced afresh — the
+        // route is alive, not permanently dead.
+        {
+            let mut physics = app.world_mut().get_mut::<ShipPhysics>(npc).unwrap();
+            physics.x = 500.0;
+            physics.z = 500.0;
+        }
+        tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            reached_waypoints(&app),
+            vec![
+                ("npc-1".to_string(), "wp0".to_string()),
+                ("npc-1".to_string(), "wp1".to_string()),
+                ("npc-1".to_string(), "wp2".to_string()),
+            ],
+            "a route resumed after leaving the arrival radius must announce again"
+        );
+    }
+
+    /// Regression (issue #696 review): the shipped-content shape of the bug.
+    /// `waypoint_arrival_radius` is designer-tunable per entity, so a route
+    /// whose legs are shorter than the authored radius is ordinary content —
+    /// a station-keeping patrol. It must not silently become "fly off the map
+    /// in a straight line, forever".
+    #[test]
+    fn route_with_legs_shorter_than_the_authored_radius_does_not_die() {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        // 100-unit legs against a 150-unit authored radius.
+        world.anchors.insert("wp0".to_string(), [500.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".to_string(), [600.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        let npc = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-1",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
+        );
+        app.world_mut()
+            .entity_mut(npc)
+            .insert(BehaviourSection(BehaviourConfig {
+                waypoint_arrival_radius: 150.0,
+                ..Default::default()
+            }));
+
+        // The lap closes on tick 1: both waypoints are inside the radius.
+        tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            reached_waypoints(&app),
+            vec![
+                ("npc-1".to_string(), "wp0".to_string()),
+                ("npc-1".to_string(), "wp1".to_string()),
+            ],
+            "the closing lap announces each waypoint once"
+        );
+
+        // 400 ticks at 1 unit/tick: a ship that lost its cursor would be 400
+        // units clear by now. This one is still on its route.
+        for _ in 0..400 {
+            tick_with_dt(&mut app, 0.1);
+        }
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+        let dist_to_wp0 = ((physics.x - 500.0).powi(2) + (physics.z - 500.0).powi(2)).sqrt();
+        assert!(
+            dist_to_wp0 < 150.0,
+            "the ship must hold its route, not fly off at forward_speed: {} units out",
+            dist_to_wp0,
+        );
+        assert_eq!(
+            cursor_state(&app, npc),
+            vec![("patrol".to_string(), 0)],
+            "the cursor must still name a real waypoint"
+        );
+
+        // And the route is resumable: shoved clear, it steers back.
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<AiWaypointReached>>()
+            .clear();
+        {
+            let mut physics = app.world_mut().get_mut::<ShipPhysics>(npc).unwrap();
+            physics.x = 3000.0;
+            physics.z = 500.0;
+        }
+        tick_with_dt(&mut app, 0.1);
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+        assert!(
+            physics.x < 3000.0,
+            "a resumed route must fly the ship back toward wp0, got x={}",
+            physics.x,
+        );
+        assert!(
+            !app.world().get::<PatrolCursors>(npc).unwrap().0[0].settled(),
+            "leaving the arrival radius must un-settle the cursor"
+        );
+    }
+
+    #[test]
+    fn no_waypoint_reached_message_while_ship_is_short_of_its_waypoint() {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("wp0".to_string(), [700.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+
+        spawn_patrolling_npc(&mut app, 500.0, 500.0, "npc-1", "patrol", &["wp0"], false);
+
+        tick_with_dt(&mut app, 0.1);
+
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<AiWaypointReached>>();
+        let mut cursor = messages.get_cursor();
+        assert_eq!(
+            cursor.read(messages).count(),
+            0,
+            "no arrival must be announced while the ship is still 200 units out"
         );
     }
 

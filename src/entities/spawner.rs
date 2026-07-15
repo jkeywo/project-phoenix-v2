@@ -433,6 +433,20 @@ pub fn spawn_entity(
         entity_commands.insert(crate::server_app::ShipBoost::default());
     }
 
+    // AiProfile section — injects AI personality component.
+    if let Some(profile) = &config.ai_profile {
+        entity_commands.insert(crate::ai_plugin::AiProfile {
+            aggression: profile.aggression,
+            sensor_range: profile.sensor_range,
+        });
+    } else {
+        // Ships without an [ai_profile] section get a sensible default.
+        entity_commands.insert(crate::ai_plugin::AiProfile {
+            aggression: 0.5,
+            sensor_range: 100.0,
+        });
+    }
+
     // Tags â€” mirror TOML tags onto the entity for snapshot builders.
     if !config.tags.is_empty() {
         entity_commands.insert(EntityTagsSection(config.tags.clone()));
@@ -792,6 +806,7 @@ mod tests {
             mesh: None,
             star: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -839,6 +854,7 @@ mod tests {
             mesh: None,
             star: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -883,6 +899,7 @@ mod tests {
             mesh: None,
             star: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -932,6 +949,7 @@ mod tests {
             mesh: None,
             star: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -982,6 +1000,7 @@ mod tests {
             target: None,
             mesh: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1045,6 +1064,7 @@ mod tests {
             ship_config: None,
             shield_arcs: Vec::new(),
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1110,6 +1130,7 @@ mod tests {
             target: None,
             mesh: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1163,6 +1184,7 @@ mod tests {
             target: None,
             mesh: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1252,6 +1274,7 @@ mod tests {
             target: None,
             mesh: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1312,6 +1335,7 @@ mod tests {
             target: None,
             mesh: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1366,6 +1390,7 @@ mod tests {
             target: None,
             mesh: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -1447,6 +1472,7 @@ mod tests {
             target: None,
             mesh: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -1564,6 +1590,7 @@ hull_integrity = 60.0
             target: None,
             mesh: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);

@@ -446,6 +446,7 @@ mod tests {
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -719,6 +720,7 @@ mod tests {
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -777,6 +779,7 @@ mod tests {
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1205,6 +1208,7 @@ mod tests {
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1356,6 +1360,7 @@ mod tests {
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1701,6 +1706,7 @@ mod tests {
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1746,6 +1752,7 @@ mod tests {
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();

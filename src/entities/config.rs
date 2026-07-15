@@ -84,6 +84,14 @@ fn default_maintain_range() -> f32 {
 /// The FSM (AiState/TransitionConfig) is dissolved in issue #572. Behaviour is
 /// now driven by a list of `DoctrineObjective`s scored by the viewscreen
 /// aggregator and interpreted per-system via operate functions.
+/// AI profile section: aggression and sensor range for NPC ship AI.
+/// Maps to [ai_profile] in entity TOML.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiProfileConfig {
+    pub aggression: f32,
+    pub sensor_range: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct BehaviourConfig {
@@ -1637,6 +1645,9 @@ pub struct EntityConfig {
     /// Optional AI behaviour controller config.
     #[serde(default)]
     pub behaviour: Option<BehaviourConfig>,
+    /// Optional AI profile (aggression, sensor range).
+    #[serde(default)]
+    pub ai_profile: Option<AiProfileConfig>,
     /// Radar appearance (colour, optional radius) for the helm radar blip.
     #[serde(default)]
     pub radar_appearance: Option<RadarAppearanceConfig>,

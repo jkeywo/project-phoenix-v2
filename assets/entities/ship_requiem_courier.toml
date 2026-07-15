@@ -42,6 +42,10 @@ trail_lifetime_secs = 0.5
 [comms]
 range = 800.0
 
+[ai_profile]
+aggression = 0.4
+sensor_range = 80.0
+
 # ── Behaviour ────────────────────────────────────────────────────────────────
 #
 # (#572) Doctrine-based AI. Courier is non-combat — only objective is to

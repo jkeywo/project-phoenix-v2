@@ -909,6 +909,7 @@ mod tests {
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
 
         let mut commands = app.world_mut().commands();

@@ -91,6 +91,10 @@ beam_color = [1.0, 0.15, 0.05, 1.0]
 [comms]
 range = 800.0
 
+[ai_profile]
+aggression = 0.9
+sensor_range = 150.0
+
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
 # (#572) Doctrine-based behaviour (FSM dissolved). Destroy always outscores

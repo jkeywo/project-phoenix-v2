@@ -91,6 +91,10 @@ beam_color = [1.0, 0.2, 0.05, 1.0]
 [comms]
 range = 600.0
 
+[ai_profile]
+aggression = 0.7
+sensor_range = 110.0
+
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
 # (#572) Doctrine-based behaviour (FSM dissolved). Destroy outscores Patrol so

@@ -6870,6 +6870,7 @@ condition = "on_world_loaded"
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         let mut commands = app.world_mut().commands();
         spawn_entity(
@@ -7162,6 +7163,7 @@ condition = "on_world_loaded"
             mesh: None,
             target: None,
             cinematic_camera: None,
+            ai_profile: None,
         };
         {
             let mut commands = app.world_mut().commands();

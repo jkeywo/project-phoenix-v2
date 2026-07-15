@@ -119,29 +119,153 @@ pub struct AmbientLightConfig {
     pub brightness: Option<f32>,
 }
 
-/// Per-world ambient dust particle effect config from `[dust]`.
+/// One depth layer of the camera-relative dust field (near / mid / far).
+///
+/// Authored as `[[dust.layer]]`. Layers are independent emitters sharing the
+/// same velocity field; each owns one texture and one material. Ranged fields
+/// are `[at_rest, at_full_speed]` pairs interpolated by the speed curve — see
+/// [`DustPfxConfig::speed_curve_exponent`].
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct DustPfxConfig {
+pub struct DustLayerConfig {
+    /// Human-readable label, for debugging only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Mote texture path, relative to `assets/`. Greyscale-in-alpha; the
+    /// renderer tints it at runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<String>,
+    /// Hard cap on live motes in this layer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_motes: Option<u32>,
+    /// Motes spawned per second.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_spawn_rate: Option<f32>,
+    pub spawn_rate: Option<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub spawn_radius: Option<f32>,
+    pub opacity: Option<[f32; 2]>,
+    /// Emissive multiplier. Values above ~1.0 feed bloom.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lifetime_secs: Option<f32>,
+    pub brightness: Option<[f32; 2]>,
+    /// Mote width as a fraction of screen height, **not** world units — the
+    /// renderer scales it by the mote's spawn depth so a layer's apparent size
+    /// doesn't depend on how far out its `depth_band` sits. Constant with
+    /// speed; apparent growth comes from `length` (spec §7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mote_radius: Option<f32>,
+    pub width: Option<f32>,
+    /// Streak length as a multiple of `width`. `1.0` renders as a point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color: Option<[f32; 4]>,
+    pub length: Option<[f32; 2]>,
+    /// Upper bound on mote lifetime. The actual lifetime is the time needed to
+    /// transit the volume and pass behind the camera; this cap only bites at
+    /// low speed, where transit time would otherwise leave motes hanging.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_opacity: Option<f32>,
+    pub max_lifetime_secs: Option<f32>,
+    /// `[min, max]` distance from camera this layer occupies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_opacity: Option<f32>,
+    pub depth_band: Option<[f32; 2]>,
+    /// `0.0` spawns uniformly across the volume; `1.0` pushes spawns hard
+    /// toward the screen edges (spec §13, near layer).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub emissive_strength: Option<f32>,
+    pub edge_bias: Option<f32>,
+    /// `true` = additive blending, `false` = alpha blending. Spec §18
+    /// recommends alpha for the far layer, additive for mid/near.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additive: Option<bool>,
+    /// Optional rare-glint texture for this layer (spec §5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glint_texture: Option<String>,
+    /// Fraction of motes (0.0–1.0) drawn with `glint_texture`. Spec §16
+    /// suggests 0.01–0.03 for the near layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glint_chance: Option<f32>,
+}
+
+/// Transitional warp-speed layer from `[dust.warp]` (spec §14).
+///
+/// Rather than stretching the ordinary layers indefinitely, impulse swaps in a
+/// dedicated high-speed field.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DustWarpConfig {
+    /// When false (or the table is absent) impulse leaves the ordinary layers
+    /// running and no warp field appears.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motes: Option<u32>,
+    /// Fraction of screen height, as per [`DustLayerConfig::width`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f32>,
+    /// Streak length multiplier at full warp, relative to mote width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length_multiplier: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<f32>,
+    /// Seconds to ramp in. Driven by `ImpulseState::charge_progress` while
+    /// charging.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enter_secs: Option<f32>,
+    /// Seconds to ramp out. Timed render-side: `cancel_charge()` snaps
+    /// `Active → Idle` in one frame, so there is no engine-side exit ramp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_secs: Option<f32>,
+}
+
+/// Per-world ambient dust particle effect config from `[dust]`.
+///
+/// A camera-relative velocity field, not world-space particles: speed drives
+/// density, luminosity and streak length, while the ship's true velocity
+/// vector drives direction.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DustPfxConfig {
+    /// Master switch. When false the effect is skipped entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Exponent applied to normalised speed before every ramp lookup. `2.0`
+    /// (spec §2's `S²`) keeps the effect restrained at low speed and ramps it
+    /// hard under acceleration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed_curve_exponent: Option<f32>,
+    /// Mote tint at rest — a cool grey-blue (spec §7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_speed_tint: Option<[f32; 3]>,
+    /// Mote tint at full speed — near-white.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub high_speed_tint: Option<[f32; 3]>,
+    /// Smoothing time constants (spec §10). Streak length should lead,
+    /// brightness follow, density lag — that ordering is what makes
+    /// acceleration feel immediate without motes popping in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streak_response_secs: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness_response_secs: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_response_secs: Option<f32>,
+    /// Radial screen mask (spec §4), in normalised screen radius from centre.
+    /// Fades motes crossing the middle of the viewscreen so they don't
+    /// distract from targeting, pushing the streaks into peripheral vision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre_fade_inner: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre_fade_outer: Option<f32>,
+    /// Fraction of the screen radius over which motes fade before leaving
+    /// view, avoiding abrupt clipping (spec §17).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_fade: Option<f32>,
+    /// Lateral drift added to each mote's velocity, as a fraction of speed.
+    /// Keep low — the main direction must stay unambiguous (spec §4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turbulence: Option<f32>,
+    /// Scales apparent mote speed relative to true ship speed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mote_speed_multiplier: Option<f32>,
+    /// Depth layers, authored as `[[dust.layer]]`. When empty the renderer
+    /// falls back to its built-in near/mid/far set.
+    #[serde(default, rename = "layer", skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<DustLayerConfig>,
+    /// Optional `[dust.warp]` table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warp: Option<DustWarpConfig>,
 }
 
 /// A concrete entity instance declared in the world TOML — a reference to an
@@ -1668,6 +1792,109 @@ mod tests {
         assert!(cfg.anchors.is_empty());
         assert!(cfg.entities.is_empty());
         assert_eq!(cfg.global.seed, 42);
+    }
+
+    #[test]
+    fn parse_world_reads_dust_layers_and_warp() {
+        let toml = r#"
+[dust]
+enabled = true
+speed_curve_exponent = 2.0
+low_speed_tint = [0.55, 0.65, 0.75]
+high_speed_tint = [0.95, 0.98, 1.0]
+turbulence = 0.05
+
+[[dust.layer]]
+name = "near"
+texture = "pfx/space_mote_streak_head.png"
+max_motes = 24
+spawn_rate = [0.0, 12.0]
+length = [1.0, 20.0]
+additive = true
+
+[[dust.layer]]
+name = "far"
+texture = "pfx/space_mote_compact_core.png"
+max_motes = 200
+spawn_rate = [10.0, 250.0]
+additive = false
+
+[dust.warp]
+enabled = true
+texture = "pfx/space_mote_streak_soft.png"
+exit_secs = 0.6
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let dust = cfg.dust.expect("[dust] must be present");
+
+        assert_eq!(dust.enabled, Some(true));
+        assert_eq!(dust.speed_curve_exponent, Some(2.0));
+        assert_eq!(dust.low_speed_tint, Some([0.55, 0.65, 0.75]));
+        assert_eq!(dust.turbulence, Some(0.05));
+
+        // `[[dust.layer]]` maps onto the renamed `layers` field, in file order.
+        assert_eq!(dust.layers.len(), 2);
+        assert_eq!(dust.layers[0].name.as_deref(), Some("near"));
+        assert_eq!(dust.layers[0].spawn_rate, Some([0.0, 12.0]));
+        assert_eq!(dust.layers[0].length, Some([1.0, 20.0]));
+        assert_eq!(dust.layers[0].additive, Some(true));
+        assert_eq!(dust.layers[1].name.as_deref(), Some("far"));
+        assert_eq!(dust.layers[1].additive, Some(false));
+
+        // Unset fields stay None so the renderer's own defaults win.
+        assert_eq!(dust.layers[1].length, None);
+        assert_eq!(dust.centre_fade_inner, None);
+
+        let warp = dust.warp.expect("[dust.warp] must be present");
+        assert_eq!(warp.enabled, Some(true));
+        assert_eq!(warp.exit_secs, Some(0.6));
+        assert_eq!(warp.enter_secs, None);
+    }
+
+    #[test]
+    fn parse_world_dust_absent_is_none() {
+        let cfg = parse_world("").expect("empty TOML should parse");
+        assert!(cfg.dust.is_none());
+    }
+
+    /// The shipped worlds are what actually reach the renderer, so parse the
+    /// real files rather than a fixture — a stale `[dust]` key here would
+    /// otherwise fail silently at runtime rather than in CI.
+    #[test]
+    fn shipped_default_world_dust_parses() {
+        let cfg = parse_world(include_str!("../../assets/worlds/default.toml"))
+            .expect("default.toml must parse");
+        let dust = cfg.dust.expect("default.toml declares [dust]");
+        assert_eq!(dust.enabled, Some(true));
+        assert!(
+            dust.layers.is_empty(),
+            "default world should ride the built-in layers"
+        );
+        assert_eq!(
+            dust.warp
+                .expect("default.toml declares [dust.warp]")
+                .enabled,
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn shipped_combat_test_world_dust_parses_with_tuned_layers() {
+        let cfg = parse_world(include_str!("../../assets/worlds/combat_test.toml"))
+            .expect("combat_test.toml must parse");
+        let dust = cfg.dust.expect("combat_test.toml declares [dust]");
+        assert_eq!(dust.layers.len(), 3, "near/mid/far must all be declared");
+        assert_eq!(dust.layers[0].name.as_deref(), Some("near"));
+        assert_eq!(dust.layers[0].max_motes, Some(32));
+        assert_eq!(dust.layers[2].name.as_deref(), Some("far"));
+        // Layers are matched to built-in defaults by position, so ordering is
+        // load-bearing: near must come first and far last.
+        let near_depth = dust.layers[0].depth_band.expect("near sets depth_band");
+        let far_depth = dust.layers[2].depth_band.expect("far sets depth_band");
+        assert!(
+            near_depth[0] < far_depth[0],
+            "layers must be authored near→far, got {near_depth:?} then {far_depth:?}"
+        );
     }
 
     #[test]

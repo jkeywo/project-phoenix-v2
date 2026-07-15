@@ -14,12 +14,19 @@
 // `trunk serve`/dev builds so hot-reload iteration stays fast.
 import { readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import binaryen from "binaryen";
 
 const isRelease = process.env.TRUNK_BUILD_RELEASE === "true";
 if (!isRelease) {
   process.exit(0);
 }
+
+// Imported lazily rather than at the top of the file: a static import is
+// hoisted above the early exit above, which made `trunk serve` require the
+// binaryen package it never uses — and, once installed, exit non-zero anyway
+// when process.exit() ran while binaryen's wasm module was still initialising
+// (libuv "handle->flags & UV_HANDLE_CLOSING" assertion on Windows). Either way
+// the dev build failed the post_build hook. Keep this import below the guard.
+const { default: binaryen } = await import("binaryen");
 
 // wasm-bindgen names output files with a content hash, and stale hashes
 // from previous builds aren't cleaned up here, so pick the most recently

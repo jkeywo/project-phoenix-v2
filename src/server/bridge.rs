@@ -813,8 +813,9 @@ pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
 
 /// Return the list of available player ships for the currently loaded world.
 ///
-/// Returns a JS array of `{ template_path: string, label: string }` objects.
-/// The list comes from the world's `[available_ships]` entries (issue #623).
+/// Returns a JS array of `{ template_path, label, class, hull_id, power_rating,
+/// name }` objects. The label comes from the world's `[available_ships]` entry;
+/// the remaining metadata is read from the cached entity config for each ship.
 /// When the world has no `available_ships` list, returns an empty array — the
 /// host should fall back to the hardcoded `assets/entities/alliance_cruiser.toml`.
 ///
@@ -839,6 +840,30 @@ pub fn wasm_get_available_ships() -> Array {
         )
         .ok();
         Reflect::set(&obj, &JsValue::from_str("label"), &JsValue::from_str(label)).ok();
+        if let Some(cfg) = crate::config_cache::get_cached_entity_config(&ship.template_path) {
+            if let Some(ref class) = cfg.class {
+                Reflect::set(&obj, &JsValue::from_str("class"), &JsValue::from_str(class)).ok();
+            }
+            if let Some(ref hull_id) = cfg.hull_id {
+                Reflect::set(
+                    &obj,
+                    &JsValue::from_str("hull_id"),
+                    &JsValue::from_str(hull_id),
+                )
+                .ok();
+            }
+            if let Some(rating) = cfg.power_rating {
+                Reflect::set(
+                    &obj,
+                    &JsValue::from_str("power_rating"),
+                    &JsValue::from_f64(rating as f64),
+                )
+                .ok();
+            }
+            if let Some(ref name) = cfg.name {
+                Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(name)).ok();
+            }
+        }
         arr.push(&obj);
     }
     arr

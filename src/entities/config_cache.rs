@@ -412,6 +412,12 @@ pub fn get_config_cache() -> ConfigCache {
     ConfigCache(CONFIG_CACHE.with(|cache| cache.borrow().clone()))
 }
 
+/// Look up a single cached entity config by template path.
+#[cfg(target_arch = "wasm32")]
+pub fn get_cached_entity_config(path: &str) -> Option<crate::entity_config::EntityConfig> {
+    CONFIG_CACHE.with(|cache| cache.borrow().get(path).cloned())
+}
+
 /// Queue a path for fetching and fire the callback.
 #[cfg(target_arch = "wasm32")]
 fn queue_and_fire(path: String) {

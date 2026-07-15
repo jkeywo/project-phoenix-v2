@@ -2097,21 +2097,23 @@ function finishInit() {
       })
       .catch(err => { showFatalError('Failed to load ' + templatePath + ': ' + String(err)); });
   } else {
-    // Multiple ships — show ship picker, defer server start until selection.
+    // Multiple ships — show ph-ship-picker component, defer server start until selection.
     const panel = document.getElementById('scenario-panel');
     const worldList = document.getElementById('world-list');
-    // Replace world list label
     document.getElementById('world-list-label').textContent = 'Select a ship';
-    // Clear existing world buttons
     worldList.innerHTML = '';
-    for (const ship of shipResult.ships) {
-      const btn = document.createElement('button');
-      btn.className = 'world-btn';
-      btn.textContent = ship.label || ship.template_path;
-      btn.addEventListener('click', function() {
-        wasm_select_ship(ship.template_path);
+
+    // Dynamically import the ship-picker web component (registers custom element).
+    import('./gui/components/ph-ship-picker.js').then(() => {
+      const picker = document.createElement('ph-ship-picker');
+      worldList.appendChild(picker);
+      picker.state = { ships: shipResult.ships };
+
+      picker.addEventListener('ship-selected', (e) => {
+        const { template_path } = e.detail;
+        wasm_select_ship(template_path);
         panel.style.display = 'none';
-        fetch(ship.template_path)
+        fetch(template_path)
           .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
           .then(toml => {
             try { wasm_validate_stations(toml); } catch (err) {
@@ -2120,12 +2122,11 @@ function finishInit() {
             }
             startServer();
           })
-          .catch(err => { showFatalError('Failed to load ' + ship.template_path + ': ' + String(err)); });
+          .catch(err => { showFatalError('Failed to load ' + template_path + ': ' + String(err)); });
       });
-      worldList.appendChild(btn);
-    }
-    // Show the panel again (it may have been hidden by world selection)
-    panel.style.display = '';
+
+      panel.style.display = '';
+    });
   }
 }
 

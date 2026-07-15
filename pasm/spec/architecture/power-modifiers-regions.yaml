@@ -58,6 +58,8 @@ entities:
       confidence: confirmed
       title: Authored Power AI Rule Evaluator
       summary: Future per-ship Power AI that evaluates data-defined rules for every authored power group. Each rule carries its own minimum permitted battery reserve, so allocation planning avoids avoidable brownouts without a fixed global emergency mode.
+      rationale:
+        - "Issue #693 implemented a narrower precursor, ai_power_allocation (src/console_ai/server.rs), rather than this fully generic evaluator: it runs exactly two hardcoded rules (a movement rule reallocating to the helm group, and a red-alert rule reallocating to the weapons group), each with its own timer/hysteresis config, not an arbitrary per-authored-group rule set. This entity remains the target design for the generalized version."
     architecture:
       kind: ai-operator
       authority: authoritative

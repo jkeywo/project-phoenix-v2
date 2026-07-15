@@ -38,7 +38,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Tactical AI Weapon Operator
-      summary: Uses scored Destroy objectives and fine-system availability to select targets, fire eligible weapons, and issue arc-bearing coordination when a usable family lacks arc.
+      summary: Uses scored Destroy objectives and fine-system availability to select and track targets, and issue arc-bearing coordination when a usable family lacks arc; firing decisions for individual weapon families live in separate decide/apply AI systems that read the resulting target.
+      rationale:
+        - "Issue #694 removed the torpedo-firing block that used to run inline inside this operator (operate_tactical_ai). Torpedo auto-fire now lives in torpedo-auto-fire-ai (ai_torpedo_auto_fire + integrate_torpedo_intents in src/console_ai/server.rs). operate_tactical_ai keeps target selection, stale/out-of-range target clearing, and the Destroy-objective/last-attacker fallback; phaser auto-fire and Sensors-driven frequency coordination were already handled outside this operator before #694."
     architecture:
       kind: ai-controller
       authority: authoritative
@@ -49,6 +51,29 @@ entities:
     implementation:
       status: declared
       paths: [src/console/weapons/server.rs, src/ai/core.rs]
+      symbols: [operate_tactical_ai]
+      tests: [cargo test]
+
+  - component: torpedo-auto-fire-ai
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Torpedo Auto-Fire AI
+      summary: Decide/apply AI pair that selects loaded, in-arc torpedo tubes to fire at the ship's locked weapons target and applies the launch via the same primitive the human torpedo-fire path uses.
+      rationale:
+        - "Issue #694 (preliminary) replaced the old fused torpedo-firing block formerly inline in operate_tactical_ai. ai_torpedo_auto_fire decides which tubes to fire and writes TorpedoIntents; integrate_torpedo_intents applies them via TorpedoSystem::launch, dual-writing the legacy TorpedoSystemResource for the LocalShip the same way integrate_power_state does for power."
+        - Gated on AiHighFidelity plus a dedicated torpedo_magazine_system_id() operate_ai policy, distinct from the coarse Tactical gate that governs target selection.
+        - "Preliminary: target_locked and target_shields inputs to the pure auto_fire_torpedo decision are hardcoded pending issue #697."
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      reads: [weapons-target-state, torpedo-state, system-control-source-state]
+      writes: [torpedo-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console_ai/server.rs, src/console_ai/core.rs, src/console/weapons/server.rs]
+      symbols: [ai_torpedo_auto_fire, integrate_torpedo_intents, auto_fire_torpedo, TorpedoIntents]
       tests: [cargo test]
   - component: tactical-weapons-controls
     core:

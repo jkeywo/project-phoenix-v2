@@ -85,7 +85,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Sensors Frequency Advisor
-      summary: Observes Tactical's locked target and sends Tactical a shield-frequency hint when the target or observed frequency changes.
+      summary: Observes Tactical's locked target and sends Tactical a shield-frequency hint when the target or observed frequency changes; ships running AI-high-fidelity Sensors under AI control instead hand off to a delayed AI variant.
+      rationale:
+        - "Issue #692 scoped this immediate readout to skip ships that carry AiHighFidelity with Sensors under AI control (operate_ai policy). Those ships instead run the new ai_frequency_hint system in src/console_ai/server.rs, which wires the previously-orphaned console_ai::core::tick_frequency_hint pure function to replicate a Low-complexity operator's reaction delay rather than this system's immediate readout. Human-held Sensors, the common case for the player ship, is unaffected."
     architecture:
       kind: coordination-producer
       authority: authoritative
@@ -95,6 +97,27 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/sensors.rs, src/core/messages.rs]
+      symbols: [tick_sensors_frequency_hint]
+      tests: [cargo test]
+
+  - component: sensors-frequency-advisor-ai-delayed
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensors Frequency Advisor (AI Delayed Variant)
+      summary: AI-controlled Sensors companion to sensors-frequency-advisor that replicates a Low-complexity operator's reaction delay before sending Tactical a shield-frequency hint, for ships running AiHighFidelity with Sensors under AI control.
+      rationale:
+        - "Issue #692 wires the previously-orphaned console_ai::core::tick_frequency_hint pure function into this Bevy system; it previously had no caller anywhere in the codebase."
+    architecture:
+      kind: coordination-producer
+      authority: authoritative
+      reads: [weapons-target-state, shield-arc-state]
+      sends: [inter-system-message-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console_ai/server.rs, src/console_ai/core.rs]
+      symbols: [ai_frequency_hint, tick_frequency_hint, ShipFrequencyHintState]
       tests: [cargo test]
 
   - component: sensors-radar-publisher

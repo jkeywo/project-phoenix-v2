@@ -115,10 +115,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Helm Control Router
-      summary: Authoritative host handler that turns admitted helm, lateral-thrust, impulse, and boost commands into ship state changes.
+      summary: Authoritative host handler that admits helm, lateral-thrust, impulse, and boost commands into shared per-ship intent components; a separate shared integrator applies that intent to ship physics and drive state.
       rationale:
         - Human helm commands are admitted at the host boundary and then applied to authoritative state on the LocalShip.
         - Impulse and boost are separate host-owned drive states even though the UI targets the coarse helm system.
+        - "Issue #695 split admission from physics integration: process_helm_inputs, handle_impulse_messages, and handle_boost_messages now only write ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand/BoostCommand intent components instead of mutating ShipPhysics/ShipImpulse/ShipBoost directly. The shared integrate_helm_physics and apply_helm_commands systems in src/ship_plugin.rs perform the actual integration for any AiHighFidelity ship (the LocalShip and promoted NPCs alike), so the same intent surface serves both the human and helm-ai-operator paths."
     architecture:
       kind: subsystem
       authority: authoritative
@@ -152,11 +153,19 @@ entities:
       paths:
         - src/ship_plugin.rs
         - src/ship/physics.rs
+        - src/ship/helm.rs
       symbols:
         - process_helm_inputs
         - handle_impulse_messages
         - handle_boost_messages
+        - integrate_helm_physics
+        - apply_helm_commands
         - compute_physics
+        - ThrustInput
+        - SteeringInput
+        - LateralThrustInput
+        - ImpulseCommand
+        - BoostCommand
       messages:
         - HelmInput
         - LateralThrustInput
@@ -680,10 +689,11 @@ entities:
       status: implemented
       confidence: inferred
       title: Helm AI Operator
-      summary: Current authoritative AI helm executor that reads scored objectives and world snapshots, computes steering and avoidance internally, and directly updates motion, cached helm intent, and impulse state.
+      summary: Current authoritative AI helm executor that reads scored objectives and world snapshots, computes steering and avoidance internally, and writes the same ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand intent components the admitted human path writes, for the shared integrate_helm_physics/apply_helm_commands systems to apply.
       rationale:
         - Helm AI does not synthesize human helm messages in the shipped code path.
         - This is a temporary implementation shape relative to the intended design, where fine helm systems should read a shared desired-motion surface and set the same typed actuator inputs a player can set, according to capability.
+        - "Issue #695 removed operate_helm_ai's direct writes to ShipPhysics/ShipImpulse; it now only decides and writes the shared intent components, mirroring the admitted human path's decide/apply split. This is a step toward, but not the same as, the intended shared desired-motion surface described below."
     architecture:
       kind: service
       authority: authoritative
@@ -696,9 +706,7 @@ entities:
         - impulse-drive-state
         - pending-arc-bearing-request-state
       writes:
-        - authoritative-ship-motion-state
         - last-helm-input-state
-        - impulse-drive-state
         - pending-arc-bearing-request-state
       runs_in:
         - host-browser-runtime

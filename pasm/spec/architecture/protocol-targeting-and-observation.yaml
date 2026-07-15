@@ -151,25 +151,21 @@ entities:
       status: declared
       paths: [pasm/implementation/observation.py, pasm/scanners/toml.py]
 
-  - component: deprecated-console-ai-plugin
+  - component: console-ai-orchestrator-plugin
     core:
-      status: deprecated
+      status: implemented
       confidence: confirmed
-      title: Deprecated Console AI Plugin
-      summary: Inactive Low-complexity console-AI registration seam retained only while its pure helper library is assessed for migration or deletion; remove this PASM entity with the code when the seam is deleted.
+      title: Console AI Orchestrator Plugin
+      summary: Registers the decide/apply system pairs that wire previously-orphaned pure helpers in console_ai::core into active Bevy systems for shields focus, power allocation, torpedo auto-fire, and delayed sensors frequency hinting.
+      rationale:
+        - "This entity previously modeled a dormant registration seam (\"deprecated-console-ai-plugin\") that installed no systems. Issues #692-#694 wired ai_shield_focus/integrate_shield_state, ai_power_allocation/integrate_power_state, ai_torpedo_auto_fire/integrate_torpedo_intents, and ai_frequency_hint into ConsoleAiPlugin's Update schedule, so the plugin is no longer inactive and the prior removal-or-replace exception no longer applies."
+        - Each decide system writes a per-ship intent component (ShieldArcIntents, PowerReactorIntents, TorpedoIntents) that its paired integrate/apply system consumes via the same mutation primitive the human admitted-command path uses.
     architecture:
-      kind: deprecated-compatibility
-      authority: non-authoritative
+      kind: service
+      authority: authoritative
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
       paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/console_ai/mod.rs, src/server_app.rs]
-      symbols: [ConsoleAiPlugin]
+      symbols: [ConsoleAiPlugin, ai_shield_focus, integrate_shield_state, ai_power_allocation, integrate_power_state, ai_torpedo_auto_fire, integrate_torpedo_intents, ai_frequency_hint]
       tests: [cargo test]
-    exceptions:
-      - rule: inactive-console-ai-must-be-removed-or-replaced
-        scope: [deprecated-console-ai-plugin]
-        rationale: The registered plugin currently installs no systems; retaining it without an explicit removal path risks confusing dormant helpers with live Backfill automation.
-        temporary: true
-        removal_condition: [ConsoleAiPlugin registration and the console_ai module are removed, or retained helpers are migrated to active system-command automation.]
-        approval_status: accepted

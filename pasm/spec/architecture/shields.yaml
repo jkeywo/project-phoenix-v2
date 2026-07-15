@@ -112,6 +112,8 @@ entities:
       confidence: confirmed
       title: Shields Recent Damage AI
       summary: AI-controlled Shields records recent per-arc damage and focuses concentrated incoming damage, falling back to a configured health imbalance rule; its current prior-health tracking is defective.
+      rationale:
+        - "Issue #692 replaced the old fused operate_shields_ai with a decide/apply split: ai_shield_focus reads shield facings and ShieldsDamageHistory and writes the decision into ShieldArcIntents, and integrate_shield_state applies those intents via ShipShields::set_focused_facing, the same mutation primitive the human handle_shields_messages path uses. The pure decision algorithm (tick_shield_focus_ai) and its defective prior-health tracking are unchanged by this split."
     architecture:
       kind: ai-operator
       authority: authoritative
@@ -121,8 +123,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/shields.rs, src/console_ai/core.rs, src/entities/config.rs, src/entities/spawner.rs]
-      symbols: [operate_shields_ai, tick_shield_focus_ai, ShieldsDamageHistory, ShieldsAiConfigToml]
+      paths: [src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/entities/spawner.rs]
+      symbols: [ai_shield_focus, integrate_shield_state, tick_shield_focus_ai, ShieldArcIntents, ShieldsDamageHistory, ShieldsAiConfigToml]
       tests: [cargo test]
 
   - state: shields-damage-history-state

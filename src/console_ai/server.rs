@@ -12,6 +12,12 @@
 //!   the human path's `handle_shields_messages` -> `set_focused_facing` shape.
 //! - `ai_frequency_hint` — wires `console_ai::tick_frequency_hint`, which had
 //!   no caller anywhere prior to this issue.
+//!
+//! Issue #694 (preliminary) adds `ai_torpedo_auto_fire` /
+//! `integrate_torpedo_intents`, replacing the old fused torpedo sub-block
+//! that used to live inside `console::weapons::server::operate_tactical_ai`
+//! with the same decide/`TorpedoIntents`-write + mutate-only-adapter shape.
+//! `operate_tactical_ai` keeps running for Tactical target selection only.
 
 use bevy::prelude::*;
 
@@ -62,6 +68,12 @@ impl Plugin for ConsoleAiPlugin {
                 integrate_power_state
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(ai_power_allocation),
+                ai_torpedo_auto_fire
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(crate::sim_sets::AiTickLabel),
+                integrate_torpedo_intents
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(ai_torpedo_auto_fire),
                 ai_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
             ),
         );
@@ -518,6 +530,256 @@ fn integrate_power_state(
         if is_local {
             if let Some(pr) = power_res.as_deref_mut() {
                 pr.0 = power.0.clone();
+            }
+        }
+    }
+}
+
+// ── Torpedo AI (preliminary, issue #694) ────────────────────────────────────
+
+/// AI torpedo auto-fire decision system (issue #694, preliminary).
+///
+/// Wires the previously-orphaned `console_ai::auto_fire_torpedo`: for ships
+/// whose Tactical target is already locked (`WeaponsTarget`, set by
+/// `console::weapons::server::operate_tactical_ai`'s target-selection half,
+/// which keeps running unchanged), decides which loaded, in-arc torpedo
+/// tubes to fire and writes the decision into `TorpedoIntents` for
+/// `integrate_torpedo_intents` to apply, rather than calling
+/// `TorpedoSystem::launch` directly.
+///
+/// Replaces the old fused torpedo sub-block that used to run inline inside
+/// `operate_tactical_ai` (banner-marked "TORPEDO AUTO-FIRE (future: split to
+/// torpedo_tube system)"), reproducing its behaviour exactly — including its
+/// claimed/unclaimed station distinction and its hardcoded
+/// `TorpedoAiInput { target_locked: true, target_shields: 0, .. }` fields.
+/// This is intentionally preliminary/incomplete (not reading real shield
+/// state) — full behaviour lands in #697 once target selection itself is
+/// split out of `operate_tactical_ai`.
+///
+/// # Gating
+/// - `ShipSystemControlSources.policy_for(torpedo_magazine_system_id()).operate_ai`
+///   — new constraint vs. the old fused block, which had no torpedo-specific
+///   gate of its own beyond the combined `any_tactical_system_operates_ai`
+///   check that runs before `operate_tactical_ai` (that check still gates
+///   `operate_tactical_ai`'s target selection; this is an *additional*,
+///   torpedo-specific gate). The torpedo magazine is the shared bottleneck
+///   resource across tubes, so its policy is the natural per-system gate
+///   (no single unified `torpedo_system_id()` exists).
+/// - `AiHighFidelity` (query filter, new constraint vs. the old system).
+/// - Claimed/unclaimed Tactical station distinction (preserved verbatim from
+///   the old block): when a session holds the Tactical station, auto-fire is
+///   additionally gated on the holder's active rating having the
+///   `torpedo_auto_fire` `ai_tuning` rule; when unclaimed, auto-fire is
+///   unconditional. This exact distinction is what
+///   `console::weapons::server`'s `ai_stops_firing_when_rating_switches_to_std`
+///   test asserts on.
+pub(crate) fn ai_torpedo_auto_fire(
+    sessions: Res<crate::lobby::Sessions>,
+    mut ships: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            &crate::ship_plugin::ShipSystemControlSources,
+            &crate::ship_plugin::ActiveStationRatings,
+            &crate::ship_state::ShipPhysics,
+            &crate::weapons_plugin::WeaponsTarget,
+            Option<&crate::weapons_plugin::TorpedoSystemResource>,
+            &mut crate::weapons_plugin::TorpedoIntents,
+        ),
+        (
+            With<crate::ai_plugin::AiHighFidelity>,
+            With<crate::server_app::Ship>,
+        ),
+    >,
+    torpedo_sys_res: Res<crate::weapons_plugin::TorpedoSystemResource>,
+    asteroid_q: Query<
+        (&crate::simulation::AsteroidUuid, &Transform),
+        With<crate::simulation::Asteroid>,
+    >,
+    other_ships_q: Query<
+        (&crate::entity_spawner::EntityUuid, &Transform),
+        Without<crate::simulation::Asteroid>,
+    >,
+) {
+    let tactical_station = crate::messages::StationId("tactical".into());
+    let policy_sid = crate::system_registry::torpedo_magazine_system_id();
+
+    for (
+        ship_config,
+        control_sources,
+        active_ratings,
+        physics,
+        weapons_target,
+        torpedo_sys_comp,
+        mut intents,
+    ) in ships.iter_mut()
+    {
+        // Clear last tick's intents unconditionally — a stale intent must
+        // never survive into a tick where the decision didn't run.
+        intents.0.clear();
+
+        let policy = control_sources.0.policy_for(&policy_sid);
+        if !policy.operate_ai {
+            continue;
+        }
+
+        // Claimed/unclaimed distinction, preserved verbatim from the old
+        // fused block: claimed stations gate on the active rating's
+        // ai_tuning; unclaimed stations fire unconditionally.
+        let auto_fire_enabled = match sessions.0.holder_for_station(&tactical_station) {
+            Some(_) => active_ratings.0.get(&tactical_station).is_some_and(|r| {
+                ship_config
+                    .0
+                    .has_ai_rule(&tactical_station, r, AI_RULE_TORPEDO_AUTO_FIRE)
+            }),
+            None => true,
+        };
+        if !auto_fire_enabled {
+            continue;
+        }
+
+        let Some(target_uuid) = weapons_target.0.clone() else {
+            continue;
+        };
+
+        // Look up live world position — WorldResource snapshot is stale for
+        // moving targets.
+        let target_xz = asteroid_q
+            .iter()
+            .find_map(|(u, t)| (u.0 == target_uuid).then_some((t.translation.x, t.translation.z)))
+            .or_else(|| {
+                other_ships_q.iter().find_map(|(u, t)| {
+                    (u.0 == target_uuid).then_some((t.translation.x, t.translation.z))
+                })
+            });
+        let Some((tx, tz)) = target_xz else {
+            continue;
+        };
+
+        let dx = tx - physics.x;
+        let dz = tz - physics.z;
+        let world_bearing = dx.atan2(-dz);
+        let bearing = world_bearing - physics.yaw;
+
+        // Prefer per-entity component; fall back to global resource for
+        // legacy test paths that only set up the Resource.
+        let torpedo_sys: &crate::torpedo::TorpedoSystem = match torpedo_sys_comp {
+            Some(c) => &c.0,
+            None => &torpedo_sys_res.0,
+        };
+        let tubes: Vec<crate::console_ai::TubeSummary> = torpedo_sys
+            .tubes
+            .iter()
+            .map(|tube| crate::console_ai::TubeSummary {
+                id: tube.id.clone(),
+                loaded: tube.is_loaded(),
+                in_arc: tube.is_in_arc(bearing),
+            })
+            .collect();
+        let magazine = torpedo_sys.torpedoes_remaining;
+
+        let input = crate::console_ai::TorpedoAiInput {
+            target_locked: true,
+            target_shields: 0,
+            tubes,
+            magazine,
+        };
+
+        let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
+        for tube_id in tubes_to_fire {
+            intents.0.push(crate::weapons_plugin::TorpedoCmd {
+                tube_id,
+                target_uuid: target_uuid.clone(),
+            });
+        }
+    }
+}
+
+/// Adapter: applies `TorpedoIntents` written by `ai_torpedo_auto_fire` to
+/// `TorpedoSystem::launch` — the same mutation primitive the old fused
+/// torpedo sub-block (formerly inline in `operate_tactical_ai`) called
+/// directly. Runs immediately after `ai_torpedo_auto_fire` in the same tick
+/// so a launched torpedo is visible to `tick_torpedo_system` /
+/// `weapons_update_broadcaster` this frame.
+///
+/// **Dual-write.** Mirrors `integrate_power_state`'s `Has<LocalShip>` +
+/// Resource-sync pattern: when the entity carries its own per-entity
+/// `TorpedoSystemResource` Component and is the `LocalShip`, also snapshot
+/// the updated Component into the global `TorpedoSystemResource` Resource
+/// (legacy Resource path for tests) after applying the intents. This matters
+/// because a disconnected player's Tactical station can flip to Backfill AI
+/// (AGENTS.md rule 5), so `ai_torpedo_auto_fire` / `integrate_torpedo_intents`
+/// can legitimately be the system driving the player's own ship's torpedoes.
+pub(crate) fn integrate_torpedo_intents(
+    mut ships: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &crate::ship_state::ShipPhysics,
+        &mut crate::weapons_plugin::TorpedoIntents,
+        Option<&mut crate::weapons_plugin::TorpedoSystemResource>,
+        Has<crate::server_app::LocalShip>,
+    )>,
+    mut torpedo_sys_res: ResMut<crate::weapons_plugin::TorpedoSystemResource>,
+    mut outbox: ResMut<crate::simulation::SimOutbox>,
+) {
+    for (ship_uuid, physics, mut intents, mut torpedo_sys_comp, is_local) in ships.iter_mut() {
+        if intents.0.is_empty() {
+            continue;
+        }
+        let source_uuid = Some(ship_uuid.0.clone());
+
+        {
+            // Prefer per-entity component; fall back to global resource for
+            // legacy test paths that only set up the Resource.
+            let torpedo_sys: &mut crate::torpedo::TorpedoSystem =
+                match torpedo_sys_comp.as_deref_mut() {
+                    Some(c) => &mut c.0,
+                    None => &mut torpedo_sys_res.0,
+                };
+
+            for cmd in intents.0.drain(..) {
+                let torpedo_uuid = uuid::Uuid::new_v4().to_string();
+                let tube_facing_rad = torpedo_sys
+                    .tube(cmd.tube_id.as_str())
+                    .map(|t| t.facing_deg.to_radians())
+                    .unwrap_or(0.0);
+                let launch_heading = physics.yaw + tube_facing_rad;
+                use crate::torpedo::LaunchResult;
+                let result = torpedo_sys.launch(
+                    cmd.tube_id.as_str(),
+                    torpedo_uuid.clone(),
+                    physics.x,
+                    physics.z,
+                    launch_heading,
+                    Some(cmd.target_uuid.clone()),
+                    source_uuid.clone(),
+                );
+                match result {
+                    LaunchResult::Launched {
+                        uuid: launched_uuid,
+                        ..
+                    } => {
+                        outbox.0.push((
+                            crate::lobby::Target::All,
+                            crate::messages::ServerMessage::TorpedoLaunched {
+                                uuid: launched_uuid,
+                                tube: cmd.tube_id,
+                                x: physics.x,
+                                z: physics.z,
+                                heading: launch_heading,
+                            },
+                        ));
+                    }
+                    LaunchResult::TubeNotLoaded
+                    | LaunchResult::NoTorpedoes
+                    | LaunchResult::UnknownTube => {}
+                }
+            }
+        }
+
+        // Dual-write: keep the Resource in sync with the LocalShip's
+        // per-entity Component (legacy Resource path for tests).
+        if is_local {
+            if let Some(c) = torpedo_sys_comp.as_deref() {
+                torpedo_sys_res.0 = c.0.clone();
             }
         }
     }

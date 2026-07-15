@@ -597,6 +597,9 @@ fn lod_ai_ships(
                     commands
                         .entity(entity)
                         .insert(crate::ship::power::ShipPowerAiState::default());
+                    commands
+                        .entity(entity)
+                        .insert(crate::weapons_plugin::TorpedoIntents::default());
                     commands.entity(entity).insert(timer_comp);
                 }
                 LodState::Low => {
@@ -613,6 +616,9 @@ fn lod_ai_ships(
                     commands
                         .entity(entity)
                         .remove::<crate::ship::power::ShipPowerAiState>();
+                    commands
+                        .entity(entity)
+                        .remove::<crate::weapons_plugin::TorpedoIntents>();
                     commands.entity(entity).insert(timer_comp);
                 }
             }
@@ -1240,6 +1246,7 @@ mod tests {
                 crate::console_ai_plugin::ShipFrequencyHintState::default(),
                 crate::ship::power::PowerReactorIntents::default(),
                 crate::ship::power::ShipPowerAiState::default(),
+                crate::weapons_plugin::TorpedoIntents::default(),
             ))
             .id()
     }

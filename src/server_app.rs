@@ -2098,6 +2098,7 @@ fn spawn_game_start_entities(
                 .insert(crate::console_ai_plugin::ShipFrequencyHintState::default())
                 .insert(crate::ship::power::PowerReactorIntents::default())
                 .insert(crate::ship::power::ShipPowerAiState::default())
+                .insert(crate::weapons_plugin::TorpedoIntents::default())
                 .insert(ShipSystemBlackboards::default())
                 .insert(ship_config)
                 .insert(initial_control_sources)

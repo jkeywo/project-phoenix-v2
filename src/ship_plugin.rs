@@ -1953,6 +1953,7 @@ mod tests {
             crate::console_ai_plugin::ShipFrequencyHintState::default(),
             crate::ship::power::PowerReactorIntents::default(),
             crate::ship::power::ShipPowerAiState::default(),
+            crate::weapons_plugin::TorpedoIntents::default(),
         ));
         app
     }
@@ -4641,6 +4642,7 @@ station = "helm"
             crate::console_ai_plugin::ShipFrequencyHintState::default(),
             crate::ship::power::PowerReactorIntents::default(),
             crate::ship::power::ShipPowerAiState::default(),
+            crate::weapons_plugin::TorpedoIntents::default(),
         ));
         app
     }

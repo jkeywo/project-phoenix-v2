@@ -85,7 +85,7 @@ pub struct TorpedoCmd {
 }
 
 /// Per-ship queue of pending torpedo-fire intents. Written by
-/// `ai_torpedo_auto_fire`, drained and applied by `integrate_torpedo_intents`
+/// `ai_torpedo_auto_fire`, drained and applied by `integrate_weapons_state`
 /// in the same tick.
 ///
 /// Present only while the ship carries `AiHighFidelity` — bundled alongside
@@ -94,6 +94,36 @@ pub struct TorpedoCmd {
 /// sites in `server_app.rs` / `ship_plugin.rs` / `ai/server.rs`).
 #[derive(Component, Default, Clone, Debug)]
 pub struct TorpedoIntents(pub Vec<TorpedoCmd>);
+
+/// A single phaser-fire command decided by [`ai_phaser_auto_fire`] (issue
+/// #698) for [`integrate_weapons_state`] to apply the same tick.
+///
+/// Carries everything the beam mutation needs, so the integrator never has to
+/// re-read `PhaserCombatConfigResource`: which bank fires, what it fires at,
+/// and how long the beam burns. `beam_duration_secs` is a TOML-authored value
+/// resolved by the decider (bank `beam_duration_secs`, falling back to
+/// `PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS`), not a hardcode.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhaserCmd {
+    pub bank: PhaserBank,
+    pub target_uuid: String,
+    pub beam_duration_secs: f32,
+}
+
+/// Per-ship queue of pending phaser-fire intents. Written by
+/// [`ai_phaser_auto_fire`], drained and applied by [`integrate_weapons_state`]
+/// in the same tick.
+///
+/// Unlike [`TorpedoIntents`], this component is **not** `AiHighFidelity`-scoped
+/// and is therefore not part of the LOD promote/demote bundle in
+/// `ai::server::lod_ai_ships`. `ai_phaser_auto_fire` runs for every ship with
+/// an [`ActiveBeam`] — low-LOD NPCs included (see that system's `# Gating`
+/// docs for why) — so the intent buffer has to exist for the same population.
+/// That is guaranteed structurally by `ActiveBeam`'s `#[require(PhaserIntents)]`
+/// rather than by enumerating spawn sites, which is what keeps ad-hoc test and
+/// legacy spawns from silently losing phaser auto-fire.
+#[derive(Component, Default, Clone, Debug)]
+pub struct PhaserIntents(pub Vec<PhaserCmd>);
 
 /// UUID of the last entity that attacked this ship. Written by the unified
 /// `tick_beams` in the Damage phase on the targeted ship's entity;
@@ -110,7 +140,15 @@ pub struct LastShipAttacker(pub Option<String>);
 ///
 /// Per-entity `Component` on every ship (player + NPC). PR-7 (issue #597)
 /// removed the dual `Resource` derive — every ship has its own beam state.
+///
+/// `#[require(PhaserIntents)]` (issue #698): beam activation moved out of
+/// `ai_phaser_auto_fire` into `integrate_weapons_state`, which reads the
+/// decision from [`PhaserIntents`]. Since phaser auto-fire is deliberately
+/// *not* `AiHighFidelity`-scoped, that buffer must exist wherever `ActiveBeam`
+/// does — including legacy/test spawns that predate the split. Requiring it
+/// here makes that structural instead of a checklist of spawn sites.
 #[derive(Component, Default, Clone, Debug)]
+#[require(PhaserIntents)]
 pub struct ActiveBeam {
     pub target_uuid: Option<String>,
     pub remaining_secs: f32,
@@ -351,7 +389,14 @@ impl Plugin for WeaponsPlugin {
                         .in_set(crate::sim_sets::SimSet::Input)
                         .before(ai_target_selection),
                     handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
-                    tick_phaser_auto_fire.in_set(crate::sim_sets::SimSet::Input),
+                    // Phaser auto-fire DECIDE half (issue #698). Stays in
+                    // `Input`, where the pre-split `tick_phaser_auto_fire` ran,
+                    // so it keeps reading pre-`sync_ship_position` `Transform`s
+                    // and pre-physics `ShipPhysics` — moving it to `Physics`
+                    // alongside `ai_torpedo_auto_fire` would leave it racing
+                    // `sync_ship_position` for target positions. Its apply half
+                    // is `integrate_weapons_state`, in `Physics` below.
+                    ai_phaser_auto_fire.in_set(crate::sim_sets::SimSet::Input),
                     tick_weapons_arc_request.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
@@ -388,7 +433,26 @@ impl Plugin for WeaponsPlugin {
                 (
                     tick_beams.in_set(crate::sim_sets::SimSet::Damage),
                     handle_blaster_hits.in_set(crate::sim_sets::SimSet::Damage),
-                    drain_power_for_active_beam.in_set(crate::sim_sets::SimSet::Physics),
+                    // Weapons AI APPLY half (issue #698): drains both
+                    // `PhaserIntents` (written in `Input`) and `TorpedoIntents`
+                    // (written in `Physics` by `ConsoleAiPlugin`). Registered
+                    // here rather than in `ConsoleAiPlugin` because the phaser
+                    // half must run for ships that never reach high-fidelity
+                    // AI — see `ai_phaser_auto_fire`'s gating docs. The
+                    // `.after` is a no-op when `ConsoleAiPlugin` is absent
+                    // (test apps), which is exactly what we want: phasers still
+                    // integrate, torpedoes have no producer.
+                    integrate_weapons_state
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(crate::console_ai_plugin::ai_torpedo_auto_fire),
+                    // Beam activation moved from `Input` to `Physics` with the
+                    // #698 split, so this drain — which used to be guaranteed
+                    // to see a beam started one whole phase earlier — needs an
+                    // explicit edge to keep draining power on the beam's first
+                    // tick rather than one tick late.
+                    drain_power_for_active_beam
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(integrate_weapons_state),
                     tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
                     // Magazine consumer runs in Physics — reads channel-2 claims
                     // that handle_load_tube emitted in Input this tick, so the
@@ -561,7 +625,7 @@ fn any_bank_accepts_human_input(
 /// True when ANY phaser bank on the ship has an operable fine system whose
 /// policy has `operate_ai == true`.
 ///
-/// Used as the ship-level early-skip gate in `tick_phaser_auto_fire` after
+/// Used as the ship-level early-skip gate in `ai_phaser_auto_fire` after
 /// issue #512 deleted the coarse `[[system]] id = "tactical"` block. Before
 /// the fix, the auto-fire loop gated on `policy_for(&tactical_system_id())
 /// .operate_ai` — that always returned the default `Human` policy for any
@@ -906,25 +970,41 @@ fn handle_fire_phaser(
     }
 }
 
-/// Fires an in-arc phaser bank at each ship's locked target every tick.
+/// Decide which in-arc phaser bank each ship should fire at its locked target
+/// this tick, and record it in [`PhaserIntents`] (issue #698).
+///
+/// The decide half of the phaser auto-fire pair split out of the pre-#698
+/// `tick_phaser_auto_fire`, which fused this decision with the `ActiveBeam`
+/// mutation. [`integrate_weapons_state`] now owns the mutation; this system is
+/// read-only apart from its own intent buffer, mirroring the shape every other
+/// console AI already uses (`ai_shield_focus` → `integrate_shield_state`,
+/// `ai_torpedo_auto_fire` → `integrate_weapons_state`).
 ///
 /// Iterates every ship (`With<Ship>`) — player + NPC — and auto-fires when
 /// either:
-/// - the ship's Tactical system is currently AI-controlled
-///   (`ShipSystemControlSources.policy_for(&tactical_system_id()).operate_ai`),
-///   which is `true` for NPCs (Ai by default) and for the player ship on
-///   Backfill / explicit Ai rating; or
+/// - at least one phaser bank on the ship has `operate_ai == true` on its own
+///   fine-system policy ([`any_bank_operates_ai`]), which holds for NPCs (Ai by
+///   default) and for the player ship on Backfill / explicit Ai rating; or
 /// - the player toggled [`CurrentPhaserMode`] to `Auto` (weapons-console-only
 ///   knob that is meaningless for NPC ships, which have no phaser mode).
 ///
+/// # Gating
+/// Deliberately **not** filtered on `AiHighFidelity`, unlike
+/// `ai_torpedo_auto_fire`. Adding that filter while extracting this system
+/// would silently stop every low-LOD NPC firing phasers — a gameplay change,
+/// not a refactor. It would also be wrong on its own terms: the
+/// `CurrentPhaserMode::Auto` leg is a *human* console toggle on the player's
+/// ship, and phaser fire is the primary damage source low-LOD NPCs contribute
+/// to a fight. `phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity`
+/// pins this.
+///
 /// Target selection: reads the ship's [`WeaponsTarget`] and falls back to
-/// [`ShipAiMemory::target`] when empty (NPCs write targets into `AiMemory`,
-/// not `WeaponsTarget`). Arc/range checks and beam activation mirror
+/// [`ShipAiMemory::target`] when empty (low-LOD NPCs write targets into
+/// `AiMemory`, not `WeaponsTarget`). Arc/range checks mirror
 /// [`handle_fire_phaser`], but use each bank's `auto_arc_deg` (looser cone
-/// than fire_arc_deg) so AI is less trigger-happy on peripheral targets.
+/// than `fire_arc_deg`) so AI is less trigger-happy on peripheral targets.
 #[allow(clippy::too_many_arguments)]
-fn tick_phaser_auto_fire(
-    mut commands: Commands,
+pub(crate) fn ai_phaser_auto_fire(
     phaser_mode: Res<CurrentPhaserMode>,
     // Every ship with weapons state. `ShipAiMemory` is `Option` because
     // pre-`AiPlugin` test apps may spawn ships without it. `ShipConfigComponent`
@@ -933,13 +1013,13 @@ fn tick_phaser_auto_fire(
     // gate (preserving pre-#512 behaviour).
     mut ship_q: Query<
         (
-            Entity,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &ShipPhysics,
             &WeaponsTarget,
-            &mut ActiveBeam,
+            &ActiveBeam,
+            &mut PhaserIntents,
             &PhaserCooldown,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
@@ -953,19 +1033,24 @@ fn tick_phaser_auto_fire(
     use crate::entity_config::PhaserCombatConfig;
 
     for (
-        ship_entity,
         is_local,
         control_sources,
         ship_config_opt,
         physics,
         weapons_target,
-        mut beam,
+        beam,
+        mut intents,
         cooldown,
         combat_config_opt,
         modifiers_opt,
         ai_memory_opt,
     ) in ship_q.iter_mut()
     {
+        // Clear last tick's intent unconditionally — a stale intent must never
+        // survive into a tick where the decision didn't run. Mirrors
+        // `ai_torpedo_auto_fire`.
+        intents.0.clear();
+
         // Gate: auto-fire only when at least one phaser bank on this ship is
         // AI-driven (per its own fine-system policy — issue #512), OR the
         // player globally toggled phaser mode to Auto (LocalShip-only signal
@@ -1075,16 +1160,171 @@ fn tick_phaser_auto_fire(
             })
             .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
 
-        beam.target_uuid = Some(target_uuid.clone());
-        beam.remaining_secs = beam_duration_secs;
-        beam.damage_accumulator = 0.0;
-        beam.bank = Some(bank_id.clone());
-
-        commands.trigger(BeamStartedEvent {
+        intents.0.push(PhaserCmd {
             bank: bank_id,
             target_uuid,
-            source_entity: ship_entity,
+            beam_duration_secs,
         });
+    }
+}
+
+/// Adapter: applies the weapons AI's decisions to authoritative weapons state
+/// (issue #698).
+///
+/// Reads [`PhaserIntents`] (written by [`ai_phaser_auto_fire`], `SimSet::Input`)
+/// and [`TorpedoIntents`] (written by `console_ai::server::ai_torpedo_auto_fire`,
+/// `SimSet::Physics`) and drives the two weapons state machines: `ActiveBeam`
+/// activation + `BeamStartedEvent`, and `TorpedoSystem::launch` +
+/// `TorpedoLaunched`. It is the single owner of both mutations — no other
+/// system drains either buffer.
+///
+/// This absorbs the former `console_ai::server::integrate_torpedo_intents`
+/// wholesale rather than sitting alongside it: two systems both draining
+/// `TorpedoIntents` would race, and the AC's "reads both" only means anything
+/// if one system owns the drain.
+///
+/// # Scheduling
+/// Runs in `SimSet::Physics`, ordered `.after(ai_torpedo_auto_fire)` — the
+/// later of its two producers, and the constraint that forces it out of
+/// `Input` where `tick_phaser_auto_fire` used to apply beams. That move is
+/// invisible to every `ActiveBeam` reader: `drain_power_for_active_beam` is
+/// explicitly ordered `.after` this system (see `WeaponsPlugin::build`), `pfx`
+/// runs `.after(SimSet::Physics)` wholesale, and `tick_beams` /
+/// `weapons_update_broadcaster` are in `Damage` / `Publish`. The decider
+/// deliberately stays in `Input` so it keeps reading pre-physics `Transform`s
+/// exactly as the fused system did.
+///
+/// **Torpedo dual-write.** Mirrors `integrate_power_state`'s `Has<LocalShip>` +
+/// Resource-sync pattern: when the entity carries its own per-entity
+/// `TorpedoSystemResource` Component and is the `LocalShip`, also snapshot the
+/// updated Component into the global `TorpedoSystemResource` Resource (legacy
+/// Resource path for tests). This matters because a disconnected player's
+/// Tactical station can flip to Backfill AI (AGENTS.md rule 5), so the AI path
+/// can legitimately be what drives the player's own ship's torpedoes.
+///
+/// Every component is `Option` on purpose. `ActiveBeam`/`PhaserIntents` are
+/// present on every ship but `TorpedoIntents` is `AiHighFidelity`-scoped, and
+/// legacy spawns exist without `EntityUuid`/`ShipPhysics`; requiring any of
+/// them would silently drop ships the pre-#698 systems served.
+pub(crate) fn integrate_weapons_state(
+    mut commands: Commands,
+    mut ships: Query<
+        (
+            Entity,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&ShipPhysics>,
+            Option<&mut ActiveBeam>,
+            Option<&mut PhaserIntents>,
+            Option<&mut TorpedoIntents>,
+            Option<&mut TorpedoSystemResource>,
+            Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
+    mut outbox: ResMut<crate::simulation::SimOutbox>,
+) {
+    for (
+        ship_entity,
+        ship_uuid,
+        physics,
+        beam,
+        phaser_intents,
+        torpedo_intents,
+        mut torpedo_sys_comp,
+        is_local,
+    ) in ships.iter_mut()
+    {
+        // ── Phasers ──────────────────────────────────────────────────────────
+        if let (Some(mut beam), Some(mut intents)) = (beam, phaser_intents) {
+            for cmd in intents.0.drain(..) {
+                // The decider only proposes a bank while the beam is idle, but
+                // `handle_fire_phaser` (SimSet::Input) can start a beam after
+                // the decision was taken. Never stomp a live beam.
+                if beam.target_uuid.is_some() {
+                    continue;
+                }
+                beam.target_uuid = Some(cmd.target_uuid.clone());
+                beam.remaining_secs = cmd.beam_duration_secs;
+                beam.damage_accumulator = 0.0;
+                beam.bank = Some(cmd.bank.clone());
+
+                commands.trigger(BeamStartedEvent {
+                    bank: cmd.bank,
+                    target_uuid: cmd.target_uuid,
+                    source_entity: ship_entity,
+                });
+            }
+        }
+
+        // ── Torpedoes ────────────────────────────────────────────────────────
+        let Some(mut intents) = torpedo_intents else {
+            continue;
+        };
+        if intents.0.is_empty() {
+            continue;
+        }
+        let Some(physics) = physics else {
+            continue;
+        };
+        let source_uuid = ship_uuid.map(|u| u.0.clone());
+
+        {
+            // Prefer per-entity component; fall back to global resource for
+            // legacy test paths that only set up the Resource.
+            let torpedo_sys: &mut crate::torpedo::TorpedoSystem =
+                match torpedo_sys_comp.as_deref_mut() {
+                    Some(c) => &mut c.0,
+                    None => &mut torpedo_sys_res.0,
+                };
+
+            for cmd in intents.0.drain(..) {
+                let torpedo_uuid = uuid::Uuid::new_v4().to_string();
+                let tube_facing_rad = torpedo_sys
+                    .tube(cmd.tube_id.as_str())
+                    .map(|t| t.facing_deg.to_radians())
+                    .unwrap_or(0.0);
+                let launch_heading = physics.yaw + tube_facing_rad;
+                use crate::torpedo::LaunchResult;
+                let result = torpedo_sys.launch(
+                    cmd.tube_id.as_str(),
+                    torpedo_uuid.clone(),
+                    physics.x,
+                    physics.z,
+                    launch_heading,
+                    Some(cmd.target_uuid.clone()),
+                    source_uuid.clone(),
+                );
+                match result {
+                    LaunchResult::Launched {
+                        uuid: launched_uuid,
+                        ..
+                    } => {
+                        outbox.0.push((
+                            crate::lobby::Target::All,
+                            crate::messages::ServerMessage::TorpedoLaunched {
+                                uuid: launched_uuid,
+                                tube: cmd.tube_id,
+                                x: physics.x,
+                                z: physics.z,
+                                heading: launch_heading,
+                            },
+                        ));
+                    }
+                    LaunchResult::TubeNotLoaded
+                    | LaunchResult::NoTorpedoes
+                    | LaunchResult::UnknownTube => {}
+                }
+            }
+        }
+
+        // Dual-write: keep the Resource in sync with the LocalShip's
+        // per-entity Component (legacy Resource path for tests).
+        if is_local {
+            if let Some(c) = torpedo_sys_comp.as_deref() {
+                torpedo_sys_res.0 = c.0.clone();
+            }
+        }
     }
 }
 
@@ -3455,8 +3695,12 @@ fn tick_torpedo_system(
 // stays in `Input` rather than moving to the `Physics` + `AiTickLabel` set the
 // other console AI pairs use.
 //
-// Neither system fires weapons: that stays with `tick_phaser_auto_fire` /
-// `ai_torpedo_auto_fire` until slices #698 / #700.
+// Neither system fires weapons. Issue #698 (slice 2/3) split firing itself the
+// same way: `ai_phaser_auto_fire` / `ai_torpedo_auto_fire` decide and write
+// `PhaserIntents` / `TorpedoIntents`; `integrate_weapons_state` is the sole
+// system that mutates `ActiveBeam` and `TorpedoSystem` from those intents.
+// `operate_tactical_ai` is now pure orchestration glue: gate, then apply
+// `locked_target` to `WeaponsTarget`.
 
 /// Read the Tactical AI's target decision out of a ship's blackboards.
 ///
@@ -3647,7 +3891,7 @@ fn ai_target_selection(
         // Stale-target guard: if the selection points at an entity that no
         // longer exists in the world, drop it. This prevents AI from sitting
         // idle after its last Destroy-objective target is killed — without this
-        // guard, tick_phaser_auto_fire and the torpedo path both skip on the
+        // guard, ai_phaser_auto_fire and the torpedo path both skip on the
         // dead entity UUID and never acquire a fresh target.
         // Also drops targets beyond radar range (issue #680).
         if let Some(current) = selected.clone() {
@@ -3665,7 +3909,7 @@ fn ai_target_selection(
 /// `WeaponsTarget` component (issue #697).
 ///
 /// `WeaponsTarget` is the single source of truth every consumer reads
-/// (`handle_fire_phaser`, `tick_phaser_auto_fire`, `ai_torpedo_auto_fire`,
+/// (`handle_fire_phaser`, `ai_phaser_auto_fire`, `ai_torpedo_auto_fire`,
 /// `tick_npc_auto_match_frequency`, …). This system is the only path by which
 /// the AI's `locked_target` intent reaches it, which is what keeps the two
 /// surfaces from disagreeing.
@@ -3712,17 +3956,6 @@ fn operate_tactical_ai(
         if weapons_target.0 != selected {
             weapons_target.0 = selected;
         }
-
-        // ── PHASER AUTO-FIRE (future: split to phaser_bank system) ───────
-        //
-        // tick_phaser_auto_fire handles auto-mode phasers for both human and AI
-        // (phaser mode is a ship-level setting, not control-source specific).
-        // No additional AI logic needed at the coarse system level.
-
-        // ── FREQUENCY COORDINATION (future: split to channel-3 coordination) ─
-        //
-        // Science AI emits FrequencyHint when its preset grants auto_hint.
-        // The Tactical AI has no corresponding action at the coarse level.
     }
 }
 
@@ -7809,7 +8042,7 @@ station = "tactical"
         }
 
         // Push a synthetic FirePhaser message for the NPC's ai: token.
-        // In production this would be emitted by operate_tactical_ai/tick_phaser_auto_fire,
+        // In production this would be emitted by operate_tactical_ai/ai_phaser_auto_fire,
         // but for this integration test we inject it directly.
         let ai_token = format!("ai:{}", npc_uuid_str);
         push(
@@ -7901,7 +8134,8 @@ station = "tactical"
         );
     }
 
-    /// Regression test for the unified `tick_phaser_auto_fire`.
+    /// Regression test for the unified phaser auto-fire path (post-#698:
+    /// `ai_phaser_auto_fire` -> `integrate_weapons_state`).
     ///
     /// Before unification, `tick_phaser_auto_fire` iterated only `LocalShip`,
     /// so NPCs had to route through the (now-deleted) `handle_npc_beam_fire`
@@ -7909,7 +8143,7 @@ station = "tactical"
     /// the same system iterates every ship whose Tactical system is
     /// AI-controlled, activating an [`ActiveBeam`] directly.
     #[test]
-    fn tick_phaser_auto_fire_activates_ai_controlled_npc_beam() {
+    fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
         use crate::ai_plugin::AiTokenRegistry;
         use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
@@ -7974,12 +8208,202 @@ station = "tactical"
             .expect("NPC entity must have ActiveBeam component");
         assert!(
             beam.target_uuid.is_some(),
-            "tick_phaser_auto_fire must activate the NPC's ActiveBeam when Tactical is AI-controlled"
+            "the ai_phaser_auto_fire -> integrate_weapons_state pair must activate the \
+             NPC's ActiveBeam when Tactical is AI-controlled"
         );
         assert_eq!(
             beam.bank.as_deref(),
             Some("fore"),
             "NPC should fire the in-arc bank selected from its own PhaserCombatConfigResource"
+        );
+    }
+
+    // ── Phaser decide/integrate split (issue #698) ─────────────────────────
+
+    /// Spawn an AI-controlled NPC with one 360° bank, a locked target, and a
+    /// live entity to shoot at directly ahead. Returns the NPC's entity.
+    ///
+    /// Deliberately does **not** insert `AiHighFidelity`: the population this
+    /// helper builds is a low-LOD NPC, which is precisely the case
+    /// `ai_phaser_auto_fire`'s missing `With<AiHighFidelity>` filter exists to
+    /// serve. Tests that need high fidelity add the marker themselves.
+    fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Entity {
+        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+        let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        sources.set(
+            crate::system_registry::tactical_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid(npc_uuid.to_string()),
+                crate::ship_plugin::ShipSystemControlSources(sources),
+                WeaponsTarget(Some(target_uuid.to_string())),
+                ActiveBeam::default(),
+                PhaserCooldown::default(),
+                ShipPhysics::default(),
+                PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                    banks: vec![crate::entity_config::PhaserBankConfig {
+                        id: "fore".into(),
+                        facing_deg: 0.0,
+                        fire_arc_deg: 360.0,
+                        auto_arc_deg: 360.0,
+                        beam_range: 50.0,
+                        beam_damage_per_sec: 5.0,
+                        beam_duration_secs: 3.0,
+                        cooldown_secs: 6.0,
+                        beam_color: vec![],
+                        shield_pierce: None,
+                        marker: None,
+                    }],
+                }),
+                Transform::default(),
+            ))
+            .id();
+
+        app.world_mut().spawn((
+            EntityUuid(target_uuid.to_string()),
+            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                50.0,
+            )])),
+            Transform::from_xyz(0.0, 0.0, -20.0),
+        ));
+        npc
+    }
+
+    /// `ai_phaser_auto_fire` is a *decider*: it must publish its choice to
+    /// `PhaserIntents` and leave `ActiveBeam` alone. Running it in isolation
+    /// (without `integrate_weapons_state`) is what proves the two halves are
+    /// genuinely separated rather than merely renamed.
+    #[test]
+    fn ai_phaser_auto_fire_writes_intent_without_touching_the_beam() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = test_app();
+        let npc = spawn_ai_phaser_npc(
+            &mut app,
+            "bb000000-0000-0000-0000-000000000001",
+            "bb000000-0000-0000-0000-000000000002",
+        );
+
+        app.world_mut()
+            .run_system_once(ai_phaser_auto_fire)
+            .expect("ai_phaser_auto_fire should run");
+
+        let intents = app
+            .world()
+            .get::<PhaserIntents>(npc)
+            .expect("ActiveBeam requires PhaserIntents, so every ship with a beam has one");
+        assert_eq!(
+            intents.0,
+            vec![PhaserCmd {
+                bank: "fore".into(),
+                target_uuid: "bb000000-0000-0000-0000-000000000002".into(),
+                // The bank's TOML-authored beam_duration_secs, resolved by the
+                // decider so the integrator never re-reads the config.
+                beam_duration_secs: 3.0,
+            }],
+            "the decider must publish the chosen bank, target and beam duration"
+        );
+        assert!(
+            app.world()
+                .get::<ActiveBeam>(npc)
+                .unwrap()
+                .target_uuid
+                .is_none(),
+            "ai_phaser_auto_fire must not mutate ActiveBeam — that is \
+             integrate_weapons_state's job"
+        );
+    }
+
+    /// `integrate_weapons_state` is the *adapter*: given an intent and nothing
+    /// else, it must advance the beam state machine. Written by hand rather
+    /// than by the decider so the adapter is pinned independently of it.
+    #[test]
+    fn integrate_weapons_state_advances_beam_from_phaser_intent() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = test_app();
+        let npc = spawn_ai_phaser_npc(
+            &mut app,
+            "bb000000-0000-0000-0000-000000000003",
+            "bb000000-0000-0000-0000-000000000004",
+        );
+
+        app.world_mut()
+            .entity_mut(npc)
+            .insert(PhaserIntents(vec![PhaserCmd {
+                bank: "fore".into(),
+                target_uuid: "bb000000-0000-0000-0000-000000000004".into(),
+                beam_duration_secs: 4.5,
+            }]));
+
+        app.world_mut()
+            .run_system_once(integrate_weapons_state)
+            .expect("integrate_weapons_state should run");
+
+        let beam = app.world().get::<ActiveBeam>(npc).unwrap();
+        assert_eq!(
+            beam.target_uuid.as_deref(),
+            Some("bb000000-0000-0000-0000-000000000004"),
+            "the adapter must arm the beam at the intent's target"
+        );
+        assert_eq!(beam.bank.as_deref(), Some("fore"));
+        assert_eq!(
+            beam.remaining_secs, 4.5,
+            "the adapter must burn for the duration the decider resolved, not a \
+             duration of its own"
+        );
+        assert!(
+            app.world().get::<PhaserIntents>(npc).unwrap().0.is_empty(),
+            "the adapter must drain the buffer so a stale intent cannot re-fire \
+             the beam next tick"
+        );
+    }
+
+    /// Pins the deliberate asymmetry between `ai_phaser_auto_fire` (no
+    /// `AiHighFidelity` filter) and `ai_torpedo_auto_fire` (filtered).
+    ///
+    /// Extracting phaser fire from `tick_phaser_auto_fire` into the same
+    /// decide/integrate shape `ai_torpedo_auto_fire` uses makes it tempting to
+    /// inherit its `With<AiHighFidelity>` filter too. That would silently
+    /// disarm every low-LOD NPC — a gameplay change wearing a refactor's
+    /// clothes. Phasers are the main damage low-LOD NPCs contribute, and the
+    /// `CurrentPhaserMode::Auto` leg of this system isn't AI at all, so the
+    /// filter would be wrong on its own terms as well.
+    ///
+    /// If a future slice does decide to gate phasers on LOD, `PhaserIntents`
+    /// must move into `lod_ai_ships`' promote/demote bundle at the same time —
+    /// see `ActiveBeam`'s `#[require(PhaserIntents)]`.
+    #[test]
+    fn ai_phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity() {
+        let mut app = test_app();
+        let npc = spawn_ai_phaser_npc(
+            &mut app,
+            "bb000000-0000-0000-0000-000000000005",
+            "bb000000-0000-0000-0000-000000000006",
+        );
+        assert!(
+            app.world()
+                .get::<crate::ai_plugin::AiHighFidelity>(npc)
+                .is_none(),
+            "precondition: this NPC is low-LOD"
+        );
+
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<ActiveBeam>(npc)
+                .unwrap()
+                .target_uuid
+                .is_some(),
+            "low-LOD NPCs must keep firing phasers — ai_phaser_auto_fire is \
+             deliberately NOT gated on AiHighFidelity"
         );
     }
 
@@ -9013,25 +9437,23 @@ station = "tactical"
         );
     }
 
-    /// Builds on `test_app()` (LocalShip + `WeaponsPlugin` + `LobbyPlugin`)
-    /// by wiring in `ai_torpedo_auto_fire` / `integrate_torpedo_intents`
-    /// (issue #694) and giving the LocalShip the two components those
-    /// systems require: `AiHighFidelity` and `TorpedoIntents`. `test_app()`
-    /// itself stays unchanged (it's shared by ~200 unrelated tests in this
-    /// module) — this is a dedicated extension, mirroring how
-    /// `combined_test_app()` layers `AiPlugin` on top of `test_app()` for
-    /// its own end-to-end tests.
+    /// Builds on `test_app()` (LocalShip + `WeaponsPlugin` + `LobbyPlugin`) by
+    /// wiring in `ai_torpedo_auto_fire` (issue #694) and giving the LocalShip
+    /// the two components it requires: `AiHighFidelity` and `TorpedoIntents`.
+    /// `test_app()` itself stays unchanged (it's shared by ~200 unrelated tests
+    /// in this module) — this is a dedicated extension, mirroring how
+    /// `combined_test_app()` layers `AiPlugin` on top of `test_app()` for its
+    /// own end-to-end tests.
+    ///
+    /// Only the *decide* half needs adding: since issue #698 the apply half is
+    /// `integrate_weapons_state`, which `WeaponsPlugin` already registers with
+    /// its `.after(ai_torpedo_auto_fire)` edge — and that edge starts binding
+    /// the moment this helper registers the decider.
     fn torpedo_ai_test_app() -> App {
         let mut app = test_app();
         app.add_systems(
             Update,
-            (
-                crate::console_ai_plugin::ai_torpedo_auto_fire
-                    .in_set(crate::sim_sets::SimSet::Physics),
-                crate::console_ai_plugin::integrate_torpedo_intents
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(crate::console_ai_plugin::ai_torpedo_auto_fire),
-            ),
+            crate::console_ai_plugin::ai_torpedo_auto_fire.in_set(crate::sim_sets::SimSet::Physics),
         );
         let ship = {
             let mut q = app
@@ -9069,6 +9491,156 @@ station = "tactical"
             "ai_torpedo_auto_fire should fire TorpedoLaunched when controlling an unclaimed \
              Tactical station"
         );
+    }
+
+    /// `ai_torpedo_auto_fire` is a *decider*: it must publish to
+    /// `TorpedoIntents` and leave the `TorpedoSystem` alone. Mirrors
+    /// `ai_phaser_auto_fire_writes_intent_without_touching_the_beam`.
+    #[test]
+    fn ai_torpedo_auto_fire_writes_intent_without_launching() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = torpedo_ai_test_app();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        set_weapons_target(&mut app, Some("target-uuid".into()));
+        load_tube_now(&mut app, "fore_port");
+        spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+
+        app.world_mut()
+            .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
+            .expect("ai_torpedo_auto_fire should run");
+
+        let ship = local_ship(&mut app);
+        let intents = app
+            .world()
+            .get::<TorpedoIntents>(ship)
+            .expect("torpedo_ai_test_app inserts TorpedoIntents");
+        assert_eq!(
+            intents.0,
+            vec![TorpedoCmd {
+                tube_id: "fore_port".into(),
+                target_uuid: "target-uuid".into(),
+            }],
+            "the decider must publish the loaded, in-arc tube and the locked target"
+        );
+        assert!(
+            app.world()
+                .resource::<SimOutbox>()
+                .0
+                .iter()
+                .all(|(_, m)| !matches!(m, ServerMessage::TorpedoLaunched { .. })),
+            "ai_torpedo_auto_fire must not launch — that is integrate_weapons_state's job"
+        );
+    }
+
+    /// `integrate_weapons_state` drains `TorpedoIntents` as well as
+    /// `PhaserIntents` (issue #698 folded the former
+    /// `integrate_torpedo_intents` into it). Pins the torpedo half of the
+    /// adapter from a hand-written intent, independently of the decider.
+    #[test]
+    fn integrate_weapons_state_launches_from_torpedo_intent() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = torpedo_ai_test_app();
+        load_tube_now(&mut app, "fore_port");
+        let ship = local_ship(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(TorpedoIntents(vec![TorpedoCmd {
+                tube_id: "fore_port".into(),
+                target_uuid: "target-uuid".into(),
+            }]));
+
+        app.world_mut()
+            .run_system_once(integrate_weapons_state)
+            .expect("integrate_weapons_state should run");
+
+        assert!(
+            app.world()
+                .resource::<SimOutbox>()
+                .0
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::TorpedoLaunched { .. })),
+            "the adapter must advance the torpedo state machine from the intent"
+        );
+        assert!(
+            app.world()
+                .get::<TorpedoIntents>(ship)
+                .unwrap()
+                .0
+                .is_empty(),
+            "the adapter must drain the buffer so a stale intent cannot re-launch"
+        );
+    }
+
+    /// Issue #698 promotion: `ai_torpedo_auto_fire` used to hardcode
+    /// `TorpedoAiInput { target_shields: 0 }`, which made `auto_fire_torpedo`'s
+    /// "shields must be down" condition unreachable — the AI fired torpedoes
+    /// straight into a fully-shielded target. It now reads the target's real
+    /// `ShipShields`, so the pure function's documented doctrine (phasers strip
+    /// shields, torpedoes finish the hull) actually holds.
+    #[test]
+    fn ai_torpedo_auto_fire_holds_fire_while_target_shields_are_up() {
+        let mut app = torpedo_ai_test_app();
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        set_weapons_target(&mut app, Some("target-uuid".into()));
+        load_tube_now(&mut app, "fore_port");
+
+        // A ship target dead ahead, shields up.
+        let target = spawn_shielded_target(&mut app, "target-uuid", 0.0, -30.0);
+
+        let out = tick(&mut app);
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            "torpedoes must hold while the target's shields are still up"
+        );
+
+        // Collapse every facing — now the shot is on.
+        {
+            let mut shields = app
+                .world_mut()
+                .get_mut::<crate::ship::shields::ShipShields>(target)
+                .unwrap();
+            for facing in shields.0.facings.iter_mut() {
+                facing.hp = 0;
+            }
+        }
+        load_tube_now(&mut app, "fore_port");
+
+        let out = tick(&mut app);
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            "torpedoes must fire once the target's shields are down"
+        );
+    }
+
+    fn local_ship(app: &mut App) -> Entity {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+        q.single(app.world())
+            .expect("test_app must spawn a LocalShip")
+    }
+
+    /// A ship-like entity carrying `ShipShields` at full HP.
+    fn spawn_shielded_target(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
+        let shields = crate::shield::ShieldSystem::new(&crate::shield::ShieldConfig::default());
+        assert!(
+            shields.facings.iter().any(|f| f.hp > 0),
+            "precondition: the default shield config must start with HP up"
+        );
+        app.world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid(uuid.into()),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
+                    (crate::messages::SystemId("captain".into()), 50.0),
+                ])),
+                crate::ship::shields::ShipShields(shields, 0.5),
+                Transform::from_xyz(x, 0.0, z),
+            ))
+            .id()
     }
 
     fn set_tactical_station_rating(app: &mut App, rating: &str) {
@@ -9687,13 +10259,13 @@ station = "tactical"
     // AI only on a fine phaser bank / torpedo tube and assert the
     // ship-level AI paths still activate.
 
-    /// Finding 1 regression: `tick_phaser_auto_fire` used to gate its
+    /// Finding 1 regression: the phaser auto-fire path used to gate its
     /// early skip on the coarse `tactical` policy. Post-fix, it uses
     /// `any_bank_operates_ai` which iterates the ship config's `phaser_bank`
     /// fine systems. This test seeds AI on ONE fine bank on an NPC — no
     /// coarse tactical touching — and asserts a beam still activates.
     #[test]
-    fn tick_phaser_auto_fire_activates_when_any_bank_operates_ai() {
+    fn ai_phaser_auto_fire_activates_when_any_bank_operates_ai() {
         use crate::ai_plugin::AiTokenRegistry;
         use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
@@ -9778,7 +10350,7 @@ ai_only = true
             .expect("NPC entity must have ActiveBeam component");
         assert!(
             beam.target_uuid.is_some(),
-            "tick_phaser_auto_fire must activate the beam when ANY phaser bank fine \
+            "ai_phaser_auto_fire must activate the beam when ANY phaser bank fine \
              system has operate_ai=true, even without the coarse tactical SystemId"
         );
         assert_eq!(

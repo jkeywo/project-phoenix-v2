@@ -40,7 +40,7 @@ entities:
       title: Tactical AI Weapon Operator
       summary: Uses scored Destroy objectives and fine-system availability to select and track targets, and issue arc-bearing coordination when a usable family lacks arc; firing decisions for individual weapon families live in separate decide/apply AI systems that read the resulting target.
       rationale:
-        - "Issue #694 removed the torpedo-firing block that used to run inline inside this operator (operate_tactical_ai). Torpedo auto-fire now lives in torpedo-auto-fire-ai (ai_torpedo_auto_fire + integrate_torpedo_intents in src/console_ai/server.rs). operate_tactical_ai keeps target selection, stale/out-of-range target clearing, and the Destroy-objective/last-attacker fallback; phaser auto-fire and Sensors-driven frequency coordination were already handled outside this operator before #694."
+        - "Issue #694 removed the torpedo-firing block that used to run inline inside this operator (operate_tactical_ai). Torpedo auto-fire now lives in torpedo-auto-fire-ai (ai_torpedo_auto_fire in src/console_ai/server.rs). Issue #697 then split target selection itself into ai_target_selection (decide, writes WeaponsBlackboard.locked_target) and operate_tactical_ai (apply, writes WeaponsTarget), and issue #698 split phaser firing the same way into phaser-auto-fire-ai. operate_tactical_ai is now orchestration glue only: gate on the tactical operate_ai policy, then apply locked_target to WeaponsTarget."
     architecture:
       kind: ai-controller
       authority: authoritative
@@ -51,7 +51,7 @@ entities:
     implementation:
       status: declared
       paths: [src/console/weapons/server.rs, src/ai/core.rs]
-      symbols: [operate_tactical_ai]
+      symbols: [ai_target_selection, operate_tactical_ai]
       tests: [cargo test]
 
   - component: torpedo-auto-fire-ai
@@ -61,9 +61,9 @@ entities:
       title: Torpedo Auto-Fire AI
       summary: Decide/apply AI pair that selects loaded, in-arc torpedo tubes to fire at the ship's locked weapons target and applies the launch via the same primitive the human torpedo-fire path uses.
       rationale:
-        - "Issue #694 (preliminary) replaced the old fused torpedo-firing block formerly inline in operate_tactical_ai. ai_torpedo_auto_fire decides which tubes to fire and writes TorpedoIntents; integrate_torpedo_intents applies them via TorpedoSystem::launch, dual-writing the legacy TorpedoSystemResource for the LocalShip the same way integrate_power_state does for power."
+        - "Issue #694 replaced the old fused torpedo-firing block formerly inline in operate_tactical_ai. ai_torpedo_auto_fire decides which tubes to fire and writes TorpedoIntents; issue #698 folded the former integrate_torpedo_intents into integrate_weapons_state (src/console/weapons/server.rs), the single adapter that drains both TorpedoIntents and PhaserIntents and applies them via TorpedoSystem::launch / ActiveBeam, dual-writing the legacy TorpedoSystemResource for the LocalShip the same way integrate_power_state does for power."
         - Gated on AiHighFidelity plus a dedicated torpedo_magazine_system_id() operate_ai policy, distinct from the coarse Tactical gate that governs target selection.
-        - "Preliminary: target_locked and target_shields inputs to the pure auto_fire_torpedo decision are hardcoded pending issue #697."
+        - "Issue #698 promoted this from preliminary to full: the target_locked and target_shields inputs to the pure auto_fire_torpedo decision were hardcoded to true/0, and now read real state — target_locked from the locked WeaponsTarget resolving to a live entity, target_shields from the sum of the target's online ShipShields facings. Targets without ShipShields (asteroids, debris) read 0 and stay torpedo-eligible."
     architecture:
       kind: ai-controller
       authority: authoritative
@@ -73,7 +73,29 @@ entities:
     implementation:
       status: declared
       paths: [src/console_ai/server.rs, src/console_ai/core.rs, src/console/weapons/server.rs]
-      symbols: [ai_torpedo_auto_fire, integrate_torpedo_intents, auto_fire_torpedo, TorpedoIntents]
+      symbols: [ai_torpedo_auto_fire, integrate_weapons_state, auto_fire_torpedo, TorpedoIntents]
+      tests: [cargo test]
+
+  - component: phaser-auto-fire-ai
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Phaser Auto-Fire AI
+      summary: Decide/apply AI pair that picks an off-cooldown, in-auto-arc phaser bank to fire at the ship's locked weapons target and applies the beam via the same ActiveBeam state the human fire path drives.
+      rationale:
+        - "Issue #698 split the former fused tick_phaser_auto_fire into ai_phaser_auto_fire (decide, SimSet::Input, writes PhaserIntents) and integrate_weapons_state (apply, SimSet::Physics, mutates ActiveBeam and triggers BeamStartedEvent). The decider stays in Input so it keeps reading pre-sync_ship_position Transforms exactly as the fused system did; drain_power_for_active_beam is explicitly ordered after the integrator so beam power still drains on the beam's first tick."
+        - "Gated on any_bank_operates_ai (per-bank phaser_bank_system_id() operate_ai policy, with a coarse tactical_system_id() fallback for ships declaring no fine banks), OR the LocalShip's CurrentPhaserMode::Auto toggle. Per-bank policy is re-checked when choosing which bank fires, so one offline bank does not disarm the others."
+        - "Deliberately NOT gated on AiHighFidelity, unlike ai_torpedo_auto_fire: low-LOD NPCs must keep firing phasers, and the CurrentPhaserMode::Auto leg is a human console toggle rather than AI at all. PhaserIntents is therefore not part of the lod_ai_ships promote/demote bundle; ActiveBeam's #[require(PhaserIntents)] guarantees it exists wherever a beam does."
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      reads: [weapons-target-state, system-control-source-state]
+      writes: [weapons-target-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/server.rs]
+      symbols: [ai_phaser_auto_fire, integrate_weapons_state, PhaserIntents, PhaserCmd]
       tests: [cargo test]
   - component: tactical-weapons-controls
     core:

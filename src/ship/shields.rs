@@ -83,6 +83,11 @@ pub struct DamageRecord {
 #[derive(Component, Default, Clone)]
 pub struct ShieldsDamageHistory {
     pub arcs: Vec<Vec<DamageRecord>>,
+    /// Last-observed HP per arc, updated every tick regardless of whether
+    /// damage occurred. Used as the damage-detection baseline instead of
+    /// the last recorded `DamageRecord.amount` (which is a delta, not an
+    /// HP value, and cannot be reused for that purpose).
+    pub last_hp: Vec<i32>,
 }
 
 impl ShieldsDamageHistory {
@@ -92,6 +97,29 @@ impl ShieldsDamageHistory {
     pub(crate) fn ensure_len(&mut self, n: usize) {
         if self.arcs.len() < n {
             self.arcs.resize(n, Vec::new());
+        }
+        if self.last_hp.len() < n {
+            // 0 is a safe placeholder: HP is never negative, so a
+            // freshly-grown slot can never register a spurious "damage"
+            // detection on the tick it's created — the real HP is written
+            // into it unconditionally at the end of that same tick's
+            // detection loop, before any future comparison happens.
+            self.last_hp.resize(n, 0);
+        }
+    }
+
+    /// Baseline HP for damage detection: the value observed last tick, or
+    /// the current HP if this arc has never been observed.
+    pub(crate) fn last_observed_hp(&self, facing_idx: usize, current_hp: i32) -> i32 {
+        self.last_hp.get(facing_idx).copied().unwrap_or(current_hp)
+    }
+
+    /// Records this tick's HP as the new baseline for the next tick's
+    /// damage-detection comparison. Must be called once per arc, per tick,
+    /// after `last_observed_hp` has been consulted.
+    pub(crate) fn observe_hp(&mut self, facing_idx: usize, current_hp: i32) {
+        if facing_idx < self.last_hp.len() {
+            self.last_hp[facing_idx] = current_hp;
         }
     }
 

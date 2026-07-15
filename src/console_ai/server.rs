@@ -209,15 +209,9 @@ fn ai_shield_focus(
         // Lazily resize damage history to match arc count.
         damage_history.ensure_len(facings.len());
 
-        // ── Detect damage: compare current HP vs last recorded ──────────────
+        // ── Detect damage: compare current HP vs last-observed HP ───────────
         for (idx, facing) in facings.iter().enumerate() {
-            // Use the last record's HP as previous, or current HP if no records.
-            let prev_hp = damage_history
-                .arcs
-                .get(idx)
-                .and_then(|records| records.last())
-                .map(|r| r.amount)
-                .unwrap_or(facing.hp);
+            let prev_hp = damage_history.last_observed_hp(idx, facing.hp);
 
             // Detect a decrease in HP (damage taken) while the arc was online.
             // If the arc went offline the HP dropped to 0 but offline_remaining
@@ -227,6 +221,7 @@ fn ai_shield_focus(
                 let delta = prev_hp - facing.hp;
                 damage_history.record_damage(idx, current_time, delta);
             }
+            damage_history.observe_hp(idx, facing.hp);
         }
 
         // Prune records outside the damage window.
@@ -988,6 +983,55 @@ mod tests {
             Some(0),
             "shield focus should follow the facing that took the attacker's damage \
              (ai_shield_focus decided, integrate_shield_state applied it via ShieldArcIntents)"
+        );
+    }
+
+    #[test]
+    fn ai_shield_focus_detects_damage_concentration_without_health_imbalance() {
+        // Regression test for a bug where damage-concentration detection was
+        // dead code: `prev_hp` was derived from the last DamageRecord's
+        // `amount` (a delta, not an HP value) instead of a real per-arc HP
+        // baseline, so `facing.hp < prev_hp` could never be true on an arc's
+        // first-ever hit — and since a record could therefore never be
+        // created, it could never be true on any later hit either.
+        //
+        // This scenario deliberately keeps health imbalance below its
+        // trigger threshold (facing 1 ends at 60/100 — normalized 0.6, not
+        // below 0.5 * 1.0) so ONLY the damage-concentration branch can
+        // produce a Focus decision. With the bug, this test fails (no
+        // focus); with the fix, one recorded hit is enough.
+        let mut app = shield_test_app();
+        let e = ship_entity(&mut app);
+
+        // Tick 1: establish the damage-history baseline (first observation
+        // of this HP value never counts as damage).
+        {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[1].hp = 90;
+        }
+        app.update();
+        assert_eq!(
+            focused_facing(&app, e),
+            None,
+            "the baseline-establishing tick must not itself register damage"
+        );
+
+        // Tick 2: a real hit lands on facing 1, dropping it further while
+        // every other facing stays untouched — 100% of window damage on one
+        // arc, but not enough absolute HP loss to trip health imbalance.
+        {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[1].hp = 60;
+        }
+        app.update();
+
+        assert_eq!(
+            focused_facing(&app, e),
+            Some(1),
+            "damage-concentration detection must focus the arc that just took \
+             a real hit, even when health imbalance alone would not trigger"
         );
     }
 

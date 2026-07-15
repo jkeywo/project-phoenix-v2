@@ -1,10 +1,10 @@
-/// Pure LOD (level of detail) evaluation for AI entities.
-///
-/// Decides whether an NPC entity should run at high or low simulation
-/// fidelity based on distance from the player ship, with hysteresis and
-/// a minimum dwell time to prevent rapid oscillation.
-///
-/// This module contains no Bevy imports — fully unit-testable on native.
+//! Pure LOD (level of detail) evaluation for AI entities.
+//!
+//! Decides whether an NPC entity should run at high or low simulation
+//! fidelity based on distance from the player ship, with hysteresis and
+//! a minimum dwell time to prevent rapid oscillation.
+//!
+//! This module contains no Bevy imports — fully unit-testable on native.
 
 /// AI simulation fidelity level.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,9 +25,9 @@ pub enum LodState {
 /// * `now_secs`       — Current simulation time in seconds.
 /// * `last_state_change_secs` — Time of the last LOD state transition.
 /// * `dwell_secs`     — Minimum time (seconds) that must elapse before a
-///                      demotion is allowed.
+///   demotion is allowed.
 /// * `hysteresis`     — Fractional hysteresis band applied on top of
-///                      `sensor_range` (e.g. `0.2` for +20%).
+///   `sensor_range` (e.g. `0.2` for +20%).
 ///
 /// # Logic
 ///

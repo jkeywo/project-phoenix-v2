@@ -1,5 +1,13 @@
+import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
+
 export class PhBoostBtn extends HTMLElement {
   #state = null;
+  // Boost is a hold, and pointer / Shift / gamepad A can hold it at the same
+  // time. Tracking the live sources means `set_boost` is sent once when the
+  // first one engages and once when the last one lets go — releasing one
+  // source never cuts boost while another is still held.
+  #holds = new Set();
+  #stopGamepad = null;
 
   constructor() {
     super();
@@ -9,7 +17,8 @@ export class PhBoostBtn extends HTMLElement {
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
+    .header { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
+    .binding { margin-left: auto; font-size: 0.55rem; letter-spacing: 0.15em; color: var(--ink-faint); }
     .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
     .btn { width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.9rem; font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: all 0.15s ease; }
     .btn.available { background: var(--bg-card); border-color: var(--loaded); color: var(--loaded); }
@@ -23,6 +32,7 @@ export class PhBoostBtn extends HTMLElement {
   </style>
   <div class="header">
     <span>BOOST</span>
+    <span class="binding" id="binding">HOLD SHIFT · A</span>
     <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
   </div>
   <div class="recharge-wrap" id="recharge-wrap" style="display:none">
@@ -33,25 +43,88 @@ export class PhBoostBtn extends HTMLElement {
     this.shadowRoot.appendChild(t.content.cloneNode(true));
   }
 
+  #pointerId = null;
+
   connectedCallback() {
     this.sendAction ??= window.sendAction;
     const btn = this.shadowRoot.getElementById('btn');
-    let pointerId = null;
     btn.addEventListener('pointerdown', (e) => {
-      if (pointerId !== null || !this.sendAction || btn.disabled) return;
-      pointerId = e.pointerId;
+      if (this.#pointerId !== null) return;
+      if (!this.#hold('pointer')) return;
+      this.#pointerId = e.pointerId;
       if (btn.setPointerCapture) btn.setPointerCapture(e.pointerId);
-      this.sendAction('set_boost', { active: true });
       e.preventDefault();
     });
     const release = (e) => {
-      if (e.pointerId !== pointerId) return;
-      pointerId = null;
+      if (e.pointerId !== this.#pointerId) return;
+      this.#pointerId = null;
       try { if (btn.releasePointerCapture) btn.releasePointerCapture(e.pointerId); } catch (_) {}
-      if (this.sendAction) this.sendAction('set_boost', { active: false });
+      this.#release('pointer');
     };
     btn.addEventListener('pointerup', release);
     btn.addEventListener('pointercancel', release);
+    // Safety net: a silently revoked pointer capture must not latch boost on.
+    btn.addEventListener('lostpointercapture', release);
+
+    // Hold Shift or gamepad A to boost, mirroring the on-screen hold.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('keydown', this.#onKeyDown);
+      document.addEventListener('keyup', this.#onKeyUp);
+    }
+    // A focus loss eats the keyup, so drop the key hold rather than boost on
+    // forever with the battery draining behind a hidden tab.
+    if (typeof window !== 'undefined') window.addEventListener('blur', this.#onBlur);
+    this.#stopGamepad = observeGamepadButton(GAMEPAD_BUTTON.A, (pressed) => {
+      if (pressed) this.#hold('gamepad'); else this.#release('gamepad');
+    });
+  }
+
+  disconnectedCallback() {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('keydown', this.#onKeyDown);
+      document.removeEventListener('keyup', this.#onKeyUp);
+    }
+    if (typeof window !== 'undefined') window.removeEventListener('blur', this.#onBlur);
+    // Stopping the observer reports a held pad button as released, which
+    // clears the 'gamepad' hold through the callback above.
+    if (this.#stopGamepad) { this.#stopGamepad(); this.#stopGamepad = null; }
+    this.#release('pointer');
+    this.#release('key');
+  }
+
+  #onKeyDown = (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') return;
+    e.preventDefault();
+    this.#hold('key');
+  };
+
+  #onKeyUp = (e) => {
+    if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') return;
+    this.#release('key');
+  };
+
+  #onBlur = () => this.#release('key');
+
+  /**
+   * Engage boost from `source`. Returns false when the press was rejected
+   * because boost is unavailable (recharging, or AUTO holds the controls).
+   */
+  #hold(source) {
+    if (this.#holds.has(source)) return true;
+    const btn = this.shadowRoot.getElementById('btn');
+    if (this.#holds.size === 0 && (!this.sendAction || btn.disabled)) return false;
+    const wasIdle = this.#holds.size === 0;
+    this.#holds.add(source);
+    if (wasIdle && this.sendAction) this.sendAction('set_boost', { active: true });
+    return true;
+  }
+
+  /** Release `source`; sends the stop only once the last source lets go. */
+  #release(source) {
+    if (!this.#holds.delete(source)) return;
+    if (this.#holds.size === 0 && this.sendAction) this.sendAction('set_boost', { active: false });
   }
 
   set state(val) {

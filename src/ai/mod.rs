@@ -1,6 +1,7 @@
 pub mod core;
 pub mod faction;
 pub mod lod;
+pub mod patrol_cursor;
 pub mod server;
 
 pub use core::{

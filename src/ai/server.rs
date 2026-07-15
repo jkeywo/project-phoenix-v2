@@ -181,6 +181,14 @@ pub struct LodTransitionTimer {
     pub last_state_change_secs: f64,
 }
 
+/// Per-objective patrol waypoint cursors.
+///
+/// Each entry is `(objective_id, waypoint_index)` tracking the current
+/// waypoint for a patrol route. Entries are independent — advancing one
+/// does not affect others. Not yet wired to any system.
+#[derive(Component, Clone, Debug, Default)]
+pub struct PatrolCursors(pub Vec<(String, usize)>);
+
 /// Marker component set on NPC entities currently in a warp-out sequence.
 /// Carries the data needed to draw the warp-exit visual and to populate
 /// `EntitySnapshot::warp_out_remaining_secs` in the broadcast.

@@ -32,7 +32,8 @@ use std::collections::HashMap;
 // â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 pub use crate::weapons_plugin::{
     weapons_update_broadcaster, ActiveBeam, AsteroidDestroyedVfx, CurrentPhaserMode,
-    LastWeaponsUpdate, PhaserCooldown, PhaserRenderConfig, TorpedoSystemResource, WeaponsTarget,
+    LastShipAttacker, LastWeaponsUpdate, PhaserCooldown, PhaserRenderConfig, TorpedoSystemResource,
+    WeaponsTarget,
 };
 
 pub use crate::repair_plugin::{repair_state_broadcaster, ShipRepairTeams};
@@ -337,7 +338,12 @@ pub fn add_simulation_plugins(app: &mut App) {
     )
     .add_systems(
         Update,
-        publish_viewscreen_blackboard.in_set(crate::sim_sets::SimSet::PublishAggregate),
+        (
+            clear_last_attacker_on_death,
+            clear_last_attacker_on_red_alert_off,
+            publish_viewscreen_blackboard,
+        )
+            .in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
     .add_plugins(weapons_update_broadcaster())
     .add_plugins(sim_state_broadcaster())
@@ -688,6 +694,41 @@ fn delivery_class_for_msg(msg: &ServerMessage) -> DeliveryClass {
 }
 
 // -- Systems -------------------------------------------------------------------
+
+/// When the entity identified by `LastShipAttacker` no longer exists in the
+/// world, clear the attacker record so stale references are not published.
+fn clear_last_attacker_on_death(
+    mut attacker_q: Query<&mut LastShipAttacker>,
+    entity_uuids: Query<&EntityUuid>,
+) {
+    for mut attacker in attacker_q.iter_mut() {
+        let uuid = match &attacker.0 {
+            Some(u) => u.clone(),
+            None => continue,
+        };
+        let still_alive = entity_uuids.iter().any(|eu| eu.0.as_str() == uuid.as_str());
+        if !still_alive {
+            attacker.0 = None;
+        }
+    }
+}
+
+/// When the ship's red alert transitions from on to off, clear the attacker
+/// record — the threat has passed and the old attacker is no longer relevant.
+fn clear_last_attacker_on_red_alert_off(
+    mut attacker_q: Query<
+        (&mut LastShipAttacker, &crate::ship_state::ShipRedAlert),
+        With<LocalShip>,
+    >,
+    mut last_ra: Local<bool>,
+) {
+    for (mut attacker, ra) in attacker_q.iter_mut() {
+        if *last_ra && !ra.0 {
+            attacker.0 = None;
+        }
+        *last_ra = ra.0;
+    }
+}
 
 fn publish_viewscreen_blackboard(
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
@@ -6985,5 +7026,111 @@ mod tests {
     fn player_spawn_rotation_yaw_roll_only_gives_zero_yaw() {
         let (_, yaw) = player_spawn_rotation_yaw([0.0, 0.0, std::f32::consts::FRAC_PI_3]);
         assert!(yaw.abs() < 1e-6, "roll-only rotation should give zero yaw");
+    }
+
+    // ── last_attacker clear handler tests ──────────────────────────────────
+
+    fn last_attacker_test_app() -> App {
+        let mut app = App::new();
+        app.add_systems(
+            Update,
+            (
+                clear_last_attacker_on_death,
+                clear_last_attacker_on_red_alert_off,
+            ),
+        );
+        app
+    }
+
+    #[test]
+    fn clear_on_despawn_clears_when_entity_removed() {
+        let mut app = last_attacker_test_app();
+        let attacker_uuid = "attacker-1".to_string();
+        let attacker_entity = app
+            .world_mut()
+            .spawn((EntityUuid(attacker_uuid.clone()),))
+            .id();
+        let ship = app
+            .world_mut()
+            .spawn((LastShipAttacker(Some(attacker_uuid)),))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<LastShipAttacker>(ship).unwrap().0,
+            Some("attacker-1".to_string())
+        );
+        app.world_mut().despawn(attacker_entity);
+        app.update();
+        assert_eq!(app.world().get::<LastShipAttacker>(ship).unwrap().0, None);
+    }
+
+    #[test]
+    fn clear_on_despawn_does_not_clear_when_entity_still_alive() {
+        let mut app = last_attacker_test_app();
+        app.world_mut()
+            .spawn((EntityUuid("attacker-1".to_string()),));
+        let ship = app
+            .world_mut()
+            .spawn((LastShipAttacker(Some("attacker-1".to_string())),))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<LastShipAttacker>(ship).unwrap().0,
+            Some("attacker-1".to_string())
+        );
+    }
+
+    #[test]
+    fn clear_on_red_alert_off_clears_when_red_alert_turns_off() {
+        let mut app = last_attacker_test_app();
+        // Spawn an entity so clear_last_attacker_on_death doesn't fire.
+        app.world_mut()
+            .spawn((EntityUuid("attacker-1".to_string()),));
+        let ship = app
+            .world_mut()
+            .spawn((
+                LastShipAttacker(Some("attacker-1".to_string())),
+                crate::ship_state::ShipRedAlert(true),
+                LocalShip,
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<LastShipAttacker>(ship).unwrap().0,
+            Some("attacker-1".to_string())
+        );
+        app.world_mut()
+            .get_mut::<crate::ship_state::ShipRedAlert>(ship)
+            .unwrap()
+            .0 = false;
+        app.update();
+        assert!(app
+            .world()
+            .get::<LastShipAttacker>(ship)
+            .unwrap()
+            .0
+            .is_none());
+    }
+
+    #[test]
+    fn clear_on_red_alert_off_does_not_clear_when_alert_stays_on() {
+        let mut app = last_attacker_test_app();
+        // Spawn an entity so clear_last_attacker_on_death doesn't fire.
+        app.world_mut()
+            .spawn((EntityUuid("attacker-1".to_string()),));
+        let ship = app
+            .world_mut()
+            .spawn((
+                LastShipAttacker(Some("attacker-1".to_string())),
+                crate::ship_state::ShipRedAlert(true),
+                LocalShip,
+            ))
+            .id();
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world().get::<LastShipAttacker>(ship).unwrap().0,
+            Some("attacker-1".to_string())
+        );
     }
 }
